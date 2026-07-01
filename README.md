@@ -6,22 +6,22 @@
 
 <img
   width="100%"
-  src="https://capsule-render.vercel.app/api?type=waving&color=0:0a0a0a,50:04160f,100:00ff9c&height=200&section=header&text=black_astro&fontSize=60&fontColor=00ff9c&fontAlignY=36&desc=Backend%20Engineer%20/%20Java%20·%20Spring&descAlignY=57&descSize=18&animation=fadeIn"
+  src="https://capsule-render.vercel.app/api?type=waving&color=0:000000,45:022a0e,100:00ff41&height=200&section=header&text=black_astro&fontSize=60&fontColor=00ff41&fontAlignY=36&desc=Backend%20Engineer%20/%20Java%20·%20Spring&descAlignY=57&descSize=18&animation=fadeIn"
   alt="header"
 />
 
 <!-- 움직이는 소개 텍스트 -->
 <a href="https://git.io/typing-svg">
   <img
-    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=22&pause=1400&color=00FF9C&center=true&vCenter=true&width=600&height=50&lines=5%EB%85%84%EC%B0%A8+%EB%B0%B1%EC%97%94%EB%93%9C+%EC%97%94%EC%A7%80%EB%8B%88%EC%96%B4;%EB%8C%80%EC%9A%A9%EB%9F%89+%EC%B2%98%EB%A6%AC+%C2%B7+%EB%8F%99%EC%8B%9C%EC%84%B1+%C2%B7+%EC%84%B1%EB%8A%A5+%EC%B5%9C%EC%A0%81%ED%99%94;%EC%9D%B8%EC%A6%9D/%EB%B3%B4%EC%95%88+%EC%84%A4%EA%B3%84+%C2%B7+CI/CD+%C2%B7+%EC%9D%B8%ED%94%84%EB%9D%BC+%EA%B5%AC%EC%B6%95;%EC%84%A4%EA%B3%84%EB%B6%80%ED%84%B0+%EC%9A%B4%EC%98%81%EA%B9%8C%EC%A7%80+%EC%A7%81%EC%A0%91+%EC%B1%85%EC%9E%84%EC%A7%91%EB%8B%88%EB%8B%A4"
+    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=22&pause=1400&color=00FF41&center=true&vCenter=true&width=600&height=50&lines=5%EB%85%84%EC%B0%A8+%EB%B0%B1%EC%97%94%EB%93%9C+%EC%97%94%EC%A7%80%EB%8B%88%EC%96%B4;%EB%8C%80%EC%9A%A9%EB%9F%89+%EC%B2%98%EB%A6%AC+%C2%B7+%EB%8F%99%EC%8B%9C%EC%84%B1+%C2%B7+%EC%84%B1%EB%8A%A5+%EC%B5%9C%EC%A0%81%ED%99%94;%EC%9D%B8%EC%A6%9D/%EB%B3%B4%EC%95%88+%EC%84%A4%EA%B3%84+%C2%B7+CI/CD+%C2%B7+%EC%9D%B8%ED%94%84%EB%9D%BC+%EA%B5%AC%EC%B6%95;%EC%84%A4%EA%B3%84%EB%B6%80%ED%84%B0+%EC%9A%B4%EC%98%81%EA%B9%8C%EC%A7%80+%EC%A7%81%EC%A0%91+%EC%B1%85%EC%9E%84%EC%A7%91%EB%8B%88%EB%8B%A4"
     alt="typing"
   />
 </a>
 
 <br/>
 
-<img src="https://komarev.com/ghpvc/?username=black-astro&label=visitors&color=00ff9c&style=flat-square" alt="views"/>
-<a href="mailto:gntj3200@gmail.com"><img src="https://img.shields.io/badge/gntj3200@gmail.com-0d1117?style=flat-square&logo=gmail&logoColor=00ff9c" alt="mail"/></a>
+<img src="https://komarev.com/ghpvc/?username=black-astro&label=visitors&color=00ff41&style=flat-square" alt="views"/>
+<a href="mailto:gntj3200@gmail.com"><img src="https://img.shields.io/badge/gntj3200@gmail.com-0d0208?style=flat-square&logo=gmail&logoColor=00ff41" alt="mail"/></a>
 
 </div>
 
@@ -29,7 +29,13 @@
 
 ---
 
-## `$ whoami`
+## `$ 소개 --핵심역량`
+
+![](https://img.shields.io/badge/%EB%8C%80%EC%9A%A9%EB%9F%89_%EB%B0%9C%EC%86%A1%C2%B7%EB%B0%B0%EC%B9%98-00ff41?style=flat-square&labelColor=0d0208)
+![](https://img.shields.io/badge/%EB%AC%B4%EC%A4%91%EB%8B%A8_%EC%95%88%EC%A0%95%EC%84%B1-00ff41?style=flat-square&labelColor=0d0208)
+![](https://img.shields.io/badge/OAuth2_%EC%9D%B8%EC%A6%9D%EC%84%A4%EA%B3%84-00ff41?style=flat-square&labelColor=0d0208)
+![](https://img.shields.io/badge/CI%2FCD%C2%B7%EC%9D%B8%ED%94%84%EB%9D%BC_%EA%B5%AC%EC%B6%95-00ff41?style=flat-square&labelColor=0d0208)
+![](https://img.shields.io/badge/Maven_Central%C2%B7npm_OSS-00ff41?style=flat-square&labelColor=0d0208)
 
 | 구분 | 내용 |
 |------|------|
@@ -47,7 +53,7 @@
 
 ---
 
-## `$ tech --list`
+## `$ 기술스택 --전체`
 
 **Backend**
 
@@ -116,18 +122,18 @@
 
 ---
 
-## `$ ls ~/open-source`
+## `$ 오픈소스 --공개`
 
 <div align="center">
 
 <a href="https://github.com/black-astro/easy-quartz">
-  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=easy-quartz&hide_border=false&border_color=00ff9c&bg_color=0d1117&title_color=00ff9c&icon_color=00ff9c&text_color=c9d1d9"/>
+  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=easy-quartz&hide_border=false&border_color=00ff41&bg_color=0d0208&title_color=00ff41&icon_color=00ff41&text_color=9dff9d"/>
 </a>
 <a href="https://github.com/black-astro/smart-msg">
-  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=smart-msg&hide_border=false&border_color=00ff9c&bg_color=0d1117&title_color=00ff9c&icon_color=00ff9c&text_color=c9d1d9"/>
+  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=smart-msg&hide_border=false&border_color=00ff41&bg_color=0d0208&title_color=00ff41&icon_color=00ff41&text_color=9dff9d"/>
 </a>
 <a href="https://github.com/black-astro/coding-test">
-  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=coding-test&hide_border=false&border_color=00ff9c&bg_color=0d1117&title_color=00ff9c&icon_color=00ff9c&text_color=c9d1d9"/>
+  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=coding-test&hide_border=false&border_color=00ff41&bg_color=0d0208&title_color=00ff41&icon_color=00ff41&text_color=9dff9d"/>
 </a>
 
 </div>
@@ -156,7 +162,7 @@ npm install -g smart-msg   # 사용: sm
 
 ---
 
-## `$ cat projects.log`
+## `$ 프로젝트 --요약`
 
 > 비공개 사내/개인 저장소는 도메인 중심으로 요약했습니다.
 
@@ -198,16 +204,16 @@ npm install -g smart-msg   # 사용: sm
 
 ---
 
-## `$ git log --graph`
+## `$ 활동그래프 --통계`
 
 <div align="center">
 
-<img height="165" src="https://github-readme-stats.vercel.app/api?username=black-astro&show_icons=true&include_all_commits=true&count_private=true&hide_border=false&border_color=00ff9c&bg_color=0d1117&title_color=00ff9c&icon_color=00ff9c&text_color=c9d1d9"/>
-<img height="165" src="https://github-readme-stats.vercel.app/api/top-langs/?username=black-astro&layout=compact&langs_count=6&hide_border=false&border_color=00ff9c&bg_color=0d1117&title_color=00ff9c&text_color=c9d1d9"/>
+<img height="165" src="https://github-readme-stats.vercel.app/api?username=black-astro&show_icons=true&include_all_commits=true&count_private=true&hide_border=false&border_color=00ff41&bg_color=0d0208&title_color=00ff41&icon_color=00ff41&text_color=9dff9d"/>
+<img height="165" src="https://github-readme-stats.vercel.app/api/top-langs/?username=black-astro&layout=compact&langs_count=6&hide_border=false&border_color=00ff41&bg_color=0d0208&title_color=00ff41&text_color=9dff9d"/>
 
 <br/>
 
-<img src="https://streak-stats.demolab.com/?user=black-astro&hide_border=false&border=00ff9c&background=0d1117&stroke=00ff9c&ring=00ff9c&fire=00ff9c&currStreakLabel=00ff9c&sideNums=00ff9c&sideLabels=c9d1d9&dates=8b949e&currStreakNum=00ff9c&dayLabels=8b949e" alt="streak"/>
+<img src="https://streak-stats.demolab.com/?user=black-astro&hide_border=false&border=00ff41&background=0d0208&stroke=00ff41&ring=00ff41&fire=00ff41&currStreakLabel=00ff41&sideNums=00ff41&sideLabels=9dff9d&dates=8b949e&currStreakNum=00ff41&dayLabels=8b949e" alt="streak"/>
 
 <br/><br/>
 
@@ -228,7 +234,7 @@ npm install -g smart-msg   # 사용: sm
 
 <img
   width="100%"
-  src="https://capsule-render.vercel.app/api?type=waving&color=0:00ff9c,50:04160f,100:0a0a0a&height=120&section=footer&text=%3E_%20thanks%20for%20visiting&fontSize=20&fontColor=00ff9c&fontAlignY=70&animation=fadeIn"
+  src="https://capsule-render.vercel.app/api?type=waving&color=0:00ff41,45:022a0e,100:000000&height=120&section=footer&text=%3E_%20thanks%20for%20visiting&fontSize=20&fontColor=00ff41&fontAlignY=70&animation=fadeIn"
   alt="footer"
 />
 
