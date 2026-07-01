@@ -13,7 +13,7 @@
 <!-- 움직이는 소개 텍스트 -->
 <a href="https://git.io/typing-svg">
   <img
-    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=500&size=21&pause=1400&color=36BCF7&center=true&vCenter=true&width=680&height=50&lines=%ED%86%B5%EC%8B%A0%C2%B7%EB%A9%94%EC%8B%9C%EC%A7%95+%EB%8F%84%EB%A9%94%EC%9D%B8+5%EB%85%84%EC%B0%A8+%EB%B0%B1%EC%97%94%EB%93%9C+%EA%B0%9C%EB%B0%9C%EC%9E%90;%EB%8C%80%EC%9A%A9%EB%9F%89+%EB%B0%9C%EC%86%A1%C2%B7%EB%B0%B0%EC%B9%98+%EC%84%9C%EB%B2%84%EB%A5%BC+%EC%84%A4%EA%B3%84%C2%B7%EA%B0%9C%EB%B0%9C%C2%B7%EC%9A%B4%EC%98%81%ED%95%A9%EB%8B%88%EB%8B%A4;KT+%EB%AA%85%EC%84%B8%EC%84%9C+%EB%B0%B0%EC%B9%98+%C2%B7+%EC%B9%B4%EC%B9%B4%EC%98%A4+%EC%95%8C%EB%A6%BC%ED%86%A1+%C2%B7+PASS+%EB%B3%B8%EC%9D%B8%EC%9D%B8%EC%A6%9D;%EC%B2%98%EB%A6%AC%EB%9F%89%EA%B3%BC+%EB%AC%B4%EC%A4%91%EB%8B%A8+%EC%95%88%EC%A0%95%EC%84%B1%EC%9D%B4+%ED%95%B5%EC%8B%AC%EC%9D%B8+%EC%8B%9C%EC%8A%A4%ED%85%9C%EC%9D%84+%EB%8B%B4%EB%8B%B9%ED%95%A9%EB%8B%88%EB%8B%A4"
+    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=500&size=22&pause=1400&color=36BCF7&center=true&vCenter=true&width=600&height=50&lines=5%EB%85%84%EC%B0%A8+%EB%B0%B1%EC%97%94%EB%93%9C+%EC%97%94%EC%A7%80%EB%8B%88%EC%96%B4;%EB%8C%80%EC%9A%A9%EB%9F%89+%EC%B2%98%EB%A6%AC+%C2%B7+%EB%8F%99%EC%8B%9C%EC%84%B1+%C2%B7+%EC%84%B1%EB%8A%A5+%EC%B5%9C%EC%A0%81%ED%99%94;%EC%9D%B8%EC%A6%9D/%EB%B3%B4%EC%95%88+%EC%84%A4%EA%B3%84+%C2%B7+CI/CD+%C2%B7+%EC%9D%B8%ED%94%84%EB%9D%BC+%EA%B5%AC%EC%B6%95;%EC%84%A4%EA%B3%84%EB%B6%80%ED%84%B0+%EC%9A%B4%EC%98%81%EA%B9%8C%EC%A7%80+%EC%A7%81%EC%A0%91+%EC%B1%85%EC%9E%84%EC%A7%91%EB%8B%88%EB%8B%A4"
     alt="typing"
   />
 </a>
@@ -190,10 +190,16 @@ npm install -g smart-msg   # 사용: sm
 - N-스레드 stagger 분산 발송, `@PreDestroy` graceful cancel
 - Jenkins Pipeline(Unit→Integration→SonarQube Quality Gate→Build) + CycloneDX SBOM 자동 산출
 
-#### 통합 인증 백엔드 · 데스크톱 클라이언트
-`Java 8` · `Spring Security / OAuth2` · `MyBatis 멀티 DataSource` · `Electron` · `Vue3`
-- 클라이언트 3종을 `@Order` + antMatcher로 `SecurityFilterChain` 분리, 도메인별 DataSource 운영
-- Electron(Vue3 · Pinia · STOMP · electron-updater) 데스크톱에서 이중 백엔드 토큰 핸드오프 연동
+#### 통합 인증 백엔드
+`Java 8` · `Spring Security / OAuth2` · `MyBatis 멀티 DataSource` · `Caffeine`
+- 클라이언트 3종을 `@Order` + antMatcher로 `SecurityFilterChain` 분리 운영
+- Access/Refresh 토큰 수명 분리, `type` 클레임 검증, 도메인별 DataSource·TransactionManager 분리
+
+#### 데스크톱 클라이언트 (Electron)
+`Electron 39` · `Vue3` · `Vuetify` · `Pinia` · `better-sqlite3` · `STOMP` · `electron-updater` · `NSIS`
+- 두 개의 백엔드 토큰을 핸드오프/자동 갱신으로 연동, 동시 요청 시 리프레시 중복 방지
+- `better-sqlite3`를 Worker 전용 접근으로 격리, `contextIsolation` 기반 렌더러 보안 적용
+- `electron-updater` 자동 업데이트 + NSIS 설치 패키징으로 운영 배포 자동화
 
 <br/>
 
