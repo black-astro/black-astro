@@ -1,27 +1,27 @@
 <!-- =========================================================
-       black-astro  ·  GitHub Profile README
+       black-astro  ·  GitHub Profile README   (hacker / terminal theme)
      ========================================================= -->
 
 <div align="center">
 
 <img
   width="100%"
-  src="https://capsule-render.vercel.app/api?type=waving&color=0:0f2027,50:203a43,100:2c5364&height=200&section=header&text=black%20astro&fontSize=60&fontColor=ffffff&fontAlignY=36&desc=Backend%20Engineer%20|%20Java%20/%20Spring&descAlignY=57&descSize=18&animation=fadeIn"
+  src="https://capsule-render.vercel.app/api?type=waving&color=0:0a0a0a,50:04160f,100:00ff9c&height=200&section=header&text=black_astro&fontSize=60&fontColor=00ff9c&fontAlignY=36&desc=Backend%20Engineer%20/%20Java%20·%20Spring&descAlignY=57&descSize=18&animation=fadeIn"
   alt="header"
 />
 
 <!-- 움직이는 소개 텍스트 -->
 <a href="https://git.io/typing-svg">
   <img
-    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=500&size=22&pause=1400&color=36BCF7&center=true&vCenter=true&width=600&height=50&lines=5%EB%85%84%EC%B0%A8+%EB%B0%B1%EC%97%94%EB%93%9C+%EC%97%94%EC%A7%80%EB%8B%88%EC%96%B4;%EB%8C%80%EC%9A%A9%EB%9F%89+%EC%B2%98%EB%A6%AC+%C2%B7+%EB%8F%99%EC%8B%9C%EC%84%B1+%C2%B7+%EC%84%B1%EB%8A%A5+%EC%B5%9C%EC%A0%81%ED%99%94;%EC%9D%B8%EC%A6%9D/%EB%B3%B4%EC%95%88+%EC%84%A4%EA%B3%84+%C2%B7+CI/CD+%C2%B7+%EC%9D%B8%ED%94%84%EB%9D%BC+%EA%B5%AC%EC%B6%95;%EC%84%A4%EA%B3%84%EB%B6%80%ED%84%B0+%EC%9A%B4%EC%98%81%EA%B9%8C%EC%A7%80+%EC%A7%81%EC%A0%91+%EC%B1%85%EC%9E%84%EC%A7%91%EB%8B%88%EB%8B%A4"
+    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=22&pause=1400&color=00FF9C&center=true&vCenter=true&width=600&height=50&lines=5%EB%85%84%EC%B0%A8+%EB%B0%B1%EC%97%94%EB%93%9C+%EC%97%94%EC%A7%80%EB%8B%88%EC%96%B4;%EB%8C%80%EC%9A%A9%EB%9F%89+%EC%B2%98%EB%A6%AC+%C2%B7+%EB%8F%99%EC%8B%9C%EC%84%B1+%C2%B7+%EC%84%B1%EB%8A%A5+%EC%B5%9C%EC%A0%81%ED%99%94;%EC%9D%B8%EC%A6%9D/%EB%B3%B4%EC%95%88+%EC%84%A4%EA%B3%84+%C2%B7+CI/CD+%C2%B7+%EC%9D%B8%ED%94%84%EB%9D%BC+%EA%B5%AC%EC%B6%95;%EC%84%A4%EA%B3%84%EB%B6%80%ED%84%B0+%EC%9A%B4%EC%98%81%EA%B9%8C%EC%A7%80+%EC%A7%81%EC%A0%91+%EC%B1%85%EC%9E%84%EC%A7%91%EB%8B%88%EB%8B%A4"
     alt="typing"
   />
 </a>
 
 <br/>
 
-<img src="https://komarev.com/ghpvc/?username=black-astro&label=Profile%20Views&color=36BCF7&style=flat" alt="views"/>
-<a href="mailto:gntj3200@gmail.com"><img src="https://img.shields.io/badge/gntj3200@gmail.com-EA4335?style=flat&logo=gmail&logoColor=white" alt="mail"/></a>
+<img src="https://komarev.com/ghpvc/?username=black-astro&label=visitors&color=00ff9c&style=flat-square" alt="views"/>
+<a href="mailto:gntj3200@gmail.com"><img src="https://img.shields.io/badge/gntj3200@gmail.com-0d1117?style=flat-square&logo=gmail&logoColor=00ff9c" alt="mail"/></a>
 
 </div>
 
@@ -29,7 +29,7 @@
 
 ---
 
-## 👤 Core Competencies
+## `$ whoami`
 
 | 구분 | 내용 |
 |------|------|
@@ -47,32 +47,30 @@
 
 ---
 
-## 🧰 Tech Stack
-
-<div align="center">
+## `$ tech --list`
 
 **Backend**
 
 ![Java](https://img.shields.io/badge/Java_8~21-007396?style=for-the-badge&logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot_2.7~3.4-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)
 ![Spring](https://img.shields.io/badge/Spring_MVC_·_AOP-6DB33F?style=for-the-badge&logo=spring&logoColor=white)
-![Virtual Thread](https://img.shields.io/badge/Java_21_Virtual_Thread-007396?style=for-the-badge&logoColor=white)
+![Virtual Thread](https://img.shields.io/badge/Java_21_Virtual_Thread-007396?style=for-the-badge&logo=openjdk&logoColor=white)
 
 **Data & Persistence**
 
 ![JPA](https://img.shields.io/badge/Spring_Data_JPA-59666C?style=for-the-badge&logo=hibernate&logoColor=white)
 ![QueryDSL](https://img.shields.io/badge/QueryDSL-0769AD?style=for-the-badge&logoColor=white)
-![MyBatis](https://img.shields.io/badge/MyBatis_(BATCH)-DC382D?style=for-the-badge&logoColor=white)
+![MyBatis](https://img.shields.io/badge/MyBatis-DC382D?style=for-the-badge&logoColor=white)
 ![MariaDB](https://img.shields.io/badge/MariaDB-003545?style=for-the-badge&logo=mariadb&logoColor=white)
 ![Oracle](https://img.shields.io/badge/Oracle-F80000?style=for-the-badge&logo=oracle&logoColor=white)
 ![Tibero](https://img.shields.io/badge/Tibero_6-1F6FEB?style=for-the-badge&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-FF4438?style=for-the-badge&logo=redis&logoColor=white)
 
 **Security · API · Resilience**
 
 ![Spring Security](https://img.shields.io/badge/Spring_Security-6DB33F?style=for-the-badge&logo=springsecurity&logoColor=white)
-![OAuth2](https://img.shields.io/badge/OAuth2_·_JWT-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white)
-![RestClient](https://img.shields.io/badge/RestClient-6DB33F?style=for-the-badge&logoColor=white)
+![JWT](https://img.shields.io/badge/OAuth2_·_JWT-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white)
+![RestClient](https://img.shields.io/badge/RestClient-6DB33F?style=for-the-badge&logo=spring&logoColor=white)
 ![STOMP](https://img.shields.io/badge/WebSocket_STOMP-010101?style=for-the-badge&logoColor=white)
 ![Resilience4j](https://img.shields.io/badge/Resilience4j-1C7C54?style=for-the-badge&logoColor=white)
 
@@ -80,7 +78,7 @@
 
 ![Quartz](https://img.shields.io/badge/Quartz_Scheduler-0E7C3F?style=for-the-badge&logoColor=white)
 ![StAX](https://img.shields.io/badge/StAX_·_JAXB-E76F00?style=for-the-badge&logoColor=white)
-![Log4j2](https://img.shields.io/badge/Log4j2_(Disruptor)-D22128?style=for-the-badge&logoColor=white)
+![Log4j2](https://img.shields.io/badge/Log4j2-D22128?style=for-the-badge&logo=apache&logoColor=white)
 ![Jenkins](https://img.shields.io/badge/Jenkins-D24939?style=for-the-badge&logo=jenkins&logoColor=white)
 ![SonarQube](https://img.shields.io/badge/SonarQube-4E9BCD?style=for-the-badge&logo=sonarqube&logoColor=white)
 ![Gradle](https://img.shields.io/badge/Gradle-02303A?style=for-the-badge&logo=gradle&logoColor=white)
@@ -91,16 +89,13 @@
 ![Nuxt](https://img.shields.io/badge/Nuxt-00DC82?style=for-the-badge&logo=nuxtdotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
-![JSP](https://img.shields.io/badge/JSP-F78C40?style=for-the-badge&logoColor=white)
 ![Electron](https://img.shields.io/badge/Electron-47848F?style=for-the-badge&logo=electron&logoColor=white)
 ![Vuetify](https://img.shields.io/badge/Vuetify-1867C0?style=for-the-badge&logo=vuetify&logoColor=white)
-![Pinia](https://img.shields.io/badge/Pinia-FFD859?style=for-the-badge&logoColor=black)
+![Pinia](https://img.shields.io/badge/Pinia-FFD859?style=for-the-badge&logo=pinia&logoColor=black)
 
 **Infra & DevOps** _(사내 CI/CD 환경 직접 구축·운영)_
 
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
-![Jenkins](https://img.shields.io/badge/Jenkins-D24939?style=for-the-badge&logo=jenkins&logoColor=white)
-![SonarQube](https://img.shields.io/badge/SonarQube_Community-4E9BCD?style=for-the-badge&logo=sonarqube&logoColor=white)
 ![Gitea](https://img.shields.io/badge/Gitea-609926?style=for-the-badge&logo=gitea&logoColor=white)
 ![Nginx](https://img.shields.io/badge/Nginx-009639?style=for-the-badge&logo=nginx&logoColor=white)
 ![Apache](https://img.shields.io/badge/Apache-D22128?style=for-the-badge&logo=apache&logoColor=white)
@@ -115,26 +110,24 @@
 ![Git](https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white)
 ![DBeaver](https://img.shields.io/badge/DBeaver-382923?style=for-the-badge&logo=dbeaver&logoColor=white)
 ![npm](https://img.shields.io/badge/npm-CB3837?style=for-the-badge&logo=npm&logoColor=white)
-![Maven Central](https://img.shields.io/badge/Maven_Central-C71A36?style=for-the-badge&logo=apachemaven&logoColor=white)
-
-</div>
+![Maven](https://img.shields.io/badge/Maven_Central-C71A36?style=for-the-badge&logo=apachemaven&logoColor=white)
 
 <br/>
 
 ---
 
-## 🚀 Open Source
+## `$ ls ~/open-source`
 
 <div align="center">
 
 <a href="https://github.com/black-astro/easy-quartz">
-  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=easy-quartz&theme=react&hide_border=true&bg_color=0d1117&title_color=36BCF7&icon_color=36BCF7"/>
+  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=easy-quartz&hide_border=false&border_color=00ff9c&bg_color=0d1117&title_color=00ff9c&icon_color=00ff9c&text_color=c9d1d9"/>
 </a>
 <a href="https://github.com/black-astro/smart-msg">
-  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=smart-msg&theme=react&hide_border=true&bg_color=0d1117&title_color=36BCF7&icon_color=36BCF7"/>
+  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=smart-msg&hide_border=false&border_color=00ff9c&bg_color=0d1117&title_color=00ff9c&icon_color=00ff9c&text_color=c9d1d9"/>
 </a>
 <a href="https://github.com/black-astro/coding-test">
-  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=coding-test&theme=react&hide_border=true&bg_color=0d1117&title_color=36BCF7&icon_color=36BCF7"/>
+  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=coding-test&hide_border=false&border_color=00ff9c&bg_color=0d1117&title_color=00ff9c&icon_color=00ff9c&text_color=c9d1d9"/>
 </a>
 
 </div>
@@ -163,7 +156,7 @@ npm install -g smart-msg   # 사용: sm
 
 ---
 
-## ⚙️ Projects
+## `$ cat projects.log`
 
 > 비공개 사내/개인 저장소는 도메인 중심으로 요약했습니다.
 
@@ -205,28 +198,27 @@ npm install -g smart-msg   # 사용: sm
 
 ---
 
-## 📊 GitHub Activity
+## `$ git log --graph`
 
 <div align="center">
 
-<img height="150" src="https://github-readme-stats.vercel.app/api?username=black-astro&show_icons=true&theme=react&include_all_commits=true&count_private=true&hide_border=true&bg_color=0d1117&title_color=36BCF7&icon_color=36BCF7"/>
-<img height="150" src="https://github-readme-stats.vercel.app/api/top-langs/?username=black-astro&layout=compact&theme=react&hide_border=true&bg_color=0d1117&title_color=36BCF7&langs_count=6"/>
+<img height="165" src="https://github-readme-stats.vercel.app/api?username=black-astro&show_icons=true&include_all_commits=true&count_private=true&hide_border=false&border_color=00ff9c&bg_color=0d1117&title_color=00ff9c&icon_color=00ff9c&text_color=c9d1d9"/>
+<img height="165" src="https://github-readme-stats.vercel.app/api/top-langs/?username=black-astro&layout=compact&langs_count=6&hide_border=false&border_color=00ff9c&bg_color=0d1117&title_color=00ff9c&text_color=c9d1d9"/>
 
 <br/>
 
-<img height="150" src="https://streak-stats.demolab.com/?user=black-astro&theme=react&hide_border=true&background=0D1117&ring=36BCF7&fire=36BCF7&currStreakLabel=36BCF7" alt="streak"/>
+<img src="https://streak-stats.demolab.com/?user=black-astro&hide_border=false&border=00ff9c&background=0d1117&stroke=00ff9c&ring=00ff9c&fire=00ff9c&currStreakLabel=00ff9c&sideNums=00ff9c&sideLabels=c9d1d9&dates=8b949e&currStreakNum=00ff9c&dayLabels=8b949e" alt="streak"/>
 
 <br/><br/>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/black-astro/black-astro/output/github-snake-dark.svg"/>
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/black-astro/black-astro/output/github-snake.svg"/>
   <img alt="snake" src="https://raw.githubusercontent.com/black-astro/black-astro/output/github-snake.svg"/>
 </picture>
 
 <br/><br/>
 
-<img src="./profile-3d-contrib/profile-night-rainbow.svg" alt="3d-contrib" width="86%"/>
+<img src="./profile-3d-contrib/profile-night-green.svg" alt="3d-contrib" width="86%"/>
 
 </div>
 
@@ -236,7 +228,7 @@ npm install -g smart-msg   # 사용: sm
 
 <img
   width="100%"
-  src="https://capsule-render.vercel.app/api?type=waving&color=0:2c5364,50:203a43,100:0f2027&height=120&section=footer&text=Thanks%20for%20visiting&fontSize=20&fontColor=ffffff&fontAlignY=68&animation=fadeIn"
+  src="https://capsule-render.vercel.app/api?type=waving&color=0:00ff9c,50:04160f,100:0a0a0a&height=120&section=footer&text=%3E_%20thanks%20for%20visiting&fontSize=20&fontColor=00ff9c&fontAlignY=70&animation=fadeIn"
   alt="footer"
 />
 
