@@ -13,7 +13,7 @@
 <!-- 움직이는 소개 텍스트 -->
 <a href="https://git.io/typing-svg">
   <img
-    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=22&pause=1400&color=00FF41&center=true&vCenter=true&width=600&height=50&lines=5%EB%85%84%EC%B0%A8+%EB%B0%B1%EC%97%94%EB%93%9C+%EC%97%94%EC%A7%80%EB%8B%88%EC%96%B4;%EB%8C%80%EC%9A%A9%EB%9F%89+%EC%B2%98%EB%A6%AC+%C2%B7+%EB%8F%99%EC%8B%9C%EC%84%B1+%C2%B7+%EC%84%B1%EB%8A%A5+%EC%B5%9C%EC%A0%81%ED%99%94;%EC%9D%B8%EC%A6%9D/%EB%B3%B4%EC%95%88+%EC%84%A4%EA%B3%84+%C2%B7+CI/CD+%C2%B7+%EC%9D%B8%ED%94%84%EB%9D%BC+%EA%B5%AC%EC%B6%95;%EC%84%A4%EA%B3%84%EB%B6%80%ED%84%B0+%EC%9A%B4%EC%98%81%EA%B9%8C%EC%A7%80+%EC%A7%81%EC%A0%91+%EC%B1%85%EC%9E%84%EC%A7%91%EB%8B%88%EB%8B%A4"
+    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=22&pause=1400&color=00FF41&center=true&vCenter=true&width=600&height=50&lines=%EB%B0%B1%EC%97%94%EB%93%9C+%EA%B0%9C%EB%B0%9C%EC%9E%90%EC%9E%85%EB%8B%88%EB%8B%A4;Java+%C2%B7+Spring%EC%9C%BC%EB%A1%9C+%EC%84%9C%EB%B2%84%EB%A5%BC+%EB%A7%8C%EB%93%AD%EB%8B%88%EB%8B%A4;%EC%95%88%EC%A0%95%EC%A0%81%EC%9D%B8+%EB%8C%80%EC%9A%A9%EB%9F%89+%EC%8B%9C%EC%8A%A4%ED%85%9C%EC%9D%84+%EA%B3%A0%EB%AF%BC%ED%95%A9%EB%8B%88%EB%8B%A4;%ED%95%84%EC%9A%94%ED%95%9C+%EB%8F%84%EA%B5%AC%EB%8A%94+%EC%A7%81%EC%A0%91+%EB%A7%8C%EB%93%A4%EC%96%B4+%EC%94%81%EB%8B%88%EB%8B%A4"
     alt="typing"
   />
 </a>
@@ -33,7 +33,7 @@
 
 ---
 
-## `$ 소개 --핵심역량`
+<img src="assets/badges/h-about.svg" alt="소개 · 핵심역량"/>
 
 <img src="assets/badges/hl-1.svg" alt="대용량 발송·배치"/>&nbsp;
 <img src="assets/badges/hl-2.svg" alt="무중단 안정성"/>&nbsp;
@@ -57,7 +57,7 @@
 
 ---
 
-## `$ 기술스택 --전체`
+<img src="assets/badges/h-tech.svg" alt="기술 스택"/>
 
 **Backend**
 
@@ -126,7 +126,7 @@
 
 ---
 
-## `$ 오픈소스 --공개`
+<img src="assets/badges/h-oss.svg" alt="오픈소스"/>
 
 ### [`easy-quartz`](https://github.com/black-astro/easy-quartz) · Spring Boot Starter
 
@@ -169,7 +169,7 @@ npm install -g smart-msg   # 사용: sm
 
 ---
 
-## `$ 프로젝트 --요약`
+<img src="assets/badges/h-project.svg" alt="프로젝트"/>
 
 > 비공개 사내/개인 저장소는 도메인 중심으로 요약했습니다.
 
@@ -211,7 +211,7 @@ npm install -g smart-msg   # 사용: sm
 
 ---
 
-## `$ 활동그래프 --통계`
+<img src="assets/badges/h-activity.svg" alt="활동 그래프"/>
 
 <div align="center">
 
