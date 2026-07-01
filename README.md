@@ -124,21 +124,14 @@
 
 ## `$ 오픈소스 --공개`
 
-<div align="center">
+### [`easy-quartz`](https://github.com/black-astro/easy-quartz) · Spring Boot Starter
 
-<a href="https://github.com/black-astro/easy-quartz">
-  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=easy-quartz&hide_border=false&border_color=00ff41&bg_color=0d0208&title_color=00ff41&icon_color=00ff41&text_color=9dff9d"/>
-</a>
-<a href="https://github.com/black-astro/smart-msg">
-  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=smart-msg&hide_border=false&border_color=00ff41&bg_color=0d0208&title_color=00ff41&icon_color=00ff41&text_color=9dff9d"/>
-</a>
-<a href="https://github.com/black-astro/coding-test">
-  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=coding-test&hide_border=false&border_color=00ff41&bg_color=0d0208&title_color=00ff41&icon_color=00ff41&text_color=9dff9d"/>
-</a>
+![Java](https://img.shields.io/badge/Java-0d0208?style=flat-square&logo=openjdk&logoColor=00ff41)
+![Maven Central](https://img.shields.io/maven-central/v/io.github.black-astro/easy-quartz-spring-boot-starter?style=flat-square&label=maven%20central&color=00ff41&labelColor=0d0208)
+![Stars](https://img.shields.io/github/stars/black-astro/easy-quartz?style=flat-square&color=00ff41&labelColor=0d0208)
+![License](https://img.shields.io/badge/license-Apache_2.0-00ff41?style=flat-square&labelColor=0d0208)
 
-</div>
-
-**[`easy-quartz`](https://github.com/black-astro/easy-quartz)** — 어노테이션(`@EasyQuartzScheduled`) 기반으로 **5종 스케줄 × 2엔진(Quartz / Spring TaskScheduler)**을 단일 추상화로 통합한 Spring Boot Starter. `Maven Central` 배포.
+어노테이션(`@EasyQuartzScheduled`) 기반으로 **5종 스케줄 × 2엔진(Quartz / Spring TaskScheduler)**을 단일 추상화로 통합한 Spring Boot Starter. `Maven Central` 배포.
 
 - `autoconfigure` / `starter` / `sample` 3-tier 멀티모듈, SPI 기반 Auto-Configuration
 - AOP 프록시 우회 문제를 `getBean()` + `AopUtils.getTargetClass()` 시그니처 검사로 해결(트랜잭션·캐시 보존)
@@ -148,13 +141,26 @@
 implementation "io.github.black-astro:easy-quartz-spring-boot-starter:0.1.0"
 ```
 
-**[`smart-msg`](https://github.com/black-astro/smart-msg)** — 다중 LLM(OpenAI · Claude · Gemini · Groq · Ollama)을 지원하는 **AI Git 커밋 메시지 생성 CLI**. `npm` 배포, Conventional Commits · 한/영 출력 지원.
+### [`smart-msg`](https://github.com/black-astro/smart-msg) · AI Commit CLI
+
+![TypeScript](https://img.shields.io/badge/TypeScript-0d0208?style=flat-square&logo=typescript&logoColor=00ff41)
+![npm](https://img.shields.io/npm/v/smart-msg?style=flat-square&label=npm&color=00ff41&labelColor=0d0208)
+![downloads](https://img.shields.io/npm/dt/smart-msg?style=flat-square&label=downloads&color=00ff41&labelColor=0d0208)
+![Stars](https://img.shields.io/github/stars/black-astro/smart-msg?style=flat-square&color=00ff41&labelColor=0d0208)
+
+다중 LLM(OpenAI · Claude · Gemini · Groq · Ollama)을 지원하는 **AI Git 커밋 메시지 생성 CLI**. `npm` 배포, Conventional Commits · 한/영 출력 지원.
 
 ```bash
 npm install -g smart-msg   # 사용: sm
 ```
 
-**[`code T`](https://github.com/black-astro/coding-test)** — **PySide6** 기반 코딩 테스트 연습 데스크톱 앱. 문법→자료구조→알고리즘 단계 학습, 문제 276·문법 강의 149 수록, **케이스별 실행 시간(ms)·최대 메모리까지 측정하는 자동 채점** (Python · Java · C++ · JS).
+### [`code T`](https://github.com/black-astro/coding-test) · 코딩테스트 데스크톱 앱
+
+![Python](https://img.shields.io/badge/Python-0d0208?style=flat-square&logo=python&logoColor=00ff41)
+![PySide6](https://img.shields.io/badge/PySide6-0d0208?style=flat-square&logo=qt&logoColor=00ff41)
+![Stars](https://img.shields.io/github/stars/black-astro/coding-test?style=flat-square&color=00ff41&labelColor=0d0208)
+
+**PySide6** 기반 코딩 테스트 연습 데스크톱 앱. 문법→자료구조→알고리즘 단계 학습, 문제 276·문법 강의 149 수록, **케이스별 실행 시간(ms)·최대 메모리까지 측정하는 자동 채점** (Python · Java · C++ · JS).
 
 > 그 외 — `shadowport` : 레거시 리버스 터널 도구를 Java 21 · Netty · AES-GCM / X25519 · JavaFX로 재설계한 네트워크·보안 사이드 프로젝트 (비공개)
 
@@ -208,8 +214,9 @@ npm install -g smart-msg   # 사용: sm
 
 <div align="center">
 
-<img height="165" src="https://github-readme-stats.vercel.app/api?username=black-astro&show_icons=true&include_all_commits=true&count_private=true&hide_border=false&border_color=00ff41&bg_color=0d0208&title_color=00ff41&icon_color=00ff41&text_color=9dff9d"/>
-<img height="165" src="https://github-readme-stats.vercel.app/api/top-langs/?username=black-astro&layout=compact&langs_count=6&hide_border=false&border_color=00ff41&bg_color=0d0208&title_color=00ff41&text_color=9dff9d"/>
+<img height="180" src="https://github-profile-summary-cards.vercel.app/api/cards/stats?username=black-astro&theme=github_dark"/>
+<img height="180" src="https://github-profile-summary-cards.vercel.app/api/cards/repos-per-language?username=black-astro&theme=github_dark"/>
+<img height="180" src="https://github-profile-summary-cards.vercel.app/api/cards/most-commit-language?username=black-astro&theme=github_dark"/>
 
 <br/>
 
