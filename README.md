@@ -36,11 +36,13 @@ KT 명세서 대용량 배치, 카카오 알림톡, PASS 본인인증 등 **처�
 
 | 구분 | 내용 |
 |------|------|
-| **대용량 처리** | StAX 스트리밍 파싱 · MyBatis `ExecutorType.BATCH` · Java 21 Virtual Thread로 1GB급 XML을 OOM 없이 ETL |
-| **인증/인가 설계** | 단일 백엔드에서 클라이언트 3종을 멀티 `SecurityFilterChain`으로 분리, JWT 발급·검증 분리 운영 |
+| **대용량 처리** | StAX 스트리밍 파싱 · MyBatis `ExecutorType.BATCH`(청크 flush) · Java 21 Virtual Thread 병렬화로 대용량 XML을 OOM 없이 ETL |
+| **인증/인가 설계** | 단일 백엔드에서 클라이언트 3종을 멀티 `SecurityFilterChain`으로 분리, JWT 발급·검증 분리, 클라이언트별 토큰 정책 운영 |
+| **외부 API 연동** | Spring 6 RestClient 기반 카카오 비즈톡·PASS 인증사 연동, 타임아웃 정밀 분기(504/500), 발송 상태머신 설계 |
+| **동시성 / 스케줄러** | `ThreadPoolTaskScheduler` N-스레드 분산 발송, MOD 기반 다중 스케줄러, `@PreDestroy` graceful shutdown |
 | **운영 안정성** | 발송 상태머신 · 스케줄러 race를 DB 원자성으로 차단, 운영 사고를 SQL로 재현·복구 후 문서화(재발 방지) |
-| **DB / SQL** | Tibero·Oracle PL/SQL 프로시저·UDF, MERGE UPSERT, 동적 인덱스 제어, SQL 튜닝 |
-| **빌드/품질 자동화** | Jenkins Pipeline · SonarQube Quality Gate · JaCoCo · CycloneDX SBOM |
+| **DB / SQL** | Tibero·Oracle PL/SQL 프로시저·UDF, MERGE UPSERT, 동적 인덱스 제어(UNUSABLE→REBUILD+`DBMS_STATS`), SQL 튜닝 |
+| **빌드/품질 자동화** | Jenkins Pipeline · SonarQube Quality Gate · JaCoCo · CycloneDX SBOM · WAR/JAR 동시 빌드 |
 | **OSS** | Spring Boot Starter 라이브러리 단독 설계·구현 후 Maven Central 배포 (`easy-quartz`) |
 
 <br/>
@@ -51,27 +53,47 @@ KT 명세서 대용량 배치, 카카오 알림톡, PASS 본인인증 등 **처�
 
 <div align="center">
 
-**Language & Framework**
+**Language & Core**
 
 ![Java](https://img.shields.io/badge/Java_8~21-007396?style=for-the-badge&logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot_2.7~3.4-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)
+![Spring](https://img.shields.io/badge/Spring_MVC_·_AOP-6DB33F?style=for-the-badge&logo=spring&logoColor=white)
+![Virtual Thread](https://img.shields.io/badge/Java_21_Virtual_Thread-007396?style=for-the-badge&logoColor=white)
+
+**Security & API**
+
 ![Spring Security](https://img.shields.io/badge/Spring_Security-6DB33F?style=for-the-badge&logo=springsecurity&logoColor=white)
-![MyBatis](https://img.shields.io/badge/MyBatis-DC382D?style=for-the-badge&logoColor=white)
-![Quartz](https://img.shields.io/badge/Quartz_Scheduler-0E7C3F?style=for-the-badge&logoColor=white)
+![OAuth2](https://img.shields.io/badge/OAuth2_Resource_Server-6DB33F?style=for-the-badge&logoColor=white)
+![JWT](https://img.shields.io/badge/JWT-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white)
+![RestClient](https://img.shields.io/badge/RestClient-6DB33F?style=for-the-badge&logoColor=white)
+![STOMP](https://img.shields.io/badge/WebSocket_STOMP-010101?style=for-the-badge&logoColor=white)
 
-**Database & Cache**
+**Persistence & Cache**
 
+![MyBatis](https://img.shields.io/badge/MyBatis_(BATCH)-DC382D?style=for-the-badge&logoColor=white)
 ![MariaDB](https://img.shields.io/badge/MariaDB-003545?style=for-the-badge&logo=mariadb&logoColor=white)
 ![Oracle](https://img.shields.io/badge/Oracle-F80000?style=for-the-badge&logo=oracle&logoColor=white)
 ![Tibero](https://img.shields.io/badge/Tibero_6-1F6FEB?style=for-the-badge&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
+![HikariCP](https://img.shields.io/badge/HikariCP-2C2255?style=for-the-badge&logoColor=white)
+![Caffeine](https://img.shields.io/badge/Caffeine_Cache-6F4E37?style=for-the-badge&logoColor=white)
 
-**Build · CI · Ops**
+**Batch · Concurrency · I/O**
+
+![Quartz](https://img.shields.io/badge/Quartz_Scheduler-0E7C3F?style=for-the-badge&logoColor=white)
+![StAX](https://img.shields.io/badge/StAX_·_JAXB-E76F00?style=for-the-badge&logoColor=white)
+![SFTP](https://img.shields.io/badge/Spring_Integration_SFTP-6DB33F?style=for-the-badge&logoColor=white)
+![Log4j2](https://img.shields.io/badge/Log4j2_(Disruptor)-D22128?style=for-the-badge&logoColor=white)
+![MapStruct](https://img.shields.io/badge/MapStruct-FF9E0F?style=for-the-badge&logoColor=white)
+![Jasypt](https://img.shields.io/badge/Jasypt_·_AES-2C3E50?style=for-the-badge&logoColor=white)
+
+**Build · CI · Quality**
 
 ![Gradle](https://img.shields.io/badge/Gradle-02303A?style=for-the-badge&logo=gradle&logoColor=white)
 ![Jenkins](https://img.shields.io/badge/Jenkins-D24939?style=for-the-badge&logo=jenkins&logoColor=white)
 ![SonarQube](https://img.shields.io/badge/SonarQube-4E9BCD?style=for-the-badge&logo=sonarqube&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![JaCoCo](https://img.shields.io/badge/JaCoCo-D22128?style=for-the-badge&logoColor=white)
+![CycloneDX](https://img.shields.io/badge/CycloneDX_SBOM-394049?style=for-the-badge&logoColor=white)
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
 
 **Tools**
@@ -79,6 +101,7 @@ KT 명세서 대용량 배치, 카카오 알림톡, PASS 본인인증 등 **처�
 ![IntelliJ IDEA](https://img.shields.io/badge/IntelliJ_IDEA-000000?style=for-the-badge&logo=intellijidea&logoColor=white)
 ![Git](https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white)
 ![DBeaver](https://img.shields.io/badge/DBeaver-382923?style=for-the-badge&logo=dbeaver&logoColor=white)
+![Maven Central](https://img.shields.io/badge/Maven_Central-C71A36?style=for-the-badge&logo=apachemaven&logoColor=white)
 
 </div>
 
@@ -90,29 +113,60 @@ KT 명세서 대용량 배치, 카카오 알림톡, PASS 본인인증 등 **처�
 
 > 사내 서비스는 도메인 중심으로 요약했으며, 공개 저장소는 링크를 함께 기재했습니다.
 
-### [`easy-quartz`](https://github.com/black-astro/easy-quartz) — Maven Central 배포 OSS
+### 🟢 Open Source
 
-어노테이션(`@EasyQuartzScheduled`) 기반으로 **5종 스케줄 × 2엔진(Quartz / Spring TaskScheduler)**을 단일 추상화로 통합한 Spring Boot Starter입니다.
-Auto-Configuration, AOP 프록시, Bean Lifecycle을 프레임워크 제공자 관점에서 직접 구현했으며,
-태그 push 기반 GPG 서명 → Sonatype Central 배포까지 릴리즈 파이프라인을 무인 자동화했습니다.
+<div align="center">
+
+<a href="https://github.com/black-astro/easy-quartz">
+  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=easy-quartz&theme=react&hide_border=true&bg_color=0d1117&title_color=36BCF7&icon_color=36BCF7"/>
+</a>
+<a href="https://github.com/black-astro/shadowport">
+  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=shadowport&theme=react&hide_border=true&bg_color=0d1117&title_color=36BCF7&icon_color=36BCF7"/>
+</a>
+
+</div>
+
+**[`easy-quartz`](https://github.com/black-astro/easy-quartz)** — 어노테이션(`@EasyQuartzScheduled`) 기반으로 **5종 스케줄 × 2엔진(Quartz / Spring TaskScheduler)**을 단일 추상화로 통합한 Spring Boot Starter.
+
+- `autoconfigure` / `starter` / `sample` 3-tier 멀티모듈, SPI 기반 Auto-Configuration + `@AutoConfigureAfter(QuartzAutoConfiguration)`
+- AOP 프록시 우회 문제를 `getBean()` + `AopUtils.getTargetClass()` 시그니처 검사로 해결(트랜잭션·캐시 어드바이스 보존)
+- `FIXED_DELAY` rescheduleJob 직접 구현, Misfire 4종·DST·jitter·requestRecovery 옵션 제공
+- 태그 push → GPG 서명 → Sonatype Central 배포까지 릴리즈 파이프라인 무인 자동화
 
 ```gradle
 implementation "io.github.black-astro:easy-quartz-spring-boot-starter:0.1.0"
 ```
 
-### [`shadowport`](https://github.com/black-astro/shadowport) — 레거시 리버스 터널 현대화
+**[`shadowport`](https://github.com/black-astro/shadowport)** — 레거시 리버스 커넥션 도구를 **Java 21 · Netty · AES-GCM / X25519 · JavaFX** 기반으로 재설계한 사이드 프로젝트. 통신 계층·GUI·패키징/빌드까지 단독 현대화 진행 중.
 
-기존 리버스 커넥션 도구를 **Java 21 · Netty · AES-GCM / X25519 · JavaFX** 기반으로 재설계한 사이드 프로젝트입니다.
-네트워크·보안 도메인 학습을 목표로 통신 계층, GUI, 패키징·빌드 파이프라인을 단독으로 현대화하고 있습니다.
+<br/>
 
-### 사내 프로젝트 (도메인 요약)
+### ⚙️ 사내 프로젝트 (도메인 요약)
 
-| 프로젝트 | 핵심 내용 | 주요 스택 |
-|----------|-----------|-----------|
-| **대용량 명세서 배치** | StAX 스트리밍 + MyBatis `BATCH` + Virtual Thread로 대용량 XML을 OOM 없이 ETL | Java 21, Spring Boot 3.4, Tibero |
-| **알림톡 발송 서버** | 외부 API를 트랜잭션 경계 밖으로 분리한 상태머신 설계, 스케줄러 race를 DB 원자성으로 차단 | Java 21, RestClient, Tibero |
-| **본인인증(PASS) 발송** | N-스레드 stagger 분산 발송, Jenkins·SonarQube 품질 게이트 자동화 | Java 21, Log4j2, Jenkins |
-| **통합 인증 백엔드** | 단일 서버에서 멀티 `SecurityFilterChain` + 멀티 DataSource 운영 | Java 8, Spring Security, MyBatis |
+#### 대용량 명세서 배치 (ETL)
+`Java 21` · `Spring Boot 3.4` · `StAX / JAXB` · `MyBatis BATCH` · `Tibero PL/SQL` · `Spring Integration SFTP`
+- 규모별 파싱 전략 분리 — 텍스트(BufferedReader) / 중규모(JAXB) / 대규모(StAX 상태머신)
+- Virtual Thread + Semaphore로 병렬 상한 제어, MyBatis BATCH 청크 단위 flush
+- 적재 전 인덱스 `UNUSABLE` → 대량 적재 → `REBUILD` + `DBMS_STATS`로 실행계획 회복
+- MERGE UPSERT, XXE 방어, 무한루프 fail-fast, 메모리 가드
+
+#### 알림톡 발송 서버
+`Java 21` · `Spring Boot 3.3` · `RestClient` · `MyBatis 동적 SQL` · `Tibero`
+- 발송/결과/정산을 단일 상태 컬럼(N→B→P→S) 상태머신으로 추적
+- 외부 API 호출을 트랜잭션 경계 밖으로 분리, `WHERE` 상태 조건으로 스케줄러 race를 DB 원자성으로 차단
+- 멱등 INSERT(`WHERE NOT EXISTS`), 무중단 Switch ON/OFF, 운영 사고 SQL 재현·복구 후 문서화
+
+#### 본인인증(PASS) 발송
+`Java 21` · `Spring Boot 3.4` · `ThreadPoolTaskScheduler` · `Log4j2(Disruptor)` · `Jasypt`
+- N-스레드 stagger 분산 발송, `@PreDestroy` graceful cancel
+- RestClient 타임아웃 504/500 정밀 분기, MyBatis BATCH 단위 flush
+- Jenkins Pipeline(Unit→Integration→SonarQube Quality Gate→Build) + CycloneDX SBOM 자동 산출
+
+#### 통합 인증 백엔드
+`Java 8` · `Spring Boot 2.7` · `Spring Security / OAuth2` · `MyBatis 멀티 DataSource` · `Caffeine`
+- 클라이언트 3종을 `@Order` + antMatcher로 `SecurityFilterChain` 분리 운영
+- Access/Refresh 토큰 수명 분리, `type` 클레임 검증, Clock Skew 대응
+- 도메인별 DataSource·TransactionManager 분리, Caffeine 캐시 `@Scheduled` 갱신
 
 <br/>
 
