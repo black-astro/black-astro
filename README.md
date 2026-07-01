@@ -27,15 +27,19 @@
 
 <br/>
 
+<div align="center">
+<img alt="contribution snake" width="62%" src="https://raw.githubusercontent.com/black-astro/black-astro/output/github-snake-dark.svg"/>
+</div>
+
 ---
 
 ## `$ 소개 --핵심역량`
 
-![](https://img.shields.io/badge/%3E-%EB%8C%80%EC%9A%A9%EB%9F%89_%EB%B0%9C%EC%86%A1%C2%B7%EB%B0%B0%EC%B9%98-0d0208?style=flat-square&labelColor=00ff41)
-![](https://img.shields.io/badge/%3E-%EB%AC%B4%EC%A4%91%EB%8B%A8_%EC%95%88%EC%A0%95%EC%84%B1-0d0208?style=flat-square&labelColor=00ff41)
-![](https://img.shields.io/badge/%3E-OAuth2_%EC%9D%B8%EC%A6%9D%EC%84%A4%EA%B3%84-0d0208?style=flat-square&labelColor=00ff41)
-![](https://img.shields.io/badge/%3E-CI%2FCD%C2%B7%EC%9D%B8%ED%94%84%EB%9D%BC_%EA%B5%AC%EC%B6%95-0d0208?style=flat-square&labelColor=00ff41)
-![](https://img.shields.io/badge/%3E-Maven_Central%C2%B7npm_OSS-0d0208?style=flat-square&labelColor=00ff41)
+<img src="assets/badges/hl-1.svg" alt="대용량 발송·배치"/>&nbsp;
+<img src="assets/badges/hl-2.svg" alt="무중단 안정성"/>&nbsp;
+<img src="assets/badges/hl-3.svg" alt="OAuth2 인증설계"/>&nbsp;
+<img src="assets/badges/hl-4.svg" alt="CI/CD·인프라 구축"/>&nbsp;
+<img src="assets/badges/hl-5.svg" alt="Maven Central·npm OSS"/>
 
 | 구분 | 내용 |
 |------|------|
@@ -126,10 +130,9 @@
 
 ### [`easy-quartz`](https://github.com/black-astro/easy-quartz) · Spring Boot Starter
 
-![Java](https://img.shields.io/badge/Java-0d0208?style=flat-square&logo=openjdk&logoColor=00ff41)
-![Maven Central](https://img.shields.io/maven-central/v/io.github.black-astro/easy-quartz-spring-boot-starter?style=flat-square&label=maven%20central&color=0d0208&labelColor=00ff41)
-![Stars](https://img.shields.io/github/stars/black-astro/easy-quartz?style=flat-square&color=0d0208&labelColor=00ff41)
-![License](https://img.shields.io/badge/license-Apache_2.0-00ff41?style=flat-square&labelColor=0d0208)
+<img src="assets/badges/eq-lang.svg" alt="Java"/>&nbsp;
+<img src="assets/badges/eq-maven.svg" alt="Maven Central v0.1.0"/>&nbsp;
+<img src="assets/badges/eq-license.svg" alt="Apache-2.0"/>
 
 어노테이션(`@EasyQuartzScheduled`) 기반으로 **5종 스케줄 × 2엔진(Quartz / Spring TaskScheduler)**을 단일 추상화로 통합한 Spring Boot Starter. `Maven Central` 배포.
 
@@ -143,10 +146,9 @@ implementation "io.github.black-astro:easy-quartz-spring-boot-starter:0.1.0"
 
 ### [`smart-msg`](https://github.com/black-astro/smart-msg) · AI Commit CLI
 
-![TypeScript](https://img.shields.io/badge/TypeScript-0d0208?style=flat-square&logo=typescript&logoColor=00ff41)
-![npm](https://img.shields.io/npm/v/smart-msg?style=flat-square&label=npm&color=0d0208&labelColor=00ff41)
-![downloads](https://img.shields.io/npm/dt/smart-msg?style=flat-square&label=downloads&color=0d0208&labelColor=00ff41)
-![Stars](https://img.shields.io/github/stars/black-astro/smart-msg?style=flat-square&color=0d0208&labelColor=00ff41)
+<img src="assets/badges/sm-lang.svg" alt="TypeScript"/>&nbsp;
+<img src="assets/badges/sm-npm.svg" alt="npm v1.3.0"/>&nbsp;
+<img src="assets/badges/sm-cli.svg" alt="CLI sm"/>
 
 다중 LLM(OpenAI · Claude · Gemini · Groq · Ollama)을 지원하는 **AI Git 커밋 메시지 생성 CLI**. `npm` 배포, Conventional Commits · 한/영 출력 지원.
 
@@ -156,9 +158,8 @@ npm install -g smart-msg   # 사용: sm
 
 ### [`code T`](https://github.com/black-astro/coding-test) · 코딩테스트 데스크톱 앱
 
-![Python](https://img.shields.io/badge/Python-0d0208?style=flat-square&logo=python&logoColor=00ff41)
-![PySide6](https://img.shields.io/badge/PySide6-0d0208?style=flat-square&logo=qt&logoColor=00ff41)
-![Stars](https://img.shields.io/github/stars/black-astro/coding-test?style=flat-square&color=0d0208&labelColor=00ff41)
+<img src="assets/badges/ct-lang.svg" alt="Python"/>&nbsp;
+<img src="assets/badges/ct-pyside.svg" alt="PySide6"/>
 
 **PySide6** 기반 코딩 테스트 연습 데스크톱 앱. 문법→자료구조→알고리즘 단계 학습, 문제 276·문법 강의 149 수록, **케이스별 실행 시간(ms)·최대 메모리까지 측정하는 자동 채점** (Python · Java · C++ · JS).
 
@@ -213,42 +214,13 @@ npm install -g smart-msg   # 사용: sm
 ## `$ 활동그래프 --통계`
 
 <div align="center">
-<img width="82%" src="https://github-profile-summary-cards.vercel.app/api/cards/profile-details?username=black-astro&theme=monokai"/>
-</div>
 
-**`> 커밋 · 연속 기여`**
+<img height="165" src="https://streak-stats.demolab.com/?user=black-astro&hide_border=false&border=00ff41&background=0d0208&stroke=00ff41&ring=00ff41&fire=00ff41&currStreakLabel=9dff9d&sideNums=00ff41&sideLabels=9dff9d&dates=4d774e&currStreakNum=9dff9d&dayLabels=4d774e" alt="streak"/>
 
-<div align="center">
-<img height="185" src="https://github-profile-summary-cards.vercel.app/api/cards/stats?username=black-astro&theme=monokai"/>
-<img height="185" src="https://streak-stats.demolab.com/?user=black-astro&hide_border=false&border=00ff41&background=0d0208&stroke=00ff41&ring=00ff41&fire=00ff41&currStreakLabel=9dff9d&sideNums=00ff41&sideLabels=9dff9d&dates=8b949e&currStreakNum=9dff9d&dayLabels=8b949e" alt="streak"/>
-</div>
+<br/><br/>
 
-**`> 주력 언어 분포`**
+<img width="72%" src="./profile-3d-contrib/profile-night-green.svg" alt="3d-contrib"/>
 
-<div align="center">
-<img height="185" src="https://github-profile-summary-cards.vercel.app/api/cards/repos-per-language?username=black-astro&theme=monokai"/>
-<img height="185" src="https://github-profile-summary-cards.vercel.app/api/cards/most-commit-language?username=black-astro&theme=monokai"/>
-</div>
-
-**`> 활동 시간대`**
-
-<div align="center">
-<img width="82%" src="https://github-profile-summary-cards.vercel.app/api/cards/productive-time?username=black-astro&theme=monokai&utcOffset=9"/>
-</div>
-
-**`> 컨트리뷰션 — Snake`**
-
-<div align="center">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/black-astro/black-astro/output/github-snake-dark.svg"/>
-  <img alt="snake" src="https://raw.githubusercontent.com/black-astro/black-astro/output/github-snake.svg"/>
-</picture>
-</div>
-
-**`> 컨트리뷰션 — 3D Calendar`**
-
-<div align="center">
-<img src="./profile-3d-contrib/profile-night-green.svg" alt="3d-contrib" width="86%"/>
 </div>
 
 <br/>
