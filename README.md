@@ -213,26 +213,42 @@ npm install -g smart-msg   # 사용: sm
 ## `$ 활동그래프 --통계`
 
 <div align="center">
+<img width="82%" src="https://github-profile-summary-cards.vercel.app/api/cards/profile-details?username=black-astro&theme=monokai"/>
+</div>
 
-<img height="180" src="https://github-profile-summary-cards.vercel.app/api/cards/stats?username=black-astro&theme=github_dark"/>
-<img height="180" src="https://github-profile-summary-cards.vercel.app/api/cards/repos-per-language?username=black-astro&theme=github_dark"/>
-<img height="180" src="https://github-profile-summary-cards.vercel.app/api/cards/most-commit-language?username=black-astro&theme=github_dark"/>
+**`> 커밋 · 연속 기여`**
 
-<br/>
+<div align="center">
+<img height="185" src="https://github-profile-summary-cards.vercel.app/api/cards/stats?username=black-astro&theme=monokai"/>
+<img height="185" src="https://streak-stats.demolab.com/?user=black-astro&hide_border=false&border=00ff41&background=0d0208&stroke=00ff41&ring=00ff41&fire=00ff41&currStreakLabel=9dff9d&sideNums=00ff41&sideLabels=9dff9d&dates=8b949e&currStreakNum=9dff9d&dayLabels=8b949e" alt="streak"/>
+</div>
 
-<img src="https://streak-stats.demolab.com/?user=black-astro&hide_border=false&border=00ff41&background=0d0208&stroke=00ff41&ring=00ff41&fire=00ff41&currStreakLabel=00ff41&sideNums=00ff41&sideLabels=9dff9d&dates=8b949e&currStreakNum=00ff41&dayLabels=8b949e" alt="streak"/>
+**`> 주력 언어 분포`**
 
-<br/><br/>
+<div align="center">
+<img height="185" src="https://github-profile-summary-cards.vercel.app/api/cards/repos-per-language?username=black-astro&theme=monokai"/>
+<img height="185" src="https://github-profile-summary-cards.vercel.app/api/cards/most-commit-language?username=black-astro&theme=monokai"/>
+</div>
 
+**`> 활동 시간대`**
+
+<div align="center">
+<img width="82%" src="https://github-profile-summary-cards.vercel.app/api/cards/productive-time?username=black-astro&theme=monokai&utcOffset=9"/>
+</div>
+
+**`> 컨트리뷰션 — Snake`**
+
+<div align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/black-astro/black-astro/output/github-snake-dark.svg"/>
   <img alt="snake" src="https://raw.githubusercontent.com/black-astro/black-astro/output/github-snake.svg"/>
 </picture>
+</div>
 
-<br/><br/>
+**`> 컨트리뷰션 — 3D Calendar`**
 
+<div align="center">
 <img src="./profile-3d-contrib/profile-night-green.svg" alt="3d-contrib" width="86%"/>
-
 </div>
 
 <br/>
