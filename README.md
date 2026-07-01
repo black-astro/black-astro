@@ -133,6 +133,9 @@
 <a href="https://github.com/black-astro/smart-msg">
   <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=smart-msg&theme=react&hide_border=true&bg_color=0d1117&title_color=36BCF7&icon_color=36BCF7"/>
 </a>
+<a href="https://github.com/black-astro/coding-test">
+  <img src="https://github-readme-stats.vercel.app/api/pin/?username=black-astro&repo=coding-test&theme=react&hide_border=true&bg_color=0d1117&title_color=36BCF7&icon_color=36BCF7"/>
+</a>
 
 </div>
 
@@ -151,6 +154,8 @@ implementation "io.github.black-astro:easy-quartz-spring-boot-starter:0.1.0"
 ```bash
 npm install -g smart-msg   # 사용: sm
 ```
+
+**[`code T`](https://github.com/black-astro/coding-test)** — **PySide6** 기반 코딩 테스트 연습 데스크톱 앱. 문법→자료구조→알고리즘 단계 학습, 문제 276·문법 강의 149 수록, **케이스별 실행 시간(ms)·최대 메모리까지 측정하는 자동 채점** (Python · Java · C++ · JS).
 
 > 그 외 — `shadowport` : 레거시 리버스 터널 도구를 Java 21 · Netty · AES-GCM / X25519 · JavaFX로 재설계한 네트워크·보안 사이드 프로젝트 (비공개)
 
