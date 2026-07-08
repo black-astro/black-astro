@@ -11,7 +11,7 @@ let raf = 0
 let last = 0
 let running = false
 const fontSize = 15
-const glyphs = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈ0123456789<>=/\\{}[]$#*+'
+const glyphs = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -41,8 +41,8 @@ function frame(t: number) {
     const ch = glyphs[Math.floor(Math.random() * glyphs.length)]
     const x = i * fontSize
     const y = drops[i] * fontSize
-    // 선두 글자는 밝게, 나머지는 어둑한 그린
-    ctx.fillStyle = Math.random() > 0.975 ? 'rgba(140, 255, 180, 0.9)' : 'rgba(46, 224, 106, 0.55)'
+    // 선두 글자는 진한 매트릭스 그린으로 밝게, 나머지는 어둑한 그린
+    ctx.fillStyle = Math.random() > 0.96 ? 'rgba(60, 255, 95, 0.95)' : 'rgba(46, 224, 106, 0.68)'
     ctx.fillText(ch, x, y)
     if (y > c.height && Math.random() > 0.975) drops[i] = 0
     drops[i]++
@@ -98,10 +98,10 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  opacity: 0.38;
-  /* 중앙(콘텐츠 영역)은 비우고 좌우 사이드에만 보이게 */
-  -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 15%, transparent 85%, #000 100%);
-  mask-image: linear-gradient(90deg, #000 0%, transparent 15%, transparent 85%, #000 100%);
+  opacity: 0.45;
+  /* 좌우 가장자리에서만 보이고 중앙은 완전히 비움 */
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 13%, transparent 87%, #000 100%);
+  mask-image: linear-gradient(90deg, #000 0%, transparent 13%, transparent 87%, #000 100%);
 }
 /* 라이트 테마에서는 숨김 (start/stop으로 렌더도 중단) */
 :root[data-theme='light'] .rain {

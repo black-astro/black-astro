@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { navRoutes } from '@/router'
 import ThemeToggle from './ThemeToggle.vue'
+import logoUrl from '@/style/img/matrix_hyeon.png'
 </script>
 
 <template>
   <header class="hd">
     <div class="hd-inner container">
       <RouterLink to="/" class="brand">
-        <span class="brand-mark">&lt;/&gt;</span>
+        <img :src="logoUrl" class="brand-logo" alt="김현우 로고" width="36" height="36" draggable="false" />
         <span class="brand-name">김현우<span class="brand-sub">Backend</span></span>
       </RouterLink>
 
@@ -47,11 +48,15 @@ import ThemeToggle from './ThemeToggle.vue'
   letter-spacing: -0.02em;
   flex-shrink: 0;
 }
-.brand-mark {
-  font-family: var(--font-mono);
-  color: var(--accent);
-  font-size: 1rem;
-  font-weight: 700;
+.brand-logo {
+  height: 36px;
+  width: 36px;
+  object-fit: contain;
+  display: block;
+  /* 축소 시 부드러운 리샘플링(픽셀 깨짐 방지) + 리사이즈 전환 매끄럽게 */
+  image-rendering: auto;
+  -webkit-user-drag: none;
+  transition: height 0.25s ease, width 0.25s ease;
 }
 .brand-name {
   display: flex;
@@ -119,6 +124,10 @@ import ThemeToggle from './ThemeToggle.vue'
   }
   .brand-name {
     font-size: 0.95rem;
+  }
+  .brand-logo {
+    height: 30px;
+    width: 30px;
   }
 }
 </style>
