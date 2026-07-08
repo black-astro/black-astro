@@ -13,7 +13,7 @@
 <!-- 움직이는 소개 텍스트 -->
 <a href="https://git.io/typing-svg">
   <img
-    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=22&pause=1400&color=00FF41&center=true&vCenter=true&width=600&height=50&lines=%EB%B0%B1%EC%97%94%EB%93%9C+%EA%B0%9C%EB%B0%9C%EC%9E%90%EC%9E%85%EB%8B%88%EB%8B%A4;Java+%C2%B7+Spring%EC%9C%BC%EB%A1%9C+%EC%84%9C%EB%B2%84%EB%A5%BC+%EB%A7%8C%EB%93%AD%EB%8B%88%EB%8B%A4;%EC%95%88%EC%A0%95%EC%A0%81%EC%9D%B8+%EB%8C%80%EC%9A%A9%EB%9F%89+%EC%8B%9C%EC%8A%A4%ED%85%9C%EC%9D%84+%EA%B3%A0%EB%AF%BC%ED%95%A9%EB%8B%88%EB%8B%A4;%ED%95%84%EC%9A%94%ED%95%9C+%EB%8F%84%EA%B5%AC%EB%8A%94+%EC%A7%81%EC%A0%91+%EB%A7%8C%EB%93%A4%EC%96%B4+%EC%94%81%EB%8B%88%EB%8B%A4"
+    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=22&pause=1400&color=00FF41&center=true&vCenter=true&width=600&height=50&lines=%EB%A7%8C%EB%93%A4%EA%B3%A0%2C%20%ED%8A%9C%EB%8B%9D%ED%95%98%EA%B3%A0%2C%20%EB%81%9D%EA%B9%8C%EC%A7%80%20%EC%B1%85%EC%9E%84%EC%A7%80%EB%8A%94%20%EB%B0%B1%EC%97%94%EB%93%9C%20%EA%B0%9C%EB%B0%9C%EC%9E%90%EC%9E%85%EB%8B%88%EB%8B%A4."
     alt="typing"
   />
 </a>
