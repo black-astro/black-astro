@@ -21,7 +21,7 @@ const facts = [
       <!-- 소개글 -->
       <div class="about-intro card">
         <p v-for="(para, i) in profile.intro" :key="i">
-          <template v-for="(line, j) in para" :key="j">{{ line }}<br v-if="j < para.length - 1" /></template>
+          <template v-for="(line, j) in para" :key="j">{{ line }}<template v-if="j < para.length - 1"> <wbr></template></template>
         </p>
       </div>
       <!-- 인적사항 + 링크 -->
