@@ -21,8 +21,13 @@
 <br/>
 
 <img src="https://komarev.com/ghpvc/?username=black-astro&label=visitors&color=00ff41&style=flat-square" alt="views"/>
+<a href="https://black-astro.github.io/black-astro/"><img src="https://img.shields.io/badge/Portfolio-black--astro.github.io-00ff41?style=flat-square&logo=vuedotjs&logoColor=00ff41&labelColor=0d0208" alt="portfolio"/></a>
 <a href="mailto:gntj3200@gmail.com"><img src="https://img.shields.io/badge/gntj3200@gmail.com-0d0208?style=flat-square&logo=gmail&logoColor=00ff41" alt="mail"/></a>
 
+</div>
+
+<div align="center">
+<sub>📖 <b>이력서 · 경력기술서 · 포트폴리오</b> 블로그 → <a href="https://black-astro.github.io/black-astro/">black-astro.github.io/black-astro</a> &nbsp;·&nbsp; <code>Vue 3 · TypeScript · Vite</code></sub>
 </div>
 
 <br/>
