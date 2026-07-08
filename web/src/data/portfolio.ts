@@ -49,6 +49,12 @@ export const caseStudies: CaseStudy[] = [
     blocks: [
       {
         type: 'text',
+        heading: '왜 StAX인가 — DOM → JAXB → StAX 시행착오',
+        content:
+          '처음엔 DOM으로 접근했지만 대용량에서 단건 파싱 속도가 나오지 않았고, JAXB로 전체 객체 바인딩하니 이번엔 메모리 점유가 치솟아 OOM이 빈발했다. 최종적으로 StAX 커서/이벤트 스트리밍으로 전환 — 문서를 통째로 올리지 않고 흘려보내며 처리해, 힙 수십 MB로 매월 명세서 약 100만 건을 안정 처리한다. 세 방식을 직접 다 겪으며 트레이드오프(속도 · 메모리 · 편의성)를 확인하고 내린 선택.',
+      },
+      {
+        type: 'text',
         heading: '해결 1 — 규모별 파싱 전략 + StAX 상태머신',
         content:
           '01001(텍스트, 10만 라인 flush) / 01002(중규모, JAXB) / 01003(대규모, StAX)으로 분기. StAX는 BILLINFO 단위 상태머신으로 섹션을 이벤트로 분해 → DTO 생성 → 즉시 배치 INSERT → 버퍼 해제. 문서를 트리로 올리지 않아 1GB+ 파일도 힙 수십 MB로 처리.',

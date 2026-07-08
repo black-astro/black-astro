@@ -30,6 +30,10 @@
 <sub>📖 <b>이력서 · 경력기술서 · 포트폴리오</b> 블로그 → <a href="https://black-astro.github.io/black-astro/">black-astro.github.io/black-astro</a> &nbsp;·&nbsp; <code>Vue 3 · TypeScript · Vite</code></sub>
 </div>
 
+<div align="center">
+<sub>🌙 이 프로필은 <b>다크(블랙) 테마</b>에 맞춰 디자인했습니다 — <b>GitHub 다크 모드</b>에서 가장 잘 보입니다.</sub>
+</div>
+
 <br/>
 
 <div align="center">

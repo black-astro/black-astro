@@ -15,8 +15,21 @@ export const profile = {
   headline: '전자고지·대용량 발송/배치 도메인을 5년간 설계·개발·운영했습니다.',
   subHeadline:
     '매월 수백만 건의 공공·통신 고지가 지나가는 발송 파이프라인. 델파이 레거시를 Java 21로 재구축하고, 필요한 도구는 직접 만들어 Maven Central에 배포합니다.',
-  intro:
-    'Java·Spring 기반으로 KT 명세서 ETL 배치, PASS 전자고지 PUSH, 카카오 전자문서 발송 서버를 설계부터 운영까지 담당해 온 백엔드 개발자입니다. 레거시 현대화가 제 경력의 축입니다 — 델파이 월 배치를 Java로 재구축하고, 관리자 콘솔을 JSP→Vue2→Vue3로 전환하고, 보험사 발송 엔진을 인수해 재구축했습니다. 운영 사고는 원인 분석부터 복구 SQL, 재발 방지 문서화까지 마무리하고, 회사 밖에서는 Spring Boot Starter를 직접 만들어 Maven Central에 배포했습니다.',
+  // 각 문단을 의미 단위 줄(line)로 분리 — 보고서처럼 읽히도록
+  intro: [
+    [
+      'Java·Spring 기반으로 KT 명세서 ETL 배치, PASS 전자고지 PUSH,',
+      '카카오 전자문서 발송 서버를 설계부터 운영까지 담당해 온 백엔드 개발자입니다.',
+    ],
+    [
+      '레거시 현대화가 제 경력의 축입니다 — 델파이 월 배치를 Java로 재구축하고,',
+      '관리자 콘솔을 JSP→Vue2→Vue3로 전환하고, 보험사 발송 엔진을 인수해 재구축했습니다.',
+    ],
+    [
+      '운영 사고는 원인 분석부터 복구 SQL, 재발 방지 문서화까지 마무리하고,',
+      '회사 밖에서는 Spring Boot Starter를 직접 만들어 Maven Central에 배포했습니다.',
+    ],
+  ],
   company: 'GIBIS',
   companyDesc: 'KT 파트너사',
   tenure: '2021.08 ~ 재직 중',
@@ -56,10 +69,10 @@ export const achievements: Achievement[] = [
     detail: '커서 루프를 집합 기반(MERGE)으로 재설계, 청크 커밋·재개 구조로 DB 세션 제약 우회. 약 60% 단축 (운영 실측).',
   },
   {
-    metric: '0',
-    unit: '건',
-    label: '운영 OOM',
-    detail: '1GB+ XML을 StAX 상태머신 + 파서 풀·단일 라이터 파이프라인으로 힙 수십 MB에 스트리밍 적재 (운영 로그 기준).',
+    metric: '~2억',
+    unit: 'row',
+    label: '누적 StAX 적재 · 메모리 터짐(OOM) 0건',
+    detail: '매월 명세서 약 100만 건(1GB+ XML)을 StAX 상태머신 + 파서 풀·단일 라이터 파이프라인으로 힙 수십 MB에만 스트리밍 파싱·적재 — 누적 파싱 약 2천만 건, 디테일 테이블 누적 약 2억 row를 운영 OOM 0건으로 처리.',
   },
   {
     metric: '3',

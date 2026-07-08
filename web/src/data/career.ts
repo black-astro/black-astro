@@ -55,7 +55,7 @@ export const projects: CareerProject[] = [
       {
         heading: '데이터 규모별 파싱 전략 분리 (OOM 해결)',
         points: [
-          '문제 — 대규모 XML(1GB+)을 JAXB로 통째 객체화하다 OutOfMemoryError 빈발.',
+          '문제 — 처음엔 DOM 파싱이 대용량에서 단건 속도가 나오지 않았고, JAXB로 전체 객체화하니 메모리 점유가 치솟아 OutOfMemoryError 빈발.',
           '해결 — 01001(텍스트, BufferedReader 10만 라인 flush) / 01002(중규모, JAXB) / 01003(대규모, StAX 스트리밍 상태머신)으로 분기. StAX는 BILLINFO 단위로 DTO 생성 → 즉시 배치 INSERT → 버퍼 해제 순으로 힙 점유 억제.',
           '결과 — 1GB급 XML을 수십 MB 힙 안에서 처리, 운영 OOM 0건. 01002는 수신~적재 전 구간 약 10분 내 완료(운영 로그 기준).',
         ],
