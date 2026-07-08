@@ -11,7 +11,7 @@ let raf = 0
 let last = 0
 let running = false
 const fontSize = 15
-const glyphs = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+const glyphs = '01ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 

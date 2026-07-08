@@ -20,7 +20,9 @@ const facts = [
     <div class="about-grid">
       <!-- 소개글 -->
       <div class="about-intro card">
-        <p>{{ profile.intro }}</p>
+        <p v-for="(para, i) in profile.intro" :key="i">
+          <template v-for="(line, j) in para" :key="j">{{ line }}<br v-if="j < para.length - 1" /></template>
+        </p>
       </div>
       <!-- 인적사항 + 링크 -->
       <aside class="about-side">
@@ -47,7 +49,7 @@ const facts = [
 
     <!-- 핵심 역량 -->
     <section class="sub">
-      <h3 class="sub-title">핵심 역량</h3>
+      <h3 class="sub-title"><AppIcon name="award" :size="20" class="sub-ic" />핵심 역량</h3>
       <div class="comp-list">
         <article v-for="c in competencies" :key="c.title" class="comp-item card">
           <div class="comp-ic"><AppIcon :name="c.icon" :size="19" /></div>
@@ -61,7 +63,7 @@ const facts = [
 
     <!-- 보유 기술 -->
     <section class="sub">
-      <h3 class="sub-title">보유 기술</h3>
+      <h3 class="sub-title"><AppIcon name="settings" :size="20" class="sub-ic" />보유 기술</h3>
       <div class="skill-groups">
         <div v-for="g in skillGroups" :key="g.category" class="skill-group card">
           <div class="sg-cat">{{ g.category }}</div>
@@ -84,11 +86,15 @@ const facts = [
 .about-intro {
   height: 100%;
   display: flex;
-  align-items: center;
-  padding: 26px 28px;
-  font-size: 1.0rem;
-  color: var(--text-secondary);
-  line-height: 1.85;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  padding: 28px 30px;
+  font-size: 1.02rem;
+  line-height: 1.8;
+}
+.about-intro p {
+  color: var(--text);
 }
 .about-side {
   display: flex;
@@ -163,10 +169,17 @@ const facts = [
   margin-top: 56px;
 }
 .sub-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 1.35rem;
   font-weight: 800;
   letter-spacing: -0.025em;
   margin-bottom: 22px;
+}
+.sub-ic {
+  flex-shrink: 0;
+  color: var(--accent);
 }
 .comp-list {
   display: grid;
