@@ -8,12 +8,16 @@ import AppIcon from '@/components/AppIcon.vue'
   <!-- HERO -->
   <section class="hero">
     <div class="container hero-inner">
-      <div class="hero-glow" aria-hidden="true"></div>
-      <span class="eyebrow">Backend Engineer · {{ profile.years }}년차</span>
+      <div class="term-line">
+        <span class="term-prompt">black-astro@backend</span><span class="term-sep">:</span><span class="term-path">~</span><span class="term-sep">$</span>
+        <span class="term-cmd">whoami</span>
+      </div>
       <h1 class="hero-title">
-        전자고지·대용량 발송/배치 도메인을<br />
-        <span class="accent">5년간 설계·개발·운영</span>했습니다.
+        김현우<span class="hero-role"> — Backend Engineer</span><span class="cursor" aria-hidden="true">▊</span>
       </h1>
+      <p class="hero-line">
+        전자고지·대용량 발송/배치 도메인을 <span class="accent">5년간 설계·개발·운영</span>했습니다.
+      </p>
       <p class="hero-sub">{{ profile.subHeadline }}</p>
 
       <div class="hero-meta">
@@ -73,41 +77,63 @@ import AppIcon from '@/components/AppIcon.vue'
 <style scoped>
 .hero {
   position: relative;
-  padding: 84px 0 60px;
-  overflow: hidden;
+  padding: 72px 0 56px;
 }
 .hero-inner {
   position: relative;
 }
-.hero-glow {
-  position: absolute;
-  top: -160px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 640px;
-  height: 380px;
-  background: radial-gradient(ellipse at center, var(--accent-soft), transparent 70%);
-  filter: blur(30px);
-  opacity: 0.9;
-  pointer-events: none;
-  z-index: -1;
+.term-line {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  margin-bottom: 20px;
+  letter-spacing: -0.01em;
+}
+.term-prompt {
+  color: var(--accent);
+}
+.term-sep {
+  color: var(--text-muted);
+  margin: 0 1px;
+}
+.term-path {
+  color: var(--text-secondary);
+}
+.term-cmd {
+  color: var(--text);
+  margin-left: 6px;
 }
 .hero-title {
-  margin-top: 16px;
-  font-size: clamp(1.9rem, 5vw, 3.1rem);
+  font-size: clamp(2rem, 5.4vw, 3.2rem);
   font-weight: 800;
-  line-height: 1.16;
+  line-height: 1.12;
   letter-spacing: -0.035em;
 }
-.hero-title .accent {
+.hero-role {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.cursor {
+  color: var(--accent);
+  font-weight: 400;
+  margin-left: 2px;
+  animation: blink 1.1s step-end infinite;
+}
+.hero-line {
+  margin-top: 18px;
+  font-size: clamp(1.15rem, 2.6vw, 1.5rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.4;
+}
+.hero-line .accent {
   color: var(--accent);
 }
 .hero-sub {
-  margin-top: 20px;
+  margin-top: 16px;
   max-width: 620px;
-  font-size: 1.08rem;
+  font-size: 1.04rem;
   color: var(--text-secondary);
-  line-height: 1.65;
+  line-height: 1.66;
 }
 .hero-meta {
   margin-top: 22px;
@@ -139,8 +165,6 @@ import AppIcon from '@/components/AppIcon.vue'
 }
 .btn-primary:hover {
   background: var(--accent-hover);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
 }
 .btn-ghost {
   border-color: var(--border-strong);
@@ -177,15 +201,17 @@ import AppIcon from '@/components/AppIcon.vue'
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
+  align-items: stretch;
 }
 .stat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   padding: 22px 22px 24px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: border-color 0.2s ease;
 }
 .stat:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-md);
-  border-color: var(--border-strong);
+  border-color: var(--accent);
 }
 .stat-metric {
   font-family: var(--font-mono);
@@ -216,15 +242,17 @@ import AppIcon from '@/components/AppIcon.vue'
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
+  align-items: stretch;
 }
 .comp {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   padding: 24px 22px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: border-color 0.2s ease;
 }
 .comp:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-md);
-  border-color: var(--border-strong);
+  border-color: var(--accent);
 }
 .comp-icon {
   display: inline-flex;

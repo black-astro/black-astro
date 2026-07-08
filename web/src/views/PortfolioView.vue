@@ -74,8 +74,12 @@ import SectionHeader from '@/components/SectionHeader.vue'
   grid-template-columns: repeat(5, 1fr);
   gap: 12px;
   margin-bottom: 48px;
+  align-items: stretch;
 }
 .pv {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   padding: 20px 18px;
 }
 .pv-no {

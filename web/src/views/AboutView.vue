@@ -165,11 +165,13 @@ const facts = [
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+  align-items: stretch;
 }
 .comp-item {
   display: flex;
   gap: 14px;
   padding: 20px 22px;
+  height: 100%;
 }
 .comp-ic {
   flex-shrink: 0;
@@ -196,9 +198,11 @@ const facts = [
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+  align-items: stretch;
 }
 .skill-group {
   padding: 18px 20px;
+  height: 100%;
 }
 .sg-cat {
   font-family: var(--font-mono);
