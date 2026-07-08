@@ -49,41 +49,42 @@ export interface Achievement {
   detail: string
 }
 
+// 여러 프로젝트에서 방어 가능한 성과를 골고루 — 대용량 · 인증 · PASS · 카카오 · 레거시 현대화 · OSS · 인프라
 export const achievements: Achievement[] = [
-  {
-    metric: '~1,000만',
-    unit: 'row',
-    label: '회차당 DB INSERT',
-    detail: '델파이 레거시 월 배치를 Java 21로 전면 재구축. 회차당 원천 약 510만 건, 최대 안내문은 명세서 100만 건이 디테일 분해로 약 1,000만 row 적재 (운영 명세 기준).',
-  },
-  {
-    metric: '50→25',
-    unit: '분',
-    label: '대량 INSERT 시간',
-    detail: '인덱스 UNUSABLE→BATCH 적재→REBUILD 재설계 + direct-path INSERT 분기로 약 50% 단축 (운영 실측).',
-  },
-  {
-    metric: '5→2',
-    unit: '시간',
-    label: '중복제거 프로시저',
-    detail: '커서 루프를 집합 기반(MERGE)으로 재설계, 청크 커밋·재개 구조로 DB 세션 제약 우회. 약 60% 단축 (운영 실측).',
-  },
   {
     metric: '~2억',
     unit: 'row',
-    label: '누적 StAX 적재 · 메모리 터짐(OOM) 0건',
-    detail: '매월 명세서 약 100만 건(1GB+ XML)을 StAX 상태머신 + 파서 풀·단일 라이터 파이프라인으로 힙 수십 MB에만 스트리밍 파싱·적재 — 누적 파싱 약 2천만 건, 디테일 테이블 누적 약 2억 row를 운영 OOM 0건으로 처리.',
+    label: '누적 StAX 스트리밍 적재 · 메모리 터짐(OOM) 0건',
+    detail: 'KT_BatchServer — 매월 명세서 약 100만 건(1GB+ XML)을 StAX 상태머신 + 파서 풀·단일 라이터로 힙 수십 MB에만 스트리밍 적재. 누적 파싱 약 2천만 건, 디테일 테이블 약 2억 row를 메모리 터짐 없이 운영.',
   },
   {
     metric: '3',
     unit: '채널',
-    label: '전자고지 발송 백엔드',
-    detail: 'PASS · 카카오 전자문서 · KT 3채널 발송 백엔드 개발. 국세청·건보공단·국민연금공단 등 공공기관 안내문 처리.',
+    label: '공공기관 전자고지 발송 백엔드',
+    detail: 'PASS · 카카오 전자문서 · KT 3채널 발송 백엔드를 설계·개발·운영. 국세청·국민건강보험공단·국민연금공단 등 공공기관 안내문이 이 파이프라인을 통과.',
+  },
+  {
+    metric: '일 180만',
+    unit: '건 규모',
+    label: 'PASS 전자고지 · SKT PASS지갑 공식 IF 연동',
+    detail: 'KT PASS 공인알림문자 시스템 개발사로서 SKT PASS지갑 공식 IF(정의서 v1.9)를 연동. 단건/벌크 발송과 결과 회수를 구현하고, 일 발송 리미트 180만 건 규모의 상한 제어 체계로 대량 발송을 통제(구축/발송 서버 분리 설계).',
+  },
+  {
+    metric: '3',
+    unit: '체인',
+    label: '멀티 SecurityFilterChain 인증 분리',
+    detail: 'GibisbizCenter — 단일 백엔드에서 OpenAPI·Electron·Vue3 어드민 3종 클라이언트를 SecurityFilterChain으로 분리. JWT 발급·검증 책임을 나눠 클라이언트별 토큰 수명·인가 정책을 독립 운영.',
+  },
+  {
+    metric: '재발 0',
+    unit: '건',
+    label: '운영 사고 원인분석 → 복구 → 재발 방지',
+    detail: '카카오 결과 미처리 사고(SRC_KEY 공백 매칭)를 SQL로 원인 분석 → 복구 SQL로 재처리 → 재현 절차·영향 범위·복구 SQL을 문서화. 이후 결과 대사 기준 동일 사고 재발 0건.',
   },
   {
     metric: 'Maven Central',
     unit: '',
-    label: 'OSS 정식 배포',
-    detail: 'Spring Boot 스케줄링 라이브러리 easy-quartz를 설계·구현·릴리즈 자동화까지 단독으로 정식 배포.',
+    label: 'Spring Boot Starter 정식 배포',
+    detail: 'easy-quartz — 설계·구현·릴리즈 자동화까지 단독으로 Maven Central에 배포. @EasyQuartzScheduled 하나로 5종 스케줄 × 2엔진(Quartz/Spring)을 통합.',
   },
 ]

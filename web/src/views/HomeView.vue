@@ -42,7 +42,7 @@ import AppIcon from '@/components/AppIcon.vue'
   <section class="container block">
     <div class="block-head">
       <span class="eyebrow">Key Results</span>
-      <h2 class="section-title">숫자로 증명하는 핵심 성과</h2>
+      <h2 class="section-title">여러 도메인에서 증명한 핵심 성과</h2>
     </div>
     <div class="stat-grid">
       <article v-for="a in achievements" :key="a.label" class="stat card">
