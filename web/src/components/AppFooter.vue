@@ -8,8 +8,6 @@ import AppIcon from './AppIcon.vue'
     <div class="container ft-inner">
       <div class="ft-left">
         <span class="ft-name">{{ profile.name }} · {{ profile.role }}</span>
-        <span class="ft-sep">/</span>
-        <span class="ft-meta">{{ profile.company }} — {{ profile.companyDesc }}</span>
       </div>
       <div class="ft-links">
         <a v-for="l in links" :key="l.label" :href="l.href" class="ft-link" target="_blank" rel="noopener">
