@@ -20,6 +20,7 @@ defineProps<{ eyebrow?: string; title: string; desc?: string }>()
 }
 .sh-desc {
   margin-top: 12px;
-  max-width: 640px;
+  max-width: 760px;
+  line-height: 1.7;
 }
 </style>

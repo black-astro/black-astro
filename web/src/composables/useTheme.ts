@@ -7,7 +7,8 @@ const STORAGE_KEY = 'ba-theme'
 function resolveInitial(): ThemeMode {
   const saved = localStorage.getItem(STORAGE_KEY)
   if (saved === 'light' || saved === 'dark') return saved
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  // 저장된 선택이 없으면 무조건 다크(매트릭스) 기본
+  return 'dark'
 }
 
 const theme = ref<ThemeMode>('light')

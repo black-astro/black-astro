@@ -18,7 +18,7 @@ export const profile = {
   intro:
     'Java·Spring 기반으로 KT 명세서 ETL 배치, PASS 전자고지 PUSH, 카카오 전자문서 발송 서버를 설계부터 운영까지 담당해 온 백엔드 개발자입니다. 레거시 현대화가 제 경력의 축입니다 — 델파이 월 배치를 Java로 재구축하고, 관리자 콘솔을 JSP→Vue2→Vue3로 전환하고, 보험사 발송 엔진을 인수해 재구축했습니다. 운영 사고는 원인 분석부터 복구 SQL, 재발 방지 문서화까지 마무리하고, 회사 밖에서는 Spring Boot Starter를 직접 만들어 Maven Central에 배포했습니다.',
   company: 'GIBIS',
-  companyDesc: 'KT 전자고지 파트너사',
+  companyDesc: 'KT 파트너사',
   tenure: '2021.08 ~ 재직 중',
   domain: 'KT 공공알림문자 · PASS · 카카오 전자문서',
 }
