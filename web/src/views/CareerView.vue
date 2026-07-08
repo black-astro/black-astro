@@ -157,9 +157,12 @@ function toggle(id: string) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 .proj {
   overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .proj.open {
