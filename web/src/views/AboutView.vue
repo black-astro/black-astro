@@ -77,13 +77,16 @@ const facts = [
 <style scoped>
 .about-grid {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
-  gap: 20px;
-  align-items: start;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 18px;
+  align-items: stretch;
 }
 .about-intro {
+  height: 100%;
+  display: flex;
+  align-items: center;
   padding: 26px 28px;
-  font-size: 1.02rem;
+  font-size: 1.0rem;
   color: var(--text-secondary);
   line-height: 1.85;
 }
@@ -91,6 +94,10 @@ const facts = [
   display: flex;
   flex-direction: column;
   gap: 14px;
+  height: 100%;
+}
+.side-links {
+  margin-top: auto;
 }
 .fact {
   padding: 20px 22px;

@@ -189,6 +189,9 @@ import AppIcon from '@/components/AppIcon.vue'
 .block {
   padding-top: 64px;
 }
+.block:last-of-type {
+  padding-bottom: 84px;
+}
 .block-head {
   margin-bottom: 26px;
 }
@@ -273,7 +276,7 @@ import AppIcon from '@/components/AppIcon.vue'
   line-height: 1.6;
 }
 .home-cta {
-  margin-top: 28px;
+  margin-top: 34px;
   display: flex;
   justify-content: center;
 }

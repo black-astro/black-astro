@@ -6,21 +6,20 @@ import AppIcon from './AppIcon.vue'
 <template>
   <footer class="ft">
     <div class="container ft-inner">
-      <div class="ft-top">
-        <div class="ft-brand">
-          <div class="ft-name">{{ profile.name }} · {{ profile.role }}</div>
-          <p class="ft-desc">{{ profile.company }} — {{ profile.companyDesc }} · {{ profile.tenure }}</p>
-        </div>
-        <div class="ft-links">
-          <a v-for="l in links" :key="l.label" :href="l.href" class="ft-link" target="_blank" rel="noopener">
-            <AppIcon :name="l.icon" :size="16" />
-            <span>{{ l.value }}</span>
-          </a>
-        </div>
+      <div class="ft-left">
+        <span class="ft-name">{{ profile.name }} · {{ profile.role }}</span>
+        <span class="ft-sep">/</span>
+        <span class="ft-meta">{{ profile.company }} — {{ profile.companyDesc }}</span>
       </div>
-      <div class="ft-bottom">
-        <span>© {{ new Date().getFullYear() }} {{ profile.name }}. Built with Vue 3 · TypeScript · Vite.</span>
+      <div class="ft-links">
+        <a v-for="l in links" :key="l.label" :href="l.href" class="ft-link" target="_blank" rel="noopener">
+          <AppIcon :name="l.icon" :size="15" />
+          <span>{{ l.value }}</span>
+        </a>
       </div>
+    </div>
+    <div class="container ft-copy">
+      © {{ new Date().getFullYear() }} {{ profile.name }} · Vue 3 · TypeScript · Vite
     </div>
   </footer>
 </template>
@@ -29,45 +28,60 @@ import AppIcon from './AppIcon.vue'
 .ft {
   border-top: 1px solid var(--border);
   background: var(--surface);
-  padding: 40px 0 48px;
+  padding: 20px 0 22px;
 }
-.ft-top {
+.ft-inner {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 22px;
+  gap: 8px 18px;
+}
+.ft-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.86rem;
 }
 .ft-name {
   font-weight: 700;
-  font-size: 1.05rem;
 }
-.ft-desc {
+.ft-sep {
   color: var(--text-muted);
-  font-size: 0.88rem;
-  margin-top: 4px;
+}
+.ft-meta {
+  color: var(--text-muted);
 }
 .ft-links {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 16px;
 }
 .ft-link {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: var(--text-secondary);
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-family: var(--font-mono);
   transition: color 0.18s ease;
 }
 .ft-link:hover {
   color: var(--accent);
 }
-.ft-bottom {
-  margin-top: 28px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
+.ft-copy {
+  margin-top: 10px;
   color: var(--text-muted);
-  font-size: 0.8rem;
+  font-size: 0.74rem;
+  font-family: var(--font-mono);
+}
+@media (max-width: 560px) {
+  .ft-inner {
+    gap: 6px;
+  }
+  .ft-links {
+    gap: 12px;
+  }
 }
 </style>
