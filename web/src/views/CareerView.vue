@@ -311,9 +311,11 @@ function toggle(id: string) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+  align-items: stretch;
 }
 .infra {
   padding: 22px 24px;
+  height: 100%;
 }
 .infra-title {
   font-size: 1.02rem;

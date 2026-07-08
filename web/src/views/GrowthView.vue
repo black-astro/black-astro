@@ -69,11 +69,13 @@ import AppIcon from '@/components/AppIcon.vue'
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
+  align-items: stretch;
 }
 .learn {
   padding: 22px 22px 24px;
   display: flex;
   flex-direction: column;
+  height: 100%;
 }
 .learn-head {
   display: flex;
@@ -138,9 +140,11 @@ import AppIcon from '@/components/AppIcon.vue'
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+  align-items: stretch;
 }
 .road {
   padding: 22px 24px;
+  height: 100%;
 }
 .road-head {
   display: flex;
