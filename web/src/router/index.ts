@@ -19,10 +19,60 @@ export const navRoutes = routes.filter((r) => r.meta?.label)
  *
  * 진입점이 헤더·홈 히어로·홈 카드·푸터 네 군데라 주소는 여기 한 곳에서만 정의한다.
  */
-export const GUIDE_URL = `${import.meta.env.BASE_URL}python-guide/`
-export const GUIDE_TITLE = '파이썬 · Pandas 시각 가이드 (별도 페이지)'
+export interface Guide {
+  key: string
+  label: string
+  emoji: string
+  href: string
+  title: string
+  heading: string
+  desc: string
+  tags: string[]
+  stats: { value: string; label: string }[]
+}
 
-export const externalNavLinks = [{ label: 'Python Guide', href: GUIDE_URL, title: GUIDE_TITLE }]
+export const guides: Guide[] = [
+  {
+    key: 'python',
+    label: 'Python Guide',
+    emoji: '🐍',
+    href: `${import.meta.env.BASE_URL}python-web/`,
+    title: '파이썬 · Pandas 시각 가이드 (별도 페이지)',
+    heading: 'Python Visual Guide',
+    desc:
+      '파이썬 문법부터 Pandas·NumPy·이미지 처리·업무 자동화·PySide6 GUI·알고리즘·DB까지, ' +
+      '데이터가 움직이는 과정을 눈으로 보면서 익히는 단일 페이지 가이드입니다.',
+    tags: ['Python', 'Pandas', 'NumPy', '업무 자동화', 'PySide6', '알고리즘', 'SQL'],
+    stats: [
+      { value: '11', label: '주제 탭' },
+      { value: '147', label: '섹션' },
+      { value: '0', label: '설치 필요' },
+    ],
+  },
+  {
+    key: 'java',
+    label: 'Java Guide',
+    emoji: '☕',
+    href: `${import.meta.env.BASE_URL}java-web/`,
+    title: '자바 · Spring Boot · JPA 실전 가이드 (별도 페이지)',
+    heading: 'Java Visual Guide',
+    desc:
+      'Java 25 문법과 가상 스레드부터 Spring Boot Web·WebFlux·JPA/QueryDSL·MyBatis· ' +
+      'Security·Gateway·POI 엑셀·JavaFX까지, 실무에서 바로 쓰는 코드로 정리했습니다.',
+    tags: ['Java 25', 'Spring Boot', 'WebFlux', 'JPA · QueryDSL', 'Security', 'POI', 'JavaFX'],
+    stats: [
+      { value: '9', label: '주제 탭' },
+      { value: '113', label: '섹션' },
+      { value: '0', label: '설치 필요' },
+    ],
+  },
+]
+
+export const externalNavLinks = guides.map((g) => ({
+  label: g.label,
+  href: g.href,
+  title: g.title,
+}))
 
 const router = createRouter({
   history: createWebHashHistory(),

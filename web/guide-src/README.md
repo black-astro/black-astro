@@ -1,10 +1,18 @@
-# Python Visual Guide — 소스
+# 학습 가이드 소스 (Python · Java)
 
-`public/python-guide/index.html`(약 20,000줄)의 **원본**입니다.
-편집은 여기서 하고, 빌드하면 조각들이 합쳐져 단일 HTML로 나갑니다.
+`public/python-web/index.html`(약 20,000줄)과 `public/java-web/index.html`(약 13,700줄)의 **원본**입니다.
+편집은 여기서 하고, 빌드하면 조각들이 합쳐져 각각 단일 HTML로 나갑니다.
 
-> ⚠️ `public/python-guide/index.html` 을 직접 고치지 마세요.
+> ⚠️ `public/python-web/` · `public/java-web/` 의 index.html 을 직접 고치지 마세요.
 > 다음 빌드에서 덮어써집니다.
+
+| 가이드 | 소스 | 배포 경로 |
+|---|---|---|
+| 🐍 Python | `guide-src/python/` | `/python-web/` |
+| ☕ Java | `guide-src/java/` | `/java-web/` |
+
+두 가이드는 **CSS 5개를 공유**합니다(테마 동일). Java 쪽 `css/06-java.css` 만 자바 전용입니다.
+`build.mjs` 상단의 `GUIDES` 배열에 항목을 추가하면 가이드를 더 늘릴 수 있습니다.
 
 ## 왜 조각으로 두고 결과물은 한 파일인가
 
@@ -19,21 +27,24 @@
 
 | 명령 | 하는 일 |
 |---|---|
-| `npm run build:guide` | 조각 → `public/python-guide/index.html` 생성 |
+| `npm run build:guide` | 조각 → 각 `index.html` 생성 (python·java 모두) |
+| `npm run build:guide -- java` | 특정 가이드만 |
 | `npm run dev:guide` | 조각이 바뀌면 자동 재빌드 (작업 중 켜두세요) |
 | `npm run check:guide` | 결과물이 조각과 일치하는지 검사만 (커밋 전 확인용) |
 | `npm run build` | `prebuild` 훅으로 가이드 빌드가 **자동 선행**된 뒤 사이트 빌드 |
 
 ## 구조
 
-빌드 순서는 `parts.json` 에 적힌 배열 그대로입니다. 조각을 추가·삭제하면
+빌드 순서는 각 가이드의 `parts.json` 에 적힌 배열 그대로입니다.
+아래는 python 기준이며, java 도 같은 구조입니다(`panes/` 가 9개, `js/` 가 4개). 조각을 추가·삭제하면
 **`parts.json` 도 함께 고쳐야 합니다** (누락·고아 파일은 빌드가 에러로 잡아 줍니다).
 
 ```
 guide-src/
-  build.mjs          빌더 (약 90줄, 의존성 없음)
-  parts.json         조각 순서 = 최종 파일의 순서
-  parts/
+  build.mjs          빌더 (의존성 없음 · 두 가이드를 모두 처리)
+  python/
+    parts.json       조각 순서 = 최종 파일의 순서
+    parts/
     00-head.html         doctype · <head> · <style> 여는 태그
     css/                 스타일 5개로 분할
       01-tokens-base-layout.css    디자인 토큰 · 기본 · 레이아웃

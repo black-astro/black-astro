@@ -1,0 +1,1435 @@
+
+<!-- ============================================================
+     DATA PANE
+     ============================================================ -->
+<div class="pane" id="pane-data">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> JPA · QUERYDSL · MYBATIS · 트랜잭션</div>
+  <h1>실무 난이도의<br>절반이<br>여기에 있다</h1>
+  <p class="tx">
+    스프링에서 가장 많이 막히고, 가장 많이 사고가 나는 영역입니다.
+    <b>N+1</b>, <b>영속성 컨텍스트</b>, <b>트랜잭션 전파</b> —
+    이 셋만 확실히 잡으면 나머지는 문법입니다.
+  </p>
+  <div class="stats">
+    <div><b>16</b><span>SECTIONS</span></div>
+    <div><b>3</b><span>기술 (JPA·QueryDSL·MyBatis)</span></div>
+    <div><b>N+1</b><span>가장 많은 성능 문제</span></div>
+    <div><b>1</b><span>트랜잭션 = 1 작업 단위</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== d01 ==================== -->
+<section class="sec" id="d01">
+  <div class="sec-head rv">
+    <span class="no">DATA 01</span>
+    <h2>기술 <span class="t">고르기 지도</span></h2>
+    <p class="lead">셋 다 배울 필요는 없습니다. 다만 <b>왜 그걸 쓰는지</b>는 알아야 합니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:18%">기술</th><th style="width:30%">강점</th><th style="width:26%">약점</th><th>언제</th></tr>
+      <tr><td><b>Spring Data JPA</b></td>
+          <td>CRUD 를 안 짜도 됨. 객체 그래프를 그대로 다룸. 더티 체킹</td>
+          <td>복잡한 조회에 약함. 내부 동작을 모르면 성능 사고</td>
+          <td><b>대부분의 신규 프로젝트 기본</b></td></tr>
+      <tr><td><b>QueryDSL</b></td>
+          <td>동적 쿼리를 <b>타입 안전하게</b>. 컴파일 시점에 오타 검출</td>
+          <td>Q타입 생성 설정이 번거로움</td>
+          <td><b>JPA 와 함께 — 검색 조건이 많을 때</b></td></tr>
+      <tr><td><b>MyBatis</b></td>
+          <td>SQL 을 그대로 씀. 복잡한 통계·레거시 DB 에 강함</td>
+          <td>매핑을 전부 손으로. 컴파일 검사 없음</td>
+          <td>레거시 DB, 튜닝된 SQL 이 필요한 곳</td></tr>
+      <tr><td>JdbcClient</td>
+          <td>가장 가벼움. 스프링 6.1+ 내장</td>
+          <td>기능이 최소한</td>
+          <td>간단한 조회 몇 개만 필요할 때</td></tr>
+      <tr><td>R2DBC</td>
+          <td>논블로킹</td>
+          <td>연관관계·더티 체킹 없음</td>
+          <td><b>WebFlux 프로젝트</b> — 🌊 09번</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip">
+    <b>실무에서 가장 흔한 조합</b> —
+    <b>Spring Data JPA (단순 CRUD) + QueryDSL (복잡한 조회)</b> 입니다.
+    통계 리포트처럼 <b>SQL 을 손으로 튜닝해야 하는 화면</b>만
+    MyBatis 나 <code>JdbcClient</code> 로 따로 빼는 식으로 섞어 씁니다.
+    <b>한 프로젝트에서 여러 개를 같이 쓰는 건 전혀 이상하지 않습니다.</b>
+  </div>
+</section>
+
+
+<!-- ==================== d02 ==================== -->
+<section class="sec" id="d02">
+  <div class="sec-head rv">
+    <span class="no">DATA 02</span>
+    <h2>DataSource · <span class="t">커넥션 풀</span></h2>
+    <p class="lead">DB 커넥션은 <b>비싸고 개수가 정해진 자원</b>입니다. 여기 설정이 잘못되면 서버가 통째로 멈춥니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="yaml"><code>spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/mydb?
+         useSSL=false&amp;serverTimezone=Asia/Seoul&amp;
+         characterEncoding=UTF-8&amp;rewriteBatchedStatements=true
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 20        # 핵심 설정 ★
+      minimum-idle: 10
+      connection-timeout: 3000     # 커넥션을 못 얻으면 3초 후 실패
+      idle-timeout: 600000         # 10분
+      max-lifetime: 1740000        # 29분 (DB wait_timeout 보다 짧게!)
+      leak-detection-threshold: 60000   # 60초 넘게 안 돌려주면 경고
+      pool-name: HikariPool-main</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>max-lifetime 은 DB 의 <code>wait_timeout</code> 보다 짧아야 합니다.</b>
+        안 그러면 DB 가 이미 끊은 커넥션을 풀이 계속 들고 있다가
+        <code>Communications link failure</code> 가 간헐적으로 터집니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">풀 크기는 몇으로?</h4>
+      <p class="tx">
+        직관과 반대로 <b>크게 잡을수록 느려집니다.</b>
+        DB 의 CPU·디스크가 병목이라 커넥션이 많으면 경합만 늘어납니다.
+      </p>
+      <pre class="code" data-lang="text"><code>권장 공식 (HikariCP 문서)
+   pool_size = (코어 수 × 2) + 유효 디스크 수
+
+예) 4코어 + SSD 1개 → 약 10
+    대부분의 웹 서비스는 10~30 사이면 충분
+
+⚠️ 서버 5대 × 풀 30 = DB 커넥션 150개
+   DB 의 max_connections 를 넘으면 전체 장애</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“커넥션 고갈”의 진짜 원인</b>은 풀이 작아서가 아니라
+        <b>커넥션을 오래 붙잡고 있어서</b>입니다.
+        트랜잭션 안에서 <b>외부 API 를 호출</b>하고 있다면
+        그게 범인입니다 — 트랜잭션 밖으로 빼세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d03 ==================== -->
+<section class="sec" id="d03">
+  <div class="sec-head rv">
+    <span class="no">DATA 03</span>
+    <h2><span class="t">Spring Data</span> 공통</h2>
+    <p class="lead">인터페이스만 선언하면 구현체를 스프링이 만들어 줍니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="java"><code>public interface OrderRepository extends JpaRepository&lt;Order, Long&gt; {
+    // 이것만 선언하면 아래가 전부 생깁니다
+    //   save, saveAll, findById, findAll, delete, count, existsById …
+}
+
+// 계층
+//   Repository
+//    └ CrudRepository        기본 CRUD
+//       └ ListCrudRepository  List 반환
+//          └ PagingAndSortingRepository  페이징
+//             └ JpaRepository            JPA 전용 (flush, saveAndFlush …)</code></pre>
+
+      <h4 class="mini">쿼리 메서드 — 이름이 곧 쿼리</h4>
+      <pre class="code" data-lang="java"><code>List&lt;Order&gt; findByStatus(OrderStatus status);
+List&lt;Order&gt; findByStatusAndAmountGreaterThan(OrderStatus s, int amount);
+List&lt;Order&gt; findByCustomerNameContaining(String keyword);     // LIKE %kw%
+List&lt;Order&gt; findByCreatedAtBetween(LocalDateTime a, LocalDateTime b);
+List&lt;Order&gt; findByStatusOrderByCreatedAtDesc(OrderStatus s);
+List&lt;Order&gt; findTop10ByOrderByAmountDesc();
+Optional&lt;Order&gt; findByOrderNo(String no);
+boolean existsByOrderNo(String no);
+long countByStatus(OrderStatus s);
+void deleteByStatus(OrderStatus s);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">키워드 표</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:44%">키워드</th><th>SQL</th></tr>
+          <tr><td>And / Or</td><td>AND / OR</td></tr>
+          <tr><td>Between</td><td>BETWEEN</td></tr>
+          <tr><td>LessThan / GreaterThanEqual</td><td>&lt; / &gt;=</td></tr>
+          <tr><td>IsNull / IsNotNull</td><td>IS NULL</td></tr>
+          <tr><td>In / NotIn</td><td>IN</td></tr>
+          <tr><td>Like / Containing / StartingWith</td><td>LIKE</td></tr>
+          <tr><td>OrderBy…Desc</td><td>ORDER BY</td></tr>
+          <tr><td>Top / First</td><td>LIMIT</td></tr>
+          <tr><td>Distinct</td><td>DISTINCT</td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>메서드 이름이 길어지면 그만 쓰세요.</b>
+        <code>findByStatusAndAmountGreaterThanAndCreatedAtBetweenOrderByAmountDesc</code>
+        같은 이름은 읽을 수도, 고칠 수도 없습니다.
+        <b>조건이 3개를 넘으면 QueryDSL</b>(09번)로 가는 게 맞습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d04 ==================== -->
+<section class="sec" id="d04">
+  <div class="sec-head rv">
+    <span class="no">DATA 04</span>
+    <h2>JPA <span class="t">엔티티 매핑</span></h2>
+    <p class="lead">엔티티는 <b>DB 테이블과 이어진 객체</b>입니다. 여기 설계가 나중을 좌우합니다.</p>
+  </div>
+
+  <div class="card rv">
+    <pre class="code" data-lang="java"><code>@Entity
+@Table(name = "orders",
+       indexes = {
+           @Index(name = "idx_order_no", columnList = "order_no", unique = true),
+           @Index(name = "idx_user_status", columnList = "user_id, status")
+       })
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)   // JPA 는 기본 생성자 필요
+public class Order {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)   // MySQL AUTO_INCREMENT
+    private Long id;
+
+    @Column(name = "order_no", nullable = false, unique = true, length = 30)
+    private String orderNo;
+
+    @Enumerated(EnumType.STRING)          // ★ ORDINAL 은 절대 금지
+    @Column(nullable = false, length = 20)
+    private OrderStatus status;
+
+    @Column(nullable = false)
+    private int amount;
+
+    @Column(columnDefinition = "TEXT")
+    private String memo;
+
+    @CreatedDate                          // Auditing
+    @Column(updatable = false)
+    private LocalDateTime createdAt;
+
+    @LastModifiedDate
+    private LocalDateTime updatedAt;
+
+    @Version                              // 낙관적 락
+    private Long version;
+
+    // 생성은 정적 팩토리로 — 유효하지 않은 엔티티가 존재할 수 없게
+    public static Order create(String orderNo, int amount) {
+        Order o = new Order();
+        o.orderNo = orderNo;
+        o.amount = amount;
+        o.status = OrderStatus.CREATED;
+        return o;
+    }
+
+    // 상태 변경은 의미 있는 메서드로 (setter 를 열지 않는다)
+    public void pay() {
+        if (status != OrderStatus.CREATED) throw new AlreadyPaidException(id);
+        this.status = OrderStatus.PAID;
+    }
+}</code></pre>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Auditing 켜기 — 생성·수정 시각 자동</h4>
+      <pre class="code" data-lang="java"><code>@Configuration
+@EnableJpaAuditing
+public class JpaConfig { }
+
+// 공통 필드를 상속으로 재사용
+@MappedSuperclass
+@EntityListeners(AuditingEntityListener.class)
+@Getter
+public abstract class BaseEntity {
+    @CreatedDate  @Column(updatable = false)
+    private LocalDateTime createdAt;
+    @LastModifiedDate
+    private LocalDateTime updatedAt;
+}
+
+@Entity
+public class Order extends BaseEntity { ... }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">엔티티 설계 원칙</h4>
+      <ul class="tx">
+        <li>❌ <b><code>@Setter</code>를 열지 마세요</b> — 아무 데서나 상태가 바뀌면 규칙을 지킬 수 없습니다</li>
+        <li>❌ <b><code>@Data</code>·<code>@ToString</code> 전체 적용 금지</b> —
+            연관 엔티티를 타고 가며 <b>무한 순환·N+1</b>이 납니다</li>
+        <li>✅ <b><code>@Enumerated(EnumType.STRING)</code></b> —
+            ORDINAL 은 enum 순서가 바뀌면 <b>기존 데이터가 전부 틀어집니다</b></li>
+        <li>✅ 기본 생성자는 <code>PROTECTED</code> — 아무나 빈 객체를 못 만들게</li>
+        <li>✅ <b>equals/hashCode 는 ID 기준</b>으로만 (또는 아예 안 만들기)</li>
+        <li>✅ <b>엔티티를 API 응답으로 쓰지 마세요</b> — DTO 로 변환</li>
+      </ul>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>ddl-auto</code> 는 운영에서 반드시 <code>validate</code></b>.
+        <code>update</code> 는 컬럼을 지우지 못하고,
+        <code>create</code> 는 <b>테이블을 통째로 날립니다.</b>
+        스키마 변경은 <b>Flyway</b>(15번)로 관리하세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d05 ==================== -->
+<section class="sec" id="d05">
+  <div class="sec-head rv">
+    <span class="no">DATA 05</span>
+    <h2><span class="t">연관관계</span> 매핑</h2>
+    <p class="lead">JPA 에서 가장 헷갈리는 부분입니다. <b>규칙 세 가지</b>만 지키면 대부분 해결됩니다.</p>
+  </div>
+
+  <div class="note tip rv">
+    <b>연관관계 3원칙</b>
+    <br>① <b>모든 연관관계는 <code>LAZY</code></b> — <code>@ManyToOne</code> 의 기본값이 EAGER 라서 반드시 바꿔야 합니다
+    <br>② <b>연관관계의 주인은 외래 키를 가진 쪽</b>(보통 <code>@ManyToOne</code>)
+    <br>③ <b><code>@OneToMany</code> 는 꼭 필요할 때만</b> — 없어도 대부분 돌아갑니다
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">N:1 — 가장 많이 씁니다</h4>
+      <pre class="code" data-lang="java"><code>@Entity
+public class Order {
+    @Id @GeneratedValue
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)       // ★ 반드시 LAZY
+    @JoinColumn(name = "user_id", nullable = false,
+                foreignKey = @ForeignKey(name = "fk_order_user"))
+    private User user;                        // orders 테이블에 user_id 컬럼
+}
+
+// 반대편(1:N)은 필요할 때만 추가
+@Entity
+public class User {
+    @OneToMany(mappedBy = "user")             // mappedBy = 주인이 아님을 표시
+    private List&lt;Order&gt; orders = new ArrayList&lt;&gt;();
+}</code></pre>
+
+      <h4 class="mini">1:N — 부모가 자식을 관리할 때</h4>
+      <pre class="code" data-lang="java"><code>@Entity
+public class Order {
+    @OneToMany(mappedBy = "order",
+               cascade = CascadeType.ALL,     // 부모 저장 시 자식도
+               orphanRemoval = true)          // 목록에서 빼면 삭제
+    private List&lt;OrderItem&gt; items = new ArrayList&lt;&gt;();
+
+    // 양방향은 편의 메서드로 양쪽을 함께 세팅
+    public void addItem(OrderItem item) {
+        items.add(item);
+        item.setOrder(this);      // ★ 이걸 빠뜨리면 FK 가 null 로 저장됨
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">1:1 과 N:M</h4>
+      <pre class="code" data-lang="java"><code>// 1:1 — FK 를 가진 쪽이 주인
+@Entity
+public class User {
+    @OneToOne(fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @JoinColumn(name = "profile_id")
+    private Profile profile;
+}
+
+// ⚠️ 1:1 의 '반대편'은 LAZY 가 안 먹습니다 (프록시를 못 만듦)
+//    → 조회 시 항상 추가 쿼리가 나갑니다. 단방향으로 두는 게 안전합니다.
+
+// N:M — @ManyToMany 는 쓰지 마세요 ★
+// ❌ 중간 테이블에 컬럼을 못 넣고, 쿼리가 예측 불가
+@ManyToMany
+private List&lt;Tag&gt; tags;
+
+// ✅ 중간 엔티티를 직접 만듭니다
+@Entity
+public class PostTag {
+    @Id @GeneratedValue private Long id;
+
+    @ManyToOne(fetch = LAZY) @JoinColumn(name = "post_id")
+    private Post post;
+
+    @ManyToOne(fetch = LAZY) @JoinColumn(name = "tag_id")
+    private Tag tag;
+
+    private LocalDateTime taggedAt;      // 추가 정보를 넣을 수 있다 ✅
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>양방향이 정말 필요한가?</b> —
+        <code>user.getOrders()</code> 를 실제로 쓰지 않는다면
+        <b>단방향(<code>@ManyToOne</code>만)</b>으로 두세요.
+        양방향은 동기화 실수·순환 참조·N+1 의 원천입니다.
+        목록이 필요하면 <code>orderRepository.findByUserId(id)</code> 로 충분합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d06 ==================== -->
+<section class="sec" id="d06">
+  <div class="sec-head rv">
+    <span class="no">DATA 06</span>
+    <h2><span class="t">영속성 컨텍스트</span> — JPA 의 심장</h2>
+    <p class="lead">“<b>왜 save() 를 안 했는데 UPDATE 가 나가지?</b>”의 답이 여기 있습니다.</p>
+  </div>
+
+  <div class="grid-a rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">엔티티의 4가지 상태</h4>
+      <div class="layer">
+        <div class="lrow l-web"><span class="tagn">비영속</span>
+          <div><b>new 로 막 만든 상태</b><span>JPA 가 모르는 객체. <code>new Order()</code></span></div></div>
+        <div class="lrow l-svc"><span class="tagn">영속</span>
+          <div><b>영속성 컨텍스트가 관리 중</b><span><code>save()</code> 했거나 <code>findById()</code> 로 꺼낸 것. <b>변경이 자동 추적됩니다</b></span></div></div>
+        <div class="lrow l-repo"><span class="tagn">준영속</span>
+          <div><b>관리에서 떨어진 상태</b><span>트랜잭션이 끝난 뒤. 변경해도 DB 에 안 반영됩니다</span></div></div>
+        <div class="lrow l-db"><span class="tagn">삭제</span>
+          <div><b>삭제 예약</b><span><code>remove()</code> 호출. 커밋 시 DELETE</span></div></div>
+      </div>
+      <pre class="code" data-lang="java"><code>@Transactional
+public void changeName(Long id, String newName) {
+    Order order = orderRepository.findById(id).orElseThrow();  // 영속 상태
+    order.changeName(newName);
+    // save() 를 부르지 않아도 커밋 시점에 UPDATE 가 나갑니다 ★ (더티 체킹)
+}
+
+@Transactional(readOnly = true)
+public OrderRes get(Long id) {
+    Order o = orderRepository.findById(id).orElseThrow();
+    o.changeName("바꿔도");     // readOnly 라 UPDATE 안 나감
+    return OrderRes.from(o);
+}</code></pre>
+    </div>
+    <div>
+      <div class="card">
+        <h4 class="mini" style="margin-top:0">영속성 컨텍스트가 해 주는 일</h4>
+        <ul class="tx">
+          <li><b>1차 캐시</b> — 같은 트랜잭션에서 같은 ID 를 두 번 조회하면 <b>쿼리가 한 번만</b> 나갑니다</li>
+          <li><b>동일성 보장</b> — 같은 ID 로 꺼낸 두 객체는 <code>==</code> 가 true</li>
+          <li><b>변경 감지(더티 체킹)</b> — 필드를 바꾸면 커밋 때 자동 UPDATE</li>
+          <li><b>쓰기 지연</b> — INSERT 를 모았다가 커밋 시 한 번에</li>
+        </ul>
+        <pre class="code" data-lang="java"><code>@Transactional
+void demo() {
+    Order a = repo.findById(1L).get();   // SELECT 발생
+    Order b = repo.findById(1L).get();   // 쿼리 없음 (1차 캐시)
+    System.out.println(a == b);          // true ✅
+}</code></pre>
+      </div>
+      <div class="card">
+        <h4 class="mini" style="margin-top:0">가장 흔한 사고 — LazyInitializationException</h4>
+        <pre class="code" data-lang="java"><code>// ❌ 트랜잭션 밖에서 지연 로딩
+public OrderRes get(Long id) {              // @Transactional 없음
+    Order o = repo.findById(id).orElseThrow();
+    return new OrderRes(o.getUser().getName());  // 💥 LazyInitializationException
+}
+
+// ✅ 해결 1 — 트랜잭션 안에서 DTO 로 변환
+@Transactional(readOnly = true)
+public OrderRes get(Long id) {
+    Order o = repo.findById(id).orElseThrow();
+    return OrderRes.from(o);       // 여기서 필요한 값을 다 꺼냄
+}
+
+// ✅ 해결 2 — 페치 조인으로 한 번에 (08번 참고)
+@Query("SELECT o FROM Order o JOIN FETCH o.user WHERE o.id = :id")
+Optional&lt;Order&gt; findWithUser(Long id);</code></pre>
+        <div class="note warn" style="margin-bottom:0">
+          <b><code>spring.jpa.open-in-view</code> 는 <code>false</code> 로 두세요.</b>
+          기본값 <code>true</code> 는 이 예외를 감춰 주지만,
+          대신 <b>요청이 끝날 때까지 DB 커넥션을 붙잡습니다.</b>
+          트래픽이 늘면 커넥션 고갈로 이어집니다.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d07 ==================== -->
+<section class="sec" id="d07">
+  <div class="sec-head rv">
+    <span class="no">DATA 07</span>
+    <h2>쿼리 메서드 · <span class="t">JPQL</span></h2>
+    <p class="lead">메서드 이름으로 안 되는 것은 직접 씁니다. JPQL 은 <b>테이블이 아니라 엔티티</b>를 대상으로 합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="java"><code>public interface OrderRepository extends JpaRepository&lt;Order, Long&gt; {
+
+    // JPQL — 엔티티 이름과 필드명을 씁니다 (테이블/컬럼 아님)
+    @Query("""
+        SELECT o FROM Order o
+         WHERE o.status = :status
+           AND o.amount &gt;= :minAmount
+         ORDER BY o.createdAt DESC
+        """)
+    List&lt;Order&gt; search(@Param("status") OrderStatus status,
+                       @Param("minAmount") int minAmount);
+
+    // DTO 로 바로 받기 (필요한 컬럼만 SELECT — 성능에 유리) ★
+    @Query("""
+        SELECT new com.myapp.order.dto.OrderSummary(o.id, o.orderNo, u.name, o.amount)
+          FROM Order o JOIN o.user u
+         WHERE o.createdAt &gt;= :from
+        """)
+    List&lt;OrderSummary&gt; findSummaries(LocalDateTime from);
+
+    // 네이티브 SQL — DB 고유 기능이 필요할 때
+    @Query(value = """
+        SELECT * FROM orders
+         WHERE MATCH(memo) AGAINST(:kw IN BOOLEAN MODE)
+        """, nativeQuery = true)
+    List&lt;Order&gt; fullTextSearch(String kw);
+
+    // 벌크 연산 — 한 번에 UPDATE/DELETE
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Order o SET o.status = :to WHERE o.status = :from")
+    int bulkUpdateStatus(OrderStatus from, OrderStatus to);
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로젝션 — 필요한 것만 가져오기</h4>
+      <pre class="code" data-lang="java"><code>// 1) 인터페이스 프로젝션 — 가장 간편
+public interface OrderView {
+    Long getId();
+    String getOrderNo();
+    int getAmount();
+    String getUserName();          // o.user.name 에 매핑
+}
+List&lt;OrderView&gt; findByStatus(OrderStatus status);
+
+// 2) record 프로젝션 — 명시적
+public record OrderSummary(Long id, String orderNo, String userName, int amount) { }
+
+// 3) 동적 프로젝션 — 한 메서드로 여러 형태
+&lt;T&gt; List&lt;T&gt; findByStatus(OrderStatus status, Class&lt;T&gt; type);
+// 호출
+repo.findByStatus(PAID, OrderView.class);
+repo.findByStatus(PAID, Order.class);</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>벌크 연산 주의</b> —
+        <code>@Modifying</code> 쿼리는 <b>영속성 컨텍스트를 건너뛰고</b> DB 에 직접 나갑니다.
+        그래서 <b>1차 캐시에 있는 엔티티는 옛날 값을 그대로</b> 들고 있습니다.
+        <code>clearAutomatically = true</code> 로 비워 주세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d08 ==================== -->
+<section class="sec" id="d08">
+  <div class="sec-head rv">
+    <span class="no">DATA 08</span>
+    <h2><span class="t">N+1 문제</span> — 가장 많이 만나는 성능 사고</h2>
+    <p class="lead">개발할 땐 멀쩡하다가 <b>데이터가 쌓이면 갑자기 느려지는</b> 문제의 1순위입니다.</p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 쿼리가 101번 나갑니다</h5>
+      <pre class="code" data-lang="java"><code>List&lt;Order&gt; orders = orderRepository.findAll();   // 쿼리 1번
+
+for (Order o : orders) {
+    System.out.println(o.getUser().getName());    // 주문마다 1번씩! (100번)
+}
+// 총 1 + 100 = 101번</code></pre>
+      <pre class="code" data-lang="sql"><code>SELECT * FROM orders;                    -- 1번
+SELECT * FROM users WHERE id = 1;        -- N번
+SELECT * FROM users WHERE id = 2;
+SELECT * FROM users WHERE id = 3;
+...</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 페치 조인 — 1번</h5>
+      <pre class="code" data-lang="java"><code>@Query("SELECT o FROM Order o JOIN FETCH o.user")
+List&lt;Order&gt; findAllWithUser();</code></pre>
+      <pre class="code" data-lang="sql"><code>SELECT o.*, u.*
+  FROM orders o
+  JOIN users u ON u.id = o.user_id;      -- 1번 ✅</code></pre>
+      <p class="tx" style="font-size:13.4px;margin-bottom:0">
+        <b>JOIN 과 JOIN FETCH 는 다릅니다</b> —
+        그냥 <code>JOIN</code> 은 조건에만 쓰이고 <b>데이터를 안 가져옵니다.</b>
+        <code>JOIN FETCH</code> 라야 함께 조회됩니다.
+      </p>
+    </div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">해결 방법 4가지</h4>
+      <pre class="code" data-lang="java"><code>// 1) 페치 조인 — 가장 확실
+@Query("SELECT o FROM Order o JOIN FETCH o.user WHERE o.status = :s")
+List&lt;Order&gt; findWithUser(OrderStatus s);
+
+// 2) @EntityGraph — 메서드 이름 방식에도 붙일 수 있다
+@EntityGraph(attributePaths = {"user", "items"})
+List&lt;Order&gt; findByStatus(OrderStatus status);
+
+// 3) batch size — 컬렉션에 특히 유용 ★
+//    IN (1,2,3,...) 로 묶어서 조회 → 1 + (N/100) 번
+//    application.yml:
+//    spring.jpa.properties.hibernate.default_batch_fetch_size: 100
+
+// 4) DTO 직접 조회 — 애초에 필요한 것만
+@Query("""
+    SELECT new com.myapp.dto.OrderSummary(o.id, u.name, o.amount)
+      FROM Order o JOIN o.user u
+    """)
+List&lt;OrderSummary&gt; findSummaries();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">⚠️ 컬렉션 페치 조인의 함정</h4>
+      <pre class="code" data-lang="java"><code>// ❌ 1:N 을 페치 조인하면 행이 뻥튀기됩니다
+@Query("SELECT o FROM Order o JOIN FETCH o.items")
+List&lt;Order&gt; findAll();
+// 주문 1개에 상품 3개 → 같은 주문이 3번 나옴
+
+// ✅ 해결 1 — DISTINCT (Hibernate 6+ 는 자동)
+@Query("SELECT DISTINCT o FROM Order o JOIN FETCH o.items")
+
+// ❌ 페이징이 안 됩니다! (메모리에서 페이징 → OOM 위험)
+//    "firstResult/maxResults specified with collection fetch; applying in memory"
+
+// ✅ 해결 2 — batch fetch size 를 쓰면 페이징이 됩니다 ★
+//    ToOne 만 페치 조인하고, 컬렉션은 batch size 로
+@Query("SELECT o FROM Order o JOIN FETCH o.user")
+Page&lt;Order&gt; findAllWithUser(Pageable pageable);
+// + default_batch_fetch_size: 100
+
+// ⚠️ 컬렉션 페치 조인은 '하나만' 가능합니다
+//    둘 이상이면 MultipleBagFetchException → Set 으로 바꾸거나 batch size</code></pre>
+    </div>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">쿼리가 몇 번 나가는지 눈으로 보기</h4>
+    <pre class="code" data-lang="yaml"><code>spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+        default_batch_fetch_size: 100      # ★ 이 한 줄이 N+1 의 대부분을 해결합니다
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE     # 파라미터 값까지
+
+# 더 편한 방법 — 쿼리 개수를 세어 주는 라이브러리
+# implementation("com.github.gavlyukovskiy:datasource-proxy-spring-boot-starter:1.9.2")</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>실무 기본 세팅</b> —
+      <code>default_batch_fetch_size: 100</code> 을 켜 두고,
+      <b>ToOne 연관은 페치 조인</b>, <b>컬렉션은 batch size</b>로 가는 조합이
+      페이징까지 되면서 N+1 도 막는 가장 무난한 방법입니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d09 ==================== -->
+<section class="sec" id="d09">
+  <div class="sec-head rv">
+    <span class="no">DATA 09</span>
+    <h2><span class="t">QueryDSL</span> 설정</h2>
+    <p class="lead">문자열 쿼리의 오타를 <b>컴파일 시점에</b> 잡아 줍니다. 설정만 한 번 넘기면 그 뒤론 편합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Gradle 설정 (Spring Boot 3.x · jakarta)</h4>
+      <pre class="code" data-lang="groovy"><code>dependencies {
+    implementation("com.querydsl:querydsl-jpa:5.1.0:jakarta")
+    annotationProcessor("com.querydsl:querydsl-apt:5.1.0:jakarta")
+    annotationProcessor("jakarta.annotation:jakarta.annotation-api")
+    annotationProcessor("jakarta.persistence:jakarta.persistence-api")
+}
+
+// 생성된 Q타입을 빌드 폴더에 두기 (clean 하면 같이 지워짐)
+tasks.withType&lt;JavaCompile&gt; {
+    options.generatedSourceOutputDirectory
+           .set(file("build/generated/querydsl"))
+}</code></pre>
+      <pre class="code" data-lang="bash"><code>./gradlew clean compileJava
+# build/generated/querydsl 아래 QOrder.java 등이 생성됩니다
+# IDE 에서 안 잡히면: Gradle 새로고침 또는 build 폴더를 소스로 표시</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JPAQueryFactory 빈 등록</h4>
+      <pre class="code" data-lang="java"><code>@Configuration
+public class QuerydslConfig {
+
+    @PersistenceContext
+    private EntityManager em;
+
+    @Bean
+    public JPAQueryFactory jpaQueryFactory() {
+        return new JPAQueryFactory(em);
+    }
+}</code></pre>
+
+      <h4 class="mini">커스텀 리포지토리 붙이기</h4>
+      <pre class="code" data-lang="java"><code>// 1) 인터페이스
+public interface OrderRepositoryCustom {
+    Page&lt;OrderSummary&gt; search(OrderSearchCond cond, Pageable pageable);
+}
+
+// 2) 구현체 — 이름은 반드시 "인터페이스명 + Impl"
+@Repository
+@RequiredArgsConstructor
+public class OrderRepositoryImpl implements OrderRepositoryCustom {
+    private final JPAQueryFactory query;
+    // ... 다음 섹션에서 구현
+}
+
+// 3) 기존 리포지토리에 상속
+public interface OrderRepository
+        extends JpaRepository&lt;Order, Long&gt;, OrderRepositoryCustom { }
+
+// 이제 한 리포지토리에서 둘 다 씁니다
+orderRepository.findById(1L);              // Spring Data
+orderRepository.search(cond, pageable);    // QueryDSL ✅</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d10 ==================== -->
+<section class="sec" id="d10">
+  <div class="sec-head rv">
+    <span class="no">DATA 10</span>
+    <h2>QueryDSL <span class="t">동적 쿼리</span></h2>
+    <p class="lead">검색 조건이 <b>있을 수도 없을 수도</b> 있을 때, 이만한 도구가 없습니다.</p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 문자열로 조립하면</h5>
+      <pre class="code" data-lang="java"><code>StringBuilder sql = new StringBuilder("SELECT o FROM Order o WHERE 1=1");
+if (status != null)  sql.append(" AND o.status = :status");
+if (from != null)    sql.append(" AND o.createdAt &gt;= :from");
+if (keyword != null) sql.append(" AND o.memo LIKE :kw");
+// · 오타가 나도 컴파일은 통과, 실행할 때 터짐
+// · 파라미터 바인딩도 따로 관리해야 함
+// · 조건이 늘수록 손댈 수 없어짐</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ QueryDSL</h5>
+      <pre class="code" data-lang="java"><code>query.selectFrom(order)
+     .where(statusEq(cond.status()),        // null 이면 자동으로 무시됨 ★
+            createdAfter(cond.from()),
+            memoContains(cond.keyword()))
+     .fetch();</code></pre>
+      <p class="tx" style="font-size:13.4px;margin-bottom:0">
+        <code>where()</code> 에 넘긴 조건이 <b><code>null</code> 이면 그냥 빠집니다.</b>
+        이 성질 하나로 동적 쿼리가 아주 깔끔해집니다.
+      </p>
+    </div>
+  </div>
+
+  <div class="card rv d1">
+    <h4 class="mini" style="margin-top:0">전체 구현 — 검색 + 페이징</h4>
+    <pre class="code" data-lang="java"><code>import static com.myapp.order.QOrder.order;
+import static com.myapp.user.QUser.user;
+
+@Repository
+@RequiredArgsConstructor
+public class OrderRepositoryImpl implements OrderRepositoryCustom {
+
+    private final JPAQueryFactory query;
+
+    @Override
+    public Page&lt;OrderSummary&gt; search(OrderSearchCond cond, Pageable pageable) {
+
+        // 1) 내용 조회
+        List&lt;OrderSummary&gt; content = query
+                .select(Projections.constructor(OrderSummary.class,   // DTO 로 바로
+                        order.id, order.orderNo, user.name, order.amount, order.createdAt))
+                .from(order)
+                .join(order.user, user)                    // 페치 조인 아님 (DTO 라서 불필요)
+                .where(
+                        statusEq(cond.status()),
+                        userNameContains(cond.userName()),
+                        amountGoe(cond.minAmount()),
+                        createdBetween(cond.from(), cond.to())
+                )
+                .orderBy(orderSpec(pageable))
+                .offset(pageable.getOffset())
+                .limit(pageable.getPageSize())
+                .fetch();
+
+        // 2) 카운트 — 별도 쿼리로 분리하면 정렬·조인을 줄일 수 있다
+        JPAQuery&lt;Long&gt; countQuery = query
+                .select(order.count())
+                .from(order)
+                .join(order.user, user)
+                .where(
+                        statusEq(cond.status()),
+                        userNameContains(cond.userName()),
+                        amountGoe(cond.minAmount()),
+                        createdBetween(cond.from(), cond.to())
+                );
+
+        // 마지막 페이지이거나 첫 페이지에 다 들어가면 카운트 쿼리를 생략한다 ★
+        return PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+    }
+
+    // ── 조건 메서드: null 이면 null 을 반환 → where 에서 무시됨 ──────
+    private BooleanExpression statusEq(OrderStatus s) {
+        return s != null ? order.status.eq(s) : null;
+    }
+
+    private BooleanExpression userNameContains(String name) {
+        return StringUtils.hasText(name) ? user.name.contains(name) : null;
+    }
+
+    private BooleanExpression amountGoe(Integer min) {
+        return min != null ? order.amount.goe(min) : null;
+    }
+
+    private BooleanExpression createdBetween(LocalDate from, LocalDate to) {
+        if (from == null &amp;&amp; to == null) return null;
+        if (from == null) return order.createdAt.loe(to.atTime(23, 59, 59));
+        if (to == null)   return order.createdAt.goe(from.atStartOfDay());
+        return order.createdAt.between(from.atStartOfDay(), to.atTime(23, 59, 59));
+    }
+
+    // 조건을 조합해서 재사용할 수도 있습니다
+    private BooleanExpression isActive() {
+        return order.status.in(OrderStatus.CREATED, OrderStatus.PAID)
+                .and(order.deletedAt.isNull());
+    }
+
+    private OrderSpecifier&lt;?&gt;[] orderSpec(Pageable pageable) {
+        if (pageable.getSort().isEmpty()) {
+            return new OrderSpecifier[]{ order.createdAt.desc() };
+        }
+        return pageable.getSort().stream()
+                .map(o -&gt; new OrderSpecifier&lt;&gt;(
+                        o.isAscending() ? Order.ASC : Order.DESC,
+                        Expressions.stringPath(order, o.getProperty())))
+                .toArray(OrderSpecifier[]::new);
+    }
+}</code></pre>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 쓰는 문법</h4>
+      <pre class="code" data-lang="java"><code>// 비교
+order.amount.eq(1000)      .ne(1000)
+order.amount.goe(1000)     // &gt;=      .gt() &gt;
+order.amount.loe(1000)     // &lt;=      .lt() &lt;
+order.amount.between(1, 100)
+order.status.in(PAID, DONE)
+order.deletedAt.isNull()   .isNotNull()
+
+// 문자열
+user.name.eq("김현우")
+user.name.contains("현")      // LIKE %현%
+user.name.startsWith("김")    // LIKE 김%
+user.name.containsIgnoreCase("kim")
+
+// 조합
+statusEq(s).and(amountGoe(1000)).or(isVip())
+order.status.eq(PAID).not()
+
+// 집계
+query.select(order.amount.sum(), order.count(),
+             order.amount.avg(), order.amount.max())
+     .from(order).fetchOne();
+
+// 그룹핑
+query.select(user.name, order.amount.sum())
+     .from(order).join(order.user, user)
+     .groupBy(user.name)
+     .having(order.amount.sum().gt(10000))
+     .fetch();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">페치 조인 · 서브쿼리 · CASE</h4>
+      <pre class="code" data-lang="java"><code>// 페치 조인 (엔티티를 가져올 때)
+query.selectFrom(order)
+     .join(order.user, user).fetchJoin()
+     .where(order.id.eq(id))
+     .fetchOne();
+
+// 서브쿼리
+import static com.querydsl.jpa.JPAExpressions.select;
+
+query.selectFrom(order)
+     .where(order.amount.gt(
+             select(order2.amount.avg()).from(order2)))   // 평균보다 큰
+     .fetch();
+
+// CASE WHEN
+query.select(new CaseBuilder()
+        .when(order.amount.gt(100000)).then("VIP")
+        .when(order.amount.gt(10000)).then("일반")
+        .otherwise("신규"))
+     .from(order).fetch();
+
+// 벌크 연산
+long updated = query.update(order)
+        .set(order.status, OrderStatus.CANCELLED)
+        .where(order.createdAt.lt(deadline))
+        .execute();
+em.flush(); em.clear();      // ★ 영속성 컨텍스트 초기화 필수
+
+// 결과 가져오기
+.fetch()          // List
+.fetchOne()       // 하나 (2개 이상이면 예외)
+.fetchFirst()     // 첫 번째
+.stream()         // 스트림</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d11 ==================== -->
+<section class="sec" id="d11">
+  <div class="sec-head rv">
+    <span class="no">DATA 11</span>
+    <h2>페이징 · 정렬 · <span class="t">프로젝션</span></h2>
+    <p class="lead">목록 화면은 거의 전부 페이징입니다. 잘못 만들면 데이터가 늘수록 급격히 느려집니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 페이징</h4>
+      <pre class="code" data-lang="java"><code>// 컨트롤러 — Pageable 을 그대로 받으면 됩니다
+@GetMapping
+public Page&lt;OrderRes&gt; list(
+        @PageableDefault(size = 20, sort = "createdAt",
+                         direction = Sort.Direction.DESC) Pageable pageable) {
+    return orderService.list(pageable);
+}
+// 요청: /api/orders?page=0&amp;size=20&amp;sort=createdAt,desc
+
+// 리포지토리
+Page&lt;Order&gt; findByStatus(OrderStatus status, Pageable pageable);
+Slice&lt;Order&gt; findByStatus(OrderStatus status, Pageable pageable);  // 카운트 없음
+
+// Page 가 주는 정보
+page.getContent();        page.getTotalElements();
+page.getTotalPages();     page.hasNext();
+page.map(OrderRes::from); // 내용만 변환 (메타는 유지) ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>Slice</code> 를 쓰면 카운트 쿼리가 안 나갑니다.</b>
+        “더 보기” 방식의 무한 스크롤이면 전체 개수가 필요 없으니
+        <code>Slice</code> 가 훨씬 빠릅니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">깊은 페이지가 느린 이유와 해결</h4>
+      <pre class="code" data-lang="sql"><code>-- 100만 번째 페이지
+SELECT * FROM orders ORDER BY id DESC LIMIT 20 OFFSET 1000000;
+-- DB 가 100만 20건을 읽고 100만 건을 버립니다 💥</code></pre>
+      <pre class="code" data-lang="java"><code>// ✅ 커서(무한 스크롤) 방식 — 마지막 본 ID 부터
+@Query("""
+    SELECT o FROM Order o
+     WHERE (:lastId IS NULL OR o.id &lt; :lastId)
+     ORDER BY o.id DESC
+    """)
+List&lt;Order&gt; findNext(Long lastId, Pageable pageable);
+// 항상 인덱스로 바로 찾아가므로 페이지가 깊어져도 일정한 속도 ✅
+
+// QueryDSL 로도
+query.selectFrom(order)
+     .where(lastId != null ? order.id.lt(lastId) : null)
+     .orderBy(order.id.desc())
+     .limit(size)
+     .fetch();</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>정렬 컬럼에 인덱스가 없으면</b> 페이징은 무조건 느립니다.
+        <code>ORDER BY created_at DESC</code> 를 쓴다면
+        <code>created_at</code> 에 인덱스가 있어야 합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d12 ==================== -->
+<section class="sec" id="d12">
+  <div class="sec-head rv">
+    <span class="no">DATA 12</span>
+    <h2><span class="t">MyBatis</span> 기초</h2>
+    <p class="lead">SQL 을 직접 쓰고 결과를 객체에 매핑합니다. <b>SQL 을 완전히 통제해야 할 때</b> 강력합니다.</p>
+  </div>
+
+  <div class="dep rv">
+    <b>build.gradle.kts</b> — <code>implementation("org.mybatis.spring.boot:mybatis-spring-boot-starter:3.0.4")</code>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설정</h4>
+      <pre class="code" data-lang="yaml"><code>mybatis:
+  mapper-locations: classpath:mapper/**/*.xml
+  type-aliases-package: com.myapp.order.dto
+  configuration:
+    map-underscore-to-camel-case: true    # user_name -&gt; userName ★
+    default-fetch-size: 100
+    jdbc-type-for-null: NULL
+
+logging:
+  level:
+    com.myapp.order.mapper: DEBUG          # SQL 로그</code></pre>
+
+      <h4 class="mini">매퍼 인터페이스</h4>
+      <pre class="code" data-lang="java"><code>@Mapper                                     // 또는 @MapperScan 을 설정에
+public interface OrderMapper {
+
+    // 애너테이션 방식 — 짧은 쿼리에
+    @Select("SELECT * FROM orders WHERE id = #{id}")
+    OrderDto findById(Long id);
+
+    @Insert("""
+        INSERT INTO orders (order_no, amount, status, created_at)
+        VALUES (#{orderNo}, #{amount}, #{status}, NOW())
+        """)
+    @Options(useGeneratedKeys = true, keyProperty = "id")
+    int insert(OrderDto dto);
+
+    // XML 방식 — 복잡한 쿼리는 이쪽
+    List&lt;OrderSummary&gt; search(OrderSearchCond cond);
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">XML 매퍼</h4>
+      <pre class="code" data-lang="xml"><code>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd"&gt;
+&lt;mapper namespace="com.myapp.order.mapper.OrderMapper"&gt;
+
+  &lt;select id="search" resultType="OrderSummary"&gt;
+    SELECT o.id,
+           o.order_no   AS orderNo,
+           u.name       AS userName,
+           o.amount,
+           o.created_at AS createdAt
+      FROM orders o
+      JOIN users u ON u.id = o.user_id
+     WHERE o.deleted_at IS NULL
+     ORDER BY o.created_at DESC
+     LIMIT #{size} OFFSET #{offset}
+  &lt;/select&gt;
+
+&lt;/mapper&gt;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>#{}</code> 와 <code>${}</code> 는 완전히 다릅니다</b>
+        <br>· <code>#{value}</code> → <b>PreparedStatement 바인딩</b> (안전) ✅
+        <br>· <code>${value}</code> → <b>문자열을 그대로 붙임</b> → <b>SQL 인젝션</b> 💥
+        <br><code>${}</code> 는 <b>정렬 컬럼명</b>처럼 어쩔 수 없을 때만,
+        그리고 반드시 <b>화이트리스트 검증</b> 후에 쓰세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d13 ==================== -->
+<section class="sec" id="d13">
+  <div class="sec-head rv">
+    <span class="no">DATA 13</span>
+    <h2>MyBatis <span class="t">동적 SQL · 결과 매핑</span></h2>
+    <p class="lead">MyBatis 의 진짜 강점입니다. 조건에 따라 SQL 자체가 달라집니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동적 SQL</h4>
+      <pre class="code" data-lang="xml"><code>&lt;select id="search" resultType="OrderSummary"&gt;
+  SELECT o.*, u.name AS userName
+    FROM orders o
+    JOIN users u ON u.id = o.user_id
+  &lt;where&gt;                          &lt;!-- 조건이 하나도 없으면 WHERE 자체를 안 붙임 --&gt;
+    &lt;if test="status != null"&gt;
+      AND o.status = #{status}
+    &lt;/if&gt;
+    &lt;if test="userName != null and userName != ''"&gt;
+      AND u.name LIKE CONCAT('%', #{userName}, '%')
+    &lt;/if&gt;
+    &lt;if test="from != null and to != null"&gt;
+      AND o.created_at BETWEEN #{from} AND #{to}
+    &lt;/if&gt;
+    &lt;if test="statuses != null and statuses.size() &gt; 0"&gt;
+      AND o.status IN
+      &lt;foreach collection="statuses" item="s" open="(" separator="," close=")"&gt;
+        #{s}
+      &lt;/foreach&gt;
+    &lt;/if&gt;
+  &lt;/where&gt;
+  &lt;choose&gt;
+    &lt;when test="sort == 'amount'"&gt;ORDER BY o.amount DESC&lt;/when&gt;
+    &lt;otherwise&gt;ORDER BY o.created_at DESC&lt;/otherwise&gt;
+  &lt;/choose&gt;
+&lt;/select&gt;
+
+&lt;!-- UPDATE 에는 set --&gt;
+&lt;update id="update"&gt;
+  UPDATE orders
+  &lt;set&gt;                            &lt;!-- 마지막 콤마를 알아서 제거 --&gt;
+    &lt;if test="status != null"&gt;status = #{status},&lt;/if&gt;
+    &lt;if test="memo != null"&gt;memo = #{memo},&lt;/if&gt;
+    updated_at = NOW()
+  &lt;/set&gt;
+  WHERE id = #{id}
+&lt;/update&gt;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">결과 매핑 · 대량 처리</h4>
+      <pre class="code" data-lang="xml"><code>&lt;!-- 1:N 을 한 번에 매핑 --&gt;
+&lt;resultMap id="orderDetail" type="OrderDetail"&gt;
+  &lt;id property="id" column="o_id"/&gt;
+  &lt;result property="orderNo" column="order_no"/&gt;
+  &lt;association property="user" javaType="UserDto"&gt;
+    &lt;id property="id" column="u_id"/&gt;
+    &lt;result property="name" column="u_name"/&gt;
+  &lt;/association&gt;
+  &lt;collection property="items" ofType="ItemDto"&gt;
+    &lt;id property="id" column="i_id"/&gt;
+    &lt;result property="name" column="i_name"/&gt;
+  &lt;/collection&gt;
+&lt;/resultMap&gt;
+
+&lt;!-- 대량 INSERT — 한 번의 쿼리로 ★ --&gt;
+&lt;insert id="insertAll"&gt;
+  INSERT INTO orders (order_no, amount, status) VALUES
+  &lt;foreach collection="list" item="o" separator=","&gt;
+    (#{o.orderNo}, #{o.amount}, #{o.status})
+  &lt;/foreach&gt;
+&lt;/insert&gt;</code></pre>
+      <pre class="code" data-lang="java"><code>// 수십만 건 조회를 메모리에 안 올리고 처리
+@Select("SELECT * FROM orders")
+@Options(fetchSize = 1000, resultSetType = ResultSetType.FORWARD_ONLY)
+Cursor&lt;OrderDto&gt; scanAll();
+
+try (Cursor&lt;OrderDto&gt; cursor = mapper.scanAll()) {
+    for (OrderDto o : cursor) { process(o); }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d14 ==================== -->
+<section class="sec" id="d14">
+  <div class="sec-head rv">
+    <span class="no">DATA 14</span>
+    <h2><span class="t">트랜잭션</span> 완전정복</h2>
+    <p class="lead">“왜 롤백이 안 되지?”의 원인은 거의 정해져 있습니다. 여기서 전부 정리합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 사용</h4>
+      <pre class="code" data-lang="java"><code>@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)        // 클래스 기본값 = 읽기 전용
+public class OrderService {
+
+    @Transactional                      // 쓰기 메서드만 재정의
+    public Order create(OrderCreateReq req) { ... }
+
+    // 옵션
+    @Transactional(
+        timeout = 5,                              // 5초 넘으면 롤백
+        isolation = Isolation.READ_COMMITTED,     // 격리 수준
+        propagation = Propagation.REQUIRED,       // 전파 방식
+        rollbackFor = Exception.class             // ★ 체크 예외도 롤백
+    )
+    public void process() { ... }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>readOnly = true</code> 의 효과</b> —
+        하이버네이트가 <b>스냅샷을 안 만들어</b> 메모리를 아끼고 더티 체킹을 건너뜁니다.
+        DB 에 따라 <b>읽기 전용 커넥션</b>으로 라우팅할 수도 있습니다.
+        <b>조회 메서드에는 꼭 붙이세요.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전파(Propagation)</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:38%">옵션</th><th>동작</th></tr>
+          <tr><td><b>REQUIRED</b> (기본)</td><td>있으면 참여, 없으면 새로 시작</td></tr>
+          <tr><td><b>REQUIRES_NEW</b></td><td><b>항상 새 트랜잭션</b>. 바깥이 롤백돼도 얘는 커밋됨</td></tr>
+          <tr><td>NESTED</td><td>중첩 (세이브포인트)</td></tr>
+          <tr><td>SUPPORTS</td><td>있으면 참여, 없으면 없이 실행</td></tr>
+          <tr><td>NOT_SUPPORTED</td><td>트랜잭션 없이 실행</td></tr>
+          <tr><td>MANDATORY</td><td>없으면 예외</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// 실전 예: 주문이 실패해도 로그는 반드시 남긴다
+@Transactional(propagation = Propagation.REQUIRES_NEW)
+public void writeAuditLog(String message) {
+    auditRepository.save(new AuditLog(message));
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="card rv d1">
+    <h4 class="mini" style="margin-top:0">⚠️ 롤백이 안 되는 5가지 이유</h4>
+    <div class="vs" style="grid-template-columns:1fr">
+      <div class="bad">
+        <h5>① 체크 예외는 기본적으로 롤백되지 않습니다</h5>
+        <pre class="code" data-lang="java"><code>@Transactional
+public void process() throws IOException {
+    repository.save(entity);
+    throw new IOException("실패");     // ❌ 커밋됩니다!
+}
+// ✅ @Transactional(rollbackFor = Exception.class)</code></pre>
+      </div>
+      <div class="bad">
+        <h5>② 예외를 잡아 버리면 롤백 신호가 안 갑니다</h5>
+        <pre class="code" data-lang="java"><code>@Transactional
+public void process() {
+    try {
+        repository.save(entity);
+        risky();
+    } catch (Exception e) {
+        log.error("실패", e);          // ❌ 삼켜서 커밋됨
+    }
+}
+// ✅ 다시 던지거나, TransactionAspectSupport
+//    .currentTransactionStatus().setRollbackOnly();</code></pre>
+      </div>
+      <div class="bad">
+        <h5>③ 자기 자신을 호출하면 프록시를 안 거칩니다</h5>
+        <pre class="code" data-lang="java"><code>public void outer() {
+    inner();          // ❌ this.inner() — 트랜잭션 없음
+}
+@Transactional
+public void inner() { ... }
+// ✅ 클래스 분리 (🍃 Boot 11번 참고)</code></pre>
+      </div>
+      <div class="bad">
+        <h5>④ private / final 메서드에는 안 걸립니다</h5>
+        <pre class="code" data-lang="java"><code>@Transactional
+private void save() { }      // ❌ 프록시가 오버라이드 불가</code></pre>
+      </div>
+      <div class="bad">
+        <h5>⑤ 다른 스레드는 트랜잭션을 공유하지 않습니다</h5>
+        <pre class="code" data-lang="java"><code>@Transactional
+public void process() {
+    executor.submit(() -&gt; repository.save(e));  // ❌ 별개 트랜잭션
+}
+// @Async 메서드도 마찬가지 — 새 트랜잭션이 필요합니다</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동시성 — 락</h4>
+      <pre class="code" data-lang="java"><code>// 낙관적 락 — 충돌이 드물 때 (권장)
+@Entity
+public class Product {
+    @Version
+    private Long version;      // 수정할 때마다 +1
+}
+// 다른 트랜잭션이 먼저 고쳤으면
+// -&gt; OptimisticLockingFailureException
+
+// 비관적 락 — 재고 차감처럼 충돌이 잦을 때
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+@Query("SELECT p FROM Product p WHERE p.id = :id")
+Optional&lt;Product&gt; findByIdForUpdate(Long id);
+// SELECT ... FOR UPDATE
+
+// 재시도로 감싸기
+@Retryable(retryFor = OptimisticLockingFailureException.class,
+           maxAttempts = 3, backoff = @Backoff(delay = 100))
+@Transactional
+public void decrease(Long id, int qty) { ... }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">트랜잭션 설계 원칙</h4>
+      <ul class="tx">
+        <li><b>짧게 유지하세요</b> — 트랜잭션이 길면 커넥션을 오래 붙잡아 풀이 고갈됩니다</li>
+        <li><b>외부 API 호출을 트랜잭션 안에 넣지 마세요</b> —
+            상대가 느려지면 우리 DB 커넥션이 전부 묶입니다</li>
+        <li><b>커밋 후 처리는 이벤트로</b></li>
+      </ul>
+      <pre class="code" data-lang="java"><code>// 커밋된 뒤에만 알림 보내기 ★
+@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+public void onOrderPaid(OrderPaidEvent event) {
+    notifier.send(event.email(), "결제 완료");
+    // 트랜잭션이 롤백되면 이 코드는 아예 실행되지 않습니다 ✅
+}
+
+// 발행하는 쪽
+@Transactional
+public void pay(Long id) {
+    Order o = ...;
+    o.pay();
+    eventPublisher.publishEvent(new OrderPaidEvent(o.getId(), o.getEmail()));
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d15 ==================== -->
+<section class="sec" id="d15">
+  <div class="sec-head rv">
+    <span class="no">DATA 15</span>
+    <h2>스키마 관리 · <span class="t">Flyway</span></h2>
+    <p class="lead"><code>ddl-auto</code> 에 스키마를 맡기면 운영에서 데이터가 날아갑니다. 마이그레이션 도구가 답입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <div class="dep">
+        <code>implementation("org.flywaydb:flyway-core")</code> ·
+        <code>implementation("org.flywaydb:flyway-mysql")</code>
+      </div>
+      <pre class="code" data-lang="yaml"><code>spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate       # ★ 엔티티와 스키마가 맞는지 검증만
+  flyway:
+    enabled: true
+    baseline-on-migrate: true  # 기존 DB 에 처음 적용할 때
+    locations: classpath:db/migration</code></pre>
+      <div class="tree">
+<span class="d">src/main/resources/db/migration/</span>
+  <span class="f">V1__create_orders.sql</span>
+  <span class="f">V2__add_order_index.sql</span>
+  <span class="f">V3__add_memo_column.sql</span>
+      </div>
+      <pre class="code" data-lang="sql"><code>-- V1__create_orders.sql
+CREATE TABLE orders (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    order_no    VARCHAR(30)  NOT NULL,
+    user_id     BIGINT       NOT NULL,
+    amount      INT          NOT NULL,
+    status      VARCHAR(20)  NOT NULL,
+    created_at  DATETIME     NOT NULL,
+    UNIQUE KEY uk_order_no (order_no),
+    KEY idx_user_status (user_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규칙</h4>
+      <ul class="tx">
+        <li><b>파일 이름은 <code>V{번호}__{설명}.sql</code></b> — 밑줄 2개입니다</li>
+        <li><b>적용된 파일은 절대 수정하지 마세요</b> —
+            체크섬이 달라져 실행이 막힙니다. <b>새 버전을 추가</b>하세요</li>
+        <li><code>flyway_schema_history</code> 테이블에 이력이 남습니다</li>
+        <li>운영 DB 변경은 <b>무중단을 고려</b>해서 —
+            컬럼 추가는 안전, <b>삭제·이름 변경은 2단계</b>로 나눠서</li>
+      </ul>
+      <pre class="code" data-lang="sql"><code>-- 안전한 컬럼 삭제 (2단계 배포)
+-- 1단계: 코드에서 컬럼 사용을 제거하고 배포
+-- 2단계: 다음 배포에서 실제 DROP
+ALTER TABLE orders DROP COLUMN old_field;</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>인덱스 설계 기본</b> —
+        <code>WHERE</code>·<code>ORDER BY</code>·<code>JOIN</code> 에 쓰는 컬럼에 인덱스를 겁니다.
+        복합 인덱스는 <b>선택도가 높은(값 종류가 많은) 컬럼을 앞에</b>.
+        <code>EXPLAIN</code> 으로 <b>실제로 타는지</b> 반드시 확인하세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d16 ==================== -->
+<section class="sec" id="d16">
+  <div class="sec-head rv">
+    <span class="no">DATA 16</span>
+    <h2>JPA vs MyBatis — <span class="t">실전 선택</span></h2>
+    <p class="lead">둘 다 써 본 입장에서 정리한 판단 기준입니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:30%">상황</th><th style="width:22%">권장</th><th>이유</th></tr>
+      <tr><td>신규 프로젝트, 도메인 중심</td><td><b>JPA + QueryDSL</b></td><td>CRUD 를 안 짜도 되고 객체지향 설계를 살릴 수 있음</td></tr>
+      <tr><td>기존 DB 가 이미 있고 스키마를 못 바꿈</td><td><b>MyBatis</b></td><td>복합키·비정규화 테이블에 JPA 매핑이 고통스러움</td></tr>
+      <tr><td>복잡한 통계·집계 리포트</td><td><b>MyBatis / JdbcClient</b></td><td>윈도우 함수·CTE 등 SQL 을 그대로 쓰는 게 빠름</td></tr>
+      <tr><td>대량 배치 처리</td><td><b>JdbcTemplate 배치</b></td><td>JPA 는 영속성 컨텍스트 때문에 메모리를 먹음</td></tr>
+      <tr><td>검색 조건이 10개 이상</td><td><b>QueryDSL</b></td><td>동적 쿼리를 타입 안전하게</td></tr>
+      <tr><td>팀에 SQL 강자가 많음</td><td>MyBatis</td><td>학습 비용이 낮고 통제가 쉬움</td></tr>
+      <tr><td>WebFlux</td><td><b>R2DBC</b></td><td>JDBC 는 블로킹 — 🌊 09번</td></tr>
+    </table>
+  </div>
+
+  <div class="card rv d1">
+    <h4 class="mini" style="margin-top:0">대량 데이터 처리 — JPA 를 쓰면 안 되는 경우</h4>
+    <pre class="code" data-lang="java"><code>// ❌ 10만 건 저장 — 영속성 컨텍스트에 전부 쌓여 OOM
+@Transactional
+public void saveAll(List&lt;Order&gt; orders) {
+    orders.forEach(orderRepository::save);
+}
+
+// ✅ 해법 1 — 배치 + 주기적 flush/clear
+@Transactional
+public void saveAll(List&lt;Order&gt; orders) {
+    for (int i = 0; i &lt; orders.size(); i++) {
+        em.persist(orders.get(i));
+        if (i % 500 == 0) { em.flush(); em.clear(); }
+    }
+}
+// application.yml
+//   spring.jpa.properties.hibernate.jdbc.batch_size: 500
+//   spring.jpa.properties.hibernate.order_inserts: true
+//   (MySQL URL 에 rewriteBatchedStatements=true 필수)
+
+// ✅ 해법 2 — JdbcTemplate 배치 (가장 빠름) ★
+jdbcTemplate.batchUpdate("""
+        INSERT INTO orders (order_no, amount, status, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+    orders, 1000,
+    (ps, o) -&gt; {
+        ps.setString(1, o.getOrderNo());
+        ps.setInt(2, o.getAmount());
+        ps.setString(3, o.getStatus().name());
+        ps.setTimestamp(4, Timestamp.valueOf(o.getCreatedAt()));
+    });
+
+// ✅ 대량 조회 — 스트리밍으로
+@Query("SELECT o FROM Order o")
+Stream&lt;Order&gt; streamAll();
+
+@Transactional(readOnly = true)
+public void process() {
+    try (Stream&lt;Order&gt; s = repository.streamAll()) {
+        s.forEach(o -&gt; { handle(o); em.detach(o); });   // 처리 후 즉시 분리
+    }
+}</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>결론</b> — <b>기술을 하나로 통일하려 애쓰지 마세요.</b>
+      대부분의 실무 프로젝트는 <b>JPA(+QueryDSL)를 기본</b>으로 두고,
+      통계·배치처럼 <b>SQL 을 직접 통제해야 하는 곳만</b> MyBatis 나
+      JdbcTemplate 으로 빼는 방식이 가장 무난합니다.
+    </div>
+  </div>
+</section>
+
+</div><!-- /pane-data -->
+

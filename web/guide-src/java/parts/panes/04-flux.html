@@ -1,0 +1,990 @@
+
+<!-- ============================================================
+     WEBFLUX PANE
+     ============================================================ -->
+<div class="pane" id="pane-flux">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> SPRING WEBFLUX · PROJECT REACTOR · R2DBC</div>
+  <h1>기다리지 않고<br>흘려보내는<br>서버</h1>
+  <p class="tx">
+    WebFlux 는 “빠른 서버”가 아니라 <b>적은 스레드로 많은 연결을 버티는 서버</b>입니다.
+    잘 쓰면 강력하지만 <b>아무 데나 쓰면 손해</b>입니다.
+    그래서 <b>언제 쓰지 말아야 하는지</b>부터 시작합니다.
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>N개</b><span>스레드 (CPU 코어 수)</span></div>
+    <div><b>수만</b><span>동시 연결</span></div>
+    <div><b>0</b><span>블로킹 허용</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== f01 ==================== -->
+<section class="sec" id="f01">
+  <div class="sec-head rv">
+    <span class="no">FLUX 01</span>
+    <h2>왜 WebFlux인가 — <span class="t">그리고 언제 쓰지 말아야 하나</span></h2>
+    <p class="lead">가상 스레드가 나온 지금, 이 판단이 예전보다 훨씬 중요해졌습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">MVC — 요청 하나에 스레드 하나</h4>
+      <pre class="code" data-lang="text"><code>요청 1 → [스레드 1] ──DB 대기 2초── 응답
+요청 2 → [스레드 2] ──DB 대기 2초── 응답
+   …
+요청 201 → 대기 (톰캣 기본 풀 200개 소진)
+
+스레드는 '기다리는 동안'에도 메모리를 붙잡고 있다</code></pre>
+      <h4 class="mini">WebFlux — 적은 스레드가 돌려막기</h4>
+      <pre class="code" data-lang="text"><code>요청 1~10000 → [이벤트 루프 스레드 8개]
+   DB 요청을 던져 놓고 → 즉시 다른 요청 처리
+   결과가 오면 → 콜백으로 이어서 처리
+
+기다리는 동안 스레드가 놀지 않는다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">셋 중 무엇을 고를까 <span class="ver new">2026 기준</span></h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:26%">상황</th><th>선택</th></tr>
+          <tr><td>일반적인 CRUD API</td><td><b>MVC</b> — 고민할 필요 없습니다</td></tr>
+          <tr><td>동시 접속은 많은데 로직은 I/O 대기 위주</td><td><b>MVC + 가상 스레드</b> ★ 코드는 그대로, 처리량만 올라갑니다</td></tr>
+          <tr><td>실시간 스트리밍 · SSE · 채팅</td><td><b>WebFlux</b></td></tr>
+          <tr><td>수십 개 API 를 조합하는 게이트웨이</td><td><b>WebFlux</b></td></tr>
+          <tr><td>백프레셔가 필요한 데이터 파이프라인</td><td><b>WebFlux</b></td></tr>
+          <tr><td>팀에 리액티브 경험자가 없다</td><td><b>MVC</b> — 학습·디버깅 비용이 큽니다</td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>솔직한 조언</b> — “성능이 좋다더라”로 WebFlux 를 고르면 대부분 후회합니다.
+        <b>스택 트레이스가 안 읽히고</b>, <b>중간에 블로킹 코드 하나만 섞여도</b>
+        전체 서버가 멈춥니다. 처리량이 목적이라면
+        <b>🧬 고급 탭의 가상 스레드를 먼저</b> 검토하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="dep rv">
+    <b>build.gradle.kts</b> — <code>implementation("org.springframework.boot:spring-boot-starter-webflux")</code>
+    <br>⚠️ <code>starter-web</code> 과 <b>함께 넣으면 MVC 가 이깁니다.</b> WebFlux 를 쓰려면 <code>starter-web</code> 을 빼세요.
+  </div>
+</section>
+
+
+<!-- ==================== f02 ==================== -->
+<section class="sec" id="f02">
+  <div class="sec-head rv">
+    <span class="no">FLUX 02</span>
+    <h2><span class="t">Mono</span>와 <span class="t">Flux</span></h2>
+    <p class="lead">리액티브의 모든 것이 이 둘로 표현됩니다. <b>“값이 나중에 온다”</b>를 담는 상자라고 보면 정확합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">둘의 차이는 개수뿐</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:26%">타입</th><th>의미</th><th>MVC 대응</th></tr>
+          <tr><td><b>Mono&lt;T&gt;</b></td><td>0 또는 1개</td><td><code>T</code> · <code>Optional&lt;T&gt;</code></td></tr>
+          <tr><td><b>Flux&lt;T&gt;</b></td><td>0 ~ N개 (무한 가능)</td><td><code>List&lt;T&gt;</code> · <code>Stream&lt;T&gt;</code></td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// 만들기
+Mono&lt;String&gt; m1 = Mono.just("값");
+Mono&lt;String&gt; m2 = Mono.empty();                 // 값 없음
+Mono&lt;String&gt; m3 = Mono.error(new RuntimeException());
+Mono&lt;String&gt; m4 = Mono.fromCallable(() -&gt; compute());   // 지연 실행
+Mono&lt;String&gt; m5 = Mono.defer(() -&gt; Mono.just(now()));   // 구독할 때마다 새로
+
+Flux&lt;Integer&gt; f1 = Flux.just(1, 2, 3);
+Flux&lt;Integer&gt; f2 = Flux.range(1, 100);
+Flux&lt;String&gt; f3 = Flux.fromIterable(list);
+Flux&lt;Long&gt; f4 = Flux.interval(Duration.ofSeconds(1));   // 1초마다 무한
+
+// 변환
+Mono&lt;List&lt;T&gt;&gt; list = flux.collectList();
+Flux&lt;T&gt; flux2 = mono.flux();
+Mono&lt;T&gt; first = flux.next();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">⚠️ 구독하지 않으면 아무 일도 안 일어난다</h4>
+      <div class="vs" style="grid-template-columns:1fr;margin-top:0">
+        <div class="bad">
+          <h5>❌ 실행되지 않습니다</h5>
+          <pre class="code" data-lang="java"><code>public void save(Order o) {
+    repository.save(o);        // Mono 를 만들기만 하고 버림
+}                              // DB 에 아무것도 안 들어감 💥</code></pre>
+        </div>
+        <div class="good">
+          <h5>✅ 반환해서 프레임워크가 구독하게</h5>
+          <pre class="code" data-lang="java"><code>public Mono&lt;Order&gt; save(Order o) {
+    return repository.save(o);    // 컨트롤러가 반환하면 스프링이 구독
+}</code></pre>
+        </div>
+      </div>
+      <p class="tx" style="font-size:13.6px;margin-bottom:0">
+        Mono·Flux 는 <b>“무엇을 할지 적어 둔 설계도”</b>일 뿐입니다.
+        누군가 <code>subscribe()</code> 해야 비로소 흐르기 시작합니다.
+        웹 컨트롤러에서는 <b>반환만 하면</b> 스프링이 대신 구독합니다 —
+        <b>직접 <code>subscribe()</code>를 호출하는 코드는 대개 잘못된 신호</b>입니다.
+      </p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f03 ==================== -->
+<section class="sec" id="f03">
+  <div class="sec-head rv">
+    <span class="no">FLUX 03</span>
+    <h2>연산자 <span class="t">지도</span></h2>
+    <p class="lead">수백 개가 있지만 <b>실무에서 쓰는 건 20개 남짓</b>입니다. 목적별로 묶어 두면 찾기 쉽습니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:30%">연산자</th><th style="width:28%">하는 일</th><th>메모</th></tr>
+      <tr><td colspan="3" style="color:var(--cyan);font-family:var(--mono);font-size:12px;background:rgba(34,211,238,.06)">■ 변환</td></tr>
+      <tr><td>map(v -&gt; f(v))</td><td>값을 바꿈 (동기)</td><td>Stream 의 map 과 동일</td></tr>
+      <tr><td><b>flatMap</b>(v -&gt; mono)</td><td>또 다른 비동기 호출을 이어붙임</td><td><b>가장 많이 씁니다.</b> 순서 보장 안 됨</td></tr>
+      <tr><td>concatMap</td><td>flatMap + <b>순서 보장</b></td><td>순서가 중요하면 이걸로</td></tr>
+      <tr><td>flatMapSequential</td><td>동시 실행 + 결과는 순서대로</td><td>성능과 순서 둘 다</td></tr>
+      <tr><td>switchMap</td><td>새 값이 오면 이전 것 취소</td><td>검색어 자동완성</td></tr>
+      <tr><td colspan="3" style="color:var(--cyan);font-family:var(--mono);font-size:12px;background:rgba(34,211,238,.06)">■ 거르기</td></tr>
+      <tr><td>filter</td><td>조건에 맞는 것만</td><td></td></tr>
+      <tr><td>take(n) / skip(n)</td><td>앞 n개 / n개 건너뛰기</td><td>무한 스트림 자르기</td></tr>
+      <tr><td>distinct()</td><td>중복 제거</td><td></td></tr>
+      <tr><td>takeUntil / takeWhile</td><td>조건까지만</td><td></td></tr>
+      <tr><td colspan="3" style="color:var(--cyan);font-family:var(--mono);font-size:12px;background:rgba(34,211,238,.06)">■ 합치기</td></tr>
+      <tr><td><b>zip</b>(a, b)</td><td>둘을 <b>동시 실행</b> 후 짝지음</td><td>API 병렬 호출의 핵심 ★</td></tr>
+      <tr><td>merge</td><td>여러 개를 뒤섞어 하나로</td><td>도착 순서대로</td></tr>
+      <tr><td>concat</td><td>앞의 것이 끝나면 다음</td><td>순차</td></tr>
+      <tr><td>then / thenReturn</td><td>앞의 결과를 버리고 다음</td><td>저장 후 완료 신호</td></tr>
+      <tr><td colspan="3" style="color:var(--cyan);font-family:var(--mono);font-size:12px;background:rgba(34,211,238,.06)">■ 없을 때 · 에러</td></tr>
+      <tr><td>defaultIfEmpty(v)</td><td>비었으면 기본값</td><td></td></tr>
+      <tr><td>switchIfEmpty(mono)</td><td>비었으면 다른 흐름으로</td><td>404 처리에 자주</td></tr>
+      <tr><td>onErrorReturn(v)</td><td>에러면 대체값</td><td></td></tr>
+      <tr><td>onErrorResume(e -&gt; mono)</td><td>에러면 다른 흐름</td><td>폴백</td></tr>
+      <tr><td>retry / retryWhen</td><td>재시도</td><td>백오프 설정 가능</td></tr>
+      <tr><td>timeout(d)</td><td>제한 시간</td><td><b>외부 호출엔 필수</b></td></tr>
+      <tr><td colspan="3" style="color:var(--cyan);font-family:var(--mono);font-size:12px;background:rgba(34,211,238,.06)">■ 부수 효과 · 디버깅</td></tr>
+      <tr><td>doOnNext / doOnError</td><td>흐름을 안 바꾸고 관찰</td><td>로깅에 사용</td></tr>
+      <tr><td>log()</td><td>모든 신호를 로그로</td><td>디버깅 1순위</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">map vs flatMap — 가장 헷갈리는 지점</h4>
+      <pre class="code" data-lang="java"><code>// map — 동기 변환. 결과가 그냥 값일 때
+Mono&lt;String&gt; name = userMono.map(User::getName);
+
+// flatMap — 반환값이 또 Mono/Flux 일 때
+// ❌ map 을 쓰면 Mono&lt;Mono&lt;Order&gt;&gt; 가 되어 버린다
+Mono&lt;Mono&lt;Order&gt;&gt; wrong = userMono.map(u -&gt; orderRepo.findByUser(u.getId()));
+
+// ✅ flatMap 이 한 겹 벗겨 준다
+Mono&lt;Order&gt; right = userMono.flatMap(u -&gt; orderRepo.findByUser(u.getId()));
+
+// 실전 — 조회 → 검증 → 저장 체인
+public Mono&lt;OrderRes&gt; pay(Long id) {
+    return orderRepository.findById(id)
+            .switchIfEmpty(Mono.error(new OrderNotFoundException(id)))
+            .flatMap(order -&gt; {
+                order.pay();
+                return orderRepository.save(order);
+            })
+            .map(OrderRes::from)
+            .doOnSuccess(r -&gt; log.info("결제 완료 {}", r.id()));
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">zip — 병렬 호출의 핵심 ★</h4>
+      <pre class="code" data-lang="java"><code>// ❌ 순차 실행 — 300ms + 400ms = 700ms
+public Mono&lt;Dashboard&gt; slow(Long id) {
+    return userClient.get(id)
+            .flatMap(user -&gt; orderClient.get(id)
+                    .map(orders -&gt; new Dashboard(user, orders)));
+}
+
+// ✅ 동시 실행 — max(300, 400) = 400ms
+public Mono&lt;Dashboard&gt; fast(Long id) {
+    return Mono.zip(
+            userClient.get(id),
+            orderClient.get(id),
+            couponClient.get(id)
+    ).map(t -&gt; new Dashboard(t.getT1(), t.getT2(), t.getT3()));
+}
+
+// 개수가 많으면 Tuple 대신 조합 함수
+Mono.zip(list, arr -&gt; combine(arr));
+
+// 하나가 실패해도 나머지는 살리고 싶다면
+Mono.zip(
+    userClient.get(id).onErrorReturn(User.unknown()),
+    orderClient.get(id).onErrorReturn(List.of())
+)</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f04 ==================== -->
+<section class="sec" id="f04">
+  <div class="sec-head rv">
+    <span class="no">FLUX 04</span>
+    <h2>스레드 모델 · <span class="t">스케줄러</span></h2>
+    <p class="lead"><b>여기가 WebFlux 에서 사고가 가장 많이 나는 곳</b>입니다. 이벤트 루프를 막으면 서버 전체가 멈춥니다.</p>
+  </div>
+
+  <div class="note warn rv">
+    <b>절대 규칙</b> — 이벤트 루프 스레드(<code>reactor-http-nio-*</code>)에서
+    <b>블로킹 호출을 하면 안 됩니다.</b>
+    스레드가 CPU 코어 수만큼(보통 4~8개)뿐이라
+    <b>한 요청이 막히면 다른 수천 개 요청이 전부 멈춥니다.</b>
+    <br>블로킹의 예: JDBC · <code>RestTemplate</code> · <code>Thread.sleep()</code> ·
+    <code>.block()</code> · 파일 I/O · 무거운 CPU 연산
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스케줄러 종류</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:38%">스케줄러</th><th>용도</th></tr>
+          <tr><td>Schedulers.parallel()</td><td><b>CPU 연산</b> (코어 수만큼)</td></tr>
+          <tr><td><b>Schedulers.boundedElastic()</b></td><td><b>블로킹 작업 격리용</b> ★</td></tr>
+          <tr><td>Schedulers.immediate()</td><td>현재 스레드 유지</td></tr>
+          <tr><td>Schedulers.single()</td><td>전용 스레드 하나</td></tr>
+          <tr><td>Schedulers.fromExecutor(e)</td><td>내 실행자 사용</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// 어쩔 수 없이 블로킹 코드를 써야 한다면 반드시 격리
+public Mono&lt;Report&gt; legacyReport(Long id) {
+    return Mono.fromCallable(() -&gt; legacyJdbcDao.find(id))   // 블로킹
+               .subscribeOn(Schedulers.boundedElastic());     // 별도 스레드로 ★
+}
+
+// publishOn — 이 지점 '이후'의 스레드를 바꾼다
+flux.publishOn(Schedulers.parallel())
+    .map(this::heavyCompute);
+
+// subscribeOn — 소스가 실행될 스레드를 바꾼다 (위치 무관, 한 번만 적용)
+mono.subscribeOn(Schedulers.boundedElastic());</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">막힌 곳 찾기 — BlockHound</h4>
+      <div class="dep">
+        <code>testImplementation("io.projectreactor.tools:blockhound:1.0.9.RELEASE")</code>
+      </div>
+      <pre class="code" data-lang="java"><code>// 테스트에서 켜 두면 블로킹 호출을 즉시 예외로 잡아 준다
+@BeforeAll
+static void setup() {
+    BlockHound.install();
+}
+
+// 이런 코드가 있으면 바로 터집니다
+// reactor.blockhound.BlockingOperationError:
+//   Blocking call! java.lang.Thread.sleep</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>가장 흔한 실수</b> —
+        WebFlux 프로젝트에 <b>JPA(JDBC)</b>를 그대로 쓰는 것입니다.
+        JDBC 는 태생이 블로킹이라 리액티브의 이점이 완전히 사라집니다.
+        <b>R2DBC 를 쓰거나</b>(다음 섹션), 못 바꾸면
+        <b>boundedElastic 으로 격리</b>하세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f05 ==================== -->
+<section class="sec" id="f05">
+  <div class="sec-head rv">
+    <span class="no">FLUX 05</span>
+    <h2>컨트롤러 · <span class="t">라우터 함수</span></h2>
+    <p class="lead">MVC 와 똑같이 애너테이션으로 쓸 수도 있고, 함수형으로 쓸 수도 있습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">애너테이션 방식 — MVC 와 거의 같습니다</h4>
+      <pre class="code" data-lang="java"><code>@RestController
+@RequestMapping("/api/orders")
+@RequiredArgsConstructor
+public class OrderController {
+
+    private final OrderService service;
+
+    @GetMapping
+    public Flux&lt;OrderRes&gt; list() {              // List 대신 Flux
+        return service.findAll();
+    }
+
+    @GetMapping("/{id}")
+    public Mono&lt;OrderRes&gt; get(@PathVariable Long id) {   // 단건은 Mono
+        return service.get(id);
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public Mono&lt;OrderRes&gt; create(@Valid @RequestBody Mono&lt;OrderCreateReq&gt; req) {
+        return req.flatMap(service::create);
+    }
+
+    @DeleteMapping("/{id}")
+    public Mono&lt;Void&gt; delete(@PathVariable Long id) {
+        return service.delete(id);
+    }
+}</code></pre>
+      <p class="tx" style="font-size:13.6px;margin-bottom:0">
+        <b>반환 타입만 바뀌었을 뿐</b> 구조는 MVC 와 동일합니다.
+        기존 MVC 경험을 그대로 살릴 수 있어 <b>처음엔 이 방식을 권합니다.</b>
+      </p>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">함수형 방식 — 라우터</h4>
+      <pre class="code" data-lang="java"><code>@Configuration
+public class OrderRouter {
+
+    @Bean
+    public RouterFunction&lt;ServerResponse&gt; routes(OrderHandler handler) {
+        return RouterFunctions.route()
+                .path("/api/orders", builder -&gt; builder
+                        .GET("", handler::list)
+                        .GET("/{id}", handler::get)
+                        .POST("", handler::create)
+                        .DELETE("/{id}", handler::delete))
+                .filter((req, next) -&gt; {           // 라우터 단위 필터
+                    log.info("{} {}", req.method(), req.path());
+                    return next.handle(req);
+                })
+                .build();
+    }
+}
+
+@Component
+@RequiredArgsConstructor
+public class OrderHandler {
+    private final OrderService service;
+
+    public Mono&lt;ServerResponse&gt; get(ServerRequest req) {
+        Long id = Long.valueOf(req.pathVariable("id"));
+        return service.get(id)
+                .flatMap(o -&gt; ServerResponse.ok().bodyValue(o))
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
+
+    public Mono&lt;ServerResponse&gt; create(ServerRequest req) {
+        return req.bodyToMono(OrderCreateReq.class)
+                .flatMap(service::create)
+                .flatMap(o -&gt; ServerResponse
+                        .created(URI.create("/api/orders/" + o.id()))
+                        .bodyValue(o));
+    }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f06 ==================== -->
+<section class="sec" id="f06">
+  <div class="sec-head rv">
+    <span class="no">FLUX 06</span>
+    <h2><span class="t">WebClient</span> — 논블로킹 HTTP 호출</h2>
+    <p class="lead"><code>RestTemplate</code>의 후계입니다. MVC 프로젝트에서도 쓸 수 있습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설정 — 타임아웃은 반드시</h4>
+      <pre class="code" data-lang="java"><code>@Bean
+public WebClient orderApiClient(WebClient.Builder builder) {
+    HttpClient httpClient = HttpClient.create()
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 2000)
+            .responseTimeout(Duration.ofSeconds(5))
+            .doOnConnected(conn -&gt; conn
+                    .addHandlerLast(new ReadTimeoutHandler(5))
+                    .addHandlerLast(new WriteTimeoutHandler(5)));
+
+    return builder
+            .baseUrl("https://api.example.com")
+            .clientConnector(new ReactorClientHttpConnector(httpClient))
+            .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .filter(logRequest())            // 요청 로깅
+            .codecs(c -&gt; c.defaultCodecs()
+                    .maxInMemorySize(5 * 1024 * 1024))   // 응답 크기 제한 (기본 256KB)
+            .build();
+}
+
+private ExchangeFilterFunction logRequest() {
+    return ExchangeFilterFunction.ofRequestProcessor(req -&gt; {
+        log.debug("{} {}", req.method(), req.url());
+        return Mono.just(req);
+    });
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호출하기</h4>
+      <pre class="code" data-lang="java"><code>// GET
+Mono&lt;UserRes&gt; user = client.get()
+        .uri("/users/{id}", id)
+        .retrieve()
+        .bodyToMono(UserRes.class);
+
+// 쿼리 파라미터
+client.get().uri(b -&gt; b.path("/users")
+        .queryParam("status", "ACTIVE")
+        .queryParam("page", 0).build());
+
+// POST
+Mono&lt;OrderRes&gt; res = client.post()
+        .uri("/orders")
+        .bodyValue(new OrderCreateReq(1L, 2))
+        .retrieve()
+        .bodyToMono(OrderRes.class);
+
+// 목록
+Flux&lt;UserRes&gt; users = client.get().uri("/users")
+        .retrieve()
+        .bodyToFlux(UserRes.class);
+
+// 상태 코드별 처리 ★
+client.get().uri("/users/{id}", id)
+    .retrieve()
+    .onStatus(s -&gt; s.value() == 404,
+              r -&gt; Mono.error(new UserNotFoundException(id)))
+    .onStatus(HttpStatusCode::is5xxServerError,
+              r -&gt; r.bodyToMono(String.class)
+                    .map(body -&gt; new ExternalApiException(body)))
+    .bodyToMono(UserRes.class)
+    .timeout(Duration.ofSeconds(3))
+    .retryWhen(Retry.backoff(3, Duration.ofMillis(200))
+                    .filter(e -&gt; e instanceof TimeoutException))
+    .onErrorResume(e -&gt; Mono.just(UserRes.fallback()));</code></pre>
+    </div>
+  </div>
+
+  <div class="note tip">
+    <b>MVC 프로젝트에서 쓴다면</b> — <code>.block()</code> 으로 결과를 기다리면 됩니다.
+    다만 <b>WebFlux 프로젝트에서는 <code>.block()</code> 이 금지</b>입니다.
+    <br>Spring 6 부터는 동기 호출 전용 <b><code>RestClient</code></b> 도 있습니다 —
+    MVC 라면 그쪽이 더 자연스럽습니다.
+  </div>
+</section>
+
+
+<!-- ==================== f07 ==================== -->
+<section class="sec" id="f07">
+  <div class="sec-head rv">
+    <span class="no">FLUX 07</span>
+    <h2><span class="t">백프레셔</span> — 감당할 만큼만 받기</h2>
+    <p class="lead">생산자가 소비자보다 빠를 때 <b>“천천히 주세요”라고 말할 수 있는</b> 능력입니다. 리액티브의 진짜 차별점입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 필요한가</h4>
+      <pre class="code" data-lang="text"><code>DB 가 초당 10만 건을 뿜는데
+소비자는 초당 1천 건만 처리 가능하다면?
+
+백프레셔 없음 → 메모리에 쌓임 → OOM 💥
+백프레셔 있음 → "1천 개만 주세요" → 안정 ✅</code></pre>
+      <pre class="code" data-lang="java"><code>// 전략 선택
+flux.onBackpressureBuffer(1000)         // 1000개까지 버퍼
+    .onBackpressureDrop(v -&gt; log.warn("버림: {}", v))
+    .onBackpressureLatest()             // 최신 것만 유지
+    .onBackpressureError();             // 넘치면 에러
+
+// 속도 제한
+flux.limitRate(100)                     // 한 번에 100개씩 요청
+    .delayElements(Duration.ofMillis(10));
+
+// 묶어서 처리 — DB 배치 저장에 유용 ★
+flux.buffer(500)                        // 500개씩 묶음
+    .flatMap(batch -&gt; repository.saveAll(batch))
+    .subscribe();
+
+// 시간 기준으로 묶기
+flux.bufferTimeout(500, Duration.ofSeconds(1));</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동시 실행 개수 제한</h4>
+      <pre class="code" data-lang="java"><code>// ❌ flatMap 기본 동시성은 256 — 외부 API 를 순식간에 때립니다
+Flux.fromIterable(ids)
+    .flatMap(id -&gt; apiClient.get(id))
+    .subscribe();
+
+// ✅ 동시 실행 수를 제한
+Flux.fromIterable(ids)
+    .flatMap(id -&gt; apiClient.get(id), 10)   // 최대 10개 동시
+    .subscribe();
+
+// 순서까지 지키려면
+    .flatMapSequential(id -&gt; apiClient.get(id), 10)
+
+// 완전 순차 (가장 느리지만 안전)
+    .concatMap(id -&gt; apiClient.get(id))</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실전에서 가장 자주 쓰는 조합</b> —
+        <code>.flatMap(fn, 동시개수)</code> + <code>.timeout()</code> + <code>.retryWhen()</code>.
+        외부 API 를 대량 호출할 때 이 셋이 없으면
+        <b>상대 서버를 다운시키거나 우리가 먼저 죽습니다.</b>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f08 ==================== -->
+<section class="sec" id="f08">
+  <div class="sec-head rv">
+    <span class="no">FLUX 08</span>
+    <h2>SSE · <span class="t">스트리밍</span></h2>
+    <p class="lead">WebFlux 가 가장 빛나는 영역입니다. <b>연결을 열어 두고 계속 흘려보내는</b> 기능이 자연스럽게 됩니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Server-Sent Events</h4>
+      <pre class="code" data-lang="java"><code>// 서버 → 클라이언트 단방향 실시간 푸시
+@GetMapping(value = "/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+public Flux&lt;OrderEvent&gt; stream() {
+    return orderEventPublisher.flux()
+            .map(OrderEvent::from);
+}
+
+// 이벤트 메타데이터까지 담기
+@GetMapping(value = "/sse", produces = TEXT_EVENT_STREAM_VALUE)
+public Flux&lt;ServerSentEvent&lt;String&gt;&gt; sse() {
+    return Flux.interval(Duration.ofSeconds(1))
+            .map(i -&gt; ServerSentEvent.&lt;String&gt;builder()
+                    .id(String.valueOf(i))
+                    .event("tick")
+                    .data("현재 시각 " + LocalTime.now())
+                    .retry(Duration.ofSeconds(3))   // 끊기면 재연결 간격
+                    .build());
+}
+
+// 연결이 끊겼을 때 정리
+.doOnCancel(() -&gt; log.info("클라이언트 연결 종료"))
+.doFinally(sig -&gt; cleanup());</code></pre>
+      <pre class="code" data-lang="javascript"><code>// 브라우저 쪽
+const es = new EventSource('/api/orders/sse');
+es.addEventListener('tick', e =&gt; console.log(e.data));
+es.onerror = () =&gt; es.close();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대용량 데이터 스트리밍</h4>
+      <pre class="code" data-lang="java"><code>// 100만 건을 메모리에 안 올리고 흘려보내기
+@GetMapping(value = "/export",
+            produces = MediaType.APPLICATION_NDJSON_VALUE)
+public Flux&lt;OrderRes&gt; export() {
+    return orderRepository.findAllBy()      // R2DBC 는 스트리밍이 기본
+            .map(OrderRes::from);
+}
+// 응답: 한 줄에 하나씩 JSON (NDJSON)
+// {"id":1,...}
+// {"id":2,...}
+
+// 여러 소스를 합쳐 실시간 대시보드로
+Flux.merge(
+        orderEvents.map(Event::of),
+        paymentEvents.map(Event::of),
+        Flux.interval(Duration.ofSeconds(30)).map(i -&gt; Event.heartbeat())
+).share();          // 여러 구독자가 같은 스트림을 공유</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>SSE vs WebSocket</b> —
+        서버 → 클라이언트 <b>단방향</b>이면 SSE 가 훨씬 간단합니다
+        (HTTP 그대로라 프록시·인증이 쉽고 자동 재연결도 됩니다).
+        <b>양방향</b>(채팅·게임)이 필요할 때만 WebSocket 을 쓰세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f09 ==================== -->
+<section class="sec" id="f09">
+  <div class="sec-head rv">
+    <span class="no">FLUX 09</span>
+    <h2><span class="t">R2DBC</span> — WebFlux 전용 DB 접근</h2>
+    <p class="lead">
+      JDBC 는 태생이 <b>블로킹</b>이라 WebFlux 와 맞지 않습니다.
+      R2DBC 는 <b>논블로킹 DB 드라이버 표준</b>입니다.
+    </p>
+  </div>
+
+  <div class="dep rv">
+    <b>build.gradle.kts</b><br>
+    <code>implementation("org.springframework.boot:spring-boot-starter-data-r2dbc")</code><br>
+    <code>runtimeOnly("io.asyncer:r2dbc-mysql")</code> ·
+    <code>runtimeOnly("org.postgresql:r2dbc-postgresql")</code> ·
+    <code>runtimeOnly("io.r2dbc:r2dbc-h2")</code>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설정</h4>
+      <pre class="code" data-lang="yaml"><code>spring:
+  r2dbc:
+    url: r2dbc:mysql://localhost:3306/mydb   # jdbc: 가 아니라 r2dbc:
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    pool:
+      initial-size: 10
+      max-size: 30
+      max-idle-time: 30m
+  sql:
+    init:
+      mode: always          # schema.sql 실행 (개발용)</code></pre>
+      <h4 class="mini">엔티티 — JPA 와 다릅니다</h4>
+      <pre class="code" data-lang="java"><code>@Table("orders")                       // @Entity 아님
+public class Order {
+
+    @Id
+    private Long id;                   // jakarta 가 아니라 spring-data 의 @Id
+
+    @Column("customer_name")
+    private String customerName;
+
+    private int amount;
+
+    @Column("created_at")
+    private LocalDateTime createdAt;
+
+    // ⚠️ 연관관계 매핑이 없습니다 (@OneToMany 없음)
+    //    필요하면 ID 를 들고 직접 조회해서 조합합니다
+    private Long userId;
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">리포지토리</h4>
+      <pre class="code" data-lang="java"><code>public interface OrderRepository extends ReactiveCrudRepository&lt;Order, Long&gt; {
+
+    // 쿼리 메서드 — JPA 와 문법이 같습니다
+    Flux&lt;Order&gt; findByStatus(OrderStatus status);
+    Mono&lt;Order&gt; findByOrderNo(String orderNo);
+    Mono&lt;Long&gt; countByUserId(Long userId);
+    Mono&lt;Boolean&gt; existsByOrderNo(String orderNo);
+
+    // 직접 SQL — JPQL 이 아니라 '진짜 SQL' 입니다
+    @Query("""
+        SELECT o.* FROM orders o
+         WHERE o.user_id = :userId
+           AND o.created_at &gt;= :from
+         ORDER BY o.created_at DESC
+        """)
+    Flux&lt;Order&gt; findRecent(Long userId, LocalDateTime from);
+
+    @Modifying
+    @Query("UPDATE orders SET status = :status WHERE id = :id")
+    Mono&lt;Integer&gt; updateStatus(Long id, String status);
+}
+
+// 사용
+public Mono&lt;OrderRes&gt; get(Long id) {
+    return orderRepository.findById(id)
+            .switchIfEmpty(Mono.error(new OrderNotFoundException(id)))
+            .map(OrderRes::from);
+}
+
+public Flux&lt;OrderRes&gt; list(OrderStatus status) {
+    return orderRepository.findByStatus(status).map(OrderRes::from);
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">연관 데이터는 직접 조합합니다</h4>
+      <pre class="code" data-lang="java"><code>// JPA 의 @OneToMany 가 없으므로 이렇게 씁니다
+public Mono&lt;OrderDetail&gt; getDetail(Long orderId) {
+    return orderRepository.findById(orderId)
+            .flatMap(order -&gt; Mono.zip(
+                    Mono.just(order),
+                    itemRepository.findByOrderId(orderId).collectList(),
+                    userRepository.findById(order.getUserId())
+            ))
+            .map(t -&gt; new OrderDetail(t.getT1(), t.getT2(), t.getT3()));
+}
+
+// 목록 + 각각의 상세 — N+1 이 되지 않게 한 번에 모아 조회 ★
+public Flux&lt;OrderDetail&gt; listWithItems(List&lt;Long&gt; orderIds) {
+    Mono&lt;Map&lt;Long, List&lt;Item&gt;&gt;&gt; itemMap = itemRepository
+            .findByOrderIdIn(orderIds)
+            .collectMultimap(Item::getOrderId)
+            .map(m -&gt; m.entrySet().stream().collect(
+                    Collectors.toMap(Map.Entry::getKey, e -&gt; List.copyOf(e.getValue()))));
+
+    return itemMap.flatMapMany(map -&gt;
+            orderRepository.findAllById(orderIds)
+                    .map(o -&gt; new OrderDetail(o, map.getOrDefault(o.getId(), List.of()))));
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복잡한 쿼리 — DatabaseClient</h4>
+      <pre class="code" data-lang="java"><code>@Repository
+@RequiredArgsConstructor
+public class OrderQueryRepository {
+
+    private final DatabaseClient client;
+
+    public Flux&lt;OrderSummary&gt; summarize(LocalDate from, LocalDate to) {
+        return client.sql("""
+                SELECT u.name         AS user_name,
+                       COUNT(*)       AS order_count,
+                       SUM(o.amount)  AS total_amount
+                  FROM orders o
+                  JOIN users u ON u.id = o.user_id
+                 WHERE o.created_at BETWEEN :from AND :to
+                 GROUP BY u.name
+                 ORDER BY total_amount DESC
+                """)
+                .bind("from", from.atStartOfDay())
+                .bind("to", to.atTime(23, 59, 59))
+                .map((row, meta) -&gt; new OrderSummary(
+                        row.get("user_name", String.class),
+                        row.get("order_count", Long.class),
+                        row.get("total_amount", Long.class)))
+                .all();
+    }
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <b>R2DBC 를 쓰기 전에 알아야 할 것</b>
+    <br>① <b>연관관계 매핑·지연 로딩·더티 체킹이 없습니다</b> — JPA 의 편의 기능 대부분이 없습니다. 직접 조합해야 합니다.
+    <br>② <b>QueryDSL 을 못 씁니다</b> — 동적 쿼리는 문자열을 조립하거나 <code>Criteria</code> API 를 씁니다.
+    <br>③ <b>지원 DB 가 제한적</b>입니다 — MySQL·PostgreSQL·MSSQL·H2·Oracle. 그 외는 확인이 필요합니다.
+    <br>④ 그래서 <b>“단순 조회가 대량으로 일어나는 서비스”</b>에 잘 맞고,
+    복잡한 도메인 모델이 있다면 <b>MVC + JPA + 가상 스레드</b>가 나은 선택인 경우가 많습니다.
+  </div>
+</section>
+
+
+<!-- ==================== f10 ==================== -->
+<section class="sec" id="f10">
+  <div class="sec-head rv">
+    <span class="no">FLUX 10</span>
+    <h2>리액티브 <span class="t">트랜잭션</span></h2>
+    <p class="lead"><code>@Transactional</code> 이 그대로 동작하지만, <b>스레드가 아니라 리액티브 컨텍스트</b>를 타고 흐른다는 점이 다릅니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="java"><code>@Configuration
+public class R2dbcConfig {
+    @Bean
+    public ReactiveTransactionManager transactionManager(ConnectionFactory cf) {
+        return new R2dbcTransactionManager(cf);
+    }
+}
+
+@Service
+@RequiredArgsConstructor
+public class OrderService {
+
+    private final OrderRepository orderRepository;
+    private final StockRepository stockRepository;
+
+    @Transactional                       // 리액티브에서도 그대로 동작
+    public Mono&lt;Order&gt; create(OrderCreateReq req) {
+        return stockRepository.findByProductId(req.productId())
+                .switchIfEmpty(Mono.error(new StockNotFoundException()))
+                .flatMap(stock -&gt; {
+                    if (stock.getQuantity() &lt; req.quantity())
+                        return Mono.error(new InsufficientStockException());
+                    stock.decrease(req.quantity());
+                    return stockRepository.save(stock);
+                })
+                .then(orderRepository.save(Order.from(req)));
+                // 어느 단계에서 에러가 나도 전체 롤백 ✅
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 제어하기</h4>
+      <pre class="code" data-lang="java"><code>@RequiredArgsConstructor
+public class OrderService {
+    private final TransactionalOperator tx;
+
+    public Mono&lt;Order&gt; create(OrderCreateReq req) {
+        return doWork(req)
+                .as(tx::transactional);      // 이 체인 전체가 한 트랜잭션
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>주의할 점</b>
+        <br>① <b>체인 밖에서 실행되는 코드는 트랜잭션에 안 들어갑니다.</b>
+        반드시 <code>flatMap</code>·<code>then</code> 으로 이어 붙이세요.
+        <br>② <b>JDBC 트랜잭션과 섞이지 않습니다</b> —
+        한 메서드에서 JPA 와 R2DBC 를 같이 쓰면 <b>롤백이 따로 놉니다.</b>
+        <br>③ <code>publishOn</code> 으로 스레드를 바꿔도 컨텍스트는 따라가지만,
+        <b><code>Mono.fromCallable</code> 안의 블로킹 JDBC 호출</b>은 별개입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f11 ==================== -->
+<section class="sec" id="f11">
+  <div class="sec-head rv">
+    <span class="no">FLUX 11</span>
+    <h2>에러 처리 · <span class="t">재시도</span></h2>
+    <p class="lead">리액티브에서는 예외가 <b>신호로 흐르기</b> 때문에 try/catch 로는 못 잡습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="java"><code>// ❌ 이렇게는 안 잡힙니다
+try {
+    return service.find(id);     // Mono 를 만들 뿐, 에러는 나중에 흐름
+} catch (Exception e) { }        // 절대 안 걸림
+
+// ✅ 연산자로 처리
+service.find(id)
+    // 1) 대체값
+    .onErrorReturn(Order.empty())
+
+    // 2) 특정 예외만
+    .onErrorReturn(TimeoutException.class, Order.empty())
+
+    // 3) 다른 흐름으로 (폴백)
+    .onErrorResume(e -&gt; {
+        log.warn("주 저장소 실패, 캐시 조회", e);
+        return cacheRepository.find(id);
+    })
+
+    // 4) 예외를 바꿔서 다시 던지기
+    .onErrorMap(DataAccessException.class,
+                e -&gt; new ServiceException("DB 오류", e))
+
+    // 5) 비어 있을 때
+    .switchIfEmpty(Mono.error(new OrderNotFoundException(id)))
+
+    // 6) 성공·실패 관계없이
+    .doFinally(sig -&gt; meter.increment(sig.name()));</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">재시도 — 지수 백오프</h4>
+      <pre class="code" data-lang="java"><code>apiClient.call()
+    .timeout(Duration.ofSeconds(3))
+    .retryWhen(
+        Retry.backoff(3, Duration.ofMillis(200))   // 200ms, 400ms, 800ms
+             .maxBackoff(Duration.ofSeconds(5))
+             .jitter(0.5)                          // 동시 재시도 분산
+             .filter(e -&gt; e instanceof TimeoutException
+                       || e instanceof WebClientRequestException)
+             .onRetryExhaustedThrow((spec, signal) -&gt;
+                     new ExternalApiException("재시도 초과", signal.failure()))
+    )
+    .onErrorResume(e -&gt; Mono.just(fallbackValue()));</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>재시도하면 안 되는 것</b> —
+        <b>결제·주문 생성처럼 중복이 치명적인 요청</b>은
+        멱등키(Idempotency-Key) 없이 재시도하면 <b>이중 결제</b>가 납니다.
+        <b>400 번대 에러</b>도 재시도해 봐야 결과가 같습니다 —
+        <code>filter</code> 로 <b>일시적 오류만</b> 골라내세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f12 ==================== -->
+<section class="sec" id="f12">
+  <div class="sec-head rv">
+    <span class="no">FLUX 12</span>
+    <h2>디버깅 · 테스트 · <span class="t">함정</span></h2>
+    <p class="lead">리액티브의 가장 큰 비용은 <b>디버깅 난이도</b>입니다. 도구를 알아 두면 훨씬 수월합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">디버깅</h4>
+      <pre class="code" data-lang="java"><code>// 1) log() — 모든 신호를 찍는다
+flux.log("order-flow")
+    .filter(...)
+    .log("after-filter");
+// onSubscribe / request(N) / onNext(v) / onComplete
+
+// 2) checkpoint() — 스택 트레이스에 위치 표시
+mono.checkpoint("주문 조회 단계")
+    .flatMap(...)
+    .checkpoint("결제 단계");
+
+// 3) 전역 디버그 모드 (개발 환경만! 성능 비용이 큽니다)
+@PostConstruct
+void init() { Hooks.onOperatorDebug(); }
+
+// 4) doOn* 으로 관찰 (흐름을 바꾸지 않음)
+.doOnSubscribe(s -&gt; log.info("시작"))
+.doOnNext(v -&gt; log.debug("값: {}", v))
+.doOnError(e -&gt; log.error("실패", e))
+.doOnCancel(() -&gt; log.warn("취소됨"))</code></pre>
+
+      <h4 class="mini">테스트 — StepVerifier</h4>
+      <pre class="code" data-lang="java"><code>@Test
+void 주문_조회() {
+    given(repository.findById(1L)).willReturn(Mono.just(order));
+
+    StepVerifier.create(service.get(1L))
+            .expectNextMatches(r -&gt; r.id().equals(1L))
+            .verifyComplete();
+}
+
+@Test
+void 없으면_예외() {
+    given(repository.findById(1L)).willReturn(Mono.empty());
+
+    StepVerifier.create(service.get(1L))
+            .expectError(OrderNotFoundException.class)
+            .verify();
+}
+
+@Test
+void 시간을_당겨서_테스트() {
+    StepVerifier.withVirtualTime(() -&gt;
+            Flux.interval(Duration.ofHours(1)).take(3))
+        .thenAwait(Duration.ofHours(3))     // 3시간을 즉시 통과
+        .expectNextCount(3)
+        .verifyComplete();
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 밟는 함정</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:40%">증상</th><th>원인 · 해결</th></tr>
+          <tr><td>아무 일도 안 일어남</td><td><b>구독 안 함.</b> 반환하거나 subscribe()</td></tr>
+          <tr><td>서버가 통째로 멈춤</td><td><b>이벤트 루프에서 블로킹.</b> boundedElastic 으로 격리</td></tr>
+          <tr><td>스택 트레이스가 안 읽힘</td><td>checkpoint() 추가, Hooks.onOperatorDebug()</td></tr>
+          <tr><td>MDC 로그 컨텍스트가 사라짐</td><td>스레드가 바뀌기 때문. <code>contextWrite</code> 사용</td></tr>
+          <tr><td>Mono&lt;Mono&lt;T&gt;&gt;</td><td>map 을 flatMap 으로</td></tr>
+          <tr><td>같은 소스가 두 번 실행됨</td><td>구독마다 재실행됨. <code>cache()</code> 사용</td></tr>
+          <tr><td>DataBufferLimitException</td><td>응답이 256KB 초과. <code>maxInMemorySize</code> 조정</td></tr>
+          <tr><td>순서가 뒤죽박죽</td><td>flatMap 은 순서 미보장 → concatMap</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// 로그 추적 ID 를 리액티브 컨텍스트로 전달
+mono.contextWrite(ctx -&gt; ctx.put("traceId", traceId));
+
+// 읽는 쪽
+Mono.deferContextual(ctx -&gt; {
+    String traceId = ctx.get("traceId");
+    return Mono.just(...);
+});</code></pre>
+    </div>
+  </div>
+</section>
+
+</div><!-- /pane-flux -->
+

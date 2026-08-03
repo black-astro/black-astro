@@ -1,12 +1,8 @@
 <script setup lang="ts">
 import { profile, achievements, links } from '@/data/profile'
 import { competencies } from '@/data/skills'
-import { GUIDE_URL, GUIDE_TITLE } from '@/router'
+import { guides } from '@/router'
 import AppIcon from '@/components/AppIcon.vue'
-
-const guideUrl = GUIDE_URL
-const guideTitle = GUIDE_TITLE
-const guideTags = ['Python', 'Pandas', 'NumPy', '업무 자동화', 'PySide6', '알고리즘', 'SQL']
 </script>
 
 <template>
@@ -36,8 +32,9 @@ const guideTags = ['Python', 'Pandas', 'NumPy', '업무 자동화', 'PySide6', '
           포트폴리오 보기 <AppIcon name="arrow" :size="17" />
         </RouterLink>
         <RouterLink to="/career" class="btn btn-ghost">경력 상세</RouterLink>
-        <a :href="guideUrl" class="btn btn-ghost btn-guide" :title="guideTitle">
-          🐍 Python Guide <span class="ext" aria-hidden="true">↗</span>
+        <a v-for="g in guides" :key="g.key" :href="g.href"
+           class="btn btn-ghost btn-guide" :title="g.title">
+          {{ g.emoji }} {{ g.label }} <span class="ext" aria-hidden="true">↗</span>
         </a>
         <a v-for="l in links" :key="l.label" :href="l.href" class="btn btn-icon" target="_blank" rel="noopener" :title="l.value">
           <AppIcon :name="l.icon" :size="18" />
@@ -81,34 +78,32 @@ const guideTags = ['Python', 'Pandas', 'NumPy', '업무 자동화', 'PySide6', '
     </div>
   </section>
 
-  <!-- Python Visual Guide -->
+  <!-- 학습 가이드 -->
   <section class="container block">
     <div class="block-head">
       <span class="eyebrow">Side Project</span>
       <h2 class="section-title">직접 만든 학습 자료</h2>
     </div>
-    <a :href="guideUrl" class="guide card" :title="guideTitle">
-      <div class="guide-main">
-        <div class="guide-top">
-          <span class="guide-emoji" aria-hidden="true">🐍</span>
-          <h3 class="guide-title">Python Visual Guide</h3>
-          <span class="guide-ext" aria-hidden="true">↗</span>
+    <div class="guide-grid">
+      <a v-for="g in guides" :key="g.key" :href="g.href" class="guide card" :title="g.title">
+        <div class="guide-main">
+          <div class="guide-top">
+            <span class="guide-emoji" aria-hidden="true">{{ g.emoji }}</span>
+            <h3 class="guide-title">{{ g.heading }}</h3>
+            <span class="guide-ext" aria-hidden="true">↗</span>
+          </div>
+          <p class="guide-desc">{{ g.desc }}</p>
+          <div class="guide-tags">
+            <span v-for="t in g.tags" :key="t" class="chip">{{ t }}</span>
+          </div>
         </div>
-        <p class="guide-desc">
-          파이썬 문법부터 Pandas·NumPy·이미지 처리·업무 자동화·PySide6 GUI·알고리즘·DB까지,
-          <strong>데이터가 움직이는 과정을 눈으로 보면서</strong> 익히는 단일 페이지 가이드입니다.
-          버튼과 슬라이더를 누르면 표의 행이 실제로 자리를 옮깁니다.
-        </p>
-        <div class="guide-tags">
-          <span v-for="t in guideTags" :key="t" class="chip">{{ t }}</span>
+        <div class="guide-stats">
+          <div v-for="st in g.stats" :key="st.label">
+            <b>{{ st.value }}</b><span>{{ st.label }}</span>
+          </div>
         </div>
-      </div>
-      <div class="guide-stats">
-        <div><b>11</b><span>주제 탭</span></div>
-        <div><b>147</b><span>섹션</span></div>
-        <div><b>0</b><span>설치 필요</span></div>
-      </div>
-    </a>
+      </a>
+    </div>
   </section>
 </template>
 
@@ -332,12 +327,19 @@ const guideTags = ['Python', 'Pandas', 'NumPy', '업무 자동화', 'PySide6', '
   opacity: 0.7;
 }
 
-/* Python Guide 진입 카드 */
+/* 학습 가이드 진입 카드 */
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
 .guide {
   display: flex;
-  align-items: center;
-  gap: 28px;
-  padding: 26px 28px;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px 26px;
+  min-width: 0;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
 .guide:hover {
@@ -386,11 +388,11 @@ const guideTags = ['Python', 'Pandas', 'NumPy', '업무 자동화', 'PySide6', '
   gap: 6px;
 }
 .guide-stats {
-  flex-shrink: 0;
+  margin-top: auto;
   display: flex;
   gap: 26px;
-  padding-left: 28px;
-  border-left: 1px solid var(--border);
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }
 .guide-stats div {
   text-align: center;
@@ -414,19 +416,11 @@ const guideTags = ['Python', 'Pandas', 'NumPy', '업무 자동화', 'PySide6', '
   .comp-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  /* 카드가 좁아지면 통계를 아래로 내린다 */
-  .guide {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 20px;
+  .guide-grid {
+    grid-template-columns: 1fr;
   }
   .guide-stats {
-    width: 100%;
     justify-content: space-between;
-    padding-left: 0;
-    padding-top: 18px;
-    border-left: none;
-    border-top: 1px solid var(--border);
   }
 }
 @media (max-width: 560px) {

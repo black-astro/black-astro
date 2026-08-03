@@ -1,0 +1,844 @@
+
+<!-- ============================================================
+     ADVANCED PANE
+     ============================================================ -->
+<div class="pane" id="pane-adv">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> JVM · 동시성 · 가상 스레드 (Java 25)</div>
+  <h1>느린 이유도<br>터지는 이유도<br>대개 여기 있다</h1>
+  <p class="tx">
+    문법을 다 알아도 <b>메모리와 스레드</b>를 모르면 운영에서 막힙니다.
+    이 탭은 “<b>왜 OOM 이 나는지</b>”, “<b>왜 가끔만 틀리는지</b>”,
+    그리고 <b>Java 21 부터 판을 바꾼 가상 스레드</b>를 다룹니다.
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>1M+</b><span>가상 스레드 동시 실행</span></div>
+    <div><b>~1KB</b><span>가상 스레드 1개 비용</span></div>
+    <div><b>1MB</b><span>플랫폼 스레드 1개 비용</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== a01 ==================== -->
+<section class="sec" id="a01">
+  <div class="sec-head rv">
+    <span class="no">ADV 01</span>
+    <h2>JVM 구조와 <span class="t">메모리</span></h2>
+    <p class="lead">“어디에 무엇이 저장되는가”만 알면 OOM·성능 문제의 절반은 짐작이 갑니다.</p>
+  </div>
+
+  <div class="grid-a rv">
+    <div>
+      <div class="layer">
+        <div class="lrow l-web"><span class="tagn">스택</span>
+          <div><b>스레드마다 하나씩</b><span>메서드 호출 정보, 지역 변수, 기본형 값. 메서드가 끝나면 즉시 사라집니다.</span></div></div>
+        <div class="lrow l-svc"><span class="tagn">힙</span>
+          <div><b>모든 스레드가 공유</b><span>new 로 만든 <b>모든 객체</b>. GC 가 청소하는 곳. OOM 의 주 무대입니다.</span></div></div>
+        <div class="lrow l-repo"><span class="tagn">메타스페이스</span>
+          <div><b>클래스 정보</b><span>클래스 구조, static 필드. Java 8부터 힙 밖(네이티브 메모리)에 있습니다.</span></div></div>
+        <div class="lrow l-db"><span class="tagn">기타</span>
+          <div><b>코드 캐시 · 다이렉트 버퍼</b><span>JIT 이 만든 기계어, NIO 버퍼. 힙 통계에 안 잡혀서 놓치기 쉽습니다.</span></div></div>
+      </div>
+      <pre class="code" data-lang="java"><code>void example() {
+    int a = 10;                    // 스택 — 값 자체
+    String s = "hello";            // 스택엔 '주소', 실제 객체는 힙
+    List&lt;String&gt; list = new ArrayList&lt;&gt;();   // 힙
+}   // 메서드 끝 -&gt; 스택은 즉시 정리, 힙 객체는 GC 가 나중에</code></pre>
+    </div>
+    <div>
+      <div class="card">
+        <h4 class="mini" style="margin-top:0">힙은 다시 세대로 나뉩니다</h4>
+        <div class="tw">
+          <table class="cheat">
+            <tr><th style="width:34%">영역</th><th>내용</th></tr>
+            <tr><td>Eden</td><td>새 객체가 처음 놓이는 곳. 대부분 여기서 바로 죽습니다</td></tr>
+            <tr><td>Survivor 0/1</td><td>Eden 에서 살아남은 것이 잠시 머무는 곳</td></tr>
+            <tr><td>Old(Tenured)</td><td>오래 살아남은 객체. 여기가 차면 <b>Full GC</b> — 느립니다</td></tr>
+          </table>
+        </div>
+        <p class="tx" style="font-size:13.6px;margin-bottom:0">
+          <b>“대부분의 객체는 금방 죽는다”</b>는 가정 위에 설계돼 있습니다.
+          그래서 짧게 쓰고 버리는 객체는 사실상 공짜에 가깝고,
+          <b>오래 붙잡고 있는 객체(캐시·static 컬렉션)</b>가 문제를 만듭니다.
+        </p>
+      </div>
+      <div class="card">
+        <h4 class="mini" style="margin-top:0">실무에서 쓰는 옵션</h4>
+        <pre class="code" data-lang="bash"><code># 힙 크기 — 컨테이너에선 비율 지정이 안전
+java -Xms512m -Xmx2g -jar app.jar
+java -XX:MaxRAMPercentage=75 -jar app.jar   # 컨테이너 메모리의 75%
+
+# OOM 나면 힙 덤프 남기기 (원인 분석의 핵심)
+java -XX:+HeapDumpOnOutOfMemoryError \
+     -XX:HeapDumpPath=/var/log/dump.hprof -jar app.jar
+
+# GC 로그
+java -Xlog:gc*:file=/var/log/gc.log:time -jar app.jar
+
+# 현재 상태 확인
+jps -l                  # 실행 중인 자바 프로세스
+jcmd &lt;pid&gt; GC.heap_info  # 힙 사용량
+jcmd &lt;pid&gt; Thread.print  # 스레드 덤프 (멈춤 현상 분석)
+jmap -histo &lt;pid&gt; | head -20   # 어떤 객체가 많은지</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <b>OOM 이 나는 진짜 이유 Top 3</b>
+    <br>① <b>static 컬렉션에 계속 담기</b> — 절대 안 지워집니다. 캐시는 반드시 크기 제한을 두세요.
+    <br>② <b>DB 결과를 전부 메모리로</b> — <code>findAll()</code> 이 100만 건이면 그대로 힙에 올라옵니다. 페이징·스트리밍을 쓰세요.
+    <br>③ <b>파일·스트림을 안 닫음</b> — <code>try-with-resources</code>를 쓰면 구조적으로 막힙니다.
+  </div>
+</section>
+
+
+<!-- ==================== a02 ==================== -->
+<section class="sec" id="a02">
+  <div class="sec-head rv">
+    <span class="no">ADV 02</span>
+    <h2>GC — <span class="t">쓰레기 수집</span></h2>
+    <p class="lead">자바가 메모리를 대신 정리해 주는 대신, <b>정리하는 동안 잠깐 멈춥니다(Stop-The-World)</b>. 이 멈춤을 줄이는 게 튜닝의 전부입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어떤 객체가 청소되나</h4>
+      <pre class="code" data-lang="java"><code>// GC 는 "루트에서 도달할 수 없는" 객체를 지운다
+//   루트 = 스택의 지역변수, static 필드, 실행 중인 스레드 …
+
+List&lt;byte[]&gt; cache = new ArrayList&lt;&gt;();
+
+void leak() {
+    cache.add(new byte[10_000_000]);   // cache 가 살아있는 한 절대 안 지워짐
+}
+
+void ok() {
+    byte[] tmp = new byte[10_000_000];
+    process(tmp);
+}   // 메서드 끝 -&gt; 참조가 끊김 -&gt; 다음 GC 때 회수 ✅
+
+// System.gc() 는 '요청'일 뿐이고, 오히려 Full GC 를 유발합니다.
+// 실무에서 호출할 이유가 없습니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">GC 종류 — 뭘 쓸까</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:28%">GC</th><th>특징 · 언제</th></tr>
+          <tr><td><b>G1</b> (기본값)</td><td>Java 9+ 기본. <b>대부분 그냥 이걸 쓰면 됩니다</b></td></tr>
+          <tr><td>ZGC</td><td>멈춤이 <b>1ms 미만</b>. 힙이 크고(수십 GB) 지연이 중요할 때</td></tr>
+          <tr><td>Shenandoah</td><td>ZGC 와 비슷한 목표</td></tr>
+          <tr><td>Parallel</td><td>처리량 우선. 배치 작업에 유리</td></tr>
+          <tr><td>Serial</td><td>작은 컨테이너·단일 CPU</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="bash"><code>java -XX:+UseG1GC -jar app.jar        # 기본
+java -XX:+UseZGC -XX:+ZGenerational -jar app.jar</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>GC 튜닝을 시작하기 전에</b> — 대부분의 “GC 문제”는
+        <b>코드가 객체를 너무 많이 만드는 문제</b>입니다.
+        옵션을 만지기 전에 <b>힙 덤프로 무엇이 쌓이는지</b> 먼저 보세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a03 ==================== -->
+<section class="sec" id="a03">
+  <div class="sec-head rv">
+    <span class="no">ADV 03</span>
+    <h2>equals · hashCode · <span class="t">불변 설계</span></h2>
+    <p class="lead">이 규약을 어기면 <b>Set 에 넣었는데 못 찾는</b>, 재현도 어려운 버그가 납니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규약 — 둘은 항상 같이 구현</h4>
+      <pre class="code" data-lang="java"><code>public final class Money {
+    private final String currency;
+    private final long amount;
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Money m)) return false;      // 패턴 매칭
+        return amount == m.amount &amp;&amp; currency.equals(m.currency);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(currency, amount);          // 필드 조합
+    }
+}
+
+// 규약
+//   1) a.equals(b) 가 true 면 -> hashCode() 도 반드시 같아야 한다
+//   2) hashCode 가 같다고 equals 가 true 일 필요는 없다 (해시 충돌 허용)
+//   3) equals 에 쓴 필드만 hashCode 에도 쓴다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>왜 중요한가</b> — <code>HashMap</code>·<code>HashSet</code>은
+        먼저 <b>hashCode 로 자리를 찾고</b> 그 안에서 <b>equals 로 비교</b>합니다.
+        hashCode 를 빼먹으면 같은 값이라도 <b>다른 자리에 들어가서</b> 영원히 못 찾습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">불변 객체 — 가장 값싼 안전장치</h4>
+      <pre class="code" data-lang="java"><code>// 불변 만들기 5원칙
+public final class Period {              // 1) final class — 상속 차단
+    private final LocalDate start;       // 2) 모든 필드 final + private
+    private final List&lt;String&gt; tags;
+
+    public Period(LocalDate start, List&lt;String&gt; tags) {
+        this.start = start;
+        this.tags = List.copyOf(tags);   // 3) 방어적 복사 (들어올 때)
+    }
+
+    public List&lt;String&gt; getTags() {
+        return tags;                     // 4) 이미 불변이라 그대로 OK
+    }                                    //    가변이면 복사해서 반환
+
+    public Period withStart(LocalDate s) {
+        return new Period(s, tags);      // 5) 변경은 '새 객체'로
+    }
+}
+
+// record 를 쓰면 1·2는 자동. 3만 신경 쓰면 됩니다
+public record Period(LocalDate start, List&lt;String&gt; tags) {
+    public Period {
+        tags = List.copyOf(tags);        // 압축 생성자에서 복사
+    }
+}</code></pre>
+      <p class="tx" style="font-size:13.6px;margin-bottom:0">
+        불변 객체는 <b>여러 스레드가 동시에 읽어도 안전</b>합니다.
+        동시성 문제의 상당수가 “<b>공유되는 가변 상태</b>”에서 나오므로,
+        불변으로 만들 수 있으면 락 자체가 필요 없어집니다.
+      </p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a04 ==================== -->
+<section class="sec" id="a04">
+  <div class="sec-head rv">
+    <span class="no">ADV 04</span>
+    <h2>스레드 <span class="t">기초</span></h2>
+    <p class="lead">웹 서버는 이미 스레드 위에서 돌고 있습니다. 직접 만들 일은 적어도 <b>무슨 일이 벌어지는지</b>는 알아야 합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">만들고 실행하기</h4>
+      <pre class="code" data-lang="java"><code>// 1) 가장 단순한 방법
+Thread t = new Thread(() -&gt; System.out.println("다른 스레드"));
+t.start();          // ⚠️ run() 을 직접 부르면 그냥 메서드 호출입니다
+t.join();           // 끝날 때까지 기다림
+
+// 2) 이름을 붙이면 로그·덤프에서 찾기 쉽다
+Thread t2 = new Thread(task, "order-worker-1");
+
+// 3) 데몬 스레드 — 메인이 끝나면 같이 종료
+t2.setDaemon(true);
+
+// 현재 스레드
+Thread.currentThread().getName();     // "main", "http-nio-8080-exec-1" …
+Thread.sleep(1000);                   // 1초 대기 (InterruptedException 처리 필요)
+
+// 인터럽트 — '멈춰 달라'는 신호 (강제 종료가 아님)
+t.interrupt();
+// 받는 쪽
+while (!Thread.currentThread().isInterrupted()) { ... }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스레드 상태</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:32%">상태</th><th>의미</th></tr>
+          <tr><td>NEW</td><td>만들어졌지만 start() 전</td></tr>
+          <tr><td>RUNNABLE</td><td>실행 중이거나 CPU 를 기다리는 중</td></tr>
+          <tr><td>BLOCKED</td><td><b>락을 기다리는 중</b> — 덤프에 많으면 경합 의심</td></tr>
+          <tr><td>WAITING</td><td>다른 스레드를 무기한 대기 (join, wait)</td></tr>
+          <tr><td>TIMED_WAITING</td><td>시간 제한 대기 (sleep, await(t))</td></tr>
+          <tr><td>TERMINATED</td><td>종료</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>서버가 멈춘 것 같을 때</b> — <code>jcmd &lt;pid&gt; Thread.print</code> 로 덤프를 뜨고
+        <b>BLOCKED 가 몰려 있는 지점</b>을 찾으세요.
+        같은 락을 여러 스레드가 기다리고 있으면 그게 병목입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a05 ==================== -->
+<section class="sec" id="a05">
+  <div class="sec-head rv">
+    <span class="no">ADV 05</span>
+    <h2>동기화 · 락 · <span class="t">원자성</span></h2>
+    <p class="lead">“가끔만 틀리는 버그”의 원인은 대부분 여기 있습니다. <b>여러 스레드가 같은 값을 동시에 건드릴 때</b> 무슨 일이 일어나는지 봅시다.</p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ count++ 는 원자적이지 않다</h5>
+      <pre class="code" data-lang="java"><code>class Counter {
+    private int count = 0;
+    public void inc() { count++; }     // 읽기 → +1 → 쓰기, 3단계!
+}
+
+// 스레드 1000개가 각각 1000번 증가시키면
+// 기대: 1,000,000  실제: 973,412 처럼 매번 다름 💥</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 세 가지 해법</h5>
+      <pre class="code" data-lang="java"><code>// 1) synchronized — 가장 단순
+private int count = 0;
+public synchronized void inc() { count++; }
+
+// 2) AtomicInteger — 락 없이 (CAS), 더 빠름
+private final AtomicInteger count = new AtomicInteger();
+public void inc() { count.incrementAndGet(); }
+
+// 3) LongAdder — 경합이 심할 때 최강
+private final LongAdder count = new LongAdder();
+public void inc() { count.increment(); }
+public long get() { return count.sum(); }</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">synchronized 와 락</h4>
+      <pre class="code" data-lang="java"><code>// 메서드 전체 — this 를 락으로 사용
+public synchronized void transfer() { ... }
+
+// 필요한 부분만 (권장) — 락 구간이 짧을수록 좋다
+private final Object lock = new Object();
+public void transfer() {
+    prepare();                    // 락 밖
+    synchronized (lock) {
+        balance -= amount;        // 꼭 필요한 부분만
+    }
+    notifyUser();                 // 락 밖
+}
+
+// ReentrantLock — 타임아웃·시도가 필요할 때
+private final ReentrantLock lock = new ReentrantLock();
+if (lock.tryLock(1, TimeUnit.SECONDS)) {
+    try { ... } finally { lock.unlock(); }   // finally 필수!
+} else {
+    throw new BusyException();
+}
+
+// 읽기가 압도적으로 많으면 ReadWriteLock
+private final var rw = new ReentrantReadWriteLock();
+rw.readLock().lock();     // 읽기끼리는 서로 안 막음
+rw.writeLock().lock();    // 쓰기는 전부 배타</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">volatile — 가시성만 보장</h4>
+      <pre class="code" data-lang="java"><code>// ❌ 다른 스레드에서 바꾼 값이 안 보일 수 있다 (CPU 캐시)
+private boolean running = true;
+public void stop() { running = false; }
+public void run() { while (running) { ... } }   // 영원히 안 멈출 수 있음
+
+// ✅ volatile — 항상 메인 메모리에서 읽고 쓴다
+private volatile boolean running = true;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>volatile 은 원자성을 보장하지 않습니다.</b>
+        <code>volatile int count; count++;</code> 는 여전히 깨집니다.
+        <br>· <b>플래그(true/false)</b> → volatile
+        <br>· <b>증감·누적</b> → Atomic 계열
+        <br>· <b>여러 값을 함께</b> → synchronized / Lock
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <b>데드락 — 서로가 서로를 기다림</b><br>
+    스레드 A가 락1을 쥐고 락2를 기다리고, B가 락2를 쥐고 락1을 기다리면 둘 다 영원히 멈춥니다.
+    <b>예방법은 하나</b> — <b>락을 항상 같은 순서로 잡기</b>(예: ID 가 작은 계좌부터).
+    그리고 가능하면 <code>tryLock(타임아웃)</code>을 써서 <b>영원히 기다리지 않게</b> 하세요.
+  </div>
+</section>
+
+
+<!-- ==================== a06 ==================== -->
+<section class="sec" id="a06">
+  <div class="sec-head rv">
+    <span class="no">ADV 06</span>
+    <h2><span class="t">java.util.concurrent</span> — 직접 만들지 마세요</h2>
+    <p class="lead">스레드를 손으로 만들고 관리하는 코드는 대부분 이미 표준 라이브러리에 더 잘 만들어져 있습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ExecutorService — 스레드 풀</h4>
+      <pre class="code" data-lang="java"><code>// 고정 크기 풀
+try (var pool = Executors.newFixedThreadPool(10)) {   // Java 19+ AutoCloseable
+    Future&lt;Integer&gt; f = pool.submit(() -&gt; compute());
+    Integer result = f.get();          // 결과를 기다림 (블로킹)
+}   // 자동으로 shutdown + 대기
+
+// 예전 방식 (여전히 많이 봅니다)
+ExecutorService pool = Executors.newFixedThreadPool(10);
+try {
+    pool.submit(task);
+} finally {
+    pool.shutdown();                   // 새 작업 거부, 진행 중인 건 마침
+    pool.awaitTermination(30, TimeUnit.SECONDS);
+    pool.shutdownNow();                // 강제 종료
+}
+
+// 여러 작업을 한 번에
+List&lt;Callable&lt;String&gt;&gt; tasks = List.of(t1, t2, t3);
+List&lt;Future&lt;String&gt;&gt; futures = pool.invokeAll(tasks);   // 전부 끝날 때까지
+String first = pool.invokeAny(tasks);                    // 가장 먼저 끝난 하나
+
+// 주기 실행
+var sched = Executors.newScheduledThreadPool(2);
+sched.scheduleAtFixedRate(job, 0, 10, TimeUnit.SECONDS);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동시성 컬렉션</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:44%">클래스</th><th>용도</th></tr>
+          <tr><td>ConcurrentHashMap</td><td><b>스레드 안전한 Map.</b> HashMap 대신</td></tr>
+          <tr><td>CopyOnWriteArrayList</td><td>읽기 위주 · 쓰기가 드문 목록(리스너 등)</td></tr>
+          <tr><td>BlockingQueue</td><td>생산자-소비자 큐. 비면 대기</td></tr>
+          <tr><td>ConcurrentLinkedQueue</td><td>락 없는 큐</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>var map = new ConcurrentHashMap&lt;String, Integer&gt;();
+map.merge("key", 1, Integer::sum);        // 원자적 증가 ✅
+map.computeIfAbsent("k", k -&gt; expensive());  // 한 번만 계산
+
+// 생산자-소비자
+BlockingQueue&lt;Order&gt; queue = new LinkedBlockingQueue&lt;&gt;(1000);
+queue.put(order);        // 가득 차면 대기
+Order o = queue.take();  // 비어 있으면 대기
+
+// 동기화 보조 도구
+var latch = new CountDownLatch(3);    // 3개가 끝날 때까지 대기
+latch.countDown();  latch.await();
+var sem = new Semaphore(5);           // 동시 5개만 허용
+sem.acquire();  try { ... } finally { sem.release(); }</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>Collections.synchronizedMap()</code>은 쓰지 마세요</b> —
+        맵 전체에 락을 걸어 사실상 직렬화됩니다.
+        <code>ConcurrentHashMap</code>은 <b>구역별로만</b> 잠가서 훨씬 빠릅니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a07 ==================== -->
+<section class="sec" id="a07">
+  <div class="sec-head rv">
+    <span class="no">ADV 07</span>
+    <h2><span class="t">CompletableFuture</span> — 비동기 조합</h2>
+    <p class="lead">“여러 API 를 동시에 호출해서 합치기” 같은 작업을 콜백 지옥 없이 쓰는 방법입니다.</p>
+  </div>
+
+  <div class="card rv">
+    <pre class="code" data-lang="java"><code>// 1) 비동기 실행
+CompletableFuture&lt;User&gt; userF =
+        CompletableFuture.supplyAsync(() -&gt; userClient.find(id), pool);
+
+// 2) 결과를 변환 (스레드 유지)
+CompletableFuture&lt;String&gt; nameF = userF.thenApply(User::getName);
+
+// 3) 또 다른 비동기 호출을 이어붙이기 (평탄화)
+CompletableFuture&lt;Profile&gt; profileF =
+        userF.thenCompose(u -&gt; CompletableFuture.supplyAsync(() -&gt; profileClient.find(u.getId())));
+
+// 4) 둘을 동시에 실행하고 합치기 ★ 가장 많이 쓰는 패턴
+CompletableFuture&lt;Order&gt; orderF = CompletableFuture.supplyAsync(() -&gt; orderClient.find(id), pool);
+CompletableFuture&lt;OrderView&gt; viewF =
+        userF.thenCombine(orderF, (user, order) -&gt; new OrderView(user, order));
+
+// 5) 전부 끝날 때까지
+CompletableFuture.allOf(f1, f2, f3).join();
+List&lt;String&gt; results = Stream.of(f1, f2, f3).map(CompletableFuture::join).toList();
+
+// 6) 가장 먼저 끝난 하나
+CompletableFuture.anyOf(f1, f2).join();
+
+// 7) 예외 처리
+userF.exceptionally(e -&gt; {                       // 실패하면 대체값
+        log.error("조회 실패", e);
+        return User.unknown();
+     })
+     .orTimeout(3, TimeUnit.SECONDS)             // 타임아웃 (Java 9+)
+     .whenComplete((result, err) -&gt; {            // 성공·실패 모두
+        if (err != null) log.error("실패", err);
+     });</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>기본 풀을 쓰지 마세요</b> — <code>supplyAsync(task)</code>에 풀을 안 주면
+      <b>공용 ForkJoinPool</b>을 씁니다. 여기서 DB·HTTP 같은 <b>블로킹 작업</b>을 하면
+      애플리케이션 전체의 병렬 스트림까지 함께 굶습니다.
+      <b>반드시 전용 풀을 두 번째 인자로 넘기세요.</b>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a08 ==================== -->
+<section class="sec" id="a08">
+  <div class="sec-head rv">
+    <span class="no">ADV 08</span>
+    <h2><span class="t">가상 스레드</span> — 판이 바뀐 지점 <span class="ver new">Java 21+</span></h2>
+    <p class="lead">
+      “<b>동시 접속 1만 명</b>을 처리하려고 WebFlux 로 갈아탈까” 고민했다면,
+      먼저 이걸 보세요. <b>기존 코드를 거의 그대로 두고</b> 처리량을 올릴 수 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 문제였나</h4>
+      <p class="tx">
+        기존 <b>플랫폼 스레드</b>는 OS 스레드와 1:1입니다.
+        하나에 <b>스택 메모리 약 1MB</b>가 필요해서 수천 개가 한계이고,
+        <code>DB 조회</code>·<code>API 호출</code> 같은 <b>기다리는 시간</b> 동안
+        그 비싼 스레드가 <b>아무것도 안 하고 묶여</b> 있습니다.
+      </p>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:36%"></th><th>플랫폼 스레드</th><th>가상 스레드</th></tr>
+          <tr><td>1개 비용</td><td>약 1MB</td><td><b>약 1KB</b></td></tr>
+          <tr><td>동시 개수</td><td>수천</td><td><b>수백만</b></td></tr>
+          <tr><td>생성 비용</td><td>비쌈 (풀 필요)</td><td><b>거의 공짜</b></td></tr>
+          <tr><td>블로킹 시</td><td>OS 스레드가 묶임</td><td><b>바로 반납, 다른 일 처리</b></td></tr>
+          <tr><td>코드 스타일</td><td>동기 (읽기 쉬움)</td><td><b>동기 (그대로)</b></td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쓰는 법 — 놀랄 만큼 단순합니다</h4>
+      <pre class="code" data-lang="java"><code>// 1) 하나 띄우기
+Thread.startVirtualThread(() -&gt; {
+    var result = restClient.get("/api/orders");   // 블로킹해도 괜찮다
+    log.info("{}", result);
+});
+
+// 2) 실행자 — 작업마다 새 가상 스레드 (풀이 필요 없음!)
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    List&lt;Future&lt;Order&gt;&gt; futures = ids.stream()
+            .map(id -&gt; executor.submit(() -&gt; orderClient.find(id)))
+            .toList();
+    for (var f : futures) process(f.get());
+}   // 자동으로 전부 대기 후 종료
+
+// 3) 10,000개 동시 실행 — 예전엔 상상도 못 했던 코드
+try (var ex = Executors.newVirtualThreadPerTaskExecutor()) {
+    IntStream.range(0, 10_000).forEach(i -&gt;
+        ex.submit(() -&gt; {
+            Thread.sleep(1000);      // 1초 대기하는 작업 1만 개
+            return i;
+        }));
+}   // 전체 소요 시간: 약 1초 (플랫폼 스레드였다면 메모리 부족)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">스프링 부트에서 켜기 — 설정 한 줄</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <pre class="code" data-lang="yaml"><code># application.yml  (Spring Boot 3.2+)
+spring:
+  threads:
+    virtual:
+      enabled: true</code></pre>
+      <p class="tx" style="font-size:13.8px">
+        이 한 줄이면 <b>톰캣의 요청 처리 스레드</b>, <code>@Async</code>, 스케줄러가
+        전부 가상 스레드로 바뀝니다. <b>컨트롤러·서비스 코드는 한 글자도 안 고칩니다.</b>
+      </p>
+      <pre class="code" data-lang="java"><code>// 직접 지정하고 싶다면
+@Bean
+public AsyncTaskExecutor applicationTaskExecutor() {
+    return new TaskExecutorAdapter(
+            Executors.newVirtualThreadPerTaskExecutor());
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">⚠️ 켜기 전에 확인할 것</h4>
+      <ul class="tx">
+        <li><b>synchronized 안에서 블로킹하면 고정(pinning)</b>됩니다 —
+            가상 스레드가 캐리어 스레드를 반납하지 못해 이점이 사라집니다.
+            <b>ReentrantLock 으로 바꾸세요.</b>
+            <span class="ver new">Java 24+ 에서 대부분 해소</span></li>
+        <li><b>ThreadLocal 을 캐시로 쓰면 안 됩니다</b> —
+            스레드가 수백만 개가 되면 메모리를 그만큼 먹습니다.
+            <b>ScopedValue</b>(다음 섹션)로 대체하세요.</li>
+        <li><b>DB 커넥션 풀이 새 병목</b>이 됩니다 —
+            스레드는 100만 개여도 커넥션은 20개뿐입니다.
+            <b>풀 크기를 함께 조정</b>하세요.</li>
+        <li><b>CPU 집약 작업에는 이점이 없습니다</b> —
+            가상 스레드는 <b>기다리는 작업(I/O)</b>에 효과가 있습니다.</li>
+      </ul>
+      <pre class="code" data-lang="bash"><code># 고정(pinning) 발생 지점 찾기
+java -Djdk.tracePinnedThreads=full -jar app.jar</code></pre>
+    </div>
+  </div>
+
+  <div class="note tip">
+    <b>WebFlux 대신 가상 스레드를 쓸 수 있을까?</b> — 상당수의 경우 <b>그렇습니다.</b>
+    “동시 요청은 많지만 로직은 단순한 I/O 대기”라면
+    <b>익숙한 동기 코드 + 가상 스레드</b>가 WebFlux 보다 훨씬 유지보수하기 쉽습니다.
+    WebFlux 가 여전히 유리한 경우는 <b>스트리밍·백프레셔가 필요할 때</b>입니다 —
+    🌊 WebFlux 탭 <b>01번</b>에서 판단 기준을 정리했습니다.
+  </div>
+</section>
+
+
+<!-- ==================== a09 ==================== -->
+<section class="sec" id="a09">
+  <div class="sec-head rv">
+    <span class="no">ADV 09</span>
+    <h2>구조적 동시성 · <span class="t">스코프 값</span> <span class="ver new">Java 21~25</span></h2>
+    <p class="lead">여러 비동기 작업을 <b>하나의 단위</b>로 묶어 “다 성공하거나 다 취소되거나”를 보장하는 방법입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조적 동시성</h4>
+      <pre class="code" data-lang="java"><code>// 문제: 하나가 실패해도 나머지는 계속 돌아 자원을 낭비한다
+// 해결: 스코프로 묶어 생명주기를 함께 관리
+
+try (var scope = StructuredTaskScope.open()) {
+    // 두 작업을 동시에 시작
+    var userTask  = scope.fork(() -&gt; userClient.find(id));
+    var orderTask = scope.fork(() -&gt; orderClient.findByUser(id));
+
+    scope.join();                     // 둘 다 끝날 때까지 대기
+                                      // 하나가 실패하면 나머지는 자동 취소 ✅
+    return new Dashboard(userTask.get(), orderTask.get());
+}   // 스코프를 벗어나면 남은 작업은 반드시 정리된다
+
+// 가장 먼저 성공한 것만 쓰기 (여러 공급자 중 빠른 것)
+try (var scope = StructuredTaskScope.open(
+        StructuredTaskScope.Joiner.&lt;String&gt;anySuccessfulResultOrThrow())) {
+    scope.fork(() -&gt; providerA.fetch());
+    scope.fork(() -&gt; providerB.fetch());
+    return scope.join();
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>CompletableFuture 와 뭐가 다른가</b> —
+        CompletableFuture 는 작업들이 <b>서로 남남</b>이라 하나가 실패해도
+        나머지를 손으로 취소해야 합니다.
+        구조적 동시성은 <b>try 블록처럼</b> 범위를 벗어나면 <b>반드시 정리</b>됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ScopedValue — ThreadLocal 의 후계</h4>
+      <pre class="code" data-lang="java"><code>// ThreadLocal 의 문제: 언제 지워야 할지 모르고, 가상 스레드에선 메모리 폭증
+private static final ThreadLocal&lt;User&gt; CURRENT = new ThreadLocal&lt;&gt;();
+CURRENT.set(user);
+try { ... } finally { CURRENT.remove(); }   // 빼먹으면 누수
+
+// ScopedValue — 범위가 끝나면 자동으로 사라진다 (불변)
+private static final ScopedValue&lt;User&gt; CURRENT_USER = ScopedValue.newInstance();
+
+ScopedValue.where(CURRENT_USER, loginUser)
+           .run(() -&gt; {
+               service.process();          // 이 안에서는 어디서든 읽을 수 있다
+           });                             // 끝나면 자동 해제 ✅
+
+// 읽는 쪽
+void deepInside() {
+    User u = CURRENT_USER.get();
+}</code></pre>
+      <p class="tx" style="font-size:13.6px;margin-bottom:0">
+        요청 단위의 <b>로그인 사용자·추적 ID·테넌트 정보</b>를 넘길 때 씁니다.
+        메서드 파라미터로 계속 넘기지 않아도 되면서, ThreadLocal 처럼 새지 않습니다.
+      </p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a10 ==================== -->
+<section class="sec" id="a10">
+  <div class="sec-head rv">
+    <span class="no">ADV 10</span>
+    <h2>성능 튜닝 · <span class="t">프로파일링</span></h2>
+    <p class="lead"><b>측정 없는 최적화는 대부분 헛수고</b>입니다. 어디가 느린지 먼저 찾는 도구부터 익히세요.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">측정 도구</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:34%">도구</th><th>언제</th></tr>
+          <tr><td><b>JFR</b> (Flight Recorder)</td><td>운영 중 상시 기록. 부하 1% 미만. <b>1순위</b></td></tr>
+          <tr><td>async-profiler</td><td>CPU·할당 병목을 불꽃 그래프로</td></tr>
+          <tr><td>VisualVM / JMC</td><td>GUI 로 힙·스레드 관찰</td></tr>
+          <tr><td>jcmd · jstack</td><td>서버에서 즉시 덤프</td></tr>
+          <tr><td>JMH</td><td>마이크로 벤치마크 (정확한 측정)</td></tr>
+          <tr><td>Actuator + Micrometer</td><td>운영 지표 상시 수집</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="bash"><code># JFR — 60초 기록
+jcmd &lt;pid&gt; JFR.start duration=60s filename=rec.jfr
+# 시작할 때부터 기록
+java -XX:StartFlightRecording=duration=60s,filename=r.jfr -jar app.jar</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">체감이 큰 순서대로</h4>
+      <ul class="tx">
+        <li><b>① DB 쿼리</b> — 웹 애플리케이션 성능 문제의 8할.
+            N+1, 인덱스 누락, 불필요한 <code>findAll()</code></li>
+        <li><b>② 외부 API 호출</b> — 순차 호출을 병렬로,
+            타임아웃·커넥션 풀 설정</li>
+        <li><b>③ 객체 생성량</b> — 반복문 안의 문자열 <code>+</code>,
+            불필요한 DTO 변환</li>
+        <li><b>④ 잘못된 자료구조</b> — 반복문 안의 <code>list.contains()</code></li>
+        <li><b>⑤ 락 경합</b> — 스레드 덤프에 BLOCKED 가 몰려 있는지</li>
+        <li>⑥ GC 옵션 — <b>여기까지 왔으면 이미 앞의 다섯을 다 본 뒤</b></li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>"코드 최적화"보다 먼저</b> — 캐시 한 줄(<code>@Cacheable</code>)이나
+        인덱스 하나가 코드 리팩터링 100줄보다 효과가 큰 경우가 대부분입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a11 ==================== -->
+<section class="sec" id="a11">
+  <div class="sec-head rv">
+    <span class="no">ADV 11</span>
+    <h2>리플렉션 · 애너테이션 · <span class="t">프록시</span></h2>
+    <p class="lead">스프링이 “마법처럼” 동작하는 원리가 여기 있습니다. 직접 쓸 일은 드물어도 <b>알면 스프링이 안 무섭습니다.</b></p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">리플렉션 — 실행 중에 클래스를 들여다보기</h4>
+      <pre class="code" data-lang="java"><code>Class&lt;?&gt; clazz = order.getClass();
+clazz.getSimpleName();                      // "Order"
+clazz.getDeclaredFields();                  // 필드 목록
+clazz.getDeclaredMethods();                 // 메서드 목록
+
+// 애너테이션이 붙었는지 확인
+if (clazz.isAnnotationPresent(Service.class)) { ... }
+
+// 값 읽기·쓰기 (private 도 가능)
+Field f = clazz.getDeclaredField("amount");
+f.setAccessible(true);
+int amount = (int) f.get(order);
+
+// 메서드 호출
+Method m = clazz.getMethod("pay");
+m.invoke(order);
+
+// 객체 생성
+Object o = clazz.getDeclaredConstructor().newInstance();</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>느리고 위험합니다.</b> 컴파일러의 타입 검사를 우회하므로
+        오타가 런타임 예외로 나옵니다.
+        <b>프레임워크를 만들 때</b>가 아니면 직접 쓸 일이 거의 없습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 만드는 애너테이션</h4>
+      <pre class="code" data-lang="java"><code>@Target(ElementType.METHOD)          // 어디에 붙일 수 있나
+@Retention(RetentionPolicy.RUNTIME)  // 언제까지 살아있나 (리플렉션엔 RUNTIME 필수)
+public @interface LogExecutionTime {
+    String value() default "";
+}
+
+// 사용
+@LogExecutionTime("주문 처리")
+public void process(Order o) { ... }
+
+// 읽는 쪽 (보통은 AOP 가 대신 해 줍니다)
+Method m = ...;
+if (m.isAnnotationPresent(LogExecutionTime.class)) {
+    String label = m.getAnnotation(LogExecutionTime.class).value();
+}</code></pre>
+
+      <h4 class="mini">프록시 — 스프링 AOP 의 정체</h4>
+      <pre class="code" data-lang="java"><code>// 원본 객체를 감싼 '대역'을 만들어 앞뒤에 코드를 끼운다
+Object proxy = Proxy.newProxyInstance(
+    loader, new Class[]{Notifier.class},
+    (p, method, args) -&gt; {
+        long t = System.nanoTime();
+        Object result = method.invoke(target, args);   // 원본 호출
+        log.info("{} took {}ms", method.getName(),
+                 (System.nanoTime() - t) / 1_000_000);
+        return result;
+    });</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이게 <code>@Transactional</code>이 동작하는 방식</b>입니다.
+        스프링이 프록시를 만들어 메서드 앞에서 트랜잭션을 시작하고 뒤에서 커밋합니다.
+        그래서 <b>같은 클래스 안에서 자기 메서드를 호출하면 프록시를 안 거쳐서 안 먹습니다</b> —
+        🗄️ 데이터 탭 <b>14번</b>에서 자세히 다룹니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a12 ==================== -->
+<section class="sec" id="a12">
+  <div class="sec-head rv">
+    <span class="no">ADV 12</span>
+    <h2>에러 메시지 사전 — <span class="t">이게 뜨면 여기를</span></h2>
+    <p class="lead">자바에서 만나는 예외는 놀랍도록 정해져 있습니다. <b>스택 트레이스는 아래에서 위로</b> 읽으세요 — 맨 아래가 근본 원인입니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:34%">메시지</th><th style="width:30%">원인</th><th>해결</th></tr>
+      <tr><td>NullPointerException<br><small>Cannot invoke "X.y()" because "z" is null</small></td>
+          <td>null 인 값에 뭔가를 호출<br>(Java 14+ 는 <b>어느 변수인지</b> 알려 줌)</td>
+          <td>메시지에 나온 변수를 추적. <code>Optional</code>·<code>Objects.requireNonNull</code></td></tr>
+      <tr><td>ClassCastException</td><td>잘못된 형변환</td><td><code>instanceof</code> 패턴으로 먼저 확인</td></tr>
+      <tr><td>ConcurrentModificationException</td><td>순회 중에 컬렉션을 수정</td><td><code>removeIf()</code> 또는 <code>Iterator.remove()</code></td></tr>
+      <tr><td>IndexOutOfBoundsException</td><td>없는 인덱스 접근</td><td>인덱스는 <code>0 ~ size()-1</code></td></tr>
+      <tr><td>NumberFormatException</td><td>숫자로 못 바꾸는 문자열</td><td><code>trim()</code> 후 변환, 또는 try/catch</td></tr>
+      <tr><td>StackOverflowError</td><td>재귀가 안 끝남</td><td>종료 조건 확인. 상호 참조 <code>toString()</code>도 원인</td></tr>
+      <tr><td>OutOfMemoryError: Java heap space</td><td>힙 부족</td><td>힙 덤프 분석. <code>findAll()</code>·static 컬렉션 의심</td></tr>
+      <tr><td>OutOfMemoryError: Metaspace</td><td>클래스가 계속 로딩됨</td><td>프록시·동적 클래스 생성 과다. 핫 리로드 반복</td></tr>
+      <tr><td>NoSuchMethodError<br>NoClassDefFoundError</td><td>컴파일할 때와 실행할 때 <b>라이브러리 버전이 다름</b></td>
+          <td><code>./gradlew dependencies</code>로 충돌 확인 후 버전 고정</td></tr>
+      <tr><td>UnsupportedOperationException</td><td><code>List.of()</code> 같은 불변 컬렉션 수정</td><td><code>new ArrayList&lt;&gt;(list)</code>로 복사</td></tr>
+      <tr><td>IllegalStateException</td><td>지금 상태에서 하면 안 되는 호출</td><td>메시지를 읽으면 대개 바로 나옵니다</td></tr>
+      <tr><td>BeanCurrentlyInCreationException</td><td>스프링 빈 순환 참조</td><td>설계 분리, 또는 <code>@Lazy</code> (임시방편)</td></tr>
+      <tr><td>LazyInitializationException</td><td>영속성 컨텍스트 밖에서 지연 로딩</td><td>페치 조인 · DTO 변환 — 🗄️ 08번 참고</td></tr>
+      <tr><td>포트 8080 already in use</td><td>이미 떠 있는 프로세스</td><td><code>lsof -i:8080</code> / <code>netstat -ano | findstr 8080</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card rv d1">
+    <h4 class="mini" style="margin-top:0">스택 트레이스 읽는 법</h4>
+    <pre class="code" data-lang="text"><code>java.lang.NullPointerException: Cannot invoke "Order.getAmount()"
+        because "order" is null                         ← ② 무엇이 문제인지
+    at com.myapp.service.OrderService.calc(OrderService.java:42)   ← ① 내 코드! 여기부터 보기
+    at com.myapp.web.OrderController.get(OrderController.java:28)  ← 호출한 곳
+    at org.springframework.web...                        ← 프레임워크 (읽을 필요 없음)
+    ... 47 more
+Caused by: java.sql.SQLException: connection timed out   ← ③ 진짜 원인은 여기!
+    at com.zaxxer.hikari...</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>순서</b> — ① <b>내 패키지명이 처음 나오는 줄</b>을 찾고
+      ② 맨 윗줄의 <b>예외 종류와 메시지</b>를 읽고
+      ③ <code>Caused by:</code> 가 있으면 <b>가장 마지막 것</b>이 근본 원인입니다.
+      프레임워크 내부 스택은 대부분 볼 필요가 없습니다.
+    </div>
+  </div>
+</section>
+
+</div><!-- /pane-adv -->
+

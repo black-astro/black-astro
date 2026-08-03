@@ -1,0 +1,879 @@
+
+<!-- ============================================================
+     SECURITY PANE
+     ============================================================ -->
+<div class="pane" id="pane-sec">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> SPRING SECURITY 6 · JWT · OAUTH2</div>
+  <h1>막는 것보다<br>흐름을 아는 게<br>먼저다</h1>
+  <p class="tx">
+    스프링 시큐리티가 어렵게 느껴지는 이유는 <b>필터 체인이 안 보이기 때문</b>입니다.
+    “<b>요청이 어느 필터를 지나 어디서 막히는지</b>”만 잡으면
+    설정은 그냥 몇 줄짜리 코드가 됩니다.
+  </p>
+  <div class="stats">
+    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>15+</b><span>기본 필터</span></div>
+    <div><b>401</b><span>인증 실패</span></div>
+    <div><b>403</b><span>권한 없음</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== s01 ==================== -->
+<section class="sec" id="s01">
+  <div class="sec-head rv">
+    <span class="no">SEC 01</span>
+    <h2>전체 그림 — <span class="t">필터 체인</span></h2>
+    <p class="lead">스프링 시큐리티는 결국 <b>서블릿 필터 묶음</b>입니다. 요청은 컨트롤러에 닿기 <b>전에</b> 이 체인을 통과합니다.</p>
+  </div>
+
+  <div class="layer rv">
+    <div class="lrow l-web"><span class="tagn">요청</span>
+      <div><b>HTTP 요청 도착</b><span>Authorization 헤더나 세션 쿠키를 달고 옵니다.</span></div></div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-web"><span class="tagn">1</span>
+      <div><b>SecurityContextPersistenceFilter</b><span>세션에 저장된 인증 정보를 꺼내 SecurityContext 에 복원합니다.</span></div></div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-svc"><span class="tagn">2</span>
+      <div><b>인증 필터</b> (UsernamePassword · JWT · OAuth2)<span>자격 증명을 검사해 <code>Authentication</code> 객체를 만듭니다. <b>커스텀 JWT 필터가 들어가는 자리</b>입니다.</span></div></div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-repo"><span class="tagn">3</span>
+      <div><b>ExceptionTranslationFilter</b><span>뒤에서 터진 인증·인가 예외를 잡아 401/403 으로 바꿉니다.</span></div></div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-db"><span class="tagn">4</span>
+      <div><b>AuthorizationFilter</b><span>“이 사용자가 이 URL 에 접근해도 되는가”를 최종 판단합니다.</span></div></div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-svc"><span class="tagn">5</span>
+      <div><b>DispatcherServlet → Controller</b><span>여기까지 왔다면 인증·인가를 통과한 것입니다.</span></div></div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">핵심 객체 4개</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:40%">객체</th><th>역할</th></tr>
+          <tr><td>SecurityContextHolder</td><td>현재 스레드의 인증 정보 보관소 (ThreadLocal)</td></tr>
+          <tr><td>Authentication</td><td>“누가” — principal · credentials · authorities</td></tr>
+          <tr><td>UserDetails</td><td>사용자 정보 (아이디·비밀번호·권한)</td></tr>
+          <tr><td>GrantedAuthority</td><td>권한 하나 (<code>ROLE_ADMIN</code> 등)</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// 어디서든 현재 사용자 꺼내기
+Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+String username = auth.getName();
+boolean isAdmin = auth.getAuthorities().stream()
+        .anyMatch(a -&gt; a.getAuthority().equals("ROLE_ADMIN"));
+
+// 컨트롤러에서는 파라미터로 받는 게 깔끔합니다
+@GetMapping("/me")
+public UserRes me(@AuthenticationPrincipal CustomUserDetails user) {
+    return UserRes.from(user.getUser());
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">401 vs 403 — 항상 헷갈리는 것</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:26%">코드</th><th>의미</th></tr>
+          <tr><td><b>401</b> Unauthorized</td><td>“<b>당신이 누군지 모릅니다</b>” — 인증 실패<br>토큰 없음·만료·잘못됨</td></tr>
+          <tr><td><b>403</b> Forbidden</td><td>“<b>누군지는 알지만 권한이 없습니다</b>” — 인가 실패<br>일반 사용자가 관리자 API 호출</td></tr>
+        </table>
+      </div>
+      <div class="dep">
+        <b>build.gradle.kts</b> —
+        <code>implementation("org.springframework.boot:spring-boot-starter-security")</code>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        의존성을 넣는 순간 <b>모든 URL 이 잠깁니다.</b>
+        기본 로그인 페이지가 뜨고, 콘솔에 임시 비밀번호가 출력됩니다.
+        다음 섹션의 설정을 넣어야 정상 동작합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== s02 ==================== -->
+<section class="sec" id="s02">
+  <div class="sec-head rv">
+    <span class="no">SEC 02</span>
+    <h2>설정 <span class="t">기본형</span></h2>
+    <p class="lead">Spring Security 6 부터는 <b>람다 DSL</b>만 씁니다. 예전 <code>WebSecurityConfigurerAdapter</code> 는 사라졌습니다.</p>
+  </div>
+
+  <div class="card rv">
+    <pre class="code" data-lang="java"><code>@Configuration
+@EnableWebSecurity
+@RequiredArgsConstructor
+public class SecurityConfig {
+
+    private final JwtAuthenticationFilter jwtFilter;
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        return http
+            // REST API 는 세션을 안 쓰므로 CSRF 불필요
+            .csrf(AbstractHttpConfigurer::disable)
+            .cors(cors -&gt; cors.configurationSource(corsConfigurationSource()))
+
+            // 세션을 만들지 않는다 (JWT 방식)
+            .sessionManagement(s -&gt; s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+            // URL 별 권한 — 위에서부터 순서대로 매칭됩니다 ★
+            .authorizeHttpRequests(auth -&gt; auth
+                .requestMatchers("/api/auth/**", "/api/public/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
+                .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/orders/**").hasAnyRole("USER", "ADMIN")
+                .anyRequest().authenticated()          // 나머지는 인증 필요
+            )
+
+            // JWT 필터를 인증 필터 앞에 끼운다
+            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+
+            // 인증·인가 실패 시 JSON 으로 응답 (기본은 로그인 페이지로 리다이렉트)
+            .exceptionHandling(e -&gt; e
+                .authenticationEntryPoint(new JwtAuthenticationEntryPoint())  // 401
+                .accessDeniedHandler(new JwtAccessDeniedHandler())            // 403
+            )
+
+            .formLogin(AbstractHttpConfigurer::disable)
+            .httpBasic(AbstractHttpConfigurer::disable)
+            .build();
+    }
+
+    // 정적 리소스는 시큐리티를 아예 태우지 않는다 (성능)
+    @Bean
+    public WebSecurityCustomizer webSecurityCustomizer() {
+        return web -&gt; web.ignoring().requestMatchers("/css/**", "/js/**", "/images/**");
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return PasswordEncoderFactories.createDelegatingPasswordEncoder();  // bcrypt
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(
+            AuthenticationConfiguration config) throws Exception {
+        return config.getAuthenticationManager();
+    }
+}</code></pre>
+  </div>
+
+  <div class="note warn rv">
+    <b><code>requestMatchers</code> 는 순서가 중요합니다.</b>
+    위에서부터 처음 매칭되는 규칙이 적용되므로,
+    <code>.anyRequest()</code> 를 위에 두면 <b>아래 규칙이 전부 무시</b>됩니다.
+    <b>구체적인 것 → 넓은 것</b> 순서로 쓰세요.
+  </div>
+</section>
+
+
+<!-- ==================== s03 ==================== -->
+<section class="sec" id="s03">
+  <div class="sec-head rv">
+    <span class="no">SEC 03</span>
+    <h2>폼 로그인 · <span class="t">세션</span></h2>
+    <p class="lead">서버가 화면까지 그리는 전통적인 웹이라면 이 방식이 여전히 가장 단순하고 안전합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="java"><code>@Bean
+public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    return http
+        .authorizeHttpRequests(a -&gt; a
+            .requestMatchers("/", "/login", "/signup").permitAll()
+            .anyRequest().authenticated())
+
+        .formLogin(form -&gt; form
+            .loginPage("/login")                    // 내 로그인 화면
+            .loginProcessingUrl("/login")           // 폼 action (필터가 가로챔)
+            .usernameParameter("email")             // input name
+            .passwordParameter("password")
+            .defaultSuccessUrl("/", true)
+            .failureUrl("/login?error")
+        )
+
+        .logout(out -&gt; out
+            .logoutUrl("/logout")
+            .logoutSuccessUrl("/login?logout")
+            .invalidateHttpSession(true)
+            .deleteCookies("JSESSIONID")
+        )
+
+        .rememberMe(r -&gt; r
+            .key("고유한-비밀-키")
+            .tokenValiditySeconds(60 * 60 * 24 * 14))   // 2주
+
+        .sessionManagement(s -&gt; s
+            .sessionFixation().changeSessionId()    // 로그인 시 세션 ID 교체 ★
+            .maximumSessions(1)                     // 동시 접속 1개
+            .maxSessionsPreventsLogin(false))       // 새 로그인이 이전 것을 밀어냄
+        .build();
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세션 vs 토큰 — 무엇을 쓸까</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:22%"></th><th>세션</th><th>JWT</th></tr>
+          <tr><td>저장 위치</td><td>서버</td><td>클라이언트</td></tr>
+          <tr><td>서버 확장</td><td>공유 저장소 필요<br>(Redis)</td><td><b>자유로움</b></td></tr>
+          <tr><td>즉시 무효화</td><td><b>가능</b></td><td>어려움 (블랙리스트 필요)</td></tr>
+          <tr><td>보안</td><td><b>비교적 안전</b></td><td>탈취되면 만료까지 유효</td></tr>
+          <tr><td>적합</td><td>서버 렌더링 웹</td><td>SPA · 모바일 · MSA</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="yaml"><code># 세션을 Redis 에 저장하면 서버를 여러 대로 확장할 수 있습니다
+# implementation("org.springframework.session:spring-session-data-redis")
+spring:
+  session:
+    store-type: redis
+    timeout: 30m
+  data:
+    redis:
+      host: localhost</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“요즘은 무조건 JWT”가 아닙니다.</b>
+        서버가 화면을 렌더링하는 서비스라면 <b>세션 + Redis</b> 가
+        구현도 쉽고 <b>강제 로그아웃</b>이 되기 때문에 더 나은 선택인 경우가 많습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== s04 ==================== -->
+<section class="sec" id="s04">
+  <div class="sec-head rv">
+    <span class="no">SEC 04</span>
+    <h2>사용자 · <span class="t">비밀번호</span></h2>
+    <p class="lead">인증의 실체는 “<b>DB 에서 사용자를 찾아 비밀번호를 비교하는 것</b>”입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">UserDetailsService 구현</h4>
+      <pre class="code" data-lang="java"><code>@Service
+@RequiredArgsConstructor
+public class CustomUserDetailsService implements UserDetailsService {
+
+    private final UserRepository userRepository;
+
+    @Override
+    @Transactional(readOnly = true)
+    public UserDetails loadUserByUsername(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -&gt; new UsernameNotFoundException("사용자 없음"));
+        return new CustomUserDetails(user);
+    }
+}
+
+@RequiredArgsConstructor
+public class CustomUserDetails implements UserDetails {
+
+    @Getter private final User user;
+
+    @Override
+    public Collection&lt;? extends GrantedAuthority&gt; getAuthorities() {
+        return user.getRoles().stream()
+                .map(r -&gt; new SimpleGrantedAuthority("ROLE_" + r.name()))  // 접두사 ★
+                .toList();
+    }
+
+    @Override public String getPassword() { return user.getPassword(); }
+    @Override public String getUsername() { return user.getEmail(); }
+    @Override public boolean isEnabled() { return user.isActive(); }
+    @Override public boolean isAccountNonLocked() { return !user.isLocked(); }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>ROLE_</code> 접두사 규칙</b> —
+        <code>hasRole("ADMIN")</code> 은 내부적으로 <code>ROLE_ADMIN</code> 을 찾습니다.
+        권한을 만들 때 <b>접두사를 붙여 저장</b>하고,
+        <code>hasAuthority()</code> 를 쓸 때는 <b>전체 문자열</b>을 씁니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비밀번호 — 절대 평문 저장 금지</h4>
+      <pre class="code" data-lang="java"><code>@Bean
+public PasswordEncoder passwordEncoder() {
+    // {bcrypt}$2a$10$... 형태로 저장 — 나중에 알고리즘 교체가 가능합니다
+    return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+}
+
+// 회원가입
+@Transactional
+public void signup(SignupReq req) {
+    if (userRepository.existsByEmail(req.email())) {
+        throw new DuplicateEmailException(req.email());
+    }
+    User user = User.create(
+            req.email(),
+            passwordEncoder.encode(req.password()),   // ★ 반드시 인코딩
+            req.name());
+    userRepository.save(user);
+}
+
+// 비밀번호 확인 (직접 비교할 일이 있다면)
+boolean ok = passwordEncoder.matches(rawPassword, user.getPassword());</code></pre>
+      <ul class="tx" style="margin-bottom:0">
+        <li>❌ <b>평문 저장</b> · MD5 · SHA-1 — 즉시 털립니다</li>
+        <li>✅ <b>bcrypt</b>(기본) 또는 Argon2 — 느린 것이 목적입니다</li>
+        <li>✅ 로그인 실패 <b>횟수 제한</b>과 <b>계정 잠금</b></li>
+        <li>✅ 로그에 <b>비밀번호·토큰을 절대 남기지 않기</b></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== s05 ==================== -->
+<section class="sec" id="s05">
+  <div class="sec-head rv">
+    <span class="no">SEC 05</span>
+    <h2><span class="t">JWT 인증</span> — 전체 구현</h2>
+    <p class="lead">SPA·모바일 앱의 표준 방식입니다. 필요한 조각을 전부 담았습니다.</p>
+  </div>
+
+  <div class="dep rv">
+    <code>implementation("io.jsonwebtoken:jjwt-api:0.12.6")</code> ·
+    <code>runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")</code> ·
+    <code>runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")</code>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">① 토큰 발급·검증 컴포넌트</h4>
+    <pre class="code" data-lang="java"><code>@Component
+public class JwtTokenProvider {
+
+    private final SecretKey key;
+    private final long accessExpMs;
+    private final long refreshExpMs;
+
+    public JwtTokenProvider(
+            @Value("${jwt.secret}") String secret,          // 최소 32바이트 ★
+            @Value("${jwt.access-exp-ms:1800000}") long accessExpMs,   // 30분
+            @Value("${jwt.refresh-exp-ms:1209600000}") long refreshExpMs) { // 14일
+        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.accessExpMs = accessExpMs;
+        this.refreshExpMs = refreshExpMs;
+    }
+
+    public String createAccessToken(Long userId, String email, List&lt;String&gt; roles) {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject(String.valueOf(userId))
+                .claim("email", email)
+                .claim("roles", roles)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusMillis(accessExpMs)))
+                .signWith(key)
+                .compact();
+    }
+
+    public String createRefreshToken(Long userId) {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject(String.valueOf(userId))
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusMillis(refreshExpMs)))
+                .signWith(key)
+                .compact();
+    }
+
+    public Claims parse(String token) {          // 만료·위조면 예외
+        return Jwts.parser().verifyWith(key).build()
+                   .parseSignedClaims(token).getPayload();
+    }
+
+    public boolean validate(String token) {
+        try {
+            parse(token);
+            return true;
+        } catch (ExpiredJwtException e) {
+            log.debug("만료된 토큰");
+        } catch (JwtException | IllegalArgumentException e) {
+            log.warn("잘못된 토큰: {}", e.getMessage());
+        }
+        return false;
+    }
+}</code></pre>
+  </div>
+
+  <div class="card rv d1">
+    <h4 class="mini" style="margin-top:0">② 요청마다 토큰을 검사하는 필터</h4>
+    <pre class="code" data-lang="java"><code>@Component
+@RequiredArgsConstructor
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private final JwtTokenProvider tokenProvider;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest req,
+                                    HttpServletResponse res,
+                                    FilterChain chain) throws ServletException, IOException {
+        String token = resolveToken(req);
+
+        if (token != null &amp;&amp; tokenProvider.validate(token)) {
+            Claims claims = tokenProvider.parse(token);
+
+            List&lt;SimpleGrantedAuthority&gt; authorities =
+                    ((List&lt;?&gt;) claims.get("roles")).stream()
+                            .map(r -&gt; new SimpleGrantedAuthority(r.toString()))
+                            .toList();
+
+            var auth = new UsernamePasswordAuthenticationToken(
+                    Long.valueOf(claims.getSubject()), null, authorities);
+            auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
+
+            SecurityContextHolder.getContext().setAuthentication(auth);
+        }
+        chain.doFilter(req, res);      // ★ 실패해도 여기서 막지 말고 넘긴다
+    }                                  //   최종 판단은 AuthorizationFilter 가 함
+
+    private String resolveToken(HttpServletRequest req) {
+        String bearer = req.getHeader(HttpHeaders.AUTHORIZATION);
+        return (bearer != null &amp;&amp; bearer.startsWith("Bearer "))
+                ? bearer.substring(7) : null;
+    }
+}</code></pre>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ 로그인·재발급 API</h4>
+      <pre class="code" data-lang="java"><code>@RestController
+@RequestMapping("/api/auth")
+@RequiredArgsConstructor
+public class AuthController {
+
+    private final AuthService authService;
+
+    @PostMapping("/login")
+    public TokenRes login(@Valid @RequestBody LoginReq req) {
+        return authService.login(req);
+    }
+
+    @PostMapping("/reissue")
+    public TokenRes reissue(@RequestBody ReissueReq req) {
+        return authService.reissue(req.refreshToken());
+    }
+
+    @PostMapping("/logout")
+    public void logout(@AuthenticationPrincipal Long userId) {
+        authService.logout(userId);      // Redis 에서 refresh 토큰 삭제
+    }
+}
+
+@Service
+@RequiredArgsConstructor
+public class AuthService {
+
+    private final AuthenticationManager authManager;
+    private final JwtTokenProvider tokenProvider;
+    private final RefreshTokenStore store;         // Redis
+
+    public TokenRes login(LoginReq req) {
+        // 여기서 UserDetailsService + PasswordEncoder 가 동작합니다
+        Authentication auth = authManager.authenticate(
+                new UsernamePasswordAuthenticationToken(req.email(), req.password()));
+
+        var user = (CustomUserDetails) auth.getPrincipal();
+        List&lt;String&gt; roles = auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority).toList();
+
+        String access = tokenProvider.createAccessToken(
+                user.getUser().getId(), user.getUsername(), roles);
+        String refresh = tokenProvider.createRefreshToken(user.getUser().getId());
+
+        store.save(user.getUser().getId(), refresh);   // 재발급·강제 로그아웃용
+        return new TokenRes(access, refresh, "Bearer", 1800);
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">④ 실패 응답을 JSON 으로</h4>
+      <pre class="code" data-lang="java"><code>// 필터에서 터진 예외는 @RestControllerAdvice 로 안 갑니다 ★
+@Component
+public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
+    @Override
+    public void commence(HttpServletRequest req, HttpServletResponse res,
+                         AuthenticationException e) throws IOException {
+        write(res, HttpStatus.UNAUTHORIZED, "A001", "인증이 필요합니다");
+    }
+}
+
+@Component
+public class JwtAccessDeniedHandler implements AccessDeniedHandler {
+    @Override
+    public void handle(HttpServletRequest req, HttpServletResponse res,
+                       AccessDeniedException e) throws IOException {
+        write(res, HttpStatus.FORBIDDEN, "A002", "권한이 없습니다");
+    }
+}
+
+private static void write(HttpServletResponse res, HttpStatus status,
+                          String code, String message) throws IOException {
+    res.setStatus(status.value());
+    res.setContentType(MediaType.APPLICATION_JSON_VALUE);
+    res.setCharacterEncoding("UTF-8");
+    res.getWriter().write("""
+        {"code":"%s","message":"%s"}
+        """.formatted(code, message));
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>JWT 운영 체크리스트</b>
+        <br>· 시크릿은 <b>32바이트 이상</b> + 환경 변수로
+        <br>· Access 토큰은 <b>짧게(15~30분)</b>, Refresh 는 길게
+        <br>· <b>민감 정보를 페이로드에 넣지 마세요</b> — 누구나 디코딩할 수 있습니다(암호화 아님)
+        <br>· 강제 로그아웃이 필요하면 <b>Refresh 토큰을 서버에 저장</b>하고 삭제
+        <br>· 토큰 저장은 <b>httpOnly 쿠키</b>가 localStorage 보다 XSS 에 안전합니다
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== s06 ==================== -->
+<section class="sec" id="s06">
+  <div class="sec-head rv">
+    <span class="no">SEC 06</span>
+    <h2><span class="t">OAuth2</span> 소셜 로그인</h2>
+    <p class="lead">구글·카카오·네이버 로그인. 스프링이 대부분을 대신해 줍니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <div class="dep">
+        <code>implementation("org.springframework.boot:spring-boot-starter-oauth2-client")</code>
+      </div>
+      <pre class="code" data-lang="yaml"><code>spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope: profile, email
+          kakao:                              # 국내 서비스는 직접 정의
+            client-id: ${KAKAO_CLIENT_ID}
+            client-authentication-method: client_secret_post
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            scope: profile_nickname, account_email
+        provider:
+          kakao:
+            authorization-uri: https://kauth.kakao.com/oauth/authorize
+            token-uri: https://kauth.kakao.com/oauth/token
+            user-info-uri: https://kapi.kakao.com/v2/user/me
+            user-name-attribute: id</code></pre>
+    </div>
+    <div class="card">
+      <pre class="code" data-lang="java"><code>@Bean
+public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    return http
+        .oauth2Login(oauth -&gt; oauth
+            .userInfoEndpoint(u -&gt; u.userService(customOAuth2UserService))
+            .successHandler(oauth2SuccessHandler))   // JWT 발급 후 리다이렉트
+        .build();
+}
+
+@Service
+@RequiredArgsConstructor
+public class CustomOAuth2UserService extends DefaultOAuth2UserService {
+
+    private final UserRepository userRepository;
+
+    @Override
+    public OAuth2User loadUser(OAuth2UserRequest req) {
+        OAuth2User oAuth2User = super.loadUser(req);
+        String provider = req.getClientRegistration().getRegistrationId();
+
+        OAuthAttributes attrs = OAuthAttributes.of(provider, oAuth2User.getAttributes());
+
+        // 있으면 갱신, 없으면 가입 (자동 회원가입)
+        User user = userRepository.findByEmail(attrs.email())
+                .map(u -&gt; u.updateOAuthInfo(attrs.name()))
+                .orElseGet(() -&gt; userRepository.save(attrs.toEntity()));
+
+        return new CustomOAuth2User(user, oAuth2User.getAttributes());
+    }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>SPA 와 함께 쓸 때</b> — 소셜 로그인 성공 후
+        <code>successHandler</code> 에서 <b>JWT 를 만들어</b>
+        프론트엔드 URL 로 리다이렉트하면서 토큰을 전달하는 방식이 일반적입니다.
+        <br>기존 계정과 <b>이메일이 같을 때 어떻게 합칠지</b>를
+        미리 정해 두지 않으면 나중에 데이터가 꼬입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== s07 ==================== -->
+<section class="sec" id="s07">
+  <div class="sec-head rv">
+    <span class="no">SEC 07</span>
+    <h2>권한 · <span class="t">메서드 시큐리티</span></h2>
+    <p class="lead">URL 단위로 막을 수 없는 것들 — “<b>자기 글만 수정 가능</b>” 같은 규칙을 다룹니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="java"><code>@Configuration
+@EnableMethodSecurity          // 켜기 (기본으로 @PreAuthorize 활성화)
+public class MethodSecurityConfig { }
+
+@Service
+public class OrderService {
+
+    @PreAuthorize("hasRole('ADMIN')")
+    public void deleteAll() { }
+
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    public List&lt;Order&gt; list() { }
+
+    // 파라미터를 조건에 쓸 수 있다 ★
+    @PreAuthorize("#userId == authentication.principal")
+    public UserRes getMyInfo(Long userId) { }
+
+    // 반환값을 검사 (실행 후)
+    @PostAuthorize("returnObject.userId == authentication.principal")
+    public OrderRes get(Long id) { }
+
+    // 복합 조건
+    @PreAuthorize("hasRole('ADMIN') or #order.userId == authentication.principal")
+    public void update(OrderUpdateReq order) { }
+
+    // 커스텀 빈의 메서드를 호출할 수도 있습니다
+    @PreAuthorize("@orderPermission.canEdit(#id, authentication)")
+    public void edit(Long id) { }
+}
+
+@Component("orderPermission")
+@RequiredArgsConstructor
+public class OrderPermissionEvaluator {
+    private final OrderRepository repository;
+
+    public boolean canEdit(Long orderId, Authentication auth) {
+        return repository.findById(orderId)
+                .map(o -&gt; o.getUserId().equals(auth.getPrincipal()))
+                .orElse(false);
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">권한 설계 — Role vs Authority</h4>
+      <pre class="code" data-lang="java"><code>// Role — 역할 (굵은 단위)
+ROLE_USER, ROLE_ADMIN, ROLE_MANAGER
+hasRole("ADMIN")            // ROLE_ 자동 부착
+
+// Authority — 세부 권한 (권장 ★)
+order:read, order:write, order:delete
+hasAuthority("order:write")
+
+// 실무에서는 Role 에 Authority 를 묶습니다
+//   ROLE_ADMIN   -&gt; order:*, user:*
+//   ROLE_MANAGER -&gt; order:read, order:write
+//   ROLE_USER    -&gt; order:read</code></pre>
+      <pre class="code" data-lang="java"><code>// 계층 구조 — ADMIN 이면 USER 권한도 자동으로
+@Bean
+public RoleHierarchy roleHierarchy() {
+    return RoleHierarchyImpl.withDefaultRolePrefix()
+            .role("ADMIN").implies("MANAGER")
+            .role("MANAGER").implies("USER")
+            .build();
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 보안 구멍</b> —
+        “URL 은 막았는데 <b>남의 데이터에 접근</b>할 수 있는 경우”입니다.
+        <code>GET /api/orders/1</code> 이 인증만 확인하고
+        <b>그 주문이 내 것인지 확인하지 않으면</b>
+        아무나 남의 주문을 볼 수 있습니다.
+        <b>조회 쿼리에 <code>userId</code> 조건을 넣는 것</b>이 가장 확실합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== s08 ==================== -->
+<section class="sec" id="s08">
+  <div class="sec-head rv">
+    <span class="no">SEC 08</span>
+    <h2><span class="t">CORS · CSRF</span></h2>
+    <p class="lead">프론트엔드를 붙일 때 가장 먼저 만나는 벽입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CORS — 다른 출처에서의 요청 허용</h4>
+      <pre class="code" data-lang="java"><code>@Bean
+public CorsConfigurationSource corsConfigurationSource() {
+    CorsConfiguration config = new CorsConfiguration();
+
+    // ⚠️ 와일드카드 "*" 는 credentials 와 함께 쓸 수 없습니다
+    config.setAllowedOrigins(List.of(
+            "http://localhost:3000",
+            "https://myapp.com"));
+    config.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
+    config.setAllowedHeaders(List.of("*"));
+    config.setExposedHeaders(List.of("Authorization"));   // 프론트가 읽을 수 있게
+    config.setAllowCredentials(true);                     // 쿠키 전송 허용
+    config.setMaxAge(3600L);                              // preflight 캐시
+
+    var source = new UrlBasedCorsConfigurationSource();
+    source.registerCorsConfiguration("/api/**", config);
+    return source;
+}
+
+// SecurityFilterChain 에 연결
+.cors(cors -&gt; cors.configurationSource(corsConfigurationSource()))</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>CORS 에러는 서버 에러가 아닙니다</b> —
+        <b>브라우저가</b> 응답을 받고 나서 막는 것입니다.
+        서버 로그에는 정상 200 이 찍힙니다.
+        <code>OPTIONS</code>(preflight) 요청이 <b>인증 없이 통과</b>되는지 꼭 확인하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CSRF — 언제 켜고 언제 끄나</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:40%">방식</th><th>CSRF</th></tr>
+          <tr><td>세션 + 쿠키 (서버 렌더링)</td><td><b>반드시 켜기</b></td></tr>
+          <tr><td>JWT (Authorization 헤더)</td><td>꺼도 됨 — 쿠키가 자동 전송되지 않으므로</td></tr>
+          <tr><td>JWT 를 <b>쿠키</b>에 저장</td><td><b>켜야 합니다</b></td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// 켜는 경우 (SPA + 쿠키)
+.csrf(csrf -&gt; csrf
+    .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+    .ignoringRequestMatchers("/api/webhook/**"))    // 외부 웹훅은 제외
+
+// 끄는 경우 (JWT 헤더 방식)
+.csrf(AbstractHttpConfigurer::disable)</code></pre>
+
+      <h4 class="mini">보안 헤더</h4>
+      <pre class="code" data-lang="java"><code>.headers(h -&gt; h
+    .contentSecurityPolicy(c -&gt; c.policyDirectives(
+            "default-src 'self'; script-src 'self'"))
+    .frameOptions(f -&gt; f.sameOrigin())          // 클릭재킹 방지
+    .httpStrictTransportSecurity(hsts -&gt; hsts
+            .maxAgeInSeconds(31536000)
+            .includeSubDomains(true)))</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== s09 ==================== -->
+<section class="sec" id="s09">
+  <div class="sec-head rv">
+    <span class="no">SEC 09</span>
+    <h2>WebFlux <span class="t">시큐리티</span></h2>
+    <p class="lead">개념은 같고 클래스 이름 앞에 <code>Server</code>·<code>Reactive</code> 가 붙습니다.</p>
+  </div>
+
+  <div class="card rv">
+    <pre class="code" data-lang="java"><code>@Configuration
+@EnableWebFluxSecurity                       // @EnableWebSecurity 가 아님
+@RequiredArgsConstructor
+public class ReactiveSecurityConfig {
+
+    private final JwtTokenProvider tokenProvider;
+
+    @Bean
+    public SecurityWebFilterChain filterChain(ServerHttpSecurity http) {
+        return http
+            .csrf(ServerHttpSecurity.CsrfSpec::disable)
+            .authorizeExchange(ex -&gt; ex                     // authorizeHttpRequests 아님
+                .pathMatchers("/api/auth/**").permitAll()
+                .pathMatchers("/api/admin/**").hasRole("ADMIN")
+                .anyExchange().authenticated())
+            .addFilterAt(jwtWebFilter(), SecurityWebFiltersOrder.AUTHENTICATION)
+            .exceptionHandling(e -&gt; e
+                .authenticationEntryPoint((exchange, ex) -&gt; {
+                    exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+                    return exchange.getResponse().setComplete();
+                }))
+            .build();
+    }
+
+    private WebFilter jwtWebFilter() {
+        return (exchange, chain) -&gt; {
+            String token = resolve(exchange.getRequest());
+            if (token == null || !tokenProvider.validate(token)) {
+                return chain.filter(exchange);
+            }
+            Claims claims = tokenProvider.parse(token);
+            var auth = new UsernamePasswordAuthenticationToken(
+                    claims.getSubject(), null, authorities(claims));
+
+            return chain.filter(exchange)
+                    .contextWrite(ReactiveSecurityContextHolder
+                            .withAuthentication(auth));      // ThreadLocal 이 아니라 컨텍스트 ★
+        };
+    }
+}
+
+// 현재 사용자 꺼내기 — 리액티브 방식
+public Mono&lt;UserRes&gt; me() {
+    return ReactiveSecurityContextHolder.getContext()
+            .map(ctx -&gt; ctx.getAuthentication().getName())
+            .flatMap(userService::findByName);
+}</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>핵심 차이</b> — MVC 는 <code>SecurityContextHolder</code>(ThreadLocal)를 쓰지만
+      WebFlux 는 <b>스레드가 계속 바뀌므로</b> 리액티브 컨텍스트에 담습니다.
+      <code>SecurityContextHolder.getContext()</code> 를 그대로 쓰면 <b>null 이 나옵니다.</b>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== s10 ==================== -->
+<section class="sec" id="s10">
+  <div class="sec-head rv">
+    <span class="no">SEC 10</span>
+    <h2>자주 하는 <span class="t">실수</span></h2>
+    <p class="lead">보안 사고는 대부분 화려한 공격이 아니라 <b>기본을 빠뜨려서</b> 납니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:34%">증상 · 실수</th><th style="width:28%">원인</th><th>해결</th></tr>
+      <tr><td>모든 요청이 401</td><td>필터가 등록 안 됨 / 순서가 틀림</td><td><code>addFilterBefore(...UsernamePasswordAuthenticationFilter.class)</code></td></tr>
+      <tr><td>403 인데 권한은 맞음</td><td><code>ROLE_</code> 접두사 누락</td><td><code>hasRole("ADMIN")</code> ↔ 저장은 <code>ROLE_ADMIN</code></td></tr>
+      <tr><td>필터 예외가 안 잡힘</td><td><code>@RestControllerAdvice</code> 는 필터 밖</td><td><code>AuthenticationEntryPoint</code> 로 직접 응답</td></tr>
+      <tr><td>CORS 는 설정했는데 계속 막힘</td><td>preflight(OPTIONS)가 인증에 막힘</td><td>OPTIONS 를 permitAll, <code>.cors()</code> 등록 확인</td></tr>
+      <tr><td>POST 만 403</td><td>CSRF 가 켜져 있음</td><td>REST API 면 <code>csrf.disable()</code></td></tr>
+      <tr><td>남의 데이터가 조회됨</td><td>인증만 하고 <b>소유권 검사 없음</b></td><td>쿼리에 <code>userId</code> 조건 추가</td></tr>
+      <tr><td>비밀번호가 그대로 보임</td><td><code>encode()</code> 누락</td><td>저장 전 <code>passwordEncoder.encode()</code></td></tr>
+      <tr><td>토큰 만료가 안 됨</td><td>클라이언트가 계속 보관</td><td>Refresh 토큰을 서버에 저장 후 삭제로 무효화</td></tr>
+      <tr><td>로그에 토큰이 찍힘</td><td>요청 헤더 전체 로깅</td><td>Authorization 헤더 마스킹</td></tr>
+      <tr><td>h2-console 이 안 열림</td><td>frameOptions 차단</td><td>개발 프로파일에서만 <code>frameOptions.sameOrigin()</code></td></tr>
+    </table>
+  </div>
+
+  <div class="note warn rv">
+    <b>배포 전 최소 점검</b> —
+    ① 비밀번호·시크릿이 <b>코드에 없는지</b>
+    ② <b>Actuator 가 외부에 안 열려</b> 있는지
+    ③ 에러 응답에 <b>스택 트레이스·SQL 이 안 나가는지</b>
+    ④ <b>HTTPS</b> 강제
+    ⑤ 관리자 API 에 <b>권한 검사</b>가 실제로 걸려 있는지 (테스트로 확인)
+    ⑥ 업로드 파일의 <b>확장자·크기 검증</b>
+  </div>
+</section>
+
+</div><!-- /pane-sec -->
+

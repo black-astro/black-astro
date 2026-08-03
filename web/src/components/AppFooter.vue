@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { links, profile } from '@/data/profile'
-import { GUIDE_URL, GUIDE_TITLE } from '@/router'
+import { guides } from '@/router'
 import AppIcon from './AppIcon.vue'
-
-const guideUrl = GUIDE_URL
-const guideTitle = GUIDE_TITLE
 </script>
 
 <template>
@@ -14,9 +11,10 @@ const guideTitle = GUIDE_TITLE
         <span class="ft-name">{{ profile.name }} · {{ profile.role }}</span>
       </div>
       <div class="ft-links">
-        <a :href="guideUrl" class="ft-link ft-guide" :title="guideTitle">
-          <span aria-hidden="true">🐍</span>
-          <span>Python Guide</span>
+        <a v-for="g in guides" :key="g.key" :href="g.href"
+           class="ft-link ft-guide" :title="g.title">
+          <span aria-hidden="true">{{ g.emoji }}</span>
+          <span>{{ g.label }}</span>
         </a>
         <a v-for="l in links" :key="l.label" :href="l.href" class="ft-link" target="_blank" rel="noopener">
           <AppIcon :name="l.icon" :size="15" />
