@@ -110,30 +110,69 @@ import logoUrl from '@/style/img/matrix_hyeon.png'
   color: var(--accent);
   font-weight: 600;
 }
+/* 외부 페이지 링크 — 내부 메뉴와 섞이지 않게 색으로 구분 */
 .nav-link-ext {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  color: var(--accent);
+}
+.nav-link-ext:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 .nav-link-ext .ext {
   font-size: 0.72em;
-  opacity: 0.65;
+  opacity: 0.7;
 }
 .hd-right {
   flex-shrink: 0;
   display: flex;
   align-items: center;
 }
+/* 좁은 화면에서는 메뉴를 둘째 줄로 내린다.
+   가로 스크롤(overflow-x)로 두면 스크롤바가 숨겨져 있어서
+   마지막 항목(Python Guide)이 화면 밖으로 잘린 채 존재조차 안 보인다. */
+@media (max-width: 900px) {
+  .hd-inner {
+    height: auto;
+    min-height: var(--nav-h);
+    flex-wrap: wrap;
+    padding-top: 9px;
+    padding-bottom: 9px;
+    row-gap: 4px;
+  }
+  .nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+    overflow-x: visible;
+    gap: 2px;
+  }
+  .hd-right {
+    margin-left: auto;
+  }
+}
 @media (max-width: 720px) {
   .brand-sub {
     display: none;
   }
-  .nav {
-    gap: 0;
+  .nav-link {
+    padding: 7px 9px;
+    font-size: 0.85rem;
+  }
+}
+/* 메뉴가 두 줄이 되는 구간 — sticky 헤더가 화면을 많이 먹지 않게 압축 */
+@media (max-width: 560px) {
+  .hd-inner {
+    padding-top: 6px;
+    padding-bottom: 6px;
+    row-gap: 0;
   }
   .nav-link {
-    padding: 8px 10px;
-    font-size: 0.85rem;
+    padding: 6px 8px;
+    font-size: 0.82rem;
   }
 }
 @media (max-width: 480px) {

@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { links, profile } from '@/data/profile'
+import { GUIDE_URL, GUIDE_TITLE } from '@/router'
 import AppIcon from './AppIcon.vue'
+
+const guideUrl = GUIDE_URL
+const guideTitle = GUIDE_TITLE
 </script>
 
 <template>
@@ -10,6 +14,10 @@ import AppIcon from './AppIcon.vue'
         <span class="ft-name">{{ profile.name }} · {{ profile.role }}</span>
       </div>
       <div class="ft-links">
+        <a :href="guideUrl" class="ft-link ft-guide" :title="guideTitle">
+          <span aria-hidden="true">🐍</span>
+          <span>Python Guide</span>
+        </a>
         <a v-for="l in links" :key="l.label" :href="l.href" class="ft-link" target="_blank" rel="noopener">
           <AppIcon :name="l.icon" :size="15" />
           <span>{{ l.value }}</span>
@@ -66,6 +74,9 @@ import AppIcon from './AppIcon.vue'
   transition: color 0.18s ease;
 }
 .ft-link:hover {
+  color: var(--accent);
+}
+.ft-guide {
   color: var(--accent);
 }
 .ft-copy {

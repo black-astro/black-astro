@@ -13,17 +13,16 @@ const routes = [
 export const navRoutes = routes.filter((r) => r.meta?.label)
 
 /**
- * SPA 밖의 정적 페이지 링크.
+ * SPA 밖의 정적 페이지 주소.
  * public/ 아래 그대로 배포되는 단독 HTML이라 라우터가 아닌 <a>로 이동한다.
  * (import.meta.env.BASE_URL = vite.config 의 base = '/black-astro/')
+ *
+ * 진입점이 헤더·홈 히어로·홈 카드·푸터 네 군데라 주소는 여기 한 곳에서만 정의한다.
  */
-export const externalNavLinks = [
-  {
-    label: 'Python Guide',
-    href: `${import.meta.env.BASE_URL}python-guide/`,
-    title: '파이썬 · Pandas 시각 가이드 (별도 페이지)',
-  },
-]
+export const GUIDE_URL = `${import.meta.env.BASE_URL}python-guide/`
+export const GUIDE_TITLE = '파이썬 · Pandas 시각 가이드 (별도 페이지)'
+
+export const externalNavLinks = [{ label: 'Python Guide', href: GUIDE_URL, title: GUIDE_TITLE }]
 
 const router = createRouter({
   history: createWebHashHistory(),
