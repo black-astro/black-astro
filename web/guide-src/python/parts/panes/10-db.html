@@ -11,6 +11,7 @@
     인덱스가 <b>왜 100만 줄을 몇 번 만에</b> 찾는지 — 전부 움직이는 화면으로 확인합니다.
     같은 일을 <b>오라클 · MySQL · PostgreSQL</b>이 어떻게 다르게 쓰는지 대조표로 정리했고,
     <b>Redis</b>는 “표가 아닌 DB”가 왜 필요한지부터 시작합니다.
+    여기까지 하면 <b>현업 데이터 요청을 직접 쿼리로 뽑고 느린 쿼리를 튜닝</b>하는 수준까지 갑니다.
   </p>
   <div class="stats">
     <div><b>18</b><span>SECTIONS</span></div>
@@ -1163,6 +1164,15 @@ pipe.execute()</code></pre>
     </div>
   </div>
 
+  <div class="note warn rv d1">
+    <b>redis-py 8 부터 기본 프로토콜이 RESP2 → RESP3</b> 로 바뀌었습니다.
+    그에 맞춰 <b>약 84개 명령의 반환 타입이 통일</b>되었습니다 —
+    리스트로 오던 것이 <code>dict</code> 로, 평평하던 응답이 구조화된 형태로 바뀐 식입니다.
+    기존 코드가 <b>응답 모양에 의존</b>하고 있다면 업그레이드 후 조용히 깨질 수 있습니다.
+    급하면 <code>redis.Redis(..., protocol=2)</code> 로 예전 동작을 유지하고,
+    시간을 두고 <b>RESP3 기준으로 고치세요</b>.
+  </div>
+
   <h3 class="sub">커넥션 풀 — <span class="t">매번 연결하면 느립니다</span></h3>
   <p class="tx">
     연결 하나 만드는 데 수십 ms가 듭니다. 요청마다 새로 연결하면
@@ -1253,6 +1263,87 @@ for chunk in pd.read_sql("SELECT * FROM big_table", engine, chunksize=50_000):
         <li>ORM을 써도 <b>실행되는 SQL은 볼 줄 알아야</b> 합니다(<code>echo=True</code>)</li>
       </ul>
     </div>
+  </div>
+
+  <h3 class="sub">ORM 모델 정의 — <span class="t">타입 힌트가 곧 컬럼</span> (SQLAlchemy 2.0 스타일)</h3>
+  <p class="tx">
+    위까지가 <b>Core</b>(SQL 문자열을 그대로 쓰는 쪽)였다면, 여기서부터가 <b>ORM</b>입니다.
+    2.0 스타일은 클래스에 <b>타입 힌트만 적으면</b> 그게 곧 컬럼 정의입니다.
+  </p>
+  <pre class="code rv d1" data-lang="python"><code>from datetime import datetime
+from sqlalchemy import ForeignKey, String, func, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, Session
+
+class Base(DeclarativeBase):
+    pass
+
+class Customer(Base):
+    __tablename__ = "customers"
+    id:   Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(50))
+    orders: Mapped[list["Order"]] = relationship(back_populates="customer")
+
+class Order(Base):
+    __tablename__ = "orders"
+    id:          Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"))
+    amount:      Mapped[int]
+    memo:        Mapped[str | None]          # Optional -&gt; NULL 허용
+    created_at:  Mapped[datetime] = mapped_column(server_default=func.now())
+    customer: Mapped["Customer"] = relationship(back_populates="orders")
+
+Base.metadata.create_all(engine)             # 테이블이 없으면 만든다</code></pre>
+
+  <div class="note info rv d1">
+    <b>타입 힌트가 곧 컬럼 정의입니다</b> — <code>Mapped[int]</code> 는
+    <code>INTEGER NOT NULL</code>, <code>Mapped[str | None]</code> 은
+    <code>VARCHAR NULL</code> 이 됩니다. 별도 선언이 없으니 <b>mypy·IDE 자동완성이 그대로 먹습니다</b>.
+    길이·제약·기본값처럼 <b>더 적을 게 있을 때만</b> <code>mapped_column(...)</code> 을 붙이면 됩니다.
+  </div>
+
+  <h3 class="sub">조회 — <span class="t">select() 하나로</span> 통일</h3>
+  <pre class="code rv d1" data-lang="python"><code>with Session(engine) as s:
+    # 여러 건
+    rows = s.scalars(select(Order).where(Order.amount &gt;= 1000)).all()
+
+    # 한 건 (없으면 None)
+    one = s.scalar(select(Order).where(Order.id == 1))
+
+    # 개수
+    n = s.scalar(select(func.count()).select_from(Order))
+
+    # 조인
+    q = (select(Customer.name, func.sum(Order.amount))
+         .join(Order)
+         .group_by(Customer.name))
+    for name, total in s.execute(q):
+        print(name, total)</code></pre>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini"><code>scalars()</code> 와 <code>execute()</code></h4>
+      <ul class="tx">
+        <li><code>s.scalars(...)</code> → <b>ORM 객체 자체</b>를 줍니다(<code>Order</code> 인스턴스)</li>
+        <li><code>s.execute(...)</code> → <b>튜플 행</b>을 줍니다(위 조인처럼 열을 골라 뽑을 때)</li>
+        <li>한 건만 필요하면 <code>s.scalar(...)</code> — 없으면 <code>None</code></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="color:var(--rose)"><code>session.query()</code> 는 레거시</h4>
+      <ul class="tx">
+        <li><code>session.query(...)</code> 는 <b>1.x 시절 API</b>입니다</li>
+        <li>2.0 에서도 아직 동작하지만, <b>새 코드는 쓰지 마세요</b></li>
+        <li>✅ <code>select()</code> + <code>session.scalars()</code> / <code>session.execute()</code></li>
+        <li>검색하다 나온 옛날 예제가 대부분 <code>query()</code> 라 헷갈리기 쉽습니다</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>pandas 와도 그대로 이어집니다</b> — <code>pd.read_sql</code> 에는 SQL 문자열뿐 아니라
+    <code>select()</code> 객체를 <b>그대로 넘길 수 있습니다</b>:
+    <code>df = pd.read_sql(select(Order).where(Order.amount &gt;= 1000), engine)</code>.
+    모델로 조건을 짜고 결과는 DataFrame 으로 받는 식입니다.
   </div>
 
   <pre class="code rv d1" data-lang="python"><code># PySide6 표에 그대로 띄우기 (PySide6 탭 §10 과 연결)

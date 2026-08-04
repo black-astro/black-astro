@@ -4,19 +4,20 @@
 <div class="pane" id="pane-node">
 
 <header class="hero">
-  <div class="eyebrow"><i></i> NODE.JS 22 LTS · 서버 런타임</div>
+  <div class="eyebrow"><i></i> NODE.JS 24 LTS · 서버 런타임</div>
   <h1>기다리는 일에<br>강하고<br>계산에 약하다</h1>
   <p class="tx">
     Node 는 <b>스레드 하나</b>로 수만 개의 연결을 버팁니다.
     DB·네트워크처럼 <b>기다리는 작업</b>에는 압도적으로 유리하고,
     이미지 변환·암호화처럼 <b>계산하는 작업</b>에는 즉시 무너집니다.
     이 성질을 이해하는 것이 Node 실력의 전부입니다.
+    <b>여기까지 마치면 API 서버를 혼자 띄우고, 느려지거나 죽는 원인을 로그와 프로파일로 좁힐 수 있습니다.</b>
   </p>
   <div class="stats">
     <div><b>17</b><span>SECTIONS</span></div>
     <div><b>1</b><span>메인 스레드</span></div>
     <div><b>10k+</b><span>동시 연결</span></div>
-    <div><b>22</b><span>LTS 기준</span></div>
+    <div><b>24</b><span>LTS 기준</span></div>
   </div>
 </header>
 
@@ -88,17 +89,25 @@
         문제는 <b>모르고 메인 스레드에서 돌릴 때</b> 생깁니다.
       </div>
       <h4 class="mini">버전 관리</h4>
-      <pre class="code" data-lang="bash"><code># 짝수 버전만 LTS 입니다 (20, 22, 24…) — 운영은 항상 LTS
+      <pre class="code" data-lang="bash"><code># 2026-08 현재
+#   24  Active LTS  (2026-10 까지 활성 · 2028-04 EOL)   ★ 운영 기본값
+#   26  Current     (2026-10 에 LTS 승격 예정)
+#   22  Maintenance (2027-04 EOL) — 신규 프로젝트에는 쓰지 마세요
+#   20  EOL (2026-04) ❌
 node -v
 
+# ★ 2026-10 Node 27 부터 릴리스 정책이 바뀝니다
+#   · 메이저는 매년 한 번만 · 홀짝 구분 폐지 — 모든 메이저가 LTS 로 승격
+#   · 총 지원 36개월 (활성 18 + 유지보수 18)
+
 # 버전 관리 도구 (프로젝트마다 다른 버전이 필요할 때)
-nvm install 22 &amp;&amp; nvm use 22        # 전통의 강자
-fnm use 22                          # 더 빠른 대안
+nvm install 24 &amp;&amp; nvm use 24        # 전통의 강자
+fnm use 24                          # 더 빠른 대안
 
 # 프로젝트에 버전 고정
-echo "22" &gt; .nvmrc
+echo "24" &gt; .nvmrc
 # package.json 에도 명시
-{ "engines": { "node": "&gt;=22" } }</code></pre>
+{ "engines": { "node": "&gt;=24" } }</code></pre>
     </div>
   </div>
 </section>
@@ -669,9 +678,9 @@ import { z } from "zod";
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]),
   PORT: z.coerce.number().default(3000),        // 문자열 → 숫자 변환
-  DATABASE_URL: z.string().url(),
+  DATABASE_URL: z.url(),
   JWT_SECRET: z.string().min(32),
-  REDIS_URL: z.string().url().optional(),
+  REDIS_URL: z.url().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);
@@ -1102,16 +1111,21 @@ node --enable-source-maps dist/index.js</code></pre>
 //   external:   Buffer 등 힙 밖 (C++ 객체)
 //   arrayBuffers: ArrayBuffer
 // }</code></pre>
-      <pre class="code" data-lang="bash"><code># 힙 한도 설정 — 컨테이너 메모리의 75% 정도로
+      <pre class="code" data-lang="bash"><code># 힙 한도 설정 — 컨테이너 메모리의 70~75% 정도로
 node --max-old-space-size=1536 app.js        # 2GB 컨테이너 기준
 
-# ★ 안 정하면 Node 가 컨테이너 한도를 모른 채 계속 늘리다
-#   커널에 OOMKilled 당합니다 (종료 코드 137, 로그 없음)</code></pre>
+# 안 정해도 Node 20+ 는 cgroup 한도를 읽어 기본 힙을 잡아 줍니다.
+# 그래도 못 박아 두는 편이 사고를 줄입니다 (아래 설명)</code></pre>
       <div class="note warn">
-        <b>Node 는 컨테이너 메모리 한도를 자동으로 못 봅니다.</b>
-        (자바의 <code>MaxRAMPercentage</code> 같은 옵션이 없습니다)
-        <b>반드시 <code>--max-old-space-size</code> 를 명시</b>하세요.
-        Buffer·네이티브 모듈은 이 한도 <b>밖</b>이므로 여유를 더 두어야 합니다.
+        <b>힙 한도는 자동 산정되지만, 명시하는 편이 안전합니다.</b>
+        Node 20+ 는 cgroup 의 <code>memory.max</code> 를 읽어
+        V8 기본 힙 크기를 컨테이너에 맞춰 잡습니다.
+        그래도 <code>--max-old-space-size</code> 를 컨테이너 메모리의 <b>70~75%</b> 로
+        직접 지정하는 이유는 —
+        ① <b>Buffer·네이티브 모듈·스레드 스택은 힙 밖</b>이라 자동 산정값에도 여유가 없을 수 있고,
+        ② 사이드카가 붙은 파드에서는 파드 전체 한도와 컨테이너 한도가 어긋나며,
+        ③ 값을 못 박아야 OOMKilled(exit 137) 대신
+        V8 의 heap out of memory 스택을 로그로 받을 수 있기 때문입니다.
       </div>
       <h4 class="mini">메모리 누수의 흔한 원인</h4>
       <ul class="tx">
@@ -1214,11 +1228,38 @@ node --watch-path=./src --watch-path=./config app.js
 # .env 읽기 (dotenv 불필요)  Node 20.6+
 node --env-file=.env --env-file=.env.local app.js
 
-# TypeScript 바로 실행 (Node 22.6+, 타입 검사는 안 함)
-node --experimental-strip-types src/index.ts
+# TypeScript 를 그대로 실행 (Node 24+ 기본 · Node 26 에서 정식)
+node src/index.ts
+#  · 타입 "지우기"만 합니다 — 타입 검사는 tsc --noEmit 로 따로
+#  · enum · 구 데코레이터 · namespace 같은 "코드를 만들어 내는" 문법은 안 됩니다
+#    → tsconfig 에 "erasableSyntaxOnly": true 를 켜 두면 미리 막아 줍니다
 
 # 단일 실행 파일로 패키징 (Node 20+, 실험적)
 node --experimental-sea-config sea-config.json</code></pre>
+      <h4 class="mini">Node 26 에서 새로 생긴 것</h4>
+      <pre class="code" data-lang="bash"><code># package.json 의 scripts 를 npm 없이 바로 실행 — 훨씬 빠릅니다
+node --run build
+node --run test -- --grep user
+
+# 테스트 러너 보강
+node --test --test-random-order      # 순서 의존 테스트를 찾아냅니다
+node --test --test-name-tag=slow     # 태그로 골라 실행</code></pre>
+      <pre class="code" data-lang="javascript"><code>// SQLite 가 런타임에 들어 있습니다 (better-sqlite3 불필요)
+//   22.13 · 23.4 부터 --experimental-sqlite 플래그가 필요 없고,
+//   25.7 부터 "릴리스 후보" 단계입니다
+import { DatabaseSync } from "node:sqlite";
+const db = new DatabaseSync("app.db");
+db.exec(`CREATE TABLE IF NOT EXISTS todo (id INTEGER PRIMARY KEY, t TEXT)`);
+db.prepare("INSERT INTO todo (t) VALUES (?)").run("장보기");
+console.log(db.prepare("SELECT * FROM todo").all());
+
+// 새 표준 내장 (Node 26)
+const cache = new Map();
+cache.getOrInsertComputed("user:1", (k) =&gt; loadUser(k));  // 없으면 만들어 넣고 반환
+for (const x of Iterator.concat([1, 2].values(), [3].values())) { /* 1,2,3 */ }
+
+// Temporal 이 전역으로 들어왔습니다 (j-탭 날짜 절 참고)
+Temporal.Now.instant().toString();   // 2026-08-04T05:00:00Z</code></pre>
       <pre class="code" data-lang="javascript"><code>// fetch · FormData · WebSocket 전부 내장 (Node 18+ / 22+)
 const res = await fetch(url);
 const ws = new WebSocket("wss://...");     // Node 22+
@@ -1267,9 +1308,9 @@ npm audit                       # ★ 알려진 취약점 검사
 npm audit fix                   # 자동 수정 (major 변경은 안 함)
 npm ls pkg                      # 이 패키지가 왜 설치됐는지 추적</code></pre>
       <h4 class="mini">버전 표기 읽기</h4>
-      <pre class="code" data-lang="text"><code>"express": "^4.18.2"    ^ = 마이너·패치 허용  4.x.x  ★ 기본값
-"express": "~4.18.2"    ~ = 패치만 허용       4.18.x
-"express": "4.18.2"     정확히 이 버전
+      <pre class="code" data-lang="text"><code>"express": "^5.2.1"     ^ = 마이너·패치 허용  5.x.x  ★ 기본값
+"express": "~5.2.1"     ~ = 패치만 허용       5.2.x
+"express": "5.2.1"      정확히 이 버전
 "express": "*"          아무거나 — ❌ 절대 금지
 
 ★ lock 파일이 있으면 실제 설치 버전은 lock 이 결정합니다.
@@ -1416,7 +1457,7 @@ export const log = (obj, msg) =&gt;
       <h4 class="mini" style="margin-top:0">세 런타임 비교 <span class="ver new">2026</span></h4>
       <div class="tw">
         <table class="cheat">
-          <tr><th style="width:22%">항목</th><th>Node 24 LTS</th><th>Deno 2.x</th><th>Bun 1.x</th></tr>
+          <tr><th style="width:22%">항목</th><th>Node 24 LTS (26 Current)</th><th>Deno 2.9</th><th>Bun 1.3</th></tr>
           <tr><td><b>생태계</b></td>
               <td><b>압도적</b> — npm 전부, 네이티브 애드온·사내 표준까지</td>
               <td>npm 호환됨. 다만 <b>Node 전용 API</b>에 기대는 패키지는 여전히 사고</td>
@@ -1430,7 +1471,7 @@ export const log = (obj, msg) =&gt;
               <td><b>표준이 우선</b> — Request/Response 가 기본 모델</td>
               <td>표준 우선 + Bun 전용 고속 API 병행</td></tr>
           <tr><td><b>TypeScript</b></td>
-              <td>24 부터 <code>.ts</code> 를 <b>타입만 지워서</b> 실행(검사는 <code>tsc</code> 별도)</td>
+              <td>24 부터 <code>.ts</code> 를 <b>타입만 지워서</b> 실행 · 26 에서 정식(검사는 <code>tsc</code> 별도)</td>
               <td><b>기본 지원</b> — 설정 없이 실행, 타입 검사도 내장</td>
               <td><b>기본 지원</b> — 트랜스파일만, 타입 검사는 안 함</td></tr>
           <tr><td><b>도구 내장</b></td>
@@ -1504,7 +1545,7 @@ deno run --allow-read=./data \
 deno run -A server.ts                 # 전부 허용 — 편하지만 의미가 사라집니다
 
 # npm 패키지를 그대로 (Deno 2)
-import express from "npm:express@4";
+import express from "npm:express@5";
 deno install                          # package.json · node_modules 인식</code></pre>
       <div class="note warn">
         <b>권한 모델은 “공급망 방어”가 목적입니다.</b>

@@ -10,6 +10,7 @@
     문법을 아는 것과 <b>동작 원리를 아는 것</b>은 다릅니다.
     이 탭은 <b>V8 내부 · 메모리 · 프로파일링 · 메타프로그래밍 · 보안 · 아키텍처</b>를 다룹니다.
     실무에서 매일 쓰지는 않지만, <b>장애를 해결할 때와 면접에서</b> 차이를 만듭니다.
+    <b>여기까지 마치면 “왜 느린가·왜 새는가”를 측정으로 답하고, 대규모 코드베이스의 구조를 설계하는 자리에 설 수 있습니다.</b>
   </p>
   <div class="stats">
     <div><b>18</b><span>SECTIONS</span></div>
@@ -38,8 +39,13 @@
 바이트코드 실행 시작  ← ★ 여기서 바로 돌기 시작합니다 (빠른 시작)
    ↓  실행하면서 프로파일링 ("이 함수가 자주 불린다")
 Sparkplug (베이스라인 컴파일러) — 간단한 기계어
-   ↓  더 자주 불리면
-Maglev / TurboFan — ★ 최적화된 기계어
+   ↓  꽤 자주 불리면
+Maglev (중간 티어) — 빠르게 만든 준수한 기계어
+   ↓  아주 뜨거우면
+TurboFan (최고 티어) — ★ 가장 잘 최적화된 기계어
+   │    · 백엔드는 2025 년에 Turboshaft(CFG 기반 IR)로 전면 교체됐습니다
+   │    · Turbolev — Maglev IR 을 Turboshaft 백엔드에 바로 넣어
+   │      TurboFan 의 "프런트엔드"까지 대체하는 작업이 진행 중입니다
    ↓  가정이 깨지면
 Deoptimization — 다시 바이트코드로 ★ 성능 급락</code></pre>
       <div class="note tip">
@@ -47,6 +53,18 @@ Deoptimization — 다시 바이트코드로 ★ 성능 급락</code></pre>
         미리 다 컴파일하지 않고, <b>실행하면서 뜨거운 코드만</b> 기계어로 만듭니다.
         그래서 <b>시작은 빠르고</b>, 반복 실행되는 코드는 <b>C 에 근접한 속도</b>가 나옵니다.
         대신 <b>“최적화 가정”이 깨지면 되돌아갑니다</b>(d02).
+      </div>
+      <div class="note tip">
+        <b>Turboshaft · Turbolev — 이름이 바뀐 이유</b><br>
+        오래된 TurboFan 은 <b>“바다의 노드(Sea of Nodes)”</b> 라는 느슨한 그래프 IR 을 썼습니다.
+        유연하지만 <b>컴파일이 느리고 캐시 지역성이 나빠</b>, V8 팀은 백엔드를
+        <b>Turboshaft</b>(제어 흐름 그래프 기반 IR)로 다시 썼고
+        <b>2025 년에 JS 백엔드가 전부 Turboshaft 로 넘어갔습니다.</b>
+        지금 진행 중인 <b>Turbolev</b> 는 여기서 한 걸음 더 나가
+        <b>Maglev 가 만든 IR 을 그대로 Turboshaft 백엔드에 넘겨</b>
+        TurboFan 프런트엔드(그래프 생성 단계)까지 걷어내는 작업입니다 —
+        목표는 <b>같은 최종 성능에 훨씬 짧은 컴파일 시간</b>입니다.
+        내 코드가 할 일은 달라지지 않습니다. 아래 “변하지 않는 원칙”이 그대로입니다.
       </div>
       <pre class="code" data-lang="bash"><code># 실제로 확인해 보기
 node --trace-opt --trace-deopt app.js       # 최적화·해제 로그
@@ -212,11 +230,15 @@ console.log(v8.getHeapStatistics());
 process.memoryUsage();
 // rss(전체) · heapTotal · heapUsed · external · arrayBuffers</code></pre>
       <div class="note warn">
-        <b>Node 는 컨테이너 메모리 한도를 자동으로 못 봅니다.</b>
-        <code>--max-old-space-size</code> 를 지정하지 않으면
-        기본 힙 한도(~4GB, 시스템에 따라 다름)까지 늘리다
-        <b>커널에 OOMKilled(137)</b> 당합니다 — <b>로그도 안 남습니다.</b>
-        컨테이너 메모리의 <b>75%</b> 정도로 지정하세요(🚀 대규모 k14).
+        <b>힙 한도는 자동 산정되지만, 명시하는 편이 안전합니다.</b>
+        Node 20+ 는 cgroup 의 <code>memory.max</code> 를 읽어
+        V8 기본 힙 크기를 컨테이너에 맞춰 잡습니다.
+        그래도 <code>--max-old-space-size</code> 를 컨테이너 메모리의 <b>70~75%</b> 로
+        직접 지정하는 이유는 —
+        ① <b>Buffer·네이티브 모듈·스레드 스택은 힙 밖</b>이라 자동 산정값에도 여유가 없을 수 있고,
+        ② 사이드카가 붙은 파드에서는 파드 전체 한도와 컨테이너 한도가 어긋나며,
+        ③ 값을 못 박아야 OOMKilled(exit 137) 대신
+        V8 의 heap out of memory 스택을 로그로 받을 수 있기 때문입니다(🚀 대규모 k14).
       </div>
     </div>
     <div class="card">
@@ -522,7 +544,8 @@ controller.abort();                    // ★ 둘 다 즉시 취소
 
 // 타임아웃 · 결합
 const timeout = AbortSignal.timeout(3000);
-const combined = AbortSignal.any([controller.signal, timeout]);  // ES2024
+const combined = AbortSignal.any([controller.signal, timeout]);
+//  ↑ WHATWG DOM (Node 20+ · 브라우저 공통)
 
 // 내가 만든 비동기 함수도 취소 가능하게
 async function longTask(signal: AbortSignal) {
@@ -585,6 +608,102 @@ const user = await dedupe(`user:${id}`, () =&gt; db.user.findUnique({ where: { i
         일반적인 서버 코드에서는 <b>거의 쓸 일이 없고</b>,
         잘못 쓰면 디버깅이 극도로 어려워집니다.
       </div>
+    </div>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">using · await using — 자원 해제를 언어가 맡습니다
+      <span class="ver new">Stage 4</span></h4>
+    <p class="tx" style="margin-top:0">
+      위 세마포어 코드의 <code>try { … } finally { release(); }</code> 가 눈에 걸렸다면,
+      그게 바로 이 문법이 나온 이유입니다.
+      <b><code>using</code> 으로 선언한 값은 블록을 벗어날 때
+      <code>[Symbol.dispose]()</code> 가 <u>선언의 역순</u>으로 자동 호출</b>됩니다 —
+      정상 종료든 <code>return</code> 이든 예외든 상관없이. (Node 24+ · Chrome 134+)
+    </p>
+    <div class="jsts">
+      <div class="js">
+        <h5>지금까지 — try/finally 로 직접</h5>
+        <pre class="code" data-lang="typescript"><code>const release = await sem.acquire();
+try {
+  const conn = await pool.connect();
+  try {
+    await conn.query("BEGIN");
+    try {
+      await work(conn);
+      await conn.query("COMMIT");
+    } catch (e) {
+      await conn.query("ROLLBACK");
+      throw e;
+    }
+  } finally {
+    conn.release();
+  }
+} finally {
+  release();
+}
+// ★ 중첩이 깊어질수록 하나씩 빠뜨립니다</code></pre>
+      </div>
+      <div class="ts">
+        <h5>using — 정리 코드가 사라집니다</h5>
+        <pre class="code" data-lang="typescript"><code>{
+  using slot = await sem.acquireScoped();
+  await using conn = await pool.connect();
+  await using tx   = await conn.begin();
+
+  await work(conn);
+  await tx.commit();
+}
+// 블록을 벗어나면 역순으로
+//   tx  → (commit 안 했으면) ROLLBACK
+//   conn→ release
+//   slot→ 세마포어 반납
+// 예외가 나도 똑같이 실행됩니다</code></pre>
+      </div>
+    </div>
+    <h4 class="mini">내 객체를 참여시키기 — 심볼 하나면 됩니다</h4>
+    <pre class="code" data-lang="typescript"><code>// ① 동기 자원 — Symbol.dispose
+class Timer {
+  private t0 = performance.now();
+  constructor(private label: string) {}
+  [Symbol.dispose]() {
+    console.log(`${this.label}: ${(performance.now() - this.t0).toFixed(1)}ms`);
+  }
+}
+
+function handler() {
+  using _t = new Timer("handler");    // 함수가 어떻게 끝나든 시간이 찍힙니다
+  return doWork();
+}
+
+// ② 비동기 자원 — Symbol.asyncDispose (await using 으로 씁니다)
+class Tx {
+  private done = false;
+  private constructor(private db: Client) {}
+  static async open(db: Client) { await db.query("BEGIN"); return new Tx(db); }
+  async commit() { await this.db.query("COMMIT"); this.done = true; }
+  async [Symbol.asyncDispose]() {
+    if (!this.done) await this.db.query("ROLLBACK");
+  }
+}
+
+// ③ 여러 자원을 한 덩어리로 — DisposableStack / AsyncDisposableStack
+async function setup() {
+  await using stack = new AsyncDisposableStack();
+  const db    = stack.use(await openDb());
+  const cache = stack.use(await openCache());
+  stack.defer(async () =&gt; log.flush());     // 임의의 정리 작업도 등록 가능
+
+  return stack.move();   // ★ 성공했을 때만 소유권을 호출자에게 넘깁니다
+}                        //   중간에 실패하면 여기서 전부 정리됩니다</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>세 가지만 주의하세요.</b>
+      ① <code>using</code> 은 <b>블록 스코프 전용</b>입니다 — 최상위 모듈이나
+      클래스 필드에는 못 씁니다.
+      ② <b>재할당이 안 됩니다</b>(<code>const</code> 처럼 동작).
+      ③ TypeScript 로 쓴다면 <code>lib</code> 에
+      <code>esnext.disposable</code> 이 들어가 있어야 <code>Symbol.dispose</code> 타입이 잡힙니다.
+      정리 순서가 <b>역순</b>이라는 점도 기억해 두세요 — 나중에 잡은 자원을 먼저 놓습니다.
     </div>
   </div>
 </section>

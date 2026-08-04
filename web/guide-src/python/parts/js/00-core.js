@@ -218,7 +218,7 @@ const SEC_KW = {
   z07:"데코레이터 functools wraps 매개변수 재시도 컨텍스트매니저 paramspec",
   z08:"제너레이터 코루틴 yield from send 파이프라인 비동기제너레이터 itertools",
   z09:"asyncio 이벤트루프 취소 cancellederror shield taskgroup contextvars uvloop 디버그",
-  z10:"gil 전역인터프리터락 free-threading 3.13 멀티프로세싱 하위인터프리터",
+  z10:"gil 전역인터프리터락 free-threading 3.14 pep779 멀티프로세싱 하위인터프리터 서브인터프리터 interpreterpoolexecutor jit",
   z11:"c확장 cython numba rust pyo3 maturin 네이티브 wheel 고속화",
   z12:"타입 protocol typevar generic overload paramspec typeddict self mypy pyright 구조적타이핑",
   z13:"함수형 불변성 frozen dataclass partial singledispatch result 패턴",

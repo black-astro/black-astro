@@ -10,6 +10,7 @@
     Node 는 <b>기다리는 일</b>에 최적화되어 있어 적은 자원으로 많은 연결을 버팁니다.
     대신 <b>이벤트 루프가 막히는 순간 전부 멈춥니다.</b>
     이 탭은 <b>대기업 백엔드 면접에서 실제로 묻는</b> 주제들을 순서대로 다룹니다.
+    <b>여기까지 마치면 수만 RPS 서버의 병목을 찾아 캐시·큐·확장으로 풀고, 그 선택의 근거를 설명할 수 있습니다.</b>
   </p>
   <div class="stats">
     <div><b>15</b><span>SECTIONS</span></div>
@@ -745,7 +746,7 @@ app.use("/api", rateLimit({
   store: new RedisStore({ sendCommand: (...a) =&gt; redis.call(...a) }),
   windowMs: 60_000,
   limit: 100,
-  standardHeaders: "draft-7",
+  standardHeaders: "draft-8",   // express-rate-limit v8 기준 (구형 클라이언트는 "draft-6")
   keyGenerator: (req) =&gt; req.user?.id ?? req.ip,   // 로그인 전은 IP, 후는 사용자
   handler: (req, res) =&gt; res.status(429)
     .set("Retry-After", "10")
@@ -1161,20 +1162,20 @@ p95 · p99            ★ 이벤트 루프 지연
     <div class="card">
       <h4 class="mini" style="margin-top:0">Dockerfile — 실무 형태</h4>
       <pre class="code" data-lang="dockerfile"><code># 1) 의존성 (레이어 캐시 최적화)
-FROM node:22-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
 # 2) 빌드
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
 # 3) 운영 — 최소한만
-FROM node:22-alpine
+FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
@@ -1186,10 +1187,15 @@ EXPOSE 3000
 # ★ npm start 로 하면 SIGTERM 이 Node 까지 전달되지 않습니다
 CMD ["node", "dist/index.js"]</code></pre>
       <div class="note warn">
-        <b>메모리 한도를 반드시 지정하세요.</b>
-        Node 는 컨테이너 한도를 <b>자동으로 못 봅니다</b>(자바와 다릅니다).
-        <code>--max-old-space-size</code> 를 컨테이너 메모리의 <b>75%</b> 정도로 주지 않으면
-        계속 늘리다 <b>OOMKilled(exit 137)</b> 당합니다 — 로그도 안 남습니다.
+        <b>힙 한도는 자동 산정되지만, 명시하는 편이 안전합니다.</b>
+        Node 20+ 는 cgroup 의 <code>memory.max</code> 를 읽어
+        V8 기본 힙 크기를 컨테이너에 맞춰 잡습니다.
+        그래도 <code>--max-old-space-size</code> 를 컨테이너 메모리의 <b>70~75%</b> 로
+        직접 지정하는 이유는 —
+        ① <b>Buffer·네이티브 모듈·스레드 스택은 힙 밖</b>이라 자동 산정값에도 여유가 없을 수 있고,
+        ② 사이드카가 붙은 파드에서는 파드 전체 한도와 컨테이너 한도가 어긋나며,
+        ③ 값을 못 박아야 OOMKilled(exit 137) 대신
+        V8 의 heap out of memory 스택을 로그로 받을 수 있기 때문입니다.
       </div>
       <pre class="code" data-lang="bash"><code>CMD ["node", "--max-old-space-size=1536", "dist/index.js"]   # 2GB 컨테이너</code></pre>
     </div>

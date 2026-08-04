@@ -11,6 +11,7 @@
     <b>ASGI · 커넥션 풀 · 멱등성</b> 같은 말이 갑자기 쏟아집니다.
     그 사이에 빠진 다리가 이 탭입니다.
     <b>HTTP 한 바퀴</b>부터 시작해 <b>내 손으로 API 서버를 띄우고 로그인을 붙이는 곳</b>까지 갑니다.
+    여기까지 하면 <b>로그인이 붙은 API 서버를 혼자 만들어 띄우는</b> 데까지 갑니다.
   </p>
   <div class="stats">
     <div><b>12</b><span>SECTIONS</span></div>
@@ -304,6 +305,34 @@ curl -o /dev/null -s -w "%{http_code}\n" https://example.com</code></pre>
         헤더를 빠뜨렸거나 <code>form</code> 으로 보낸 경우입니다.
         <b>보낸 것과 선언한 것이 같은지</b>부터 확인하세요.
       </div>
+    </div>
+  </div>
+
+  <div class="card rv d1">
+    <h4 class="mini" style="margin-top:0">그런데 <code>HTTP/1.1</code> 옆의 숫자 — 2 와 3 은 무엇이 다른가</h4>
+    <pre class="code" data-lang="text"><code>HTTP/1.1        연결 하나에 요청 하나씩, 앞의 응답이 와야 다음을 보냅니다
+                → 브라우저가 도메인당 6개쯤 연결을 열어 억지로 우회
+                → 헤더(쿠키·User-Agent…)가 요청마다 평문으로 통째로 반복
+
+HTTP/2  (2015)  ★ 연결 하나에서 스트림 여러 개를 동시에 (멀티플렉싱)
+                ★ HPACK 헤더 압축 — 반복되는 헤더를 표로 줄임
+                · 서버 푸시는 사실상 폐기되었습니다
+                남은 문제: TCP 레벨 HOL 블로킹 —
+                  패킷 하나가 유실되면 무관한 스트림까지 전부 멈춥니다
+
+HTTP/3  (2022, RFC 9114)   ★ QUIC over UDP
+                ★ 스트림이 서로 독립 → TCP HOL 블로킹이 사라짐
+                ★ TLS 가 전송 계층에 통합 → 핸드셰이크 1-RTT (재접속은 0-RTT)
+                ★ 모바일에서 IP 가 바뀌어도 연결 유지 (connection migration)
+
+메시지의 의미(메서드·상태 코드·헤더)는 셋 다 같습니다.
+바뀐 것은 "그것을 선으로 어떻게 실어 나르는가" 뿐입니다.</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>앱 서버가 직접 할 일은 거의 없습니다.</b>
+      CDN · Nginx · ALB 같은 <b>앞단이 브라우저와 2/3 로 이야기하고</b>,
+      <code>uvicorn</code> 은 그 뒤에서 <b>HTTP/1.1 로 받습니다</b>
+      (<code>uvicorn</code> 자체는 HTTP/2 를 지원하지 않습니다).
+      “HTTP/3 를 켜라”는 요구는 대개 <b>인프라 설정</b>이지 코드 변경이 아닙니다.
     </div>
   </div>
 </section>
@@ -744,7 +773,7 @@ from fastapi.exceptions import RequestValidationError
 
 <span class="t-ann">@app.exception_handler</span>(RequestValidationError)
 async def validation_handler(request, exc):
-    return JSONResponse(422, content={
+    return JSONResponse(status_code=422, content={
         "code": "VALIDATION_ERROR",
         "message": "입력값을 확인해 주세요",
         "detail": exc.errors(),
@@ -753,10 +782,12 @@ async def validation_handler(request, exc):
 <span class="t-ann">@app.exception_handler</span>(Exception)
 async def unhandled(request, exc):
     logger.exception("unhandled", extra={"path": request.url.path})
-    return JSONResponse(500, content={
+    return JSONResponse(status_code=500, content={
         "code": "INTERNAL_ERROR",
         "message": "잠시 후 다시 시도해 주세요",   # ★ 내부 정보 노출 금지
-    })</code></pre>
+    })
+# ★ status_code 는 반드시 키워드로 — JSONResponse(content, status_code=200, ...) 라서
+#   JSONResponse(500, content={...}) 는 500 이 content 자리로 들어가 TypeError 가 납니다</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>예외 메시지를 그대로 사용자에게 보내지 마세요.</b>
         <code>str(exc)</code> 에는 <b>테이블명 · 파일 경로 · 쿼리문</b>이 섞여 나옵니다.
@@ -800,7 +831,14 @@ async def unhandled(request, exc):
           <tr><td><b>HttpOnly</b></td><td>자바스크립트가 못 읽음 → <b>XSS 로 탈취 불가</b> ★</td></tr>
           <tr><td><b>Secure</b></td><td>HTTPS 에서만 전송</td></tr>
           <tr><td><b>SameSite=Lax</b></td><td>다른 사이트에서 온 요청엔 안 붙음 → <b>CSRF 완화</b></td></tr>
-          <tr><td>Max-Age / Expires</td><td>유효 기간</td></tr>
+          <tr><td>SameSite=Strict</td><td>외부 사이트에서 온 요청엔 <b>아예 안 실림</b> — CSRF 로는 가장 강하지만
+              메일·검색 결과 링크로 들어오면 <b>로그아웃된 것처럼 보입니다</b></td></tr>
+          <tr><td>SameSite=None; Secure</td><td>크로스 사이트로 <b>보내겠다</b>는 선언.
+              ★ <code>Secure</code> 를 같이 안 주면 <b>브라우저가 쿠키를 버립니다</b></td></tr>
+          <tr><td><b><code>__Host-</code> prefix</b></td><td><code>__Host-session</code> 처럼 이름 앞에 붙이면 브라우저가
+              <b><code>Secure</code> + <code>Path=/</code> + <code>Domain</code> 없음</b>을 강제합니다.
+              서브도메인이 쿠키를 덮어쓰는 공격(cookie tossing)을 <b>가장 싸게</b> 막는 방법 ★</td></tr>
+          <tr><td>Max-Age / Expires</td><td>유효 기간. <b>빼면 세션 쿠키</b>가 되어 브라우저를 닫을 때 사라집니다</td></tr>
           <tr><td>Domain / Path</td><td>어느 주소에 붙일지</td></tr>
         </table>
       </div>
@@ -1113,21 +1151,38 @@ async def refresh(response: Response,
     uid, jti = int(p["sub"]), p["jti"]
     # ★ 저장소에 없으면 이미 쓰였거나 회수된 토큰입니다
     if not await redis.delete(f"rt:{uid}:{jti}"):
-        await redis.delete(*await redis.keys(f"rt:{uid}:*"))   # 재사용 감지 → 전부 무효화
+        await revoke_all(uid)                                  # 재사용 감지 → 전부 무효화
         raise CRED_ERR
 
     new_refresh, new_jti = create_refresh_token(uid)           # ★ 회전(rotation)
-    await redis.setex(f"rt:{uid}:{new_jti}", 60*60*24*14, "1")
-    response.set_cookie("refresh_token", new_refresh, httponly=True,
-                        secure=True, samesite="lax", path="/auth")
+    await redis.setex(f"rt:{uid}:{new_jti}", 60 * 60 * 24 * 14, "1")
+    response.set_cookie(
+        "refresh_token", new_refresh,
+        httponly=True, secure=True, samesite="lax",
+        max_age=60 * 60 * 24 * 14, path="/auth",   # ★ 로그인 때와 똑같이
+    )
     return {"access_token": create_access_token(uid), "token_type": "bearer"}
+
+async def revoke_all(user_id: int) -&gt; None:
+    # ★ KEYS 가 아니라 SCAN — 블로킹 없이 조금씩 훑습니다
+    keys = [k async for k in redis.scan_iter(match=f"rt:{user_id}:*", count=100)]
+    if keys:                                   # ★ 빈 리스트면 delete() 인자가 0개 → 에러
+        await redis.delete(*keys)
 
 <span class="t-ann">@router.post</span>("/logout", status_code=204)
 async def logout(user: CurrentUser, response: Response):
-    keys = await redis.keys(f"rt:{user.id}:*")
-    if keys:
-        await redis.delete(*keys)
+    await revoke_all(user.id)
     response.delete_cookie("refresh_token", path="/auth")</code></pre>
+      <div class="note warn">
+        <b>회전한 쿠키에 <code>max_age</code> 를 빼먹으면 세션 쿠키가 됩니다.</b>
+        브라우저를 닫는 순간 사라져서 <b>“가끔 로그인이 풀린다”</b>는 신고로 돌아옵니다 —
+        <b>재발급 때도 로그인 때와 같은 옵션</b>을 그대로 붙이세요.
+      </div>
+      <div class="note warn">
+        <b><code>KEYS</code> 는 운영 DB 를 멈춥니다.</b>
+        Redis 는 단일 스레드라 <code>KEYS</code> 하나가 전체 키를 훑는 동안
+        <b>다른 모든 명령이 대기</b>합니다 — <code>SCAN</code>(<code>scan_iter</code>)을 쓰세요.
+      </div>
       <div class="note warn">
         <b>체크리스트 — 하나라도 빠지면 구멍입니다.</b>
         ① <code>algorithms=["HS256"]</code> 를 <b>반드시 명시</b>
@@ -1317,7 +1372,8 @@ def create():
     data = request.get_json()          # ★ 검증은 직접 해야 합니다
     new_id = len(db) + 1
     db[new_id] = data
-    return jsonify(id=new_id, **data), 201
+    return jsonify({**data, "id": new_id}), 201   # ★ jsonify(id=..., **data) 는
+                                                  #   data 에 id 가 있으면 TypeError
 
 <span class="t-ann">@app.get</span>("/items/&lt;int:item_id&gt;")
 def read(item_id):

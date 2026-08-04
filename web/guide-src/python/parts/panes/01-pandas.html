@@ -8,6 +8,7 @@
     표가 <b>쪼개지고 · 합쳐지고 · 뒤집히는</b> 과정을 애니메이션으로 직접 확인하세요.
     개념 설명 → 코드 → 실제 데이터 이동까지 한 화면에서 이어집니다.
     각 데모의 버튼과 슬라이더를 눌러보면 요소들이 실제로 자리를 옮깁니다.
+    여기까지 하면 <b>수십만 행 데이터를 혼자 정리·집계해 정기 리포트를 자동으로 뽑는</b> 수준까지 갑니다.
   </p>
   <div class="stats">
     <div><b>22</b><span>SECTIONS</span></div>
@@ -1333,14 +1334,104 @@ df.loc[df["매출"] &gt; 300, "등급"] = "S"</code></pre>
     </div>
   </div>
 
-  <h3 class="sub" data-lv="a">고급 — pandas 2.x 심화</h3>
+  <h3 class="sub" data-lv="a">고급 — pandas 3.0 심화</h3>
+
+  <div class="card rv d1">
+    <h4 class="mini" style="margin-top:0">pandas 3.0 마이그레이션 — 2.x 코드가 깨지는 지점</h4>
+    <p class="tx" style="font-size:14px">
+      3.0 은 2026년 1월에 나온 대형 릴리스입니다. 대부분의 코드는 그대로 돌지만,
+      아래 다섯 가지는 <b>에러 없이 결과만 조용히 달라지는</b> 경우가 있어 먼저 확인해야 합니다.
+    </p>
+    <div class="tw">
+      <table class="cheat">
+        <tr><th style="width:22%">바뀐 것</th><th style="width:30%">2.x 에서는</th><th>3.0 에서는</th></tr>
+        <tr>
+          <td>① 문자열 dtype</td>
+          <td><code>object</code> 가 기본</td>
+          <td><b><code>str</code> 이 기본.</b> <code>df.dtypes</code> 출력이 달라지고,
+              <code>dtype == object</code> 로 문자열 컬럼을 골라내던 코드가 <b>아무것도 못 고릅니다</b></td>
+        </tr>
+        <tr>
+          <td>② 날짜 해상도</td>
+          <td>기본 <code>datetime64[ns]</code></td>
+          <td>기본 <b><code>datetime64[us]</code></b>.
+              <code>.astype("int64")</code>로 타임스탬프를 정수로 뽑던 코드는 <b>값이 1000배 작아집니다</b> →
+              먼저 <code>.dt.as_unit("ns")</code>로 맞춘 뒤 변환</td>
+        </tr>
+        <tr>
+          <td>③ 체인 대입</td>
+          <td>경고를 띄우고 동작은 불확실</td>
+          <td><b>경고 없이 조용히 무시</b>됩니다. <code>df[df.x &gt; 0]["y"] = 1</code> 은
+              원본을 바꾸지도, 에러를 내지도 않습니다 → <code>df.loc[조건, "y"] = 1</code> 한 방으로</td>
+        </tr>
+        <tr>
+          <td>④ <code>inplace=True</code></td>
+          <td><code>None</code> 을 반환</td>
+          <td><b>self(그 DataFrame)를 반환</b>합니다.
+              <code>x = df.fillna(0, inplace=True)</code> 가 이제 DataFrame 을 주므로
+              <code>None</code> 을 전제로 분기하던 코드가 깨집니다</td>
+        </tr>
+        <tr>
+          <td>⑤ <code>copy=</code> 키워드</td>
+          <td>여러 메서드에서 받아줌</td>
+          <td><b>전부 제거</b> — 넘기면 <code>TypeError</code>.
+              Copy-on-Write 가 항상 켜져 있어 의미가 없어졌습니다</td>
+        </tr>
+      </table>
+    </div>
+    <pre class="code" data-lang="python"><code># ① 문자열 컬럼 고르기 — object 비교로는 이제 안 걸립니다
+df.dtypes                    # 3.0: str   (2.x: object)
+df.dtypes == object          # ❌ 문자열 컬럼이 안 잡힘
+
+from pandas.api.types import is_string_dtype
+[c for c in df.columns if is_string_dtype(df[c])]   # ✅ 버전 무관
+
+# ② 타임스탬프 → 정수: 단위를 못 박고 변환
+df["날짜"].astype("int64")                    # 3.0 은 us → 예전보다 1000배 작음
+df["날짜"].dt.as_unit("ns").astype("int64")   # ✅ 2.x 와 같은 값
+
+# ③ 체인 대입은 조용히 무시된다 (경고도 에러도 없음)
+df[df["매출"] &gt; 300]["등급"] = "S"      # ❌ 아무 일도 일어나지 않음
+df.loc[df["매출"] &gt; 300, "등급"] = "S"   # ✅ 유일하게 확실한 방법
+
+# ④ inplace 의 반환값이 바뀌었다
+x = df.fillna(0, inplace=True)   # 2.x: None  /  3.0: DataFrame
+
+# ⑤ copy= 는 사라졌다
+df.rename(columns={"a":"b"}, copy=False)   # ❌ TypeError</code></pre>
+    <h4 class="mini">함께 바뀐 것들</h4>
+    <ul class="tx" style="font-size:14px">
+      <li><b>시간대</b> — <span class="kw">pytz</span> 대신 표준 라이브러리
+          <span class="kw">zoneinfo</span> 로 전환합니다:
+          <code>from zoneinfo import ZoneInfo</code> →
+          <code>s.dt.tz_localize(ZoneInfo("Asia/Seoul"))</code></li>
+      <li><b>오프셋 별칭</b> — <code>M</code> / <code>Q</code> / <code>Y</code> 는
+          <code>ME</code> / <code>QE</code> / <code>YE</code>(월말·분기말·연말)로 바뀌었습니다</li>
+      <li><b>최소 요구사항</b> — Python <b>3.11+</b>, NumPy <b>1.26+</b></li>
+    </ul>
+    <h4 class="mini">올리는 순서</h4>
+    <ul class="tx" style="font-size:14px">
+      <li><b>2.2 → 2.3</b> 으로 먼저 올리고, 여기서 뜨는 경고를 <b>전부</b> 정리합니다</li>
+      <li>2.3 에서 <code>pd.options.future.infer_string = True</code> 로
+          새 문자열 dtype 을 미리 시험해 볼 수 있습니다</li>
+      <li>경고가 0 이 된 다음에 <b>3.0</b> 으로 올립니다</li>
+    </ul>
+    <div class="note warn" style="margin-bottom:0">
+      <b>가장 위험한 건 ③</b> — 나머지는 에러나 눈에 띄는 차이로 드러나지만,
+      체인 대입은 <b>경고도 에러도 없이 그냥 안 먹습니다</b>.
+      2.x 시절 경고를 보고 고치던 자리가 3.0 에서는 아무 신호도 주지 않으니,
+      값 대입은 <b>무조건 <code>df.loc[행조건, "열"] = 값</code> 한 방</b>으로 쓰세요.
+    </div>
+  </div>
+
   <div class="grid2 rv d2">
     <div class="card">
       <h4 class="mini" style="margin-top:0">Copy-on-Write · PyArrow 백엔드</h4>
-      <pre class="code" data-lang="python"><code># Copy-on-Write — SettingWithCopyWarning 의 근본 해결
-pd.options.mode.copy_on_write = True   # 3.0부터 기본값
-# 이후 모든 슬라이스는 '수정하는 순간에만' 복사됩니다.
-# view/copy 고민이 사라지고 동작이 예측 가능해집니다.
+      <pre class="code" data-lang="python"><code># Copy-on-Write — 3.0 부터 '항상 켜져 있고 끌 수 없습니다'.
+# 모든 슬라이스는 '수정하는 순간에만' 복사되고,
+# view/copy 고민이 사라져 동작이 예측 가능해집니다.
+# 옵션을 설정할 필요가 없고, 설정하면 오히려 FutureWarning 이 납니다
+# (pd.options.mode.copy_on_write 는 3.0 에서 deprecated, 4.0 제거 예정)
 
 # PyArrow 백엔드 — 문자열 메모리 절반, NaN 없는 정수
 df = pd.read_csv("big.csv", dtype_backend="pyarrow",

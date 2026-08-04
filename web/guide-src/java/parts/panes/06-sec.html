@@ -5,7 +5,7 @@
 <div class="pane" id="pane-sec">
 
 <header class="hero">
-  <div class="eyebrow"><i></i> SPRING SECURITY 6 · JWT · OAUTH2</div>
+  <div class="eyebrow"><i></i> SPRING SECURITY 7 · JWT · OAUTH2</div>
   <h1>막는 것보다<br>흐름을 아는 게<br>먼저다</h1>
   <p class="tx">
     스프링 시큐리티가 어렵게 느껴지는 이유는 <b>필터 체인이 안 보이기 때문</b>입니다.
@@ -101,7 +101,23 @@ public UserRes me(@AuthenticationPrincipal CustomUserDetails user) {
   <div class="sec-head rv">
     <span class="no">SEC 02</span>
     <h2>설정 <span class="t">기본형</span></h2>
-    <p class="lead">Spring Security 6 부터는 <b>람다 DSL</b>만 씁니다. 예전 <code>WebSecurityConfigurerAdapter</code> 는 사라졌습니다.</p>
+    <p class="lead">
+      <b>Spring Security 7</b>(Boot 4.0 = 7.0 · Boot 4.1 = 7.1)은 <b>람다 DSL</b>만 씁니다.
+      옛 자료를 복붙하면 컴파일부터 안 됩니다.
+    </p>
+  </div>
+
+  <div class="note warn rv">
+    <b>Security 7 에서 완전히 없어진 것</b> — 6 시절 “deprecated” 였던 것들이 이제 <b>제거</b>됐습니다.
+    <br>· <code>WebSecurityConfigurerAdapter</code> — <code>SecurityFilterChain</code> <b>빈</b>으로 대체
+    <br>· <code>authorizeRequests()</code> — <code>authorizeHttpRequests()</code> 로
+    <br>· 체이닝용 <code>.and()</code> — <b>람다 중첩</b>으로만 작성
+    <br>· <code>AccessDecisionManager</code>·<code>AccessDecisionVoter</code> — <code>AuthorizationManager</code> 로
+    <br>· OAuth2 <b>password grant</b> — 사양 자체가 폐기돼 제거 (authorization code + PKCE 로)
+    <br>또 URL 매칭 기본이 <code>AntPathRequestMatcher</code>·<code>MvcRequestMatcher</code> 에서
+    <b><code>PathPatternRequestMatcher</code></b> 로 바뀌었습니다.
+    문자열만 넘기는 <code>requestMatchers("/api/**")</code> 는 그대로 동작하지만,
+    매처를 <b>직접 만들어 넘기던 코드</b>는 고쳐야 합니다.
   </div>
 
   <div class="card rv">
@@ -211,10 +227,11 @@ public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
             .key("고유한-비밀-키")
             .tokenValiditySeconds(60 * 60 * 24 * 14))   // 2주
 
+        // Security 7 은 람다 중첩만 씁니다 — .and() 체이닝은 제거됐습니다
         .sessionManagement(s -&gt; s
-            .sessionFixation().changeSessionId()    // 로그인 시 세션 ID 교체 ★
-            .maximumSessions(1)                     // 동시 접속 1개
-            .maxSessionsPreventsLogin(false))       // 새 로그인이 이전 것을 밀어냄
+            .sessionFixation(f -&gt; f.changeSessionId())   // 로그인 시 세션 ID 교체 ★
+            .maximumSessions(1)                          // 동시 접속 1개
+            .maxSessionsPreventsLogin(false))            // 새 로그인이 이전 것을 밀어냄
         .build();
 }</code></pre>
     </div>
@@ -342,9 +359,9 @@ boolean ok = passwordEncoder.matches(rawPassword, user.getPassword());</code></p
   </div>
 
   <div class="dep rv">
-    <code>implementation("io.jsonwebtoken:jjwt-api:0.12.6")</code> ·
-    <code>runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")</code> ·
-    <code>runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")</code>
+    <code>implementation("io.jsonwebtoken:jjwt-api:0.13.0")</code> ·
+    <code>runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")</code> ·
+    <code>runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")</code>
   </div>
 
   <div class="card rv">
@@ -551,7 +568,8 @@ private static void write(HttpServletResponse res, HttpStatus status,
   <div class="grid2 rv">
     <div class="card">
       <div class="dep">
-        <code>implementation("org.springframework.boot:spring-boot-starter-oauth2-client")</code>
+        <code>implementation("org.springframework.boot:spring-boot-starter-security-oauth2-client")</code>
+        <br><span style="opacity:.75">Boot 3 의 <code>spring-boot-starter-oauth2-client</code> 가 개명된 이름입니다.</span>
       </div>
       <pre class="code" data-lang="yaml"><code>spring:
   security:
@@ -770,6 +788,45 @@ public CorsConfigurationSource corsConfigurationSource() {
     .httpStrictTransportSecurity(hsts -&gt; hsts
             .maxAgeInSeconds(31536000)
             .includeSubDomains(true)))</code></pre>
+    </div>
+  </div>
+
+  <div class="card rv d1">
+    <h4 class="mini" style="margin-top:0">SSRF 방어 — <code>InetAddressFilter</code> <span class="ver new">Boot 4.1</span></h4>
+    <p class="tx">
+      <b>SSRF</b>(Server-Side Request Forgery)는 “사용자가 준 URL 로 서버가 대신 요청하게” 만드는 공격입니다.
+      썸네일 생성·웹훅 등록·이미지 프록시처럼 <b>URL 을 입력으로 받는 기능</b>이 있으면 노출됩니다.
+      공격자는 <code>http://169.254.169.254/…</code>(클라우드 메타데이터)나
+      <code>http://127.0.0.1:8500</code> 같은 <b>내부 주소</b>를 넣습니다 —
+      방화벽 바깥에서는 못 닿지만 <b>내 서버는 닿기</b> 때문에 뚫립니다.
+    </p>
+    <pre class="code" data-lang="java"><code>// org.springframework.boot.http.client.InetAddressFilter
+// 빈으로 하나만 올려 두면 자동 설정된 RestClient·WebClient 전부에 적용됩니다
+@Configuration
+public class HttpClientConfig {
+
+    // ① 가장 단순한 형태 — "외부(라우팅 가능) 주소로만 나간다"
+    //    루프백 127.0.0.0/8 · ::1, 사설 10/8 · 172.16/12 · 192.168/16,
+    //    IPv6 ULA fc00::/7 이 전부 막힙니다
+    @Bean
+    public InetAddressFilter inetAddressFilter() {
+        return InetAddressFilter.externalAddresses();
+    }
+
+    // ② 내부 API 서버 하나만 예외로 열어야 한다면 조합해서 씁니다
+    //    (and / or / andNot / negate 로 필터를 이어 붙일 수 있습니다)
+    // return InetAddressFilter.externalAddresses().or("10.0.5.20");
+}
+
+// 막힌 주소로 요청하면 네트워크로 나가기 전에 FilteredHostException 이 납니다</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>문자열로 URL 을 검사하는 방어는 거의 다 뚫립니다.</b>
+      <code>http://127.0.0.1</code> 만 막아도
+      <code>http://127.1</code>·<code>http://0x7f.0.0.1</code>·<code>http://localtest.me</code>
+      (공인 DNS 인데 127.0.0.1 로 해석) 로 우회됩니다.
+      <b>이름이 아니라 해석된 IP 를 대역 단위로</b> 막아야 합니다 —
+      <code>InetAddressFilter</code> 가 <b>DNS 해석 결과</b>를 기준으로 판정하는 이유입니다.
+      <br>가능하면 <b>허용 목록(allowlist)</b> 이 원칙입니다.
     </div>
   </div>
 </section>

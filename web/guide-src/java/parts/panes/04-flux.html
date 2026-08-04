@@ -13,7 +13,7 @@
     그래서 <b>언제 쓰지 말아야 하는지</b>부터 시작합니다.
   </p>
   <div class="stats">
-    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>17</b><span>SECTIONS</span></div>
     <div><b>N개</b><span>스레드 (CPU 코어 수)</span></div>
     <div><b>수만</b><span>동시 연결</span></div>
     <div><b>0</b><span>블로킹 허용</span></div>
@@ -69,7 +69,8 @@
 
   <div class="dep rv">
     <b>build.gradle.kts</b> — <code>implementation("org.springframework.boot:spring-boot-starter-webflux")</code>
-    <br>⚠️ <code>starter-web</code> 과 <b>함께 넣으면 MVC 가 이깁니다.</b> WebFlux 를 쓰려면 <code>starter-web</code> 을 빼세요.
+    <br>⚠️ <code>starter-webmvc</code>(Boot 3 의 <code>starter-web</code>) 와 <b>함께 넣으면 MVC 가 이깁니다.</b>
+    WebFlux 를 쓰려면 <code>starter-webmvc</code> 를 빼세요.
   </div>
 </section>
 
@@ -278,7 +279,7 @@ mono.subscribeOn(Schedulers.boundedElastic());</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">막힌 곳 찾기 — BlockHound</h4>
       <div class="dep">
-        <code>testImplementation("io.projectreactor.tools:blockhound:1.0.9.RELEASE")</code>
+        <code>testImplementation("io.projectreactor.tools:blockhound:1.0.13.RELEASE")</code>
       </div>
       <pre class="code" data-lang="java"><code>// 테스트에서 켜 두면 블로킹 호출을 즉시 예외로 잡아 준다
 @BeforeAll
@@ -472,8 +473,8 @@ client.get().uri("/users/{id}", id)
   <div class="note tip">
     <b>MVC 프로젝트에서 쓴다면</b> — <code>.block()</code> 으로 결과를 기다리면 됩니다.
     다만 <b>WebFlux 프로젝트에서는 <code>.block()</code> 이 금지</b>입니다.
-    <br>Spring 6.1 부터는 동기 호출 전용 <b><code>RestClient</code></b> 도 있습니다 —
-    MVC 라면 그쪽이 더 자연스럽습니다.
+    <br>Spring 6.1 부터는 동기 호출 전용 <b><code>RestClient</code></b> 도 있습니다
+    <span class="ver">Spring 6.1+ (현행 7.x)</span> — MVC 라면 그쪽이 더 자연스럽습니다.
   </div>
 </section>
 
@@ -982,6 +983,765 @@ Mono.deferContextual(ctx -&gt; {
     String traceId = ctx.get("traceId");
     return Mono.just(...);
 });</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== f13 ==================== -->
+<section class="sec" id="f13">
+  <div class="sec-head rv">
+    <span class="no">FLUX 13</span>
+    <h2>Netty 구조 — <span class="t">왜 WebFlux가 빠른가</span></h2>
+    <p class="lead">
+      WebFlux 아래에는 <b>항상 Netty</b>가 깔려 있습니다.
+      여기를 모르면 <b>튜닝도 장애 분석도 추측</b>이 됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Reactor 패턴 — 스레드 하나가 수천 소켓을 본다</h4>
+      <pre class="code" data-lang="text"><code>[ 톰캣 · 블로킹 ]
+소켓 1  → 스레드 1  (read() 에서 멈춰 있음)
+소켓 2  → 스레드 2  (read() 에서 멈춰 있음)
+소켓 N  → 스레드 N   … 스레드 = 소켓 개수
+
+[ Netty · Reactor 패턴 ]
+소켓 1 ┐
+소켓 2 ├→ [ Selector / epoll ] → 이벤트 루프 스레드 1개
+  …    │      "읽을 게 생긴 소켓만 알려 줘"
+소켓 N ┘
+      → 이벤트가 온 소켓만 골라서 처리 → 다음 소켓
+      스레드는 '기다리지' 않고 '깨워질 때만' 일한다</code></pre>
+      <p class="tx" style="font-size:13.6px">
+        핵심은 <b>스레드 수를 소켓 수에서 분리</b>한 것입니다.
+        연결 1만 개가 있어도 <b>실제로 데이터가 오가는 건 그중 수백 개</b>뿐이므로,
+        <b>CPU 코어 수만큼의 스레드</b>로 전부 감당할 수 있습니다.
+        컨텍스트 스위칭과 스레드 스택(기본 1MB × N)이 통째로 사라지는 것이
+        <b>WebFlux 가 메모리를 적게 먹는 진짜 이유</b>입니다.
+      </p>
+      <h4 class="mini">EventLoopGroup — boss와 worker</h4>
+      <pre class="code" data-lang="java"><code>// boss   : accept() 만 담당 (연결 수락) — 보통 1개면 충분
+// worker : 수락된 연결의 read/write 를 전담 — 코어 수만큼
+EventLoopGroup boss   = new MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory());
+EventLoopGroup worker = new MultiThreadIoEventLoopGroup(NioIoHandler.newFactory());
+
+// ★ 한 Channel 은 평생 같은 EventLoop 에 묶인다 (스레드 어피니티)
+//    → 그 채널의 핸들러 안에서는 동기화가 필요 없다
+//    → 대신 그 스레드를 막으면 '그 채널에 붙은 다른 수천 연결'도 같이 멈춘다</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ChannelPipeline — 요청이 지나가는 컨베이어</h4>
+      <pre class="code" data-lang="text"><code>소켓에서 바이트 도착
+   ↓  Inbound (아래 → 위)
+[ SslHandler ] → [ HttpServerCodec ] → [ 집계 ] → [ 내 핸들러 ]
+   ↑  Outbound (위 → 아래)
+소켓으로 바이트 전송
+
+· ChannelHandler = 컨베이어 위의 작업자 하나
+· ChannelPipeline = 작업자들의 줄 (연결마다 1개)
+· ChannelHandlerContext = 작업자가 앞뒤 사람에게 말 거는 창구
+· 순서가 곧 로직이다 — addLast 순서를 틀리면 조용히 안 먹는다</code></pre>
+      <h4 class="mini">ByteBuf — 참조 카운팅이 붙은 버퍼 ★</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">종류</th><th>특징</th></tr>
+          <tr><td><b>힙 ByteBuf</b></td><td>JVM 힙에 할당. GC 가 치워 줌. 소켓에 쓸 때 <b>복사 1회</b> 발생</td></tr>
+          <tr><td><b>다이렉트 ByteBuf</b></td><td>힙 밖(네이티브). <b>복사 없이</b> 커널로 전달 = zero-copy. <b>Netty 기본값</b> ★</td></tr>
+        </table>
+      </div>
+      <h4 class="mini">할당자(Allocator) — 4.2 에서 기본값이 바뀌었습니다 ★</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">할당자</th><th>특징</th></tr>
+          <tr><td><b>Adaptive</b></td><td><b>Netty 4.2 기본값.</b> 실제 워크로드를 관찰해 버퍼 크기·전략을 자동 조정.
+            pooled 보다 <b>메모리를 적게</b> 쓰고 <b>가상 스레드와도 잘 맞습니다</b> ★</td></tr>
+          <tr><td>Pooled</td><td>버퍼를 재사용해 GC 압력을 줄임. <b>4.1 까지의 기본값</b>.
+            지금은 <code>-Dio.netty.allocator.type=pooled</code> 로 <b>명시해야</b> 씁니다</td></tr>
+          <tr><td>Unpooled</td><td>매번 새로 할당. 느리지만 <b>진단용</b>으로 유용</td></tr>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>4.1 시절 블로그를 그대로 믿지 마세요</b> —
+        “Netty 기본은 PooledByteBufAllocator” 는 <b>4.2 부터 사실이 아닙니다.</b>
+        기본은 <code>AdaptiveByteBufAllocator</code> 입니다.
+        풀 기준으로 튜닝하던 <code>io.netty.allocator.numDirectArenas</code> 같은 옵션은
+        adaptive 에서는 의미가 없습니다.
+      </div>
+      <pre class="code" data-lang="java"><code>ByteBuf buf = ctx.alloc().buffer(1024);   // refCnt = 1
+buf.writeBytes(data);
+buf.retain();                              // refCnt = 2 (다른 곳도 쓴다)
+ReferenceCountUtil.release(buf);           // refCnt = 1
+ReferenceCountUtil.release(buf);           // refCnt = 0 → 풀로 반납
+
+// ⚠️ release 를 빠뜨리면 GC 가 안 치웁니다 = 다이렉트 메모리 누수
+//    누수는 '한참 뒤 OOM' 으로만 드러나서 원인 추적이 지옥입니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>ResourceLeakDetector</b> — 누수를 잡는 유일한 실용 도구입니다.
+        <br><code>-Dio.netty.leakDetection.level=PARANOID</code> (개발·부하 테스트 전용, 모든 버퍼 추적)
+        <br><code>SIMPLE</code>(기본, 1% 샘플링) · <code>ADVANCED</code>(샘플링 + 접근 위치 기록) ·
+        <code>PARANOID</code>(전수 검사, 느림)
+        <br>로그에 <code>LEAK: ByteBuf.release() was not called</code> 가 뜨면
+        <b>그 아래 스택이 마지막으로 만진 위치</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Spring WebFlux 는 Netty 위에 이렇게 얹힌다</h4>
+      <pre class="code" data-lang="text"><code>@RestController / RouterFunction
+        ↓
+DispatcherHandler          (스프링 웹플럭스)
+        ↓
+HttpHandler                (서버 중립 추상화)
+        ↓
+ReactorHttpHandlerAdapter  (Reactor Netty 로 변환)
+        ↓
+reactor.netty.http.server.HttpServer
+        ↓
+io.netty.*  ChannelPipeline / EventLoop / ByteBuf</code></pre>
+      <pre class="code" data-lang="java"><code>// 서버 옵션을 직접 손대는 지점 — 스프링 부트가 주는 커스터마이저
+@Bean
+public NettyServerCustomizer nettyCustomizer() {
+    return server -&gt; server
+            .option(ChannelOption.SO_BACKLOG, 4096)          // accept 대기 큐
+            .childOption(ChannelOption.TCP_NODELAY, true)
+            .idleTimeout(Duration.ofSeconds(60))
+            .accessLog(true);
+}
+
+// application.yml 로 되는 것들
+// server.netty.connection-timeout: 2s
+// server.netty.idle-timeout: 60s
+// server.max-http-request-header-size: 16KB</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스레드 수 — 기본값과 실제 튜닝</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:44%">항목</th><th>기본값</th></tr>
+          <tr><td>worker 스레드 수</td><td><code>max(availableProcessors(), 4)</code></td></tr>
+          <tr><td>변경 방법</td><td><code>-Dreactor.netty.ioWorkerCount=16</code></td></tr>
+          <tr><td>select 스레드 수</td><td><code>-Dreactor.netty.ioSelectCount=1</code></td></tr>
+          <tr><td>스레드 이름</td><td><code>reactor-http-nio-1 … -N</code></td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// 컨테이너 안에서는 availableProcessors() 가 거짓말을 합니다
+// Java 10+ 는 cgroup 을 읽지만, CPU limit 이 500m 이면 → 1 로 보고
+//   → worker 4개 (하한) 로 뜨는데 실제 CPU 는 0.5개
+//   → 스레드끼리 서로 CPU 를 뺏어 p99 가 튄다
+// ✅ CPU limit 과 ioWorkerCount 를 '같은 수'로 맞추세요
+//    resources.limits.cpu: "2"  +  -Dreactor.netty.ioWorkerCount=2
+
+// 지금 몇 개로 떠 있는지 확인
+Loggers.getLogger("reactor.netty").debug("...");
+// 또는 액추에이터 스레드 덤프에서 reactor-http-nio-* 개수를 센다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>늘린다고 빨라지지 않습니다 ★</b> —
+        이벤트 루프는 <b>CPU 를 쉬지 않고 쓰는 구조</b>라
+        코어 수보다 많이 만들면 컨텍스트 스위칭만 늘어납니다.
+        <b>루프 스레드가 부족해 보인다면 십중팔구 “어딘가 블로킹이 있다”</b>는 신호입니다
+        (다음다음 섹션).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f14 ==================== -->
+<section class="sec" id="f14">
+  <div class="sec-head rv">
+    <span class="no">FLUX 14</span>
+    <h2>Netty <span class="t">직접 다루기</span></h2>
+    <p class="lead">
+      대부분은 직접 쓸 일이 없습니다. 다만 <b>사설 프로토콜·게임 서버·프록시</b>를 만드는 순간
+      <b>이게 유일한 선택지</b>가 됩니다.
+    </p>
+  </div>
+
+  <div class="dep rv">
+    <b>build.gradle.kts</b> — 스프링 부트를 쓰면 <code>starter-webflux</code> 에
+    Netty 가 <b>이미 들어 있습니다</b>. 버전은 <b>Boot BOM 에 맡기고 적지 마세요</b>
+    (직접 박으면 부트가 관리하는 버전과 어긋납니다).
+    <br>부트 없이 Netty 만 쓸 때만 <code>implementation("io.netty:netty-all")</code>
+    에 명시 버전을 붙입니다.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ServerBootstrap — 최소 에코 서버</h4>
+      <pre class="code" data-lang="java"><code>public class EchoServer {
+
+    public static void main(String[] args) throws Exception {
+        EventLoopGroup boss   = new MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory());
+        EventLoopGroup worker = new MultiThreadIoEventLoopGroup(NioIoHandler.newFactory());
+        try {
+            ServerBootstrap b = new ServerBootstrap()
+                .group(boss, worker)
+                .channel(NioServerSocketChannel.class)
+                .option(ChannelOption.SO_BACKLOG, 1024)              // 서버 소켓용
+                .childOption(ChannelOption.TCP_NODELAY, true)        // 연결마다
+                .childOption(ChannelOption.SO_KEEPALIVE, true)
+                .childHandler(new ChannelInitializer&lt;SocketChannel&gt;() {
+                    @Override protected void initChannel(SocketChannel ch) {
+                        ch.pipeline()
+                          .addLast(new LoggingHandler(LogLevel.DEBUG))
+                          .addLast(new LengthFieldBasedFrameDecoder(
+                                       65536, 0, 4, 0, 4))           // 길이 헤더 4바이트
+                          .addLast(new LengthFieldPrepender(4))
+                          .addLast(new StringDecoder(UTF_8))
+                          .addLast(new StringEncoder(UTF_8))
+                          .addLast(new EchoHandler());
+                    }
+                });
+
+            ChannelFuture f = b.bind(9090).sync();
+            f.channel().closeFuture().sync();          // 종료까지 대기
+        } finally {
+            boss.shutdownGracefully();
+            worker.shutdownGracefully();
+        }
+    }
+}</code></pre>
+      <h4 class="mini">커스텀 핸들러</h4>
+      <pre class="code" data-lang="java"><code>@ChannelHandler.Sharable          // 상태가 없을 때만 붙일 것
+public class EchoHandler extends SimpleChannelInboundHandler&lt;String&gt; {
+
+    @Override
+    protected void channelRead0(ChannelHandlerContext ctx, String msg) {
+        ctx.writeAndFlush("echo: " + msg);     // 응답
+    }
+
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) {
+        log.info("접속 {}", ctx.channel().remoteAddress());
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        log.error("핸들러 예외", cause);
+        ctx.close();                            // ★ 안 닫으면 좀비 커넥션이 쌓인다
+    }
+}
+
+// SimpleChannelInboundHandler 는 처리 후 ByteBuf 를 '자동 release' 합니다.
+// ChannelInboundHandlerAdapter 를 직접 쓰면 → 반드시 직접 release 하세요.
+public class RawHandler extends ChannelInboundHandlerAdapter {
+    @Override public void channelRead(ChannelHandlerContext ctx, Object msg) {
+        ByteBuf in = (ByteBuf) msg;
+        try { /* 처리 */ } finally { ReferenceCountUtil.release(in); }   // 필수
+    }
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">TCP 경계 문제 — 하프 패킷 · 스티키 패킷 ★</h4>
+      <pre class="code" data-lang="text"><code>보낸 쪽:   [ 주문A ][ 주문B ][ 주문C ]
+
+받는 쪽에 실제로 도착하는 모습(둘 다 정상):
+  ① 스티키   [ 주문A주문B주문 ][ C ]     ← 뭉쳐서 옴
+  ② 하프     [ 주문 ][ A주문B ][ 주문C ] ← 잘려서 옴
+
+TCP 는 '바이트 스트림'이라 메시지 경계를 보장하지 않는다.
+경계는 '내가' 만들어야 한다.</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:46%">디코더</th><th>경계를 정하는 방법</th></tr>
+          <tr><td><b>LengthFieldBasedFrameDecoder</b></td><td><b>길이 헤더</b>를 읽어 그만큼 자름 — <b>실무 표준</b> ★</td></tr>
+          <tr><td>DelimiterBasedFrameDecoder</td><td>구분자(<code>\n</code>, <code>\0</code>)로 자름</td></tr>
+          <tr><td>LineBasedFrameDecoder</td><td>줄바꿈으로 자름 (텍스트 프로토콜)</td></tr>
+          <tr><td>FixedLengthFrameDecoder</td><td>항상 N바이트 고정</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// 프레임 형식:  [ 길이(4바이트) ][ 본문 ]
+new LengthFieldBasedFrameDecoder(
+        1024 * 1024,  // maxFrameLength — 넘으면 TooLongFrameException (DoS 방어)
+        0,            // lengthFieldOffset  : 길이 필드 시작 위치
+        4,            // lengthFieldLength  : 길이 필드 크기
+        0,            // lengthAdjustment   : 길이값 보정
+        4);           // initialBytesToStrip: 앞 4바이트(헤더)는 버리고 넘김
+
+// ⚠️ 디코더는 상태를 가집니다 → @Sharable 금지, 연결마다 새로 만들 것</code></pre>
+      <h4 class="mini">ChannelOption — 자주 만지는 것만</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:38%">옵션</th><th>의미 · 실전값</th></tr>
+          <tr><td><b>SO_BACKLOG</b></td><td>accept 대기 큐. 리눅스 <code>somaxconn</code>과 <b>둘 중 작은 값</b>이 적용됩니다. 4096 권장</td></tr>
+          <tr><td><b>TCP_NODELAY</b></td><td>Nagle 끄기. <b>작은 패킷의 40ms 지연 제거</b> — 켜 두세요(true) ★</td></tr>
+          <tr><td>SO_KEEPALIVE</td><td>죽은 연결 감지. 다만 기본 2시간이라 <b>앱 레벨 하트비트</b>가 더 실용적</td></tr>
+          <tr><td>SO_REUSEADDR</td><td>재기동 시 <code>Address already in use</code> 방지</td></tr>
+          <tr><td>CONNECT_TIMEOUT_MILLIS</td><td>클라이언트 연결 타임아웃. 기본 30초는 <b>너무 깁니다</b> → 2초</td></tr>
+          <tr><td>WRITE_BUFFER_WATER_MARK</td><td>느린 클라이언트 대비 송신 버퍼 한계. 넘으면 <code>isWritable()==false</code></td></tr>
+        </table>
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>언제 Netty 를 직접 쓰나</b>
+        <br>① <b>사설 바이너리 프로토콜</b> — 금융 FIX·POS·IoT 장비 연동처럼 HTTP 가 아닌 경우
+        <br>② <b>게임 서버</b> — 지연에 민감하고 연결이 오래 유지되는 경우
+        <br>③ <b>프록시·중계 서버</b> — 바이트를 그대로 흘려보내야 할 때(zero-copy)
+        <br>④ <b>수십만 동시 연결</b> — HTTP 서버 추상화의 오버헤드조차 아까울 때
+        <br>그 외 <b>웹 API 라면 직접 쓸 이유가 없습니다.</b> WebFlux 가 이미 잘 감싸 놨습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f15 ==================== -->
+<section class="sec" id="f15">
+  <div class="sec-head rv">
+    <span class="no">FLUX 15</span>
+    <h2>이벤트 루프를 <span class="t">막지 마라</span></h2>
+    <p class="lead">
+      WebFlux 운영 장애의 <b>절반 이상이 이 하나</b>입니다.
+      코드 한 줄이 서버 전체를 세웁니다.
+    </p>
+  </div>
+
+  <div class="note warn rv">
+    <b>실제 장애 시나리오</b> —
+    잘 돌던 게이트웨이에 “관리자 화면용 통계 API” 하나가 추가됐습니다.
+    그 안에 <b>레거시 JDBC 조회 한 줄</b>(평균 300ms)이 들어 있었습니다.
+    <br>· 관리자는 하루 열 번 호출 → <b>QA 에서 아무 문제 없음</b>
+    <br>· 운영 배포 → 평소 p99 40ms 였던 <b>전체 API 가 2~8초</b>로 튐
+    <br>· 원인: 워커 4개 중 하나가 300ms 동안 멈출 때마다
+    <b>그 루프에 묶인 수천 개 연결이 전부 대기</b>. 처리량이 25% 씩 계단식으로 붕괴.
+    <br>· CPU 는 30% 로 한가하고, 스레드 덤프에도 “정상”으로 보여서 <b>3일을 헤맸습니다.</b>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 블로킹인가</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:42%">코드</th><th>왜 위험한가</th></tr>
+          <tr><td><code>JdbcTemplate</code> · JPA</td><td>소켓 read 에서 스레드가 멈춤</td></tr>
+          <tr><td><code>RestTemplate</code> · <code>.block()</code></td><td>응답까지 스레드 점유</td></tr>
+          <tr><td><code>Thread.sleep()</code></td><td>말할 것도 없음</td></tr>
+          <tr><td><code>synchronized</code> 경합</td><td>락 대기 = 블로킹</td></tr>
+          <tr><td>파일 I/O · <code>Files.readAllBytes</code></td><td>디스크가 느리면 그대로 멈춤</td></tr>
+          <tr><td>큰 JSON 직렬화 · 이미지 처리</td><td><b>CPU 도 블로킹</b>입니다 (양보를 안 함)</td></tr>
+          <tr><td><code>System.out.println</code> 폭주</td><td>콘솔 출력은 동기 I/O — 의외의 범인 ★</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// ❌ 이벤트 루프에서 그대로 실행됨
+@GetMapping("/stat")
+public Mono&lt;Stat&gt; stat() {
+    Stat s = jdbcDao.heavyQuery();      // 300ms 동안 루프 정지 💥
+    return Mono.just(s);
+}
+
+// ✅ 별도 스레드로 격리
+@GetMapping("/stat")
+public Mono&lt;Stat&gt; stat() {
+    return Mono.fromCallable(() -&gt; jdbcDao.heavyQuery())
+               .subscribeOn(Schedulers.boundedElastic());   // ★
+}
+
+// ✅ CPU 바운드는 parallel 로
+flux.publishOn(Schedulers.parallel())
+    .map(this::resizeImage);
+
+// boundedElastic 기본 상한: 10 × CPU 코어 수, 큐 10만
+// → 이것도 무한이 아닙니다. 넘치면 RejectedExecutionException
+Schedulers.newBoundedElastic(50, 1000, "legacy-jdbc");</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">BlockHound — 블로킹을 컴파일하듯 잡는다 ★</h4>
+      <div class="dep">
+        <code>testImplementation("io.projectreactor.tools:blockhound:1.0.13.RELEASE")</code><br>
+        Java 13+ 에서는 <code>-XX:+AllowRedefinitionToAddDeleteMethods</code> 옵션이 필요합니다.
+      </div>
+      <pre class="code" data-lang="java"><code>// 테스트 부트스트랩에서 한 번만
+@BeforeAll
+static void installBlockHound() {
+    BlockHound.builder()
+        // 우리가 '의도적으로' 허용하는 곳은 화이트리스트로
+        .allowBlockingCallsInside(
+            "com.example.legacy.LegacyJdbcDao", "heavyQuery")
+        .allowBlockingCallsInside(
+            "java.util.UUID", "randomUUID")        // 엔트로피 대기
+        .blockingMethodCallback(m -&gt; {
+            log.error("🚫 블로킹 감지: {}", m);
+            throw new BlockingOperationError(m);
+        })
+        .install();
+}
+
+// 잡히면 이렇게 나옵니다
+// reactor.blockhound.BlockingOperationError:
+//   Blocking call! java.net.SocketInputStream#socketRead0
+//     at com.example.OrderService.stat(OrderService.java:42)
+//   ← 몇 번째 줄인지까지 정확히 찍힙니다</code></pre>
+      <div class="note tip">
+        <b>운영에는 켜지 마세요</b> — BlockHound 는 바이트코드를 계측하므로
+        <b>성능 비용이 큽니다.</b> <b>테스트·부하 테스트 환경에서만</b> 켜고,
+        CI 에서 통합 테스트를 돌려 <b>블로킹이 들어오는 순간 빌드를 깨뜨리는</b> 것이 정석입니다.
+      </div>
+      <h4 class="mini">핸들러 안의 무거운 작업 — EventExecutorGroup</h4>
+      <pre class="code" data-lang="java"><code>// Netty 를 직접 쓸 때, 특정 핸들러만 별도 스레드 풀에서 돌린다
+private static final EventExecutorGroup BIZ =
+        new DefaultEventExecutorGroup(16);
+
+ch.pipeline()
+  .addLast(new HttpServerCodec())          // 루프 스레드에서
+  .addLast(BIZ, new BusinessHandler());    // ★ 이 핸들러만 BIZ 스레드에서
+
+// 주의 ① 스레드가 바뀌므로 ByteBuf 를 그대로 넘기면 수명 관리가 어려워집니다
+//        → 되도록 POJO 로 디코딩한 '뒤' 지점에 붙이세요
+// 주의 ② 같은 채널의 순서는 유지되지만, 채널 간 순서는 보장되지 않습니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>진단 3종 세트</b> —
+        ① <code>jcmd &lt;pid&gt; Thread.print</code> 를 <b>2초 간격 3회</b> 떠서
+        <code>reactor-http-nio-*</code> 가 <b>매번 같은 스택</b>에 있으면 그게 범인입니다.
+        ② <b>CPU 는 낮은데 처리량이 안 오르면</b> 거의 항상 블로킹입니다.
+        ③ JFR 의 <b>Socket Read / File Read 이벤트</b>에 루프 스레드 이름이 보이면 확정.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f16 ==================== -->
+<section class="sec" id="f16">
+  <div class="sec-head rv">
+    <span class="no">FLUX 16</span>
+    <h2>Reactor Netty 튜닝 · <span class="t">커넥션 풀</span></h2>
+    <p class="lead">
+      <code>WebClient</code> 는 내부적으로 <b>커넥션 풀</b>을 씁니다.
+      이 설정을 모르면 <b>“가끔 502 · 가끔 타임아웃”</b>이 영원히 안 잡힙니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ConnectionProvider — 풀 설정 전부</h4>
+      <pre class="code" data-lang="java"><code>ConnectionProvider provider = ConnectionProvider.builder("order-api")
+    .maxConnections(200)                            // 호스트당 최대 커넥션 ★
+    .pendingAcquireMaxCount(1000)                   // 대기 큐 (기본: max × 2)
+    .pendingAcquireTimeout(Duration.ofSeconds(3))   // 대기 한계 (기본 45초 — 너무 김) ★
+    .maxIdleTime(Duration.ofSeconds(20))            // 놀고 있는 커넥션 폐기 ★★
+    .maxLifeTime(Duration.ofMinutes(5))             // 오래된 커넥션 강제 교체
+    .evictInBackground(Duration.ofSeconds(30))      // 유휴 커넥션 청소 주기
+    .lifo()                                         // 최근 쓴 것부터 재사용 (기본)
+    .metrics(true)                                  // ★ 마이크로미터 연동
+    .build();
+
+HttpClient httpClient = HttpClient.create(provider)
+    .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 2000)
+    .responseTimeout(Duration.ofSeconds(5))         // 응답 전체 한계 ★
+    .doOnConnected(c -&gt; c
+        .addHandlerLast(new ReadTimeoutHandler(5))  // 5초간 수신 없음
+        .addHandlerLast(new WriteTimeoutHandler(5)))
+    .compress(true)
+    .keepAlive(true)
+    .metrics(true, Function.identity());            // URI 태그 (카디널리티 주의)
+
+@Bean
+WebClient orderClient(WebClient.Builder b) {
+    return b.baseUrl("https://order.internal")
+            .clientConnector(new ReactorClientHttpConnector(httpClient))
+            .build();
+}</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:40%">설정</th><th>기본값 · 권장</th></tr>
+          <tr><td>maxConnections</td><td>기본 <code>max(코어×2, 16)</code> → <b>대개 너무 작습니다</b></td></tr>
+          <tr><td>pendingAcquireTimeout</td><td>기본 <b>45초</b> → <b>3초 이하로</b> 낮추세요 ★</td></tr>
+          <tr><td>maxIdleTime</td><td>기본 <b>없음(무한)</b> → <b>반드시 설정</b> ★★</td></tr>
+          <tr><td>maxLifeTime</td><td>기본 없음 → 5~10분 (LB 뒤 IP 변경 대응)</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가장 흔한 사고 — keep-alive 타임아웃 불일치 ★★</h4>
+      <pre class="code" data-lang="text"><code>우리 쪽 풀:   maxIdleTime = 무한 (기본값)
+상대 서버:    keepAliveTimeout = 5초  (nginx 기본)
+
+t=0    요청 → 커넥션 A 사용 → 풀에 반납
+t=5s   상대 서버가 A 를 조용히 닫음 (FIN)
+       우리 풀은 아직 "A 는 살아 있다"고 믿는다
+t=6s   요청 → 풀에서 A 를 꺼내 전송
+       → 이미 닫힌 소켓 → 즉시 실패
+
+증상: PrematureCloseException / Connection prematurely closed
+      "BEFORE response" · 재현이 안 됨 · 트래픽 적은 새벽에 더 잦음 💥</code></pre>
+      <div class="note warn">
+        <b>해결 공식</b> — <b><code>maxIdleTime</code> 을 상대 서버 keep-alive 보다 짧게.</b>
+        <br>nginx <code>keepalive_timeout 75s</code> → 우리 <code>maxIdleTime 20~60s</code>
+        <br>AWS ALB idle timeout 60s → 우리 <code>maxIdleTime 30s</code>
+        <br>모르면 <b>보수적으로 20초</b>. 커넥션을 좀 더 자주 새로 맺는 비용이
+        <b>간헐적 실패를 쫓아다니는 비용보다 훨씬 쌉니다.</b>
+      </div>
+      <h4 class="mini">타임아웃 3종 — 역할이 다릅니다</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:38%">타임아웃</th><th>어디를 재는가</th></tr>
+          <tr><td>CONNECT_TIMEOUT_MILLIS</td><td>TCP 핸드셰이크까지</td></tr>
+          <tr><td><b>responseTimeout</b></td><td>요청 전송 → <b>응답 헤더 도착</b>까지 ★</td></tr>
+          <tr><td>ReadTimeoutHandler</td><td><b>패킷 사이</b> 무응답 시간 (스트리밍에 필요)</td></tr>
+          <tr><td>Mono <code>.timeout()</code></td><td>리액티브 체인 전체 (최후 방어선)</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        SSE·NDJSON 같은 <b>장시간 스트리밍</b>에 <code>responseTimeout</code> 을 걸면
+        <b>정상 연결이 끊깁니다.</b> 스트리밍 클라이언트는
+        <code>responseTimeout</code> 대신 <b><code>ReadTimeoutHandler</code> 만</b> 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메트릭 — 풀 상태를 눈으로</h4>
+      <pre class="code" data-lang="java"><code>// .metrics(true) 를 켜면 마이크로미터로 자동 노출됩니다
+reactor.netty.connection.provider.total.connections   { name="order-api" }
+reactor.netty.connection.provider.active.connections
+reactor.netty.connection.provider.idle.connections
+reactor.netty.connection.provider.pending.connections  // ★ 이게 0 이 아니면 부족
+reactor.netty.connection.provider.max.connections
+
+reactor.netty.http.client.data.received
+reactor.netty.http.client.response.time                // 히스토그램
+reactor.netty.http.client.connect.time</code></pre>
+      <pre class="code" data-lang="yaml"><code>management:
+  metrics:
+    enable:
+      reactor.netty: true
+  endpoints.web.exposure.include: prometheus,health,metrics
+  prometheus.metrics.export.enabled: true</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>카디널리티 폭발 주의</b> —
+        <code>.metrics(true, Function.identity())</code> 는 <b>URI 를 그대로 태그</b>로 씁니다.
+        <code>/users/12345</code> 같은 경로가 있으면 <b>시계열이 무한히 늘어나</b>
+        프로메테우스가 먼저 죽습니다.
+        <br>✅ <code>.metrics(true, uri -&gt; uri.replaceAll("/\\d+", "/{id}"))</code> 처럼
+        <b>반드시 정규화 함수</b>를 넣으세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">wiretap — 바이트 수준 디버깅</h4>
+      <pre class="code" data-lang="java"><code>HttpClient.create(provider)
+    .wiretap("reactor.netty.http.client.HttpClient",
+             LogLevel.DEBUG, AdvancedByteBufFormat.TEXTUAL);
+// SIMPLE   : 이벤트 이름만
+// HEX_DUMP : 16진수 덤프 (바이너리 프로토콜)
+// TEXTUAL  : 사람이 읽는 텍스트 ★ (HTTP 디버깅용)</code></pre>
+      <pre class="code" data-lang="yaml"><code>logging:
+  level:
+    reactor.netty.http.client: DEBUG
+    reactor.netty.resources: DEBUG     # 풀 획득/반납 로그</code></pre>
+      <div class="note warn">
+        운영에서 <code>wiretap</code> 을 켜 두면 <b>요청 본문이 통째로 로그에 남습니다.</b>
+        토큰·주민번호·카드번호가 그대로 찍힙니다. <b>로컬·스테이징 전용</b>으로만 쓰세요.
+      </div>
+      <h4 class="mini">커넥션 풀 고갈 — 증상과 진단</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:46%">증상</th><th>원인</th></tr>
+          <tr><td><code>PoolAcquireTimeoutException</code></td><td>풀 고갈. <b>maxConnections 부족</b> 또는 상대가 느림</td></tr>
+          <tr><td><code>PrematureCloseException</code></td><td>keep-alive 불일치 (위 참고)</td></tr>
+          <tr><td>응답은 오는데 p99 만 튐</td><td><code>pending.connections</code> 확인 — 큐에서 대기 중</td></tr>
+          <tr><td>커넥션이 계속 늘어남</td><td>응답 본문을 <b>소비하지 않아</b> 반납이 안 됨 ★</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// ⚠️ 커넥션 누수 1위 — 본문을 안 읽고 버리기
+client.get().uri("/ping").exchangeToMono(res -&gt; {
+    if (res.statusCode().is2xxSuccessful()) return Mono.just("ok");
+    return Mono.just("fail");        // 💥 본문 미소비 → 커넥션 반납 안 됨
+});
+
+// ✅ 반드시 본문을 비우고 끝낸다
+client.get().uri("/ping").exchangeToMono(res -&gt;
+    res.releaseBody().thenReturn(res.statusCode().value()));
+
+// 또는 그냥 retrieve() 를 쓰세요 — 알아서 처리해 줍니다
+client.get().uri("/ping").retrieve().toBodilessEntity();
+
+// 필요한 풀 크기 계산 (리틀의 법칙)
+// maxConnections ≒ 목표 RPS × 상대 응답시간(초) × 1.5
+// 예) 500 RPS × 0.08s × 1.5 ≒ 60</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== f17 ==================== -->
+<section class="sec" id="f17">
+  <div class="sec-head rv">
+    <span class="no">FLUX 17</span>
+    <h2>운영 · 튜닝 <span class="t">종합</span></h2>
+    <p class="lead">
+      여기까지 오면 남는 질문은 하나입니다 —
+      <b>“그래서 지금도 WebFlux 를 써야 하나?”</b>
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">네이티브 트랜스포트 — epoll · io_uring</h4>
+      <div class="dep">
+        <code>runtimeOnly("io.netty:netty-transport-native-epoll::linux-x86_64")</code><br>
+        <code>runtimeOnly("io.netty:netty-transport-native-kqueue::osx-aarch_64")</code> (맥)
+        <br><span style="opacity:.75">콜론 두 개 = 버전 생략(Boot BOM 이 채움) + 분류자(classifier) 지정.</span>
+      </div>
+      <pre class="code" data-lang="java"><code>// 넣기만 하면 Reactor Netty 가 자동으로 감지해 씁니다
+// 확인
+log.info("native = {}", reactor.netty.resources.LoopResources.hasNativeSupport());
+
+// 강제로 끄기 (문제 격리용)
+System.setProperty("reactor.netty.native", "false");
+
+// Netty 를 직접 쓸 때는 채널 클래스를 직접 골라야 합니다
+Class&lt;? extends ServerChannel&gt; ch = Epoll.isAvailable()
+        ? EpollServerSocketChannel.class
+        : NioServerSocketChannel.class;</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:26%">트랜스포트</th><th>차이</th></tr>
+          <tr><td><b>NIO</b></td><td>JDK 기본. 어디서나 동작. 기준선</td></tr>
+          <tr><td><b>epoll</b></td><td>리눅스 전용. <b>GC 압력 ↓ · 지연 5~15% 개선</b>. <code>SO_REUSEPORT</code>·<code>TCP_FASTOPEN</code> 사용 가능 ★</td></tr>
+          <tr><td>kqueue</td><td>맥·BSD 용</td></tr>
+          <tr><td><b>io_uring</b></td><td>Netty 4.2 정식(<code>io.netty:netty-transport-native-io_uring</code>). 커널 5.10+ 필요.
+            고부하에서 syscall 비용이 크게 줄지만 <b>커널 버전 편차가 큼</b> — 반드시 측정 후 도입</td></tr>
+        </table>
+      </div>
+      <div class="note warn">
+        <b><code>netty-incubator-transport-native-io_uring</code> 은 폐기됐습니다.</b>
+        인큐베이터 모듈을 쓰던 예제가 아직 검색에 많이 나오는데,
+        io_uring 은 <b>4.2 에서 본체(<code>io.netty</code>)로 들어왔습니다.</b>
+        인큐베이터 좌표는 더 이상 갱신되지 않으니 옮기세요.
+      </div>
+      <h4 class="mini">파일 디스크립터 — 조용한 상한선</h4>
+      <pre class="code" data-lang="bash"><code># 소켓 하나 = FD 하나. 1만 연결 = FD 1만 개.
+ulimit -n                      # 기본 1024 → 절대 부족
+ulimit -n 65536
+
+# 컨테이너 (docker-compose)
+ulimits: { nofile: { soft: 65536, hard: 65536 } }
+
+# 지금 몇 개 쓰는지
+ls /proc/&lt;pid&gt;/fd | wc -l
+cat /proc/&lt;pid&gt;/limits | grep files
+
+# 넘치면: java.io.IOException: Too many open files
+#         → accept 가 조용히 실패하고 신규 연결만 안 됩니다 (기존은 정상)
+#         → "일부 사용자만 접속이 안 돼요" 로 보고됩니다 ★</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다이렉트 메모리 — 힙 밖의 OOM ★</h4>
+      <pre class="code" data-lang="bash"><code># Netty 는 다이렉트 버퍼를 기본으로 씁니다 → 힙이 아닙니다
+-XX:MaxDirectMemorySize=512m       # 미지정 시 = -Xmx 와 같은 크기
+-Dio.netty.maxDirectMemory=536870912   # Netty 자체 상한 (별도 계산)
+
+# 컨테이너 메모리 = 힙 + 다이렉트 + 메타스페이스 + 스레드스택 + 네이티브
+# 예) limits.memory 2Gi 라면
+#     -XX:MaxRAMPercentage=50  (힙 1Gi)
+#     -XX:MaxDirectMemorySize=512m
+#     나머지 500Mi 를 여유로 남긴다  ← 이걸 안 남기면 OOMKilled</code></pre>
+      <div class="note warn">
+        <b>증상 구분법</b>
+        <br>· <code>java.lang.OutOfMemoryError: Java heap space</code> → 힙 문제. 힙덤프를 보세요.
+        <br>· <code>OutOfMemoryError: Direct buffer memory</code> → <b>다이렉트 메모리 고갈.</b> ByteBuf 누수 의심.
+        <br>· <code>io.netty.util.internal.OutOfDirectMemoryError</code> → <b>Netty 가 자체 카운터로 막은 것.</b> 거의 확실히 누수입니다.
+        <br>· 로그 없이 <b>컨테이너가 그냥 죽음(exit 137)</b> → <b>OOMKilled.</b> 힙 밖 사용량을 재세요.
+      </div>
+      <h4 class="mini">ByteBuf 누수 추적 실전</h4>
+      <pre class="code" data-lang="bash"><code># 1) 부하 테스트 환경에서 PARANOID 로 켠다
+-Dio.netty.leakDetection.level=PARANOID
+-Dio.netty.leakDetection.targetRecords=64
+
+# 2) 로그에서 이 문자열을 찾는다
+#    LEAK: ByteBuf.release() was not called before it's garbage-collected
+#    Recent access records:
+#      #1: io.netty.buffer.AdvancedLeakAwareByteBuf.readBytes(...)
+#          at com.example.ProxyHandler.channelRead(ProxyHandler.java:57)  ← 범인
+
+# 3) 힙 밖 사용량을 JVM 에게 직접 물어본다
+jcmd &lt;pid&gt; VM.native_memory summary        # -XX:NativeMemoryTracking=summary 필요
+jcmd &lt;pid&gt; GC.heap_info
+
+# 4) 할당자를 바꿔 원인을 가른다
+-Dio.netty.allocator.type=unpooled   # 재사용을 꺼서 '누수인지 파편화인지' 가른다
+                                     #   unpooled 로도 계속 늘면 → 진짜 누수(release 누락)
+                                     #   unpooled 에서 멎으면  → 풀 파편화·풀 크기 문제
+-Dio.netty.allocator.type=pooled     # 4.1 시절 기본값으로 되돌려 비교 (4.2 기본은 adaptive)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>누수 예방 규칙 3개</b> —
+        ① 가능하면 <code>SimpleChannelInboundHandler</code> 를 쓴다(자동 release).
+        ② 직접 받은 <code>ByteBuf</code> 는 <b><code>try/finally</code> 로 release</b>.
+        ③ <b>다음 핸들러로 넘긴 버퍼는 내가 release 하지 않는다</b> — 소유권이 넘어갑니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:22%">기준</th><th style="width:39%">WebFlux + Netty</th><th>MVC + 가상 스레드 (Java 21+)</th></tr>
+      <tr><td>동시 연결 1만+</td><td>✅ 검증된 영역</td><td>✅ 가능 (스택 메모리만 주의)</td></tr>
+      <tr><td>DB 접근</td><td>R2DBC 필수 — <b>JPA 를 못 씁니다</b></td><td>✅ <b>JPA·MyBatis 그대로</b> ★</td></tr>
+      <tr><td>기존 코드 재사용</td><td>전면 재작성</td><td>✅ <b>설정 한 줄</b>, 코드 그대로 ★</td></tr>
+      <tr><td>스택 트레이스</td><td>❌ 읽기 매우 어려움</td><td>✅ 평소와 동일</td></tr>
+      <tr><td>디버거 · 프로파일러</td><td>❌ 흐름 추적이 어려움</td><td>✅ 그대로 동작</td></tr>
+      <tr><td>블로킹 한 줄의 대가</td><td>💥 <b>서버 전체 정지</b></td><td>캐리어 스레드 하나만 (핀 되는 경우 제외)</td></tr>
+      <tr><td>백프레셔</td><td>✅ <b>프로토콜 수준으로 내장</b> ★</td><td>❌ 직접 만들어야 함 (세마포어 등)</td></tr>
+      <tr><td>SSE · 스트리밍 · WebSocket</td><td>✅ <b>가장 자연스러움</b> ★</td><td>△ 가능하지만 연결당 스레드</td></tr>
+      <tr><td>API 수십 개 병렬 조합</td><td>✅ <code>zip</code> 한 줄</td><td>✅ 구조적 동시성 (<code>StructuredTaskScope</code> — <b>아직 preview</b>) · 또는 <code>CompletableFuture</code></td></tr>
+      <tr><td>메모리(연결 1만 기준)</td><td>✅ 가장 적음</td><td>여유 있음 (가상 스레드 스택은 힙에)</td></tr>
+      <tr><td>팀 학습 비용</td><td>❌ 매우 큼</td><td>✅ <b>거의 없음</b></td></tr>
+    </table>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그래서 언제 갈아타야 하나 ★</h4>
+      <div class="note info">
+        <b>MVC + 가상 스레드로 가세요</b> — 다음 중 <b>둘 이상</b>이면 WebFlux 를 고집할 이유가 없습니다.
+        <br>① 하는 일이 <b>“DB 읽고 JSON 주기”</b> 위주다
+        <br>② <b>JPA 의 도메인 모델</b>이 필요하다 (연관관계·더티 체킹)
+        <br>③ 팀에 리액티브를 <b>자신 있게 읽는 사람이 2명 미만</b>이다
+        <br>④ 장애 때 <b>스택 트레이스로 원인을 못 찾은 적</b>이 있다
+        <br>⑤ 블로킹 라이브러리를 <b><code>boundedElastic</code> 으로 감싸는 코드가 늘고 있다</b>
+        — 이건 “리액티브를 흉내만 내고 비용만 낸다”는 신호입니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>WebFlux 를 유지하세요</b> —
+        ① <b>SSE·WebSocket·스트리밍</b>이 핵심 기능이다
+        ② <b>게이트웨이·프록시·BFF</b> 처럼 수십 개 백엔드를 부채꼴로 호출한다
+        ③ <b>백프레셔</b>가 실제로 필요한 파이프라인이다
+        ④ 이미 잘 돌고 있고 팀이 익숙하다 — <b>돌아가는 걸 굳이 바꾸지 마세요.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영 반입 전 체크리스트</h4>
+      <pre class="code" data-lang="text"><code>[ 스레드 · 블로킹 ]
+□ CI 통합 테스트에 BlockHound 가 켜져 있다
+□ CPU limit 과 reactor.netty.ioWorkerCount 가 같다
+□ boundedElastic 의 상한을 명시했다 (기본 10×코어 의존 금지)
+
+[ 커넥션 · 타임아웃 ]
+□ 모든 WebClient 에 responseTimeout 이 있다
+□ maxIdleTime &lt; 상대 서버 keep-alive timeout
+□ pendingAcquireTimeout 을 3초 이하로 낮췄다
+□ exchangeToMono 를 쓰는 곳마다 본문을 소비/해제한다
+□ maxConnections 를 리틀의 법칙으로 산정했다
+
+[ 메모리 · OS ]
+□ -XX:MaxDirectMemorySize 를 명시했다
+□ 컨테이너 메모리 = 힙 + 다이렉트 + 여유 로 나눴다
+□ ulimit -n ≥ 65536
+□ 부하 테스트 때 leakDetection=PARANOID 로 한 번 돌렸다
+
+[ 관측 ]
+□ reactor.netty 메트릭이 프로메테우스에 올라간다
+□ pending.connections 에 알람이 걸려 있다
+□ URI 태그에 정규화 함수를 넣었다 (카디널리티)
+□ wiretap 은 운영에서 꺼져 있다</code></pre>
     </div>
   </div>
 </section>

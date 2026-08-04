@@ -10,6 +10,7 @@
     주피터에서 잘 돌던 코드가 <b>서버에 올라가는 순간</b> 이야기가 달라집니다.
     <b>GIL · 동시 요청 · 커넥션 풀 · 메모리</b>가 한꺼번에 문제가 됩니다.
     이 탭은 <b>파이썬으로 트래픽을 받는 법</b>을 대기업 실무 기준으로 정리했습니다.
+    여기까지 하면 <b>동시 수천 요청을 받는 서비스를 설계하고 운영·튜닝</b>할 수 있습니다.
   </p>
   <div class="stats">
     <div><b>15</b><span>SECTIONS</span></div>
@@ -43,14 +44,24 @@
   I/O 바운드  →  async 또는 스레드    (동시성 OK)
   CPU 바운드  →  멀티프로세싱 필수     (스레드는 무의미)
 
-※ Python 3.13 부터 실험적 free-threaded 빌드(GIL 없음)가 있지만
-  라이브러리 호환성 문제로 운영 도입은 아직 이릅니다.</code></pre>
+※ free-threaded 빌드(GIL 없음)는 3.13 에서 실험적으로 들어왔고
+  3.14 에서 PEP 779 로 "공식 지원" 단계가 됐습니다 (실행: python3.14t)</code></pre>
       <div class="note warn">
         <b>“파이썬은 느리다”는 말의 실체</b> —
         순수 계산은 실제로 느립니다(C 의 수십~수백 배).
         하지만 <b>웹 서버 작업의 대부분은 대기 시간</b>이라
         <b>제대로 만들면 트래픽 처리에는 충분</b>합니다.
         인스타그램·드롭박스가 파이썬으로 돌아갑니다.
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>free-threading — 3.14 에서 “공식 지원”이 됐습니다.</b>
+        3.13 에서 <b>실험적</b>으로 들어왔고,
+        <b>3.14 에서 PEP 779 로 공식 지원 단계</b>에 올라 실험 딱지를 뗐습니다.
+        전용 실행 파일 <code>python3.14t</code> 로 돌립니다
+        (uv 라면 <code>uv python install 3.14t</code>).
+        대신 <b>단일 스레드 성능은 5~10% 느립니다</b> — GIL 을 없애는 대가입니다.
+        2026-08 기준 <b>상위 네이티브 패키지 360개 중 183개</b>가 free-threading 휠을 냅니다.
+        돌아가는 서비스를 갈아엎기보다 <b>새 워크로드부터 검토</b>하는 편이 안전합니다.
       </div>
     </div>
     <div class="card">
@@ -107,7 +118,9 @@
     <div class="card">
       <h4 class="mini" style="margin-top:0">기본 구조</h4>
       <div class="dep"><code>uv add fastapi uvicorn[standard] pydantic-settings</code></div>
-      <pre class="code" data-lang="python"><code>from fastapi import FastAPI, Depends, HTTPException, status
+      <pre class="code" data-lang="python"><code>from typing import Annotated
+
+from fastapi import FastAPI, Depends, HTTPException, status
 from pydantic import BaseModel, Field, EmailStr
 from contextlib import asynccontextmanager
 
@@ -130,8 +143,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="My API")
 
+# ★ 의존성은 Annotated 로 — FastAPI 공식 권장 스타일입니다
+#   기본값 자리를 비워 두므로 재사용·테스트·타입 검사가 모두 편합니다
 <span class="t-ann">@app.post</span>("/users", response_model=UserOut, status_code=201)
-async def create_user(dto: UserCreate, svc: UserService = Depends(get_service)):
+async def create_user(dto: UserCreate,
+                      svc: Annotated[UserService, Depends(get_service)]):
     if await svc.exists(dto.email):
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 가입된 이메일입니다")
     return await svc.create(dto)</code></pre>
@@ -157,7 +173,10 @@ class Settings(BaseSettings):
 
 settings = Settings()   # 여기서 터지면 운영 중에 안 터집니다</code></pre>
       <pre class="code" data-lang="python"><code># 의존성 주입 — 테스트에서 갈아 끼우기 쉬워집니다
-async def get_current_user(token: str = Depends(oauth2_scheme)) -&gt; User:
+from typing import Annotated
+
+async def get_current_user(
+        token: Annotated[str, Depends(oauth2_scheme)]) -&gt; User:
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
     except JWTError:
@@ -165,7 +184,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -&gt; User:
     return await user_repo.get(int(payload["sub"]))
 
 <span class="t-ann">@app.get</span>("/me")
-async def me(user: User = Depends(get_current_user)):
+async def me(user: Annotated[User, Depends(get_current_user)]):
     return user
 
 # 전역 예외 처리 — 응답 형태를 통일합니다
@@ -299,7 +318,8 @@ async def monitor_lag():
         <table class="cheat">
           <tr><th style="width:34%">작업</th><th>도구</th></tr>
           <tr><td>DB·API·파일 대기 (I/O)</td><td><b>asyncio</b> 또는 스레드</td></tr>
-          <tr><td>계산·변환 (CPU)</td><td><b>ProcessPoolExecutor</b> · 별도 워커</td></tr>
+          <tr><td>계산·변환 (CPU) · 데이터가 큼</td><td><b>ProcessPoolExecutor</b> · 별도 워커</td></tr>
+          <tr><td>계산·변환 (CPU) · 데이터가 작음</td><td><b>InterpreterPoolExecutor</b> (Python 3.14 신설)</td></tr>
           <tr><td>numpy·pandas 연산</td><td>내부적으로 GIL 을 놓는 경우가 많아
               <b>스레드로도 이득</b>이 납니다</td></tr>
           <tr><td>오래 걸리는 작업</td><td><b>Celery</b> 로 완전 분리 (k08)</td></tr>
@@ -327,19 +347,45 @@ async def make_report(payload: dict):
         <b>큰 DataFrame 을 통째로 넘기면</b> 계산보다 전송이 더 오래 걸립니다.
         <b>파일 경로·쿼리 조건만 넘기고</b> 프로세스 안에서 읽는 편이 낫습니다.
       </div>
+      <h4 class="mini">InterpreterPoolExecutor — Python 3.14 신설</h4>
+      <pre class="code" data-lang="python"><code>from concurrent.futures import InterpreterPoolExecutor
+
+# 워커 하나하나가 "독립 서브인터프리터"입니다 (PEP 734)
+#   · GIL 을 공유하지 않으므로 CPU 바운드가 진짜 병렬로 돕니다
+#   · 프로세스보다 가볍습니다 — fork/spawn 없이 인터프리터만 새로 뜹니다
+
+with InterpreterPoolExecutor(max_workers=4) as ex:
+    totals = list(ex.map(heavy_calc, chunks))
+
+# ⚠️ 제약
+#   · 객체를 그냥 공유할 수 없습니다 — 전달 가능한 타입이 제한적이고
+#     사실상 pickle 왕복입니다 (전역 변수·DB 커넥션 공유 불가)
+#   · 인터프리터 시작 비용이 스레드보다 큽니다
+#   · C 확장이 서브인터프리터를 지원해야 합니다</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>무엇을 고를까</b> —
+        I/O → <b>스레드·asyncio</b> ·
+        CPU + 큰 데이터 → <b>프로세스</b> ·
+        CPU + 작은 데이터 → <b>인터프리터 풀</b> ·
+        새로 짜는 코드라면 <b>free-threading</b>(k01)도 후보입니다.
+      </div>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">서버 워커 수 — 실무 계산</h4>
+      <div class="dep"><code>uv add gunicorn uvicorn-worker</code></div>
       <pre class="code" data-lang="bash"><code># Uvicorn (ASGI) — 비동기 앱
 uvicorn app:app --workers 4 --loop uvloop --http httptools
 
 # Gunicorn + Uvicorn 워커 (운영에서 흔한 조합)
+#   --graceful-timeout  ★ 무중단 배포에 필요 (k11)
+#   --max-requests      ★ 메모리 누수 완화 (주기적 재시작)
+# ※ 줄 끝 역슬래시 뒤에는 공백이 하나도 없어야 줄이 이어집니다
 gunicorn app:app \
-  -k uvicorn.workers.UvicornWorker \
+  -k uvicorn_worker.UvicornWorker \
   --workers 4 \
   --timeout 60 \
-  --graceful-timeout 30 \        # ★ 무중단 배포에 필요 (k11)
-  --max-requests 10000 \         # ★ 메모리 누수 완화 (주기적 재시작)
+  --graceful-timeout 30 \
+  --max-requests 10000 \
   --max-requests-jitter 1000
 
 # 워커 수 기준
@@ -358,6 +404,17 @@ def container_cpus() -&gt; int:
     except FileNotFoundError:
         pass
     return os.cpu_count() or 1</code></pre>
+      <div class="note warn">
+        <b><code>uvicorn.workers.UvicornWorker</code> 는 deprecated 입니다.</b>
+        uvicorn 0.30+ 에서 <code>uvicorn.workers</code> 가 deprecated 됐고
+        별도 패키지 <b><code>uvicorn-worker</code></b> 로 옮겨졌습니다 —
+        <code>uvicorn_worker.UvicornWorker</code> 를 쓰세요.
+      </div>
+      <div class="note info">
+        <b>granian</b> — Rust 로 만든 ASGI/WSGI/RSGI 서버입니다.
+        <b>워커 관리가 내장</b>이라 gunicorn 없이 단독으로 뜨고,
+        <b>HTTP/2 를 직접 지원</b>합니다.
+      </div>
       <div class="note tip" style="margin-bottom:0">
         <b>워커를 늘린다고 항상 빨라지지 않습니다.</b>
         워커마다 <b>메모리를 통째로 복사</b>하고
@@ -381,7 +438,10 @@ def container_cpus() -&gt; int:
     <div class="card">
       <h4 class="mini" style="margin-top:0">비동기 세션 구성</h4>
       <div class="dep"><code>uv add sqlalchemy[asyncio] asyncpg</code></div>
-      <pre class="code" data-lang="python"><code>from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+      <pre class="code" data-lang="python"><code>from typing import Annotated
+
+from sqlalchemy.ext.asyncio import (
+    create_async_engine, async_sessionmaker, AsyncSession)
 
 engine = create_async_engine(
     settings.database_url,           # postgresql+asyncpg://...
@@ -399,7 +459,8 @@ async def get_db():
         yield session                # ★ FastAPI 의존성으로 주입
 
 <span class="t-ann">@app.get</span>("/users/{user_id}")
-async def get_user(user_id: int, db: AsyncSession = Depends(get_db)):
+async def get_user(user_id: int,
+                   db: Annotated[AsyncSession, Depends(get_db)]):
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(404, "없습니다")
@@ -414,7 +475,8 @@ async def get_user(user_id: int, db: AsyncSession = Depends(get_db)):
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">N+1 과 대량 처리</h4>
-      <pre class="code" data-lang="python"><code>from sqlalchemy.orm import selectinload, joinedload
+      <pre class="code" data-lang="python"><code>from sqlalchemy import select, update
+from sqlalchemy.orm import selectinload, joinedload
 
 # ❌ N+1 — 사용자 100명이면 쿼리 101번
 users = (await db.scalars(select(User))).all()
@@ -435,7 +497,9 @@ result = await db.execute(
 if result.rowcount == 0:
     raise OutOfStockError(pid)
 await db.commit()</code></pre>
-      <pre class="code" data-lang="python"><code># 대량 처리 — 청크로 나누고 커밋
+      <pre class="code" data-lang="python"><code>from sqlalchemy import insert, select
+
+# 대량 처리 — 청크로 나누고 커밋
 CHUNK = 1000
 for i in range(0, len(rows), CHUNK):
     await db.execute(insert(Record), rows[i:i + CHUNK])
@@ -579,7 +643,9 @@ async def get_2tier(pid: int):
 
 ★ async 함수에서도 await 사이에 다른 요청이 끼어듭니다.
   워커가 하나여도 이 문제가 생깁니다.</code></pre>
-      <pre class="code" data-lang="python"><code># ✅ 해법 1 — 조건을 쿼리 안으로 (락 불필요, 가장 빠름)
+      <pre class="code" data-lang="python"><code>from sqlalchemy import select, update
+
+# ✅ 해법 1 — 조건을 쿼리 안으로 (락 불필요, 가장 빠름)
 result = await db.execute(
     update(Stock)
     .where(Stock.product_id == pid, Stock.quantity &gt;= qty)
@@ -619,9 +685,13 @@ async def with_lock(key: str, ttl: int = 5):
     finally:
         await r.eval(UNLOCK_LUA, 1, f"lock:{key}", token)  # ★ 내 락만 삭제</code></pre>
       <pre class="code" data-lang="python"><code># 멱등성 — 같은 요청이 두 번 와도 결과는 한 번
+from typing import Annotated
+
+from fastapi import Header
+
 <span class="t-ann">@app.post</span>("/payments")
 async def pay(dto: PayRequest,
-              idempotency_key: str = Header(alias="Idempotency-Key")):
+              idempotency_key: Annotated[str, Header(alias="Idempotency-Key")]):
     k = f"idem:pay:{idempotency_key}"
     first = await r.set(k, "PROCESSING", ex=86400, nx=True)
 
@@ -723,6 +793,14 @@ celery -A tasks worker --max-tasks-per-child=100    # 메모리 누수 완화</c
         <b>Celery 작업은 반드시 멱등해야 합니다.</b>
         재시도·워커 재시작으로 <b>같은 작업이 두 번</b> 실행될 수 있습니다.
         메일이 두 번 가는 건 참을 만해도 <b>정산이 두 번</b> 되면 사고입니다(k07).
+      </div>
+      <div class="note info">
+        <b>Redis 말고 브로커를 고른다면</b> —
+        <b>Kafka</b> 는 로그 기반 파티션 스트림입니다.
+        <b>재생(replay) 가능</b>·초당 수십만 건·<b>파티션 내 순서 보장</b>이 강점이고 운영 부담이 큽니다.
+        <b>RabbitMQ</b> 는 전통적인 메시지 브로커로
+        <b>라우팅(exchange)</b>·<b>per-message ack</b> 이 유연합니다.
+        처리량은 Kafka 보다 낮지만 <b>운영은 훨씬 쉽습니다</b>.
       </div>
       <div class="note tip" style="margin-bottom:0">
         <b>더 가벼운 대안</b> —
@@ -869,9 +947,10 @@ async def settle_daily(target_date: date):
           <tr><td>Prefect · Dagster</td><td>Airflow 의 현대적 대안. 파이썬 친화적</td></tr>
         </table>
       </div>
-      <pre class="code" data-lang="python"><code># Airflow — 의존 관계가 있는 파이프라인
-from airflow.decorators import dag, task
-from datetime import datetime
+      <pre class="code" data-lang="python"><code># Airflow 3 — 의존 관계가 있는 파이프라인
+from airflow.sdk import dag, task              # ★ Airflow 3 의 공식 경로
+                                               #   airflow.decorators 는 deprecated
+from datetime import datetime, timedelta       # ★ timedelta 도 함께
 
 <span class="t-ann">@dag</span>(schedule="0 3 * * *", start_date=datetime(2026, 1, 1),
       catchup=False, max_active_runs=1)          # ★ 중복 실행 방지
@@ -912,7 +991,7 @@ daily_settlement()</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">Dockerfile — uv 기반</h4>
       <pre class="code" data-lang="dockerfile"><code># 빌드 단계
-FROM python:3.12-slim AS build
+FROM python:3.14-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
@@ -925,7 +1004,7 @@ COPY . .
 RUN uv sync --frozen --no-dev
 
 # 실행 단계
-FROM python:3.12-slim
+FROM python:3.14-slim
 WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
@@ -936,7 +1015,7 @@ RUN useradd -m appuser &amp;&amp; chown -R appuser /app
 USER appuser                            # ★ root 로 실행 금지
 
 EXPOSE 8000
-CMD ["gunicorn", "app:app", "-k", "uvicorn.workers.UvicornWorker", \
+CMD ["gunicorn", "app:app", "-k", "uvicorn_worker.UvicornWorker", \
      "--bind", "0.0.0.0:8000", "--workers", "4", "--graceful-timeout", "30"]</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b><code>PYTHONUNBUFFERED=1</code> 을 빠뜨리면 로그가 안 보입니다.</b>
@@ -1212,7 +1291,8 @@ python -m cProfile -s cumtime script.py</code></pre>
         </table>
       </div>
       <pre class="code" data-lang="python"><code># 자주 놓치는 것 ① — JSON 직렬화가 의외로 큽니다
-import orjson
+from fastapi.responses import ORJSONResponse           # uv add orjson
+
 app = FastAPI(default_response_class=ORJSONResponse)   # 2~5배 빠름
 
 # ② 반복문을 벡터 연산으로 (🐼 Pandas · 🔢 NumPy 탭)
