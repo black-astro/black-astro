@@ -14,7 +14,7 @@
     WebFlux 기반이라 적은 스레드로 많은 연결을 버팁니다.
   </p>
   <div class="stats">
-    <div><b>8</b><span>SECTIONS</span></div>
+    <div><b>9</b><span>SECTIONS</span></div>
     <div><b>1</b><span>진입점</span></div>
     <div><b>N</b><span>백엔드 서비스</span></div>
     <div><b>0</b><span>중복 인증 코드</span></div>
@@ -594,6 +594,113 @@ logging:
     <br>② <b>블로킹 코드를 넣지 마세요</b> — WebFlux 기반이라 한 요청이 막으면 전체가 멈춥니다. DB 조회가 필요하면 R2DBC 나 Redis 리액티브 클라이언트를 쓰세요.
     <br>③ <b>타임아웃을 반드시 설정</b>하세요 — 백엔드가 느려지면 게이트웨이 커넥션이 고갈됩니다.
     <br>④ 응답 본문을 <b>통째로 읽는 필터</b>는 메모리를 먹습니다. 꼭 필요할 때만.
+  </div>
+</section>
+
+
+<!-- ==================== g09 ==================== -->
+<section class="sec" id="g09">
+  <div class="sec-head rv">
+    <span class="no">GW 09</span>
+    <h2>MSA 인프라 — <span class="t">디스커버리 · 설정 · 추적</span></h2>
+    <p class="lead">서비스가 열 개가 되면 <b>주소·설정·로그</b>를 사람이 관리할 수 없습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 서비스 디스커버리 — 주소를 이름으로</h4>
+      <pre class="code" data-lang="text"><code>주소를 고정으로 적으면
+
+  uri: http://10.0.1.24:8081
+  → 서버가 늘거나 IP 가 바뀌면 게이트웨이를 다시 배포해야 합니다
+  → 오토스케일과 근본적으로 맞지 않습니다
+
+이름으로 부르면
+
+  uri: lb://order-service
+  → 레지스트리에 등록된 인스턴스 목록을 받아 알아서 분산
+  → 죽은 인스턴스는 목록에서 빠집니다</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">선택지</th><th>언제 씁니다</th></tr>
+          <tr><td><b>Kubernetes Service</b></td><td>K8s 를 쓴다면 <b>이미 있습니다</b>.
+              별도 레지스트리 없이 DNS 이름으로 부르면 끝 — <b>요즘 기본</b></td></tr>
+          <tr><td>Eureka</td><td>K8s 가 아닌 환경(온프레미스 VM). 국내 SI·금융권에 여전히 많습니다</td></tr>
+          <tr><td>Consul · Nacos</td><td>디스커버리 + 설정 저장을 함께</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="yaml"><code># Eureka 를 쓰는 경우
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka1:8761/eureka/,http://eureka2:8762/eureka/
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 10     # 하트비트 주기
+
+spring:
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true          # 등록된 서비스로 라우트 자동 생성
+          lower-case-service-id: true</code></pre>
+      <div class="note tip">
+        <b>K8s 환경이라면 Eureka 를 넣지 마세요.</b>
+        같은 일을 하는 계층이 두 개가 되어 <b>장애 원인만 늘어납니다.</b>
+        <code>http://order-service.default.svc.cluster.local</code> 로 부르면 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 중앙 설정 — Config Server</h4>
+      <pre class="code" data-lang="text"><code>문제: 서비스 10개 × 환경 4개 = 설정 파일 40개
+      DB 비밀번호 하나 바꾸는 데 10번 배포
+
+해결: 설정을 Git 저장소 한 곳에 두고 기동 시 받아 갑니다
+      config-repo/
+        order-service-prod.yml
+        order-service-dev.yml
+        application-prod.yml        ← 공통
+
+  변경 → /actuator/refresh (또는 Spring Cloud Bus) → 재배포 없이 반영</code></pre>
+      <div class="note warn">
+        <b>K8s 라면 ConfigMap·Secret 으로 충분한 경우가 많습니다.</b>
+        Config Server 는 <b>운영할 컴포넌트가 하나 더 느는</b> 선택입니다.
+        여기가 죽으면 <b>모든 서비스가 기동에 실패</b>하므로 이중화가 필수입니다.
+        비밀값은 어느 쪽이든 <b>Vault·KMS·Secret</b> 에 두고 Git 에는 절대 넣지 마세요.
+      </div>
+      <h4 class="mini">③ 분산 추적 — 게이트웨이가 시작점</h4>
+      <pre class="code" data-lang="yaml"><code># 게이트웨이와 모든 서비스에 동일하게
+management:
+  tracing:
+    sampling:
+      probability: 0.1        # 운영 10%
+  zipkin:
+    tracing:
+      endpoint: http://tempo:9411/api/v2/spans</code></pre>
+      <pre class="code" data-lang="java"><code>// 요청 ID 를 심어 두면 사용자 문의 대응이 쉬워집니다
+<span class="t-ann">@Bean</span>
+GlobalFilter requestIdFilter() {
+    return (exchange, chain) -&gt; {
+        String rid = exchange.getRequest().getHeaders()
+                .getFirst("X-Request-Id");
+        if (rid == null) rid = UUID.randomUUID().toString();
+
+        var mutated = exchange.getRequest().mutate()
+                .header("X-Request-Id", rid).build();
+
+        exchange.getResponse().getHeaders().add("X-Request-Id", rid);  // 응답에도
+        return chain.filter(exchange.mutate().request(mutated).build());
+    };
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“결제가 안 돼요”라는 문의에 대응하는 방법.</b>
+        사용자가 본 화면의 요청 ID 하나로
+        <b>게이트웨이 → 주문 → 결제 → 알림</b> 로그를 전부 이어 봅니다.
+        이게 없으면 서비스 10개의 로그를 시간으로 맞춰 가며 추측해야 합니다.
+        수집·대시보드 구성은 <b>⚡ 대규모 트래픽 탭 k14</b> 에서 이어집니다.
+      </div>
+    </div>
   </div>
 </section>
 

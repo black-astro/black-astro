@@ -163,10 +163,27 @@ const TAB_KW = {
   toolbox:"도구 도구상자 툴 라이브러리 추천 실전 로그 로깅 설정 config json 요청 requests api http 스케줄러 테스트 유틸 패턴 파일처리 압축 zip 암호화 환경변수 cli",
   algo:"알고리즘 코딩테스트 코테 문제풀이 정렬 탐색 이분탐색 이진탐색 완전탐색 dp 동적계획법 그래프 bfs dfs 재귀 스택 큐 힙 해시 시간복잡도 빅오 자료구조 그리디 백트래킹 투포인터",
   db:"데이터베이스 db sql 쿼리 select 조회 join 조인 인덱스 index 트랜잭션 락 잠금 격리수준 데드락 mysql postgresql oracle 정규화 성능 튜닝 스키마 테이블 orm 무결성",
+  scale:"대규모 트래픽 서버 백엔드 웹 api fastapi 비동기 async await asyncio gil 멀티프로세싱 프로세스 스레드 동시성 uvicorn gunicorn asgi wsgi django flask sqlalchemy 커넥션풀 캐시 redis 레디스 분산락 멱등 중복결제 celery 셀러리 큐 워커 배치 airflow 스케줄 대용량 polars duckdb parquet 배포 도커 docker 쿠버네티스 k8s 무중단 관측 모니터링 로깅 structlog 프로메테우스 prometheus 부하테스트 locust py-spy 프로파일링 성능 최적화 p99 rps 병목 확장",
 };
 const FIND_CHIPS = ["데스크탑 프로그램","엑셀","자동화","이미지 리사이즈","가상환경",
-                    "리스트 정렬","클래스","SQL 조인","코딩테스트","정규식"];
+                    "리스트 정렬","클래스","SQL 조인","코딩테스트","정규식",
+                    "FastAPI 비동기","GIL","Celery 큐","대용량 처리","부하 테스트"];
 const SEC_KW = {
+  k01:"gil 전역인터프리터락 wsgi asgi 동기 비동기 파이썬느림 인스타그램",
+  k02:"fastapi pydantic 의존성주입 depends 응답모델 swagger docs 설정검증",
+  k03:"async await 블로킹 이벤트루프 requests httpx to_thread gather 세마포어 타임아웃",
+  k04:"멀티프로세싱 processpool 코어 워커수 gunicorn uvicorn cpu바운드",
+  k05:"sqlalchemy asyncpg 커넥션풀 pool_size n+1 selectinload 커서페이징 pgbouncer",
+  k06:"redis 캐시 스탬피드 ttl 랜덤 락 로컬캐시 cachetools",
+  k07:"동시성 재고 마이너스 경쟁조건 분산락 멱등성 idempotency 중복결제 for_update",
+  k08:"celery 셀러리 작업큐 워커 재시도 beat flower arq dramatiq 백그라운드",
+  k09:"대용량 청크 chunksize parquet polars duckdb 메모리 스트리밍 dtype",
+  k10:"배치 스케줄 크론 airflow dag 중복실행 재시작 백필 apscheduler",
+  k11:"배포 도커 dockerfile uv 쿠버네티스 무중단 graceful preStop 헬스체크 pythonunbuffered",
+  k12:"관측 모니터링 로깅 structlog json로그 요청id 프로메테우스 메트릭 추적 opentelemetry 알람",
+  k13:"부하테스트 locust 성능테스트 rps p99 slo 스트레스 스파이크",
+  k14:"프로파일링 py-spy memray 성능최적화 orjson lru_cache 벡터화 병목",
+  k15:"체크리스트 아키텍처 면접 전체그림 대규모설계",
   p01:"실행 들여쓰기 인덴트 주석 docstring repl 스크립트 첫코드 헬로월드",
   p02:"변수 자료형 타입 int str float bool 형변환 캐스팅 타입힌트 연산자 나눗셈 몫 나머지",
   p03:"문자열 텍스트 글자 f-string 포맷 서식 자르기 붙이기 split join replace strip 정규식 re 치환",

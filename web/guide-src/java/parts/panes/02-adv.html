@@ -13,7 +13,7 @@
     그리고 <b>Java 21 부터 판을 바꾼 가상 스레드</b>를 다룹니다.
   </p>
   <div class="stats">
-    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>13</b><span>SECTIONS</span></div>
     <div><b>1M+</b><span>가상 스레드 동시 실행</span></div>
     <div><b>~1KB</b><span>가상 스레드 1개 비용</span></div>
     <div><b>1MB</b><span>플랫폼 스레드 1개 비용</span></div>
@@ -836,6 +836,88 @@ Caused by: java.sql.SQLException: connection timed out   ← ③ 진짜 원인�
       ② 맨 윗줄의 <b>예외 종류와 메시지</b>를 읽고
       ③ <code>Caused by:</code> 가 있으면 <b>가장 마지막 것</b>이 근본 원인입니다.
       프레임워크 내부 스택은 대부분 볼 필요가 없습니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a13 ==================== -->
+<section class="sec" id="a13">
+  <div class="sec-head rv">
+    <span class="no">ADV 13</span>
+    <h2>운영 JVM 튜닝 — <span class="t">컨테이너 · 힙 · GC</span></h2>
+    <p class="lead">요즘 자바는 대부분 <b>도커 안에서</b> 돕니다. 그 환경의 규칙은 조금 다릅니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">컨테이너에서 제일 먼저 하는 설정</h4>
+      <pre class="code" data-lang="text"><code># ❌ 흔한 실수 — 컨테이너 메모리를 무시하고 고정
+java -Xmx2g -jar app.jar
+   → 컨테이너 한도가 1GB 면 힙만으로 초과 → OOMKilled(exit 137)
+   → 애플리케이션 로그에는 아무것도 안 남습니다 (커널이 죽인 것)
+
+# ✅ 컨테이너 한도의 비율로 지정 (Java 10+ 기본으로 컨테이너를 인식)
+java -XX:MaxRAMPercentage=75.0 \
+     -XX:InitialRAMPercentage=75.0 \
+     -jar app.jar</code></pre>
+      <div class="note warn">
+        <b>JVM 이 쓰는 메모리 = 힙만이 아닙니다.</b>
+        메타스페이스·스레드 스택(스레드당 1MB)·코드 캐시·다이렉트 버퍼가 <b>힙 밖에</b> 더 붙습니다.
+        그래서 힙을 컨테이너 한도의 <b>100%</b> 로 주면 반드시 죽습니다.
+        <b>70~75%</b> 가 안전한 출발점입니다.
+      </div>
+      <h4 class="mini">운영에서 늘 넣는 옵션</h4>
+      <pre class="code" data-lang="text"><code>-XX:MaxRAMPercentage=75.0
+-XX:+HeapDumpOnOutOfMemoryError          # ★ OOM 순간을 파일로 남긴다
+-XX:HeapDumpPath=/dump/heap.hprof        #   (영속 볼륨이어야 재시작 후에도 남음)
+-XX:+ExitOnOutOfMemoryError              # 반쯤 죽은 채 서비스하지 말고 재시작
+-Xlog:gc*:file=/log/gc.log:time,uptime:filecount=5,filesize=10M
+-Dfile.encoding=UTF-8
+-Duser.timezone=Asia/Seoul               # ★ 컨테이너 기본은 UTC 입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>OOM 은 “증상”이지 원인이 아닙니다.</b>
+        힙 덤프를 받아 <b>MAT</b> 나 IntelliJ 프로파일러로 열면
+        “어떤 객체가 몇 개, 누가 붙잡고 있는지”가 바로 보입니다.
+        범인은 대부분 <b>무한히 커지는 캐시</b>이거나 <b>정리 안 된 ThreadLocal</b> 입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">GC 고르기 — Java 21 기준</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:24%">GC</th><th>이럴 때</th></tr>
+          <tr><td><b>G1</b> (기본)</td><td>대부분의 웹 서비스. 힙 4~32GB 에서 무난합니다. <b>고민되면 그냥 G1</b></td></tr>
+          <tr><td><b>ZGC</b></td><td>정지 시간이 중요할 때. 힙이 커도 <b>1ms 미만</b> 정지.
+              <code>-XX:+UseZGC -XX:+ZGenerational</code> <span class="ver new">Java 21+</span></td></tr>
+          <tr><td>Parallel</td><td>배치처럼 <b>처리량만</b> 중요하고 멈춰도 되는 작업</td></tr>
+          <tr><td>Serial</td><td>컨테이너가 아주 작을 때(1 vCPU). 사이드카·작은 유틸</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="text"><code># p99 가 GC 때문에 튄다면 (gc.log 에서 200ms+ 정지가 보임)
+-XX:+UseZGC -XX:+ZGenerational
+
+# G1 을 계속 쓰면서 정지 시간만 낮추고 싶다면
+-XX:MaxGCPauseMillis=100     # 목표치일 뿐, 보장은 아닙니다</code></pre>
+      <div class="note warn">
+        <b>GC 옵션부터 만지는 것은 거의 항상 잘못된 순서입니다.</b>
+        GC 가 자주 도는 진짜 이유는 대개 <b>객체를 너무 많이 만드는 코드</b>입니다.
+        (한 번에 100만 건 조회, 문자열 반복 연결, 불필요한 DTO 변환)
+        <b>코드를 고치면 GC 는 저절로 조용해집니다.</b>
+      </div>
+      <h4 class="mini">기동 시간 — 오토스케일에 직결됩니다</h4>
+      <ul class="tx">
+        <li>트래픽이 몰려 서버를 늘릴 때 <b>부팅이 60초면 이미 늦습니다</b></li>
+        <li><b>CDS</b>(클래스 데이터 공유)로 기동 20~30% 단축 —
+            <code>-XX:ArchiveClassesAtExit</code> <span class="ver new">Spring Boot 3.3+</span></li>
+        <li>스프링의 <b>지연 초기화</b>는 첫 요청이 느려지므로 운영에서는 권하지 않습니다</li>
+        <li>기동 직후 느린 것(JIT 워밍업)은 정상 — <b>readiness 프로브</b>로 트래픽 투입을 늦추세요</li>
+      </ul>
+      <div class="note" style="margin-bottom:0">
+        더 나아가려면 <b>⚡ 대규모 트래픽</b> 탭의
+        <b>k02(병목 지도)</b>·<b>k14(관측)</b>·<b>k15(부하 테스트)</b> 를 이어서 보세요.
+        JVM 튜닝은 <b>측정한 뒤에</b> 하는 마지막 단계입니다.
+      </div>
     </div>
   </div>
 </section>

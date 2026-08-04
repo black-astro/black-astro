@@ -1,0 +1,1030 @@
+<!-- ============================================================
+     ELECTRON PANE
+     ============================================================ -->
+<div class="pane" id="pane-electron">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> ELECTRON 3x · 데스크탑 앱</div>
+  <h1>웹 기술로<br>만드는<br>사내 도구</h1>
+  <p class="tx">
+    VS Code · Slack · Discord 가 전부 Electron 입니다.
+    <b>웹 화면 + Node 의 파일·프로세스 권한</b>을 합친 구조라,
+    <b>사내 업무 도구</b>를 만들 때 압도적으로 빠릅니다.
+    대신 <b>보안 설정을 틀리면 사용자 PC 가 통째로 열립니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>2</b><span>프로세스 구조</span></div>
+    <div><b>3</b><span>OS 동시 지원</span></div>
+    <div><b>IPC</b><span>모든 통신의 통로</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== e01 ==================== -->
+<section class="sec" id="e01">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 01</span>
+    <h2>메인 · <span class="t">렌더러 구조</span></h2>
+    <p class="lead">이 구분 하나만 이해하면 Electron 의 <b>80%</b>는 끝납니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 개의 세계</h4>
+      <div class="layer" style="margin-top:0">
+        <div class="lrow l-svc"><span class="tagn">Main</span>
+          <div><b>메인 프로세스 — Node.js 환경</b>
+          <span>앱당 <b>하나</b>. 창을 만들고, 파일·DB·OS 기능에 접근합니다.
+          <code>fs</code>·<code>child_process</code> 를 쓸 수 있습니다.</span></div></div>
+        <div class="larrow">▲ IPC ▼</div>
+        <div class="lrow l-web"><span class="tagn">Renderer</span>
+          <div><b>렌더러 프로세스 — 브라우저 환경</b>
+          <span>창마다 <b>하나씩</b>. React·Vue 로 화면을 그립니다.
+          <b>기본적으로 Node 를 쓸 수 없습니다</b>(그래야 안전합니다).</span></div></div>
+        <div class="larrow">▲</div>
+        <div class="lrow l-repo"><span class="tagn">Preload</span>
+          <div><b>프리로드 — 둘 사이의 다리</b>
+          <span>렌더러가 로드되기 전에 실행되며, <b>허용된 기능만</b> 화면에 노출합니다.</span></div></div>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>규칙 하나</b> —
+        <b>화면(렌더러)은 파일을 직접 읽을 수 없습니다.</b>
+        “메인에게 부탁 → 메인이 처리 → 결과를 돌려받기”가
+        모든 기능의 기본 흐름입니다(e03 IPC).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로젝트 구조</h4>
+      <pre class="code" data-lang="text"><code>my-app/
+  src/
+    main/                    ★ Node 환경
+      index.ts               앱 시작 · 창 생성
+      ipc/                   IPC 핸들러 (기능별로 분리)
+        file.handler.ts
+        db.handler.ts
+      services/              실제 로직
+      windows/               창 관리
+    preload/
+      index.ts               ★ contextBridge 로 API 노출
+    renderer/                ★ 브라우저 환경 (React 등)
+      App.tsx
+      index.html
+  electron-builder.yml       패키징 설정
+  package.json</code></pre>
+      <pre class="code" data-lang="bash"><code># 요즘 표준 템플릿 (Vite 기반 — HMR 이 됩니다)
+npm create @quick-start/electron@latest
+# 또는
+npx create-electron-vite
+
+# 옛 방식(electron-forge + webpack)보다 빌드가 훨씬 빠릅니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Electron 은 가볍지 않습니다.</b>
+        빈 앱도 설치 파일이 <b>80~150MB</b>, 메모리 <b>100MB+</b> 입니다
+        (Chromium 을 통째로 포함하기 때문).
+        <b>가벼움이 중요하면</b> Tauri(Rust) 를 검토하세요 —
+        대신 웹뷰가 OS 마다 달라 <b>호환성 이슈</b>가 생깁니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e02 ==================== -->
+<section class="sec" id="e02">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 02</span>
+    <h2>첫 창 <span class="t">띄우기</span></h2>
+    <p class="lead">최소 코드와 <b>운영에 필요한 설정</b>을 함께 봅니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메인 프로세스</h4>
+      <pre class="code" data-lang="typescript"><code>import { app, BrowserWindow, shell } from "electron";
+import path from "node:path";
+
+let mainWindow: BrowserWindow | null = null;
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200, height: 800,
+    minWidth: 940, minHeight: 600,
+    show: false,                              // ★ 준비될 때까지 숨김
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    webPreferences: {
+      preload: path.join(__dirname, "../preload/index.js"),
+      contextIsolation: true,                 // ★ 반드시 true (e04)
+      nodeIntegration: false,                 // ★ 반드시 false
+      sandbox: true,
+    },
+  });
+
+  // ★ 흰 화면 깜빡임 방지
+  mainWindow.once("ready-to-show", () =&gt; mainWindow?.show());
+
+  // 외부 링크는 기본 브라우저로 (앱 안에서 열면 보안 위험)
+  mainWindow.webContents.setWindowOpenHandler(({ url }) =&gt; {
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+
+  if (process.env.NODE_ENV === "development") {
+    mainWindow.loadURL("http://localhost:5173");
+    mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
+  }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">앱 생명주기 — OS 마다 다릅니다</h4>
+      <pre class="code" data-lang="typescript"><code>app.whenReady().then(() =&gt; {
+  createWindow();
+
+  // ★ macOS — 독 아이콘 클릭 시 창이 없으면 다시 만듭니다
+  app.on("activate", () =&gt; {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+// ★ macOS 는 창을 닫아도 앱이 살아 있는 것이 관례입니다
+app.on("window-all-closed", () =&gt; {
+  if (process.platform !== "darwin") app.quit();
+});
+
+// 단일 인스턴스 — 두 번 실행되지 않게 (거의 항상 필요합니다)
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () =&gt; {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
+// 종료 전 정리
+app.on("before-quit", async (e) =&gt; {
+  if (hasUnsavedWork) {
+    e.preventDefault();
+    const ok = await confirmQuit();
+    if (ok) { hasUnsavedWork = false; app.quit(); }
+  }
+});</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>창 크기·위치를 기억하게 하세요.</b>
+        데스크탑 앱에서 사용자가 가장 먼저 불편해하는 부분입니다.
+        <code>electron-window-state</code> 라이브러리 한 줄이면 해결됩니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e03 ==================== -->
+<section class="sec" id="e03">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 03</span>
+    <h2>IPC <span class="t">통신</span></h2>
+    <p class="lead">화면과 메인이 대화하는 유일한 통로입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">요청-응답 (가장 많이 씁니다)</h4>
+      <pre class="code" data-lang="typescript"><code>// ① 메인 — 핸들러 등록
+import { ipcMain, dialog } from "electron";
+
+ipcMain.handle("file:read", async (event, filePath: string) =&gt; {
+  // ★ 반드시 검증하세요 (e04)
+  const safe = path.resolve(DATA_DIR, filePath);
+  if (!safe.startsWith(path.resolve(DATA_DIR) + path.sep)) {
+    throw new Error("잘못된 경로입니다");
+  }
+  return fs.readFile(safe, "utf8");
+});
+
+ipcMain.handle("dialog:openFile", async () =&gt; {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ["openFile"],
+    filters: [{ name: "엑셀", extensions: ["xlsx", "csv"] }],
+  });
+  return canceled ? null : filePaths[0];
+});</code></pre>
+      <pre class="code" data-lang="typescript"><code>// ② 프리로드 — 화면에 노출할 API 만 정의
+import { contextBridge, ipcRenderer } from "electron";
+
+const api = {
+  readFile: (p: string) =&gt; ipcRenderer.invoke("file:read", p),
+  openFile: () =&gt; ipcRenderer.invoke("dialog:openFile"),
+};
+contextBridge.exposeInMainWorld("api", api);
+export type Api = typeof api;                 // ★ 타입을 렌더러에서 재사용
+
+// ③ 렌더러 — 그냥 함수처럼 씁니다
+const path = await window.api.openFile();
+if (path) {
+  const text = await window.api.readFile(path);
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메인 → 렌더러 (진행률·알림)</h4>
+      <pre class="code" data-lang="typescript"><code>// 메인에서 보내기
+mainWindow.webContents.send("job:progress", { done: 30, total: 100 });
+
+// 프리로드 — 구독 API 를 만들어 줍니다
+const api = {
+  onProgress: (cb: (p: Progress) =&gt; void) =&gt; {
+    const listener = (_e: unknown, p: Progress) =&gt; cb(p);
+    ipcRenderer.on("job:progress", listener);
+    return () =&gt; ipcRenderer.off("job:progress", listener);   // ★ 해제 함수 반환
+  },
+};
+
+// 렌더러 (React)
+useEffect(() =&gt; {
+  const off = window.api.onProgress(setProgress);
+  return off;                                  // ★ 언마운트 시 해제 (누수 방지)
+}, []);</code></pre>
+      <h4 class="mini">타입 안전하게 쓰기</h4>
+      <pre class="code" data-lang="typescript"><code>// renderer/global.d.ts
+import type { Api } from "../preload";
+
+declare global {
+  interface Window { api: Api; }               // ★ 자동완성이 됩니다
+}
+export {};</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>IPC 로 큰 데이터를 자주 주고받지 마세요.</b>
+        구조화 복제(structured clone)로 <b>직렬화 비용</b>이 듭니다.
+        100MB 파일 내용을 통째로 넘기는 대신
+        <b>메인에서 처리하고 결과만</b> 보내거나, 파일 경로만 주고받으세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e04 ==================== -->
+<section class="sec" id="e04">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 04</span>
+    <h2>preload · <span class="t">보안</span></h2>
+    <p class="lead">이 절을 대충 넘기면 <b>사용자 PC 를 공격자에게 내주게 됩니다.</b></p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 위험한가</h4>
+      <pre class="code" data-lang="text"><code>nodeIntegration: true 로 두면
+  화면(웹 페이지)에서 require("child_process") 가 됩니다.
+  → 표시하는 콘텐츠에 XSS 가 하나라도 있으면
+  → 공격자가 사용자 PC 에서 "무슨 명령이든" 실행합니다
+
+위험이 들어오는 경로
+  · 외부 웹사이트를 iframe·webview 로 표시
+  · 서버에서 받은 HTML 을 innerHTML 로 넣기
+  · 사용자가 입력한 마크다운 렌더링
+  · 취약한 npm 패키지 (🧬 초고급 d13)</code></pre>
+      <pre class="code" data-lang="typescript"><code>// ★ 안전한 기본 설정 — 이대로 두세요
+webPreferences: {
+  contextIsolation: true,       // 프리로드와 페이지의 컨텍스트 분리
+  nodeIntegration: false,       // 페이지에서 Node 사용 불가
+  sandbox: true,                // 렌더러를 샌드박스에
+  webSecurity: true,            // ★ 개발 편의로도 끄지 마세요
+  allowRunningInsecureContent: false,
+  preload: path.join(__dirname, "preload.js"),
+}</code></pre>
+      <div class="note warn">
+        <b>인터넷에서 “해결책”으로 <code>nodeIntegration: true</code> 를 권하는 글이 많습니다.</b>
+        대부분 <b>오래된 튜토리얼</b>입니다.
+        지금은 <b>contextBridge 로 필요한 기능만 노출</b>하는 것이 유일한 정답입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">안전한 API 노출</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>❌ 통째로 노출</h5>
+          <pre class="code" data-lang="typescript"><code>contextBridge
+ .exposeInMainWorld("api", {
+   fs: require("fs"),
+   exec: require("child_process")
+          .exec,
+   ipc: ipcRenderer,   // 무엇이든
+ });                   // 호출 가능</code></pre>
+        </div>
+        <div class="good">
+          <h5>✅ 기능 단위로</h5>
+          <pre class="code" data-lang="typescript"><code>contextBridge
+ .exposeInMainWorld("api", {
+   readConfig: () =&gt;
+     ipcRenderer.invoke("config:read"),
+   saveReport: (data) =&gt;
+     ipcRenderer.invoke("report:save",
+                        data),
+ });   // 정해진 동작만</code></pre>
+        </div>
+      </div>
+      <pre class="code" data-lang="typescript"><code>// 메인 쪽에서도 반드시 검증합니다 (프리로드는 우회될 수 있습니다)
+ipcMain.handle("report:save", async (event, data: unknown) =&gt; {
+  // ① 발신자 확인
+  if (event.senderFrame?.url !== expectedUrl) throw new Error("거부");
+
+  // ② 입력 검증 (Zod)
+  const parsed = ReportSchema.parse(data);
+
+  // ③ 경로·권한 검증
+  const target = path.join(app.getPath("documents"), parsed.filename);
+  if (!target.startsWith(app.getPath("documents"))) throw new Error("거부");
+
+  await fs.writeFile(target, JSON.stringify(parsed));
+});</code></pre>
+      <h4 class="mini">보안 체크리스트</h4>
+      <ul class="tx">
+        <li>☐ <code>contextIsolation: true</code> · <code>nodeIntegration: false</code></li>
+        <li>☐ <b>CSP 헤더</b> 설정 (인라인 스크립트 차단)</li>
+        <li>☐ 외부 링크는 <code>shell.openExternal</code> 로만</li>
+        <li>☐ <code>will-navigate</code> 로 <b>예상 밖 이동 차단</b></li>
+        <li>☐ 원격 콘텐츠를 로드한다면 <b>반드시 HTTPS</b></li>
+        <li>☐ <b>DB 접속 정보·API 키를 앱에 넣지 않기</b> — 디컴파일하면 다 보입니다</li>
+        <li>☐ <code>npm audit</code> · Electron <b>최신 버전 유지</b> (Chromium 취약점 패치)</li>
+      </ul>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Electron 버전을 오래 방치하지 마세요.</b>
+        Chromium 취약점이 그대로 남아 있게 됩니다.
+        보안 패치를 받으려면 <b>최신 3개 메이저 버전</b> 안에 머물러야 합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e05 ==================== -->
+<section class="sec" id="e05">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 05</span>
+    <h2>메뉴 · 트레이 · <span class="t">단축키</span></h2>
+    <p class="lead">데스크탑 앱다운 느낌을 만드는 요소들입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">애플리케이션 메뉴</h4>
+      <pre class="code" data-lang="typescript"><code>import { Menu, shell, app } from "electron";
+
+const isMac = process.platform === "darwin";
+
+const template: Electron.MenuItemConstructorOptions[] = [
+  ...(isMac ? [{ role: "appMenu" as const }] : []),
+  {
+    label: "파일",
+    submenu: [
+      { label: "새로 만들기", accelerator: "CmdOrCtrl+N",
+        click: () =&gt; mainWindow?.webContents.send("menu:new") },
+      { label: "열기…", accelerator: "CmdOrCtrl+O", click: openFile },
+      { type: "separator" },
+      isMac ? { role: "close" } : { role: "quit" },
+    ],
+  },
+  { role: "editMenu" },              // 복사·붙여넣기 (★ 이거 없으면 Cmd+C 가 안 됩니다)
+  { role: "viewMenu" },
+  {
+    label: "도움말",
+    submenu: [{ label: "문서 보기",
+                click: () =&gt; shell.openExternal("https://docs.example.com") }],
+  },
+];
+
+Menu.setApplicationMenu(Menu.buildFromTemplate(template));</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>role: "editMenu"</code> 를 빠뜨리면</b>
+        macOS 에서 <b>복사·붙여넣기 단축키가 아예 동작하지 않습니다.</b>
+        메뉴를 커스터마이즈할 때 가장 흔한 실수입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">트레이 · 컨텍스트 메뉴 · 단축키</h4>
+      <pre class="code" data-lang="typescript"><code>import { Tray, Menu, nativeImage, globalShortcut } from "electron";
+
+// 트레이 (백그라운드 상주 앱에 필수)
+const tray = new Tray(nativeImage.createFromPath(iconPath));
+tray.setToolTip("내 앱");
+tray.setContextMenu(Menu.buildFromTemplate([
+  { label: "창 열기", click: () =&gt; mainWindow?.show() },
+  { label: "동기화", click: sync },
+  { type: "separator" },
+  { label: "종료", click: () =&gt; app.quit() },
+]));
+tray.on("click", () =&gt; mainWindow?.isVisible()
+  ? mainWindow.hide() : mainWindow?.show());
+
+// 전역 단축키 — 앱이 배경에 있어도 동작합니다
+app.whenReady().then(() =&gt; {
+  const ok = globalShortcut.register("CmdOrCtrl+Shift+K", () =&gt; {
+    mainWindow?.show();
+    mainWindow?.webContents.send("shortcut:quickOpen");
+  });
+  if (!ok) log.warn("단축키 등록 실패 — 다른 앱이 사용 중");
+});
+
+app.on("will-quit", () =&gt; globalShortcut.unregisterAll());   // ★ 정리 필수</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 창을 닫아도 트레이에 남기기 (백그라운드 앱 패턴)
+let isQuitting = false;
+app.on("before-quit", () =&gt; { isQuitting = true; });
+
+mainWindow.on("close", (e) =&gt; {
+  if (!isQuitting) {
+    e.preventDefault();
+    mainWindow?.hide();
+    return false;
+  }
+});</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>전역 단축키는 다른 앱과 충돌합니다.</b>
+        등록 실패를 <b>조용히 무시하지 말고</b> 사용자에게 알리거나
+        <b>설정에서 바꿀 수 있게</b> 만드세요.
+        흔한 조합(<code>Ctrl+Shift+S</code> 등)은 피하는 편이 좋습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e06 ==================== -->
+<section class="sec" id="e06">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 06</span>
+    <h2>파일 · <span class="t">다이얼로그</span></h2>
+    <p class="lead">사내 도구의 핵심 기능. <b>엑셀 읽고 결과 저장</b>이 가장 흔한 요구사항입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파일 선택 · 저장</h4>
+      <pre class="code" data-lang="typescript"><code>// 열기
+ipcMain.handle("dialog:open", async () =&gt; {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow!, {
+    title: "데이터 파일 선택",
+    properties: ["openFile", "multiSelections"],
+    filters: [
+      { name: "스프레드시트", extensions: ["xlsx", "xls", "csv"] },
+      { name: "모든 파일", extensions: ["*"] },
+    ],
+    defaultPath: app.getPath("documents"),
+  });
+  return canceled ? [] : filePaths;
+});
+
+// 저장
+ipcMain.handle("dialog:save", async (_e, defaultName: string) =&gt; {
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow!, {
+    defaultPath: path.join(app.getPath("downloads"), defaultName),
+    filters: [{ name: "엑셀", extensions: ["xlsx"] }],
+  });
+  return canceled ? null : filePath;
+});
+
+// 확인 대화상자
+const { response } = await dialog.showMessageBox(mainWindow!, {
+  type: "warning",
+  buttons: ["취소", "삭제"],
+  defaultId: 0, cancelId: 0,
+  message: "정말 삭제하시겠습니까?",
+  detail: "이 작업은 되돌릴 수 없습니다.",
+});
+if (response === 1) doDelete();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">앱 데이터 위치 · 드래그 앤 드롭</h4>
+      <pre class="code" data-lang="typescript"><code>// ★ 설치 폴더에는 쓰지 마세요 — 권한이 없을 수 있습니다
+app.getPath("userData");     // 설정·DB (앱 전용, 자동 생성됨)
+app.getPath("documents");    // 사용자 문서
+app.getPath("downloads");
+app.getPath("temp");
+app.getPath("logs");
+
+// 예: Windows → C:\Users\이름\AppData\Roaming\내앱\
+//     macOS   → ~/Library/Application Support/내앱/</code></pre>
+      <pre class="code" data-lang="tsx"><code>// 렌더러 — 드래그 앤 드롭
+function DropZone() {
+  return (
+    &lt;div
+      onDragOver={(e) =&gt; e.preventDefault()}
+      onDrop={async (e) =&gt; {
+        e.preventDefault();
+        // Electron 32+ 는 webUtils 로 실제 경로를 얻습니다
+        const paths = [...e.dataTransfer.files]
+          .map(f =&gt; window.api.getPathForFile(f));
+        await window.api.processFiles(paths);
+      }}
+    &gt;파일을 여기로 끌어다 놓으세요&lt;/div&gt;
+  );
+}
+
+// preload
+import { webUtils } from "electron";
+getPathForFile: (file: File) =&gt; webUtils.getPathForFile(file),</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>큰 파일은 메인 프로세스에서 처리하세요.</b>
+        렌더러에서 100MB 엑셀을 파싱하면 <b>화면이 통째로 얼어붙습니다.</b>
+        메인에서 처리하고 <b>진행률만 IPC 로</b> 보내거나,
+        더 무거우면 <code>utilityProcess</code>·워커로 분리하세요(e11).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e07 ==================== -->
+<section class="sec" id="e07">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 07</span>
+    <h2>데이터 <span class="t">저장</span></h2>
+    <p class="lead">설정은 가볍게, 데이터가 많으면 <b>SQLite</b>.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설정 — electron-store</h4>
+      <div class="dep"><code>npm i electron-store</code></div>
+      <pre class="code" data-lang="typescript"><code>import Store from "electron-store";
+
+type Config = {
+  theme: "light" | "dark";
+  serverUrl: string;
+  recentFiles: string[];
+};
+
+const store = new Store&lt;Config&gt;({
+  defaults: { theme: "light", serverUrl: "", recentFiles: [] },
+  schema: {                                  // ★ 검증 스키마
+    theme: { type: "string", enum: ["light", "dark"] },
+    serverUrl: { type: "string", format: "uri" },
+  },
+  encryptionKey: "obfuscation-only",         // ⚠️ 난독화 수준일 뿐입니다
+  migrations: {                              // 버전 업 시 데이터 이전
+    "1.1.0": (s) =&gt; s.set("recentFiles", []),
+  },
+});
+
+store.get("theme");
+store.set("theme", "dark");
+store.onDidChange("theme", (newV) =&gt; applyTheme(newV));</code></pre>
+      <div class="note warn">
+        <b><code>encryptionKey</code> 는 진짜 암호화가 아닙니다.</b>
+        키가 <b>앱 안에 들어 있으므로</b> 마음먹으면 풀 수 있습니다.
+        <b>비밀번호·토큰은 OS 키체인</b>(<code>keytar</code>·<code>safeStorage</code>)에 저장하세요.
+      </div>
+      <pre class="code" data-lang="typescript"><code>// OS 수준 암호화 (Electron 내장)
+import { safeStorage } from "electron";
+
+if (safeStorage.isEncryptionAvailable()) {
+  const enc = safeStorage.encryptString(token);
+  store.set("token", enc.toString("base64"));
+  // 복호화
+  const dec = safeStorage.decryptString(Buffer.from(store.get("token"), "base64"));
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">데이터가 많으면 SQLite</h4>
+      <div class="dep"><code>npm i better-sqlite3</code> (동기 API — Electron 에 잘 맞습니다)</div>
+      <pre class="code" data-lang="typescript"><code>import Database from "better-sqlite3";
+import path from "node:path";
+
+const db = new Database(path.join(app.getPath("userData"), "app.db"));
+db.pragma("journal_mode = WAL");             // ★ 동시 읽기 성능
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_created ON records(created_at);
+`);
+
+// 준비된 문장 — 반복 실행이 빠릅니다
+const insert = db.prepare("INSERT INTO records (name, amount) VALUES (?, ?)");
+const findAll = db.prepare("SELECT * FROM records ORDER BY id DESC LIMIT ?");
+
+// 대량 삽입은 트랜잭션으로 (수십 배 빨라집니다)
+const insertMany = db.transaction((rows: Row[]) =&gt; {
+  for (const r of rows) insert.run(r.name, r.amount);
+});
+insertMany(rows);</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>스키마 변경(마이그레이션)을 처음부터 준비하세요.</b>
+        앱은 <b>사용자 PC 에 설치</b>되므로, 버전마다 DB 구조가 다른 사용자가 섞입니다.
+        <code>user_version</code> pragma 로 버전을 관리하고
+        <b>단계별 업그레이드 스크립트</b>를 두는 것이 정석입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e08 ==================== -->
+<section class="sec" id="e08">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 08</span>
+    <h2>창 관리 · <span class="t">다중 창</span></h2>
+    <p class="lead">창이 늘어나면 <b>메모리와 상태 공유</b>를 함께 생각해야 합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">창 여러 개 다루기</h4>
+      <pre class="code" data-lang="typescript"><code>const windows = new Map&lt;string, BrowserWindow&gt;();
+
+function openDetailWindow(id: string) {
+  const existing = windows.get(id);
+  if (existing) { existing.focus(); return existing; }   // ★ 중복 방지
+
+  const win = new BrowserWindow({
+    width: 800, height: 600,
+    parent: mainWindow!,          // 부모 지정 (항상 위에 뜸)
+    modal: false,
+    webPreferences: { preload, contextIsolation: true, nodeIntegration: false },
+  });
+
+  win.loadURL(`${baseUrl}#/detail/${id}`);
+  win.on("closed", () =&gt; windows.delete(id));            // ★ 정리
+  windows.set(id, win);
+  return win;
+}
+
+// 모든 창에 브로드캐스트
+function broadcast(channel: string, payload: unknown) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    w.webContents.send(channel, payload);
+  }
+}</code></pre>
+      <div class="note warn">
+        <b>창 하나 = 크로미움 렌더러 프로세스 하나</b>입니다.
+        창 10개면 <b>메모리가 10배</b>가 됩니다.
+        가벼운 보조 화면은 별도 창 대신
+        <b>모달·사이드 패널</b>로 만드는 편이 훨씬 낫습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">창 간 상태 공유</h4>
+      <pre class="code" data-lang="typescript"><code>// ★ 상태의 원본은 "메인 프로세스"에 두세요
+class AppState {
+  private data: State = initialState;
+
+  update(patch: Partial&lt;State&gt;) {
+    this.data = { ...this.data, ...patch };
+    broadcast("state:changed", this.data);     // 모든 창에 알림
+  }
+  get() { return this.data; }
+}
+
+ipcMain.handle("state:get", () =&gt; appState.get());
+ipcMain.handle("state:update", (_e, patch) =&gt; appState.update(patch));</code></pre>
+      <pre class="code" data-lang="tsx"><code>// 렌더러 — 훅으로 감싸면 편합니다
+function useAppState() {
+  const [state, setState] = useState&lt;State | null&gt;(null);
+
+  useEffect(() =&gt; {
+    window.api.getState().then(setState);
+    return window.api.onStateChanged(setState);   // 구독 + 해제
+  }, []);
+
+  return [state, window.api.updateState] as const;
+}</code></pre>
+      <h4 class="mini">그 밖의 창 기능</h4>
+      <pre class="code" data-lang="typescript"><code>win.setAlwaysOnTop(true, "floating");     // 항상 위
+win.setFullScreen(true);
+win.flashFrame(true);                      // 작업 표시줄 깜빡임 (알림)
+win.setProgressBar(0.5);                   // ★ 독·작업표시줄 진행률
+win.setOverlayIcon(icon, "3개 알림");       // Windows 배지
+
+// 프레임 없는 창 (커스텀 타이틀바)
+new BrowserWindow({ frame: false, titleBarStyle: "hidden",
+                    titleBarOverlay: { color: "#0b0f1a", symbolColor: "#fff" } });</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>커스텀 타이틀바는 신중히.</b>
+        예쁘지만 <b>창 이동·최대화·스냅</b> 동작을 직접 구현해야 하고
+        OS 마다 미묘하게 다릅니다.
+        사내 도구라면 <b>기본 타이틀바로 시작</b>하는 편이 효율적입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e09 ==================== -->
+<section class="sec" id="e09">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 09</span>
+    <h2>자동 <span class="t">업데이트</span></h2>
+    <p class="lead">데스크탑 앱의 <b>가장 큰 운영 과제</b>입니다. 없으면 구버전이 영원히 남습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">electron-updater</h4>
+      <div class="dep"><code>npm i electron-updater</code></div>
+      <pre class="code" data-lang="typescript"><code>import { autoUpdater } from "electron-updater";
+import log from "electron-log";
+
+autoUpdater.logger = log;
+autoUpdater.autoDownload = false;            // ★ 사용자에게 먼저 묻기
+
+app.whenReady().then(() =&gt; {
+  autoUpdater.checkForUpdates();
+  setInterval(() =&gt; autoUpdater.checkForUpdates(), 4 * 60 * 60 * 1000);  // 4시간
+});
+
+autoUpdater.on("update-available", async (info) =&gt; {
+  const { response } = await dialog.showMessageBox({
+    type: "info",
+    buttons: ["나중에", "지금 받기"],
+    message: `새 버전 ${info.version} 이 있습니다`,
+    detail: info.releaseNotes?.toString().slice(0, 500),
+  });
+  if (response === 1) autoUpdater.downloadUpdate();
+});
+
+autoUpdater.on("download-progress", (p) =&gt;
+  mainWindow?.setProgressBar(p.percent / 100));
+
+autoUpdater.on("update-downloaded", async () =&gt; {
+  const { response } = await dialog.showMessageBox({
+    buttons: ["나중에", "지금 재시작"],
+    message: "업데이트 준비 완료",
+  });
+  if (response === 1) autoUpdater.quitAndInstall();
+});
+
+autoUpdater.on("error", (e) =&gt; log.error("업데이트 실패", e));</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 채널 설정</h4>
+      <pre class="code" data-lang="yaml"><code># electron-builder.yml
+publish:
+  provider: github          # 또는 s3 · generic(사내 서버)
+  owner: my-org
+  repo: my-app
+
+# 사내 서버를 쓴다면
+publish:
+  provider: generic
+  url: https://updates.company.internal/my-app/</code></pre>
+      <pre class="code" data-lang="text"><code>업데이트 서버에 올라가는 파일
+  latest.yml           버전 정보 · 파일 해시 (Windows)
+  latest-mac.yml       macOS
+  my-app-1.2.0.exe     설치 파일
+  my-app-1.2.0.exe.blockmap   ★ 차등 다운로드용
+
+blockmap 이 있으면 "바뀐 부분만" 받아 업데이트가 훨씬 빠릅니다.</code></pre>
+      <div class="note warn">
+        <b>코드 서명이 없으면 자동 업데이트가 동작하지 않습니다.</b>
+        · Windows — 서명 없으면 SmartScreen 경고 + 업데이트 검증 실패<br>
+        · macOS — 서명·공증(notarization)이 <b>필수</b>. 없으면 실행 자체가 차단<br>
+        인증서 비용(연 10~40만원)을 <b>프로젝트 시작 전에</b> 확보하세요.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>강제 업데이트가 필요할 때</b> —
+        서버 API 에 <b>최소 지원 버전</b>을 두고,
+        앱이 그보다 낮으면 <b>업데이트 안내 화면에서 막으세요.</b>
+        보안 패치나 API 호환성이 깨지는 변경에 반드시 필요합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e10 ==================== -->
+<section class="sec" id="e10">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 10</span>
+    <h2>패키징 · <span class="t">설치 파일</span></h2>
+    <p class="lead">exe · dmg · AppImage 를 만듭니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">electron-builder 설정</h4>
+      <pre class="code" data-lang="yaml"><code># electron-builder.yml
+appId: com.company.myapp
+productName: 내 업무 도구
+copyright: Copyright © 2026 회사
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - "dist/**"
+  - "!**/*.map"                    # 소스맵 제외 (용량·보안)
+  - "!node_modules/**/{test,__tests__,*.md}"
+
+asar: true                         # 소스를 하나로 묶음 (★ 완전한 보호는 아닙니다)
+asarUnpack:
+  - "**/*.node"                    # 네이티브 모듈은 풀어 둬야 동작
+
+win:
+  target: [{ target: nsis, arch: [x64] }]
+  icon: build/icon.ico
+nsis:
+  oneClick: false                  # 설치 경로를 고를 수 있게
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: 내 업무 도구
+
+mac:
+  target: [{ target: dmg, arch: [x64, arm64] }]
+  category: public.app-category.productivity
+  hardenedRuntime: true            # ★ 공증에 필요
+  entitlements: build/entitlements.mac.plist
+
+linux:
+  target: [AppImage, deb]</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드 · 서명</h4>
+      <pre class="code" data-lang="bash"><code># 빌드
+npm run build &amp;&amp; npx electron-builder --win --x64
+npx electron-builder --mac --arm64 --x64
+npx electron-builder -mwl                 # 전부 (각 OS 에서 실행해야 함)
+
+# ★ 크로스 빌드는 제약이 많습니다
+#   macOS 앱은 macOS 에서만 서명·공증할 수 있습니다
+#   → CI(GitHub Actions)에서 OS 별 러너를 쓰는 것이 정석입니다</code></pre>
+      <pre class="code" data-lang="yaml"><code># .github/workflows/build.yml
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - run: npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}          # 인증서
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}          # 공증
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PW }}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>asar 는 암호화가 아닙니다.</b>
+        <code>npx asar extract app.asar out</code> 한 줄이면 소스가 다 나옵니다.
+        <b>API 키·DB 접속 정보를 넣지 마세요.</b>
+        정말 보호가 필요한 로직은 <b>서버에 두고 API 로</b> 호출해야 합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e11 ==================== -->
+<section class="sec" id="e11">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 11</span>
+    <h2>성능 · <span class="t">메모리</span></h2>
+    <p class="lead">“Electron 은 무겁다”는 말을 <b>덜 듣게 만드는</b> 방법들입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">시작 속도</h4>
+      <ul class="tx">
+        <li><code>show: false</code> + <code>ready-to-show</code> — <b>흰 화면 제거</b>(e02)</li>
+        <li>렌더러 번들을 작게 — 큰 라이브러리는 <b>지연 로딩</b></li>
+        <li>메인에서 <b>동기 파일 I/O 금지</b> — 창 뜨는 시간이 그대로 늘어납니다</li>
+        <li>DB·업데이트 확인은 <b>창을 띄운 뒤</b>에</li>
+        <li><code>v8 코드 캐시</code> 활용 (electron-builder 의 <code>electronLanguages</code> 정리 포함)</li>
+      </ul>
+      <pre class="code" data-lang="typescript"><code>// ❌ 앱 시작을 막는 코드
+app.whenReady().then(async () =&gt; {
+  await loadHugeConfig();        // 2초
+  await checkForUpdates();       // 3초
+  createWindow();                // ← 5초 뒤에야 창이 뜸
+});
+
+// ✅ 창부터 띄우고 나머지는 뒤에서
+app.whenReady().then(() =&gt; {
+  createWindow();
+  setImmediate(async () =&gt; {
+    await loadHugeConfig();
+    autoUpdater.checkForUpdates();
+  });
+});</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메모리 관리</h4>
+      <pre class="code" data-lang="typescript"><code>// 프로세스별 메모리 확인
+const metrics = app.getAppMetrics();
+metrics.forEach(m =&gt; log.info(m.type, m.memory.workingSetSize, "KB"));
+
+// 백그라운드 창의 렌더링 억제
+win.webContents.setBackgroundThrottling(true);   // 기본값 (숨겨지면 타이머 감속)
+
+// 안 쓰는 창은 destroy
+win.destroy();                                    // close 와 달리 즉시 해제</code></pre>
+      <div class="note warn">
+        <b>메모리 누수의 흔한 원인</b> —
+        ① <code>ipcRenderer.on</code> 을 등록만 하고 <b>off 안 함</b>(e03),
+        ② 창을 닫아도 <b>Map 에서 안 지움</b>(e08),
+        ③ <code>setInterval</code> 미정리,
+        ④ 큰 이미지·데이터를 렌더러 상태에 계속 쌓음.
+      </div>
+      <h4 class="mini">무거운 작업 분리</h4>
+      <pre class="code" data-lang="typescript"><code>// ★ 메인 프로세스도 싱글 스레드입니다 — 여기가 막히면 UI 도 멈춥니다
+import { utilityProcess } from "electron";
+
+const child = utilityProcess.fork(path.join(__dirname, "heavy-worker.js"));
+child.postMessage({ type: "parse", filePath });
+child.on("message", (msg) =&gt; {
+  if (msg.type === "progress") mainWindow?.webContents.send("job:progress", msg);
+  if (msg.type === "done") child.kill();
+});
+
+// 또는 Node 의 worker_threads (🟩 Node 탭 n09)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>측정 방법</b> —
+        렌더러는 <b>Chrome DevTools</b>(Performance·Memory)를 그대로 쓸 수 있고,
+        메인 프로세스는 <code>--inspect</code> 로 붙여 프로파일링합니다.
+        방법이 웹·Node 와 완전히 같습니다(🧬 초고급 d06).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e12 ==================== -->
+<section class="sec" id="e12">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 12</span>
+    <h2>사내 도구 <span class="t">체크리스트</span></h2>
+    <p class="lead">실제로 만들어 배포할 때 <b>놓치기 쉬운 것</b>들을 모았습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설계 단계</h4>
+      <ul class="tx">
+        <li>☐ <b>정말 데스크탑 앱이어야 하는가?</b>
+            웹으로 되는 일이면 웹이 배포·유지보수가 훨씬 쉽습니다.
+            <b>로컬 파일·프린터·시리얼 포트·오프라인</b>이 필요할 때만 가치가 있습니다</li>
+        <li>☐ <b>DB 에 직접 붙지 않기</b> — 접속 정보가 앱에 들어가면
+            <b>사용자 PC 에서 DB 전체가 열립니다.</b> 반드시 서버 API 를 거치세요</li>
+        <li>☐ 인증은 <b>서버에서</b> — 앱 안의 검사는 우회됩니다</li>
+        <li>☐ 지원할 OS·버전 범위 확정 (Windows 10 이상? 맥 인텔도?)</li>
+        <li>☐ <b>코드 서명 인증서</b> 확보 계획 (e09)</li>
+      </ul>
+      <h4 class="mini">개발 단계</h4>
+      <ul class="tx">
+        <li>☐ <code>contextIsolation: true</code> · <code>nodeIntegration: false</code> (e04)</li>
+        <li>☐ IPC 채널마다 <b>입력 검증</b></li>
+        <li>☐ 설정·DB 는 <code>userData</code> 에 (설치 폴더 X)</li>
+        <li>☐ 단일 인스턴스 잠금</li>
+        <li>☐ 창 크기·위치 기억</li>
+        <li>☐ <b>로그를 파일로</b> — 사용자 PC 에서 무슨 일이 났는지 알 유일한 방법</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 · 운영</h4>
+      <pre class="code" data-lang="typescript"><code>// 로그 파일 — 사내 도구에서 가장 중요한 기능입니다
+import log from "electron-log/main";
+
+log.initialize();
+log.transports.file.level = "info";
+log.transports.file.maxSize = 10 * 1024 * 1024;   // 10MB 로테이션
+log.errorHandler.startCatching();                  // 크래시 자동 기록
+
+// 사용자에게 로그 위치 알려 주기 (문의 대응이 10배 쉬워집니다)
+ipcMain.handle("log:open", () =&gt;
+  shell.showItemInFolder(log.transports.file.getFile().path));</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 크래시 리포팅
+import * as Sentry from "@sentry/electron/main";
+Sentry.init({ dsn: process.env.SENTRY_DSN, release: app.getVersion() });</code></pre>
+      <ul class="tx">
+        <li>☐ 자동 업데이트 동작 확인 (구버전 → 신버전 실제 테스트)</li>
+        <li>☐ <b>백신 오탐</b> 확인 — 서명 없는 exe 는 자주 차단됩니다</li>
+        <li>☐ 사내 <b>프록시·인증서</b> 환경에서 API 호출이 되는지</li>
+        <li>☐ 오프라인·네트워크 끊김 상황 처리</li>
+        <li>☐ 사용자 매뉴얼 + <b>로그 보내는 법</b> 안내</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>같은 도구를 다른 방식으로 만든다면</b> —
+        🐍 파이썬 가이드의 <b>PySide6</b>, ☕ 자바 가이드의 <b>JavaFX</b> 가
+        같은 자리를 차지합니다.
+        <b>웹 개발자가 팀에 많다면 Electron</b> 이 가장 빠르고,
+        <b>배포 용량이 중요하면</b> 다른 선택지를 검토하세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /pane-electron -->

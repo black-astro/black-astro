@@ -327,10 +327,10 @@ import AppIcon from '@/components/AppIcon.vue'
   opacity: 0.7;
 }
 
-/* 학습 가이드 진입 카드 */
+/* 학습 가이드 진입 카드 — 가이드 수가 늘어도 폭에 맞춰 알아서 접힙니다 */
 .guide-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 16px;
   align-items: stretch;
 }

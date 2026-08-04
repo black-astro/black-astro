@@ -1,0 +1,1349 @@
+<!-- ============================================================
+     대규모 트래픽 PANE
+     ============================================================ -->
+<div class="pane" id="pane-scale">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> HIGH TRAFFIC · NODE 운영</div>
+  <h1>스레드 하나로<br>10만 명을<br>받는 법</h1>
+  <p class="tx">
+    Node 는 <b>기다리는 일</b>에 최적화되어 있어 적은 자원으로 많은 연결을 버팁니다.
+    대신 <b>이벤트 루프가 막히는 순간 전부 멈춥니다.</b>
+    이 탭은 <b>대기업 백엔드 면접에서 실제로 묻는</b> 주제들을 순서대로 다룹니다.
+  </p>
+  <div class="stats">
+    <div><b>15</b><span>SECTIONS</span></div>
+    <div><b>p99</b><span>보는 지표</span></div>
+    <div><b>Redis</b><span>BullMQ · Kafka</span></div>
+    <div><b>0</b><span>중복 결제</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== k01 ==================== -->
+<section class="sec" id="k01">
+  <div class="sec-head rv">
+    <span class="no">SCALE 01</span>
+    <h2>Node 로 <span class="t">트래픽 받기</span></h2>
+    <p class="lead">“싱글 스레드라 느리다”는 오해부터 풀고 시작합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 스레드 하나로 버티나</h4>
+      <pre class="code" data-lang="text"><code>[스레드 기반 서버]  요청 1개 = 스레드 1개
+  요청 10,000개 → 스레드 10,000개
+  → 스레드당 1MB 스택 = 10GB
+  → 컨텍스트 스위칭 비용 폭발
+
+[Node]  요청 10,000개 = 대기 중인 콜백 10,000개
+  → 실제로 CPU 를 쓰는 건 "응답이 도착한 것"뿐
+  → 메모리는 수백 MB, 스위칭 없음
+
+핵심: 웹 서버 작업의 대부분은 "기다리는 시간"입니다.
+      DB 응답 50ms 동안 CPU 는 놀고 있습니다.
+      Node 는 그 시간에 다른 요청을 처리합니다.</code></pre>
+      <div class="note warn">
+        <b>단, 계산이 들어오는 순간 무너집니다.</b>
+        요청 하나가 CPU 를 200ms 점유하면
+        <b>그동안 다른 모든 요청이 대기</b>합니다.
+        초당 5개만 들어와도 서버가 마비됩니다.
+        <b>이것이 Node 운영의 유일하고 가장 큰 위험</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">용량 산정 — 면접에서 시키는 계산</h4>
+      <pre class="code" data-lang="text"><code>1) DAU × 1인당 요청 수 = 하루 총 요청
+2) ÷ 86,400 = 평균 RPS
+3) × 피크 배수(3~10) = 피크 RPS
+4) 리틀의 법칙: 동시 처리 수 = RPS × 평균 처리시간(초)
+5) ÷ 서버 1대 처리량 = 필요 대수
+
+예) DAU 100만 · 1인 20요청 · 피크 5배
+    = 2,000만 ÷ 86,400 × 5 ≈ 1,160 RPS
+    평균 응답 100ms → 동시 116건
+    → 커넥션 풀·외부 API 동시 호출 수를 이 기준으로 설계</code></pre>
+      <h4 class="mini">Node 서버 1대의 감각</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:46%">작업 성격</th><th>대략의 처리량 (2vCPU)</th></tr>
+          <tr><td>메모리 캐시 응답</td><td>10,000+ RPS</td></tr>
+          <tr><td>Redis 조회 1회</td><td>수천 RPS</td></tr>
+          <tr><td>DB 조회 1~2회</td><td>500 ~ 2,000 RPS</td></tr>
+          <tr><td>DB 쓰기 + 트랜잭션</td><td>수백 RPS</td></tr>
+          <tr><td>JSON 1MB 파싱</td><td><b>초당 수십 건</b> — CPU 바운드 ★</td></tr>
+          <tr><td>이미지 리사이즈</td><td><b>워커 필수</b></td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>정확한 수치가 목적이 아닙니다.</b>
+        <b>자릿수</b>가 맞는지 보는 겁니다.
+        “200 RPS 인데 서버 20대”면 뭔가 잘못 설계된 것이고,
+        “3,000 RPS 를 2대로” 라면 부하 테스트(k13) 없이는 믿을 수 없습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k02 ==================== -->
+<section class="sec" id="k02">
+  <div class="sec-head rv">
+    <span class="no">SCALE 02</span>
+    <h2>병목 지도 · <span class="t">이벤트 루프 지연</span></h2>
+    <p class="lead">Node 가 느릴 때 <b>볼 곳은 정해져 있습니다.</b></p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이 순서로 확인하세요</h4>
+      <div class="layer" style="margin-top:0">
+        <div class="lrow l-web"><span class="tagn">1</span>
+          <div><b>이벤트 루프 지연</b>
+          <span>여기가 막혔으면 <b>다른 어떤 지표도 의미가 없습니다.</b> 가장 먼저 봅니다.</span></div></div>
+        <div class="larrow">▼</div>
+        <div class="lrow l-svc"><span class="tagn">2</span>
+          <div><b>외부 호출 · 타임아웃</b>
+          <span>타임아웃 없는 fetch 하나가 <b>커넥션과 메모리를 계속 붙잡습니다.</b></span></div></div>
+        <div class="larrow">▼</div>
+        <div class="lrow l-repo"><span class="tagn">3</span>
+          <div><b>DB 커넥션 풀</b>
+          <span>Node 는 스레드 제한이 없어서 <b>진짜 한도는 대부분 여기</b>입니다.</span></div></div>
+        <div class="larrow">▼</div>
+        <div class="lrow l-db"><span class="tagn">4</span>
+          <div><b>데이터베이스</b>
+          <span>인덱스 없는 조회·N+1·락 경합. 원인의 절대다수.</span></div></div>
+      </div>
+      <pre class="code" data-lang="javascript"><code>// 이벤트 루프 지연 측정 — 운영에 반드시 넣으세요
+import { monitorEventLoopDelay } from "node:perf_hooks";
+const h = monitorEventLoopDelay({ resolution: 10 });
+h.enable();
+
+setInterval(() =&gt; {
+  const p99 = h.percentile(99) / 1e6;
+  metrics.gauge("event_loop_delay_p99_ms", p99);
+  if (p99 &gt; 100) logger.warn({ p99 }, "이벤트 루프 지연 경고");
+  h.reset();
+}, 10_000);
+
+// 기준: p99 &lt; 10ms 정상 · &gt; 50ms 조사 · &gt; 200ms 사용자 체감</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">증상 → 범인</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:42%">증상</th><th>의심할 것</th></tr>
+          <tr><td>CPU 100% · 루프 지연 큼</td><td><b>동기 코드</b> — JSON 파싱·정규식·암호화·큰 배열</td></tr>
+          <tr><td>CPU 낮은데 응답 느림</td><td><b>대기</b> — DB·외부 API·커넥션 풀 고갈</td></tr>
+          <tr><td>메모리가 계속 증가</td><td>캐시 무한 증가·리스너 누수 (🧬 d04)</td></tr>
+          <tr><td>간헐적 502</td><td><code>keepAliveTimeout</code> &lt; LB 타임아웃 (🟩 n06)</td></tr>
+          <tr><td>배포 직후만 느림</td><td>캐시가 비어 있음 — 워밍업 필요 (k04)</td></tr>
+          <tr><td>특정 시간대만 느림</td><td>배치·크론과 겹침</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="javascript"><code>// 메인 스레드를 막는 대표적 코드
+JSON.parse(hugeString)              // 10MB → 수백 ms
+crypto.pbkdf2Sync(...)              // 동기 암호화
+fs.readFileSync(...)                // 동기 파일
+hugeArray.sort()                    // 100만 건 정렬
+/(a+)+$/.test(userInput)            // ★ ReDoS — 정규식 폭발
+new Array(1e7).fill(0).map(...)     // 큰 배열 변형
+
+// 해법
+//  · 워커로 넘기기 (🟩 Node n09)
+//  · 스트리밍 파서 사용
+//  · 청크로 나누고 setImmediate 로 양보
+//  · 애초에 그 작업을 서버에서 하지 않기 (S3 · 별도 서비스)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“Node 가 느리다”는 진단은 거의 항상 틀립니다.</b>
+        실제 원인은 <b>인덱스 없는 쿼리</b>, <b>순차로 도는 API 호출</b>,
+        <b>커넥션 풀 고갈</b> 순입니다.
+        <b>측정 없이 서버를 늘리지 마세요</b> — 비용만 늘고 문제는 그대로입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k03 ==================== -->
+<section class="sec" id="k03">
+  <div class="sec-head rv">
+    <span class="no">SCALE 03</span>
+    <h2>캐시 전략 · <span class="t">Redis</span></h2>
+    <p class="lead">가장 저렴하고 효과가 큰 수단. 대신 <b>정합성을 내줍니다.</b></p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 패턴 — Cache Aside</h4>
+      <pre class="code" data-lang="typescript"><code>import { Redis } from "ioredis";
+const redis = new Redis(env.REDIS_URL, {
+  maxRetriesPerRequest: 3,
+  enableReadyCheck: true,
+  // ★ Redis 가 죽어도 서비스는 살아야 합니다
+  reconnectOnError: (err) =&gt; err.message.includes("READONLY"),
+});
+
+async function getProduct(id: number): Promise&lt;Product | null&gt; {
+  const key = `product:${id}`;
+
+  try {
+    const hit = await redis.get(key);
+    if (hit) return JSON.parse(hit);
+  } catch (e) {
+    logger.warn({ e }, "캐시 조회 실패 — DB 로 우회");   // ★ 캐시 장애가 서비스 장애가 되면 안 됩니다
+  }
+
+  const product = await db.product.findUnique({ where: { id } });
+  if (!product) return null;
+
+  // ★ TTL 에 랜덤을 섞습니다 (k04 스탬피드 방지)
+  const ttl = 300 + Math.floor(Math.random() * 60);
+  redis.setex(key, ttl, JSON.stringify(product)).catch(() =&gt; {});
+  return product;
+}
+
+// 갱신할 때는 "고치지 말고 지우세요"
+async function updateProduct(id: number, dto: UpdateDto) {
+  const updated = await db.product.update({ where: { id }, data: dto });
+  await redis.del(`product:${id}`);          // ★ set 이 아니라 del
+  return updated;
+}</code></pre>
+      <div class="note warn">
+        <b>캐시를 새 값으로 덮어쓰면 안 되는 이유</b> —
+        동시에 두 요청이 수정하면 <b>느린 쪽이 나중에 덮어써서</b>
+        옛 값이 캐시에 남습니다. <b>지워 두면</b> 다음 조회가 DB 에서 최신을 가져옵니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Redis 자료구조 고르기</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:24%">타입</th><th>용도</th></tr>
+          <tr><td>String</td><td>캐시 값, 카운터(<code>INCR</code>), 분산 락</td></tr>
+          <tr><td>Hash</td><td>객체의 일부 필드만 갱신 — 세션</td></tr>
+          <tr><td><b>Sorted Set</b></td><td><b>랭킹·대기열·시간순 큐</b></td></tr>
+          <tr><td>Set</td><td>중복 제거, 태그, 오늘 방문자</td></tr>
+          <tr><td>Bitmap</td><td>출석·활성 사용자 — 100만 명에 125KB</td></tr>
+          <tr><td>HyperLogLog</td><td>순 방문자 근사 — 12KB 고정</td></tr>
+          <tr><td>Stream</td><td>가벼운 이벤트 큐 (컨슈머 그룹 지원)</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="typescript"><code>// 실시간 랭킹
+await redis.zincrby("rank:20260804", 1, `product:${id}`);
+const top = await redis.zrevrange("rank:20260804", 0, 9, "WITHSCORES");
+
+// 순 방문자 (100만 명이어도 12KB)
+await redis.pfadd("uv:20260804", String(userId));
+const uv = await redis.pfcount("uv:20260804");
+
+// ★ N번 호출하지 말고 파이프라인으로
+const pipe = redis.pipeline();
+ids.forEach(id =&gt; pipe.get(`product:${id}`));
+const results = await pipe.exec();</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>운영에서 절대 치면 안 되는 명령</b> —
+        <code>KEYS *</code> · <code>FLUSHALL</code> · 큰 <code>HGETALL</code>.
+        Redis 는 <b>싱글 스레드</b>라 한 명령이 오래 걸리면
+        <b>모든 요청이 그동안 멈춥니다.</b>
+        훑기는 <code>SCAN</code>, 대량 삭제는 <code>UNLINK</code> 로.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k04 ==================== -->
+<section class="sec" id="k04">
+  <div class="sec-head rv">
+    <span class="no">SCALE 04</span>
+    <h2>캐시가 <span class="t">서비스를 죽일 때</span></h2>
+    <p class="lead">캐시 때문에 생긴 장애는 <b>캐시가 없었을 때보다 큽니다.</b></p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 캐시 스탬피드</h4>
+      <pre class="code" data-lang="text"><code>인기 상품 캐시가 만료되는 그 순간
+  → 동시에 들어온 요청 3,000개가 전부 MISS
+  → 3,000개가 같은 DB 쿼리를 동시에 실행
+  → DB CPU 100% → 커넥션 고갈 → 전 서비스 마비
+
+막는 법 세 가지
+  ① TTL 에 랜덤 섞기 (가장 쉽고 효과 큼)
+  ② 재계산은 한 명만 (분산 락)
+  ③ 만료 전에 미리 갱신 (백그라운드 리프레시)</code></pre>
+      <pre class="code" data-lang="typescript"><code>// ② 락으로 한 명만 DB 에 보내기
+async function getWithLock(id: number) {
+  const key = `product:${id}`;
+  const cached = await redis.get(key);
+  if (cached) return JSON.parse(cached);
+
+  const lockKey = `lock:${key}`;
+  const got = await redis.set(lockKey, "1", "EX", 5, "NX");
+
+  if (got) {
+    try {
+      const data = await db.product.findUnique({ where: { id } });
+      await redis.setex(key, 300 + Math.random() * 60, JSON.stringify(data));
+      return data;
+    } finally { await redis.del(lockKey); }
+  }
+
+  // 락을 못 얻은 요청은 짧게 기다렸다 캐시를 다시 봅니다
+  await new Promise(r =&gt; setTimeout(r, 50));
+  const retry = await redis.get(key);
+  return retry ? JSON.parse(retry) : db.product.findUnique({ where: { id } });
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 캐시 관통 · ③ 핫키</h4>
+      <pre class="code" data-lang="typescript"><code>// ② 존재하지 않는 id 를 계속 조회 (봇·버그·공격)
+//    → "없음"도 캐시합니다
+const cached = await redis.get(key);
+if (cached === "__NULL__") return null;
+if (cached) return JSON.parse(cached);
+
+const data = await db.product.findUnique({ where: { id } });
+if (!data) {
+  await redis.setex(key, 30, "__NULL__");     // 짧은 TTL
+  return null;
+}</code></pre>
+      <pre class="code" data-lang="typescript"><code>// ③ 핫키 — 특정 키에 요청이 몰려 Redis 노드 하나가 터짐
+//    → 로컬 캐시를 한 겹 더 (2단 캐시)
+import { LRUCache } from "lru-cache";
+
+const local = new LRUCache&lt;string, Product&gt;({
+  max: 1000,
+  ttl: 5_000,                     // ★ 아주 짧게 — 정합성 손실 최소화
+});
+
+async function get2Tier(id: number) {
+  const key = `product:${id}`;
+  const l1 = local.get(key);
+  if (l1) return l1;                       // 왕복 0회
+
+  const l2 = await redis.get(key);
+  if (l2) { const v = JSON.parse(l2); local.set(key, v); return v; }
+
+  const data = await db.product.findUnique({ where: { id } });
+  local.set(key, data);
+  await redis.setex(key, 300, JSON.stringify(data));
+  return data;
+}</code></pre>
+      <div class="note warn">
+        <b>로컬 캐시는 서버마다 값이 다릅니다.</b>
+        10대라면 최대 5초 동안 <b>10가지 답</b>이 나갈 수 있습니다.
+        <b>재고·잔액에는 쓰지 마세요.</b>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>④ 배포 직후 눈사태</b> —
+        재시작으로 로컬 캐시가 전부 비면 <b>모든 요청이 MISS</b> 가 됩니다.
+        인기 데이터를 기동 시 미리 채우는 <b>워밍업</b>과,
+        <b>롤링 배포</b>(한 번에 전부 재시작하지 않기)로 완화합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k05 ==================== -->
+<section class="sec" id="k05">
+  <div class="sec-head rv">
+    <span class="no">SCALE 05</span>
+    <h2>동시성 · <span class="t">분산 락</span></h2>
+    <p class="lead">서버가 <b>여러 대</b>가 되는 순간 메모리 락은 아무 의미가 없습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">재고가 마이너스가 되는 이유</h4>
+      <pre class="code" data-lang="text"><code>재고 1개 · 동시에 100명이 주문
+
+서버A: SELECT 재고 → 1
+서버B: SELECT 재고 → 1      ← 아직 아무도 안 줄임
+서버A: 1 &gt; 0 → 주문 생성, UPDATE 재고 = 0
+서버B: 1 &gt; 0 → 주문 생성, UPDATE 재고 = 0
+
+→ 1개를 2명에게 판매, 100명이면 재고 -37 같은 숫자가 남습니다
+
+★ Node 는 싱글 스레드지만 await 사이에 다른 요청이 끼어듭니다.
+  "한 프로세스 안에서도" 이 문제가 생깁니다.</code></pre>
+      <h4 class="mini">해법 1 — 락 없이 (가장 먼저 검토)</h4>
+      <pre class="code" data-lang="typescript"><code>// ★ 조건을 UPDATE 문 안으로 밀어 넣습니다
+const r = await prisma.stock.updateMany({
+  where: { productId, quantity: { gte: qty } },   // 조건
+  data: { quantity: { decrement: qty } },
+});
+if (r.count === 0) throw new OutOfStockError(productId);
+
+// Redis 원자 연산 — 선착순 쿠폰에 잘 맞습니다
+const left = await redis.decrby(`stock:${productId}`, qty);
+if (left &lt; 0) {
+  await redis.incrby(`stock:${productId}`, qty);   // 되돌리기
+  throw new OutOfStockError(productId);
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“읽고 → 판단하고 → 쓰기”를 하지 마세요.</b>
+        그 세 단계 사이가 전부 사고 구간입니다.
+        <b>판단을 쿼리 안으로</b> 옮기면 락이 아예 필요 없어집니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">해법 2 — 분산 락 (Redlock)</h4>
+      <div class="dep"><code>npm i redlock</code> 또는 <code>ioredis</code> + Lua</div>
+      <pre class="code" data-lang="typescript"><code>// 직접 만들 때 빠뜨리기 쉬운 것들
+// ① TTL (프로세스가 죽으면 락이 영원히 남음)
+// ② 소유자 확인 (남의 락을 지우면 안 됨)
+// ③ 작업이 TTL 보다 길어질 때의 연장
+
+const token = crypto.randomUUID();
+
+// 획득 — NX(없을 때만) + PX(만료)
+const ok = await redis.set(lockKey, token, "PX", 5000, "NX");
+if (!ok) throw new BusyError("잠시 후 다시 시도해 주세요");
+
+try {
+  await doWork();
+} finally {
+  // ★ 해제는 반드시 Lua 로 (내 락인지 확인 후 삭제 — 원자적)
+  await redis.eval(`
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+      return redis.call("del", KEYS[1])
+    else return 0 end
+  `, 1, lockKey, token);
+}</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 라이브러리를 쓰는 편이 안전합니다
+import Redlock from "redlock";
+const redlock = new Redlock([redis], { retryCount: 3, retryDelay: 200 });
+
+await redlock.using([`lock:stock:${productId}`], 5000, async (signal) =&gt; {
+  const stock = await getStock(productId);
+  if (stock &lt; qty) throw new OutOfStockError(productId);
+  await decreaseStock(productId, qty);
+
+  if (signal.aborted) throw signal.error;   // ★ 락이 만료됐는지 확인
+});</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>분산 락은 완벽하지 않습니다.</b>
+        네트워크 지연·GC 정지로 <b>락이 만료됐는데 작업이 계속되는</b> 상황이 생길 수 있습니다.
+        <b>돈이 걸린 곳은 락에만 의존하지 말고</b>
+        DB 유니크 제약·원자적 UPDATE 를 <b>최후 방어선</b>으로 두세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k06 ==================== -->
+<section class="sec" id="k06">
+  <div class="sec-head rv">
+    <span class="no">SCALE 06</span>
+    <h2>멱등성 — <span class="t">두 번 눌러도 한 번만</span></h2>
+    <p class="lead">대규모에서는 <b>같은 요청이 두 번 오는 게 정상</b>입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">중복은 왜 생기나</h4>
+      <ul class="tx">
+        <li>사용자가 <b>결제 버튼을 두 번</b> 눌렀다</li>
+        <li>응답이 늦어 <b>클라이언트가 재시도</b>했다 (서버는 이미 처리 완료)</li>
+        <li>로드밸런서·게이트웨이가 <b>자동 재시도</b>했다</li>
+        <li>큐 워커가 <b>재시도</b>로 같은 작업을 다시 받았다 (k07)</li>
+        <li>모바일 앱이 <b>네트워크 복구 후</b> 대기 큐를 전송했다 (⚛️ RN r09)</li>
+      </ul>
+      <div class="note warn">
+        <b>재시도 로직(k08)을 넣는 순간 멱등성은 필수가 됩니다.</b>
+        둘은 <b>항상 같이</b> 설계해야 합니다.
+        “재시도하면 되지”가 곧 “중복 결제”입니다.
+      </div>
+      <pre class="code" data-lang="typescript"><code>// Idempotency-Key 패턴 — 업계 표준 (Stripe·Toss 등)
+app.post("/api/payments", async (req, res) =&gt; {
+  const key = req.header("Idempotency-Key");
+  if (!key) throw new ValidationError("Idempotency-Key 헤더가 필요합니다");
+
+  const k = `idem:pay:${key}`;
+  const first = await redis.set(k, "PROCESSING", "EX", 86400, "NX");
+
+  if (!first) {
+    const saved = await redis.get(k);
+    if (saved === "PROCESSING")
+      return res.status(409).json({ code: "IN_PROGRESS" });
+    return res.json(JSON.parse(saved!));      // ★ 저장된 결과 재사용
+  }
+
+  try {
+    const result = await paymentService.pay(req.body);
+    await redis.setex(k, 86400, JSON.stringify(result));
+    res.json(result);
+  } catch (e) {
+    await redis.del(k);                        // ★ 실패는 지워 재시도 허용
+    throw e;
+  }
+});</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">DB 제약을 최후 방어선으로</h4>
+      <pre class="code" data-lang="sql"><code>-- Redis 가 날아가도 중복이 막힙니다
+create table payment (
+  id             bigserial primary key,
+  idempotency_key varchar(64) unique not null,   -- ★
+  order_id       varchar(64) not null,
+  amount         integer not null,
+  created_at     timestamptz default now()
+);</code></pre>
+      <pre class="code" data-lang="typescript"><code>try {
+  await prisma.payment.create({ data: { idempotencyKey: key, ...dto } });
+} catch (e) {
+  if (e.code === "P2002") {                    // 유니크 위반
+    return prisma.payment.findUnique({ where: { idempotencyKey: key } });
+  }
+  throw e;
+}</code></pre>
+      <h4 class="mini">더 나은 방법 — 애초에 멱등한 연산으로</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>비멱등</h5>
+          <pre class="code" data-lang="sql"><code>update account
+   set balance
+     = balance - 1000
+ where id = 7;
+-- 두 번 오면 2,000원</code></pre>
+        </div>
+        <div class="good">
+          <h5>멱등 (원장 기록)</h5>
+          <pre class="code" data-lang="sql"><code>insert into ledger
+  (tx_id, account_id, amount)
+values ('tx-99', 7, -1000)
+on conflict (tx_id)
+  do nothing;
+-- 몇 번 와도 한 번</code></pre>
+        </div>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>상태를 “증감”이 아니라 “사실의 기록”으로</b> 바꾸면
+        중복이 자연히 무해해집니다.
+        잔액은 원장의 합으로 계산하고, 원장에는 <b>거래 ID 유니크</b>를 겁니다.
+        금융권에서 실제로 쓰는 형태입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k07 ==================== -->
+<section class="sec" id="k07">
+  <div class="sec-head rv">
+    <span class="no">SCALE 07</span>
+    <h2>큐 — <span class="t">BullMQ · Kafka</span></h2>
+    <p class="lead">오래 걸리는 일을 넘기면 <b>응답은 빨라지고 장애는 안 번집니다.</b></p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동기 처리의 한계</h4>
+      <pre class="code" data-lang="text"><code>[동기] 주문 API 하나에 전부 매달림
+  주문 저장 120ms + 쿠폰 80 + 포인트 90
+  + 알림톡 300 + 정산 150 = 740ms
+  → 알림톡 업체가 죽으면 "주문 자체가" 실패
+
+[비동기] 이벤트를 던지고 끝
+  주문 저장 120ms + 큐 등록 3ms = 123ms
+  → 알림톡이 죽어도 주문은 정상
+  → 복구되면 밀린 것부터 처리</code></pre>
+      <h4 class="mini">BullMQ — Node 진영의 표준</h4>
+      <div class="dep"><code>npm i bullmq</code> (Redis 기반)</div>
+      <pre class="code" data-lang="typescript"><code>import { Queue, Worker, QueueEvents } from "bullmq";
+
+const connection = { url: env.REDIS_URL };
+
+export const emailQueue = new Queue("email", {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 1000 },   // 1s → 2s → 4s
+    removeOnComplete: { age: 3600, count: 1000 },     // ★ 안 지우면 Redis 가 참
+    removeOnFail: { age: 86400 },
+  },
+});
+
+// 등록 — ★ jobId 로 중복 방지
+await emailQueue.add("welcome", { userId },
+  { jobId: `welcome:${userId}`, delay: 5000 });
+
+// 처리
+new Worker("email", async (job) =&gt; {
+  await job.updateProgress(50);
+  await mailer.send(job.data);
+}, { connection, concurrency: 5, limiter: { max: 100, duration: 60_000 } });</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 Kafka 인가</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:26%">도구</th><th>적합한 상황</th></tr>
+          <tr><td><b>BullMQ</b></td><td><b>작업 큐</b> — 메일·이미지·리포트.
+              재시도·지연·우선순위·반복 작업이 필요할 때. <b>대부분 이걸로 충분</b></td></tr>
+          <tr><td><b>Kafka</b></td><td><b>이벤트 스트림</b> — 여러 서비스가 <b>같은 이벤트를 각자</b> 구독,
+              대용량 로그, <b>재처리</b>가 필요할 때</td></tr>
+          <tr><td>SQS · Pub/Sub</td><td>관리형이 필요할 때 (운영 인력 절약)</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="typescript"><code>// Kafka (kafkajs)
+import { Kafka } from "kafkajs";
+const kafka = new Kafka({ clientId: "order-api", brokers: env.KAFKA_BROKERS.split(",") });
+
+const producer = kafka.producer({ idempotent: true });   // ★ 중복 발행 방지
+await producer.send({
+  topic: "order.created",
+  messages: [{ key: orderId, value: JSON.stringify(event) }],
+  //          ★ 키가 같으면 같은 파티션 = 순서 보장
+  acks: -1,                                  // 모든 복제본 확인
+});
+
+const consumer = kafka.consumer({ groupId: "point-service" });
+await consumer.run({
+  eachMessage: async ({ message }) =&gt; {
+    const event = JSON.parse(message.value!.toString());
+    await pointService.give(event);          // ★ 멱등해야 합니다 (k06)
+  },
+});</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>큐 운영에서 반드시 챙길 것</b><br>
+        · <b>실패한 작업(DLQ)에 알람</b> — 안 보면 없는 것과 같습니다<br>
+        · <b>대기 작업 수(백로그)</b>를 지표로 — 계속 늘면 워커가 부족한 것<br>
+        · 완료된 작업을 <b>주기적으로 삭제</b> — Redis 메모리가 찹니다<br>
+        · 워커도 <b>우아한 종료</b> 필요 — 배포 중 작업이 유실됩니다
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k08 ==================== -->
+<section class="sec" id="k08">
+  <div class="sec-head rv">
+    <span class="no">SCALE 08</span>
+    <h2>장애 격리 · <span class="t">서킷 브레이커</span></h2>
+    <p class="lead">대규모 장애는 대부분 <b>작은 지연이 전체로 번져서</b> 일어납니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">장애 전파 시나리오</h4>
+      <pre class="code" data-lang="text"><code>추천 서비스가 느려짐 (200ms → 10초)
+  → 상품 API 의 fetch 가 10초씩 대기
+  → 대기 중인 요청이 계속 쌓임 (메모리·소켓)
+  → 커넥션 풀·파일 디스크립터 고갈
+  → 추천과 무관한 "주문 API 까지" 실패
+  → 사용자 재시도 → 부하 2배 → 완전 마비
+
+핵심: 죽은 것은 추천 하나인데 서비스 전체가 멈췄다</code></pre>
+      <h4 class="mini">막는 장치 — 이 순서로</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">장치</th><th>역할</th></tr>
+          <tr><td><b>① 타임아웃</b></td><td><b>가장 중요.</b> 이것만 있어도 절반은 막힙니다</td></tr>
+          <tr><td><b>② 재시도 + 백오프</b></td><td>일시적 오류만. <b>지수 백오프 + 지터</b> 필수</td></tr>
+          <tr><td><b>③ 서킷 브레이커</b></td><td>계속 실패하면 <b>시도조차 안 함</b></td></tr>
+          <tr><td><b>④ 폴백</b></td><td>실패 시 <b>대신 보여 줄 것</b></td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="typescript"><code>// ★ 타임아웃 없는 fetch 는 그 자체로 장애입니다
+const res = await fetch(url, {
+  signal: AbortSignal.timeout(3000),        // 전체 3초
+});
+
+// undici 로 더 세밀하게
+import { request } from "undici";
+await request(url, {
+  headersTimeout: 2000,
+  bodyTimeout: 5000,
+});</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">재시도 — 잘못하면 불난 데 기름</h4>
+      <pre class="code" data-lang="typescript"><code>// ❌ 나쁜 재시도 — 서버가 힘든데 3배로 때립니다
+for (let i = 0; i &lt; 3; i++) {
+  try { return await call(); } catch { /* 즉시 재시도 */ }
+}
+
+// ✅ 지수 백오프 + 지터
+async function retry&lt;T&gt;(fn: () =&gt; Promise&lt;T&gt;, max = 3): Promise&lt;T&gt; {
+  let lastErr: unknown;
+  for (let i = 0; i &lt; max; i++) {
+    try { return await fn(); }
+    catch (e) {
+      lastErr = e;
+      if (!isRetryable(e)) throw e;          // ★ 4xx 는 재시도해도 소용없습니다
+      const base = 200 * 2 ** i;             // 200 → 400 → 800
+      const jitter = Math.random() * base;   // ★ 지터 — 동시 재시도 방지
+      await new Promise(r =&gt; setTimeout(r, base + jitter));
+    }
+  }
+  throw lastErr;
+}
+
+const isRetryable = (e: any) =&gt;
+  e.name === "TimeoutError" ||
+  ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED"].includes(e.code) ||
+  [429, 502, 503, 504].includes(e.status);</code></pre>
+      <h4 class="mini">서킷 브레이커</h4>
+      <div class="dep"><code>npm i opossum</code></div>
+      <pre class="code" data-lang="typescript"><code>import CircuitBreaker from "opossum";
+
+const breaker = new CircuitBreaker(callRecommendApi, {
+  timeout: 2000,
+  errorThresholdPercentage: 50,     // 50% 실패하면 OPEN
+  resetTimeout: 10_000,             // 10초 뒤 반개방(HALF_OPEN)
+  volumeThreshold: 10,              // 최소 10건은 모여야 판단
+});
+
+breaker.fallback(() =&gt; popularCache.get());     // ★ 빈 화면 대신 그럴듯한 것
+breaker.on("open", () =&gt; logger.warn("추천 서비스 서킷 열림"));
+breaker.on("halfOpen", () =&gt; logger.info("추천 서비스 탐색 중"));
+
+const items = await breaker.fire(userId);</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>상태 전이</b> —
+        <b>CLOSED</b>(통과, 실패율 집계) →
+        <b>OPEN</b>(즉시 폴백, 죽은 서버에 부하 안 줌) →
+        <b>HALF_OPEN</b>(몇 개만 시험) → 성공하면 CLOSED.
+        <b>사람이 개입하지 않아도 자동 복구</b>되는 것이 핵심 가치입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k09 ==================== -->
+<section class="sec" id="k09">
+  <div class="sec-head rv">
+    <span class="no">SCALE 09</span>
+    <h2>Rate Limit — <span class="t">받을 만큼만</span></h2>
+    <p class="lead">전부 받아 주다 다 같이 죽느니 <b>일부를 거절하고 나머지를 살리는</b> 편이 낫습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">알고리즘</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">방식</th><th>특징</th></tr>
+          <tr><td>고정 윈도우</td><td>단순. <b>경계에서 2배</b>가 통과하는 결함</td></tr>
+          <tr><td>슬라이딩 윈도우</td><td>경계 문제 해결. 메모리를 조금 더 사용</td></tr>
+          <tr><td><b>토큰 버킷</b></td><td>여유분을 모아 뒀다 <b>순간 폭주 허용</b>. <b>API 제한의 표준</b></td></tr>
+          <tr><td>리키 버킷</td><td>일정 속도로만 흘려보냄. 뒷단 보호에 좋음</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="typescript"><code>// ★ 서버가 여러 대면 메모리 카운터는 무의미합니다 (10대 = 한도 10배)
+import rateLimit from "express-rate-limit";
+import RedisStore from "rate-limit-redis";
+
+app.use("/api", rateLimit({
+  store: new RedisStore({ sendCommand: (...a) =&gt; redis.call(...a) }),
+  windowMs: 60_000,
+  limit: 100,
+  standardHeaders: "draft-7",
+  keyGenerator: (req) =&gt; req.user?.id ?? req.ip,   // 로그인 전은 IP, 후는 사용자
+  handler: (req, res) =&gt; res.status(429)
+    .set("Retry-After", "10")
+    .json({ code: "TOO_MANY_REQUESTS" }),
+}));
+
+// 민감한 엔드포인트는 훨씬 빡빡하게
+app.use("/auth/login", rateLimit({ windowMs: 900_000, limit: 5 }));</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Redis + Lua — 원자적 토큰 버킷</h4>
+      <pre class="code" data-lang="typescript"><code>// Lua 는 Redis 안에서 한 덩어리로 실행됩니다 (경쟁 조건 없음)
+const LUA = `
+  local key      = KEYS[1]
+  local capacity = tonumber(ARGV[1])
+  local rate     = tonumber(ARGV[2])
+  local now      = tonumber(ARGV[3])
+
+  local b = redis.call('HMGET', key, 'tokens', 'ts')
+  local tokens = tonumber(b[1]) or capacity
+  local ts     = tonumber(b[2]) or now
+
+  tokens = math.min(capacity, tokens + (now - ts) * rate)
+  local allowed = tokens &gt;= 1
+  if allowed then tokens = tokens - 1 end
+
+  redis.call('HMSET', key, 'tokens', tokens, 'ts', now)
+  redis.call('EXPIRE', key, 120)
+  return allowed and 1 or 0
+`;
+
+const allowed = await redis.eval(LUA, 1, `rate:${userId}`,
+  "60", "1", String(Date.now() / 1000));</code></pre>
+      <h4 class="mini">대기열 — 티켓팅·선착순</h4>
+      <pre class="code" data-lang="text"><code>1) 진입 시 Sorted Set 에 (사용자, 타임스탬프) 등록
+2) 내 순번 = ZRANK → "앞에 12,043명" 안내
+3) 서버는 "초당 N명"씩만 통과시켜 입장 토큰 발급
+4) 토큰이 있는 요청만 실제 API 호출 가능
+
+효과
+  · 뒷단은 항상 감당 가능한 만큼만 받는다
+  · 사용자는 "실패" 대신 "순번"을 본다 (체감이 완전히 다름)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>429 는 “거절”이 아니라 “안내”여야 합니다.</b>
+        <code>Retry-After</code> 를 주면 정상 클라이언트는 기다립니다.
+        아무 안내 없이 막으면 <b>즉시 재시도해서 부하가 더 늘어납니다.</b>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k10 ==================== -->
+<section class="sec" id="k10">
+  <div class="sec-head rv">
+    <span class="no">SCALE 10</span>
+    <h2>DB 확장 · <span class="t">커넥션 풀</span></h2>
+    <p class="lead">서버는 늘리기 쉽지만 <b>DB 는 그렇지 않습니다.</b></p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">커넥션 풀 — Node 의 진짜 한도</h4>
+      <pre class="code" data-lang="text"><code>Node 는 스레드 제한이 없어서
+"동시에 처리 중인 요청 수"에 상한이 없습니다.
+→ 진짜 한도는 대부분 DB 커넥션 풀입니다.
+
+계산
+  서버 10대 × 풀 크기 20 = 200 커넥션
+  PostgreSQL 기본 max_connections = 100
+  → 절반이 연결 실패 ★
+
+권장
+  · 풀 크기는 (vCPU × 2 + 디스크수) 근처에서 시작
+  · 서버 대수 × 풀 크기 &lt; DB max_connections × 0.8
+  · 서버가 많으면 PgBouncer 같은 커넥션 풀러를 앞에</code></pre>
+      <pre class="code" data-lang="typescript"><code>// Prisma
+DATABASE_URL="postgresql://...?connection_limit=10&amp;pool_timeout=10"
+
+// pg (직접 사용)
+const pool = new Pool({
+  max: 10,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 3_000,     // ★ 무한 대기 금지
+  statement_timeout: 10_000,          // ★ 느린 쿼리 강제 종료
+});
+
+// 풀 상태를 지표로 노출하세요
+setInterval(() =&gt; {
+  metrics.gauge("db_pool_idle", pool.idleCount);
+  metrics.gauge("db_pool_waiting", pool.waitingCount);   // ★ 이게 쌓이면 부족
+}, 10_000);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">확장 순서 — 건너뛰지 마세요</h4>
+      <pre class="code" data-lang="text"><code>1) 쿼리·인덱스 튜닝        ← 90% 는 여기서 끝 (무료)
+2) 캐시 (k03~k04)          ← 읽기 부하 제거
+3) 커넥션 풀·인스턴스 사양
+4) 읽기 복제본             ← 읽기가 많은 서비스의 정답
+5) 수직 분할 (도메인별 DB)
+6) 샤딩                     ← 최후의 수단, 복잡도 폭발</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 읽기 복제본 — Prisma 확장
+import { readReplicas } from "@prisma/extension-read-replicas";
+
+const prisma = new PrismaClient().$extends(
+  readReplicas({ url: env.DATABASE_REPLICA_URL }),
+);
+
+await prisma.user.findMany();                      // → 복제본
+await prisma.$primary().user.findMany();           // → 프라이머리 강제
+await prisma.user.create({ data });                // 쓰기는 항상 프라이머리</code></pre>
+      <div class="note warn">
+        <b>복제 지연을 반드시 고려하세요.</b>
+        “글을 쓰고 바로 목록을 봤는데 내 글이 없다” — 복제본이 아직 못 따라온 것입니다.
+        <b>쓰기 직후 조회는 프라이머리로</b> 보내거나,
+        화면에서 낙관적으로 먼저 보여 주세요.
+      </div>
+      <h4 class="mini">대용량 테이블 다루기</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>깊은 페이징</h5>
+          <pre class="code" data-lang="sql"><code>select * from orders
+ order by id desc
+ limit 20 offset 1000000;
+-- 100만 건 세고 버림</code></pre>
+        </div>
+        <div class="good">
+          <h5>커서 방식</h5>
+          <pre class="code" data-lang="sql"><code>select * from orders
+ where id &lt; :lastId
+ order by id desc
+ limit 20;
+-- 항상 같은 속도 ★</code></pre>
+        </div>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>대량 UPDATE 는 쪼개서.</b>
+        100만 건을 한 번에 고치면 <b>락과 복제 지연</b>이 생깁니다.
+        1,000건씩 나눠 커밋하고 <b>사이에 이벤트 루프를 양보</b>하세요(🟩 Node n11).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k11 ==================== -->
+<section class="sec" id="k11">
+  <div class="sec-head rv">
+    <span class="no">SCALE 11</span>
+    <h2>수평 확장 · <span class="t">무상태</span></h2>
+    <p class="lead">서버를 늘리려면 <b>서버가 기억하는 게 없어야</b> 합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">확장을 막는 것들</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:36%">문제</th><th>해결</th></tr>
+          <tr><td>메모리 세션</td><td>Redis 세션 스토어 또는 JWT</td></tr>
+          <tr><td>메모리 캐시</td><td>Redis (또는 짧은 TTL 로 감수)</td></tr>
+          <tr><td>로컬 디스크 업로드</td><td><b>S3 등 공용 스토리지</b></td></tr>
+          <tr><td>메모리 Rate Limit</td><td>Redis 스토어 (k09)</td></tr>
+          <tr><td><code>setInterval</code> 스케줄러</td><td>서버마다 실행됨 → <b>분산 락</b>이나 전용 워커</td></tr>
+          <tr><td>WebSocket 연결</td><td>Redis 어댑터로 브로드캐스트</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="typescript"><code>// ❌ 서버 3대면 크론이 3번 돕니다
+cron.schedule("0 3 * * *", () =&gt; settleDaily());
+
+// ✅ 방법 1 — 분산 락으로 한 대만
+cron.schedule("0 3 * * *", async () =&gt; {
+  const got = await redis.set("cron:settle", "1", "EX", 3600, "NX");
+  if (!got) return;                       // 다른 서버가 이미 실행 중
+  await settleDaily();
+});
+
+// ✅ 방법 2 — 큐에 등록하고 워커가 처리 (권장)
+cron.schedule("0 3 * * *", () =&gt;
+  settleQueue.add("daily", { date: today() },
+    { jobId: `daily:${today()}` }));      // ★ jobId 로 중복 차단
+
+// ✅ 방법 3 — K8s CronJob 으로 분리 (가장 깔끔)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세션과 WebSocket</h4>
+      <pre class="code" data-lang="typescript"><code>// 세션을 Redis 로
+import session from "express-session";
+import { RedisStore } from "connect-redis";
+
+app.use(session({
+  store: new RedisStore({ client: redis }),
+  secret: env.SESSION_SECRET,
+  resave: false, saveUninitialized: false,
+  cookie: { httpOnly: true, secure: true, sameSite: "lax", maxAge: 86400_000 },
+}));</code></pre>
+      <pre class="code" data-lang="typescript"><code>// Socket.IO — 서버 여러 대에서 브로드캐스트
+import { createAdapter } from "@socket.io/redis-adapter";
+
+const pub = new Redis(env.REDIS_URL);
+const sub = pub.duplicate();
+io.adapter(createAdapter(pub, sub));
+// ★ 이게 없으면 A 서버 사용자와 B 서버 사용자가 서로 못 봅니다</code></pre>
+      <h4 class="mini">스티키 세션은 해법이 아닙니다</h4>
+      <pre class="code" data-lang="text"><code>"같은 사용자를 항상 같은 서버로" (sticky session)
+  · 그 서버가 죽으면 사용자 상태가 사라짐
+  · 부하가 고르게 분산되지 않음
+  · 배포 시 특정 서버만 몰림
+  · 오토스케일과 충돌
+
+→ 임시 방편으로만 쓰고, 결국 상태를 밖으로 빼야 합니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“이 서버를 아무 때나 죽여도 되는가?”</b>
+        이 질문에 <b>예</b>라고 답할 수 있으면 수평 확장 준비가 된 것입니다.
+        오토스케일·롤링 배포·스팟 인스턴스가 전부 이 전제 위에 있습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k12 ==================== -->
+<section class="sec" id="k12">
+  <div class="sec-head rv">
+    <span class="no">SCALE 12</span>
+    <h2>관측 가능성 — <span class="t">안 보이면 못 고친다</span></h2>
+    <p class="lead">대규모에서 <b>모니터링은 기능의 일부</b>입니다. 나중에 붙이는 게 아닙니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 기둥</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:22%">종류</th><th>답해 주는 질문 · 도구</th></tr>
+          <tr><td><b>메트릭</b></td><td>“지금 몇 RPS 이고 p99 는?” — prom-client → Prometheus → Grafana</td></tr>
+          <tr><td><b>로그</b></td><td>“그때 무슨 일이?” — pino → Loki / ELK</td></tr>
+          <tr><td><b>추적</b></td><td>“어느 서비스에서 느려졌나?” — OpenTelemetry → Jaeger / Tempo</td></tr>
+        </table>
+      </div>
+      <div class="dep"><code>npm i prom-client @opentelemetry/auto-instrumentations-node pino</code></div>
+      <pre class="code" data-lang="typescript"><code>// 메트릭
+import client from "prom-client";
+client.collectDefaultMetrics();              // CPU·메모리·이벤트 루프 자동 수집
+
+const httpDuration = new client.Histogram({
+  name: "http_request_duration_seconds",
+  help: "요청 처리 시간",
+  labelNames: ["method", "route", "status"],  // ★ 고유값을 라벨에 넣지 마세요
+  buckets: [0.01, 0.05, 0.1, 0.3, 1, 3],
+});
+
+app.use((req, res, next) =&gt; {
+  const end = httpDuration.startTimer();
+  res.on("finish", () =&gt;
+    end({ method: req.method, route: req.route?.path ?? "unknown",
+          status: res.statusCode }));
+  next();
+});
+
+app.get("/metrics", async (_req, res) =&gt;
+  res.set("Content-Type", client.register.contentType)
+     .end(await client.register.metrics()));</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>라벨에 사용자ID·주문번호를 넣지 마세요.</b>
+        Prometheus 는 라벨 조합마다 시계열을 만듭니다.
+        고유값을 넣으면 <b>시계열이 수백만 개</b>가 되어(카디널리티 폭발)
+        모니터링 서버가 먼저 죽습니다. 그건 <b>로그에</b> 남기세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">추적 — 로그를 하나로 꿰기</h4>
+      <pre class="code" data-lang="typescript"><code>// instrumentation.ts — ★ 앱보다 먼저 로드되어야 합니다
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+
+new NodeSDK({
+  serviceName: "order-api",
+  instrumentations: [getNodeAutoInstrumentations()],   // HTTP·DB·Redis 자동 계측
+}).start();
+
+// node --import ./instrumentation.js dist/index.js</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 로그에 추적 ID 붙이기 (🟩 Node n16)
+import { trace } from "@opentelemetry/api";
+
+const log = (obj: object, msg: string) =&gt; {
+  const span = trace.getActiveSpan()?.spanContext();
+  logger.info({ ...obj, traceId: span?.traceId, spanId: span?.spanId }, msg);
+};</code></pre>
+      <pre class="code" data-lang="text"><code>10:32:01.412 [order-api]  INFO [a1b2c3d4] 주문 생성 12345
+10:32:01.520 [point-api]  INFO [a1b2c3d4] 포인트 적립
+10:32:01.733 [pay-api]    ERROR[a1b2c3d4] 결제 게이트웨이 타임아웃
+
+→ traceId 하나로 여러 서비스의 로그를 한 줄로 잇습니다.
+   MSA 에서 이게 없으면 장애 분석이 사실상 불가능합니다.</code></pre>
+      <h4 class="mini">알람은 “증상”에</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:44%">알람 대상</th><th>기준 예</th></tr>
+          <tr><td><b>p99 응답시간</b></td><td>5분 평균 &gt; 1s</td></tr>
+          <tr><td><b>5xx 비율</b></td><td>&gt; 1%</td></tr>
+          <tr><td><b>이벤트 루프 지연</b></td><td>p99 &gt; 100ms</td></tr>
+          <tr><td><b>큐 백로그</b></td><td>계속 증가</td></tr>
+          <tr><td><b>DLQ 건수</b></td><td>&gt; 0</td></tr>
+          <tr><td>DB 커넥션 대기</td><td>&gt; 0 지속</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“CPU 80%” 같은 알람은 쓸모가 적습니다.</b>
+        정상일 수도 있고, CPU 가 낮은데 서비스가 죽을 수도 있습니다.
+        <b>사용자가 아픈 지표</b>에 거세요.
+        알람이 너무 많으면 <b>아무도 안 봅니다</b>(알람 피로).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k13 ==================== -->
+<section class="sec" id="k13">
+  <div class="sec-head rv">
+    <span class="no">SCALE 13</span>
+    <h2>부하 <span class="t">테스트</span></h2>
+    <p class="lead">“몇 명까지 버팁니까?”의 답은 <b>재 봐야</b> 나옵니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">도구</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:28%">도구</th><th>특징</th></tr>
+          <tr><td><b>k6</b></td><td>JS 로 시나리오 작성. CI 붙이기 좋음. <b>요즘 표준</b></td></tr>
+          <tr><td><b>autocannon</b></td><td>Node 제작. <b>한 줄로 즉시</b> 측정 — 개발 중 확인용</td></tr>
+          <tr><td>Artillery</td><td>YAML 시나리오. Node 생태계</td></tr>
+          <tr><td>nGrinder</td><td>국산. 대기업 사내에서 자주 씁니다</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="bash"><code># 빠른 확인
+npx autocannon -c 100 -d 30 http://localhost:3000/api/products
+# -c 동시 연결 · -d 시간(초)</code></pre>
+      <pre class="code" data-lang="javascript"><code>// k6 — load-test.js
+import http from "k6/http";
+import { check, sleep } from "k6";
+
+export const options = {
+  stages: [
+    { duration: "2m", target: 100 },   // 서서히 증가
+    { duration: "5m", target: 100 },   // 유지 ← 여기 지표가 진짜
+    { duration: "2m", target: 500 },   // 스파이크
+    { duration: "3m", target: 0 },     // 회복 확인
+  ],
+  thresholds: {
+    http_req_duration: ["p(95)&lt;500", "p(99)&lt;1500"],
+    http_req_failed: ["rate&lt;0.01"],
+  },
+};
+
+export default function () {
+  const res = http.get("https://api.example.com/products?page=1");
+  check(res, { "200": (r) =&gt; r.status === 200 });
+  sleep(1);                             // ★ 실제 사용자처럼 생각하는 시간
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">테스트하며 같이 볼 것</h4>
+      <pre class="code" data-lang="text"><code>부하 생성기 쪽        서버 쪽 (동시에 봐야 의미 있음)
+─────────────────    ──────────────────────────────
+RPS                  CPU · 메모리 · RSS
+p95 · p99            ★ 이벤트 루프 지연
+오류율               DB 커넥션 대기 수
+                     DB CPU · 슬로우 쿼리
+                     Redis 명령 지연
+
+"어디가 먼저 100% 가 되는가" — 그게 병목입니다.
+아무 데도 100% 가 아닌데 느리면 → 어딘가에서 '대기' 중</code></pre>
+      <div class="note warn">
+        <b>내 노트북에서 테스트하지 마세요.</b>
+        부하 생성기 쪽이 먼저 한계에 걸려
+        <b>서버가 멀쩡한데 느린 것처럼</b> 나옵니다.
+        생성기는 대상과 <b>같은 네트워크의 별도 장비</b>에 두세요.
+      </div>
+      <h4 class="mini">테스트 종류</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:28%">종류</th><th>알아내는 것</th></tr>
+          <tr><td>부하(Load)</td><td>예상 트래픽에서 정상인지</td></tr>
+          <tr><td>스트레스</td><td>어디서 <b>무너지는지</b></td></tr>
+          <tr><td>스파이크</td><td>갑자기 10배가 오면</td></tr>
+          <tr><td><b>내구성(Soak)</b></td><td>몇 시간 돌리면 — <b>메모리 누수 발견</b> ★</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>목표를 숫자로 먼저 정하세요.</b>
+        “빠르게”가 아니라
+        <b>“피크 1,200 RPS 에서 p99 500ms, 오류율 0.1% 미만”</b> 처럼.
+        이 문장이 곧 <b>SLO</b> 이고, 대기업에서는 문서로 관리합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k14 ==================== -->
+<section class="sec" id="k14">
+  <div class="sec-head rv">
+    <span class="no">SCALE 14</span>
+    <h2>배포 — <span class="t">Docker · K8s</span></h2>
+    <p class="lead">무중단으로 배포하려면 <b>애플리케이션이 지켜야 할 약속</b>이 있습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Dockerfile — 실무 형태</h4>
+      <pre class="code" data-lang="dockerfile"><code># 1) 의존성 (레이어 캐시 최적화)
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+
+# 2) 빌드
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+# 3) 운영 — 최소한만
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package*.json ./
+RUN npm ci --omit=dev &amp;&amp; npm cache clean --force
+COPY --from=build /app/dist ./dist
+
+USER node                                  # ★ root 로 실행 금지
+EXPOSE 3000
+# ★ npm start 로 하면 SIGTERM 이 Node 까지 전달되지 않습니다
+CMD ["node", "dist/index.js"]</code></pre>
+      <div class="note warn">
+        <b>메모리 한도를 반드시 지정하세요.</b>
+        Node 는 컨테이너 한도를 <b>자동으로 못 봅니다</b>(자바와 다릅니다).
+        <code>--max-old-space-size</code> 를 컨테이너 메모리의 <b>75%</b> 정도로 주지 않으면
+        계속 늘리다 <b>OOMKilled(exit 137)</b> 당합니다 — 로그도 안 남습니다.
+      </div>
+      <pre class="code" data-lang="bash"><code>CMD ["node", "--max-old-space-size=1536", "dist/index.js"]   # 2GB 컨테이너</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무중단 배포 — 끊기는 진짜 이유</h4>
+      <pre class="code" data-lang="text"><code>파드 종료 시 실제로 일어나는 일
+  1. 종료 중으로 표시
+  2. 서비스 엔드포인트에서 제거   ┐ 이 둘은 동시에
+  3. 컨테이너에 SIGTERM 전달      ┘ (순서 보장 없음)
+
+  → 3번이 먼저 오면, 아직 라우팅되는 상태에서 종료가 시작
+  → 그 사이 요청이 502 로 떨어집니다
+
+해결: 종료 신호를 받고 몇 초 버틴 뒤 실제 종료</code></pre>
+      <pre class="code" data-lang="yaml"><code>lifecycle:
+  preStop:
+    exec: { command: ["sh", "-c", "sleep 5"] }   # ★ 제거를 기다림
+terminationGracePeriodSeconds: 60
+
+livenessProbe:                       # ★ 의존성 검사 넣지 말 것
+  httpGet: { path: /health/live, port: 3000 }
+  initialDelaySeconds: 10
+readinessProbe:                      # ★ DB·Redis 는 여기서
+  httpGet: { path: /health/ready, port: 3000 }
+  periodSeconds: 5
+
+strategy:
+  rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }   # 무중단
+
+resources:
+  requests: { cpu: "250m", memory: "512Mi" }
+  limits:   { cpu: "1",    memory: "2Gi" }</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 애플리케이션 쪽 — 우아한 종료 (🟩 Node n08)
+process.on("SIGTERM", async () =&gt; {
+  server.close();                                  // 새 요청 차단
+  await new Promise(r =&gt; setTimeout(r, 5000));     // 진행 중 요청 완료
+  await worker.close();                            // ★ 큐 워커도 정리
+  await prisma.$disconnect();
+  await redis.quit();
+  process.exit(0);
+});</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>단일 VM 이라면 PM2</b> 로도 무중단이 됩니다 —
+        <code>pm2 reload app</code> 이 하나씩 순차 재시작합니다.
+        <b>K8s 를 쓸 여건이 아니면</b> PM2 클러스터 모드가 현실적인 선택입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k15 ==================== -->
+<section class="sec" id="k15">
+  <div class="sec-head rv">
+    <span class="no">SCALE 15</span>
+    <h2>전체 그림 · <span class="t">체크리스트</span></h2>
+    <p class="lead">지금까지의 조각을 한 장으로. <b>면접 답변과 설계 리뷰</b>에 그대로 씁니다.</p>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">Node 기반 대규모 서비스의 표준 구성</h4>
+    <pre class="code" data-lang="text"><code>                     [CDN]  정적 파일 · 이미지
+                       │
+                  [로드밸런서]  TLS 종료 · 헬스체크
+                       │
+                  [API 게이트웨이]  인증 · Rate Limit · 라우팅
+                       │
+       ┌───────────────┼───────────────┐
+  [주문 API]      [상품 API]      [회원 API]      ← 각각 여러 파드, 오토스케일
+       │               │               │
+       │          [Redis]  캐시 · 세션 · 분산락 · 큐(BullMQ)
+       │               │
+  [Primary DB] ──복제──→ [Read Replica ×N]
+       │
+  [워커 프로세스]  메일 · 이미지 · 정산 (API 와 분리 배포) ★
+       │
+  [Kafka]  주문 이벤트 → 검색색인 · 정산 · 분석
+       │
+  [관측]  Prometheus + Grafana · Loki · Tempo</code></pre>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 전 체크리스트</h4>
+      <ul class="tx">
+        <li>☐ 모든 <b>외부 호출에 타임아웃</b>이 있는가</li>
+        <li>☐ <b>이벤트 루프 지연</b>을 측정·알람하고 있는가</li>
+        <li>☐ 커넥션 풀 × 서버 대수가 <b>DB 한도</b> 안인가</li>
+        <li>☐ 캐시 TTL 에 <b>랜덤</b>을 섞었는가</li>
+        <li>☐ 재시도하는 API 가 <b>멱등</b>한가</li>
+        <li>☐ 재고·포인트 차감이 <b>원자적</b>인가</li>
+        <li>☐ 큐 작업이 <b>두 번 실행돼도</b> 괜찮은가</li>
+        <li>☐ <b>DLQ·백로그에 알람</b>이 있는가</li>
+        <li>☐ liveness / readiness 를 <b>분리</b>했는가</li>
+        <li>☐ <code>SIGTERM</code> 처리 + <code>preStop</code> 이 있는가</li>
+        <li>☐ <code>--max-old-space-size</code> 를 지정했는가</li>
+        <li>☐ 로그가 <b>JSON + traceId</b> 인가</li>
+        <li>☐ <b>Redis 가 죽어도</b> 서비스가 동작하는가</li>
+        <li>☐ 부하 테스트로 <b>한계 RPS</b> 를 아는가</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">면접에서 이렇게 답하면 됩니다</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:38%">질문</th><th>답의 뼈대</th></tr>
+          <tr><td>Node 는 싱글 스레드인데<br>어떻게 트래픽을 받나?</td>
+              <td>I/O 대기 중에 다른 요청을 처리 → 대신 <b>CPU 작업이 들어오면 즉시 무너짐</b> →
+                  워커·별도 서비스로 분리 (k01·k02)</td></tr>
+          <tr><td>트래픽이 10배가 되면?</td>
+              <td><b>측정</b>(k13) → 이벤트 루프·쿼리 개선 → 캐시 → 읽기 복제본 →
+                  파드 확장 → 비동기화</td></tr>
+          <tr><td>선착순 쿠폰 10만 요청</td>
+              <td>Redis <code>DECR</code> 로 수량 판정 → 통과분만 큐로 →
+                  워커가 DB 저장. <b>DB 에 10만 요청을 보내지 않습니다</b></td></tr>
+          <tr><td>중복 결제를 어떻게 막나?</td>
+              <td>Idempotency-Key + Redis 선점 + <b>DB 유니크 제약</b>(최후 방어선)</td></tr>
+          <tr><td>외부 결제사가 느려지면?</td>
+              <td>타임아웃 → 재시도(백오프+지터) → 서킷 브레이커 → 폴백</td></tr>
+          <tr><td>서버를 늘렸는데<br>세션이 풀립니다</td>
+              <td>메모리 세션 → Redis 세션 또는 JWT. <b>무상태가 확장의 전제</b>(k11)</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>가장 좋은 답은 “저희는 이렇게 겪었습니다”입니다.</b>
+        수치(전 800ms → 후 90ms), 원인(N+1 + 동기 JSON 파싱),
+        조치(include + 워커 분리), <b>확인 방법</b>(k6 p99)까지 한 세트로 말하면
+        지식 나열보다 훨씬 강한 인상을 줍니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="card rv d1">
+    <h4 class="mini" style="margin-top:0">순서를 지키세요</h4>
+    <div class="road">
+      <div class="rp"><b>1단계 — 측정</b>
+        <span>이벤트 루프 지연·슬로우 쿼리·p99 를 먼저 보세요(k02·k12). 여기서 끝나는 문제가 대부분입니다.</span></div>
+      <div class="rp"><b>2단계 — 없애기</b>
+        <span>인덱스·N+1·동기 코드 제거. <b>코드를 고치는 게 가장 싸고 효과가 큽니다.</b></span></div>
+      <div class="rp"><b>3단계 — 걷어내기</b>
+        <span>캐시로 DB 부하를 덜고(k03), 급하지 않은 일은 큐로(k07).</span></div>
+      <div class="rp"><b>4단계 — 늘리기</b>
+        <span>무상태로 만들고(k11) 파드를 늘립니다. 이때부터 동시성(k05)과 멱등성(k06)이 필수가 됩니다.</span></div>
+      <div class="rp"><b>5단계 — 지키기</b>
+        <span>타임아웃·서킷·Rate Limit(k08·k09)으로 과부하에서 무너지지 않게.</span></div>
+      <div class="rp"><b>6단계 — 확인하기</b>
+        <span>부하 테스트로 한계를 재고(k13) 알람을 걸어 둡니다.</span></div>
+    </div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>1·2단계를 건너뛰고 4단계로 가는 것이 가장 흔한 실수입니다.</b>
+      동기 함수 하나만 고치면 될 일에 파드를 10개 늘리면
+      비용은 10배가 되고 <b>문제는 그대로</b>입니다. 그리고 다음 달에 다시 옵니다.
+    </div>
+  </div>
+</section>
+
+</div><!-- /pane-scale -->

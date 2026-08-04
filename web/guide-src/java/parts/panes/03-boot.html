@@ -13,7 +13,7 @@
     이 탭은 <b>빈 프로젝트에서 배포 가능한 REST API 까지</b>를 순서대로 따라갑니다.
   </p>
   <div class="stats">
-    <div><b>16</b><span>SECTIONS</span></div>
+    <div><b>17</b><span>SECTIONS</span></div>
     <div><b>3.x</b><span>Spring Boot</span></div>
     <div><b>1</b><span>줄로 서버 실행</span></div>
     <div><b>0</b><span>XML 설정</span></div>
@@ -1541,6 +1541,107 @@ ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", \
         <b>무중단 배포</b>는 <code>graceful</code> 종료 + <b>readiness 프로브</b> 조합이 기본입니다.
         새 인스턴스가 <code>/actuator/health/readiness</code> 에서 UP 을 반환한 뒤에
         트래픽을 옮기고, 옛 인스턴스는 처리 중인 요청을 마치고 내려가게 합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== b17 ==================== -->
+<section class="sec" id="b17">
+  <div class="sec-head rv">
+    <span class="no">BOOT 17</span>
+    <h2>쿠버네티스 · <span class="t">무중단 배포</span></h2>
+    <p class="lead">대기업 배포는 거의 다 K8s 입니다. <b>애플리케이션이 지켜야 할 약속</b>이 몇 가지 있습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 가지 프로브 — 역할이 다릅니다</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:28%">프로브</th><th>실패하면</th></tr>
+          <tr><td><b>liveness</b><br>살아 있나?</td><td><b>파드를 죽이고 재시작</b>합니다.
+              여기에 DB 검사를 넣으면 <b>DB 가 잠깐 흔들릴 때 전 파드가 재시작</b>합니다 — 넣지 마세요</td></tr>
+          <tr><td><b>readiness</b><br>받을 준비 됐나?</td><td>트래픽만 끊고 <b>재시작은 안 합니다</b>.
+              DB·Redis 의존성은 <b>여기에</b> 넣습니다</td></tr>
+          <tr><td>startup</td><td>기동이 느린 앱을 위해 <b>초기에만</b> 여유를 줍니다</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="yaml"><code># application.yml — 부트가 두 엔드포인트를 만들어 줍니다
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true          # /actuator/health/liveness, /readiness
+  health:
+    livenessstate:  { enabled: true }
+    readinessstate: { enabled: true }
+
+server:
+  shutdown: graceful           # ★ 처리 중인 요청을 끝내고 종료
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s</code></pre>
+      <pre class="code" data-lang="yaml"><code># deployment.yaml
+livenessProbe:
+  httpGet: { path: /actuator/health/liveness, port: 8080 }
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  failureThreshold: 3
+readinessProbe:
+  httpGet: { path: /actuator/health/readiness, port: 8080 }
+  initialDelaySeconds: 10
+  periodSeconds: 5
+resources:
+  requests: { cpu: "500m", memory: "1Gi" }    # 스케줄링 기준
+  limits:   { cpu: "2",    memory: "2Gi" }    # 넘으면 OOMKilled</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무중단 배포 — 끊기는 진짜 이유</h4>
+      <pre class="code" data-lang="text"><code>파드 종료 순간 실제로 일어나는 일
+
+  1. K8s 가 파드를 "종료 중"으로 표시
+  2. 서비스 엔드포인트에서 제거   ┐ 이 둘은
+  3. 컨테이너에 SIGTERM 전달      ┘ 동시에 일어납니다 (순서 보장 없음)
+
+  → 3번이 먼저 오면, 아직 라우팅되는 상태에서 앱이 종료를 시작
+  → 그 사이에 들어온 요청이 502 로 떨어집니다
+
+해결: 종료 신호를 받고 몇 초 버틴 뒤에 실제 종료를 시작</code></pre>
+      <pre class="code" data-lang="yaml"><code>lifecycle:
+  preStop:
+    exec: { command: ["sh", "-c", "sleep 5"] }   # ★ 엔드포인트 제거를 기다림
+terminationGracePeriodSeconds: 60                 # graceful shutdown 보다 길게
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1          # 새 파드를 1개 더 띄우고
+    maxUnavailable: 0    # ★ 기존 파드는 하나도 안 줄인다 = 무중단</code></pre>
+      <div class="note warn">
+        <b>배포할 때마다 잠깐 502 가 뜬다면</b> 열에 아홉은
+        <code>preStop</code> 이 없거나 <code>server.shutdown: graceful</code> 이 빠진 것입니다.
+        스케일 인·노드 교체 때도 똑같이 일어나므로 <b>반드시</b> 넣으세요.
+      </div>
+      <h4 class="mini">오토스케일 · 설정 주입</h4>
+      <pre class="code" data-lang="yaml"><code>apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+spec:
+  minReplicas: 3          # ★ 2 이상 — 1이면 재시작 때 서비스가 멈춥니다
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 60 } }
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300    # 급하게 줄이지 않기 (플래핑 방지)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>설정과 비밀값은 이미지에 넣지 마세요.</b>
+        ConfigMap·Secret 을 <b>환경 변수</b>로 주입하면
+        스프링이 <code>SPRING_DATASOURCE_PASSWORD</code> 같은 이름을 <b>자동으로</b> 매핑합니다.
+        같은 이미지를 개발·스테이징·운영에 그대로 쓰는 게 원칙입니다.
+        <b>서버가 여러 대가 된 뒤의 이야기</b>는 ⚡ 대규모 트래픽 탭에서 이어집니다.
       </div>
     </div>
   </div>

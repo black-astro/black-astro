@@ -25,6 +25,7 @@ const PUBLIC = join(HERE, '..', 'public')
 const GUIDES = [
   { name: 'python', out: 'python-web', label: '🐍 Python' },
   { name: 'java', out: 'java-web', label: '☕ Java' },
+  { name: 'js-ts', out: 'js-ts-web', label: '🟨 JS · TS' },
 ]
 
 const kb = (n) => `${(n / 1024).toFixed(0)} KB`

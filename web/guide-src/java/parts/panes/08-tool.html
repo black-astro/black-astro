@@ -12,7 +12,7 @@
     현업에서 가장 자주 받는 요청들을 <b>복붙해서 바로 도는 코드</b>로 정리했습니다.
   </p>
   <div class="stats">
-    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>13</b><span>SECTIONS</span></div>
     <div><b>POI</b><span>엑셀 표준</span></div>
     <div><b>100만+</b><span>행 스트리밍 처리</span></div>
     <div><b>4</b><span>XML 파싱 방식</span></div>
@@ -1189,6 +1189,101 @@ public UserApi userApi(RestClient client) {
 <section class="sec" id="t12">
   <div class="sec-head rv">
     <span class="no">TOOL 12</span>
+    <h2>Testcontainers — <span class="t">진짜 DB 로 테스트하기</span></h2>
+    <p class="lead">H2 로 통과한 테스트는 <b>운영에서 통과한다는 뜻이 아닙니다.</b></p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">H2 로 테스트할 때 놓치는 것</h4>
+      <pre class="code" data-lang="text"><code>H2 에서는 통과하는데 운영(MySQL·Oracle)에서 터지는 것들
+
+  · 문자열 비교의 대소문자 구분 (콜레이션이 다름)
+  · 날짜 함수 · 문자 함수 이름이 다름 (DATE_FORMAT, NVL …)
+  · JSON 컬럼 · 전문 검색 · 시퀀스 동작
+  · 락 · 격리 수준 동작 (SELECT FOR UPDATE 의 실제 동작)
+  · 인덱스가 실제로 타는지 (실행 계획이 아예 다름)
+  · 예약어 · 컬럼 길이 초과 시의 동작
+
+그래서 "테스트가 초록불인데 배포하면 죽는" 일이 생깁니다.</code></pre>
+      <div class="dep">
+        <code>testImplementation("org.springframework.boot:spring-boot-testcontainers")</code><br>
+        <code>testImplementation("org.testcontainers:mysql")</code> ·
+        <code>testImplementation("org.testcontainers:kafka")</code><br>
+        ⚠️ 실행하는 곳에 <b>도커</b>가 있어야 합니다 (로컬·CI 모두).
+      </div>
+      <h4 class="mini">동작 방식</h4>
+      <pre class="code" data-lang="text"><code>테스트 시작 → 도커로 MySQL 컨테이너를 띄움 (랜덤 포트)
+           → 스프링 DataSource 를 그 주소로 자동 연결
+           → Flyway 가 실제 마이그레이션을 실행
+           → 테스트 실행
+           → 끝나면 컨테이너 자동 삭제
+
+운영과 "같은 버전의 진짜 DB" 위에서 테스트가 돕니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스프링 부트 3.1+ — 이제 코드가 짧습니다</h4>
+      <pre class="code" data-lang="java"><code><span class="t-ann">@TestConfiguration</span>(proxyBeanMethods = false)
+public class ContainerConfig {
+
+    <span class="t-ann">@Bean</span>
+    <span class="t-ann">@ServiceConnection</span>                      // ★ 접속 정보를 자동으로 연결해 줍니다
+    MySQLContainer&lt;?&gt; mysql() {
+        return new MySQLContainer&lt;&gt;("mysql:8.0.36")
+                .withReuse(true);                // 테스트 간 재사용 (빠름)
+    }
+
+    <span class="t-ann">@Bean</span>
+    <span class="t-ann">@ServiceConnection</span>
+    GenericContainer&lt;?&gt; redis() {
+        return new GenericContainer&lt;&gt;("redis:7-alpine").withExposedPorts(6379);
+    }
+}
+
+<span class="t-ann">@SpringBootTest</span>
+<span class="t-ann">@Import</span>(ContainerConfig.class)
+class OrderIntegrationTest {
+
+    <span class="t-ann">@Autowired</span> OrderService orderService;
+
+    <span class="t-ann">@Test</span>
+    void 재고가_부족하면_주문이_실패한다() {
+        assertThatThrownBy(() -&gt; orderService.order(1L, 999))
+            .isInstanceOf(OutOfStockException.class);
+    }
+}</code></pre>
+      <div class="note tip">
+        <b>로컬 개발도 편해집니다.</b>
+        <code>src/test</code> 에 <code>TestApplication</code> 을 만들어 두면
+        <b>DB 를 설치하지 않고도</b> <code>./gradlew bootTestRun</code> 으로
+        앱을 띄울 수 있습니다. 신규 입사자 세팅 시간이 하루에서 10분이 됩니다.
+      </div>
+      <h4 class="mini">테스트 층 나누기 — 실무 기준</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">층</th><th>범위와 속도</th></tr>
+          <tr><td><b>단위 테스트</b></td><td>스프링 없이 순수 객체. <b>밀리초</b>. 가장 많이 만드세요</td></tr>
+          <tr><td><code>@DataJpaTest</code></td><td>JPA 계층만. Testcontainers 와 조합하면 쿼리 검증에 최적</td></tr>
+          <tr><td><code>@WebMvcTest</code></td><td>컨트롤러만. 서비스는 <code>@MockitoBean</code> 으로</td></tr>
+          <tr><td><b>통합 테스트</b></td><td>전체 기동. <b>느리므로 핵심 흐름만</b> (주문·결제·로그인)</td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>CI 가 느려지는 걸 조심하세요.</b>
+        모든 테스트를 <code>@SpringBootTest</code> 로 만들면
+        빌드가 20분이 되고, 그러면 <b>아무도 테스트를 안 돌립니다.</b>
+        컨테이너는 <b>재사용</b>(<code>withReuse</code>)하고,
+        무거운 통합 테스트는 태그로 분리해 <b>머지 전에만</b> 돌리세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== t13 ==================== -->
+<section class="sec" id="t13">
+  <div class="sec-head rv">
+    <span class="no">TOOL 13</span>
     <h2>목적별 <span class="t">도구 찾기</span></h2>
     <p class="lead">“이걸 하려면 뭘 써야 하지?”를 한글로 검색하세요.</p>
   </div>

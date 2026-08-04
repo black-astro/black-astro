@@ -1,0 +1,1040 @@
+<!-- ============================================================
+     EXPRESS PANE
+     ============================================================ -->
+<div class="pane" id="pane-express">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> EXPRESS 4/5 · 가장 빠른 API</div>
+  <h1>10줄이면<br>서버가<br>돌아간다</h1>
+  <p class="tx">
+    Express 는 <b>얇습니다.</b> 정해 주는 게 거의 없어서 자유롭고, 그래서 <b>팀마다 구조가 제각각</b>이 됩니다.
+    빠르게 만들어야 하는 API·사내 도구·프로토타입에 최적이고,
+    규모가 커지면 <b>🐈 NestJS</b> 로 옮겨 가는 것이 자연스러운 흐름입니다.
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>10</b><span>줄로 서버</span></div>
+    <div><b>0</b><span>정해진 구조</span></div>
+    <div><b>5.x</b><span>최신 메이저</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== x01 ==================== -->
+<section class="sec" id="x01">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 01</span>
+    <h2>5분 만에 <span class="t">서버 띄우기</span></h2>
+    <p class="lead">설치하고 바로 돌려 보세요.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최소 구성</h4>
+      <div class="dep"><code>npm i express</code> · TS 라면 <code>npm i -D @types/express tsx</code></div>
+      <pre class="code" data-lang="typescript"><code>import express from "express";
+
+const app = express();
+app.use(express.json());                 // ★ JSON 본문 파싱 (없으면 req.body 가 undefined)
+
+app.get("/health", (req, res) =&gt; {
+  res.json({ ok: true, uptime: process.uptime() });
+});
+
+app.get("/api/users/:id", async (req, res) =&gt; {
+  const user = await db.user.findUnique({ where: { id: Number(req.params.id) } });
+  if (!user) return res.status(404).json({ message: "없습니다" });
+  res.json(user);
+});
+
+app.post("/api/users", async (req, res) =&gt; {
+  const created = await db.user.create({ data: req.body });
+  res.status(201).json(created);
+});
+
+const port = Number(process.env.PORT ?? 3000);
+app.listen(port, () =&gt; console.log(`http://localhost:${port}`));</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Express 5 에서 달라진 것</b> —
+        ① async 핸들러에서 던진 에러가 <b>자동으로 에러 미들웨어로</b> 갑니다
+        (4.x 에서는 <code>express-async-errors</code> 가 필요했습니다),
+        ② 경로 패턴 문법이 엄격해졌습니다(<code>*</code> → <code>/*splat</code>),
+        ③ Node 18+ 필요. <b>신규 프로젝트는 5 로 시작</b>하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무 초기 세팅</h4>
+      <pre class="code" data-lang="typescript"><code>import express from "express";
+import helmet from "helmet";
+import cors from "cors";
+import compression from "compression";
+import pinoHttp from "pino-http";
+
+const app = express();
+
+app.set("trust proxy", 1);              // ★ LB 뒤에 있으면 필수 (실제 IP·https 인식)
+app.disable("x-powered-by");            // 서버 정보 숨기기
+
+app.use(helmet());                       // 보안 헤더 (x10)
+app.use(cors({ origin: env.ALLOWED_ORIGINS.split(",") }));
+app.use(compression());                  // 응답 gzip
+app.use(express.json({ limit: "1mb" })); // ★ 크기 제한 필수
+app.use(express.urlencoded({ extended: true }));
+app.use(pinoHttp({ logger }));           // 요청 로그
+
+app.use("/api/users", userRouter);        // 라우터 등록 (x02)
+app.use(notFoundHandler);                 // 404
+app.use(errorHandler);                    // ★ 에러는 항상 맨 마지막 (x06)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>trust proxy</code> 를 안 켜면</b>
+        <code>req.ip</code> 가 로드밸런서의 IP 로 나옵니다.
+        Rate Limit 을 IP 기준으로 걸면 <b>모든 사용자가 한 사람으로 취급</b>되어
+        서비스가 통째로 차단됩니다. 실제로 자주 나는 사고입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x02 ==================== -->
+<section class="sec" id="x02">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 02</span>
+    <h2>라우팅 · <span class="t">라우터 분리</span></h2>
+    <p class="lead">파일 하나가 500줄이 되기 전에 나누세요.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">라우터로 나누기</h4>
+      <pre class="code" data-lang="typescript"><code>// routes/user.routes.ts
+import { Router } from "express";
+const router = Router();
+
+router.get("/", listUsers);
+router.get("/:id", getUser);
+router.post("/", validate(CreateUserSchema), createUser);
+router.patch("/:id", requireAuth, updateUser);
+router.delete("/:id", requireAuth, requireRole("admin"), deleteUser);
+
+export default router;
+
+// app.ts
+app.use("/api/users", userRouter);       // 앞에 붙는 경로를 여기서 결정
+app.use("/api/orders", orderRouter);</code></pre>
+      <h4 class="mini">경로 패턴</h4>
+      <pre class="code" data-lang="typescript"><code>app.get("/users/:id", ...)               // req.params.id
+app.get("/users/:id/orders/:orderId")    // 여러 개
+app.get("/files/*splat", ...)            // Express 5 의 와일드카드
+app.get(/^\/api\/v[12]\//, ...)          // 정규식도 가능
+
+// 쿼리스트링
+// GET /users?page=2&amp;size=20&amp;sort=name
+req.query.page     // "2"  ★ 항상 문자열 (숫자 변환 필요)
+
+// ★ 순서가 중요합니다 — 먼저 매칭된 것이 이깁니다
+router.get("/me", getMe);          // 이게 위에 있어야
+router.get("/:id", getUser);       // "me" 가 id 로 잡히지 않습니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>라우트 순서 버그는 조용히 나타납니다.</b>
+        <code>/users/:id</code> 를 먼저 등록하면
+        <code>/users/me</code> 요청이 <code>id="me"</code> 로 들어가
+        “사용자를 찾을 수 없습니다”가 됩니다.
+        <b>구체적인 경로를 항상 위에</b> 두세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">폴더 구조 — 기능 단위로 나누세요</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>파일 종류별 (커지면 지옥)</h5>
+          <pre class="code" data-lang="text"><code>src/
+  controllers/
+    user.controller.ts
+    order.controller.ts
+    ...20개
+  services/
+    ...20개
+  routes/
+    ...20개
+→ 기능 하나 고치려면
+  폴더 5개를 오감</code></pre>
+        </div>
+        <div class="good">
+          <h5>기능(도메인)별 ★</h5>
+          <pre class="code" data-lang="text"><code>src/
+  modules/
+    user/
+      user.routes.ts
+      user.service.ts
+      user.schema.ts
+      user.test.ts
+    order/
+      ...
+  shared/
+    middleware/
+    db.ts
+  app.ts</code></pre>
+        </div>
+      </div>
+      <pre class="code" data-lang="typescript"><code>// 계층 역할을 지키세요 (Nest 와 같은 원칙)
+// routes    — URL 매칭, 미들웨어 연결만
+// service   — 비즈니스 규칙 (여기에 req/res 를 넘기지 마세요 ★)
+// repository— DB 접근
+
+// ❌ 서비스가 HTTP 를 알면 테스트도 재사용도 어려워집니다
+export async function createUser(req: Request, res: Response) { ... }
+
+// ✅ 서비스는 순수한 입력·출력
+export async function createUser(dto: CreateUserDto): Promise&lt;User&gt; { ... }</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>API 버저닝</b>은 <code>app.use("/api/v1", v1Router)</code> 처럼
+        <b>경로에 두는 방식</b>이 가장 단순하고 디버깅하기 좋습니다.
+        헤더 기반 버저닝은 캐시·로그·테스트가 모두 복잡해집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x03 ==================== -->
+<section class="sec" id="x03">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 03</span>
+    <h2>미들웨어의 <span class="t">원리</span></h2>
+    <p class="lead">Express 의 전부입니다. <b>요청이 통과하는 관문의 줄</b>이라고 생각하세요.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동작 구조</h4>
+      <pre class="code" data-lang="text"><code>요청 →  [helmet] → [json 파싱] → [로거] → [인증] → [핸들러] → 응답
+                                                    ↓ next(err)
+                                              [에러 미들웨어]
+
+· next()      다음 미들웨어로
+· next(err)   ★ 에러 미들웨어로 건너뜀
+· 아무것도 안 하면 → 요청이 그대로 멈춥니다 (타임아웃)
+· res 를 보내면 → 체인 종료</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 미들웨어는 그냥 함수 3개(또는 4개) 짜리입니다
+const requestTime: RequestHandler = (req, res, next) =&gt; {
+  const start = Date.now();
+  res.on("finish", () =&gt; {                 // ★ 응답이 끝난 뒤 실행
+    logger.info({ ms: Date.now() - start, path: req.path }, "요청 완료");
+  });
+  next();                                   // ★ 반드시 호출
+};
+
+// 에러 미들웨어는 인자가 4개 (이 시그니처로 구분합니다)
+const errorHandler: ErrorRequestHandler = (err, req, res, next) =&gt; { ... };</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무에서 만드는 미들웨어</h4>
+      <pre class="code" data-lang="typescript"><code>// ① 인증 — req 에 사용자 정보를 붙임
+export const requireAuth: RequestHandler = (req, res, next) =&gt; {
+  const token = req.headers.authorization?.replace("Bearer ", "");
+  if (!token) return next(new UnauthorizedError());
+  try {
+    req.user = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+    next();
+  } catch {
+    next(new UnauthorizedError("토큰이 유효하지 않습니다"));
+  }
+};
+
+// ② 권한 — 매개변수를 받는 미들웨어는 "함수를 반환"하는 형태
+export const requireRole = (...roles: string[]): RequestHandler =&gt;
+  (req, res, next) =&gt;
+    roles.includes(req.user?.role ?? "")
+      ? next()
+      : next(new ForbiddenError());
+
+// ③ async 래퍼 (Express 4 에서 필수, 5 에서는 불필요)
+export const asyncHandler = (fn: RequestHandler): RequestHandler =&gt;
+  (req, res, next) =&gt; Promise.resolve(fn(req, res, next)).catch(next);
+
+router.get("/:id", asyncHandler(async (req, res) =&gt; {
+  const user = await service.find(req.params.id);   // 던져도 안전
+  res.json(user);
+}));</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Express 4 에서 가장 흔한 사고</b> —
+        async 핸들러에서 던진 에러가 <b>아무 데도 안 잡히고</b>
+        요청이 <b>영원히 응답 없이</b> 남습니다.
+        <code>asyncHandler</code> 로 감싸거나 <b>Express 5 로 올리세요.</b>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x04 ==================== -->
+<section class="sec" id="x04">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 04</span>
+    <h2>요청 · 응답 · <span class="t">바디 파싱</span></h2>
+    <p class="lead">값을 꺼내는 곳은 세 군데뿐입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">요청에서 값 꺼내기</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:26%">위치</th><th>예 · 특징</th></tr>
+          <tr><td><code>req.params</code></td><td><code>/users/:id</code> → 경로 변수. <b>항상 문자열</b></td></tr>
+          <tr><td><code>req.query</code></td><td><code>?page=2</code> → 쿼리. <b>항상 문자열 또는 배열</b></td></tr>
+          <tr><td><code>req.body</code></td><td>본문. <b>파서 미들웨어가 있어야</b> 채워짐</td></tr>
+          <tr><td><code>req.headers</code></td><td>키는 <b>전부 소문자</b>로 들어옵니다</td></tr>
+          <tr><td><code>req.cookies</code></td><td><code>cookie-parser</code> 필요</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="typescript"><code>// ★ 숫자 변환을 잊지 마세요 — 흔한 버그
+const page = Number(req.query.page ?? 1);
+if (!Number.isInteger(page) || page &lt; 1) throw new ValidationError("page");
+
+// 배열로 올 수도 있습니다: ?tag=a&amp;tag=b → ["a","b"]
+const tags = [req.query.tag ?? []].flat();
+
+// ★ 실무에서는 검증 라이브러리로 한 번에 처리하세요 (x05)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">응답 보내기</h4>
+      <pre class="code" data-lang="typescript"><code>res.json({ data });                     // JSON (Content-Type 자동)
+res.status(201).json(created);
+res.status(204).end();                  // 본문 없음 (삭제 성공)
+res.redirect(302, "/login");
+res.sendFile(path.resolve("public/a.pdf"));
+res.download(filePath, "보고서.pdf");    // 다운로드 헤더 자동
+res.set("Cache-Control", "public, max-age=3600");
+res.cookie("token", t, {
+  httpOnly: true, secure: true, sameSite: "lax", maxAge: 3600_000,
+});
+
+// 스트리밍 응답 (큰 파일 — 메모리 절약)
+import { pipeline } from "node:stream/promises";
+await pipeline(createReadStream(bigFile), res);
+
+// SSE (실시간 알림)
+res.writeHead(200, {
+  "Content-Type": "text/event-stream",
+  "Cache-Control": "no-cache",
+  Connection: "keep-alive",
+});
+const timer = setInterval(() =&gt; res.write(`data: ${Date.now()}\n\n`), 1000);
+req.on("close", () =&gt; clearInterval(timer));   // ★ 정리 필수</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>응답 형태를 팀에서 통일하세요.</b>
+        <code>{ data, meta }</code> 처럼 감쌀지, 그냥 객체를 줄지 정해 두지 않으면
+        프런트엔드가 엔드포인트마다 다르게 처리해야 합니다.
+        <b>에러 응답 형태</b>도 마찬가지입니다(x06).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x05 ==================== -->
+<section class="sec" id="x05">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 05</span>
+    <h2>입력 검증 <span class="t">(Zod)</span></h2>
+    <p class="lead">들어오는 값은 <b>전부 의심</b>하세요. TypeScript 는 런타임에 아무것도 못 막습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스키마 정의</h4>
+      <div class="dep"><code>npm i zod</code></div>
+      <pre class="code" data-lang="typescript"><code>import { z } from "zod";
+
+export const CreateUserSchema = z.object({
+  email: z.string().email("이메일 형식이 아닙니다"),
+  password: z.string().min(8, "8자 이상").regex(/[0-9]/, "숫자 포함"),
+  name: z.string().min(1).max(50),
+  age: z.number().int().positive().optional(),
+  role: z.enum(["user", "admin"]).default("user"),
+  tags: z.array(z.string()).max(10).default([]),
+});
+
+export type CreateUserDto = z.infer&lt;typeof CreateUserSchema&gt;;   // ★ 타입 자동 생성
+
+// 쿼리는 문자열로 오므로 변환이 필요합니다
+export const ListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),     // ★ "2" → 2
+  size: z.coerce.number().int().min(1).max(100).default(20),
+  keyword: z.string().trim().optional(),
+});</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">미들웨어로 연결</h4>
+      <pre class="code" data-lang="typescript"><code>type Target = "body" | "query" | "params";
+
+export const validate =
+  (schema: z.ZodTypeAny, target: Target = "body"): RequestHandler =&gt;
+  (req, res, next) =&gt; {
+    const result = schema.safeParse(req[target]);
+    if (!result.success) {
+      return res.status(400).json({
+        message: "입력값이 올바르지 않습니다",
+        errors: result.error.issues.map(i =&gt; ({
+          field: i.path.join("."),
+          message: i.message,
+        })),
+      });
+    }
+    req[target] = result.data;        // ★ 변환·기본값이 적용된 값으로 교체
+    next();
+  };
+
+// 사용
+router.post("/", validate(CreateUserSchema), async (req, res) =&gt; {
+  const dto = req.body as CreateUserDto;    // ✅ 검증·변환 완료된 값
+  res.status(201).json(await service.create(dto));
+});</code></pre>
+      <div class="note warn">
+        <b>검증하지 않으면 무슨 일이 생기나</b> —
+        <code>{ "role": "admin" }</code> 을 그대로 <code>db.create(req.body)</code> 에 넘기면
+        <b>누구나 관리자가 됩니다</b>(Mass Assignment).
+        Zod 는 <b>정의하지 않은 필드를 기본적으로 제거</b>하므로 이 공격을 막아 줍니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>같은 스키마를 프런트엔드와 공유</b>하면 폼 검증까지 한 번에 해결됩니다.
+        모노레포라면 <code>packages/schema</code> 에 두고 양쪽에서 import 하세요
+        (🧰 도구 o02·o07).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x06 ==================== -->
+<section class="sec" id="x06">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 06</span>
+    <h2>에러 <span class="t">처리</span></h2>
+    <p class="lead">컨트롤러마다 try/catch 를 쓰고 있다면 <b>이 절을 반드시</b> 보세요.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">중앙 집중 에러 처리</h4>
+      <pre class="code" data-lang="typescript"><code>// errors.ts — 도메인 에러 정의
+export class AppError extends Error {
+  constructor(
+    message: string,
+    public status = 500,
+    public code = "INTERNAL_ERROR",
+    public details?: unknown,
+  ) { super(message); this.name = this.constructor.name; }
+}
+export class NotFoundError extends AppError {
+  constructor(what = "리소스") { super(`${what}를 찾을 수 없습니다`, 404, "NOT_FOUND"); }
+}
+export class UnauthorizedError extends AppError {
+  constructor(m = "인증이 필요합니다") { super(m, 401, "UNAUTHORIZED"); }
+}
+export class ForbiddenError extends AppError {
+  constructor(m = "권한이 없습니다") { super(m, 403, "FORBIDDEN"); }
+}
+export class ConflictError extends AppError {
+  constructor(m: string) { super(m, 409, "CONFLICT"); }
+}</code></pre>
+      <pre class="code" data-lang="typescript"><code>// middleware/error.ts — ★ 앱에서 마지막에 등록
+export const errorHandler: ErrorRequestHandler = (err, req, res, _next) =&gt; {
+  const requestId = req.headers["x-request-id"];
+
+  if (err instanceof AppError) {
+    logger.warn({ err, requestId, path: req.path }, "처리된 오류");
+    return res.status(err.status).json({
+      code: err.code, message: err.message, details: err.details, requestId,
+    });
+  }
+
+  // 라이브러리 에러 변환
+  if (err instanceof z.ZodError) {
+    return res.status(400).json({ code: "VALIDATION_ERROR", errors: err.issues });
+  }
+  if (err.code === "P2002") {             // Prisma 유니크 위반
+    return res.status(409).json({ code: "DUPLICATE", message: "이미 존재합니다" });
+  }
+
+  // 예상 못 한 에러 — ★ 내부 정보를 노출하지 마세요
+  logger.error({ err, requestId, path: req.path }, "예상치 못한 오류");
+  res.status(500).json({
+    code: "INTERNAL_ERROR", message: "서버 오류가 발생했습니다", requestId,
+  });
+};</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">컨트롤러가 깨끗해집니다</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>매번 try/catch</h5>
+          <pre class="code" data-lang="typescript"><code>router.get("/:id",
+  async (req, res) =&gt; {
+  try {
+    const u = await find(id);
+    if (!u) return res.status(404)
+      .json({ message: "없음" });
+    res.json(u);
+  } catch (e) {
+    console.error(e);
+    res.status(500)
+      .json({ message: "오류" });
+  }
+});</code></pre>
+        </div>
+        <div class="good">
+          <h5>던지기만</h5>
+          <pre class="code" data-lang="typescript"><code>router.get("/:id",
+  async (req, res) =&gt; {
+  const u = await find(id);
+  if (!u) throw new NotFoundError("사용자");
+  res.json(u);
+});
+// 에러 미들웨어가
+// 알아서 처리 ★
+// (Express 5 기준)</code></pre>
+        </div>
+      </div>
+      <h4 class="mini">404 와 프로세스 레벨</h4>
+      <pre class="code" data-lang="typescript"><code>// 어떤 라우트에도 안 걸린 요청
+app.use((req, res) =&gt; {
+  res.status(404).json({ code: "NOT_FOUND", message: `${req.method} ${req.path}` });
+});
+app.use(errorHandler);       // ★ 반드시 맨 마지막
+
+// 프로세스 레벨 안전망 (🟩 Node n12)
+process.on("unhandledRejection", (e) =&gt; { logger.fatal({ e }); process.exit(1); });</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>에러 응답에 스택 트레이스를 넣지 마세요.</b>
+        운영에서 <code>err.stack</code> 을 그대로 내보내면
+        <b>파일 경로·라이브러리 버전·내부 구조</b>가 공격자에게 그대로 노출됩니다.
+        스택은 <b>로그에만</b> 남기고, 사용자에게는 <b>requestId</b> 만 주세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x07 ==================== -->
+<section class="sec" id="x07">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 07</span>
+    <h2>인증 — <span class="t">JWT · 세션</span></h2>
+    <p class="lead">로그인 유지 방식 두 가지. <b>선택 기준</b>부터 정리합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 고를까</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:22%">방식</th><th>특징</th></tr>
+          <tr><td><b>세션</b></td><td>서버가 상태를 가짐. <b>즉시 로그아웃 가능</b>.
+              서버가 여러 대면 <b>Redis 필요</b></td></tr>
+          <tr><td><b>JWT</b></td><td>서버가 상태를 안 가짐(무상태). 확장에 유리.
+              <b>발급된 토큰을 취소하기 어려움</b></td></tr>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>모바일 앱·MSA·서버 여러 대 → JWT.</b><br>
+        <b>웹 전용·즉시 차단이 중요(관리자·금융) → 세션.</b><br>
+        실무에서는 <b>짧은 액세스 토큰(15분) + 리프레시 토큰(2주)</b> 조합이 가장 흔합니다.
+      </div>
+      <h4 class="mini">JWT 구현</h4>
+      <div class="dep"><code>npm i jsonwebtoken bcrypt</code> · <code>npm i -D @types/jsonwebtoken @types/bcrypt</code></div>
+      <pre class="code" data-lang="typescript"><code>import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
+
+// 회원가입 — 비밀번호는 반드시 해시
+const hash = await bcrypt.hash(password, 12);      // ★ 평문 저장 절대 금지
+
+// 로그인
+const ok = await bcrypt.compare(password, user.passwordHash);
+if (!ok) throw new UnauthorizedError("아이디 또는 비밀번호가 올바르지 않습니다");
+//        ★ "비밀번호가 틀렸습니다" 라고 하면 계정 존재 여부가 새어 나갑니다
+
+const accessToken = jwt.sign(
+  { sub: String(user.id), role: user.role },
+  env.JWT_SECRET,
+  { expiresIn: "15m", issuer: "my-api" },
+);
+const refreshToken = crypto.randomUUID();
+await redis.set(`refresh:${refreshToken}`, user.id, { EX: 60 * 60 * 24 * 14 });
+
+res.cookie("refresh", refreshToken, {
+  httpOnly: true, secure: true, sameSite: "strict", path: "/auth/refresh",
+});
+res.json({ accessToken });</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">검증 · 갱신 · 로그아웃</h4>
+      <pre class="code" data-lang="typescript"><code>// 검증 미들웨어
+export const requireAuth: RequestHandler = (req, _res, next) =&gt; {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return next(new UnauthorizedError());
+  try {
+    const payload = jwt.verify(token, env.JWT_SECRET, { issuer: "my-api" });
+    req.user = { id: Number(payload.sub), role: payload.role };
+    next();
+  } catch (e) {
+    next(e instanceof jwt.TokenExpiredError
+      ? new UnauthorizedError("토큰이 만료되었습니다")
+      : new UnauthorizedError());
+  }
+};
+
+// 갱신 — 리프레시 토큰 회전(rotation)
+router.post("/auth/refresh", async (req, res) =&gt; {
+  const rt = req.cookies.refresh;
+  const userId = await redis.get(`refresh:${rt}`);
+  if (!userId) throw new UnauthorizedError("다시 로그인해 주세요");
+
+  await redis.del(`refresh:${rt}`);            // ★ 한 번 쓰면 폐기
+  // 새 토큰 발급…
+});
+
+// 로그아웃 — 리프레시만 지우면 됩니다 (액세스는 15분 뒤 자동 만료)
+router.post("/auth/logout", async (req, res) =&gt; {
+  await redis.del(`refresh:${req.cookies.refresh}`);
+  res.clearCookie("refresh").status(204).end();
+});</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>JWT 로 흔히 하는 실수</b><br>
+        · 토큰을 <b>localStorage 에 저장</b> → XSS 한 번에 털립니다.
+          <b>httpOnly 쿠키</b>가 안전합니다<br>
+        · 만료를 <b>7일</b>로 길게 → 탈취되면 일주일간 무방비<br>
+        · 페이로드에 <b>개인정보</b>를 담음 → JWT 는 <b>암호화가 아니라 서명</b>입니다. 누구나 디코딩할 수 있습니다<br>
+        · <code>algorithm: "none"</code> 을 허용 → 서명 우회 공격
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x08 ==================== -->
+<section class="sec" id="x08">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 08</span>
+    <h2>파일 <span class="t">업로드 · 다운로드</span></h2>
+    <p class="lead">가장 많이 취약점이 생기는 기능입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">업로드 — multer</h4>
+      <div class="dep"><code>npm i multer</code> · <code>npm i -D @types/multer</code></div>
+      <pre class="code" data-lang="typescript"><code>import multer from "multer";
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) =&gt; cb(null, env.UPLOAD_DIR),
+    filename: (req, file, cb) =&gt;
+      // ★ 사용자 파일명을 그대로 쓰지 마세요
+      cb(null, `${crypto.randomUUID()}${path.extname(file.originalname)}`),
+  }),
+  limits: {
+    fileSize: 5 * 1024 * 1024,        // ★ 5MB 제한 (없으면 디스크가 찹니다)
+    files: 5,
+  },
+  fileFilter: (req, file, cb) =&gt; {
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowed.includes(file.mimetype))
+      return cb(new ValidationError("이미지만 업로드할 수 있습니다"));
+    cb(null, true);
+  },
+});
+
+router.post("/upload", requireAuth, upload.single("file"), (req, res) =&gt; {
+  res.status(201).json({ filename: req.file!.filename });
+});</code></pre>
+      <div class="note warn">
+        <b>파일 업로드 체크리스트</b><br>
+        · 파일명을 <b>새로 생성</b>(경로 순회·덮어쓰기 방지)<br>
+        · <b>크기 제한</b>을 반드시<br>
+        · MIME 타입은 <b>위조 가능</b> — 중요하면 파일 시그니처(매직 넘버)까지 확인<br>
+        · 업로드 폴더에서 <b>실행 권한 제거</b> (웹셸 방지)<br>
+        · 정적 서빙 경로와 업로드 경로를 <b>분리</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무 — 클라우드 스토리지 직접 업로드</h4>
+      <pre class="code" data-lang="typescript"><code>// ★ 서버를 거치지 않는 것이 정답입니다
+// 서버는 "업로드 허가증(presigned URL)"만 발급합니다
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+router.post("/upload-url", requireAuth, async (req, res) =&gt; {
+  const key = `uploads/${req.user.id}/${crypto.randomUUID()}.jpg`;
+  const url = await getSignedUrl(
+    s3,
+    new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, ContentType: "image/jpeg" }),
+    { expiresIn: 300 },              // 5분간 유효
+  );
+  res.json({ uploadUrl: url, key });
+});
+
+// 클라이언트가 직접 S3 로 PUT → 서버 대역폭·메모리 0 ★</code></pre>
+      <h4 class="mini">다운로드</h4>
+      <pre class="code" data-lang="typescript"><code>router.get("/files/:id", requireAuth, async (req, res) =&gt; {
+  const file = await db.file.findUnique({ where: { id: req.params.id } });
+  if (!file) throw new NotFoundError("파일");
+  if (file.ownerId !== req.user.id) throw new ForbiddenError();   // ★ 권한 확인
+
+  // 경로 검증 (n04)
+  const abs = path.resolve(env.UPLOAD_DIR, file.storedName);
+  if (!abs.startsWith(path.resolve(env.UPLOAD_DIR) + path.sep))
+    throw new ForbiddenError();
+
+  res.download(abs, file.originalName);       // 한글 파일명도 자동 인코딩
+});</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>서버가 여러 대라면 로컬 디스크에 저장하면 안 됩니다.</b>
+        A 서버에 올린 파일을 B 서버가 못 찾습니다.
+        <b>S3·GCS 같은 공용 스토리지</b>를 쓰세요(🚀 대규모 k11 무상태).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x09 ==================== -->
+<section class="sec" id="x09">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 09</span>
+    <h2>DB 연동 <span class="t">(Prisma)</span></h2>
+    <p class="lead">타입이 자동으로 만들어지는 것이 <b>가장 큰 장점</b>입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스키마와 클라이언트</h4>
+      <div class="dep"><code>npm i @prisma/client</code> · <code>npm i -D prisma</code> · <code>npx prisma init</code></div>
+      <pre class="code" data-lang="text"><code>// prisma/schema.prisma
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String
+  orders    Order[]
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model Order {
+  id       Int    @id @default(autoincrement())
+  userId   Int
+  user     User   @relation(fields: [userId], references: [id])
+  amount   Int
+  status   OrderStatus @default(PENDING)
+}
+
+enum OrderStatus { PENDING PAID CANCELLED }</code></pre>
+      <pre class="code" data-lang="bash"><code>npx prisma migrate dev --name init     # 개발 — 마이그레이션 생성·적용
+npx prisma migrate deploy              # ★ 운영 — 적용만
+npx prisma generate                    # 타입 재생성
+npx prisma studio                      # GUI 로 데이터 보기</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쿼리</h4>
+      <pre class="code" data-lang="typescript"><code>// 조회 — 필요한 필드만 (★ select 를 쓰는 습관)
+const users = await prisma.user.findMany({
+  where: { name: { contains: keyword }, createdAt: { gte: from } },
+  select: { id: true, name: true, _count: { select: { orders: true } } },
+  orderBy: { createdAt: "desc" },
+  skip: (page - 1) * size,
+  take: size,
+});
+
+// 관계 포함 — N+1 을 자동으로 막아 줍니다
+const withOrders = await prisma.user.findMany({
+  include: { orders: { where: { status: "PAID" }, take: 5 } },
+});
+
+// 트랜잭션
+await prisma.$transaction(async (tx) =&gt; {
+  const order = await tx.order.create({ data: dto });
+  await tx.stock.update({
+    where: { productId: dto.productId },
+    data: { quantity: { decrement: dto.qty } },
+  });
+  return order;
+});
+
+// 원자적 차감 — 동시성 문제 방지 (🚀 대규모 k05)
+const r = await prisma.stock.updateMany({
+  where: { productId, quantity: { gte: qty } },     // ★ 조건을 쿼리 안에
+  data: { quantity: { decrement: qty } },
+});
+if (r.count === 0) throw new ConflictError("재고가 부족합니다");</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>운영에서 주의할 점</b><br>
+        · <code>migrate dev</code> 를 운영에서 쓰면 <b>데이터가 날아갈 수 있습니다</b>.
+          운영은 <code>migrate deploy</code><br>
+        · 커넥션 풀 크기는 <code>?connection_limit=10</code> 로 URL 에 지정 —
+          <b>서버 대수 × 풀 크기</b>가 DB 한도를 넘지 않게(🚀 k10)<br>
+        · 서버리스 환경에서는 <b>Prisma Accelerate</b> 나 PgBouncer 가 필요합니다
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x10 ==================== -->
+<section class="sec" id="x10">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 10</span>
+    <h2>보안 <span class="t">필수 설정</span></h2>
+    <p class="lead">이 절의 내용은 <b>운영 서버라면 예외 없이</b> 적용해야 합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 방어 3종</h4>
+      <div class="dep"><code>npm i helmet cors express-rate-limit</code></div>
+      <pre class="code" data-lang="typescript"><code>import helmet from "helmet";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
+
+// ① 보안 헤더
+app.use(helmet());                    // CSP·X-Frame-Options 등 15종
+
+// ② CORS — ★ origin: true 나 "*" 는 위험합니다
+app.use(cors({
+  origin: env.ALLOWED_ORIGINS.split(","),   // 화이트리스트
+  credentials: true,                         // 쿠키를 주고받을 때
+  maxAge: 86400,
+}));
+
+// ③ Rate Limit
+app.use("/api", rateLimit({
+  windowMs: 60_000, limit: 100,
+  standardHeaders: "draft-7",
+  message: { code: "TOO_MANY_REQUESTS" },
+}));
+
+// 로그인은 훨씬 빡빡하게 (무차별 대입 방지)
+app.use("/auth/login", rateLimit({ windowMs: 15 * 60_000, limit: 5 }));</code></pre>
+      <div class="note warn">
+        <b>서버가 여러 대라면 메모리 기반 Rate Limit 은 의미가 없습니다.</b>
+        10대면 실제 한도가 <b>10배</b>가 됩니다.
+        <code>rate-limit-redis</code> 스토어를 붙이세요(🚀 대규모 k09).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">체크리스트</h4>
+      <ul class="tx">
+        <li>☐ <b>SQL 인젝션</b> — ORM 이나 파라미터 바인딩 사용.
+            문자열로 쿼리를 만들지 마세요</li>
+        <li>☐ <b>XSS</b> — 사용자 입력을 HTML 로 렌더링할 때 이스케이프.
+            React 는 기본으로 해 주지만 <code>dangerouslySetInnerHTML</code> 은 예외</li>
+        <li>☐ <b>Mass Assignment</b> — <code>req.body</code> 를 그대로 DB 에 넘기지 마세요(x05)</li>
+        <li>☐ <b>경로 순회</b> — 파일 경로에 사용자 입력이 들어가면 검증(x08)</li>
+        <li>☐ <b>비밀번호</b> — bcrypt·argon2 로 해시. <b>MD5·SHA 단독 금지</b></li>
+        <li>☐ <b>비밀 값</b> — 코드·이미지·로그에 남기지 않기</li>
+        <li>☐ <b>의존성</b> — <code>npm audit</code> 를 CI 에 포함</li>
+        <li>☐ <b>에러 응답</b> — 스택·내부 경로 노출 금지(x06)</li>
+        <li>☐ <b>HTTPS</b> — 운영은 예외 없이. 쿠키에 <code>secure</code></li>
+      </ul>
+      <pre class="code" data-lang="typescript"><code>// 응답 헤더에서 서버 정보 지우기
+app.disable("x-powered-by");
+
+// 요청 크기 제한 (메모리 고갈 공격 방지)
+app.use(express.json({ limit: "1mb" }));
+
+// 오래 걸리는 요청 끊기
+import timeout from "connect-timeout";
+app.use(timeout("30s"));
+
+// NoSQL 인젝션 (MongoDB 를 쓴다면)
+import mongoSanitize from "express-mongo-sanitize";
+app.use(mongoSanitize());</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>OWASP Top 10</b> 을 한 번은 읽어 보세요.
+        여기 적힌 대부분이 그 목록에서 나온 것입니다.
+        보안은 <b>기능 추가 후에 붙이는 것이 아니라</b>
+        처음부터 기본값으로 들어 있어야 합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x11 ==================== -->
+<section class="sec" id="x11">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 11</span>
+    <h2><span class="t">테스트</span></h2>
+    <p class="lead">서버를 띄우지 않고도 요청·응답을 검증할 수 있습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">supertest</h4>
+      <div class="dep"><code>npm i -D vitest supertest @types/supertest</code></div>
+      <pre class="code" data-lang="typescript"><code>// app.ts 에서 app 만 export 하고, listen 은 server.ts 에서 하세요 ★
+// 그래야 테스트에서 포트 없이 app 을 그대로 쓸 수 있습니다
+
+import request from "supertest";
+import { describe, it, expect, beforeEach } from "vitest";
+import { app } from "../src/app.js";
+
+describe("POST /api/users", () =&gt; {
+  beforeEach(async () =&gt; { await resetDb(); });
+
+  it("정상 생성되면 201 을 반환한다", async () =&gt; {
+    const res = await request(app)
+      .post("/api/users")
+      .send({ email: "a@b.c", password: "12345678", name: "김" })
+      .expect(201);
+
+    expect(res.body).toMatchObject({ email: "a@b.c" });
+    expect(res.body).not.toHaveProperty("password");    // ★ 노출 확인
+  });
+
+  it("이메일 형식이 틀리면 400", async () =&gt; {
+    const res = await request(app)
+      .post("/api/users")
+      .send({ email: "not-an-email", password: "12345678" })
+      .expect(400);
+    expect(res.body.errors[0].field).toBe("email");
+  });
+
+  it("인증 없이 접근하면 401", () =&gt;
+    request(app).delete("/api/users/1").expect(401));
+});</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 테스트할까</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">층</th><th>대상</th></tr>
+          <tr><td><b>단위</b></td><td>서비스 함수의 <b>비즈니스 규칙</b>. 가장 많이 만드세요</td></tr>
+          <tr><td><b>통합</b></td><td>라우트 + 검증 + DB. <b>핵심 흐름만</b></td></tr>
+          <tr><td>E2E</td><td>실제 브라우저 (🧰 도구 o06)</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="typescript"><code>// DB 는 진짜를 쓰는 편이 낫습니다 (Testcontainers)
+import { PostgreSqlContainer } from "@testcontainers/postgresql";
+
+let container;
+beforeAll(async () =&gt; {
+  container = await new PostgreSqlContainer("postgres:16").start();
+  process.env.DATABASE_URL = container.getConnectionUri();
+  await runMigrations();
+}, 60_000);
+
+afterAll(() =&gt; container.stop());</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 외부 API 는 모킹 (msw 가 실무 표준)
+import { setupServer } from "msw/node";
+import { http, HttpResponse } from "msw";
+
+const server = setupServer(
+  http.get("https://api.pay.com/verify", () =&gt;
+    HttpResponse.json({ status: "APPROVED" })),
+);
+beforeAll(() =&gt; server.listen());
+afterAll(() =&gt; server.close());</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“무엇을 테스트할지” 기준</b> —
+        ① <b>돈·권한과 관련된 로직</b>은 반드시,
+        ② <b>버그가 났던 곳</b>은 재발 방지 테스트를 먼저,
+        ③ 단순 CRUD 는 통합 테스트 하나로 충분합니다.
+        <b>커버리지 숫자를 목표로 삼으면</b> 의미 없는 테스트만 늘어납니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x12 ==================== -->
+<section class="sec" id="x12">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 12</span>
+    <h2>구조 설계 · <span class="t">배포</span></h2>
+    <p class="lead">Express 는 구조를 정해 주지 않습니다. <b>그래서 직접 정해야 합니다.</b></p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무에서 쓰는 구조</h4>
+      <pre class="code" data-lang="text"><code>src/
+  app.ts                 미들웨어 등록 · 라우터 연결 (listen 은 여기 X)
+  server.ts              listen · 우아한 종료
+  config/
+    env.ts               ★ Zod 로 환경 변수 검증 (n08)
+  modules/
+    user/
+      user.routes.ts     URL 매칭
+      user.service.ts    비즈니스 규칙 (req/res 를 모름)
+      user.repository.ts DB 접근
+      user.schema.ts     Zod 스키마 + 타입
+      user.test.ts
+  shared/
+    middleware/          auth · validate · error
+    errors.ts            AppError 계열
+    db.ts  redis.ts  logger.ts
+  types/
+    express.d.ts         ★ Request 확장 (🔷 TS t13)</code></pre>
+      <div class="note tip">
+        <b>규칙 하나만 지키세요 —</b>
+        <b>service 는 <code>req</code>·<code>res</code> 를 몰라야 합니다.</b>
+        이 한 줄이 테스트 가능성·재사용성·나중에 Nest 로 옮길 여지를 전부 만듭니다.
+        (배치·큐 워커에서 같은 서비스를 그대로 부를 수 있게 됩니다)
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 전 체크리스트</h4>
+      <ul class="tx">
+        <li>☐ <code>NODE_ENV=production</code> (Express 가 뷰 캐시 등을 켭니다)</li>
+        <li>☐ <b>환경 변수 검증</b>이 부팅 시 동작하는가</li>
+        <li>☐ <code>/health</code> 엔드포인트 — <b>DB 연결까지</b> 확인</li>
+        <li>☐ <b>우아한 종료</b> — SIGTERM 처리(🟩 Node n08)</li>
+        <li>☐ <code>keepAliveTimeout</code> &gt; 로드밸런서 타임아웃</li>
+        <li>☐ <b>구조화 로그</b> + 요청 ID</li>
+        <li>☐ helmet · cors · rate limit</li>
+        <li>☐ <b>비밀 값</b>이 이미지에 없는지</li>
+      </ul>
+      <pre class="code" data-lang="dockerfile"><code># 멀티 스테이지 — 이미지 크기를 크게 줄입니다
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package*.json ./
+RUN npm ci --omit=dev &amp;&amp; npm cache clean --force
+COPY --from=build /app/dist ./dist
+USER node                              # ★ root 로 실행하지 마세요
+EXPOSE 3000
+CMD ["node", "dist/server.js"]         # ★ npm start 로 하면 SIGTERM 이 안 옵니다</code></pre>
+      <pre class="code" data-lang="typescript"><code>// /health — 진짜 상태를 확인해야 의미가 있습니다
+app.get("/health", async (req, res) =&gt; {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    await redis.ping();
+    res.json({ status: "ok", uptime: process.uptime() });
+  } catch (e) {
+    res.status(503).json({ status: "degraded" });
+  }
+});
+// ★ 단, liveness 프로브에는 DB 검사를 넣지 마세요 —
+//   DB 가 잠깐 흔들릴 때 모든 서버가 재시작됩니다 (🚀 대규모 k14)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>언제 NestJS 로 옮길까</b> —
+        ① 팀이 3명을 넘고 구조가 제각각이 되기 시작할 때,
+        ② DI·트랜잭션·모듈 경계가 필요해질 때,
+        ③ 마이크로서비스·GraphQL·WebSocket 을 같이 다뤄야 할 때.
+        <b>service 계층을 잘 분리해 뒀다면</b> 이전 비용이 크지 않습니다(🐈 NestJS 탭).
+      </div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /pane-express -->
