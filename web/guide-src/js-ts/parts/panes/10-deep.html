@@ -12,7 +12,7 @@
     실무에서 매일 쓰지는 않지만, <b>장애를 해결할 때와 면접에서</b> 차이를 만듭니다.
   </p>
   <div class="stats">
-    <div><b>15</b><span>SECTIONS</span></div>
+    <div><b>18</b><span>SECTIONS</span></div>
     <div><b>V8</b><span>엔진 내부</span></div>
     <div><b>측정</b><span>추측이 아니라</span></div>
     <div><b>🔴</b><span>전부 고급</span></div>
@@ -1260,6 +1260,284 @@ export class Order {
         ② ORM·결제사 교체 시 고칠 곳이 좁음,
         ③ 도메인 테스트에 DB 가 필요 없음,
         ④ <b>비즈니스 규칙이 한 곳에 모여</b> 신규 입사자가 빨리 파악합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d16 ==================== -->
+<section class="sec" id="d16">
+  <div class="sec-head rv">
+    <span class="no">DEEP 16</span>
+    <h2>WebAssembly · <span class="t">네이티브 애드온</span></h2>
+    <p class="lead">자바스크립트가 <b>구조적으로 못 따라가는 구간</b>을 다른 언어로 채웁니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">선택지</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:26%">방법</th><th>특징</th></tr>
+          <tr><td><b>napi-rs</b> (Rust)</td><td>★ <b>요즘 표준</b>. Node 애드온을 Rust 로.
+              swc·Prisma 엔진·lightningcss 가 이 방식</td></tr>
+          <tr><td><b>WebAssembly</b></td><td>브라우저·Node·Deno 어디서나 동작.
+              <b>샌드박스</b>라 안전하지만 시스템 접근이 제한적</td></tr>
+          <tr><td>node-gyp (C++)</td><td>전통 방식. 빌드 환경 문제로 고생이 많습니다</td></tr>
+          <tr><td>WASI</td><td>WASM 에 파일·소켓 접근을 더한 표준. 아직 발전 중</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="rust"><code>// napi-rs — Rust 로 Node 애드온
+use napi_derive::napi;
+
+#[napi]
+pub fn parse_logs(input: String) -&gt; Vec&lt;String&gt; {
+    input.lines().filter(|l| l.contains("ERROR"))
+         .map(String::from).collect()
+}
+
+// ★ 무거운 작업은 별도 스레드에서 (이벤트 루프를 안 막습니다)
+#[napi]
+pub async fn heavy_task(data: Vec&lt;u8&gt;) -&gt; napi::Result&lt;u32&gt; {
+    tokio::task::spawn_blocking(move || compute(&amp;data))
+        .await.map_err(|e| napi::Error::from_reason(e.to_string()))
+}</code></pre>
+      <pre class="code" data-lang="bash"><code>npm i -D @napi-rs/cli
+napi build --platform --release
+# → index.node 생성 · package.json 의 optionalDependencies 로 플랫폼별 배포</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WebAssembly 쓰기</h4>
+      <pre class="code" data-lang="javascript"><code>// Node 에서 wasm 로드
+import { readFile } from "node:fs/promises";
+
+const bytes = await readFile("./image.wasm");
+const { instance } = await WebAssembly.instantiate(bytes, {
+  env: { log: (ptr, len) =&gt; console.log(decode(ptr, len)) },
+});
+
+// ★ 메모리는 직접 다뤄야 합니다 (문자열·배열을 그냥 못 넘깁니다)
+const memory = instance.exports.memory;
+const view = new Uint8Array(memory.buffer);
+
+function passString(str) {
+  const bytes = new TextEncoder().encode(str);
+  const ptr = instance.exports.alloc(bytes.length);   // wasm 쪽 할당 함수
+  view.set(bytes, ptr);
+  return [ptr, bytes.length];
+}
+
+// wasm-bindgen(Rust)·AssemblyScript 를 쓰면 이 변환을 자동화해 줍니다</code></pre>
+      <pre class="code" data-lang="text"><code>WASM 이 실제로 값을 하는 경우
+  · 이미지·비디오 처리 (ffmpeg.wasm · squoosh)
+  · 암호화·해시 · 압축
+  · 파서 · 정규식 엔진 (swc · esbuild 는 네이티브)
+  · 물리 엔진 · 시뮬레이션
+  · 브라우저에서 기존 C/C++ 라이브러리 재사용
+
+값을 못 하는 경우
+  · DOM 조작 (JS 를 거쳐야 해서 오히려 느림)
+  · 짧은 함수 호출 반복 (경계를 넘는 비용이 큼)
+  · 문자열이 많이 오가는 작업 (직렬화 비용)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>측정 없이 도입하지 마세요.</b>
+        경계를 넘는 비용(직렬화·메모리 복사) 때문에
+        <b>작은 작업은 순수 JS 가 더 빠릅니다.</b>
+        “한 번 호출에 수 ms 이상 걸리는 큰 덩어리”일 때만 이득이 납니다.
+        그리고 <b>네이티브 애드온은 플랫폼마다 빌드</b>해야 배포가 됩니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d17 ==================== -->
+<section class="sec" id="d17">
+  <div class="sec-head rv">
+    <span class="no">DEEP 17</span>
+    <h2>스트림 · <span class="t">백프레셔 심화</span></h2>
+    <p class="lead">🟩 Node n05 의 확장판. <b>메모리가 터지는 진짜 이유</b>를 봅니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">백프레셔 — 읽는 속도 &gt; 쓰는 속도</h4>
+      <pre class="code" data-lang="text"><code>파일 읽기 500MB/s  →  네트워크 쓰기 10MB/s
+
+조절이 없으면
+  읽은 데이터가 메모리 버퍼에 계속 쌓임 → OOM
+
+highWaterMark (기본 64KB / objectMode 는 16개)
+  버퍼가 이 값을 넘으면 write() 가 false 를 반환
+  → 읽기를 멈추고 'drain' 이벤트를 기다려야 합니다
+
+★ pipe / pipeline 은 이것을 자동으로 해 줍니다.
+  직접 'data' 이벤트로 처리하면 이 보호가 사라집니다.</code></pre>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>❌ 백프레셔 무시</h5>
+          <pre class="code" data-lang="javascript"><code>readable.on("data", (chunk) =&gt; {
+  writable.write(chunk);
+  // 반환값을 무시 →
+  // 버퍼가 무한히 쌓임
+});</code></pre>
+        </div>
+        <div class="good">
+          <h5>✅ pipeline</h5>
+          <pre class="code" data-lang="javascript"><code>import { pipeline } from
+  "node:stream/promises";
+
+await pipeline(readable,
+               transform,
+               writable);
+// 속도 조절 + 에러 + 정리</code></pre>
+        </div>
+      </div>
+      <pre class="code" data-lang="javascript"><code>// 직접 제어해야 한다면
+for await (const chunk of readable) {
+  if (!writable.write(chunk)) {
+    await once(writable, "drain");        // ★ 버퍼가 비워질 때까지 대기
+  }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Web Streams 와 상호 변환</h4>
+      <pre class="code" data-lang="javascript"><code>// Node 스트림 ↔ Web 스트림 (fetch·브라우저 호환)
+import { Readable, Writable } from "node:stream";
+
+const webStream = Readable.toWeb(nodeReadable);
+const nodeStream = Readable.fromWeb(response.body);
+
+// fetch 응답을 스트리밍으로 처리 (메모리에 다 안 올림)
+const res = await fetch(url);
+await pipeline(
+  Readable.fromWeb(res.body),
+  createGunzip(),
+  createWriteStream("out.json"),
+);
+
+// TransformStream (Web 표준) — 브라우저·Node 공통
+const upper = new TransformStream({
+  transform(chunk, controller) {
+    controller.enqueue(chunk.toUpperCase());
+  },
+});</code></pre>
+      <pre class="code" data-lang="javascript"><code>// 실전 — 대용량 CSV 를 DB 로 (메모리 일정)
+import { pipeline } from "node:stream/promises";
+import { parse } from "csv-parse";
+
+let batch = [];
+await pipeline(
+  createReadStream("10gb.csv"),
+  parse({ columns: true }),
+  async function* (source) {
+    for await (const row of source) {
+      batch.push(row);
+      if (batch.length &gt;= 1000) {        // ★ 배치로 모아서
+        await db.insertMany(batch);
+        batch = [];
+        yield `${row.id}\n`;              // 진행 상황
+      }
+    }
+    if (batch.length) await db.insertMany(batch);
+  },
+  createWriteStream("progress.log"),
+);</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>스트림 에러 처리는 까다롭습니다.</b>
+        <code>pipe</code> 는 에러가 나도 <b>앞 스트림을 닫지 않아</b>
+        파일 디스크립터가 새어 나갑니다.
+        <b>항상 <code>pipeline</code></b> 을 쓰고, <code>AbortSignal</code> 로
+        취소도 함께 다루세요(d07).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d18 ==================== -->
+<section class="sec" id="d18">
+  <div class="sec-head rv">
+    <span class="no">DEEP 18</span>
+    <h2>번들 · <span class="t">트리셰이킹 심화</span></h2>
+    <p class="lead">“번들이 왜 이렇게 크죠?”를 <b>실제로 해결하는</b> 방법.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">트리셰이킹이 안 되는 이유</h4>
+      <pre class="code" data-lang="javascript"><code>// ① CommonJS 는 정적 분석이 안 됩니다
+const _ = require("lodash");        // ❌ 전부 포함 (70KB+)
+import { debounce } from "lodash-es";   // ✅ ESM 이라 필요한 것만
+
+// ② 부수 효과가 있다고 판단되면 못 지웁니다
+// package.json 에 명시하세요
+{ "sideEffects": false }                      // 부수 효과 없음
+{ "sideEffects": ["*.css", "./src/polyfill.js"] }   // 이것만 있음
+
+// ③ 배럴 파일 (index.ts 에서 몰아 export)
+export * from "./a";  export * from "./b";  // ...50개
+// → 하나만 import 해도 전부 평가될 수 있습니다
+// ★ 라이브러리에서는 피하고, 앱에서는 경로를 직접 import
+
+// ④ 클래스는 메서드 단위로 못 지웁니다
+class Utils { a(){} b(){} }        // a 만 써도 b 가 남습니다
+export function a(){}              // ✅ 함수로 나누면 지워집니다</code></pre>
+      <pre class="code" data-lang="bash"><code># 무엇이 번들을 키우는지 눈으로 보기
+npx vite-bundle-visualizer
+npx source-map-explorer dist/assets/*.js
+npx esbuild-visualizer --metadata meta.json
+
+# 설치 전에 크기 확인
+npx package-size lodash date-fns dayjs</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드 스플리팅과 로딩 전략</h4>
+      <pre class="code" data-lang="javascript"><code>// 동적 import — 필요할 때만 받아옵니다
+const { Chart } = await import("./Chart.js");        // 라우트·모달 단위
+
+// 프리로드 힌트 (곧 쓸 것을 미리)
+import(/* webpackPrefetch: true */ "./Heavy.js");
+
+// 벤더 청크 분리 — 자주 안 바뀌는 것을 따로 (캐시 효율)
+build: {
+  rollupOptions: {
+    output: {
+      manualChunks(id) {
+        if (id.includes("node_modules")) {
+          if (id.includes("react")) return "react";
+          return "vendor";
+        }
+      },
+    },
+  },
+}</code></pre>
+      <pre class="code" data-lang="text"><code>실무에서 번들을 줄인 사례
+  moment → date-fns        -230KB
+  lodash → lodash-es       -60KB (개별 import)
+  axios  → fetch(내장)      -35KB
+  전체 아이콘 → 쓰는 것만    -100KB+
+  polyfill 재검토           -50KB (타깃 브라우저 확인)
+
+★ 가장 큰 효과는 "안 쓰는 라이브러리를 지우는 것"입니다.
+  번들러 설정을 만지기 전에 의존성 목록부터 보세요.</code></pre>
+      <pre class="code" data-lang="javascript"><code>// 라이브러리를 만든다면 — 소비자의 트리셰이킹을 돕는 방법
+{
+  "type": "module",
+  "sideEffects": false,                  // ★
+  "exports": {
+    ".":        "./dist/index.js",
+    "./utils":  "./dist/utils.js",       // ★ 하위 경로 노출
+    "./package.json": "./package.json"
+  }
+}
+// 하위 경로를 열어 두면 사용자가 필요한 것만 가져갈 수 있습니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>서버(Node)는 번들 크기가 대개 문제가 아닙니다.</b>
+        이 절은 <b>프런트엔드·React Native·Electron</b> 에서 값을 합니다.
+        서버라면 <b>Docker 이미지 크기</b>(🧰 도구 o12)와
+        <b>콜드 스타트</b>(서버리스)를 대신 보세요.
       </div>
     </div>
   </div>

@@ -48,6 +48,7 @@ const TAB_LABEL = {
   python:"🐍 Python 기본", uv:"📦 uv 세팅", pandas:"🐼 Pandas", numpy:"🔢 NumPy",
   img:"🖼️ 이미지 처리", auto:"🖱️ 윈도우 매크로", qt:"💻 PySide6", toolbox:"🧰 실전 도구상자",
   algo:"🧠 알고리즘", db:"🗄️ 데이터베이스", scale:"⚡ 대규모 트래픽 · 서버",
+  deep:"🧬 초고급 · CPython 내부",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -82,6 +83,8 @@ const SEC_LV = {
                d17:"i",d18:"i",
   /* scale */  k01:"i",k02:"i",k03:"a",k04:"a",k05:"a",k06:"i",k07:"a",k08:"i",
                k09:"i",k10:"i",k11:"i",k12:"i",k13:"i",k14:"a",k15:"b",
+  /* deep */   z01:"a",z02:"a",z03:"a",z04:"a",z05:"a",z06:"a",z07:"a",z08:"a",
+               z09:"a",z10:"a",z11:"a",z12:"a",z13:"i",z14:"i",z15:"a",z16:"a",
   /* toolbox 는 자체 필터 사용 → 제외 */
 };
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 왕초보 한 줄 번역 (항상 표시) */
@@ -229,6 +232,23 @@ const EZ = {
  k13:"“몇 명까지 버팁니까?”는 <b>재 봐야</b> 압니다. Locust는 파이썬으로 시나리오를 씁니다.",
  k14:"<b>py-spy</b>는 서비스를 끄지 않고도 “지금 뭐가 느린지” 보여 줘요. 파이썬 운영의 필수 도구입니다.",
  k15:"지금까지의 내용을 <b>한 장</b>으로. 배포 전 체크리스트와 면접 답변 뼈대입니다.",
+
+ z01:"파이썬도 <b>바이트코드로 컴파일된 뒤</b> 실행돼요. <code>dis</code>로 그 결과를 직접 볼 수 있습니다.",
+ z02:"변수는 값이 아니라 <b>객체를 가리키는 이름표</b>예요. 그 객체를 몇 명이 가리키는지 세다가 0이 되면 지웁니다.",
+ z03:"서로를 가리키는 객체(순환 참조)는 카운트가 0이 안 돼요. 그걸 <b>GC가 따로</b> 정리합니다.",
+ z04:"메모리가 안 줄면 <b>누군가 계속 붙잡고</b> 있는 겁니다. 스냅샷 두 장을 비교해 찾아요.",
+ z05:"<code>@property</code>와 ORM 필드가 돌아가는 원리예요. <b>속성 접근을 가로채는</b> 규약입니다.",
+ z06:"“클래스를 만드는 클래스”. Django·Pydantic이 마법을 부리는 자리인데, <b>보통은 필요 없습니다.</b>",
+ z07:"<code>@functools.wraps</code>를 빼먹으면 <b>함수 이름과 설명이 사라져요</b>. 실무 사고의 단골입니다.",
+ z08:"<code>async/await</code>는 사실 <b>제너레이터에서 나왔어요</b>. 멈췄다 재개하는 원리가 같습니다.",
+ z09:"취소는 <b>예외로 전달</b>돼요. <code>finally</code>에서 정리하지 않으면 좀비 작업이 쌓입니다.",
+ z10:"GIL은 <b>참조 카운팅을 지키려고</b> 생겼어요. 3.13부터 GIL 없는 빌드가 실험적으로 나왔습니다.",
+ z11:"느린 구간만 <b>Rust·C로 갈아 끼우는</b> 방법이에요. Polars·Pydantic v2가 이 방식입니다.",
+ z12:"<b>Protocol</b>을 쓰면 상속 없이도 “모양만 맞으면” 통과해요. 파이썬다운 인터페이스입니다.",
+ z13:"값을 <b>바꾸지 않고 새로 만드는</b> 방식이에요. <code>frozen=True</code> 하나로 버그가 크게 줍니다.",
+ z14:"자바 책의 패턴을 그대로 옮기지 마세요. 파이썬에선 <b>이미 언어 기능</b>인 게 많습니다.",
+ z15:"<code>pickle</code>은 <b>임의 코드 실행</b>이 설계에 포함돼 있어요. 사용자 입력에 절대 쓰면 안 됩니다.",
+ z16:"규모가 커지면 <b>폴더 구조가 곧 설계</b>예요. 의존 방향을 한쪽으로 고정하세요.",
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 (표시 필터는 없음 — 항상 전부 보입니다) */
@@ -254,7 +274,7 @@ const EZ = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (11번째 '대규모 트래픽' 탭은 단축키 없음) */
-const TAB_ORDER = ["python","uv","pandas","numpy","img","auto","qt","toolbox","algo","db","scale"];
+const TAB_ORDER = ["python","uv","pandas","numpy","img","auto","qt","toolbox","algo","db","scale","deep"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;

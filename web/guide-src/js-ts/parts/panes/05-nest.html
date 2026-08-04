@@ -12,7 +12,7 @@
     Express 가 <b>자유</b>를 준다면 Nest 는 <b>일관성</b>을 줍니다 — 팀이 커질수록 후자가 이깁니다.
   </p>
   <div class="stats">
-    <div><b>16</b><span>SECTIONS</span></div>
+    <div><b>17</b><span>SECTIONS</span></div>
     <div><b>DI</b><span>스프링과 동일 개념</span></div>
     <div><b>TS</b><span>기본 언어</span></div>
     <div><b>11</b><span>최신 메이저</span></div>
@@ -1428,6 +1428,115 @@ SwaggerModule.setup("docs", app, SwaggerModule.createDocument(app, config));
         서버리스에 올릴 계획이라면 미리 측정하세요.
         컨테이너라면 <b>readiness 프로브</b>로 트래픽 투입을 늦추면 됩니다.
         운영 전반은 <b>🚀 대규모 트래픽</b> 탭에서 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== s17 ==================== -->
+<section class="sec" id="s17">
+  <div class="sec-head rv">
+    <span class="no">NEST 17</span>
+    <h2>CQRS · <span class="t">고급 구조</span></h2>
+    <p class="lead">규모가 커진 서비스에서 <b>Nest 를 더 밀어붙이는</b> 방법들입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CQRS — 읽기와 쓰기를 나누기</h4>
+      <div class="dep"><code>npm i @nestjs/cqrs</code></div>
+      <pre class="code" data-lang="typescript"><code>// 명령 — 상태를 바꿉니다
+export class CreateOrderCommand {
+  constructor(readonly userId: number, readonly items: OrderItem[]) {}
+}
+
+<span class="t-ann">@CommandHandler</span>(CreateOrderCommand)
+export class CreateOrderHandler implements ICommandHandler&lt;CreateOrderCommand&gt; {
+  constructor(private readonly repo: OrderRepository,
+              private readonly publisher: EventPublisher) {}
+
+  async execute(cmd: CreateOrderCommand) {
+    const order = this.publisher.mergeObjectContext(Order.create(cmd));
+    await this.repo.save(order);
+    order.commit();                    // ★ 쌓인 도메인 이벤트를 한 번에 발행
+    return order.id;
+  }
+}
+
+// 조회 — 상태를 안 바꿉니다 (읽기 전용 모델·복제본을 써도 됩니다)
+<span class="t-ann">@QueryHandler</span>(GetOrderListQuery)
+export class GetOrderListHandler {
+  async execute(q: GetOrderListQuery) {
+    return this.readDb.query(...);     // ★ 정규화를 깬 뷰 테이블도 가능
+  }
+}
+
+// 이벤트 — 부수 효과
+<span class="t-ann">@EventsHandler</span>(OrderCreatedEvent)
+export class SendMailOnOrderCreated implements IEventHandler&lt;OrderCreatedEvent&gt; {
+  handle(e: OrderCreatedEvent) { this.queue.add("mail", { id: e.orderId }); }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>CQRS 를 기본값으로 삼지 마세요.</b>
+        파일 수가 <b>3~4배</b>로 늘고, 단순 CRUD 에는 순수한 오버헤드입니다.
+        <b>읽기와 쓰기의 요구가 확연히 다를 때</b>
+        (쓰기는 복잡한 규칙, 읽기는 대량 조회·다른 형태)만 값을 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동적 모듈 · 커스텀 프로바이더</h4>
+      <pre class="code" data-lang="typescript"><code>// 사내 공통 모듈을 만들 때의 표준 형태
+<span class="t-ann">@Module</span>({})
+export class TracingModule {
+  static forRootAsync(options: TracingAsyncOptions): DynamicModule {
+    return {
+      module: TracingModule,
+      global: true,
+      imports: options.imports ?? [],
+      providers: [
+        {
+          provide: TRACING_OPTIONS,
+          useFactory: options.useFactory,
+          inject: options.inject ?? [],
+        },
+        TracingService,
+      ],
+      exports: [TracingService],
+    };
+  }
+}
+
+// ConfigurableModuleBuilder — 위 보일러플레이트를 자동 생성 (Nest 9+)
+export const { ConfigurableModuleClass, MODULE_OPTIONS_TOKEN } =
+  new ConfigurableModuleBuilder&lt;TracingOptions&gt;().setClassMethodName("forRoot").build();
+
+export class TracingModule extends ConfigurableModuleClass {}</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 요청 컨텍스트 전파 — REQUEST 스코프보다 훨씬 빠릅니다
+import { ClsModule, ClsService } from "nestjs-cls";
+
+ClsModule.forRoot({
+  global: true,
+  middleware: {
+    mount: true,
+    setup: (cls, req) =&gt; {
+      cls.set("requestId", req.headers["x-request-id"] ?? randomUUID());
+      cls.set("userId", req.user?.id);
+    },
+  },
+});
+
+// 어디서든 꺼내 씁니다 (매개변수로 안 넘겨도 됩니다)
+constructor(private readonly cls: ClsService) {}
+this.logger.log({ requestId: this.cls.get("requestId") }, "주문 생성");
+// ★ 내부적으로 AsyncLocalStorage 를 씁니다 (🟩 Node n16)
+// ★ 트랜잭션 전파(s12)도 같은 원리입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>Scope.REQUEST</code> 를 피해야 하는 이유</b> —
+        요청마다 <b>의존성 트리 전체를 새로 만듭니다.</b>
+        그 프로바이더를 주입받는 상위 프로바이더도 전부 요청 스코프가 되어
+        <b>성능이 눈에 띄게 떨어집니다.</b>
+        요청 정보가 필요하면 <b>CLS(AsyncLocalStorage)</b> 를 쓰세요.
       </div>
     </div>
   </div>

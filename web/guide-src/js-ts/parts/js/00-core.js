@@ -228,6 +228,10 @@ const SEC_KW = {
   d08:"proxy reflect 메타프로그래밍 트랩 get set 프록시",
   d13:"보안 프로토타입오염 공급망 supplychain npm audit 악성패키지 postinstall",
   d15:"아키텍처 계층 헥사고날 클린 ddd 의존성역전 폴더구조",
+  d16:"webassembly wasm 네이티브애드온 napi-rs rust node-gyp wasi 고속화",
+  d17:"스트림 백프레셔 highwatermark pipeline drain webstreams 대용량 csv 메모리",
+  d18:"번들 트리셰이킹 sideeffects 코드스플리팅 동적import 청크 lodash moment 번들크기",
+  s17:"cqrs 명령 조회 분리 이벤트소싱 동적모듈 configurablemodule cls asynclocalstorage 요청스코프",
 };
 let FIDX = null;
 

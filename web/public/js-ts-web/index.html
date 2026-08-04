@@ -2181,6 +2181,7 @@ tr.jnull td{color:var(--dim-2);font-style:italic}
   <a href="#s14"><em>14</em>테스트</a>
   <a href="#s15"><em>15</em>WebSocket · MSA · GraphQL</a>
   <a href="#s16"><em>16</em>배포 · 모니터링</a>
+  <a href="#s17"><em>17</em>CQRS · 고급 구조 ★</a>
 </div>
 
 <div class="navset" data-nav="rn">
@@ -2300,6 +2301,11 @@ tr.jnull td{color:var(--dim-2);font-style:italic}
   <a href="#d13"><em>13</em>보안 — 공급망 · 오염 ★</a>
   <a href="#d14"><em>14</em>성능 최적화 종합 ★</a>
   <a href="#d15"><em>15</em>아키텍처 — 계층 · DDD</a>
+
+  <div class="grp">심화 주제 · Advanced</div>
+  <a href="#d16"><em>16</em>WebAssembly · 네이티브 애드온</a>
+  <a href="#d17"><em>17</em>스트림 · 백프레셔 심화 ★</a>
+  <a href="#d18"><em>18</em>번들 · 트리셰이킹 심화 ★</a>
 </div>
 </nav>
 
@@ -7737,7 +7743,7 @@ app.get("/health", async (req, res) =&gt; {
     Express 가 <b>자유</b>를 준다면 Nest 는 <b>일관성</b>을 줍니다 — 팀이 커질수록 후자가 이깁니다.
   </p>
   <div class="stats">
-    <div><b>16</b><span>SECTIONS</span></div>
+    <div><b>17</b><span>SECTIONS</span></div>
     <div><b>DI</b><span>스프링과 동일 개념</span></div>
     <div><b>TS</b><span>기본 언어</span></div>
     <div><b>11</b><span>최신 메이저</span></div>
@@ -9153,6 +9159,115 @@ SwaggerModule.setup("docs", app, SwaggerModule.createDocument(app, config));
         서버리스에 올릴 계획이라면 미리 측정하세요.
         컨테이너라면 <b>readiness 프로브</b>로 트래픽 투입을 늦추면 됩니다.
         운영 전반은 <b>🚀 대규모 트래픽</b> 탭에서 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== s17 ==================== -->
+<section class="sec" id="s17">
+  <div class="sec-head rv">
+    <span class="no">NEST 17</span>
+    <h2>CQRS · <span class="t">고급 구조</span></h2>
+    <p class="lead">규모가 커진 서비스에서 <b>Nest 를 더 밀어붙이는</b> 방법들입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CQRS — 읽기와 쓰기를 나누기</h4>
+      <div class="dep"><code>npm i @nestjs/cqrs</code></div>
+      <pre class="code" data-lang="typescript"><code>// 명령 — 상태를 바꿉니다
+export class CreateOrderCommand {
+  constructor(readonly userId: number, readonly items: OrderItem[]) {}
+}
+
+<span class="t-ann">@CommandHandler</span>(CreateOrderCommand)
+export class CreateOrderHandler implements ICommandHandler&lt;CreateOrderCommand&gt; {
+  constructor(private readonly repo: OrderRepository,
+              private readonly publisher: EventPublisher) {}
+
+  async execute(cmd: CreateOrderCommand) {
+    const order = this.publisher.mergeObjectContext(Order.create(cmd));
+    await this.repo.save(order);
+    order.commit();                    // ★ 쌓인 도메인 이벤트를 한 번에 발행
+    return order.id;
+  }
+}
+
+// 조회 — 상태를 안 바꿉니다 (읽기 전용 모델·복제본을 써도 됩니다)
+<span class="t-ann">@QueryHandler</span>(GetOrderListQuery)
+export class GetOrderListHandler {
+  async execute(q: GetOrderListQuery) {
+    return this.readDb.query(...);     // ★ 정규화를 깬 뷰 테이블도 가능
+  }
+}
+
+// 이벤트 — 부수 효과
+<span class="t-ann">@EventsHandler</span>(OrderCreatedEvent)
+export class SendMailOnOrderCreated implements IEventHandler&lt;OrderCreatedEvent&gt; {
+  handle(e: OrderCreatedEvent) { this.queue.add("mail", { id: e.orderId }); }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>CQRS 를 기본값으로 삼지 마세요.</b>
+        파일 수가 <b>3~4배</b>로 늘고, 단순 CRUD 에는 순수한 오버헤드입니다.
+        <b>읽기와 쓰기의 요구가 확연히 다를 때</b>
+        (쓰기는 복잡한 규칙, 읽기는 대량 조회·다른 형태)만 값을 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동적 모듈 · 커스텀 프로바이더</h4>
+      <pre class="code" data-lang="typescript"><code>// 사내 공통 모듈을 만들 때의 표준 형태
+<span class="t-ann">@Module</span>({})
+export class TracingModule {
+  static forRootAsync(options: TracingAsyncOptions): DynamicModule {
+    return {
+      module: TracingModule,
+      global: true,
+      imports: options.imports ?? [],
+      providers: [
+        {
+          provide: TRACING_OPTIONS,
+          useFactory: options.useFactory,
+          inject: options.inject ?? [],
+        },
+        TracingService,
+      ],
+      exports: [TracingService],
+    };
+  }
+}
+
+// ConfigurableModuleBuilder — 위 보일러플레이트를 자동 생성 (Nest 9+)
+export const { ConfigurableModuleClass, MODULE_OPTIONS_TOKEN } =
+  new ConfigurableModuleBuilder&lt;TracingOptions&gt;().setClassMethodName("forRoot").build();
+
+export class TracingModule extends ConfigurableModuleClass {}</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 요청 컨텍스트 전파 — REQUEST 스코프보다 훨씬 빠릅니다
+import { ClsModule, ClsService } from "nestjs-cls";
+
+ClsModule.forRoot({
+  global: true,
+  middleware: {
+    mount: true,
+    setup: (cls, req) =&gt; {
+      cls.set("requestId", req.headers["x-request-id"] ?? randomUUID());
+      cls.set("userId", req.user?.id);
+    },
+  },
+});
+
+// 어디서든 꺼내 씁니다 (매개변수로 안 넘겨도 됩니다)
+constructor(private readonly cls: ClsService) {}
+this.logger.log({ requestId: this.cls.get("requestId") }, "주문 생성");
+// ★ 내부적으로 AsyncLocalStorage 를 씁니다 (🟩 Node n16)
+// ★ 트랜잭션 전파(s12)도 같은 원리입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>Scope.REQUEST</code> 를 피해야 하는 이유</b> —
+        요청마다 <b>의존성 트리 전체를 새로 만듭니다.</b>
+        그 프로바이더를 주입받는 상위 프로바이더도 전부 요청 스코프가 되어
+        <b>성능이 눈에 띄게 떨어집니다.</b>
+        요청 정보가 필요하면 <b>CLS(AsyncLocalStorage)</b> 를 쓰세요.
       </div>
     </div>
   </div>
@@ -13945,7 +14060,7 @@ trivy image my-image                   # CI 에 넣으면 좋습니다</code></p
     실무에서 매일 쓰지는 않지만, <b>장애를 해결할 때와 면접에서</b> 차이를 만듭니다.
   </p>
   <div class="stats">
-    <div><b>15</b><span>SECTIONS</span></div>
+    <div><b>18</b><span>SECTIONS</span></div>
     <div><b>V8</b><span>엔진 내부</span></div>
     <div><b>측정</b><span>추측이 아니라</span></div>
     <div><b>🔴</b><span>전부 고급</span></div>
@@ -15198,6 +15313,284 @@ export class Order {
   </div>
 </section>
 
+
+<!-- ==================== d16 ==================== -->
+<section class="sec" id="d16">
+  <div class="sec-head rv">
+    <span class="no">DEEP 16</span>
+    <h2>WebAssembly · <span class="t">네이티브 애드온</span></h2>
+    <p class="lead">자바스크립트가 <b>구조적으로 못 따라가는 구간</b>을 다른 언어로 채웁니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">선택지</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:26%">방법</th><th>특징</th></tr>
+          <tr><td><b>napi-rs</b> (Rust)</td><td>★ <b>요즘 표준</b>. Node 애드온을 Rust 로.
+              swc·Prisma 엔진·lightningcss 가 이 방식</td></tr>
+          <tr><td><b>WebAssembly</b></td><td>브라우저·Node·Deno 어디서나 동작.
+              <b>샌드박스</b>라 안전하지만 시스템 접근이 제한적</td></tr>
+          <tr><td>node-gyp (C++)</td><td>전통 방식. 빌드 환경 문제로 고생이 많습니다</td></tr>
+          <tr><td>WASI</td><td>WASM 에 파일·소켓 접근을 더한 표준. 아직 발전 중</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="rust"><code>// napi-rs — Rust 로 Node 애드온
+use napi_derive::napi;
+
+#[napi]
+pub fn parse_logs(input: String) -&gt; Vec&lt;String&gt; {
+    input.lines().filter(|l| l.contains("ERROR"))
+         .map(String::from).collect()
+}
+
+// ★ 무거운 작업은 별도 스레드에서 (이벤트 루프를 안 막습니다)
+#[napi]
+pub async fn heavy_task(data: Vec&lt;u8&gt;) -&gt; napi::Result&lt;u32&gt; {
+    tokio::task::spawn_blocking(move || compute(&amp;data))
+        .await.map_err(|e| napi::Error::from_reason(e.to_string()))
+}</code></pre>
+      <pre class="code" data-lang="bash"><code>npm i -D @napi-rs/cli
+napi build --platform --release
+# → index.node 생성 · package.json 의 optionalDependencies 로 플랫폼별 배포</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WebAssembly 쓰기</h4>
+      <pre class="code" data-lang="javascript"><code>// Node 에서 wasm 로드
+import { readFile } from "node:fs/promises";
+
+const bytes = await readFile("./image.wasm");
+const { instance } = await WebAssembly.instantiate(bytes, {
+  env: { log: (ptr, len) =&gt; console.log(decode(ptr, len)) },
+});
+
+// ★ 메모리는 직접 다뤄야 합니다 (문자열·배열을 그냥 못 넘깁니다)
+const memory = instance.exports.memory;
+const view = new Uint8Array(memory.buffer);
+
+function passString(str) {
+  const bytes = new TextEncoder().encode(str);
+  const ptr = instance.exports.alloc(bytes.length);   // wasm 쪽 할당 함수
+  view.set(bytes, ptr);
+  return [ptr, bytes.length];
+}
+
+// wasm-bindgen(Rust)·AssemblyScript 를 쓰면 이 변환을 자동화해 줍니다</code></pre>
+      <pre class="code" data-lang="text"><code>WASM 이 실제로 값을 하는 경우
+  · 이미지·비디오 처리 (ffmpeg.wasm · squoosh)
+  · 암호화·해시 · 압축
+  · 파서 · 정규식 엔진 (swc · esbuild 는 네이티브)
+  · 물리 엔진 · 시뮬레이션
+  · 브라우저에서 기존 C/C++ 라이브러리 재사용
+
+값을 못 하는 경우
+  · DOM 조작 (JS 를 거쳐야 해서 오히려 느림)
+  · 짧은 함수 호출 반복 (경계를 넘는 비용이 큼)
+  · 문자열이 많이 오가는 작업 (직렬화 비용)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>측정 없이 도입하지 마세요.</b>
+        경계를 넘는 비용(직렬화·메모리 복사) 때문에
+        <b>작은 작업은 순수 JS 가 더 빠릅니다.</b>
+        “한 번 호출에 수 ms 이상 걸리는 큰 덩어리”일 때만 이득이 납니다.
+        그리고 <b>네이티브 애드온은 플랫폼마다 빌드</b>해야 배포가 됩니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d17 ==================== -->
+<section class="sec" id="d17">
+  <div class="sec-head rv">
+    <span class="no">DEEP 17</span>
+    <h2>스트림 · <span class="t">백프레셔 심화</span></h2>
+    <p class="lead">🟩 Node n05 의 확장판. <b>메모리가 터지는 진짜 이유</b>를 봅니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">백프레셔 — 읽는 속도 &gt; 쓰는 속도</h4>
+      <pre class="code" data-lang="text"><code>파일 읽기 500MB/s  →  네트워크 쓰기 10MB/s
+
+조절이 없으면
+  읽은 데이터가 메모리 버퍼에 계속 쌓임 → OOM
+
+highWaterMark (기본 64KB / objectMode 는 16개)
+  버퍼가 이 값을 넘으면 write() 가 false 를 반환
+  → 읽기를 멈추고 'drain' 이벤트를 기다려야 합니다
+
+★ pipe / pipeline 은 이것을 자동으로 해 줍니다.
+  직접 'data' 이벤트로 처리하면 이 보호가 사라집니다.</code></pre>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>❌ 백프레셔 무시</h5>
+          <pre class="code" data-lang="javascript"><code>readable.on("data", (chunk) =&gt; {
+  writable.write(chunk);
+  // 반환값을 무시 →
+  // 버퍼가 무한히 쌓임
+});</code></pre>
+        </div>
+        <div class="good">
+          <h5>✅ pipeline</h5>
+          <pre class="code" data-lang="javascript"><code>import { pipeline } from
+  "node:stream/promises";
+
+await pipeline(readable,
+               transform,
+               writable);
+// 속도 조절 + 에러 + 정리</code></pre>
+        </div>
+      </div>
+      <pre class="code" data-lang="javascript"><code>// 직접 제어해야 한다면
+for await (const chunk of readable) {
+  if (!writable.write(chunk)) {
+    await once(writable, "drain");        // ★ 버퍼가 비워질 때까지 대기
+  }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Web Streams 와 상호 변환</h4>
+      <pre class="code" data-lang="javascript"><code>// Node 스트림 ↔ Web 스트림 (fetch·브라우저 호환)
+import { Readable, Writable } from "node:stream";
+
+const webStream = Readable.toWeb(nodeReadable);
+const nodeStream = Readable.fromWeb(response.body);
+
+// fetch 응답을 스트리밍으로 처리 (메모리에 다 안 올림)
+const res = await fetch(url);
+await pipeline(
+  Readable.fromWeb(res.body),
+  createGunzip(),
+  createWriteStream("out.json"),
+);
+
+// TransformStream (Web 표준) — 브라우저·Node 공통
+const upper = new TransformStream({
+  transform(chunk, controller) {
+    controller.enqueue(chunk.toUpperCase());
+  },
+});</code></pre>
+      <pre class="code" data-lang="javascript"><code>// 실전 — 대용량 CSV 를 DB 로 (메모리 일정)
+import { pipeline } from "node:stream/promises";
+import { parse } from "csv-parse";
+
+let batch = [];
+await pipeline(
+  createReadStream("10gb.csv"),
+  parse({ columns: true }),
+  async function* (source) {
+    for await (const row of source) {
+      batch.push(row);
+      if (batch.length &gt;= 1000) {        // ★ 배치로 모아서
+        await db.insertMany(batch);
+        batch = [];
+        yield `${row.id}\n`;              // 진행 상황
+      }
+    }
+    if (batch.length) await db.insertMany(batch);
+  },
+  createWriteStream("progress.log"),
+);</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>스트림 에러 처리는 까다롭습니다.</b>
+        <code>pipe</code> 는 에러가 나도 <b>앞 스트림을 닫지 않아</b>
+        파일 디스크립터가 새어 나갑니다.
+        <b>항상 <code>pipeline</code></b> 을 쓰고, <code>AbortSignal</code> 로
+        취소도 함께 다루세요(d07).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d18 ==================== -->
+<section class="sec" id="d18">
+  <div class="sec-head rv">
+    <span class="no">DEEP 18</span>
+    <h2>번들 · <span class="t">트리셰이킹 심화</span></h2>
+    <p class="lead">“번들이 왜 이렇게 크죠?”를 <b>실제로 해결하는</b> 방법.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">트리셰이킹이 안 되는 이유</h4>
+      <pre class="code" data-lang="javascript"><code>// ① CommonJS 는 정적 분석이 안 됩니다
+const _ = require("lodash");        // ❌ 전부 포함 (70KB+)
+import { debounce } from "lodash-es";   // ✅ ESM 이라 필요한 것만
+
+// ② 부수 효과가 있다고 판단되면 못 지웁니다
+// package.json 에 명시하세요
+{ "sideEffects": false }                      // 부수 효과 없음
+{ "sideEffects": ["*.css", "./src/polyfill.js"] }   // 이것만 있음
+
+// ③ 배럴 파일 (index.ts 에서 몰아 export)
+export * from "./a";  export * from "./b";  // ...50개
+// → 하나만 import 해도 전부 평가될 수 있습니다
+// ★ 라이브러리에서는 피하고, 앱에서는 경로를 직접 import
+
+// ④ 클래스는 메서드 단위로 못 지웁니다
+class Utils { a(){} b(){} }        // a 만 써도 b 가 남습니다
+export function a(){}              // ✅ 함수로 나누면 지워집니다</code></pre>
+      <pre class="code" data-lang="bash"><code># 무엇이 번들을 키우는지 눈으로 보기
+npx vite-bundle-visualizer
+npx source-map-explorer dist/assets/*.js
+npx esbuild-visualizer --metadata meta.json
+
+# 설치 전에 크기 확인
+npx package-size lodash date-fns dayjs</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드 스플리팅과 로딩 전략</h4>
+      <pre class="code" data-lang="javascript"><code>// 동적 import — 필요할 때만 받아옵니다
+const { Chart } = await import("./Chart.js");        // 라우트·모달 단위
+
+// 프리로드 힌트 (곧 쓸 것을 미리)
+import(/* webpackPrefetch: true */ "./Heavy.js");
+
+// 벤더 청크 분리 — 자주 안 바뀌는 것을 따로 (캐시 효율)
+build: {
+  rollupOptions: {
+    output: {
+      manualChunks(id) {
+        if (id.includes("node_modules")) {
+          if (id.includes("react")) return "react";
+          return "vendor";
+        }
+      },
+    },
+  },
+}</code></pre>
+      <pre class="code" data-lang="text"><code>실무에서 번들을 줄인 사례
+  moment → date-fns        -230KB
+  lodash → lodash-es       -60KB (개별 import)
+  axios  → fetch(내장)      -35KB
+  전체 아이콘 → 쓰는 것만    -100KB+
+  polyfill 재검토           -50KB (타깃 브라우저 확인)
+
+★ 가장 큰 효과는 "안 쓰는 라이브러리를 지우는 것"입니다.
+  번들러 설정을 만지기 전에 의존성 목록부터 보세요.</code></pre>
+      <pre class="code" data-lang="javascript"><code>// 라이브러리를 만든다면 — 소비자의 트리셰이킹을 돕는 방법
+{
+  "type": "module",
+  "sideEffects": false,                  // ★
+  "exports": {
+    ".":        "./dist/index.js",
+    "./utils":  "./dist/utils.js",       // ★ 하위 경로 노출
+    "./package.json": "./package.json"
+  }
+}
+// 하위 경로를 열어 두면 사용자가 필요한 것만 가져갈 수 있습니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>서버(Node)는 번들 크기가 대개 문제가 아닙니다.</b>
+        이 절은 <b>프런트엔드·React Native·Electron</b> 에서 값을 합니다.
+        서버라면 <b>Docker 이미지 크기</b>(🧰 도구 o12)와
+        <b>콜드 스타트</b>(서버리스)를 대신 보세요.
+      </div>
+    </div>
+  </div>
+</section>
+
 </div><!-- /pane-deep -->
 <footer>
   JavaScript &amp; TypeScript Visual Guide · Node · NestJS · React Native · Electron · 단일 HTML 학습 자료<br>
@@ -15440,6 +15833,10 @@ const SEC_KW = {
   d08:"proxy reflect 메타프로그래밍 트랩 get set 프록시",
   d13:"보안 프로토타입오염 공급망 supplychain npm audit 악성패키지 postinstall",
   d15:"아키텍처 계층 헥사고날 클린 ddd 의존성역전 폴더구조",
+  d16:"webassembly wasm 네이티브애드온 napi-rs rust node-gyp wasi 고속화",
+  d17:"스트림 백프레셔 highwatermark pipeline drain webstreams 대용량 csv 메모리",
+  d18:"번들 트리셰이킹 sideeffects 코드스플리팅 동적import 청크 lodash moment 번들크기",
+  s17:"cqrs 명령 조회 분리 이벤트소싱 동적모듈 configurablemodule cls asynclocalstorage 요청스코프",
 };
 let FIDX = null;
 
@@ -15861,7 +16258,7 @@ const SEC_LV = {
   /* expr */ x01:"b",x02:"b",x03:"i",x04:"b",x05:"i",x06:"i",x07:"a",x08:"i",
              x09:"i",x10:"i",x11:"i",x12:"i",
   /* nest */ s01:"b",s02:"b",s03:"i",s04:"b",s05:"b",s06:"i",s07:"i",s08:"a",
-             s09:"a",s10:"b",s11:"i",s12:"a",s13:"a",s14:"i",s15:"a",s16:"i",
+             s09:"a",s10:"b",s11:"i",s12:"a",s13:"a",s14:"i",s15:"a",s16:"i",s17:"a",
   /* rn   */ r01:"i",r02:"b",r03:"b",r04:"i",r05:"b",r06:"i",r07:"i",r08:"i",
              r09:"b",r10:"i",r11:"a",r12:"a",r13:"a",r14:"i",
   /* elec */ e01:"b",e02:"b",e03:"i",e04:"a",e05:"b",e06:"b",e07:"i",e08:"i",
@@ -15872,6 +16269,7 @@ const SEC_LV = {
              o09:"i",o10:"b",o11:"i",o12:"i",o13:"b",
   /* deep */ d01:"a",d02:"a",d03:"a",d04:"a",d05:"a",d06:"a",d07:"a",d08:"a",
              d09:"i",d10:"i",d11:"a",d12:"a",d13:"a",d14:"a",d15:"a",
+             d16:"a",d17:"a",d18:"a",
 };
 
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 한 줄 번역 (항상 표시) */
@@ -15957,6 +16355,7 @@ const EZ = {
  s14:"Nest는 <b>테스트 모듈</b>을 따로 만들어 줘서 가짜 객체 끼우기가 쉽습니다.",
  s15:"실시간(WebSocket)·서비스 분리(MSA)·GraphQL을 <b>같은 구조 그대로</b> 확장할 수 있어요.",
  s16:"헬스체크와 지표 노출은 <b>배포 전에</b> 붙여 두세요. 없으면 장애를 늦게 압니다.",
+ s17:"읽기와 쓰기를 <b>아예 다른 코드로</b> 나누는 방식이에요. 단순 CRUD엔 과하지만, 규모가 크면 값을 합니다.",
 
  r01:"자바스크립트로 <b>진짜 앱</b>을 만듭니다. 화면은 웹뷰가 아니라 <b>네이티브 부품</b>이에요.",
  r02:"처음엔 <b>Expo</b>로 시작하세요. 네이티브 코드가 꼭 필요해질 때 넘어가면 됩니다.",
@@ -16031,6 +16430,9 @@ const EZ = {
  d13:"내 코드보다 <b>가져다 쓴 패키지</b>가 더 위험할 수 있어요. 공급망 공격이 실제로 일어납니다.",
  d14:"측정 → 없애기 → 줄이기 순서예요. <b>측정 없는 최적화는 대부분 헛수고</b>입니다.",
  d15:"규모가 커지면 <b>폴더 구조가 곧 설계</b>가 됩니다. 의존 방향을 한 쪽으로 고정하세요.",
+ d16:"자바스크립트로 안 되는 구간만 <b>Rust·WASM으로 갈아 끼우는</b> 방법이에요. 작은 작업엔 오히려 손해입니다.",
+ d17:"읽는 속도가 쓰는 속도보다 빠르면 <b>메모리에 계속 쌓입니다.</b> <code>pipeline</code>이 이걸 알아서 조절해 줘요.",
+ d18:"“번들이 왜 이렇게 크죠?”의 답. <b>안 쓰는 라이브러리를 지우는 것</b>이 가장 큰 효과입니다.",
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 */

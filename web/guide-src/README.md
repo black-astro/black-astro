@@ -8,9 +8,9 @@
 
 | 가이드 | 소스 | 배포 경로 | 규모 |
 |---|---|---|---|
-| 🐍 Python | `guide-src/python/` | `/python-web/` | 11탭 · 161섹션 |
-| ☕ Java | `guide-src/java/` | `/java-web/` | 10탭 · 134섹션 |
-| 🟨 JS · TS | `guide-src/js-ts/` | `/js-ts-web/` | 10탭 · 146섹션 |
+| 🐍 Python | `guide-src/python/` | `/python-web/` | 12탭 · 177섹션 |
+| ☕ Java | `guide-src/java/` | `/java-web/` | 11탭 · 150섹션 |
+| 🟨 JS · TS | `guide-src/js-ts/` | `/js-ts-web/` | 10탭 · 150섹션 |
 
 세 가이드는 **CSS 5개(01~05)를 공유**합니다(테마 동일).
 각 폴더의 `css/06-*.css` 만 그 가이드 전용입니다.
@@ -77,9 +77,13 @@ Python 가이드만 데모 스크립트가 많아 `js/` 가 13개로 더 잘게 
 
 | 가이드 | 탭 |
 |---|---|
-| 🐍 Python | Python 기본 · uv · Pandas · NumPy · 이미지 · 윈도우 매크로 · PySide6 · 도구상자 · 알고리즘 · DB · **대규모 트래픽** |
-| ☕ Java | Java 기초 · 고급/동시성 · Spring Boot · WebFlux · 데이터/JPA · Security · Gateway · 실전 도구 · JavaFX · **대규모 트래픽** |
-| 🟨 JS · TS | JavaScript · TypeScript · Node.js · Express · NestJS · React Native · Electron · **대규모 트래픽** · 실전 도구 · 초고급 |
+| 🐍 Python | Python 기본 · uv · Pandas · NumPy · 이미지 · 윈도우 매크로 · PySide6 · 도구상자 · 알고리즘 · DB · **대규모 트래픽** · **초고급** |
+| ☕ Java | Java 기초 · 고급/동시성 · Spring Boot · WebFlux · 데이터/JPA · Security · Gateway · 실전 도구 · JavaFX · **대규모 트래픽** · **초고급** |
+| 🟨 JS · TS | JavaScript · TypeScript · Node.js · Express · NestJS · React Native · Electron · **대규모 트래픽** · 실전 도구 · **초고급** |
+
+세 가이드 모두 마지막 두 탭이 **대규모 트래픽 + 초고급**입니다.
+초고급 탭은 각 언어의 런타임 내부(CPython / JVM / V8)와
+메모리·프로파일링·보안·아키텍처를 같은 뼈대로 다룹니다.
 
 ## 자주 하는 작업
 
@@ -121,3 +125,8 @@ npm run check:guide       # 결과물이 조각과 일치하는지
   - Java — 스레드 풀 · JVM · 분산 락(Redisson) · Kafka
   - JS · TS — 이벤트 루프 · 싱글 스레드 · BullMQ · 무상태 확장
   - Python — GIL · 비동기 함정 · Celery · 멀티프로세싱
+- **초고급** 탭도 마찬가지로 같은 주제를 언어별 관점으로 다룹니다
+  - Java(🔬) — 바이트코드/JIT · JMM · CAS · GC 내부 · JFR/힙덤프 · 역직렬화 보안
+  - JS · TS(🧬) — V8 히든 클래스 · 마이크로태스크 · Proxy · WASM · 번들 최적화
+  - Python(🧬) — CPython 바이트코드 · 참조 카운팅 · 디스크립터 · 메타클래스 · GIL 내부
+  - 공통 — 메모리 누수 추적 · 프로파일링 · 함수형 · 디자인 패턴 · 공급망 보안 · 아키텍처

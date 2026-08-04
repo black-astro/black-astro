@@ -41,7 +41,7 @@ export const guides: Guide[] = [
     heading: 'Python Visual Guide',
     desc:
       '파이썬 문법부터 Pandas·NumPy·이미지 처리·업무 자동화·PySide6 GUI·알고리즘·DB, ' +
-      '그리고 FastAPI·Celery로 대규모 트래픽을 받는 법까지 ' +
+      'FastAPI·Celery로 대규모 트래픽을 받는 법, 그리고 CPython 내부·GIL·메타클래스까지 ' +
       '데이터가 움직이는 과정을 눈으로 보면서 익히는 단일 페이지 가이드입니다.',
     tags: [
       'Python',
@@ -51,11 +51,11 @@ export const guides: Guide[] = [
       'PySide6',
       'FastAPI',
       '대규모 트래픽',
-      'SQL',
+      'CPython 내부',
     ],
     stats: [
-      { value: '11', label: '주제 탭' },
-      { value: '161', label: '섹션' },
+      { value: '12', label: '주제 탭' },
+      { value: '177', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -68,8 +68,8 @@ export const guides: Guide[] = [
     heading: 'Java Visual Guide',
     desc:
       'Java 25 문법과 가상 스레드부터 Spring Boot Web·WebFlux·JPA/QueryDSL·MyBatis· ' +
-      'Security·Gateway·POI 엑셀·JavaFX, 그리고 Redis·Kafka·분산 락으로 대규모 트래픽을 ' +
-      '버티는 방법까지 실무에서 바로 쓰는 코드로 정리했습니다.',
+      'Security·Gateway·JavaFX, Redis·Kafka로 대규모 트래픽을 버티는 방법, ' +
+      '그리고 바이트코드·JIT·메모리 모델까지 실무에서 바로 쓰는 코드로 정리했습니다.',
     tags: [
       'Java 25',
       'Spring Boot',
@@ -77,12 +77,12 @@ export const guides: Guide[] = [
       'JPA · QueryDSL',
       'Security',
       '대규모 트래픽',
-      'Redis · Kafka',
+      'JVM 내부',
       'JavaFX',
     ],
     stats: [
-      { value: '10', label: '주제 탭' },
-      { value: '134', label: '섹션' },
+      { value: '11', label: '주제 탭' },
+      { value: '150', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -109,7 +109,7 @@ export const guides: Guide[] = [
     ],
     stats: [
       { value: '10', label: '주제 탭' },
-      { value: '146', label: '섹션' },
+      { value: '150', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
