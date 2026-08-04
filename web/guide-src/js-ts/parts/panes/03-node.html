@@ -13,7 +13,7 @@
     이 성질을 이해하는 것이 Node 실력의 전부입니다.
   </p>
   <div class="stats">
-    <div><b>16</b><span>SECTIONS</span></div>
+    <div><b>17</b><span>SECTIONS</span></div>
     <div><b>1</b><span>메인 스레드</span></div>
     <div><b>10k+</b><span>동시 연결</span></div>
     <div><b>22</b><span>LTS 기준</span></div>
@@ -205,8 +205,8 @@ import fs from "fs/promises";           // 동작은 하지만
 └──┤  close callbacks          │  socket.on("close")
    └───────────────────────────┘
 
-★ 각 페이즈 사이마다 마이크로태스크 큐를 전부 비웁니다
-  (process.nextTick → Promise 순서)</code></pre>
+★ 매크로태스크 콜백이 하나 끝날 때마다 마이크로태스크 큐를
+  전부 비웁니다 (process.nextTick → Promise 순서 · Node 11+)</code></pre>
       <pre class="code" data-lang="javascript"><code>// 이 순서가 보장되지 않는 유명한 예
 setTimeout(() =&gt; console.log("timeout"), 0);
 setImmediate(() =&gt; console.log("immediate"));
@@ -562,7 +562,7 @@ setGlobalDispatcher(new Agent({ keepAliveTimeout: 60_000, connections: 100 }));<
   <div class="grid2 rv">
     <div class="card">
       <h4 class="mini" style="margin-top:0">기본 사용</h4>
-      <pre class="code" data-lang="javascript"><code>import { EventEmitter, once } from "node:events";
+      <pre class="code" data-lang="javascript"><code>import { EventEmitter, once, on } from "node:events";
 
 class OrderService extends EventEmitter {
   async create(dto) {
@@ -918,13 +918,12 @@ const result = JSON.parse(out);</code></pre>
       <pre class="code" data-lang="javascript"><code>// ❌ 10,000개 요청을 동시에 발사
 await Promise.all(users.map(u =&gt; sendEmail(u)));
 
-무슨 일이 일어나나
-  · 소켓 10,000개 동시 오픈 → EMFILE (파일 디스크립터 고갈)
-  · 메일 서버가 429/503 으로 차단
-  · 메모리에 10,000개의 Promise + 응답 버퍼
-  · DB 라면 커넥션 풀이 즉시 고갈
-
-★ "동시에 몇 개까지" 를 반드시 정해야 합니다</code></pre>
+// 무슨 일이 일어나나
+//   · 소켓 10,000개 동시 오픈 → EMFILE (파일 디스크립터 고갈)
+//   · 메일 서버가 429/503 으로 차단
+//   · 메모리에 10,000개의 Promise + 응답 버퍼
+//   · DB 라면 커넥션 풀이 즉시 고갈
+// ★ "동시에 몇 개까지" 를 반드시 정해야 합니다</code></pre>
       <h4 class="mini">직접 구현 — 개념 이해용</h4>
       <pre class="code" data-lang="javascript"><code>async function mapLimit(items, limit, fn) {
   const results = new Array(items.length);
@@ -1071,7 +1070,8 @@ node --stack-trace-limit=50 app.js
 # TypeScript 빌드 결과의 스택을 원본으로
 npm i source-map-support
 node -r source-map-support/register dist/index.js
-# 또는 tsconfig 에 "sourceMap": true 후 Node 22+ 는 자동 지원</code></pre>
+# 또는 tsconfig 에 "sourceMap": true 후 --enable-source-maps 플래그
+node --enable-source-maps dist/index.js</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>에러에 문맥을 담으세요.</b>
         <code>throw new Error("실패")</code> 는 아무 도움이 안 됩니다.
@@ -1397,6 +1397,152 @@ export const log = (obj, msg) =&gt;
         <code>debug</code>(개발용, 운영에서는 끔).
         <b>모든 것을 info 로 찍으면 아무것도 안 보입니다.</b>
         수집·대시보드는 🚀 대규모 트래픽 k12 에서 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== n17 ==================== -->
+<section class="sec" id="n17">
+  <div class="sec-head rv">
+    <span class="no">NODE 17</span>
+    <h2>Deno · Bun — <span class="t">다른 런타임을 고를 때</span></h2>
+    <p class="lead">2026년의 서버 JS 는 <b>런타임이 셋</b>입니다. 유행이 아니라 <b>기준</b>으로 고르세요.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 런타임 비교 <span class="ver new">2026</span></h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:22%">항목</th><th>Node 24 LTS</th><th>Deno 2.x</th><th>Bun 1.x</th></tr>
+          <tr><td><b>생태계</b></td>
+              <td><b>압도적</b> — npm 전부, 네이티브 애드온·사내 표준까지</td>
+              <td>npm 호환됨. 다만 <b>Node 전용 API</b>에 기대는 패키지는 여전히 사고</td>
+              <td>npm 호환됨. 문제 대부분이 <b>네이티브 애드온</b>에서 터짐</td></tr>
+          <tr><td><b>성능</b></td>
+              <td>V8. HTTP 처리량은 <b>실무에서 병목이 된 적이 거의 없음</b></td>
+              <td>V8 + Rust. Node 와 <b>같은 급</b></td>
+              <td>JavaScriptCore + Zig. <b>기동·설치·파일 I/O 가 확실히 빠름</b></td></tr>
+          <tr><td><b>표준 Web API</b></td>
+              <td>fetch·WebSocket·Streams 내장(18~22 에 걸쳐 들어옴)</td>
+              <td><b>표준이 우선</b> — Request/Response 가 기본 모델</td>
+              <td>표준 우선 + Bun 전용 고속 API 병행</td></tr>
+          <tr><td><b>TypeScript</b></td>
+              <td>24 부터 <code>.ts</code> 를 <b>타입만 지워서</b> 실행(검사는 <code>tsc</code> 별도)</td>
+              <td><b>기본 지원</b> — 설정 없이 실행, 타입 검사도 내장</td>
+              <td><b>기본 지원</b> — 트랜스파일만, 타입 검사는 안 함</td></tr>
+          <tr><td><b>도구 내장</b></td>
+              <td>테스트·watch·<code>--env-file</code> (n14)</td>
+              <td>fmt·lint·test·bundle·compile 전부</td>
+              <td>패키지 매니저·번들러·테스트러너·<code>bun --hot</code></td></tr>
+          <tr><td><b>배포</b></td>
+              <td>어디서나 — 도커·서버리스·PaaS 전부 1급 지원</td>
+              <td>Deno Deploy 는 매끄러움. <b>그 밖은 직접 도커</b></td>
+              <td>공식 이미지는 있으나 <b>매니지드 지원이 아직 얇음</b></td></tr>
+        </table>
+      </div>
+      <h4 class="mini">같은 서버, 세 가지 방식</h4>
+      <pre class="code" data-lang="javascript"><code>// ① Node — server.mjs   $ node server.mjs
+import { createServer } from "node:http";
+
+createServer((req, res) =&gt; {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({ runtime: "node", v: process.version }));
+}).listen(3000);</code></pre>
+      <pre class="code" data-lang="typescript"><code>// ② Deno — server.ts   $ deno run --allow-net server.ts
+Deno.serve({ port: 3000 }, (_req: Request) =&gt;
+  Response.json({ runtime: "deno", v: Deno.version.deno }));
+// ★ TS 를 그대로 실행합니다. 빌드 단계가 없습니다.</code></pre>
+      <pre class="code" data-lang="typescript"><code>// ③ Bun — server.ts   $ bun server.ts
+Bun.serve({
+  port: 3000,
+  fetch: (_req: Request) =&gt; Response.json({ runtime: "bun", v: Bun.version }),
+});
+// ★ Deno·Bun 은 둘 다 "요청 → Response 반환" 이라는
+//   표준 Fetch 모델을 씁니다. Hono 같은 프레임워크가
+//   세 런타임에서 같은 코드로 도는 이유입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Bun — 진짜 강점과 아직 조심할 점</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="good">
+          <h5>실제로 체감되는 것</h5>
+          <ul class="tx" style="margin:0">
+            <li><b>설치 속도</b> — <code>bun install</code> 이 npm 대비 몇 배.
+                CI 캐시 미스 때 차이가 가장 큽니다</li>
+            <li><b>번들러·테스트러너 내장</b> — tsup·vitest·tsx 를 한꺼번에 걷어냅니다</li>
+            <li><b>기동 시간</b> — 짧은 CLI·스크립트·서버리스에서 유리</li>
+            <li><code>bun --hot</code> — 프로세스 재시작 없는 리로드</li>
+          </ul>
+        </div>
+        <div class="bad">
+          <h5>아직 걸리는 것</h5>
+          <ul class="tx" style="margin:0">
+            <li><b>네이티브 애드온(N-API) 호환</b> — sharp·bcrypt·<code>node-gyp</code> 계열이
+                버전에 따라 깨집니다 ★</li>
+            <li>Node 내부 API 를 파고드는 라이브러리(APM 에이전트·일부 ORM)</li>
+            <li>프로파일링·힙 스냅샷 도구가 <b>V8 생태계만큼 성숙하지 않음</b></li>
+            <li>사내 표준·클라우드 런타임이 Node 만 지원하는 경우</li>
+          </ul>
+        </div>
+      </div>
+      <div class="note tip">
+        <b>가장 안전한 Bun 도입법</b> — <b>런타임은 Node 로 두고 패키지 매니저·테스트러너만</b>
+        Bun 으로 바꾸는 것입니다(<code>bun install</code> + <code>bun test</code>).
+        위험은 거의 없고 CI 시간은 바로 줄어듭니다.
+      </div>
+      <h4 class="mini">Deno 2 — 권한 모델이 핵심</h4>
+      <pre class="code" data-lang="bash"><code># Deno 는 "기본값이 아무것도 못 함" 입니다
+deno run server.ts                    # ❌ 네트워크 접근에서 즉시 거부
+deno run --allow-net=:3000 server.ts  # 포트만 열어 줌
+deno run --allow-read=./data \
+         --allow-env=PORT,DATABASE_URL \
+         --allow-net=api.example.com server.ts   # ★ 화이트리스트
+
+deno run -A server.ts                 # 전부 허용 — 편하지만 의미가 사라집니다
+
+# npm 패키지를 그대로 (Deno 2)
+import express from "npm:express@4";
+deno install                          # package.json · node_modules 인식</code></pre>
+      <div class="note warn">
+        <b>권한 모델은 “공급망 방어”가 목적입니다.</b>
+        악성 <code>postinstall</code> 이나 오염된 트랜지티브 의존성이
+        <b>토큰을 읽어 외부로 보내는</b> 시나리오를 런타임이 막아 줍니다(🧬 초고급 d13).
+        <code>-A</code> 로 시작해 놓고 끝까지 안 좁히면 <b>Node 와 다를 게 없습니다.</b>
+      </div>
+      <h4 class="mini">지금 새 프로젝트를 시작한다면</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:34%">상황</th><th>선택</th></tr>
+          <tr><td>회사 서비스 · 운영 책임이 있는 API</td>
+              <td><b>Node LTS</b> — 채용·문서·APM·장애 사례가 전부 여기 있습니다 ★</td></tr>
+          <tr><td>CLI · 스크립트 · 사내 도구</td>
+              <td><b>Bun</b> 또는 <b>Deno</b> — 기동이 빠르고 단일 실행 파일로 뽑기 쉽습니다</td></tr>
+          <tr><td>엣지 · 서버리스 함수</td>
+              <td>표준 Fetch 모델(<b>Deno</b>·<b>Hono</b>) 이 이식성이 가장 좋습니다</td></tr>
+          <tr><td>신뢰할 수 없는 코드 실행</td>
+              <td><b>Deno</b> — 권한 모델이 그대로 샌드박스가 됩니다</td></tr>
+          <tr><td>CI 가 느려서 괴로울 때</td>
+              <td>런타임은 두고 <b>bun install / bun test</b> 만</td></tr>
+        </table>
+      </div>
+      <h4 class="mini">마이그레이션에서 실제로 걸리는 것들</h4>
+      <ul class="tx">
+        <li><b>네이티브 애드온</b> — 제일 먼저 깨집니다. 목록부터 뽑으세요
+            (<code>npm ls --all | grep -i "gyp\|napi"</code>)</li>
+        <li><b><code>node:</code> 내장 모듈의 가장자리</b> — <code>cluster</code>·<code>vm</code>·
+            <code>async_hooks</code>·<code>v8</code> 은 호환이 부분적입니다</li>
+        <li><b>APM · 프로파일러</b> — Datadog·Sentry 에이전트가 Node 전용인 경우가 많습니다</li>
+        <li><b>도커 이미지·베이스 OS</b> — 배포 파이프라인 전체를 같이 바꿔야 합니다(🧰 도구 o12)</li>
+        <li><b>팀</b> — “새벽 3시에 이 런타임을 디버깅할 사람이 있는가”가 마지막 질문입니다</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>판단 기준 한 줄</b> —
+        <b>Node 가 느려서 문제였던 적이 있습니까?</b>
+        대부분은 인덱스 없는 쿼리와 순차 호출이었습니다(n13).
+        런타임 교체는 <b>그 병목을 확인한 뒤</b>에 검토해도 늦지 않습니다.
       </div>
     </div>
   </div>

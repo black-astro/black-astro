@@ -79,6 +79,11 @@
         <li><b>간단한 내부 도구</b> → Flask 로 충분</li>
         <li><b>데이터 API</b>(모델 서빙·집계) → FastAPI + 백그라운드 워커(k08)</li>
       </ul>
+      <div class="note info">
+        <b>HTTP·REST·FastAPI 기본기가 아직이라면 <b>🌐 웹 기초 탭</b>을 먼저 보세요.</b>
+        요청·응답 한 바퀴부터 <b>첫 서버 · 로그인(JWT) · CORS</b> 까지 정리돼 있습니다.
+        여기서 만든 것을 검증하는 방법은 <b>🧪 테스트 탭</b>에 있습니다.
+      </div>
       <div class="note tip" style="margin-bottom:0">
         <b>기존 분석 코드를 서비스로 올릴 때</b> —
         pandas·numpy 연산은 <b>CPU 바운드</b>입니다.
@@ -477,6 +482,8 @@ async def get_product(pid: int) -&gt; dict | None:
     try:
         hit = await r.get(key)
         if hit:
+            if hit == b"__NULL__":             # ★ "없음" 마커면 DB 안 가고 종료
+                return None
             return json.loads(hit)
     except redis.RedisError as e:
         logger.warning("캐시 조회 실패 — DB 로 우회: %s", e)
@@ -592,6 +599,7 @@ stmt = select(Stock).where(Stock.product_id == pid).with_for_update()</code></pr
     <div class="card">
       <h4 class="mini" style="margin-top:0">분산 락 · 멱등성</h4>
       <pre class="code" data-lang="python"><code># 분산 락 — 여러 서버·워커에 걸쳐야 할 때
+import contextlib
 import uuid
 
 UNLOCK_LUA = """
@@ -600,6 +608,7 @@ if redis.call("get", KEYS[1]) == ARGV[1] then
 else return 0 end
 """
 
+<span class="t-ann">@contextlib.asynccontextmanager</span>
 async def with_lock(key: str, ttl: int = 5):
     token = str(uuid.uuid4())
     got = await r.set(f"lock:{key}", token, ex=ttl, nx=True)
@@ -708,7 +717,7 @@ celery -A tasks beat
 # 모니터링 UI
 celery -A tasks flower --port=5555
 
-# ★ 배포 시 우아한 종료 (진행 중 작업을 끝내고 나감)
+# ★ 작업 100개마다 워커 프로세스를 재시작 (재활용)
 celery -A tasks worker --max-tasks-per-child=100    # 메모리 누수 완화</code></pre>
       <div class="note warn">
         <b>Celery 작업은 반드시 멱등해야 합니다.</b>

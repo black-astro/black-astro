@@ -12,7 +12,7 @@
     “무엇을 왜 고르는가”와 <b>바로 붙여 쓸 설정</b>을 정리했습니다.
   </p>
   <div class="stats">
-    <div><b>13</b><span>SECTIONS</span></div>
+    <div><b>14</b><span>SECTIONS</span></div>
     <div><b>1</b><span>선택 · 팀 전체</span></div>
     <div><b>CI</b><span>사람 대신 기계가</span></div>
     <div><b>0</b><span>스타일 논쟁</span></div>
@@ -445,6 +445,7 @@ afterAll(() =&gt; server.close());</code></pre>
         <b>커버리지 숫자를 목표로 삼지 마세요.</b>
         80% 를 맞추려고 <b>의미 없는 테스트</b>를 양산하게 됩니다.
         “이 코드가 깨지면 <b>서비스에 무슨 일이</b> 생기나”를 기준으로 고르세요.
+        <b>커버리지가 왜 거짓말을 하는지</b>는 o14 에서 이어집니다.
       </div>
     </div>
   </div>
@@ -1127,6 +1128,185 @@ trivy image my-image                   # CI 에 넣으면 좋습니다</code></p
       ① 최근 업데이트, ② 의존성 개수, ③ 이슈 응답 속도,
       ④ <b>내장 기능으로 되는 일은 아닌지</b>.
       자바스크립트 생태계는 <b>선택지가 많은 게 문제</b>이지 부족한 적은 없습니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o14 ==================== -->
+<section class="sec" id="o14">
+  <div class="sec-head rv">
+    <span class="no">TOOL 14</span>
+    <h2>테스트 심화 — <span class="t">예제를 넘어서</span></h2>
+    <p class="lead">o05 가 “어떻게 쓰는가”였다면, 여기는 <b>“내 테스트가 무엇을 못 잡고 있는가”</b> 입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 속성 기반 테스트 — fast-check</h4>
+      <p class="tx" style="margin-top:0">
+        보통의 테스트는 <b>내가 생각해 낸 입력</b>만 검증합니다.
+        문제는 <b>버그가 사는 곳이 대개 내가 생각 못 한 입력</b>이라는 점입니다 —
+        빈 문자열, 이모지, 음수 0, 아주 큰 수, 서머타임 경계.
+        속성 기반 테스트는 <b>입력을 라이브러리가 수백 개 만들어</b> 던집니다.
+      </p>
+      <div class="dep"><code>npm i -D fast-check @fast-check/vitest</code></div>
+      <pre class="code" data-lang="typescript"><code>import { test } from "@fast-check/vitest";
+import fc from "fast-check";
+import { expect } from "vitest";
+
+// "예제"가 아니라 "항상 참이어야 하는 성질(property)" 을 적습니다
+test.prop([fc.array(fc.integer())])("정렬은 길이를 바꾸지 않는다", (arr) =&gt; {
+  expect(mySort(arr).length).toBe(arr.length);
+});
+
+test.prop([fc.string()])("인코딩 → 디코딩은 원본이다", (s) =&gt; {
+  expect(decode(encode(s))).toBe(s);          // ★ 왕복(round-trip) 속성
+});
+
+test.prop([fc.nat(), fc.integer({ min: 0, max: 100 })])(
+  "할인가는 0 이상 원가 이하다",              // 불변식(invariant)
+  (price, pct) =&gt; {
+    const r = applyDiscount(price, pct);
+    expect(r).toBeGreaterThanOrEqual(0);
+    expect(r).toBeLessThanOrEqual(price);
+  });</code></pre>
+      <h4 class="mini">반례 축소(shrinking) — 이게 진짜 값어치</h4>
+      <pre class="code" data-lang="text"><code>Property failed after 37 tests
+{ seed: 1739..., path: "12:3:0:1" }
+Counterexample: [ 0, -0 ]        ← ★ 이 두 줄이 전부
+
+처음 실패한 입력은 [ 8391, -4, 0, 77, -0, 12, ... ] 였습니다.
+fast-check 는 실패를 유지하는 선에서 입력을 계속 줄여
+"가장 작은 반례" 만 남겨 줍니다.
+→ 디버깅 시작점이 "배열 200개" 가 아니라 "[0, -0]" 이 됩니다.
+   (Object.is(0, -0) === false 라서 중복 제거가 깨지던 실제 버그)</code></pre>
+      <div class="note tip">
+        <b>도입할 가치가 있는 곳</b> —
+        <b>파서·직렬화·정렬·금액 계산·날짜 변환·권한 계산</b>처럼
+        <b>입력 공간이 넓고 규칙이 명확한</b> 순수 함수.<br>
+        <b>가치가 없는 곳</b> — CRUD 컨트롤러, 화면 조립 코드.
+        “항상 참인 성질”이 안 떠오르면 그 코드는 대상이 아닙니다.
+      </div>
+      <h4 class="mini">② 뮤테이션 테스트 — Stryker</h4>
+      <p class="tx">
+        <b>커버리지 100% 는 “그 줄이 실행됐다”는 뜻일 뿐</b>,
+        “그 줄이 틀렸을 때 테스트가 빨개진다”는 뜻이 아닙니다.
+        <code>expect</code> 가 하나도 없는 테스트도 커버리지는 올라갑니다.
+        Stryker 는 <b>소스를 일부러 고쳐 놓고</b>(mutant) 테스트가 잡아내는지 셉니다.
+      </p>
+      <div class="dep"><code>npm i -D @stryker-mutator/core @stryker-mutator/vitest-runner</code></div>
+      <pre class="code" data-lang="json"><code>// stryker.config.json
+{ "testRunner": "vitest", "coverageAnalysis": "perTest",
+  "mutate": ["src/domain/**/*.ts", "!src/**/*.spec.ts"],
+  "thresholds": { "high": 80, "low": 60, "break": 50 } }</code></pre>
+      <pre class="code" data-lang="text"><code>$ npx stryker run
+
+src/domain/discount.ts
+  #12  Survived   if (percent &gt; 100)  →  if (percent &gt;= 100)
+  #19  Survived   return price * r    →  return price / r
+  #24  Killed     ConditionalExpression
+
+Mutation score: 61.5%   ← ★ 커버리지는 98% 였습니다
+
+"Survived" = 코드를 망가뜨렸는데 테스트가 전부 통과했다
+           = 그 분기를 지켜 주는 테스트가 사실상 없다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>느립니다 — 전체 코드에 돌리지 마세요.</b>
+        변이 하나마다 테스트를 다시 돌리므로 시간이 수십 배가 됩니다.
+        <b>도메인 로직 폴더에만</b> 범위를 좁히고,
+        PR 마다가 아니라 <b>야간 스케줄 CI</b>에서 돌리는 것이 현실적인 운용입니다.
+        <b>도입할 가치</b> — 돈·재고·권한 계산 모듈, 그리고
+        “커버리지는 높은데 왜 자꾸 버그가 나지?”라는 질문이 나왔을 때.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ 계약 테스트 — Pact</h4>
+      <p class="tx" style="margin-top:0">
+        MSA 에서 가장 흔한 사고는 <b>“서버 팀이 필드 이름을 바꿨는데 아무도 몰랐다”</b> 입니다.
+        각 서비스의 단위 테스트는 전부 초록색이고, E2E 는 느려서 자주 못 돌립니다.
+        계약 테스트는 <b>소비자가 기대하는 응답 모양을 파일(pact)로 못 박고 제공자 CI 가 그것으로 자신을 검증</b>합니다.
+      </p>
+      <div class="dep"><code>npm i -D @pact-foundation/pact</code></div>
+      <pre class="code" data-lang="typescript"><code>// ── 소비자(주문 서비스) 쪽 테스트 ──
+import { PactV3, MatchersV3 as M } from "@pact-foundation/pact";
+
+const provider = new PactV3({ consumer: "order-api", provider: "user-api" });
+
+it("사용자 조회 계약", async () =&gt; {
+  provider
+    .given("id 1 사용자가 존재한다")
+    .uponReceiving("사용자 조회 요청")
+    .withRequest({ method: "GET", path: "/users/1" })
+    .willRespondWith({
+      status: 200,
+      body: {                              // ★ 값이 아니라 "모양"을 고정
+        id: M.integer(1), email: M.email("a@b.c"),
+        grade: M.regex(/GOLD|SILVER/, "GOLD"),
+      },
+    });
+
+  await provider.executeTest(async (mock) =&gt; {
+    const u = await new UserClient(mock.url).find(1);
+    expect(u.email).toBe("a@b.c");
+  });
+});
+// → pacts/order-api-user-api.json 생성 → Pact Broker 로 발행</code></pre>
+      <pre class="code" data-lang="bash"><code># ── 제공자(user-api) CI ──
+# 발행된 모든 소비자 계약을 실제 서버에 재생해 봅니다
+npx pact-provider-verifier --provider-base-url=http://localhost:3000
+
+# ★ email 을 mail 로 바꾸면 "제공자 CI 가" 빨개집니다.
+#   소비자 팀이 운영에서 발견하기 전에.</code></pre>
+      <div class="note tip">
+        <b>도입할 가치</b> — 서비스가 <b>3개 이상</b>이고 팀이 나뉘어
+        <b>배포 주기가 서로 다를 때</b>. 소비자와 제공자를 같은 저장소에서
+        같은 사람이 같이 배포한다면 <b>타입 공유(공용 패키지)로 충분</b>합니다.
+        계약 테스트는 <b>Broker 운영·버전 태깅</b>이라는 관리 비용이 따라옵니다.
+      </div>
+      <h4 class="mini">④ 스냅샷 테스트의 함정</h4>
+      <pre class="code" data-lang="typescript"><code>it("응답 형태", () =&gt; {
+  expect(render(order)).toMatchSnapshot();   // ⚠️ 편하지만 위험
+});</code></pre>
+      <ul class="tx">
+        <li><b>실패해도 무엇이 잘못인지 모릅니다</b> — “달라졌다”만 알려 줍니다</li>
+        <li><b><code>-u</code> 반사 신경</b> — 깨지면 다들 <code>vitest -u</code> 로 덮어씁니다.
+            그 순간 <b>버그가 정답으로 승격</b>됩니다 ★</li>
+        <li>날짜·UUID·정렬 순서가 섞이면 <b>깜빡이는 테스트</b>가 되고,
+            거대한 <code>.snap</code> 은 <b>아무도 리뷰하지 않습니다</b></li>
+      </ul>
+      <pre class="code" data-lang="typescript"><code>// ✅ 인라인 스냅샷 — 코드 옆에 있어 리뷰가 됩니다
+expect(fmt(1234567)).toMatchInlineSnapshot(`"1,234,567원"`);
+
+// ✅ 흔들리는 값은 고정하고, 검증할 필드만 명시
+vi.setSystemTime(new Date("2026-08-04"));
+expect(res.body).toMatchObject({ status: "PAID", amount: 10_000 });</code></pre>
+      <h4 class="mini">⑤ 피라미드와 “테스트하지 않을 것”</h4>
+      <pre class="code" data-lang="text"><code>        ▲  E2E (Playwright)        5%   결제·로그인 등 핵심 흐름만
+       ███ 통합 (DB·HTTP 실물)     25%   ★ 가성비가 가장 높은 층
+     ███████ 단위 (순수 로직)      70%   빠르고 많아도 부담 없음
+
+느리고 잘 깨지는 층이 위로 갈수록 얇아야 합니다.
+E2E 200개짜리 프로젝트는 예외 없이 "아무도 안 보는 빨간 CI" 가 됩니다.</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:38%">테스트하지 말 것</th><th>이유</th></tr>
+          <tr><td>getter · setter · DTO 매핑</td><td>깨질 수가 없습니다. 리팩터링만 방해합니다</td></tr>
+          <tr><td>라이브러리 동작 (Zod·Prisma 자체)</td><td>남의 테스트를 다시 짜는 일입니다</td></tr>
+          <tr><td>mock 만 검증하는 테스트</td><td><b>내가 짠 mock 이 잘 도는지</b>를 볼 뿐입니다 (o05)</td></tr>
+          <tr><td>화면 픽셀·문구</td><td>가장 자주 바뀌고 가장 자주 깨집니다</td></tr>
+          <tr><td>private 메서드</td><td>공개 동작으로 검증되지 않는다면 설계가 잘못된 것입니다</td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>도입 순서를 지키세요.</b>
+        ① 통합 테스트(Testcontainers)로 <b>진짜 DB</b>부터 →
+        ② 도메인 로직에 <b>fast-check</b> →
+        ③ 커버리지가 의심스러우면 <b>Stryker</b>(야간) →
+        ④ 서비스가 갈라지면 <b>Pact</b>.
+        <b>①이 없는데 ③부터 하는 팀</b>이 의외로 많습니다 —
+        측정 도구를 늘려도 <b>안 짠 테스트는 생기지 않습니다.</b>
+      </div>
     </div>
   </div>
 </section>

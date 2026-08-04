@@ -156,10 +156,10 @@ const TAB_KW = {
   flux:"webflux 웹플럭스 리액티브 reactive mono flux 비동기 논블로킹 백프레셔 backpressure webclient r2dbc 스트리밍 sse netty 이벤트루프 project reactor",
   data:"데이터 db 데이터베이스 jpa hibernate 엔티티 entity querydsl 쿼리dsl mybatis 마이바티스 sql 트랜잭션 transaction 영속성 n+1 페치조인 fetch 연관관계 spring data 리포지토리 repository r2dbc 커넥션풀 hikari 플라이웨이 인덱스 배치 batch 스프링배치 대용량 청크 chunk 정산 마이그레이션 파티셔닝",
   sec:"시큐리티 security 보안 인증 authentication 인가 authorization 로그인 로그아웃 jwt 토큰 oauth2 소셜로그인 필터체인 filter 세션 비밀번호 암호화 csrf cors 권한 role 메서드보안",
-  gw:"게이트웨이 gateway 라우팅 route 필터 filter 서킷브레이커 circuit breaker resilience 로드밸런싱 마이크로서비스 msa 프록시 리버스 rate limit 재시도 유레카 eureka 디스커버리 discovery 서비스등록 config server 분산추적 tracing zipkin 요청id",
+  gw:"게이트웨이 gateway 라우팅 route 필터 filter 서킷브레이커 circuit breaker resilience 로드밸런싱 마이크로서비스 msa 프록시 리버스 rate limit 재시도 유레카 eureka 디스커버리 discovery 서비스등록 config server 분산추적 tracing zipkin 요청id grpc 지알피씨 protobuf 프로토버프 proto 스키마 http2 스트리밍 stub 스텁 인터셉터 interceptor 데드라인 deadline grpcurl buf 내부통신 서비스간통신 바이너리",
   tool:"도구 롬복 lombok 로그 log log4j2 logback slf4j 엑셀 excel poi 아파치 xml 파싱 parsing jackson json 매퍼 mapstruct 테스트 junit mockito 빌드 gradle maven 유틸 testcontainers 테스트컨테이너 통합테스트 h2 도커테스트",
   fx:"javafx 자바fx gui 데스크탑 데스크톱 프로그램 화면 창 window 버튼 위젯 fxml 씬빌더 scene 컨트롤 테이블 차트 이벤트 배포 exe jpackage",
-  deep:"초고급 심화 내부동작 바이트코드 bytecode javap jit c1 c2 인라이닝 이스케이프분석 deopt jmh 벤치마크 클래스로더 classloader 위임 noclassdeffound nosuchmethod 서비스로더 jmm 메모리모델 happens-before volatile 가시성 재배치 안전발행 cas compareandset atomic longadder varhandle 락프리 aba false sharing 캐시라인 contended 데이터지역성 jol gc g1 zgc 리전 humongous 저지연 힙덤프 heapdump mat jfr flightrecorder jcmd 스레드덤프 오프힙 directbytebuffer 네이티브메모리 nmt 메타스페이스 foreign arena nio selector netty 이벤트루프 bytebuf methodhandle lambdametafactory 애너테이션프로세서 apt graalvm 네이티브이미지 직렬화 역직렬화 rce 가젯 ysoserial log4shell xxe 공급망 supplychain sbom trivy dependencycheck 함수형 record sealed 패턴매칭 optional stream collector 디자인패턴 싱글턴 어댑터 archunit 아키텍처 헥사고날 ddd 계층 의존성역전",
+  deep:"초고급 심화 내부동작 바이트코드 bytecode javap jit c1 c2 인라이닝 이스케이프분석 deopt jmh 벤치마크 클래스로더 classloader 위임 noclassdeffound nosuchmethod 서비스로더 jmm 메모리모델 happens-before volatile 가시성 재배치 안전발행 cas compareandset atomic longadder varhandle 락프리 aba false sharing 캐시라인 contended 데이터지역성 jol gc g1 zgc 리전 humongous 저지연 힙덤프 heapdump mat jfr flightrecorder jcmd 스레드덤프 오프힙 directbytebuffer 네이티브메모리 nmt 메타스페이스 foreign arena nio selector netty 이벤트루프 bytebuf methodhandle lambdametafactory 애너테이션프로세서 apt graalvm 네이티브이미지 직렬화 역직렬화 rce 가젯 ysoserial log4shell xxe 공급망 supplychain sbom trivy dependencycheck 함수형 record sealed 패턴매칭 optional stream collector 디자인패턴 싱글턴 어댑터 archunit 아키텍처 헥사고날 ddd 계층 의존성역전 모듈 jpms module-info 모듈시스템 requires exports opens add-opens add-exports 캡슐화 jlink jdeps 자동모듈 클래스패스 모듈패스 graalvm 네이티브이미지 native aot nativecompile reachability reflect-config 콜드스타트 기동시간 appcds crac leyden 서버리스",
   scale:"대규모 트래픽 대용량 성능 부하 확장 스케일 scale 캐시 cache redis 레디스 분산락 락 lock redisson 동시성 재고 선착순 멱등 idempotent 중복결제 카프카 kafka 메시지큐 큐 이벤트 비동기 아웃박스 outbox 사가 saga 서킷브레이커 resilience4j 타임아웃 폴백 벌크헤드 rate limit 처리율제한 429 대기열 샤딩 레플리카 복제 커넥션풀 모니터링 관측 프로메테우스 prometheus grafana 그라파나 micrometer 부하테스트 k6 jmeter ngrinder p99 rps tps slo 병목 스탬피드 핫키",
 };
 const FIND_CHIPS = ["REST API 만들기","JPA 연관관계","가상 스레드","엑셀 다운로드",
@@ -188,6 +188,7 @@ const SEC_KW = {
   b17:"쿠버네티스 k8s 무중단배포 롤링업데이트 프로브 헬스체크 graceful preStop hpa 오토스케일 502",
   d17:"스프링배치 대용량처리 청크 재시작 정산 마이그레이션 스케줄 잡 job step",
   g09:"서비스디스커버리 유레카 eureka config server 중앙설정 분산추적 요청id traceid",
+  g10:"grpc protobuf proto 스키마 http2 바이너리 스트리밍 단항 양방향 stub 스텁 데드라인 deadline 인터셉터 grpcurl buf 필드번호 reserved 내부통신 서비스간통신 msa통신",
   t12:"테스트컨테이너 testcontainers 통합테스트 도커테스트 h2차이 실제db",
   z01:"바이트코드 javap jit c1 c2 인라이닝 이스케이프분석 최적화해제 deopt jmh 워밍업",
   z02:"클래스로더 위임 noclassdeffounderror nosuchmethoderror 의존성충돌 서비스로더 fatjar",
@@ -205,6 +206,8 @@ const SEC_KW = {
   z14:"디자인패턴 전략 어댑터 빌더 싱글턴 enum 옵저버 템플릿메서드 스프링",
   z15:"성능최적화 순서 측정 jfr jmh 커넥션재사용 keepalive 로그레벨 페이로드",
   z16:"아키텍처 헥사고날 포트어댑터 ddd 계층 도메인 유스케이스 archunit 의존성역전 패키지구조",
+  z17:"jpms 모듈 module-info requires exports opens 강한캡슐화 add-opens add-exports inaccessibleobjectexception 클래스패스 모듈패스 자동모듈 splitpackage jlink jdeps 최소런타임 unsafe",
+  z18:"graalvm 네이티브이미지 nativeimage aot nativecompile closedworld 콜드스타트 기동시간 메모리절감 reachability reflect-config 리플렉션등록 native-image-agent runtimehints pgo appcds aotcache crac leyden 서버리스 lambda",
 };
 let FIDX = null;
 

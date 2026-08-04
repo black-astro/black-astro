@@ -383,7 +383,12 @@ export const validate =
         })),
       });
     }
-    req[target] = result.data;        // ★ 변환·기본값이 적용된 값으로 교체
+    if (target === "query") {
+      // ★ Express 5 에서 req.query 는 getter 전용 — 재할당하면 TypeError
+      Object.defineProperty(req, "query", { value: result.data });
+    } else {
+      req[target] = result.data;      // ★ 변환·기본값이 적용된 값으로 교체
+    }
     next();
   };
 
@@ -565,8 +570,10 @@ const refreshToken = crypto.randomUUID();
 await redis.set(`refresh:${refreshToken}`, user.id, { EX: 60 * 60 * 24 * 14 });
 
 res.cookie("refresh", refreshToken, {
-  httpOnly: true, secure: true, sameSite: "strict", path: "/auth/refresh",
+  httpOnly: true, secure: true, sameSite: "strict", path: "/auth",
 });
+// ★ path 는 이 쿠키를 쓰는 라우트를 모두 포함해야 합니다
+//   (/auth/refresh 로 좁히면 /auth/logout 에는 쿠키가 안 실려 로그아웃이 안 됩니다)
 res.json({ accessToken });</code></pre>
     </div>
     <div class="card">
@@ -844,13 +851,15 @@ app.disable("x-powered-by");
 // 요청 크기 제한 (메모리 고갈 공격 방지)
 app.use(express.json({ limit: "1mb" }));
 
-// 오래 걸리는 요청 끊기
-import timeout from "connect-timeout";
-app.use(timeout("30s"));
+// 오래 걸리는 요청 끊기 — 서버 타임아웃으로
+// (connect-timeout 패키지는 응답 후에도 핸들러가 계속 도는 문제로 비권장)
+const server = app.listen(3000);
+server.requestTimeout = 30_000;
+server.headersTimeout = 35_000;
 
-// NoSQL 인젝션 (MongoDB 를 쓴다면)
-import mongoSanitize from "express-mongo-sanitize";
-app.use(mongoSanitize());</code></pre>
+// NoSQL 인젝션 (MongoDB 를 쓴다면) — Zod 로 값의 타입을 강제하세요
+// ($gt 같은 객체가 문자열 자리에 못 들어오게. x05 참고)
+// ★ express-mongo-sanitize 는 Express 5 와 호환되지 않습니다</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>OWASP Top 10</b> 을 한 번은 읽어 보세요.
         여기 적힌 대부분이 그 목록에서 나온 것입니다.

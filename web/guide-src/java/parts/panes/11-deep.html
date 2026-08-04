@@ -13,7 +13,7 @@
     보안 · 아키텍처 — <b>장애를 해결할 때와 시니어 면접에서</b> 차이를 만드는 영역입니다.
   </p>
   <div class="stats">
-    <div><b>16</b><span>SECTIONS</span></div>
+    <div><b>18</b><span>SECTIONS</span></div>
     <div><b>JVM</b><span>바이트코드 · JIT</span></div>
     <div><b>측정</b><span>추측이 아니라</span></div>
     <div><b>🔴</b><span>전부 고급</span></div>
@@ -380,14 +380,16 @@ class Counters {
 // 스레드1이 a 를, 스레드2가 b 를 계속 증가시키면
 // 논리적으로는 독립인데 실제로는 서로를 방해합니다
 
-// ✅ 패딩으로 분리 (Java 8+ 공식 방법)
+// ⚠️ @Contended 는 공식 API 가 아니라 JDK 내부 애노테이션입니다
+//    (jdk.internal.vm.annotation — 컴파일에 --add-exports 로
+//     java.base/jdk.internal.vm.annotation 을 열어야 하고,
+//     실행 시 -XX:-RestrictContended 도 필요합니다)
 import jdk.internal.vm.annotation.Contended;   // JDK 내부용
 
 @Contended
 static class PaddedCounter { volatile long value; }
-// 실행 시 -XX:-RestrictContended 필요
 
-// ✅ 더 현실적인 해법 — 애초에 나눠 두기
+// ✅ 실무 해법 — LongAdder 를 쓰거나 수동 패딩(더미 long 필드)으로 분리
 LongAdder counter = new LongAdder();   // ★ 내부가 이미 패딩되어 있습니다</code></pre>
     </div>
     <div class="card">
@@ -480,8 +482,10 @@ Mixed GC
   · 로드 배리어 때문에 처리량이 약간 (수 %) 낮습니다
   · 메모리를 조금 더 씁니다
 
-세대별 ZGC (Java 21+) — 대부분의 워크로드에서 기본 ZGC 보다 낫습니다
-  -XX:+UseZGC -XX:+ZGenerational</code></pre>
+세대별 ZGC — 대부분의 워크로드에서 비세대형보다 낫습니다
+  -XX:+UseZGC
+  ※ Java 23부터 세대형이 기본. 21~22에서만 -XX:+ZGenerational 을
+    추가로 켜야 하고, 24부터는 이 플래그 자체가 폐기됐습니다</code></pre>
       <div class="tw">
         <table class="cheat">
           <tr><th style="width:24%">GC</th><th>고르는 기준</th></tr>
@@ -857,9 +861,9 @@ if (o instanceof User u) { ... }     // 캐스팅 전에 코드가 실행됩니�
 교훈: "신뢰할 수 없는 데이터를 파싱하는 모든 지점"이 공격면입니다.</code></pre>
       <div class="note warn">
         <b>결론 — 자바 직렬화를 외부 통신에 쓰지 마세요.</b>
-        JEP 154 에서 <b>공식적으로 “실패한 설계”</b>로 규정했고,
-        장기적으로 제거될 예정입니다.
-        <b>JSON · Protobuf · Avro</b> 를 쓰세요.
+        오라클 아키텍트들도 공개적으로 “뼈아픈 실수”라 인정했고
+        축소·대체 논의(JEP 154 초안 등)가 있지만, 확정된 제거 일정은 없습니다.
+        어쨌든 외부 데이터에는 <b>JSON · Protobuf · Avro</b> 를 쓰세요.
       </div>
     </div>
     <div class="card">
@@ -1329,6 +1333,355 @@ static final ArchRule 계층_의존_방향 = layeredArchitecture().consideringAl
         ② JPA → MyBatis 교체 시 고칠 곳이 좁음,
         ③ 도메인 테스트에 스프링 컨텍스트가 필요 없음(빠름),
         ④ <b>비즈니스 규칙이 한 곳에 모여</b> 신규 입사자가 빨리 파악합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== z17 ==================== -->
+<section class="sec" id="z17">
+  <div class="sec-head rv">
+    <span class="no">DEEP 17</span>
+    <h2>JPMS · <span class="t">모듈 시스템</span></h2>
+    <p class="lead"><code>--add-opens</code> 를 치게 되는 <b>진짜 이유</b>. Java 9 가 그은 새 경계입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">module-info.java — 전부입니다</h4>
+      <pre class="code" data-lang="java"><code>// src/main/java/module-info.java  (패키지 없이 소스 루트에)
+module com.company.order {
+
+    requires java.sql;                    // 이 모듈을 씁니다
+    requires transitive com.company.core; // ★ 내 API 에 노출됨 → 쓰는 쪽도 자동으로 읽음
+    requires static lombok;               // 컴파일 때만 필요 (런타임 없어도 됨)
+
+    exports com.company.order.api;                    // 누구에게나 공개
+    exports com.company.order.internal to com.company.admin;  // 지정한 모듈에만
+
+    opens com.company.order.dto;          // ★ 런타임 리플렉션 허용 (Jackson·JPA용)
+    opens com.company.order.entity to org.hibernate.orm.core;
+
+    uses  com.company.order.PaymentProvider;          // ServiceLoader 소비 (z02)
+    provides com.company.order.PaymentProvider
+        with com.company.order.impl.CardProvider;     // 구현 제공
+}</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">키워드</th><th>의미</th></tr>
+          <tr><td><b>exports</b></td><td><b>컴파일·런타임 모두</b> 접근 허용.
+              <code>public</code> 이어도 exports 안 하면 <b>밖에서 못 씁니다</b> ★</td></tr>
+          <tr><td><b>opens</b></td><td>컴파일은 막고 <b>리플렉션만</b> 허용.
+              <code>setAccessible(true)</code> 가 통하는 유일한 통로</td></tr>
+          <tr><td>requires transitive</td><td>내 공개 API 시그니처에 나오는 타입이면 <b>반드시</b> 이걸로</td></tr>
+          <tr><td>requires static</td><td>컴파일 전용 — 애너테이션·롬복</td></tr>
+          <tr><td>open module …</td><td>모듈 전체를 리플렉션에 개방 (마이그레이션용 도피구)</td></tr>
+        </table>
+      </div>
+      <div class="note java">
+        <b>왜 만들었나</b> —
+        ① <code>public</code> 이 <b>“전 세계 공개”</b> 하나뿐이라
+        내부 구현 패키지(<code>com.sun.*</code>·<code>*.internal.*</code>)를
+        모두가 갖다 썼고, JDK 는 <b>영원히 못 고치는 코드</b>를 떠안았습니다.
+        ② 클래스패스는 <b>실행해 봐야</b> 빠진 jar 를 알 수 있었습니다
+        (<code>NoClassDefFoundError</code> — z02).
+        모듈은 <b>기동 즉시</b> 의존 그래프를 검증합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무에서 --add-opens 를 치게 되는 순간</h4>
+      <pre class="code" data-lang="text"><code>java.lang.reflect.InaccessibleObjectException:
+  Unable to make field private final int java.time.LocalDate.year
+  accessible: module java.base does not "opens java.time" to unnamed module
+
+★ 원인은 항상 같습니다 — 라이브러리가 JDK 내부를 리플렉션으로 파고들었습니다
+  · 직렬화·복사 라이브러리 (Kryo · Objenesis · 옛 Jackson 모듈)
+  · 목킹 프레임워크 (Mockito 의 inline mock maker · PowerMock)
+  · Spark · Hadoop · 옛 ORM
+  · sun.misc.Unsafe 를 쓰던 코드
+
+Java 16 부터 강한 캡슐화가 "기본값"이 되면서 경고 → 에러로 바뀌었고,
+Java 17 이후로는 --illegal-access 옵션 자체가 사라졌습니다.</code></pre>
+      <pre class="code" data-lang="bash"><code># 딱 필요한 패키지만 여세요 (전부 여는 open module 은 최후 수단)
+java --add-opens java.base/java.lang=ALL-UNNAMED \
+     --add-opens java.base/java.util=ALL-UNNAMED \
+     -jar app.jar
+
+# 컴파일/실행 시 "exports 안 된 패키지"를 써야 할 때 (z05 의 @Contended 처럼)
+javac --add-exports java.base/jdk.internal.vm.annotation=ALL-UNNAMED ...
+
+# jar 에 미리 박아 두면 실행 옵션이 필요 없습니다 (MANIFEST.MF)
+Add-Opens: java.base/java.lang java.base/java.util
+
+# Gradle 테스트에 걸어 두기 (build.gradle.kts)
+# tasks.test { jvmArgs("--add-opens", "java.base/java.lang=ALL-UNNAMED") }</code></pre>
+      <div class="note warn">
+        <b><code>--add-opens</code> 는 “해결”이 아니라 “유예”입니다.</b>
+        옵션이 늘어난다는 것은 <b>낡은 라이브러리를 안고 있다</b>는 신호입니다.
+        JDK 를 올릴 때마다 같은 자리에서 다시 터지므로,
+        <b>옵션을 추가할 때 이유와 라이브러리 이름을 주석으로 남기세요.</b>
+        <code>sun.misc.Unsafe</code> 는 메모리 접근 메서드가 이미 <b>단계적 폐기</b> 중이며
+        (JEP 471·498 — 기본 경고), 대체는 <b>FFM API</b> 입니다 (z08).
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">클래스패스 vs 모듈패스</h4>
+      <pre class="code" data-lang="text"><code>-classpath (전통)                    --module-path (모듈)
+────────────────────────────────────────────────────────────
+전부 "이름 없는 모듈"                  각 jar 가 이름을 가진 모듈
+모든 패키지가 서로에게 열림             exports/opens 한 것만 보임
+같은 패키지가 여러 jar 에 있어도 통과    ★ split package = 기동 실패
+없는 jar 는 실행 중에 발각              기동 시 그래프 검증
+
+★ 섞어 쓸 수 있습니다 (현실의 99%)
+  module-info 없는 jar 를 모듈패스에 올리면 "자동 모듈"이 되어
+  jar 파일명(또는 MANIFEST 의 Automatic-Module-Name)이 모듈 이름이 됩니다.
+  → 자동 모듈은 모든 패키지를 exports/opens 한 것으로 취급됩니다.</code></pre>
+      <pre class="code" data-lang="bash"><code># 무엇이 모듈로 인식되는지 확인
+java --module-path libs --list-modules
+jar --file lib.jar --describe-module
+
+# 내 코드가 어떤 JDK 모듈에 의존하는지 (마이그레이션 1단계)
+jdeps --multi-release 25 --print-module-deps app.jar
+jdeps -s --module-path libs app.jar        # 요약 그래프</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>스프링 부트 fat jar 는 모듈이 아닙니다.</b>
+        <code>BOOT-INF/lib</code> 안의 jar 를 자체 로더가 읽으므로(z02)
+        <b>클래스패스 모드로 돕니다.</b>
+        그래서 부트 애플리케이션에 <code>module-info.java</code> 를 넣어도
+        <b>실질적인 이득이 없습니다.</b> 라이브러리를 만들 때만 의미가 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">jlink — 필요한 것만 담은 런타임</h4>
+      <pre class="code" data-lang="bash"><code># ① 앱이 실제로 쓰는 JDK 모듈만 뽑는다
+DEPS=$(jdeps --multi-release 25 --print-module-deps --ignore-missing-deps app.jar)
+
+# ② 그 모듈만으로 런타임 이미지를 만든다
+jlink --add-modules "$DEPS" \
+      --strip-debug --no-header-files --no-man-pages \
+      --compress=zip-6 \
+      --output ./runtime
+
+./runtime/bin/java -jar app.jar
+
+# 크기 비교 (대략)
+#   전체 JDK 25      ~330MB
+#   전체 JRE 상당     ~180MB
+#   jlink 최소 런타임  ~45~60MB   ← 컨테이너 이미지가 확 줄어듭니다</code></pre>
+      <pre class="code" data-lang="text"><code>Dockerfile 2단계 빌드에 그대로 붙습니다
+
+  FROM eclipse-temurin:25-jdk AS build
+  RUN jlink --add-modules java.base,java.logging,java.sql,jdk.crypto.ec \
+            --strip-debug --no-header-files --no-man-pages --output /runtime
+
+  FROM debian:stable-slim
+  COPY --from=build /runtime /opt/java
+  COPY app.jar /app.jar
+  ENTRYPOINT ["/opt/java/bin/java","-jar","/app.jar"]
+
+⚠️ jdk.crypto.ec 를 빼면 TLS 핸드셰이크가 조용히 실패합니다.
+   jdk.unsupported 를 빼면 Unsafe 를 쓰는 라이브러리가 죽습니다.
+   ★ 줄인 뒤에는 반드시 통합 테스트를 다시 돌리세요.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>모듈화를 안 해도 되는 경우 — 대부분입니다.</b>
+        ① <b>스프링 부트 애플리케이션</b> — 이득 없음, 설정 비용만 큼<br>
+        ② <b>사내 전용 라이브러리</b> — 팀이 규칙을 알면 패키지 컨벤션으로 충분<br>
+        ③ 의존 라이브러리에 <b>자동 모듈이 많은</b> 프로젝트 — 캡슐화가 어차피 뚫림<br>
+        <b>쓸 값어치가 있는 곳</b>은 ① <b>외부에 배포하는 라이브러리·SDK</b>
+        (내부 패키지를 진짜로 숨길 수 있음),
+        ② <b>jlink 로 런타임을 줄이는</b> CLI·데스크톱 배포(JavaFX 의 <code>jpackage</code>),
+        ③ 모놀리스 안에서 <b>모듈 간 의존을 컴파일러로 강제</b>하고 싶을 때.
+        ③번은 <b>ArchUnit</b>(z16)이 더 싸게 같은 목적을 달성합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== z18 ==================== -->
+<section class="sec" id="z18">
+  <div class="sec-head rv">
+    <span class="no">DEEP 18</span>
+    <h2>GraalVM 네이티브 이미지 · <span class="t">AOT</span></h2>
+    <p class="lead">기동 <b>50ms</b>, 메모리 1/5. 대신 <b>포기하는 것</b>이 분명합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JIT 과 무엇이 다른가 — closed-world</h4>
+      <pre class="code" data-lang="text"><code>[JVM · JIT — z01]
+  실행하면서 프로파일링 → 뜨거운 코드만 C2 로 컴파일
+  · 어떤 클래스든 런타임에 로딩 가능 (open world)
+  · 워밍업이 끝나면 ★ 피크 성능이 가장 높습니다
+  · 대신 기동에 수 초, JVM·메타스페이스·코드캐시로 메모리를 씁니다
+
+[네이티브 이미지 · AOT]
+  빌드 시점에 "도달 가능한 코드"를 정적 분석해 기계어로 굽습니다
+  ★ closed-world 가정 —
+    "빌드 때 보이지 않은 클래스는 런타임에도 존재하지 않는다"
+  · main 에서 도달 불가능한 코드는 통째로 삭제 (dead code elimination)
+  · 힙 스냅샷까지 실행 파일에 넣어 둠 → 기동 즉시 준비 완료
+  · 클래스로딩·검증·JIT 이 아예 없습니다 (z02·z01 이 사라짐)</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">항목</th><th>JVM (JIT)</th><th>네이티브</th></tr>
+          <tr><td>기동 시간</td><td>2~5초</td><td><b>30~80ms</b> ★</td></tr>
+          <tr><td>첫 요청 지연</td><td>워밍업 수십 초</td><td><b>없음</b></td></tr>
+          <tr><td>RSS 메모리</td><td>300~600MB</td><td><b>50~120MB</b></td></tr>
+          <tr><td>피크 처리량</td><td><b>기준 100%</b></td><td>70~95% (PGO 없으면 낮음)</td></tr>
+          <tr><td>빌드 시간</td><td>수십 초</td><td><b>3~15분</b> · 메모리 8GB+</td></tr>
+          <tr><td>이미지 크기</td><td>JRE + jar</td><td>단일 실행 파일 60~150MB</td></tr>
+        </table>
+      </div>
+      <div class="note java" style="margin-bottom:0">
+        <b>숫자는 “대략”입니다.</b> 애플리케이션·JDK 버전·GC 설정에 따라 크게 달라지므로
+        <b>도입 판단은 반드시 자기 서비스로 재고</b> 하세요.
+        경향만 기억하면 됩니다 — <b>기동·메모리는 네이티브가, 장시간 처리량은 JVM 이 이깁니다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Spring Boot AOT — 실제 명령</h4>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts
+plugins {
+    id("org.springframework.boot") version "3.5.4"
+    id("io.spring.dependency-management") version "1.1.7"
+    id("org.graalvm.buildtools.native") version "0.10.6"   // ★ 이 줄
+    java
+}
+
+graalvmNative {
+    binaries {
+        named("main") {
+            imageName.set("order-service")
+            buildArgs.add("--enable-monitoring=jfr,heapdump")  // 운영 진단용
+            buildArgs.add("-march=native")                     // 배포 CPU 와 같을 때만
+        }
+    }
+}</code></pre>
+      <pre class="code" data-lang="bash"><code>sdk install java 25-graal        # ① GraalVM 설치
+
+# ② 빌드 — 스프링이 빈 정의·프록시를 "소스 코드"로 미리 생성(AOT)한 뒤 컴파일
+./gradlew nativeCompile          # build/native/nativeCompile/order-service
+./order-service                  # ★ Started in 0.062 seconds
+
+# ③ 로컬에 GraalVM 이 없으면 Buildpacks 로 (도커만 있으면 됩니다)
+./gradlew bootBuildImage --imageName=order:native
+
+./gradlew nativeTest             # ④ 네이티브에서만 나는 버그를 잡는 테스트
+
+# ⑤ 네이티브 없이 AOT 산출물만 활용 — JVM 기동 20~30% 단축
+java -Dspring.aot.enabled=true -jar app.jar</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>먼저 <code>nativeTest</code> 를 CI 에 넣으세요.</b>
+        네이티브 문제는 <b>컴파일이 아니라 런타임에</b> 드러납니다.
+        “빌드는 됐는데 특정 API 만 500” 이 전형적인 증상이고,
+        그 원인은 거의 항상 <b>다음 카드의 reachability metadata</b> 입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">reachability metadata — 깨지는 이유의 90%</h4>
+      <pre class="code" data-lang="text"><code>정적 분석은 "코드에서 따라갈 수 있는 것"만 봅니다.
+문자열로 이름을 만들어 부르는 것은 따라갈 수 없습니다.
+
+  Class.forName(props.get("driver"))     ← 빌드 때 값을 모름 → 클래스가 삭제됨
+  → ClassNotFoundException (JVM 에서는 잘 되던 코드)
+
+빌드 때 등록해 줘야 하는 것들
+  · 리플렉션      생성자·메서드·필드 접근
+  · 동적 프록시    Proxy.newProxyInstance 로 만드는 인터페이스 조합
+  · 리소스        messages.properties · 템플릿 · *.json
+  · 직렬화        Serializable 구현체
+  · JNI           네이티브 호출 대상</code></pre>
+      <pre class="code" data-lang="json"><code>// src/main/resources/META-INF/native-image/&lt;group&gt;/&lt;artifact&gt;/reflect-config.json
+[
+  { "name": "com.company.order.dto.OrderRequest",
+    "allDeclaredFields": true, "allDeclaredConstructors": true,
+    "allDeclaredMethods": true },
+  { "name": "com.mysql.cj.jdbc.Driver",
+    "methods": [ { "name": "&lt;init&gt;", "parameterTypes": [] } ] }
+]
+// 같은 폴더에 resource-config.json · proxy-config.json · serialization-config.json</code></pre>
+      <pre class="code" data-lang="bash"><code># ★ 손으로 쓰지 마세요 — 에이전트가 실행을 추적해 만들어 줍니다
+java -agentlib:native-image-agent=config-merge-dir=\
+src/main/resources/META-INF/native-image \
+     -jar app.jar
+# 이 상태로 통합 테스트·주요 시나리오를 한 바퀴 돌리면 설정이 채워집니다
+# (merge 라서 여러 번 돌릴수록 정확해집니다)</code></pre>
+      <pre class="code" data-lang="java"><code>// 코드로 등록하는 방법 — 스프링 6+ RuntimeHints (라이브러리 저자용)
+public class OrderHints implements RuntimeHintsRegistrar {
+    @Override
+    public void registerHints(RuntimeHints hints, ClassLoader cl) {
+        hints.reflection().registerType(OrderRequest.class,
+              MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+              MemberCategory.DECLARED_FIELDS);
+        hints.resources().registerPattern("templates/*.html");
+        hints.proxies().registerJdkProxy(OrderPort.class);
+    }
+}
+// @ImportRuntimeHints(OrderHints.class) 를 설정 클래스에 붙입니다
+
+// ★ 대부분의 유명 라이브러리는 이미 등록되어 있습니다
+//   GraalVM Reachability Metadata Repository — 빌드 플러그인이 자동으로 가져옵니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">제약 — 못 하는 것</h4>
+      <pre class="code" data-lang="text"><code>① 동적 클래스 로딩 불가
+   런타임에 jar 를 추가해 기능을 늘리는 플러그인 구조(z02)는 불가능
+② JIT 이 없음
+   프로파일 기반 최적화를 못 하므로 ★ 장시간 피크 성능은 JVM 보다 낮습니다
+   → PGO 로 상당히 좁힐 수 있지만 Oracle GraalVM(유료 조건) 기능입니다
+③ 바이트코드 조작 런타임 불가
+   ByteBuddy·CGLIB 로 "실행 중" 클래스를 만드는 라이브러리 (Mockito 기본 모드 등)
+④ 클래스 초기화 시점이 다름
+   빌드 때 static 초기화가 돌아 "빌드 머신의 값"이 이미지에 박힐 수 있습니다
+   → 난수 시드·시각·호스트명·열린 소켓을 static 에 두면 사고
+   --initialize-at-run-time=com.app.Secrets 로 미루세요
+⑤ 빌드가 무겁다
+   CI 에 8GB+ 메모리와 수 분이 필요 → 매 커밋 빌드는 비현실적
+⑥ 진단 도구가 제한적
+   JFR·힙덤프는 --enable-monitoring 으로 되지만
+   jcmd 로 붙여 쓰는 상당수 기능은 없습니다 (z07 절차가 그대로 안 통합니다)</code></pre>
+      <h4 class="mini">기동을 줄이는 다른 선택지</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:22%">기술</th><th>방식 · 효과</th><th>대가</th></tr>
+          <tr><td><b>AppCDS</b></td><td>클래스 로딩·검증 결과를 아카이브로.
+              기동 <b>20~40%</b> 단축. <code>-XX:AOTCache</code>(Java 24+ · JEP 483)로
+              더 쉬워졌습니다</td><td><b>거의 없음</b> ★ 가장 먼저 시도</td></tr>
+          <tr><td><b>CRaC</b></td><td>워밍업까지 끝난 프로세스를 <b>체크포인트</b>로 저장 후 복원.
+              기동 <b>수십 ms</b> + 피크 성능 유지</td><td>리눅스·특정 JDK 필요.
+              열린 커넥션·비밀값 처리에 코드 수정</td></tr>
+          <tr><td><b>Leyden</b></td><td>“조기 실행(premain)”으로 AOT 를 표준 JDK 에 들이는 프로젝트.
+              캐시 일부는 이미 JDK 24~25 에 들어왔습니다</td><td><b>진행 중</b> — 전체 상은 아직 미확정</td></tr>
+          <tr><td>네이티브 이미지</td><td>기동·메모리 최고</td><td>이 카드의 ①~⑥ 전부</td></tr>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>“기동이 느리다”의 원인이 정말 JVM 인지 먼저 보세요.</b>
+        스프링 기동 3초 중 <b>2초가 DB 커넥션 풀 초기화·Flyway·외부 설정 조회</b>인 경우가 흔합니다.
+        그 상태로 네이티브를 만들면 <b>기동은 여전히 2초</b>입니다.
+        <code>-Ddebug=true</code> 나 <code>ApplicationStartup</code> 으로 <b>구간을 먼저 재세요.</b>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>쓸 때 / 쓰지 말 때</b><br>
+        ✅ <b>서버리스·Lambda·Cloud Run</b> — 콜드 스타트가 곧 비용이자 지연<br>
+        ✅ <b>CLI 도구</b> — 실행 시간이 수백 ms 인 프로그램에 JVM 기동은 낭비<br>
+        ✅ <b>사이드카·에이전트</b> — 인스턴스마다 뜨므로 메모리 절감이 곱해집니다<br>
+        ✅ 스케일아웃이 <b>초 단위로</b> 일어나는 트래픽(⚡ k12 대기열 개방)<br>
+        ❌ <b>24시간 도는 일반 웹 서비스</b> — 기동은 하루 한 번, 처리량은 JIT 이 이깁니다<br>
+        ❌ 리플렉션·동적 프록시가 많은 <b>레거시 의존성</b>이 섞인 프로젝트<br>
+        ❌ CI 예산이 빠듯한 팀 — 빌드 시간이 <b>배포 리듬</b>을 망칩니다<br>
+        <b>중간 답</b>: 먼저 <b>AppCDS/AOT 캐시</b> → 그래도 부족하면 <b>CRaC</b> →
+        콜드 스타트가 본질이면 <b>네이티브</b>. (z10 의 애너테이션 프로세서 기반 설계가
+        어느 쪽이든 유리하게 만듭니다)
       </div>
     </div>
   </div>

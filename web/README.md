@@ -19,6 +19,34 @@
 
 콘텐츠는 `src/data/*.ts`에 데이터로 분리되어 있어 텍스트만 수정하면 됩니다.
 
+## 학습 가이드 (정적 페이지 3종)
+
+포트폴리오와 함께 배포되는 단일 HTML 학습 가이드입니다.
+소스는 `guide-src/`에 조각으로 두고, 빌드하면 `public/*-web/index.html`로 합쳐집니다.
+→ 자세한 내용: [`guide-src/README.md`](guide-src/README.md)
+
+| 가이드 | 주소 | 소스 |
+|---|---|---|
+| 🐍 Python | `/python-web/` | `guide-src/python/` |
+| ☕ Java | `/java-web/` | `guide-src/java/` |
+| 🟨 JS · TS | `/js-ts-web/` | `guide-src/js-ts/` |
+
+## 폴더 구조
+
+```
+black-astro/                저장소 루트 (GitHub 프로필 저장소 겸용)
+├─ README.md                프로필 페이지 (github.com/black-astro 에 표시)
+├─ assets/badges/           프로필 README 전용 SVG 배지
+├─ profile-3d-contrib/      3D 잔디 그래프 (워크플로가 자동 생성 — 직접 수정 X)
+├─ docs/                    디자인 시스템 명세 등 문서
+├─ .github/workflows/       배포 · 잔디 그래프 · 스네이크 자동화
+└─ web/                     ★ 실제 코드 — 포트폴리오 SPA + 학습 가이드
+   ├─ src/                  Vue 3 SPA (views · components · data · style)
+   ├─ guide-src/            학습 가이드 원본 조각 (편집은 여기서)
+   ├─ public/               정적 파일 + 가이드 빌드 결과물 (*-web/ 은 직접 수정 X)
+   └─ dist/                 사이트 빌드 산출물 (git 제외)
+```
+
 ## 개발
 
 ```bash

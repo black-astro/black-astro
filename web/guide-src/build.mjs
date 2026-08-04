@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 학습 가이드 빌더 (Python / Java)
+ * 학습 가이드 빌더 (Python · Java · JS/TS)
  *
  * guide-src/<가이드>/parts/** 조각들을 parts.json 순서대로 이어붙여
  * public/<출력경로>/index.html 을 만든다.

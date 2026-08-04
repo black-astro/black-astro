@@ -14,7 +14,7 @@
     WebFlux 기반이라 적은 스레드로 많은 연결을 버팁니다.
   </p>
   <div class="stats">
-    <div><b>9</b><span>SECTIONS</span></div>
+    <div><b>10</b><span>SECTIONS</span></div>
     <div><b>1</b><span>진입점</span></div>
     <div><b>N</b><span>백엔드 서비스</span></div>
     <div><b>0</b><span>중복 인증 코드</span></div>
@@ -699,6 +699,293 @@ GlobalFilter requestIdFilter() {
         <b>게이트웨이 → 주문 → 결제 → 알림</b> 로그를 전부 이어 봅니다.
         이게 없으면 서비스 10개의 로그를 시간으로 맞춰 가며 추측해야 합니다.
         수집·대시보드 구성은 <b>⚡ 대규모 트래픽 탭 k14</b> 에서 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g10 ==================== -->
+<section class="sec" id="g10">
+  <div class="sec-head rv">
+    <span class="no">GW 10</span>
+    <h2>gRPC — <span class="t">MSA 내부 통신</span></h2>
+    <p class="lead">외부 공개는 REST, <b>서비스끼리는 gRPC</b>. 그 경계선을 정합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">REST 와 무엇이 다른가</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:24%">항목</th><th>REST + JSON</th><th>gRPC</th></tr>
+          <tr><td>전송</td><td>HTTP/1.1 (보통)</td><td><b>HTTP/2</b> — 멀티플렉싱·헤더 압축</td></tr>
+          <tr><td>페이로드</td><td>텍스트 JSON</td><td><b>protobuf 바이너리</b> — 보통 3~10배 작음</td></tr>
+          <tr><td>계약</td><td>문서·OpenAPI (선택)</td><td><b><code>.proto</code> 가 곧 계약</b> ★ 코드가 생성됨</td></tr>
+          <tr><td>스트리밍</td><td>SSE·WebSocket 별도</td><td><b>양방향이 기본 기능</b></td></tr>
+          <tr><td>브라우저</td><td>그냥 됨</td><td><b>직접 안 됨</b> — grpc-web + 프록시 필요</td></tr>
+          <tr><td>디버깅</td><td>curl 로 즉시</td><td>grpcurl 필요 · 눈으로 못 읽음</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="text"><code>HTTP/1.1  커넥션 하나에 요청 하나 — 키프얼라이브를 써도
+          "앞 요청이 끝나야 다음"(head-of-line blocking)
+HTTP/2    ★ 커넥션 하나 위에 스트림 수백 개를 동시에
+          → 커넥션 풀 압박이 줄고, 헤더도 HPACK 으로 압축됩니다
+          → 내부 홉이 많은 MSA 일수록 이득이 커집니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“무조건 빠르다”가 아닙니다.</b>
+        페이로드가 작고 호출이 드물면 <b>체감 차이가 거의 없습니다.</b>
+        gRPC 의 실제 이득은 <b>① 스키마가 강제되어 필드 오타·타입 사고가 사라지는 것</b>,
+        <b>② 클라이언트 코드를 직접 안 짜도 되는 것</b>,
+        ③ 그다음이 성능입니다. 순서를 착각하면 도입 근거가 약해집니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">.proto — 계약을 먼저 씁니다</h4>
+      <pre class="code" data-lang="proto"><code>syntax = "proto3";
+
+package order.v1;                       // ★ 버전을 패키지에 넣습니다
+option java_package = "com.company.grpc.order.v1";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+
+service OrderService {
+  rpc GetOrder     (GetOrderRequest)  returns (OrderResponse);              // 단항
+  rpc ListOrders   (ListOrdersRequest) returns (stream OrderResponse);      // 서버 스트리밍
+  rpc UploadEvents (stream OrderEvent) returns (UploadSummary);             // 클라 스트리밍
+  rpc Sync         (stream OrderEvent) returns (stream OrderResponse);      // 양방향
+}
+
+message GetOrderRequest {
+  int64 order_id = 1;                   // ★ 숫자는 "필드 번호" — 이름이 아니라 이걸로 인코딩
+}
+
+message OrderResponse {
+  int64  order_id = 1;
+  Status status   = 2;
+  google.protobuf.Timestamp created_at = 3;
+  repeated OrderItem items = 4;         // 리스트
+  optional string memo = 5;             // "없음"과 "빈 문자열"을 구분하려면 optional
+}
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;               // ★ 0번은 반드시 비워 둡니다 (기본값 자리)
+  STATUS_PAID = 1;
+  STATUS_SHIPPED = 2;
+}</code></pre>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts
+plugins { id("com.google.protobuf") version "0.9.4" }
+
+dependencies {
+    implementation("net.devh:grpc-spring-boot-starter:3.1.0.RELEASE")
+    // 또는 스프링 공식: org.springframework.grpc:spring-grpc-spring-boot-starter
+}
+protobuf {
+    protoc { artifact = "com.google.protobuf:protoc:4.29.3" }
+    plugins { create("grpc") { artifact = "io.grpc:protoc-gen-grpc-java:1.70.0" } }
+    generateProtoTasks { all().forEach { it.plugins { create("grpc") } } }
+}
+// ./gradlew generateProto → build/generated 에 스텁 클래스가 생성됩니다</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">서버 — 생성된 base 클래스를 구현</h4>
+      <pre class="code" data-lang="java"><code>@GrpcService                                   // net.devh 스타터
+public class OrderGrpcService
+        extends OrderServiceGrpc.OrderServiceImplBase {
+
+    private final OrderQuery query;
+
+    // ① 단항 — 요청 1 : 응답 1 (REST 와 같은 모양)
+    @Override
+    public void getOrder(GetOrderRequest req,
+                         StreamObserver&lt;OrderResponse&gt; res) {
+        var order = query.find(req.getOrderId())
+            .orElseThrow(() -&gt; Status.NOT_FOUND
+                .withDescription("주문을 찾을 수 없습니다: " + req.getOrderId())
+                .asRuntimeException());
+
+        res.onNext(toProto(order));            // 값 전달
+        res.onCompleted();                     // ★ 반드시 호출 — 빼먹으면 클라가 영원히 대기
+    }
+
+    // ② 서버 스트리밍 — 대량 조회를 나눠 보냅니다 (메모리 폭발 방지)
+    @Override
+    public void listOrders(ListOrdersRequest req,
+                           StreamObserver&lt;OrderResponse&gt; res) {
+        try (var stream = query.streamByUser(req.getUserId())) {
+            stream.forEach(o -&gt; res.onNext(toProto(o)));
+        }
+        res.onCompleted();
+    }
+
+    // ③ 클라이언트 스트리밍 — 받는 쪽 Observer 를 "반환"합니다
+    @Override
+    public StreamObserver&lt;OrderEvent&gt; uploadEvents(StreamObserver&lt;UploadSummary&gt; res) {
+        var n = new AtomicInteger();
+        return new StreamObserver&lt;&gt;() {
+            public void onNext(OrderEvent e) { ingest(e); n.incrementAndGet(); }
+            public void onError(Throwable t) { log.warn("업로드 중단", t); }
+            public void onCompleted() {
+                res.onNext(UploadSummary.newBuilder().setAccepted(n.get()).build());
+                res.onCompleted();
+            }
+        };
+    }
+    // ④ 양방향 — ③과 같은 모양에서 onNext 안에서 곧바로 res.onNext() 로 밀어 줍니다
+}</code></pre>
+      <pre class="code" data-lang="yaml"><code>grpc:
+  server:
+    port: 9090                    # ★ HTTP(8080)와 별도 포트
+  client:
+    inventory:
+      address: "static://inventory:9090"   # K8s 면 dns:///inventory:9090
+      negotiationType: PLAINTEXT           # 내부망 · mTLS 면 TLS
+      enableKeepAlive: true
+      keepAliveTime: 30s</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">클라이언트 · 데드라인 · 에러</h4>
+      <pre class="code" data-lang="java"><code>@Service
+public class InventoryClient {
+
+    @GrpcClient("inventory")                    // 위 yaml 의 이름
+    private InventoryServiceGrpc.InventoryServiceBlockingStub stub;
+
+    public int stockOf(long itemId) {
+        try {
+            return stub.withDeadlineAfter(300, TimeUnit.MILLISECONDS)   // ★ 매 호출마다
+                       .getStock(GetStockRequest.newBuilder()
+                                 .setItemId(itemId).build())
+                       .getQuantity();
+        } catch (StatusRuntimeException e) {
+            var code = e.getStatus().getCode();
+            if (code == Status.Code.DEADLINE_EXCEEDED) throw new SlowUpstream();
+            if (code == Status.Code.NOT_FOUND)          return 0;
+            throw e;
+        }
+    }
+}
+// 가상 스레드(🧬 a08)를 쓰면 BlockingStub 로도 동시성이 충분히 나옵니다.
+// 논블로킹이 필요하면 FutureStub / reactive-grpc 를 쓰세요.</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:38%">gRPC 상태 코드</th><th>대응 HTTP</th></tr>
+          <tr><td>INVALID_ARGUMENT</td><td>400</td></tr>
+          <tr><td>UNAUTHENTICATED / PERMISSION_DENIED</td><td>401 / 403</td></tr>
+          <tr><td>NOT_FOUND</td><td>404</td></tr>
+          <tr><td>ALREADY_EXISTS / ABORTED</td><td>409</td></tr>
+          <tr><td><b>DEADLINE_EXCEEDED</b></td><td>504 — 가장 자주 봅니다</td></tr>
+          <tr><td>RESOURCE_EXHAUSTED</td><td>429</td></tr>
+          <tr><td>UNAVAILABLE</td><td>503 — <b>재시도해도 되는</b> 유일한 축</td></tr>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>데드라인은 전파됩니다.</b>
+        A→B→C 로 이어질 때 A 가 300ms 를 걸면
+        <b>남은 시간이 B·C 에도 그대로 전달</b>되어, 이미 늦은 요청을 더 처리하지 않습니다.
+        REST 의 “각 구간이 각자 타임아웃” 보다 훨씬 안전합니다 —
+        <b>타임아웃 없이 호출하지 마세요</b>(⚡ k11).
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>재시도는 UNAVAILABLE 에만.</b>
+        <code>INTERNAL</code>·<code>UNKNOWN</code> 을 재시도하면
+        <b>같은 사고를 두 번</b> 냅니다. 쓰기 호출은 멱등 키를 함께 보내세요(⚡ k07).
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스키마 진화 — 필드 번호가 전부입니다</h4>
+      <pre class="code" data-lang="proto"><code>message OrderResponse {
+  int64  order_id = 1;
+  string user_id  = 2;
+  // string coupon_code = 3;      ← 삭제했습니다
+  reserved 3;                     // ★ 번호를 예약해 재사용을 컴파일러가 막습니다
+  reserved "coupon_code";         // 이름도 함께
+  int64  amount = 4;
+  string channel = 8;             // 새 필드는 "새 번호"로만
+}</code></pre>
+      <pre class="code" data-lang="text"><code>왜 번호를 재사용하면 안 되는가
+  protobuf 는 이름이 아니라 "번호 + 타입"으로 인코딩합니다.
+  3번을 string 에서 int64 로 바꿔 재사용하면,
+  아직 옛 스키마를 쓰는 서비스는 그 바이트를 ★ 조용히 잘못 해석합니다.
+  예외도 안 나고 로그도 안 남습니다 — 값만 틀립니다.
+  (배포는 절대 동시에 끝나지 않으므로 구·신 버전은 반드시 공존합니다)
+
+안전한 변경 ✅                      깨지는 변경 ❌
+  · 새 필드 추가 (새 번호)             · 필드 번호 변경·재사용
+  · 필드 삭제 후 reserved              · 타입 변경 (string ↔ int64)
+  · 새 rpc 추가                        · rpc 이름·시그니처 변경
+  · enum 값 추가 (끝에)                · required ↔ optional (proto2 잔재)
+  · 필드 이름만 변경(권장 안 함)        · 패키지·서비스 이름 변경
+
+★ proto3 는 "모르는 필드는 무시"가 기본이라
+  신규 필드를 추가해도 구버전 클라이언트가 죽지 않습니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>.proto 는 별도 저장소에서 버전 관리하세요.</b>
+        서비스마다 복사해 두면 <b>세 곳의 스키마가 미묘하게 달라집니다.</b>
+        <b>Buf</b>(<code>buf lint</code>·<code>buf breaking</code>)를 CI 에 넣으면
+        <b>호환성을 깨는 PR 자체를 막을 수 있습니다.</b>
+        큰 변경은 파일을 <code>order/v2</code> 로 새로 파고
+        <b>두 버전을 한동안 함께 서빙</b>하는 것이 정석입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">관측 — 인터셉터</h4>
+      <pre class="code" data-lang="java"><code>// REST 의 필터(g05)에 해당합니다 — 로깅·인증·추적을 여기 한 곳에
+@GrpcGlobalServerInterceptor
+public class TraceServerInterceptor implements ServerInterceptor {
+
+    static final Metadata.Key&lt;String&gt; TRACE =
+        Metadata.Key.of("x-trace-id", Metadata.ASCII_STRING_MARSHALLER);
+
+    @Override
+    public &lt;Q, R&gt; ServerCall.Listener&lt;Q&gt; interceptCall(
+            ServerCall&lt;Q, R&gt; call, Metadata headers, ServerCallHandler&lt;Q, R&gt; next) {
+
+        MDC.put("traceId", Optional.ofNullable(headers.get(TRACE))
+                                   .orElseGet(() -&gt; UUID.randomUUID().toString()));
+        long start = System.nanoTime();
+
+        return next.startCall(new SimpleForwardingServerCall&lt;Q, R&gt;(call) {
+            @Override public void close(Status status, Metadata trailers) {
+                log.info("{} {} {}ms", call.getMethodDescriptor().getFullMethodName(),
+                         status.getCode(), (System.nanoTime() - start) / 1_000_000);
+                MDC.clear();
+                super.close(status, trailers);
+            }
+        }, headers);
+    }
+}
+// 인증도 같은 자리 — Metadata 의 authorization 을 읽어 Context 에 넣습니다.
+// 게이트웨이가 검증한 X-User-Id 를 메타데이터로 넘기는 구성이 흔합니다(g05).</code></pre>
+      <pre class="code" data-lang="bash"><code># 리플렉션 서비스를 켜 두면 .proto 없이 호출할 수 있습니다 (개발·스테이징만)
+grpcurl -plaintext localhost:9090 list
+grpcurl -plaintext -d '{"order_id":42}' localhost:9090 order.v1.OrderService/GetOrder
+
+grpc_health_probe -addr=localhost:9090    # 표준 헬스체크 — K8s 프로브에 그대로
+# 메트릭은 Micrometer 가 grpc_server_* 로 자동 수집합니다 (⚡ k14)</code></pre>
+      <div class="note warn">
+        <b>Spring Cloud Gateway 는 gRPC 를 그대로 프록시하지 않습니다.</b>
+        외부 → 내부 경로에 gRPC 를 두려면
+        <b>Envoy·Nginx(grpc_pass)·Istio</b> 같은 HTTP/2 프록시나
+        <b>grpc-web 트랜스코딩</b>이 필요합니다.
+        게이트웨이는 <b>REST 를 받아 내부에서 gRPC 로 바꿔 부르는</b> 배치가 현실적입니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>경계선 — 외부는 REST, 내부는 gRPC</b><br>
+        ✅ <b>내부 서비스 간 동기 호출</b>이 많고 스키마를 강제하고 싶을 때<br>
+        ✅ 대량·실시간 <b>스트리밍</b>(시세·로그·진행률)<br>
+        ✅ 팀·언어가 갈려 있을 때 — <b>.proto 하나로 클라이언트가 생성</b>됩니다<br>
+        ❌ <b>브라우저·외부 파트너 공개 API</b> — REST + OpenAPI 가 압도적으로 편합니다<br>
+        ❌ 서비스가 2~3개뿐 — 도구·학습 비용이 이득보다 큽니다<br>
+        ❌ <b>비동기로 풀어야 할 일</b> — 그건 gRPC 가 아니라 Kafka 입니다(⚡ k08).
+        동기 호출 체인이 길어지면 <b>장애가 그대로 전파</b>됩니다.
       </div>
     </div>
   </div>

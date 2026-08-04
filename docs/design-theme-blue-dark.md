@@ -3,7 +3,7 @@
 > **용도**: 이 문서를 AI(Claude, ChatGPT 등)에게 통째로 붙여넣고
 > "이 디자인 시스템을 그대로 적용해서 ○○ 페이지를 만들어줘"라고 지시하면
 > 동일한 테마의 결과물을 얻을 수 있습니다.
-> 원본: Python Visual Guide (https://black-astro.github.io/black-astro/python-guide/)
+> 원본: Python Visual Guide (https://black-astro.github.io/black-astro/python-web/)
 
 ---
 

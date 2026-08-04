@@ -8,9 +8,9 @@
 
 | 가이드 | 소스 | 배포 경로 | 규모 |
 |---|---|---|---|
-| 🐍 Python | `guide-src/python/` | `/python-web/` | 12탭 · 177섹션 |
-| ☕ Java | `guide-src/java/` | `/java-web/` | 11탭 · 150섹션 |
-| 🟨 JS · TS | `guide-src/js-ts/` | `/js-ts-web/` | 10탭 · 150섹션 |
+| 🐍 Python | `guide-src/python/` | `/python-web/` | 14탭 · 200섹션 |
+| ☕ Java | `guide-src/java/` | `/java-web/` | 11탭 · 153섹션 |
+| 🟨 JS · TS | `guide-src/js-ts/` | `/js-ts-web/` | 10탭 · 152섹션 |
 
 세 가이드는 **CSS 5개(01~05)를 공유**합니다(테마 동일).
 각 폴더의 `css/06-*.css` 만 그 가이드 전용입니다.
@@ -77,7 +77,7 @@ Python 가이드만 데모 스크립트가 많아 `js/` 가 13개로 더 잘게 
 
 | 가이드 | 탭 |
 |---|---|
-| 🐍 Python | Python 기본 · uv · Pandas · NumPy · 이미지 · 윈도우 매크로 · PySide6 · 도구상자 · 알고리즘 · DB · **대규모 트래픽** · **초고급** |
+| 🐍 Python | Python 기본 · uv · Pandas · NumPy · 이미지 · 윈도우 매크로 · PySide6 · 도구상자 · 알고리즘 · DB · **웹 기초** · **테스트** · **대규모 트래픽** · **초고급** |
 | ☕ Java | Java 기초 · 고급/동시성 · Spring Boot · WebFlux · 데이터/JPA · Security · Gateway · 실전 도구 · JavaFX · **대규모 트래픽** · **초고급** |
 | 🟨 JS · TS | JavaScript · TypeScript · Node.js · Express · NestJS · React Native · Electron · **대규모 트래픽** · 실전 도구 · **초고급** |
 

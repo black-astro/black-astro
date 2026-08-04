@@ -429,7 +429,8 @@ redis.executePipelined((RedisCallback&lt;Object&gt;) conn -&gt; {
         } finally { redis.delete(lockKey); }
     }
     // 못 얻은 요청은 짧게 기다렸다가 캐시를 다시 본다
-    Thread.sleep(50);
+    try { Thread.sleep(50); }
+    catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     var retry = redis.opsForValue().get(key);
     return retry != null ? (ProductDto) retry : repository.findDto(id);
 }</code></pre>
@@ -1301,6 +1302,15 @@ public class RoutingDataSource extends AbstractRoutingDataSource {
     }
 }
 
+// ★ 반드시 LazyConnectionDataSourceProxy 로 감싸야 한다.
+// 스프링은 트랜잭션 시작 시점(readOnly 판정 전)에 커넥션을 먼저 얻으므로
+// 그냥 쓰면 항상 primary 로 간다. 프록시가 실제 커넥션 획득을
+// 첫 쿼리 시점까지 미뤄 줘야 replica 라우팅이 동작한다.
+<span class="t-ann">@Bean</span>
+public DataSource dataSource(RoutingDataSource routing) {
+    return new LazyConnectionDataSourceProxy(routing);
+}
+
 <span class="t-ann">@Transactional</span>(readOnly = true)      // ★ 이 한 줄로 복제본으로 간다
 public List&lt;ProductDto&gt; list() { ... }</code></pre>
       <div class="note warn" style="margin-bottom:0">
@@ -1570,7 +1580,7 @@ p95 · p99            톰캣 활성 스레드 수
         <li>☐ 재고·포인트 차감이 <b>원자적</b>인가 (읽고→판단→쓰기 아닌가)</li>
         <li>☐ 컨슈머가 <b>같은 메시지를 두 번 받아도</b> 괜찮은가</li>
         <li>☐ <b>DLQ 에 알람</b>이 걸려 있는가</li>
-        <li>☐ 헬스체크(<code>/actuator/health</code>)가 <b>DB 상태까지</b> 보는가</li>
+        <li>☐ readiness 프로브(<code>/actuator/health/readiness</code>)가 <b>DB 상태까지</b> 보는가 (liveness 에 DB 를 넣으면 안 됩니다)</li>
         <li>☐ <b>p99·오류율·컨슈머 랙</b>에 알람이 있는가</li>
         <li>☐ 로그에 <b>traceId</b> 가 찍히는가</li>
         <li>☐ 부하 테스트로 <b>한계 RPS 를 아는가</b></li>
