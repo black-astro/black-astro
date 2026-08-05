@@ -849,6 +849,50 @@ class PointConsumer {
 }</code></pre>
     </div>
   </div>
+
+  <div class="card rv d1">
+    <h4 class="mini" style="margin-top:0">브로커 버전 — Kafka 4.x 에는 <b>ZooKeeper 가 없습니다</b></h4>
+    <pre class="code" data-lang="text"><code>옛날 자료에는 "Kafka 를 띄우려면 ZooKeeper 부터 띄운다" 가 반드시 나옵니다.
+★ 이제 아닙니다. deprecated 가 아니라 코드에서 완전히 "제거" 됐습니다.
+
+  3.x 까지   ZooKeeper 앙상블 + 브로커       (메타데이터를 ZK 가 보관)
+  3.5~3.9    KRaft 와 ZooKeeper 를 둘 다 지원 (마이그레이션 기간)
+  4.0 부터   ★ ZooKeeper 제거 — KRaft 만 남음
+  현행       4.2.0 (2026-02)
+
+KRaft = Kafka 가 스스로 Raft 합의로 메타데이터를 관리하는 방식
+  · 프로세스 종류가 하나로 줄어 운영·모니터링 대상이 절반이 됩니다
+  · 파티션 수십만 개에서도 컨트롤러 페일오버가 수 초 → 수백 ms
+  · 컨트롤러 쿼럼은 홀수(보통 3) — 작은 클러스터는 broker 와 겸할 수 있습니다
+    (KAFKA_PROCESS_ROLES=broker,controller)</code></pre>
+    <div class="note warn">
+      <b>3.x → 4.x 는 “바로” 못 올립니다.</b>
+      4.0 에는 ZooKeeper 코드가 아예 없으므로 <b>마이그레이션 기능도 없습니다.</b>
+      ★ 순서는 <b>① 3.9(브리지 릴리스)로 먼저 올리고 → ② 거기서 KRaft 로 전환한 뒤 → ③ 4.x 로 업그레이드</b> 입니다.
+      ZooKeeper 를 쓰는 3.x 클러스터를 그대로 4.x 로 올리면 <b>브로커가 기동하지 않습니다.</b>
+    </div>
+    <pre class="code" data-lang="bash"><code># 관리 명령의 --zookeeper 옵션도 함께 사라졌습니다 → 전부 --bootstrap-server 기준
+# ❌ 옛 방식 (4.x 에서 "unrecognized option" 으로 실패)
+kafka-topics.sh --zookeeper zk1:2181 --list
+kafka-configs.sh --zookeeper zk1:2181 --describe --entity-type brokers
+
+# ✅ 지금 방식
+kafka-topics.sh   --bootstrap-server kafka1:9092 --list
+kafka-topics.sh   --bootstrap-server kafka1:9092 --create --topic order.created \
+                  --partitions 6 --replication-factor 3
+kafka-configs.sh  --bootstrap-server kafka1:9092 --describe --entity-type brokers
+kafka-consumer-groups.sh --bootstrap-server kafka1:9092 --describe --group point-service
+
+# 컨트롤러 쿼럼 상태 확인 (KRaft 에서 새로 보게 되는 명령)
+kafka-metadata-quorum.sh --bootstrap-server kafka1:9092 describe --status</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>애플리케이션 코드는 대부분 그대로입니다.</b>
+      클라이언트는 원래 <code>bootstrap-servers</code> 만 알면 됐기 때문에
+      <b>spring-kafka 설정도 위의 yaml 그대로</b> 씁니다 — 바뀌는 것은 <b>브로커 운영 쪽</b>입니다.
+      다만 <b>클라이언트가 너무 낡으면(0.x~2.0 대) 4.x 브로커가 거부합니다.</b>
+      올리기 전에 <code>spring-kafka</code> / <code>kafka-clients</code> 버전부터 확인하세요.
+    </div>
+  </div>
 </section>
 
 
