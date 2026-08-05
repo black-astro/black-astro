@@ -48,6 +48,54 @@
   }
   window.pickSheet = function(g){ showSheet(String(g)); };
 
+  /* ── 그룹에 마우스를 올리면 그 안의 탭을 옆으로 펼친다 ──
+     그룹을 눌러 첫 탭으로 간 다음 헤더에서 다시 고르는 두 번을
+     한 번으로 줄인다. 사이드바는 세로 스크롤 영역이라 잘리지 않도록
+     팝오버는 body 에 붙이고 위치만 계산한다. */
+  if (matchMedia("(hover:hover)").matches){
+    const pop = document.createElement("div");
+    pop.className = "ngpop";
+    document.body.appendChild(pop);
+
+    let timer = null;
+    const hide = () => { clearTimeout(timer); pop.classList.remove("on"); };
+    const lazyHide = () => { clearTimeout(timer); timer = setTimeout(hide, 220); };
+    const keep = () => clearTimeout(timer);
+
+    function open(grp){
+      keep();
+      const g = grp.dataset.g;
+      pop.innerHTML = "";
+      btns.filter(b => b.dataset.g === g).forEach(src => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = src.classList.contains("on") ? "on" : "";
+        b.innerHTML = src.innerHTML;
+        b.addEventListener("click", () => { switchTab(src.dataset.t); hide(); });
+        pop.appendChild(b);
+      });
+      if (!pop.children.length) return;
+
+      pop.classList.add("on");
+      const r = grp.getBoundingClientRect();
+      pop.style.left = (r.right + 8) + "px";
+      pop.style.top  = "0px";                       // 높이를 재기 전에 초기화
+      const h = pop.offsetHeight;
+      const top = Math.min(Math.max(8, r.top - 4), innerHeight - h - 8);
+      pop.style.top = top + "px";
+    }
+
+    grps.forEach(grp => {
+      grp.addEventListener("mouseenter", () => open(grp));
+      grp.addEventListener("mouseleave", lazyHide);
+      grp.addEventListener("focus", () => open(grp));
+    });
+    pop.addEventListener("mouseenter", keep);
+    pop.addEventListener("mouseleave", lazyHide);
+    addEventListener("scroll", hide, {passive:true});
+    addEventListener("blur", hide);
+  }
+
   /* 탭이 바뀌면(단축키 · 검색 · 시트) 그 탭이 속한 그룹으로 양쪽을 맞춘다 */
   window.tabReveal = function(){
     const on = btns.find(b => b.classList.contains("on"));
