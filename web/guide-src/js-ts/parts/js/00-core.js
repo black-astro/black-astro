@@ -147,7 +147,7 @@ $$(".stage-title").forEach(t => {
 
 /* ============================================================
    통합 검색 — 탭별 연관 키워드 사전 + 섹션 인덱스
-   "JWT 인증" → Nest 가드·Express 미들웨어,  "메모리 누수" → 초고급 탭
+   "JWT 인증" → Nest 가드·Express 미들웨어,  "메모리 누수" → 전문가 탭
    ============================================================ */
 const TAB_KW = {
   js:"자바스크립트 javascript js 기초 문법 변수 let const 타입 함수 화살표 arrow this 스코프 클로저 closure 객체 프로토타입 prototype 배열 array map filter reduce 구조분해 스프레드 클래스 class 모듈 module esm commonjs import require 이벤트루프 event loop 비동기 async await promise 프로미스 에러 try catch 제너레이터 이터레이터 옵셔널체이닝 정규식 regex 날짜 date es2024",
@@ -159,7 +159,7 @@ const TAB_KW = {
   electron:"일렉트론 electron 데스크탑 데스크톱 앱 프로그램 exe 창 window 메인프로세스 렌더러 renderer ipc 통신 preload contextbridge 보안 nodeintegration 메뉴 menu 트레이 tray 단축키 다이얼로그 dialog 파일 저장 electron-store sqlite 다중창 자동업데이트 updater 패키징 electron-builder 설치파일 msi dmg 서명 성능 메모리 사내도구",
   scale:"대규모 트래픽 대용량 성능 부하 확장 스케일 scale 캐시 cache redis 레디스 분산락 lock redlock 동시성 재고 선착순 멱등 idempotent 중복결제 큐 queue bullmq 카프카 kafka 메시지 이벤트 비동기 서킷브레이커 circuit breaker 타임아웃 폴백 재시도 백오프 rate limit 처리율제한 429 커넥션풀 수평확장 무상태 stateless 세션 pm2 클러스터 모니터링 관측 opentelemetry prometheus grafana pino 부하테스트 k6 autocannon p99 rps 병목 이벤트루프지연 도커 docker 쿠버네티스 k8s 무중단 배포 graceful",
   tool:"도구 패키지매니저 npm pnpm yarn 모노레포 monorepo workspace turborepo 번들러 bundler vite esbuild tsup rollup webpack eslint prettier biome 린트 포맷 테스트 vitest jest 커버리지 e2e playwright cypress zod 검증 스키마 axios ky fetch dayjs 날짜 lodash 유틸 로깅 pino winston 로그 환경변수 dotenv husky lint-staged 커밋 commitlint ci cd github actions 도커 docker 이미지 최적화 테스트심화 속성기반 propertybased fast-check 반례 shrinking 뮤테이션 mutation stryker 변이 계약테스트 contract pact broker 스냅샷 snapshot 테스트피라미드 msw testcontainers",
-  deep:"초고급 심화 내부동작 v8 엔진 engine jit 컴파일 히든클래스 hidden class 인라인캐시 최적화 deopt 메모리 memory gc 가비지컬렉션 힙 heap 누수 leak 스냅샷 마이크로태스크 microtask 매크로태스크 프로파일링 profiling flame cpu proxy reflect 메타프로그래밍 symbol weakmap weakref finalizationregistry 함수형 불변성 커링 합성 디자인패턴 pattern 싱글턴 팩토리 옵저버 타입레벨 동시성 abortcontroller 세마포어 보안 프로토타입오염 공급망 supply chain 아키텍처 헥사고날 ddd 계층",
+  deep:"전문가 초고급 고급 심화 내부동작 v8 엔진 engine jit 컴파일 히든클래스 hidden class 인라인캐시 최적화 deopt 메모리 memory gc 가비지컬렉션 힙 heap 누수 leak 스냅샷 마이크로태스크 microtask 매크로태스크 프로파일링 profiling flame cpu proxy reflect 메타프로그래밍 symbol weakmap weakref finalizationregistry 함수형 불변성 커링 합성 디자인패턴 pattern 싱글턴 팩토리 옵저버 타입레벨 동시성 abortcontroller 세마포어 보안 프로토타입오염 공급망 supply chain 아키텍처 헥사고날 ddd 계층",
 };
 const FIND_CHIPS = ["JWT 인증 만들기","이벤트 루프 순서","제네릭","유틸리티 타입",
                     "스트림으로 큰 파일","메모리 누수 잡기","NestJS 트랜잭션","FlatList 성능",

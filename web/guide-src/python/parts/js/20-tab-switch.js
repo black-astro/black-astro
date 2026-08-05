@@ -47,9 +47,9 @@ function switchTab(name){
 const TAB_LABEL = {
   python:"🐍 Python 기본", uv:"📦 uv 세팅", pandas:"🐼 Pandas", numpy:"🔢 NumPy",
   img:"🖼️ 이미지 처리", auto:"🖱️ 윈도우 매크로", qt:"💻 PySide6", toolbox:"🧰 실전 도구상자",
-  algo:"🧠 알고리즘", db:"🗄️ 데이터베이스", web:"🌐 웹 기초", test:"🧪 테스트",
+  algo:"🧠 알고리즘", db:"🗄️ DB · 파이썬 연동", web:"🌐 웹 · API 만들기", test:"🧪 테스트",
   scale:"⚡ 대규모 트래픽 · 서버",
-  deep:"🧬 초고급 · CPython 내부",
+  deep:"🧬 전문가 · CPython 내부",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -493,7 +493,7 @@ const CAP = {
   k14:["e","py-spy로 운영 중인 서비스를 멈추지 않고 프로파일링해, 병목 함수를 찾아 응답 시간을 실제로 줄입니다."],
   k15:["e","배포 전 체크리스트와 전체 아키텍처를 한 장으로 정리해, 대규모 서비스 설계 리뷰와 면접에서 설명해 냅니다."],
 
-  /* 🧬 초고급 · CPython 내부 */
+  /* 🧬 전문가 · CPython 내부 */
   z01:["e","dis로 바이트코드를 읽어 파이썬이 실제로 무엇을 하는지 설명할 수 있습니다 — 성능 논쟁을 근거로 끝냅니다."],
   z02:["p","참조 카운팅과 객체 모델을 이해해, is와 ==, 얕은 복사 문제를 원리 수준에서 설명하고 고칠 수 있습니다."],
   z03:["e","세대별 GC 동작과 순환 참조를 이해해, gc 튜닝이 필요한 장기 구동 서버의 메모리 거동을 근거로 설명합니다."],
@@ -549,7 +549,7 @@ const CAP = {
   }
 })();
 
-/* 키보드 1~9·0 으로 탭 전환 (11번째부터 — 웹 기초·테스트·대규모 트래픽·초고급은 단축키 없음) */
+/* 키보드 1~9·0 으로 탭 전환 (11번째부터 — 웹 기초·테스트·대규모 트래픽·전문가은 단축키 없음) */
 const TAB_ORDER = ["python","uv","pandas","numpy","img","auto","qt","toolbox","algo","db","web","test","scale","deep"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;

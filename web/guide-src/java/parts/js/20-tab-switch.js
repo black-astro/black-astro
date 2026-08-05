@@ -43,7 +43,7 @@ const TAB_LABEL = {
   core:"☕ Java 기초", adv:"🧬 Java 고급·동시성", boot:"🍃 Spring Boot Web",
   flux:"🌊 WebFlux · Netty", data:"🗄️ 데이터 · JPA", sec:"🔐 Security",
   gw:"🚪 Gateway", tool:"🧰 실전 도구", fx:"🖥️ JavaFX",
-  scale:"⚡ 대규모 트래픽", deep:"🔬 초고급 · JVM 내부",
+  scale:"⚡ 대규모 트래픽", deep:"🔬 전문가 · JVM 내부",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
