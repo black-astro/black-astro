@@ -12,7 +12,7 @@ function switchTab(name){
   $$(".pane").forEach(p => p.classList.toggle("on", p.id === "pane-" + name));
   $$(".navset").forEach(n => n.classList.toggle("on", n.dataset.nav === name));
   // 드롭다운 안의 주제 탭만 대상 (같은 탭바에 있는 수준 선택 chip은 건드리지 않음)
-  $$(".tabbar .tabrow button, .tabbar .tabs button").forEach(b => {
+  $$(".tabbar .tabrow button, .tabbar .tabs .tabsl button").forEach(b => {
     const on = b.dataset.t === name;
     b.classList.toggle("on", on);
     b.setAttribute("aria-selected", on ? "true" : "false");

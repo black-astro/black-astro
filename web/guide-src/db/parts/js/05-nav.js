@@ -35,10 +35,25 @@
     if (!cur || cur.dataset.g !== g) switchTab(first.dataset.t);
   };
 
-  /* 탭이 바뀌면(단축키 · 검색 · 모바일 드롭다운) 그 탭이 속한 그룹으로 맞춘다 */
+  /* ── 모바일 드롭다운도 같은 2단(그룹 → 탭) ──
+     좁은 화면에는 사이드바가 없으므로 시트 안에서 그룹을 골라야 한다.
+     그룹을 눌러도 시트는 닫지 않는다 — 탭까지 고르고 나가야 하기 때문이다. */
+  const sheet  = document.getElementById("tabs");
+  const sTabs  = sheet ? [...sheet.querySelectorAll(".tabsl > [data-g]")] : [];
+  const sGrps  = sheet ? [...sheet.querySelectorAll(".tabsg button[data-sg]")] : [];
+
+  function showSheet(g){
+    sTabs.forEach(b => b.classList.toggle("off", b.dataset.g !== g));
+    sGrps.forEach(x => x.classList.toggle("on", x.dataset.sg === g));
+  }
+  window.pickSheet = function(g){ showSheet(String(g)); };
+
+  /* 탭이 바뀌면(단축키 · 검색 · 시트) 그 탭이 속한 그룹으로 양쪽을 맞춘다 */
   window.tabReveal = function(){
     const on = btns.find(b => b.classList.contains("on"));
-    if (on) show(on.dataset.g);
+    if (!on) return;
+    show(on.dataset.g);
+    showSheet(on.dataset.g);
   };
   tabReveal();
 })();

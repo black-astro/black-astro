@@ -10,7 +10,7 @@ function switchTab(name){
   currentTab = name;
   $$(".pane").forEach(p => p.classList.toggle("on", p.id === "pane-" + name));
   $$(".navset").forEach(n => n.classList.toggle("on", n.dataset.nav === name));
-  $$(".tabbar .tabrow button, .tabbar .tabs button").forEach(b => {
+  $$(".tabbar .tabrow button, .tabbar .tabs .tabsl button").forEach(b => {
     const on = b.dataset.t === name;
     b.classList.toggle("on", on);
     b.setAttribute("aria-selected", on ? "true" : "false");
