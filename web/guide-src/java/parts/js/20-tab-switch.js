@@ -10,14 +10,13 @@ function switchTab(name){
   currentTab = name;
   $$(".pane").forEach(p => p.classList.toggle("on", p.id === "pane-" + name));
   $$(".navset").forEach(n => n.classList.toggle("on", n.dataset.nav === name));
-  $$(".navtab button").forEach(b => b.classList.toggle("on", b.dataset.t === name));
-  if (window.tabReveal) tabReveal();      // 고른 탭의 그룹만 펼친다
-  $$(".tabbar .tabs button").forEach(b => {
+  $$(".tabbar .tabrow button, .tabbar .tabs button").forEach(b => {
     const on = b.dataset.t === name;
     b.classList.toggle("on", on);
     b.setAttribute("aria-selected", on ? "true" : "false");
     if (on) b.scrollIntoView({block:"nearest", inline:"nearest"});
   });
+  if (window.tabReveal) tabReveal();   // 사이드바 그룹 · 헤더 줄을 그 탭에 맞춘다
   window.scrollTo(0, 0);
 
   if (!tabReady.has(name)){
