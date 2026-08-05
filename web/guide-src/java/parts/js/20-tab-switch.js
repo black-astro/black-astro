@@ -11,6 +11,7 @@ function switchTab(name){
   $$(".pane").forEach(p => p.classList.toggle("on", p.id === "pane-" + name));
   $$(".navset").forEach(n => n.classList.toggle("on", n.dataset.nav === name));
   $$(".navtab button").forEach(b => b.classList.toggle("on", b.dataset.t === name));
+  if (window.tabReveal) tabReveal();      // 고른 탭의 그룹만 펼친다
   $$(".tabbar .tabs button").forEach(b => {
     const on = b.dataset.t === name;
     b.classList.toggle("on", on);

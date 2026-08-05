@@ -615,27 +615,12 @@ document.addEventListener("keydown", e => {
 function tocOpen(){
   const nav = $(`.navset[data-nav="${currentTab}"]`);
   if (!nav) return;
-  /* 그룹은 <details> 로 접어 둔다 — 탭 하나에 섹션이 20개를 넘어
-     모바일 한 화면에 들어오지 않는다. 지금 읽고 있는 그룹만 펼쳐 준다. */
-  let html = "", head = "", buf = "", open = false;
-  const flush = () => {
-    if (!buf) return;
-    html += head
-      ? `<details class="tg"${open ? " open" : ""}><summary>${head}` +
-        `<span class="c">${(buf.match(/<a /g) || []).length}</span></summary>${buf}</details>`
-      : buf;
-    buf = ""; open = false;
-  };
-  nav.querySelectorAll('.grp, a[href^="#"]').forEach(el => {
-    if (el.classList.contains("grp")){
-      flush();
-      head = (el.querySelector(".lb") || el).textContent;
-    } else {
-      if (el.classList.contains("on")) open = true;
-      buf += `<a href="${el.getAttribute("href")}">${el.innerHTML}</a>`;
-    }
+  let html = "";
+  [...nav.children].forEach(el => {
+    if (el.classList.contains("grp")) html += `<h4>${el.textContent}</h4>`;
+    else if (el.tagName === "A")
+      html += `<a href="${el.getAttribute("href")}">${el.innerHTML}</a>`;
   });
-  flush();
   $("#tocBody").innerHTML = html;
   const t = $("#tocTitle");
   if (t) t.textContent = (TAB_LABEL[currentTab] || "") + " · 목차";
@@ -819,8 +804,6 @@ function setCode(sel, text){
       if (!e.isIntersecting) return;
       const id = e.target.id;
       links.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + id));
-      if (window.navReveal) navReveal(id);
-      if (window.navMark)   navMark();
     });
   }, {rootMargin:"-25% 0px -65% 0px"});
   secs.forEach(s => { if (s.id) spy.observe(s); });
