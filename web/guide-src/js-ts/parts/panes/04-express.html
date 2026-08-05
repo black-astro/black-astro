@@ -13,7 +13,7 @@
     <b>여기까지 마치면 인증·검증·보안·배포를 갖춘 실서비스 API 를 혼자 만들어 운영할 수 있습니다.</b>
   </p>
   <div class="stats">
-    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>16</b><span>SECTIONS</span></div>
     <div><b>10</b><span>줄로 서버</span></div>
     <div><b>0</b><span>정해진 구조</span></div>
     <div><b>5.x</b><span>최신 메이저</span></div>
@@ -1042,6 +1042,637 @@ app.get("/health", async (req, res) =&gt; {
         ② DI·트랜잭션·모듈 경계가 필요해질 때,
         ③ 마이크로서비스·GraphQL·WebSocket 을 같이 다뤄야 할 때.
         <b>service 계층을 잘 분리해 뒀다면</b> 이전 비용이 크지 않습니다(🐈 NestJS 탭).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x13 ==================== -->
+<section class="sec" id="x13">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 13</span>
+    <h2>실시간 — <span class="t">SSE · WebSocket</span></h2>
+    <p class="lead">
+      진행률 표시줄, 알림 뱃지, “누군가 입력 중…”.
+      <b>대부분은 WebSocket 이 아니라 SSE 로 충분</b>하고, 훨씬 쉽습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 고를 것인가</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th></th><th>SSE</th><th>WebSocket</th></tr></thead>
+          <tbody>
+            <tr><td>방향</td><td>서버 → 브라우저</td><td>양방향</td></tr>
+            <tr><td>프로토콜</td><td><b>그냥 HTTP</b></td><td>업그레이드 필요</td></tr>
+            <tr><td>재연결</td><td><b>브라우저가 자동</b></td><td>직접 구현</td></tr>
+            <tr><td>프록시</td><td>대체로 무사통과</td><td>설정 필요</td></tr>
+            <tr><td>쓸 곳</td><td>알림 · 진행률 · 대시보드</td><td>채팅 · 협업 편집 · 게임</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“채팅을 만들 건데요” 에도 SSE 로 시작할 수 있습니다.</b>
+        보내는 쪽은 <b>평범한 POST</b>, 받는 쪽만 SSE 면 됩니다.
+        WebSocket 은 <b>지연이 정말 중요할 때</b>(협업 커서·게임) 꺼내세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SSE — 30줄이면 끝난다</h4>
+      <pre class="code" data-lang="ts"><code>const clients = new Map&lt;string, Response&gt;();
+
+app.get('/events', requireAuth, (req, res) =&gt; {
+  res.set({
+    'Content-Type':  'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',   // no-transform 중요
+    'Connection':    'keep-alive',
+    'X-Accel-Buffering': 'no',                   // Nginx 버퍼링 끄기
+  });
+  res.flushHeaders();
+
+  const id = crypto.randomUUID();
+  clients.set(id, res);
+
+  // 15초마다 주석 한 줄 — 프록시가 유휴 연결을 끊는 것을 막는다
+  const ping = setInterval(() =&gt; res.write(': ping\n\n'), 15_000);
+
+  req.on('close', () =&gt; { clearInterval(ping); clients.delete(id); });
+});
+
+export function push(userId: string, event: string, data: unknown) {
+  const res = clients.get(userId);
+  if (!res) return;
+  res.write(`event: ${event}\n`);
+  res.write(`id: ${Date.now()}\n`);              // 재연결 시 이어받기용
+  res.write(`data: ${JSON.stringify(data)}\n\n`); // 빈 줄 두 개가 끝 표시
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Nginx 뒤에 두면 “아무것도 안 오는” 증상이 납니다.</b>
+        기본 설정이 응답을 <b>버퍼링</b>하기 때문입니다.
+        위 <code>X-Accel-Buffering: no</code> 헤더나
+        서버 쪽 <code>proxy_buffering off;</code> 중 하나는 반드시 필요합니다
+        (🌐 웹서버 가이드 · Nginx 탭).
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">브라우저 쪽 — 끊김을 전제로</h4>
+      <pre class="code" data-lang="ts"><code>const es = new EventSource('/events', { withCredentials: true });
+
+es.addEventListener('job.progress', (e) =&gt; {
+  const { jobId, percent } = JSON.parse(e.data);
+  setProgress(jobId, percent);
+});
+
+// 브라우저가 자동 재연결한다. 다만 '끊긴 동안'은 스스로 메워야 한다
+es.onopen  = () =&gt; syncMissed();      // 놓친 것 한 번 당겨오기
+es.onerror = () =&gt; setStatus('연결 끊김 — 자동 재시도 중');
+
+// 서버가 Last-Event-ID 를 받아 이어 보낼 수도 있다
+// (req.headers['last-event-id'])</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실시간의 90%는 “놓친 것 메우기”입니다.</b>
+        연결이 살아 있을 때만 정확한 화면은 <b>지하철에 들어가면 무너집니다</b>.
+        <b>재연결 직후 한 번 당겨오는 코드</b>를 항상 함께 만드세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">여러 대로 늘리면 생기는 문제</h4>
+      <div class="note warn" style="margin-top:0">
+        <b>서버가 2대가 되는 순간 알림이 절반만 갑니다.</b>
+        사용자는 A 서버에 붙어 있는데 이벤트는 B 서버에서 발생하기 때문입니다.
+        <b>메모리 Map 은 한 프로세스 안에서만 유효</b>합니다.
+      </div>
+      <pre class="code" data-lang="ts"><code>// Redis Pub/Sub 으로 서버 간에 이벤트를 흘려 준다
+import { createClient } from 'redis';
+
+const sub = createClient({ url: process.env.REDIS_URL });
+const pub = sub.duplicate();
+await Promise.all([sub.connect(), pub.connect()]);
+
+// 어느 서버에서 발생하든 전체에 뿌린다
+export const emit = (userId: string, event: string, data: unknown) =&gt;
+  pub.publish('events', JSON.stringify({ userId, event, data }));
+
+// 내 프로세스에 그 사용자가 붙어 있으면 내려보낸다
+await sub.subscribe('events', (raw) =&gt; {
+  const { userId, event, data } = JSON.parse(raw);
+  push(userId, event, data);
+});</code></pre>
+      <ul class="tx">
+        <li><b>연결 수 제한</b> — 한 사용자가 탭 20개를 열 수 있습니다. 사용자당 상한을 두세요</li>
+        <li><b>느린 클라이언트</b> — <code>res.write()</code> 가 <code>false</code> 를 반환하면
+          버퍼가 찬 것입니다. 계속 밀어 넣으면 <b>서버 메모리가 터집니다</b></li>
+        <li>그레이스풀 셧다운 때 <b>연결을 먼저 닫아</b> 클라이언트가 다른 서버로 붙게 하세요</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        규모가 더 커지면 <b>전용 게이트웨이</b>(Centrifugo·Soketi)로 분리하는 것이 답입니다 —
+        <b>⚡ 대규모 트래픽 탭</b>에서 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x14 ==================== -->
+<section class="sec" id="x14">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 14</span>
+    <h2>리버스 터널 <span class="t">직접 만들기</span></h2>
+    <p class="lead">
+      ngrok·Cloudflare Tunnel 이 하는 일을 <b>200줄로</b> 만들어 봅니다.
+      사내 장비 수백 대를 <b>포트 하나 열지 않고</b> 관리하는 에이전트 구조가 이것입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 190" role="img"
+         aria-label="사내 에이전트가 중계 서버로 WebSocket을 먼저 연결해 두면, 외부 요청이 중계 서버에서 그 소켓을 타고 사내 로컬 서버로 전달되고 응답이 같은 길로 돌아오는 구조">
+      <rect class="bx" x="12"  y="58"  width="126" height="58"/>
+      <rect class="bx" x="196" y="58"  width="150" height="58"/>
+      <rect class="bx bx-fw" x="404" y="10" width="12" height="156"/>
+      <rect class="bx" x="452" y="58"  width="130" height="58"/>
+      <rect class="bx" x="606" y="58"  width="62"  height="58"/>
+      <text x="75"  y="82"  text-anchor="middle" font-size="12.5">외부 요청</text>
+      <text x="75"  y="100" text-anchor="middle" class="lbl">GET /report</text>
+      <text x="271" y="82"  text-anchor="middle" font-size="12.5">중계 서버</text>
+      <text x="271" y="100" text-anchor="middle" class="lbl">Express + WS</text>
+      <text x="410" y="184" text-anchor="middle" class="lbl">방화벽</text>
+      <text x="517" y="82"  text-anchor="middle" font-size="12.5">사내 에이전트</text>
+      <text x="517" y="100" text-anchor="middle" class="lbl">WS 클라이언트</text>
+      <text x="637" y="82"  text-anchor="middle" font-size="12.5">로컬</text>
+      <text x="637" y="100" text-anchor="middle" class="lbl">:3000</text>
+      <path class="fl" d="M138 78 H196"/>
+      <path class="fl" d="M346 78 H452"/>
+      <path class="fl" d="M582 78 H606"/>
+      <path class="ln" d="M606 100 H582 M452 100 H346 M196 100 H138"/>
+      <text x="399" y="44" text-anchor="middle" class="lbl">↑ 요청은 열려 있는 소켓을 타고</text>
+      <text x="399" y="136" text-anchor="middle" class="lbl">↓ 응답은 같은 길로</text>
+    </svg>
+    <div class="cap">에이전트가 <b>먼저 붙어 대기</b>합니다. 중계 서버는 요청이 오면 <b>그 소켓에 실어 보내고 답을 기다립니다</b>.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">중계 서버 — 요청을 소켓에 실어 보낸다</h4>
+      <pre class="code" data-lang="ts"><code>import express from 'express';
+import { WebSocketServer } from 'ws';
+import { randomUUID } from 'node:crypto';
+
+const app = express();
+const agents  = new Map&lt;string, WebSocket&gt;();          // tenant → 소켓
+const waiting = new Map&lt;string, (r: TunnelRes) =&gt; void&gt;(); // reqId → 응답 대기
+
+const wss = new WebSocketServer({ noServer: true });
+
+wss.on('connection', (ws, req, tenant: string) =&gt; {
+  agents.set(tenant, ws);
+
+  ws.on('message', (buf) =&gt; {
+    const msg = JSON.parse(buf.toString());
+    waiting.get(msg.id)?.(msg);                        // 기다리던 요청에 응답 전달
+    waiting.delete(msg.id);
+  });
+
+  // 죽은 연결 청소 — TCP 는 끊겨도 한동안 살아 있는 척한다
+  let alive = true;
+  ws.on('pong', () =&gt; { alive = true; });
+  const iv = setInterval(() =&gt; {
+    if (!alive) return ws.terminate();
+    alive = false; ws.ping();
+  }, 30_000);
+
+  ws.on('close', () =&gt; { clearInterval(iv); agents.delete(tenant); });
+});
+
+// 외부 요청 → 해당 테넌트의 에이전트로
+app.all('/t/:tenant/*', async (req, res) =&gt; {
+  const ws = agents.get(req.params.tenant);
+  if (!ws || ws.readyState !== ws.OPEN)
+    return res.status(503).json({ error: 'agent offline' });
+
+  const id = randomUUID();
+  const body = await readBody(req);                    // 상한을 두고 읽는다
+
+  const answer = new Promise&lt;TunnelRes&gt;((ok, ng) =&gt; {
+    waiting.set(id, ok);
+    setTimeout(() =&gt; { waiting.delete(id); ng(new Error('timeout')); }, 30_000);
+  });
+
+  ws.send(JSON.stringify({
+    id, method: req.method,
+    path: '/' + (req.params[0] ?? ''),
+    headers: stripHopByHop(req.headers),
+    body: body.toString('base64'),
+  }));
+
+  try {
+    const r = await answer;
+    res.status(r.status).set(r.headers).send(Buffer.from(r.body, 'base64'));
+  } catch { res.status(504).json({ error: 'agent timeout' }); }
+});</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>구조는 “요청 ID 로 짝 맞추기”가 전부입니다.</b>
+        소켓 하나에 여러 요청이 뒤섞여 흐르므로,
+        <b>id 를 붙여 보내고 id 로 받는</b> 것만 지키면 됩니다 —
+        이것을 <b>멀티플렉싱</b>이라고 부릅니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">사내 에이전트 — 받아서 로컬로 넘긴다</h4>
+      <pre class="code" data-lang="ts"><code>import WebSocket from 'ws';
+
+const LOCAL = 'http://127.0.0.1:3000';
+let backoff = 1_000;
+
+function connect() {
+  const ws = new WebSocket(`wss://relay.example.com/agent`, {
+    headers: { authorization: `Bearer ${process.env.AGENT_TOKEN}` },
+  });
+
+  ws.on('open', () =&gt; { backoff = 1_000; log.info('tunnel up'); });
+
+  ws.on('message', async (buf) =&gt; {
+    const m = JSON.parse(buf.toString());
+    try {
+      // 로컬 서비스로 그대로 전달 (허용 경로만!)
+      const r = await fetch(LOCAL + m.path, {
+        method: m.method,
+        headers: m.headers,
+        body: ['GET', 'HEAD'].includes(m.method)
+          ? undefined : Buffer.from(m.body, 'base64'),
+        signal: AbortSignal.timeout(25_000),
+      });
+      const body = Buffer.from(await r.arrayBuffer());
+      ws.send(JSON.stringify({
+        id: m.id, status: r.status,
+        headers: Object.fromEntries(r.headers),
+        body: body.toString('base64'),
+      }));
+    } catch (e) {
+      ws.send(JSON.stringify({ id: m.id, status: 502, headers: {}, body: '' }));
+    }
+  });
+
+  // 끊기면 지수 백오프로 재연결 — 중계 서버 재시작 때 몰리는 것을 막는다
+  const retry = () =&gt; {
+    const jitter = Math.random() * 1_000;
+    setTimeout(connect, Math.min(backoff, 60_000) + jitter);
+    backoff *= 2;
+  };
+  ws.on('close', retry);
+  ws.on('error', () =&gt; ws.close());
+}
+connect();</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>지터(무작위 지연)를 빼면 안 됩니다.</b>
+        장비 500대가 <b>정확히 같은 초에</b> 재접속하면
+        중계 서버가 다시 죽습니다 — 되살아날 때마다 죽는 <b>재연결 폭풍</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 만들 때 반드시 챙길 것</h4>
+      <ul class="tx">
+        <li><b>인증은 연결 시점에</b> — 토큰 검증 후에만 <code>agents</code> 에 등록.
+          테넌트 id 를 <b>클라이언트가 자기 입으로 말하게 두면 안 됩니다</b></li>
+        <li><b>경로 화이트리스트</b> — 에이전트가 <b>로컬의 아무 데나</b> 요청을 전달하면
+          사내망 전체가 노출됩니다(SSRF)</li>
+        <li><b>본문 크기 상한</b> — 메모리에 통째로 올리는 구조라 <b>10MB 정도로 제한</b>하고,
+          큰 파일은 별도 스트리밍 경로로</li>
+        <li><b>동시 요청 상한</b> — 에이전트당 <code>p-limit</code> 으로 묶지 않으면
+          사내 서버가 먼저 쓰러집니다</li>
+        <li><b>hop-by-hop 헤더 제거</b> — <code>connection</code>·<code>upgrade</code>·
+          <code>transfer-encoding</code> 을 그대로 넘기면 프록시가 오작동합니다</li>
+      </ul>
+      <div class="note warn" style="margin-bottom:0">
+        <b>이 구조는 그 자체로 “원격 제어 채널”입니다.</b>
+        토큰이 새면 <b>사내망 침투 경로</b>가 됩니다.
+        토큰은 장비별로 발급하고 <b>회수(revoke) 목록</b>을 서버가 확인하게 만드세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 만들 것인가, 가져다 쓸 것인가</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="good">
+          <h5>직접 만들 만한 경우</h5>
+          <ul class="tx">
+            <li>장비마다 <b>다른 인증·권한</b>이 필요하다</li>
+            <li>외부 SaaS 로 트래픽이 나가면 <b>안 되는 데이터</b></li>
+            <li>HTTP 만 통과시키면 되는 <b>좁은 요구</b></li>
+            <li>에이전트에 <b>다른 일도 시킬</b> 예정(수집·배포)</li>
+          </ul>
+        </div>
+        <div class="bad">
+          <h5>가져다 쓰는 게 나은 경우</h5>
+          <ul class="tx">
+            <li>TCP·UDP·SSH 까지 넘겨야 한다 → <b>frp</b></li>
+            <li>HTTPS·WAF·SSO 가 필요 → <b>Cloudflare Tunnel</b></li>
+            <li>웹훅 테스트용 임시 → <b>ngrok</b></li>
+            <li>운영 인력이 없다 — 터널은 <b>24시간 살아 있어야</b> 합니다</li>
+          </ul>
+        </div>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>완성품 운영은 🌐 웹서버 가이드</b>의
+        <b>보안 · 운영 탭 15 리버스 터널</b>에서 다룹니다 —
+        systemd 자동 복구, 키 제한, 헬스체크까지 그쪽이 실전에 가깝습니다.
+        <b>여기서는 “어떻게 동작하는가”</b>를 코드로 보는 것이 목적입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x15 ==================== -->
+<section class="sec" id="x15">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 15</span>
+    <h2>대용량 전송 — <span class="t">Range · 재개 업로드</span></h2>
+    <p class="lead">
+      동영상 탐색 바를 끌면 <b>그 지점부터</b> 재생되는 것,
+      2GB 업로드가 끊겼을 때 <b>이어서</b> 올라가는 것 — 둘 다 서버가 해 주는 일입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Range 응답 — 동영상 스트리밍의 최소 조건</h4>
+      <pre class="code" data-lang="ts"><code>import { stat, createReadStream } from 'node:fs';
+
+app.get('/media/:id', async (req, res) =&gt; {
+  const file = await resolveSafe(req.params.id);   // 경로 조작 방어
+  const { size } = await stat(file);
+  const range = req.headers.range;
+
+  if (!range) {
+    res.set({ 'Content-Length': size, 'Accept-Ranges': 'bytes',
+              'Content-Type': 'video/mp4' });
+    return createReadStream(file).pipe(res);
+  }
+
+  // "bytes=1048576-" 형태를 파싱한다
+  const m = /^bytes=(\d*)-(\d*)$/.exec(range);
+  if (!m) return res.status(416).set('Content-Range', `bytes */${size}`).end();
+
+  const start = m[1] ? Number(m[1]) : 0;
+  const end   = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  if (start &gt;= size || start &gt; end)
+    return res.status(416).set('Content-Range', `bytes */${size}`).end();
+
+  res.status(206).set({
+    'Content-Range':  `bytes ${start}-${end}/${size}`,
+    'Accept-Ranges':  'bytes',
+    'Content-Length': end - start + 1,
+    'Content-Type':   'video/mp4',
+  });
+  createReadStream(file, { start, end }).pipe(res);
+});</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>206</code> 과 <code>Content-Range</code> 가 없으면</b>
+        브라우저는 탐색 바를 <b>끌 수 없게</b> 만듭니다(처음부터 다시 받습니다).
+        “재생은 되는데 탐색이 안 돼요”의 원인은 거의 항상 이것입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">업로드 — 메모리에 올리지 않기</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>메모리로 받기</h5>
+          <pre class="code" data-lang="ts"><code>multer({ storage: memoryStorage() })
+// 2GB 파일 3개 = 서버 사망</code></pre>
+        </div>
+        <div class="good">
+          <h5>디스크·스토리지로 흘리기</h5>
+          <pre class="code" data-lang="ts"><code>import { pipeline } from 'node:stream/promises';
+await pipeline(req, createWriteStream(tmp));
+// 또는 S3 멀티파트로 바로 흘린다</code></pre>
+        </div>
+      </div>
+      <pre class="code" data-lang="ts"><code>// 재개 가능한 업로드 — 청크를 오프셋으로 받는다 (tus 프로토콜의 핵심)
+app.patch('/upload/:id', async (req, res) =&gt; {
+  const offset = Number(req.headers['upload-offset']);
+  const meta   = await store.get(req.params.id);
+  if (!meta) return res.sendStatus(404);
+
+  // 클라이언트가 아는 위치와 서버가 아는 위치가 다르면 거부한다
+  if (offset !== meta.received)
+    return res.status(409).set('Upload-Offset', meta.received).end();
+
+  const ws = createWriteStream(meta.path, { flags: 'a' });
+  let written = 0;
+  req.on('data', (c) =&gt; { written += c.length; });
+  await pipeline(req, ws);
+
+  meta.received += written;
+  await store.set(req.params.id, meta);
+  res.set('Upload-Offset', meta.received).sendStatus(204);
+});</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>직접 만들기 전에 프로토콜을 보세요.</b>
+        재개 업로드는 <b>tus</b> 라는 표준이 있고 클라이언트 라이브러리가 이미 있습니다.
+        <b>파일이 큰데 네트워크가 불안한 환경</b>(현장·모바일)이라면
+        직접 구현보다 tus 서버를 붙이는 쪽이 빠릅니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파일은 앱 서버를 거치지 않는 게 최선</h4>
+      <pre class="code" data-lang="ts"><code>// 프리사인 URL — 브라우저가 스토리지에 직접 올린다
+app.post('/upload-url', requireAuth, async (req, res) =&gt; {
+  const key = `u/${req.user.id}/${randomUUID()}`;
+  const url = await getSignedUrl(s3, new PutObjectCommand({
+    Bucket: BUCKET, Key: key,
+    ContentType: req.body.type,
+  }), { expiresIn: 300 });                 // 5분짜리 일회용 주소
+
+  res.json({ url, key });
+});
+
+// 다운로드도 마찬가지 — 앱 서버는 '주소만' 발급한다
+app.get('/files/:id/url', requireAuth, async (req, res) =&gt; {
+  const f = await db.file.findUnique({ where: { id: req.params.id } });
+  if (!f || f.ownerId !== req.user.id) return res.sendStatus(404);
+  res.json({ url: await getSignedUrl(s3,
+    new GetObjectCommand({ Bucket: BUCKET, Key: f.key }), { expiresIn: 60 }) });
+});</code></pre>
+      <ul class="tx">
+        <li>앱 서버의 <b>대역폭·메모리를 쓰지 않습니다</b></li>
+        <li><b>Content-Type·크기 제한</b>을 서명에 함께 걸 수 있습니다</li>
+        <li>업로드 완료는 <b>스토리지 이벤트</b>나 클라이언트 콜백으로 확인</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">놓치기 쉬운 것</h4>
+      <ul class="tx">
+        <li><b>백프레셔</b> — <code>pipe</code>/<code>pipeline</code> 을 쓰세요.
+          <code>res.write()</code> 반환값을 무시하고 계속 쓰면 <b>메모리가 붑니다</b></li>
+        <li><b>중단 처리</b> — 사용자가 탭을 닫으면 <code>req.on('aborted')</code>.
+          임시 파일을 <b>지워 주지 않으면 디스크가 찹니다</b></li>
+        <li><b>업로드 파일명을 그대로 쓰지 마세요</b> —
+          <code>../../etc/passwd</code>, 확장자 위장, 유니코드 트릭이 들어옵니다.
+          <b>서버가 만든 UUID</b>를 키로 쓰고 원본 이름은 DB 에만 두세요</li>
+        <li><b>Nginx <code>client_max_body_size</code></b> 를 함께 올리지 않으면
+          앱까지 오지도 못하고 <b>413</b> 이 납니다</li>
+        <li>이미지·영상은 <b>비동기 후처리 큐</b>로 — 요청 안에서 변환하면 타임아웃이 납니다</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>스트림 자체가 낯설다면</b> 🟩 <b>Node.js 탭 05 스트림</b> 을 먼저 보세요 —
+        2GB CSV 를 메모리 100MB 로 처리하는 같은 원리입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== x16 ==================== -->
+<section class="sec" id="x16">
+  <div class="sec-head rv">
+    <span class="no">EXPRESS 16</span>
+    <h2>결제·웹훅 <span class="t">— 돈이 걸린 API</span></h2>
+    <p class="lead">
+      결제 연동에서 사고가 나는 지점은 정해져 있습니다 —
+      <b>중복 결제</b>, <b>놓친 웹훅</b>, <b>위조된 웹훅</b>.
+      세 가지를 막는 패턴은 어느 결제사든 같습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">멱등성 — 같은 요청을 두 번 받아도 한 번만</h4>
+      <pre class="code" data-lang="ts"><code>// 클라이언트가 요청마다 키를 만들어 보낸다 (재시도 시 같은 키)
+app.post('/orders', requireAuth, async (req, res) =&gt; {
+  const key = req.get('Idempotency-Key');
+  if (!key) return res.status(400).json({ error: 'Idempotency-Key 필요' });
+
+  // 같은 키로 이미 처리했다면 그때 결과를 그대로 돌려준다
+  const hit = await db.idempotency.findUnique({ where: { key } });
+  if (hit) return res.status(hit.status).json(hit.body);
+
+  // 동시에 두 번 들어온 경우 — DB 유니크 제약이 한쪽을 막아 준다
+  try {
+    await db.idempotency.create({ data: { key, userId: req.user.id,
+                                          status: 0, body: {} } });
+  } catch { return res.status(409).json({ error: '처리 중입니다' }); }
+
+  const order = await createOrder(req.user.id, req.body);
+  await db.idempotency.update({
+    where: { key }, data: { status: 201, body: order },
+  });
+  res.status(201).json(order);
+});</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“결제 버튼을 두 번 눌렀어요”는 프런트로 못 막습니다.</b>
+        네트워크가 느릴 때 <b>브라우저가 자동 재시도</b>하기도 하고,
+        모바일에서는 <b>앱이 요청을 다시 보냅니다</b>.
+        <b>서버에서 막는 것</b>이 유일하게 확실한 방법입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">웹훅 수신 — 서명 검증이 먼저</h4>
+      <pre class="code" data-lang="ts"><code>// ★ 서명 검증에는 '가공되지 않은 원문'이 필요하다.
+//   express.json() 이 먼저 파싱해 버리면 검증할 수 없다.
+app.post('/webhooks/pay',
+  express.raw({ type: 'application/json', limit: '1mb' }),
+  async (req, res) =&gt; {
+    const sig = req.get('x-signature') ?? '';
+    const ts  = Number(req.get('x-timestamp') ?? 0);
+
+    // 재전송 공격 방어 — 5분 넘은 것은 거부
+    if (Math.abs(Date.now() / 1000 - ts) &gt; 300) return res.sendStatus(400);
+
+    const mine = crypto.createHmac('sha256', process.env.WEBHOOK_SECRET!)
+                       .update(`${ts}.`).update(req.body).digest();
+    const theirs = Buffer.from(sig, 'hex');
+
+    // 길이가 다르면 timingSafeEqual 이 예외를 던진다
+    if (mine.length !== theirs.length ||
+        !crypto.timingSafeEqual(mine, theirs)) return res.sendStatus(401);
+
+    const event = JSON.parse(req.body.toString());
+
+    // 같은 이벤트가 여러 번 온다 — 결제사는 재시도를 보장한다
+    const fresh = await db.webhookEvent.create({ data: { id: event.id } })
+                          .catch(() =&gt; null);
+    if (!fresh) return res.sendStatus(200);        // 이미 처리함
+
+    // ★ 무거운 일은 큐에 넣고 즉시 200 — 늦게 답하면 결제사가 재시도한다
+    await queue.add('pay.event', event);
+    res.sendStatus(200);
+  });</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>===</code> 로 서명을 비교하지 마세요.</b>
+        문자열 비교는 <b>다른 첫 글자에서 즉시 멈추므로</b>
+        걸린 시간으로 정답을 한 글자씩 알아낼 수 있습니다(타이밍 공격).
+        반드시 <code>crypto.timingSafeEqual</code> 을 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">웹훅을 못 받았을 때 — 폴링 보완</h4>
+      <pre class="code" data-lang="ts"><code>// 웹훅은 '반드시 온다'가 아니라 '보통 온다' 입니다.
+// 서버 재배포 중이거나 장애가 나면 그대로 유실됩니다.
+// 그래서 상용 서비스는 폴링을 하나 더 둡니다.
+
+// 5분마다: 결제 요청은 있는데 아직 결론이 없는 건을 직접 조회
+cron.schedule('*/5 * * * *', async () =&gt; {
+  const stuck = await db.order.findMany({
+    where: { status: 'PENDING', createdAt: { lt: minutesAgo(3) } },
+    take: 100,
+  });
+  for (const o of stuck) {
+    const r = await pg.getPayment(o.paymentKey);    // 결제사에 직접 물어본다
+    if (r.status === 'DONE')     await markPaid(o.id, r);
+    if (r.status === 'CANCELED') await markCanceled(o.id, r);
+  }
+});</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“웹훅이 안 왔어요”는 결제 연동에서 가장 흔한 장애입니다.</b>
+        원인은 대개 <b>배포 중 다운타임</b>·<b>타임아웃</b>·<b>5xx 응답</b> 입니다.
+        웹훅을 <b>유일한 진실 통로로 삼지 말고</b> 폴링을 항상 곁들이세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">돈이 걸린 API 의 기본기</h4>
+      <ul class="tx">
+        <li><b>금액을 클라이언트에서 받지 마세요.</b> 상품 id 만 받고
+          <b>금액은 서버가 계산</b>합니다 — 가장 흔한 취약점입니다</li>
+        <li><b>결제 승인과 주문 확정은 같은 트랜잭션</b>에 —
+          중간에 죽으면 <b>돈은 빠졌는데 주문이 없는</b> 상태가 됩니다</li>
+        <li><b>모든 상태 변화를 로그로</b> — 분쟁이 나면 로그가 증거입니다.
+          <b>절대 지우거나 덮어쓰지 마세요</b>(append-only)</li>
+        <li><b>테스트 키와 운영 키를 코드로 분리</b> —
+          운영 DB 에 테스트 결제가 섞이면 정산이 안 맞습니다</li>
+        <li><b>환불·부분취소까지 설계</b>한 뒤 시작하세요.
+          나중에 붙이면 <b>상태 머신을 다시 짜야</b> 합니다</li>
+      </ul>
+      <div class="note warn">
+        <b>카드번호를 서버가 만지는 순간</b> PCI-DSS 범위에 들어갑니다.
+        결제사가 주는 <b>결제창·SDK</b> 를 써서
+        <b>카드 정보가 내 서버를 거치지 않게</b> 하세요 — 예외 없이.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        큐·재시도·분산 락 같은 뒷단 설계는
+        <b>⚡ 대규모 트래픽 탭</b>에서 이어집니다.
       </div>
     </div>
   </div>

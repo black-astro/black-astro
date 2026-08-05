@@ -40,10 +40,17 @@ function switchTab(name){
 
 /* 주제 탭 드롭다운 (전 해상도 공통) */
 const TAB_LABEL = {
-  start:"🧭 시작 · 개념", nginx:"🟩 Nginx", apache:"🪶 Apache",
-  tomcat:"🐱 Tomcat", caddy:"🔒 Caddy", tls:"🔐 HTTPS · 인증서",
-  lang:"🔗 언어별 연동", perf:"⚡ 성능 · 튜닝", lb:"⚖️ 로드밸런싱",
-  ops:"🛡️ 보안 · 운영", deep:"🧬 전문가 · 서버 내부",
+  start:"🧭 시작 · 개념",
+  nginx:"🟩 Nginx",
+  apache:"🪶 Apache",
+  tomcat:"🐱 Tomcat",
+  caddy:"🔒 Caddy",
+  tls:"🔐 HTTPS · 인증서",
+  lb:"⚖️ 로드밸런싱 · 무중단",
+  lang:"🔗 언어별 연동 · 배포",
+  perf:"⚡ 성능 · 튜닝",
+  ops:"🛡️ 보안 · 운영",
+  deep:"🧬 전문가 · 서버 내부",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -77,7 +84,7 @@ const SEC_LV = {
   /* lb */     b01:"b",b02:"b",b03:"b",b04:"i",b05:"i",b06:"i",b07:"i",b08:"i",
                b09:"a",b10:"a",b11:"i",b12:"b",
   /* ops */    o01:"i",o02:"b",o03:"i",o04:"a",o05:"a",o06:"i",o07:"i",o08:"i",
-               o09:"a",o10:"i",o11:"a",o12:"a",o13:"b",o14:"i",
+               o09:"a",o10:"i",o11:"a",o12:"a",o13:"b",o14:"i",o15:"a",
   /* deep */   z01:"a",z02:"a",z03:"a",z04:"a",z05:"a",z06:"a",z07:"a",z08:"a",
                z09:"a",z10:"a",z11:"a",z12:"a",z13:"a",z14:"i",
 };
@@ -230,6 +237,7 @@ const EZ = {
  o12:"자주 나는 장애 유형과 <b>대응 순서</b>를 정리했습니다.",
  o13:"매일·매주·매월 무엇을 봐야 하는지 목록으로 만들어 두세요.",
  o14:"보안 취약점이 발표되면 <b>내 서버 버전이 해당되는지</b> 확인하고 패치해야 합니다.",
+ o15:"공인 IP가 없어도 <b>안에서 밖으로 먼저 연결</b>해 두면 외부에서 사내 서버에 접속할 수 있어요. 방화벽에 구멍을 안 뚫습니다.",
 
  z01:"연결은 <b>운영체제의 대기줄(backlog)</b>에 쌓였다가 웹서버가 하나씩 꺼내 갑니다. 이 줄이 넘치면 접속이 거부돼요.",
  z02:"연결 수천 개를 <b>스레드 하나로</b> 다루는 비결이 epoll이에요. \"준비된 것만 알려 줘\"라는 방식입니다.",
@@ -406,6 +414,7 @@ const CAP = {
   o12:["e","장애 유형별 대응 순서를 숙지해 복구 시간을 분 단위로 줄입니다."],
   o13:["p","정기 점검 체계를 갖춰 사고를 예방합니다."],
   o14:["p","보안 공지를 추적해 취약 버전을 방치하지 않습니다."],
+  o15:["e","SSH -R·Cloudflare Tunnel·frp 로 공인 IP 없는 사내 서버를 외부에 안전하게 노출하고 자동 재연결·헬스체크·키 제한까지 운영합니다."],
 
   /* ── deep ── */
   z01:["e","접속이 거부되는 원인을 커널 대기열 수준에서 진단합니다."],
@@ -461,7 +470,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (0 = 10번째 탭) */
-const TAB_ORDER = ["start","nginx","apache","tomcat","caddy","tls","lang","perf","lb","ops","deep"];
+const TAB_ORDER = ["start","nginx","apache","tomcat","caddy","tls","lb","lang","perf","ops"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;

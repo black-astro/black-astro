@@ -1113,4 +1113,333 @@ trivy image --exit-code 1 --severity CRITICAL myapp:latest</code></pre>
   </div>
 </section>
 
+
+<!-- ==================== o15 ==================== -->
+<section class="sec" id="o15">
+  <div class="sec-head rv">
+    <span class="no">OPS 15</span>
+    <h2>리버스 터널 — <span class="t">포트를 안 열고 사내 서버 노출하기</span></h2>
+    <p class="lead">
+      <b>공인 IP 도 없고, 방화벽에 구멍도 못 뚫는데</b> 밖에서 접속은 돼야 할 때.
+      해법은 방향을 뒤집는 것입니다 — <b>안에서 밖으로 먼저 연결을 걸어 두고</b>,
+      그 통로로 바깥 요청을 되받습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 212" role="img"
+         aria-label="사내 서버가 방화벽을 통과해 바깥 중계 서버로 먼저 연결을 걸어 두면, 사용자의 요청이 중계 서버를 거쳐 그 통로를 타고 사내 서버에 도달하는 구조">
+      <rect class="bx" x="14"  y="26"  width="150" height="60"/>
+      <rect class="bx" x="14"  y="118" width="150" height="60"/>
+      <rect class="bx" x="268" y="70"  width="150" height="60"/>
+      <rect class="bx bx-fw" x="470" y="14" width="14" height="168"/>
+      <rect class="bx" x="524" y="70"  width="142" height="60"/>
+      <text x="89"  y="52"  text-anchor="middle" font-size="12.5">외부 사용자</text>
+      <text x="89"  y="70"  text-anchor="middle" class="lbl">app.example.com</text>
+      <text x="89"  y="144" text-anchor="middle" font-size="12.5">운영자</text>
+      <text x="89"  y="162" text-anchor="middle" class="lbl">SSH · 관리 화면</text>
+      <text x="343" y="96"  text-anchor="middle" font-size="12.5">중계 서버 (공인 IP)</text>
+      <text x="343" y="114" text-anchor="middle" class="lbl">Cloudflare · frps · VPS</text>
+      <text x="477" y="204" text-anchor="middle" class="lbl">방화벽 — 인바운드 전면 차단</text>
+      <text x="595" y="96"  text-anchor="middle" font-size="12.5">사내 서버</text>
+      <text x="595" y="114" text-anchor="middle" class="lbl">127.0.0.1:8080</text>
+      <path class="ln" d="M164 56 H222 V100 H268"/>
+      <path class="ln" d="M164 148 H222 V100 H268"/>
+      <path class="fl" d="M524 100 H418" />
+      <text x="416" y="52" text-anchor="middle" class="lbl">↑ 아웃바운드로</text>
+      <text x="416" y="160" text-anchor="middle" class="lbl">먼저 연결해 둔다</text>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="2.4s" repeatCount="indefinite" path="M524 100 H418"/>
+      </circle>
+    </svg>
+    <div class="cap">
+      화살표가 <b>안에서 밖으로</b> 향한다는 점이 전부입니다 —
+      방화벽은 <b>나가는 연결</b>은 대부분 막지 않기 때문에 <b>포트를 하나도 열지 않고</b> 통로가 생깁니다.
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 쓰나 — 실제로 쓰이는 자리</h4>
+      <ul class="tx">
+        <li><b>사내망 서비스를 외부에 공개</b> — 공인 IP·고정 IP 없이 (지사·공장·매장 서버)</li>
+        <li><b>고객사 장비 원격 관리</b> — 고객 방화벽을 건드리지 않고 지원 채널 확보</li>
+        <li><b>개발 중인 로컬 서버를 팀·외부에 시연</b> — 결제사 웹훅 테스트가 대표적</li>
+        <li><b>CGNAT·모바일 회선</b> — 통신사가 공인 IP 를 안 줄 때 유일한 방법</li>
+        <li><b>IoT · 키오스크 원격 접속</b> — 수백 대가 각자 밖으로 붙어 옵니다</li>
+      </ul>
+      <div class="note tip">
+        <b>같은 원리를 이미 쓰고 계실 수도 있습니다.</b>
+        GitHub Actions 러너, Jenkins 에이전트, 모니터링 에이전트, 원격 데스크톱 도구는
+        전부 <b>에이전트가 밖으로 붙는</b> 구조입니다.
+        “서버가 클라이언트에게 연결하는 게 아니라, <b>클라이언트가 먼저 붙어 대기</b>한다”가 공통점입니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>사내 규정을 먼저 확인하세요.</b>
+        리버스 터널은 <b>방화벽 정책을 사실상 우회</b>합니다.
+        보안팀 승인 없이 몰래 뚫으면 <b>징계 사유</b>가 되는 조직이 많습니다.
+        “포트를 안 열었으니 괜찮다”는 <b>기술적으로도 틀린 말</b>입니다 — 통로는 실제로 생깁니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">네 가지 선택지 비교</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>방식</th><th>설치</th><th>HTTPS</th><th>적합한 곳</th></tr></thead>
+          <tbody>
+            <tr><td><b>SSH <code>-R</code></b></td><td>없음<br><span class="sm">서버에 이미 있음</span></td>
+                <td>직접 구성</td><td>임시 · 운영자 접속<br><span class="sm">가장 빠르게 뚫을 때</span></td></tr>
+            <tr><td><b>Cloudflare Tunnel</b></td><td>cloudflared</td>
+                <td><b>자동</b></td><td>상시 서비스 공개<br><span class="sm">무료 · 도메인 필요</span></td></tr>
+            <tr><td><b>frp</b></td><td>frps + frpc</td>
+                <td>직접 구성</td><td>내가 다 통제해야 할 때<br><span class="sm">TCP·UDP 도 됨</span></td></tr>
+            <tr><td><b>ngrok</b></td><td>ngrok</td>
+                <td><b>자동</b></td><td>개발 중 임시 공개<br><span class="sm">웹훅 테스트</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>고르는 기준 한 줄</b> —
+        <b>상시 서비스</b>면 Cloudflare Tunnel,
+        <b>내 인프라 안에서 다 끝내야</b> 하면 frp,
+        <b>지금 5분만 필요</b>하면 SSH <code>-R</code>,
+        <b>웹훅 테스트</b>면 ngrok.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① SSH 리버스 터널 — 설치 없이 지금</h4>
+      <pre class="code" data-lang="bash"><code># 사내 서버에서 실행한다 (안 → 밖 방향)
+# 중계서버의 8080 포트로 들어온 요청 → 내 PC 의 127.0.0.1:3000 으로
+ssh -N -R 8080:127.0.0.1:3000 relay@relay.example.com
+
+#  -N  원격 명령 실행 없이 터널만
+#  -R  Remote forward (반대 방향은 -L)
+
+# 중계 서버 밖에서도 접속받게 하려면 sshd 설정이 필요하다
+# /etc/ssh/sshd_config
+GatewayPorts yes          # 없으면 127.0.0.1 에만 바인딩된다
+ClientAliveInterval 30    # 죽은 터널을 빨리 정리
+ClientAliveCountMax 3</code></pre>
+      <pre class="code" data-lang="ini"><code># ── 끊기면 자동 복구: systemd + autossh ──────────────
+# /etc/systemd/system/tunnel.service
+[Unit]
+Description=Reverse tunnel to relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tunnel
+Environment=AUTOSSH_GATETIME=0
+ExecStart=/usr/bin/autossh -M 0 -N -q \
+  -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" \
+  -o "ExitOnForwardFailure yes" -o "StrictHostKeyChecking yes" \
+  -i /home/tunnel/.ssh/id_ed25519 \
+  -R 8080:127.0.0.1:3000 relay@relay.example.com
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>ExitOnForwardFailure yes</code> 를 빼면 조용히 망가집니다.</b>
+        중계 서버에 포트가 이미 잡혀 있으면
+        SSH 는 <b>포워딩만 실패하고 연결은 유지</b>합니다 —
+        프로세스는 살아 있는데 터널만 죽은 상태라 <b>모니터링에도 안 잡힙니다</b>.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">중계 서버 쪽 — 계정을 가둬 두기</h4>
+      <pre class="code" data-lang="bash"><code># 터널 전용 계정: 셸도 없고, 포워딩만 가능
+sudo useradd -m -s /usr/sbin/nologin tunnel
+
+# ~tunnel/.ssh/authorized_keys — 키 앞에 제약을 붙인다
+restrict,port-forwarding,permitlisten="8080" ssh-ed25519 AAAA... 사내서버A</code></pre>
+      <ul class="tx">
+        <li><code>restrict</code> — 모든 기능을 끄고 필요한 것만 다시 켭니다</li>
+        <li><code>permitlisten</code> — <b>이 키는 8080 만</b> 열 수 있습니다</li>
+        <li>셸이 <code>nologin</code> 이라 <b>터널이 뚫려도 명령 실행은 불가</b></li>
+        <li>키는 <b>장비마다 다르게</b> — 한 대가 털려도 나머지는 무사합니다</li>
+      </ul>
+      <pre class="code" data-lang="nginx"><code># 중계 서버의 Nginx — 터널 포트를 도메인에 붙인다
+server {
+  listen 443 ssl;
+  http2 on;
+  server_name app.example.com;
+
+  ssl_certificate     /etc/letsencrypt/live/app.example.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/app.example.com/privkey.pem;
+
+  location / {
+    proxy_pass http://127.0.0.1:8080;   # ← 터널이 물려 있는 포트
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # 터널이 끊겼을 때 60초씩 기다리지 않게
+    proxy_connect_timeout 3s;
+    proxy_next_upstream error timeout http_502;
+  }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>HTTPS 는 중계 서버에서 끝내는 것이 정석입니다.</b>
+        인증서는 공인 도메인을 가진 중계 서버가 갖고,
+        터널 안쪽(중계 → 사내)은 <b>이미 SSH 로 암호화</b>되어 있습니다.
+        사내 서버에 인증서를 넣으려 애쓰지 마세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② Cloudflare Tunnel — 중계 서버도 필요 없다</h4>
+      <pre class="code" data-lang="bash"><code># 사내 서버에서 (중계 서버를 직접 운영하지 않아도 된다)
+cloudflared tunnel login
+cloudflared tunnel create office-app
+cloudflared tunnel route dns office-app app.example.com
+
+# ~/.cloudflared/config.yml
+tunnel: office-app
+credentials-file: /home/svc/.cloudflared/&lt;UUID&gt;.json
+ingress:
+  - hostname: app.example.com
+    service: http://127.0.0.1:3000
+  - hostname: admin.example.com
+    service: http://127.0.0.1:9000
+    originRequest:
+      noTLSVerify: false
+  - service: http_status:404          # 마지막 규칙은 필수
+
+# 서비스로 등록 (부팅 시 자동 시작)
+sudo cloudflared service install</code></pre>
+      <ul class="tx">
+        <li><b>인증서 자동</b> — Let's Encrypt 갱신을 신경 쓸 필요가 없습니다</li>
+        <li><b>DDoS·WAF 가 앞단에</b> 붙습니다 — 사내 서버가 직접 두들겨 맞지 않습니다</li>
+        <li><b>Access 정책</b>으로 사내 계정(SSO)·이메일 인증을 앞에 세울 수 있습니다</li>
+        <li>단점 — <b>Cloudflare 에 의존</b>하고, 도메인을 Cloudflare DNS 로 옮겨야 합니다</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>사내 관리 화면을 공개할 때는 Access 를 꼭 앞에 두세요.</b>
+        터널만 뚫으면 <b>인터넷 전체에 열린 것</b>과 같습니다.
+        “주소를 아무도 모른다”는 방어가 아닙니다 — 스캐너는 <b>인증서 투명성 로그</b>로 도메인을 찾아냅니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ frp — 전부 내 손 안에 두고 싶을 때</h4>
+      <pre class="code" data-lang="toml"><code># ── 중계 서버(공인 IP): frps.toml ──────────────────
+bindPort = 7000
+auth.method = "token"
+auth.token = "긴-랜덤-문자열"          # 반드시 바꿀 것
+
+vhostHTTPPort  = 8080
+webServer.addr = "127.0.0.1"          # 대시보드는 외부에 열지 않는다
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "..."
+
+# 아무나 붙어서 아무 포트나 열지 못하게
+allowPorts = [{ start = 20000, end = 20100 }]</code></pre>
+      <pre class="code" data-lang="toml"><code># ── 사내 서버: frpc.toml ───────────────────────────
+serverAddr = "relay.example.com"
+serverPort = 7000
+auth.token = "긴-랜덤-문자열"
+transport.tls.enable = true           # frp 구간도 TLS 로 감싼다
+
+[[proxies]]
+name = "office-web"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 3000
+customDomains = ["app.example.com"]
+# 터널 자체에 인증을 하나 더 (공개하면 안 되는 화면이라면)
+httpUser = "team"
+httpPassword = "..."
+
+[[proxies]]
+name = "office-db"                    # TCP 도 그대로 넘긴다
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 5432
+remotePort = 20055</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>DB 포트를 터널로 여는 것은 최후의 수단입니다.</b>
+        열더라도 <b>중계 서버의 <code>127.0.0.1</code> 에만 바인딩</b>하고,
+        접속자는 <b>SSH 로 중계 서버에 들어온 뒤</b> 로컬 포트로 붙게 하세요.
+        인터넷에 5432 를 노출하면 <b>몇 분 안에 스캔이 들어옵니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영 — 끊기는 것을 전제로 만든다</h4>
+      <ul class="tx">
+        <li><b>죽은 터널 감지</b> — 프로세스 생존이 아니라 <b>실제 응답</b>을 확인해야 합니다</li>
+        <li><b>지수 백오프 재연결</b> — 중계 서버가 재부팅될 때 수백 대가 동시에 들이닥칩니다</li>
+        <li><b>keepalive 30초</b> — NAT·방화벽이 유휴 연결을 조용히 끊습니다</li>
+        <li><b>장비별 개별 키·토큰</b> — 한 대 분실 시 그 키만 폐기</li>
+        <li><b>중계 서버 로그를 남기세요</b> — 누가 언제 붙었는지가 감사 자료가 됩니다</li>
+      </ul>
+      <pre class="code" data-lang="bash"><code># 터널 헬스체크 — 중계 서버에서 1분마다
+#!/usr/bin/env bash
+if ! curl -fsS --max-time 5 http://127.0.0.1:8080/healthz &gt;/dev/null; then
+  logger -t tunnel "DOWN: office-app"
+  curl -s -X POST "$SLACK_WEBHOOK" \
+       -d '{"text":"⚠️ 사내 터널(office-app) 응답 없음"}'
+fi</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>사내 서버 쪽에 <code>/healthz</code> 를 꼭 두세요.</b>
+        터널은 <b>“연결은 살아 있는데 뒤가 죽은”</b> 상태가 가장 흔합니다.
+        TCP 연결만 확인하면 이 상태를 <b>정상으로 오판</b>합니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">보안 — 터널은 방화벽에 낸 구멍입니다</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>이렇게 하면 사고가 납니다</h5>
+          <ul class="tx">
+            <li>루트 계정으로 터널을 띄운다</li>
+            <li>키 하나를 모든 장비에 복사해 쓴다</li>
+            <li>관리자 화면을 인증 없이 그대로 노출</li>
+            <li><code>0.0.0.0</code> 바인딩 + 인증 없는 frps</li>
+            <li>“임시로” 열어 두고 <b>1년째 그대로</b></li>
+          </ul>
+        </div>
+        <div class="good">
+          <h5>최소한 이만큼은</h5>
+          <ul class="tx">
+            <li>전용 계정 + <code>nologin</code> 셸</li>
+            <li>장비별 키 · <code>permitlisten</code> 제한</li>
+            <li>터널 앞단에 <b>인증</b>(SSO·Basic·mTLS)</li>
+            <li>노출 대상은 <b>한 서비스·한 포트</b>로 최소화</li>
+            <li><b>만료일을 정하고</b> 캘린더에 회수 일정 등록</li>
+          </ul>
+        </div>
+      </div>
+      <div class="note warn">
+        <b>공격자도 리버스 터널을 씁니다.</b>
+        침해된 서버에서 밖으로 나가는 연결을 만들어 <b>지속 접근 통로</b>를 확보하는 것은
+        전형적인 수법입니다. 그래서 <b>내 서버에서 나가는 연결을 감시</b>하는 것이
+        보안 운영의 기본이고, <b>우리가 만든 정상 터널도 문서로 남겨 둬야</b>
+        나중에 “이건 우리 것”이라고 증명할 수 있습니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>더 나은 대안이 있는지 먼저 보세요.</b>
+        상시 접속이 목적이라면 <b>VPN(WireGuard)</b> 이나
+        <b>제로트러스트 네트워크</b>(Tailscale·Cloudflare Access)가
+        감사·권한 관리 면에서 앞섭니다.
+        리버스 터널은 <b>“그것들을 쓸 수 없을 때”의 해법</b>입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
 </div><!-- /pane-ops -->

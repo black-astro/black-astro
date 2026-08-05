@@ -40,10 +40,16 @@ function switchTab(name){
 
 /* 주제 탭 드롭다운 (전 해상도 공통) */
 const TAB_LABEL = {
-  start:"🧭 시작 · 설치", sql:"📘 SQL 기초", pro:"🎓 SQL 전문가",
-  oracle:"🅾️ Oracle", pg:"🐘 PostgreSQL", mysql:"🐬 MySQL · MariaDB",
-  sqlite:"🪶 SQLite3", tune:"⚙️ 설계 · 튜닝", deep:"🧬 전문가 · DB 내부",
-  app:"🔌 앱 연동",
+  start:"🧭 시작 · 설치",
+  sql:"📘 SQL 기초",
+  pro:"🎓 SQL 전문가",
+  oracle:"🅾️ Oracle",
+  pg:"🐘 PostgreSQL",
+  mysql:"🐬 MySQL · MariaDB",
+  sqlite:"🪶 SQLite3",
+  tune:"⚙️ 설계 · 튜닝",
+  deep:"🧬 전문가 · DB 내부",
+  app:"🔌 앱 연동 · Python·Java·Node",
 };
 function tabDrop(force){
   const tb = $("#tabbar");

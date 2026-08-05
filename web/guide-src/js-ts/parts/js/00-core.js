@@ -193,6 +193,10 @@ const SEC_KW = {
   n17:"deno 디노 bun 번 런타임비교 다른런타임 jsc 권한모델 allow-net 샌드박스 npm호환 마이그레이션 bun install bun test deno deploy hono 표준 fetch 서버리스 엣지",
   x03:"미들웨어 next 순서 커스텀미들웨어 에러미들웨어",
   x06:"에러핸들러 전역 asyncHandler 404 상태코드",
+  x13:"실시간 sse eventsource 서버센트이벤트 websocket 알림 진행률 pubsub redis 스트리밍응답",
+  x14:"리버스터널 터널 ngrok 대체 websocket 멀티플렉싱 에이전트 중계서버 사내망 프록시 재연결 백오프",
+  x15:"대용량 스트리밍 range 206 부분응답 동영상 재개업로드 tus 프리사인 presigned s3 멀티파트 백프레셔",
+  x16:"결제 웹훅 webhook 서명검증 hmac 멱등성 idempotency 중복결제 타이밍공격 재시도 폴링 pci",
   x10:"보안 helmet cors ratelimit csrf xss sql인젝션 취약점",
   s03:"모듈 di 의존성주입 provider inject forwardRef 순환참조 scope",
   s06:"dto 검증 class-validator classtransformer validationpipe whitelist",
@@ -207,6 +211,13 @@ const SEC_KW = {
   e01:"메인프로세스 렌더러 프로세스구조 chromium nodejs 아키텍처",
   e03:"ipc invoke handle send on 통신 양방향 브로드캐스트",
   e04:"보안 contextisolation nodeintegration preload contextbridge csp 원격코드",
+  e12:"딥링크 프로토콜 커스텀스킴 단일인스턴스 secondinstance openurl 자동시작 트레이상주 파일연결 점프리스트",
+  e13:"터미널 nodepty xterm pty conpty 콘솔 셸 자식프로세스 execfile 명령주입 빌드로그",
+  e14:"확장 플러그인 extensionhost utilityprocess 매니페스트 activationevents 격리 샌드박스 vscode",
+  e15:"창상태 복원 세션 위치기억 멀티모니터 getnormalbounds safestorage 키체인 핫엑싯",
+  e16:"코드서명 서명 공증 notarize smartscreen gatekeeper ev인증서 azuretrustedsigning 채널 델타업데이트 blockmap 스테이징",
+  e17:"오프라인 동기화 아웃박스 큐 낙관적ui 충돌해결 crdt lww 델타싱크 재연결 백오프 sqlite 로컬퍼스트",
+  e18:"체크리스트 사내도구 배포전 점검 오탐 프록시",
   e10:"패키징 electron-builder nsis dmg 설치파일 서명 공증 배포",
   v01:"아키텍처 vscode discord 구조 멀티프로세스 확장호스트 격리 플러그인 설계",
   v02:"프로세스모델 utilityprocess worker_threads child_process 격리 서비스이름 하트비트 vm샌드박스",
@@ -410,12 +421,27 @@ document.addEventListener("keydown", e => {
 function tocOpen(){
   const nav = $(`.navset[data-nav="${currentTab}"]`);
   if (!nav) return;
-  let html = "";
-  [...nav.children].forEach(el => {
-    if (el.classList.contains("grp")) html += `<h4>${el.textContent}</h4>`;
-    else if (el.tagName === "A")
-      html += `<a href="${el.getAttribute("href")}">${el.innerHTML}</a>`;
+  /* 그룹은 <details> 로 접어 둔다 — 탭 하나에 섹션이 20개를 넘어
+     모바일 한 화면에 들어오지 않는다. 지금 읽고 있는 그룹만 펼쳐 준다. */
+  let html = "", head = "", buf = "", open = false;
+  const flush = () => {
+    if (!buf) return;
+    html += head
+      ? `<details class="tg"${open ? " open" : ""}><summary>${head}` +
+        `<span class="c">${(buf.match(/<a /g) || []).length}</span></summary>${buf}</details>`
+      : buf;
+    buf = ""; open = false;
+  };
+  nav.querySelectorAll('.grp, a[href^="#"]').forEach(el => {
+    if (el.classList.contains("grp")){
+      flush();
+      head = (el.querySelector(".lb") || el).textContent;
+    } else {
+      if (el.classList.contains("on")) open = true;
+      buf += `<a href="${el.getAttribute("href")}">${el.innerHTML}</a>`;
+    }
   });
+  flush();
   $("#tocBody").innerHTML = html;
   const t = $("#tocTitle");
   if (t) t.textContent = (TAB_LABEL[currentTab] || "") + " · 목차";
@@ -599,6 +625,8 @@ function setCode(sel, text){
       if (!e.isIntersecting) return;
       const id = e.target.id;
       links.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + id));
+      if (window.navReveal) navReveal(id);
+      if (window.navMark)   navMark();
     });
   }, {rootMargin:"-25% 0px -65% 0px"});
   secs.forEach(s => { if (s.id) spy.observe(s); });

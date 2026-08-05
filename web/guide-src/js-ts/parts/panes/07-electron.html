@@ -16,7 +16,7 @@
     <b>⚙️ 네이티브 · 미디어 탭</b>에서 이어집니다.
   </p>
   <div class="stats">
-    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>18</b><span>SECTIONS</span></div>
     <div><b>2</b><span>프로세스 구조</span></div>
     <div><b>3</b><span>OS 동시 지원</span></div>
     <div><b>IPC</b><span>모든 통신의 통로</span></div>
@@ -1002,6 +1002,996 @@ child.on("message", (msg) =&gt; {
 <section class="sec" id="e12">
   <div class="sec-head rv">
     <span class="no">ELECTRON 12</span>
+    <h2>딥링크 · <span class="t">단일 인스턴스 · OS 통합</span></h2>
+    <p class="lead">
+      <code>slack://</code> · <code>vscode://</code> 를 눌렀을 때
+      <b>이미 열려 있는 창</b>이 앞으로 나오는 그 동작입니다.
+      상용 앱과 “그냥 만든 앱”이 갈리는 첫 번째 지점입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 660 132" role="img"
+         aria-label="브라우저에서 myapp:// 링크를 누르면 OS가 프로토콜 등록표를 보고 이미 실행 중인 앱에 인자를 전달하는 흐름">
+      <rect class="bx" x="8"   y="34" width="128" height="58"/>
+      <rect class="bx" x="196" y="34" width="128" height="58"/>
+      <rect class="bx" x="384" y="8"  width="128" height="52"/>
+      <rect class="bx" x="384" y="72" width="128" height="52"/>
+      <rect class="bx" x="556" y="34" width="96"  height="58"/>
+      <text x="72"  y="58"  text-anchor="middle" font-size="12.5">브라우저</text>
+      <text x="72"  y="76"  text-anchor="middle" class="lbl">myapp://room/42</text>
+      <text x="260" y="58"  text-anchor="middle" font-size="12.5">OS 등록표</text>
+      <text x="260" y="76"  text-anchor="middle" class="lbl">registry / plist</text>
+      <text x="448" y="30"  text-anchor="middle" font-size="12.5">첫 실행</text>
+      <text x="448" y="46"  text-anchor="middle" class="lbl">process.argv</text>
+      <text x="448" y="94"  text-anchor="middle" font-size="12.5">이미 실행 중</text>
+      <text x="448" y="110" text-anchor="middle" class="lbl">second-instance</text>
+      <text x="604" y="58"  text-anchor="middle" font-size="12.5">창 포커스</text>
+      <text x="604" y="76"  text-anchor="middle" class="lbl">방 42 열기</text>
+      <path class="fl" d="M136 63 H196"/>
+      <path class="ln" d="M324 63 H356 M356 63 V34 H384 M356 63 V98 H384"/>
+      <path class="fl" d="M512 34 H534 V63 H556"/>
+      <path class="fl" d="M512 98 H534 V63 H556"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="1.6s" repeatCount="indefinite" path="M136 63 H196"/>
+      </circle>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="1.6s" begin="0.5s" repeatCount="indefinite" path="M512 34 H534 V63 H556"/>
+      </circle>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="1.6s" begin="0.9s" repeatCount="indefinite" path="M512 98 H534 V63 H556"/>
+      </circle>
+    </svg>
+    <div class="cap">링크 한 번에 <b>새 프로세스가 뜨느냐</b>, <b>열려 있던 창이 응답하느냐</b> — 그 차이를 만드는 배선입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 프로토콜 등록 + 단일 인스턴스</h4>
+      <pre class="code" data-lang="ts"><code>import { app, BrowserWindow } from 'electron';
+import path from 'node:path';
+
+// 1) 내 앱이 myapp:// 를 담당한다고 OS 에 등록
+if (process.defaultApp) {
+  // 개발 중(electron . 로 띄울 때)은 실행 인자까지 함께 등록해야 한다
+  if (process.argv.length >= 2)
+    app.setAsDefaultProtocolClient('myapp', process.execPath,
+                                   [path.resolve(process.argv[1])]);
+} else {
+  app.setAsDefaultProtocolClient('myapp');
+}
+
+// 2) 두 번째 실행을 막는다 — 실패하면 '내가 두 번째'라는 뜻
+const primary = app.requestSingleInstanceLock();
+if (!primary) {
+  app.quit();                 // 인자는 이미 첫 번째 프로세스로 전달됐다
+} else {
+  app.on('second-instance', (_e, argv) =&gt; {
+    // Windows · Linux: 두 번째 실행의 argv 가 여기로 넘어온다
+    const url = argv.find(a =&gt; a.startsWith('myapp://'));
+    focusMain();
+    if (url) route(url);
+  });
+
+  // macOS: argv 가 아니라 open-url 이벤트로 온다
+  app.on('open-url', (e, url) =&gt; { e.preventDefault(); focusMain(); route(url); });
+
+  app.whenReady().then(() =&gt; {
+    createWindow();
+    // Windows · Linux 첫 실행: 시작 인자에 딥링크가 섞여 있다
+    const url = process.argv.find(a =&gt; a.startsWith('myapp://'));
+    if (url) route(url);
+  });
+}</code></pre>
+      <div class="note warn">
+        <b>플랫폼마다 들어오는 통로가 다릅니다.</b>
+        macOS 는 <code>open-url</code>, Windows·Linux 는 <b>argv</b> 입니다.
+        <b>세 경로(첫 실행 argv · second-instance argv · open-url)를 모두 처리</b>하지 않으면
+        “어떤 때는 되고 어떤 때는 안 되는” 버그가 됩니다 —
+        딥링크 문의의 대부분이 여기서 나옵니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>단일 인스턴스 락은 딥링크만을 위한 게 아닙니다.</b>
+        SQLite 파일·로그 파일·설정 파일을 <b>두 프로세스가 동시에 쓰는 사고</b>를 막아 줍니다.
+        데이터를 파일로 들고 있는 앱이라면 <b>거의 항상 켜야 합니다</b>.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② URL 을 화면 이동으로 — 검증이 먼저</h4>
+      <pre class="code" data-lang="ts"><code>function focusMain() {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win) return createWindow();
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+// 딥링크는 '외부에서 들어온 입력'이다 — 화이트리스트로 받는다
+const ROUTES = {
+  room:    (id: string) =&gt; `/rooms/${encodeURIComponent(id)}`,
+  ticket:  (id: string) =&gt; `/tickets/${encodeURIComponent(id)}`,
+} as const;
+
+function route(raw: string) {
+  let u: URL;
+  try { u = new URL(raw); } catch { return; }
+  if (u.protocol !== 'myapp:') return;
+
+  const kind = u.hostname;                       // myapp://room/42 → 'room'
+  const id   = u.pathname.replace(/^\//, '');
+  const make = ROUTES[kind as keyof typeof ROUTES];
+  if (!make) return;                             // 모르는 경로는 조용히 버린다
+
+  BrowserWindow.getAllWindows()[0]
+    ?.webContents.send('deeplink:navigate', make(id));
+}</code></pre>
+      <div class="note warn">
+        <b>딥링크는 공격 표면입니다.</b>
+        악성 웹페이지가 <code>myapp://</code> 링크를 심어 사용자를 클릭하게 만들 수 있습니다.
+        <b>URL 을 그대로 <code>loadURL</code>·<code>shell.openPath</code>·<code>exec</code> 에 넘기면 안 됩니다.</b>
+        위처럼 <b>허용한 경로만 화이트리스트로 매핑</b>하고,
+        결제·삭제처럼 되돌릴 수 없는 동작은 <b>딥링크로 바로 실행하지 말고 확인 화면을 거치세요</b>.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        패키징 쪽 설정도 함께 필요합니다 —
+        <code>electron-builder.yml</code> 의
+        <code>protocols:</code>(name·schemes) 항목을 적어야
+        설치 시 OS 에 등록됩니다. macOS 는 <code>CFBundleURLTypes</code> 로 들어갑니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ 파일 연결 · 자동 시작 · 최근 항목</h4>
+      <pre class="code" data-lang="ts"><code>// 파일 더블클릭으로 내 앱이 열리게 (.myproj 연결)
+// macOS
+app.on('open-file', (e, filePath) =&gt; { e.preventDefault(); openProject(filePath); });
+// Windows · Linux — 경로가 argv 로 들어온다 (딥링크와 같은 통로)
+
+// 로그인 시 자동 시작 — '조용히' 트레이로만 뜨게
+app.setLoginItemSettings({
+  openAtLogin: true,
+  openAsHidden: true,                       // macOS
+  args: ['--hidden'],                       // Windows 에서 우리가 직접 해석
+});
+
+// 최근 파일 (Windows 점프리스트 · macOS 독 메뉴에 자동 반영)
+app.addRecentDocument(filePath);
+
+// Windows 작업 표시줄 진행률 · 배지
+win.setProgressBar(0.42);                   // -1 이면 숨김
+app.setBadgeCount(3);                       // macOS · 일부 Linux</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>자동 시작을 기본값으로 켜지 마세요.</b>
+        사내 배포에서 가장 많이 오는 항의가 “PC 가 느려졌다”입니다.
+        <b>설정에서 사용자가 켜게 하고</b>, 켜더라도
+        <code>openAsHidden</code>/<code>--hidden</code> 으로 <b>창 없이 트레이만</b> 띄우세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">④ 상용 앱이 실제로 하는 것</h4>
+      <div class="layer" style="margin-top:0">
+        <div class="lrow l-web"><span class="tagn">Slack</span>
+          <div><b><code>slack://channel?team=T1&amp;id=C2</code></b>
+          <span>웹에서 누르면 <b>앱이 이미 켜져 있으면 그 창</b>, 없으면 실행 후 이동.
+          앱이 없으면 웹으로 폴백하는 <b>중간 착지 페이지</b>를 씁니다.</span></div></div>
+        <div class="lrow l-svc"><span class="tagn">VS Code</span>
+          <div><b><code>vscode://file/C:/x/a.ts:12:5</code></b>
+          <span>파일·줄·열까지 실어 보냅니다. 확장이 자기 스킴을 등록할 수 있어
+          <b>딥링크 자체가 확장 API</b> 입니다.</span></div></div>
+        <div class="lrow l-repo"><span class="tagn">Discord</span>
+          <div><b>단일 인스턴스 + 트레이 상주</b>
+          <span>창을 닫아도 프로세스는 남고, 아이콘을 누르면 <b>같은 창이 복원</b>됩니다.
+          <code>close</code> 를 가로채 <code>hide()</code> 로 바꾸는 패턴입니다.</span></div></div>
+      </div>
+      <pre class="code" data-lang="ts"><code>// 닫기 = 종료가 아니라 숨기기 (트레이 상주형 앱의 표준)
+let quitting = false;
+app.on('before-quit', () =&gt; { quitting = true; });
+
+win.on('close', (e) =&gt; {
+  if (quitting) return;                     // 진짜 종료
+  e.preventDefault();
+  win.hide();
+  if (process.platform === 'darwin') app.dock?.hide();
+});</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>이 패턴을 쓰면 “종료가 안 된다”는 문의가 따라옵니다.</b>
+        트레이 메뉴에 <b>종료 항목을 반드시</b> 두고,
+        처음 숨길 때 <b>한 번은 풍선 알림</b>으로 “트레이에서 계속 실행 중”을 알려 주세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e13 ==================== -->
+<section class="sec" id="e13">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 13</span>
+    <h2>통합 터미널 · <span class="t">자식 프로세스 붙이기</span></h2>
+    <p class="lead">
+      VS Code 의 터미널 패널을 만드는 부품은 두 개입니다 —
+      <b>node-pty</b>(가짜 터미널)와 <b>xterm.js</b>(화면).
+      빌드 로그·배포 스크립트를 앱 안에서 돌리는 사내 도구의 핵심 부품이기도 합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 <code>spawn</code> 이 아니라 pty 인가</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>child_process.spawn</h5>
+          <ul class="tx">
+            <li>파이프라 <b>TTY 가 아니다</b> → 색이 안 나오고 진행바가 깨집니다</li>
+            <li><code>npm</code>·<code>docker</code> 가 “터미널이 아님”으로 판단해 출력 형식을 바꿉니다</li>
+            <li>창 크기 개념이 없어 <b>줄바꿈이 엉킵니다</b></li>
+            <li>대화형 입력(비밀번호 프롬프트)이 <b>동작하지 않습니다</b></li>
+          </ul>
+        </div>
+        <div class="good">
+          <h5>node-pty</h5>
+          <ul class="tx">
+            <li>OS 에게 <b>진짜 터미널을 하나 만들어 달라</b>고 요청합니다</li>
+            <li>색·커서 제어·진행바가 <b>그대로</b> 옵니다</li>
+            <li><code>resize(cols, rows)</code> 로 창 크기를 알려 줄 수 있습니다</li>
+            <li>Windows 는 <b>ConPTY</b>, 유닉스는 <b>forkpty</b> 를 씁니다</li>
+          </ul>
+        </div>
+      </div>
+      <pre class="code" data-lang="bash"><code>npm i node-pty @xterm/xterm @xterm/addon-fit
+# node-pty 는 네이티브 모듈 → Electron ABI 로 다시 빌드해야 한다
+npm i -D @electron/rebuild &amp;&amp; npx electron-rebuild</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>네이티브 모듈이라 “내 PC 에선 되는데”가 자주 납니다.</b>
+        <code>electron-rebuild</code> 를 <code>postinstall</code> 에 걸고,
+        CI 에서 <b>배포 대상 OS 별로 각각 빌드</b>하세요
+        (⚙️ 네이티브 · 미디어 탭 <b>07 네이티브 모듈 운영</b>에서 이어집니다).
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메인 프로세스 — 세션 관리</h4>
+      <pre class="code" data-lang="ts"><code>import * as pty from 'node-pty';
+import { ipcMain, BrowserWindow } from 'electron';
+import os from 'node:os';
+
+const shell = process.platform === 'win32'
+  ? (process.env.COMSPEC ?? 'powershell.exe')
+  : (process.env.SHELL   ?? '/bin/bash');
+
+const sessions = new Map&lt;string, pty.IPty&gt;();
+
+ipcMain.handle('term:create', (e, { cols, rows, cwd }) =&gt; {
+  const id = crypto.randomUUID();
+  const p = pty.spawn(shell, [], {
+    name: 'xterm-color', cols, rows,
+    cwd: cwd ?? os.homedir(),
+    env: { ...process.env, TERM: 'xterm-256color' },
+  });
+
+  // ── 흐름 제어: 출력을 모아서 보낸다 ──────────────────
+  // 빌드 로그는 초당 수천 줄이 나온다. 한 줄마다 IPC 를 태우면
+  // 렌더러가 먼저 죽는다. 16ms(한 프레임) 단위로 묶어 보낸다.
+  let buf = '', timer: NodeJS.Timeout | null = null;
+  const wc = BrowserWindow.fromWebContents(e.sender)!.webContents;
+  p.onData(chunk =&gt; {
+    buf += chunk;
+    if (buf.length &gt; 512 * 1024) buf = buf.slice(-512 * 1024);  // 폭주 방어
+    timer ??= setTimeout(() =&gt; {
+      wc.send(`term:data:${id}`, buf); buf = ''; timer = null;
+    }, 16);
+  });
+
+  p.onExit(({ exitCode }) =&gt; {
+    wc.send(`term:exit:${id}`, exitCode);
+    sessions.delete(id);
+  });
+
+  sessions.set(id, p);
+  return id;
+});
+
+ipcMain.on('term:input',  (_e, id, data)       =&gt; sessions.get(id)?.write(data));
+ipcMain.on('term:resize', (_e, id, cols, rows) =&gt; sessions.get(id)?.resize(cols, rows));
+ipcMain.on('term:kill',   (_e, id)             =&gt; sessions.get(id)?.kill());
+
+// 창이 닫히면 자식 프로세스도 정리한다 — 안 하면 유령 셸이 남는다
+app.on('before-quit', () =&gt; { for (const p of sessions.values()) p.kill(); });</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>16ms 배칭이 이 섹션의 핵심입니다.</b>
+        <code>npm run build</code> 한 번이 <b>3만 줄</b>을 뱉는 일은 흔합니다.
+        줄마다 IPC 를 보내면 초당 수천 번의 직렬화가 일어나 UI 가 멈춥니다.
+        <b>모아 보내기 + 상한(512KB)</b> 두 줄이 터미널 패널의 체감 품질을 결정합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">렌더러 — xterm.js 연결</h4>
+      <pre class="code" data-lang="ts"><code>import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
+
+const term = new Terminal({
+  fontFamily: 'JetBrains Mono, Consolas, monospace',
+  fontSize: 13,
+  scrollback: 5000,                 // 무제한으로 두면 메모리가 계속 큽니다
+  theme: { background: '#0b1220' },
+});
+const fit = new FitAddon();
+term.loadAddon(fit);
+term.open(document.getElementById('term')!);
+fit.fit();
+
+const id = await window.api.term.create({ cols: term.cols, rows: term.rows });
+
+term.onData(d =&gt; window.api.term.input(id, d));       // 키 입력 → pty
+window.api.term.onData(id, d =&gt; term.write(d));       // pty 출력 → 화면
+
+// 창 크기가 바뀌면 pty 에도 알려 줘야 줄바꿈이 안 깨진다
+const ro = new ResizeObserver(() =&gt; {
+  fit.fit();
+  window.api.term.resize(id, term.cols, term.rows);
+});
+ro.observe(document.getElementById('term')!);</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">터미널을 열어 준다는 것의 무게</h4>
+      <div class="note warn" style="margin-top:0">
+        <b>터미널 = 사용자 PC 에서 임의 명령 실행입니다.</b>
+        “버튼을 누르면 배포 스크립트가 도는” 사내 도구를 만들 때,
+        <b>렌더러가 보낸 문자열을 그대로 셸에 넘기면</b>
+        XSS 하나가 곧바로 <b>원격 코드 실행</b>이 됩니다.
+      </div>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>위험 — 문자열을 셸에 통째로</h5>
+          <pre class="code" data-lang="ts"><code>ipcMain.handle('run', (_e, cmd) =&gt;
+  exec(cmd));            // 렌더러가 시키는 대로 다 한다</code></pre>
+        </div>
+        <div class="good">
+          <h5>안전 — 명령은 메인이 정한다</h5>
+          <pre class="code" data-lang="ts"><code>const TASKS = {
+  build:  ['npm', ['run', 'build']],
+  deploy: ['node', ['scripts/deploy.js']],
+} as const;
+
+ipcMain.handle('run', (_e, key: keyof typeof TASKS) =&gt; {
+  const t = TASKS[key];
+  if (!t) throw new Error('unknown task');
+  return execFile(t[0], t[1], { shell: false });
+});</code></pre>
+        </div>
+      </div>
+      <ul class="tx">
+        <li><b>셸을 통하지 않기</b> — <code>execFile</code> + <code>shell:false</code></li>
+        <li><b>작업 목록은 메인에 상수로</b> — 렌더러는 키만 보냅니다</li>
+        <li>자유 터미널이 꼭 필요하면 <b>기능 자체를 설정으로 잠글 수 있게</b> 두세요</li>
+        <li><code>cwd</code> 는 <b>앱이 정한 작업 폴더</b>로 고정 — 사용자 입력 경로는 검증</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>사내 도구 현실 조언</b> —
+        대부분의 요구는 “터미널”이 아니라 <b>“정해진 스크립트 3개를 버튼으로”</b> 입니다.
+        먼저 <code>execFile</code> + 로그 뷰로 만들고,
+        <b>진짜 대화형이 필요할 때만</b> pty 를 붙이세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e14 ==================== -->
+<section class="sec" id="e14">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 14</span>
+    <h2>확장 시스템 — <span class="t">VS Code 가 안 죽는 이유</span></h2>
+    <p class="lead">
+      확장 5만 개가 도는데도 편집기가 멈추지 않는 것은 성능이 아니라 <b>격리 설계</b> 때문입니다.
+      남의 코드를 <b>내 프로세스 밖</b>에 두는 구조를 그대로 따라 만듭니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 660 190" role="img"
+         aria-label="메인 프로세스와 렌더러는 그대로 두고, 확장 호스트를 별도 유틸리티 프로세스로 띄워 그 안에서 확장들을 실행하는 구조">
+      <rect class="bx" x="14"  y="16" width="180" height="52"/>
+      <rect class="bx" x="14"  y="118" width="180" height="52"/>
+      <rect class="bx bx-warn" x="300" y="12" width="346" height="166"/>
+      <rect class="bx" x="320" y="60" width="98" height="46"/>
+      <rect class="bx" x="432" y="60" width="98" height="46"/>
+      <rect class="bx" x="544" y="60" width="84" height="46"/>
+      <text x="104" y="40"  text-anchor="middle" font-size="12.5">Main</text>
+      <text x="104" y="58"  text-anchor="middle" class="lbl">창 · 파일 · OS</text>
+      <text x="104" y="142" text-anchor="middle" font-size="12.5">Renderer</text>
+      <text x="104" y="160" text-anchor="middle" class="lbl">UI · 편집 화면</text>
+      <text x="473" y="36"  text-anchor="middle" font-size="12.5">Extension Host — utilityProcess</text>
+      <text x="369" y="80"  text-anchor="middle" font-size="11.5">확장 A</text>
+      <text x="369" y="97"  text-anchor="middle" class="lbl">정상</text>
+      <text x="481" y="80"  text-anchor="middle" font-size="11.5">확장 B</text>
+      <text x="481" y="97"  text-anchor="middle" class="lbl">무한 루프</text>
+      <text x="586" y="80"  text-anchor="middle" font-size="11.5">확장 C</text>
+      <text x="586" y="97"  text-anchor="middle" class="lbl">정상</text>
+      <text x="473" y="140" text-anchor="middle" class="lbl">여기서 무슨 일이 나도 창은 살아 있다</text>
+      <text x="473" y="162" text-anchor="middle" class="lbl">죽으면 호스트만 재시작 → 확장 다시 로드</text>
+      <path class="ln" d="M194 42 H248 V95 H300"/>
+      <path class="fl" d="M194 144 H248 V95 H300"/>
+    </svg>
+    <div class="cap">확장은 <b>같은 프로세스에 들이지 않습니다.</b> 남의 코드가 무한 루프를 돌아도 사용자가 잃는 건 “확장 기능”뿐입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 확장 호스트 띄우기</h4>
+      <pre class="code" data-lang="ts"><code>import { utilityProcess, MessageChannelMain } from 'electron';
+import path from 'node:path';
+
+let host: Electron.UtilityProcess | null = null;
+
+function startHost() {
+  const { port1, port2 } = new MessageChannelMain();
+
+  host = utilityProcess.fork(path.join(__dirname, 'ext-host.js'), [], {
+    serviceName: 'extension-host',
+    // 확장은 앱 권한을 그대로 물려받으면 안 된다 — 환경 변수부터 줄인다
+    env: { NODE_ENV: process.env.NODE_ENV ?? 'production' },
+  });
+
+  host.postMessage({ type: 'init' }, [port1]);   // 포트를 넘겨 직접 통신
+  wireRenderer(port2);
+
+  host.on('exit', (code) =&gt; {
+    log.warn('extension host exited', code);
+    if (code !== 0) setTimeout(startHost, 1000);  // 죽으면 되살린다
+  });
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <code>utilityProcess</code> 는 <b>Chromium 이 관리하는 Node 프로세스</b>입니다.
+        <code>child_process.fork</code> 와 달리
+        앱이 죽으면 <b>같이 정리</b>되고 <code>MessagePort</code> 를 직접 주고받을 수 있어,
+        메인을 거치지 않는 <b>렌더러 ↔ 확장 직통 채널</b>을 만들 수 있습니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 매니페스트 + 지연 활성화</h4>
+      <pre class="code" data-lang="json"><code>{
+  "name": "csv-preview",
+  "version": "1.2.0",
+  "engines": { "myapp": "^3.0.0" },
+  "main": "./out/index.js",
+  "activationEvents": [
+    "onLanguage:csv",
+    "onCommand:csv.preview"
+  ],
+  "contributes": {
+    "commands":  [{ "command": "csv.preview", "title": "CSV 미리보기" }],
+    "menus":     { "editor/title": [{ "command": "csv.preview" }] },
+    "settings":  { "csv.delimiter": { "type": "string", "default": "," } }
+  },
+  "permissions": ["workspace.read"]
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>활성화 이벤트가 성능의 전부입니다.</b>
+        확장 50개를 시작할 때 전부 <code>require</code> 하면
+        시작이 <b>3초씩 밀립니다</b>. VS Code 가
+        “CSV 파일을 열었을 때”처럼 <b>조건을 매니페스트에 선언</b>하게 만든 이유입니다 —
+        조건이 만족될 때까지 <b>코드를 읽지도 않습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ 확장에게 주는 API — 좁게, 검사하며</h4>
+      <pre class="code" data-lang="ts"><code>// ext-host.js — 확장이 import 하는 것은 '내가 만든 객체' 하나뿐
+function makeApi(manifest: Manifest) {
+  const can = (p: string) =&gt; manifest.permissions?.includes(p) ?? false;
+
+  return Object.freeze({
+    commands: {
+      register(id: string, fn: () =&gt; void) {
+        if (!id.startsWith(manifest.name + '.'))     // 남의 이름표 도용 금지
+          throw new Error('command id must be prefixed');
+        registry.set(id, guard(manifest, fn));
+      },
+    },
+    workspace: {
+      readFile: (p: string) =&gt; {
+        if (!can('workspace.read')) throw new Error('permission denied');
+        return rpc('workspace.readFile', p);          // 실제 IO 는 메인이 한다
+      },
+    },
+    window: { showMessage: (m: string) =&gt; rpc('window.showMessage', m) },
+  });
+}
+
+// 오래 잡아먹는 확장은 표시해 둔다 (VS Code 의 '확장 성능' 화면과 같은 원리)
+function guard(m: Manifest, fn: Function) {
+  return async (...a: unknown[]) =&gt; {
+    const t = performance.now();
+    try { return await fn(...a); }
+    finally {
+      const ms = performance.now() - t;
+      if (ms &gt; 100) telemetry.slowExtension(m.name, ms);
+    }
+  };
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">④ 설계할 때 미리 정해 둘 것</h4>
+      <ul class="tx">
+        <li><b>API 는 한 번 공개하면 못 지웁니다.</b> 처음엔 <b>다섯 개</b>로 시작하세요 —
+          늘리는 건 쉽고 줄이는 건 불가능합니다</li>
+        <li><b>버전 범위를 매니페스트에 강제</b>(<code>engines</code>) — 안 맞으면 로드 거부하고 이유를 보여 줍니다</li>
+        <li><b>확장 전용 저장소</b>를 주세요(<code>ctx.storagePath</code>). 아니면 남의 설정 파일을 건드립니다</li>
+        <li><b>UI 는 직접 그리게 하지 마세요.</b> DOM 접근을 열면 격리가 무의미해집니다 —
+          <b>선언(메뉴·명령·뷰 타입)만 받고 그리는 것은 앱이</b> 합니다</li>
+        <li><b>느린 확장·죽은 확장 목록을 사용자에게 보여 주세요.</b>
+          “앱이 느리다”의 원인을 사용자가 스스로 찾습니다</li>
+      </ul>
+      <div class="note tip">
+        <b>사내 도구에서도 쓸모가 있습니다.</b>
+        팀마다 다른 요구를 본체에 다 넣으면 앱이 무너집니다.
+        <b>“팀별 스크립트를 확장으로”</b> 두면 본체는 안정적으로 두고
+        각 팀이 자기 속도로 붙일 수 있습니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>남의 코드를 로드한다면 공급망 검토가 따라옵니다.</b>
+        확장 설치 시 <b>서명·해시 검증</b>, <b>버전 고정</b>, <b>사내 레지스트리</b>를 함께 설계하세요
+        (🧬 전문가 탭 <b>13 공급망 보안</b>).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e15 ==================== -->
+<section class="sec" id="e15">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 15</span>
+    <h2>창 상태 · <span class="t">세션 복원</span></h2>
+    <p class="lead">
+      껐다 켰을 때 <b>어제 그 자리, 그 문서</b>가 그대로 있는 것 —
+      기능 목록에는 안 적히지만 <b>“완성도”라고 부르는 것의 절반</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">창 위치 복원 — 모니터 검증이 핵심</h4>
+      <pre class="code" data-lang="ts"><code>import { screen, BrowserWindow } from 'electron';
+import Store from 'electron-store';
+
+const store = new Store&lt;{ win: Rect &amp; { max: boolean } }&gt;();
+
+function restoreBounds() {
+  const s = store.get('win');
+  const def = { width: 1280, height: 800 };
+  if (!s) return def;
+
+  // ★ 저장된 좌표가 '지금도 존재하는 화면' 안인지 확인한다.
+  //   노트북에서 외부 모니터를 빼면 창이 화면 밖에 놓여 영영 안 보인다.
+  const visible = screen.getAllDisplays().some(d =&gt; {
+    const w = d.workArea;
+    return s.x &gt;= w.x - 40 &amp;&amp; s.y &gt;= w.y - 40 &amp;&amp;
+           s.x + 80 &lt;= w.x + w.width &amp;&amp; s.y + 40 &lt;= w.y + w.height;
+  });
+  return visible ? s : def;                 // 안 보이면 기본 위치로
+}
+
+const win = new BrowserWindow({ ...restoreBounds(), show: false });
+if (store.get('win')?.max) win.maximize();
+win.once('ready-to-show', () =&gt; win.show());   // 흰 화면 깜빡임 방지
+
+// 저장은 몰아서 — resize 이벤트는 드래그 중 초당 수십 번 옵니다
+let t: NodeJS.Timeout;
+const save = () =&gt; {
+  clearTimeout(t);
+  t = setTimeout(() =&gt; {
+    if (win.isDestroyed()) return;
+    store.set('win', { ...win.getNormalBounds(), max: win.isMaximized() });
+  }, 400);
+};
+win.on('resize', save);
+win.on('move', save);
+win.on('close', save);</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>getBounds()</code> 가 아니라 <code>getNormalBounds()</code> 입니다.</b>
+        최대화 상태에서 <code>getBounds()</code> 를 저장하면
+        <b>“복원”을 눌렀을 때 크기가 화면 전체</b>가 되어 원래 크기를 영영 잃습니다.
+        모니터 해제 검증과 함께, <b>버그 리포트가 가장 많이 오는 두 지점</b>입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세션 복원 — 무엇을 되살릴 것인가</h4>
+      <div class="layer" style="margin-top:0">
+        <div class="lrow l-svc"><span class="tagn">항상</span>
+          <div><b>창 위치 · 크기 · 최대화 · 사이드바 폭</b>
+          <span>비용이 거의 없고 효과가 가장 큽니다. 여기부터 하세요.</span></div></div>
+        <div class="lrow l-web"><span class="tagn">보통</span>
+          <div><b>열려 있던 탭 · 스크롤 위치 · 선택 영역</b>
+          <span>문서 <b>경로만</b> 저장하고 내용은 다시 읽습니다.
+          내용까지 저장하면 <b>디스크의 원본과 어긋납니다</b>.</span></div></div>
+        <div class="lrow l-repo"><span class="tagn">주의</span>
+          <div><b>저장 안 된 편집 내용</b>
+          <span>VS Code 의 “핫 엑싯”. <b>별도 백업 폴더</b>에 쓰고
+          복원 시 <b>원본과 다르다는 표시</b>를 반드시 보여 줘야 합니다.</span></div></div>
+        <div class="lrow l-db"><span class="tagn">금지</span>
+          <div><b>로그인 세션 · 토큰을 평문 파일로</b>
+          <span><code>safeStorage.encryptString()</code> 으로 <b>OS 키체인</b>에 맡기세요.</span></div></div>
+      </div>
+      <pre class="code" data-lang="ts"><code>import { safeStorage } from 'electron';
+
+// OS 가 제공하는 암호화 (Keychain · DPAPI · libsecret)
+function saveToken(t: string) {
+  if (!safeStorage.isEncryptionAvailable()) return;   // 리눅스는 없을 수 있다
+  store.set('tok', safeStorage.encryptString(t).toString('base64'));
+}
+function loadToken(): string | null {
+  const b = store.get('tok');
+  if (!b) return null;
+  try { return safeStorage.decryptString(Buffer.from(b, 'base64')); }
+  catch { store.delete('tok'); return null; }   // 다른 PC 로 복사된 경우
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>복원은 “실패해도 앱은 떠야” 합니다.</b>
+        상태 파일이 깨졌을 때 시작 자체가 막히면 사용자는 <b>재설치밖에</b> 못 합니다.
+        복원 코드 전체를 <code>try/catch</code> 로 감싸고,
+        실패하면 <b>파일을 <code>.bak</code> 으로 밀어내고 기본값으로 시작</b>하세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e16 ==================== -->
+<section class="sec" id="e16">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 16</span>
+    <h2>코드 서명 · 공증 · <span class="t">배포 채널</span></h2>
+    <p class="lead">
+      “다운로드했는데 <b>Windows 가 막아요</b>”, “<b>손상된 파일이래요</b>” —
+      기능이 아니라 <b>서명 문제</b>입니다. 사내 배포든 외부 배포든 여기서 한 번은 막힙니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Windows — SmartScreen 을 넘는 법</h4>
+      <ul class="tx">
+        <li><b>서명이 없으면</b> — “Windows 의 PC 보호” 파란 창. 사용자의 90%가 여기서 포기합니다</li>
+        <li><b>OV 인증서</b>(연 20~40만원대) — 서명은 되지만 <b>평판이 쌓일 때까지</b> 경고가 계속 뜹니다</li>
+        <li><b>EV 인증서 · Azure Trusted Signing</b> — 즉시 신뢰. 2023년 6월부터
+          코드 서명 키는 <b>HSM·클라우드 보관이 의무</b>라 pfx 파일을 CI 에 두는 방식은 끝났습니다</li>
+      </ul>
+      <pre class="code" data-lang="yaml"><code># electron-builder.yml — Azure Trusted Signing (요즘 가장 현실적)
+win:
+  signtoolOptions:
+    publisherName: "MyCompany Inc."
+  target: [{ target: nsis, arch: [x64, arm64] }]
+azureSignOptions:
+  publisherName: "MyCompany Inc."
+  endpoint: "https://eus.codesigning.azure.net"
+  certificateProfileName: "myapp-profile"
+  codeSigningAccountName: "myapp-signing"
+nsis:
+  oneClick: false                # 설치 경로를 고를 수 있게
+  perMachine: false              # 관리자 권한 없이 설치 (사내 배포에 유리)
+  allowToChangeInstallationDirectory: true</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>사내 배포에서 자주 나오는 함정</b> —
+        백신·EDR 이 <b>서명 없는 exe 를 격리</b>합니다.
+        서명이 어렵다면 최소한 <b>정보보안팀에 해시를 등록</b>해 예외 처리를 받으세요.
+        “왜 나만 설치가 안 되죠?”의 대부분이 이 경우입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">macOS — 서명 + 공증은 한 세트</h4>
+      <pre class="code" data-lang="yaml"><code>mac:
+  hardenedRuntime: true          # 공증의 전제 조건
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  notarize: true                 # electron-builder 26+ 는 이 한 줄
+  target: [{ target: dmg, arch: [x64, arm64] }]</code></pre>
+      <pre class="code" data-lang="xml"><code>&lt;!-- build/entitlements.mac.plist — 필요한 것만 켠다 --&gt;
+&lt;key&gt;com.apple.security.cs.allow-jit&lt;/key&gt;&lt;true/&gt;
+&lt;key&gt;com.apple.security.cs.allow-unsigned-executable-memory&lt;/key&gt;&lt;true/&gt;
+&lt;!-- 마이크·카메라를 쓴다면 (음성 채팅·화면 공유) --&gt;
+&lt;key&gt;com.apple.security.device.audio-input&lt;/key&gt;&lt;true/&gt;</code></pre>
+      <pre class="code" data-lang="bash"><code># CI 환경 변수 (App Store Connect API 키 방식이 표준)
+APPLE_API_KEY=./AuthKey_XXXX.p8
+APPLE_API_KEY_ID=XXXXXXXX
+APPLE_API_ISSUER=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+# 결과 확인 — 공증이 붙었는지 최종 확인
+xcrun stapler validate dist/MyApp.dmg
+spctl -a -vv -t install dist/MyApp.app</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“손상되었기 때문에 열 수 없습니다”는 파일 손상이 아닙니다.</b>
+        거의 항상 <b>공증 누락</b> 또는 <b>서명 후 파일을 건드림</b>입니다.
+        서명 뒤에 <b>파일을 하나라도 수정하면 서명이 깨집니다</b> —
+        빌드 파이프라인에서 <b>서명은 마지막 단계</b>여야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 채널 · 점진적 롤아웃</h4>
+      <pre class="code" data-lang="ts"><code>import { autoUpdater } from 'electron-updater';
+
+// 채널: latest(안정) · beta · alpha — 버전에 -beta.1 을 붙이면 자동 인식
+autoUpdater.channel = store.get('updateChannel', 'latest');
+autoUpdater.autoDownload = false;          // 사용자에게 먼저 묻는다
+
+autoUpdater.on('update-available', async (info) =&gt; {
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    message: `새 버전 ${info.version} 이 있습니다`,
+    detail: releaseNotesText(info),
+    buttons: ['지금 받기', '나중에'],
+  });
+  if (response === 0) autoUpdater.downloadUpdate();
+});
+
+// 받아 두고 '다음 실행 때' 적용 — 작업 중 강제 재시작은 최악의 경험
+autoUpdater.on('update-downloaded', () =&gt; {
+  showRestartBanner(() =&gt; autoUpdater.quitAndInstall(false, true));
+});</code></pre>
+      <pre class="code" data-lang="yaml"><code># 서버의 latest.yml 에 넣으면 일부에게만 먼저 나갑니다
+version: 3.4.0
+stagingPercentage: 10       # 10% 에게만 → 문제 없으면 100 으로
+path: MyApp-3.4.0.exe
+sha512: ...</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>델타 업데이트</b> — electron-builder 는 <code>.blockmap</code> 을 함께 만들어
+        <b>바뀐 블록만</b> 내려받습니다. 150MB 앱의 패치가 <b>5~15MB</b> 로 줄어듭니다.
+        <b>이전 버전의 blockmap 을 서버에서 지우지 마세요</b> — 지우면 전체 재다운로드가 됩니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">GitHub Actions — 3 OS 동시 빌드</h4>
+      <pre class="code" data-lang="yaml"><code>jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npx electron-builder --publish always
+        env:
+          GH_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          CSC_LINK:         ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}</code></pre>
+      <ul class="tx">
+        <li><b>macOS 는 macOS 러너에서만</b> 서명·공증됩니다 — 교차 빌드로는 안 됩니다</li>
+        <li>Windows arm64 도 함께 내세요 — <b>Copilot+ PC 사용자가 늘고 있습니다</b></li>
+        <li>Linux 는 <b>AppImage + deb</b> 두 개면 대부분 커버됩니다</li>
+        <li>서명 키는 <b>절대 저장소에 넣지 말 것</b> — Secrets 또는 클라우드 서명 서비스</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>배포 인프라 전반</b>(무중단 · 헬스체크 · 롤백)은
+        🌐 <b>웹서버 가이드</b>의 <b>로드밸런싱 · 무중단</b> 탭에서 이어집니다 —
+        업데이트 서버를 직접 운영한다면 함께 보세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e17 ==================== -->
+<section class="sec" id="e17">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 17</span>
+    <h2>오프라인 우선 · <span class="t">동기화 설계</span></h2>
+    <p class="lead">
+      Slack·Notion 을 지하철에서 열어도 <b>어제 대화가 보이고 글이 써집니다</b>.
+      데스크탑 앱이 웹앱과 갈라지는 지점이자, <b>가장 자주 틀리는 설계</b>입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 660 178" role="img"
+         aria-label="사용자 입력이 로컬 DB에 먼저 쓰이고 화면이 즉시 갱신된 뒤, 아웃박스 큐가 네트워크가 살아날 때 서버로 보내고 서버 변경분을 다시 받아 병합하는 흐름">
+      <rect class="bx" x="10"  y="18" width="120" height="46"/>
+      <rect class="bx" x="10"  y="106" width="120" height="46"/>
+      <rect class="bx" x="176" y="62" width="128" height="52"/>
+      <rect class="bx" x="350" y="62" width="120" height="52"/>
+      <rect class="bx" x="516" y="62" width="132" height="52"/>
+      <text x="70"  y="40"  text-anchor="middle" font-size="12.5">사용자 입력</text>
+      <text x="70"  y="57"  text-anchor="middle" class="lbl">메시지 전송</text>
+      <text x="70"  y="128" text-anchor="middle" font-size="12.5">화면</text>
+      <text x="70"  y="145" text-anchor="middle" class="lbl">즉시 표시 (전송중)</text>
+      <text x="240" y="84"  text-anchor="middle" font-size="12.5">로컬 SQLite</text>
+      <text x="240" y="101" text-anchor="middle" class="lbl">진실의 1차 원본</text>
+      <text x="410" y="84"  text-anchor="middle" font-size="12.5">아웃박스 큐</text>
+      <text x="410" y="101" text-anchor="middle" class="lbl">재시도 · 백오프</text>
+      <text x="582" y="84"  text-anchor="middle" font-size="12.5">서버</text>
+      <text x="582" y="101" text-anchor="middle" class="lbl">WS 로 변경분 회신</text>
+      <path class="fl" d="M130 41 H152 V88 H176"/>
+      <path class="fl" d="M176 100 H152 V129 H130"/>
+      <path class="fl" d="M304 88 H350"/>
+      <path class="fl" d="M470 88 H516"/>
+      <path class="ln" d="M582 114 V150 H240 V114"/>
+      <text x="411" y="166" text-anchor="middle" class="lbl">서버 변경분 ← 병합 후 다시 화면으로</text>
+    </svg>
+    <div class="cap">핵심은 순서입니다 — <b>로컬에 먼저 쓰고, 화면을 먼저 바꾸고, 네트워크는 나중에</b>.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">아웃박스 패턴 — 보낼 것을 DB 에 적는다</h4>
+      <pre class="code" data-lang="sql"><code>-- 로컬 SQLite (better-sqlite3 · node:sqlite)
+CREATE TABLE messages (
+  id          TEXT PRIMARY KEY,     -- 클라이언트가 만든 UUID
+  room_id     TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  server_seq  INTEGER,              -- NULL 이면 아직 서버가 모르는 것
+  state       TEXT NOT NULL         -- pending | sent | failed
+);
+CREATE INDEX idx_msg_room ON messages(room_id, created_at);
+
+CREATE TABLE outbox (
+  id        TEXT PRIMARY KEY,
+  op        TEXT NOT NULL,          -- create.message · update.doc ...
+  payload   TEXT NOT NULL,          -- JSON
+  tries     INTEGER NOT NULL DEFAULT 0,
+  next_at   INTEGER NOT NULL        -- 지수 백오프용 시각
+);</code></pre>
+      <pre class="code" data-lang="ts"><code>// 전송 = '로컬에 쓰기' 한 트랜잭션. 네트워크는 나중 일이다
+const send = db.transaction((roomId: string, body: string) =&gt; {
+  const id = crypto.randomUUID();
+  db.prepare(`INSERT INTO messages
+      (id,room_id,body,created_at,state) VALUES (?,?,?,?,'pending')`)
+    .run(id, roomId, body, Date.now());
+  db.prepare(`INSERT INTO outbox (id,op,payload,next_at) VALUES (?,?,?,?)`)
+    .run(id, 'create.message', JSON.stringify({ id, roomId, body }), Date.now());
+  return id;
+});
+
+// 화면은 로컬 DB 만 봅니다 — 네트워크 상태와 무관하게 항상 그려집니다
+</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>id 를 클라이언트가 만드는 것이 포인트입니다.</b>
+        서버가 id 를 준다면 오프라인에서 글을 쓸 수 없습니다.
+        UUID 를 클라이언트가 만들면 <b>같은 요청을 두 번 보내도 서버가 중복을 걸러 낼 수 있어</b>
+        (멱등성) 재시도가 안전해집니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">플러시 루프 · 재연결</h4>
+      <pre class="code" data-lang="ts"><code>const BACKOFF = [1_000, 2_000, 5_000, 15_000, 60_000];
+
+async function flush() {
+  const now = Date.now();
+  const rows = db.prepare(
+    `SELECT * FROM outbox WHERE next_at &lt;= ? ORDER BY next_at LIMIT 20`).all(now);
+
+  for (const r of rows) {
+    try {
+      await api(r.op, JSON.parse(r.payload));       // 서버는 id 로 멱등 처리
+      db.prepare(`DELETE FROM outbox WHERE id = ?`).run(r.id);
+      db.prepare(`UPDATE messages SET state='sent' WHERE id = ?`).run(r.id);
+    } catch (e) {
+      const tries = r.tries + 1;
+      const wait  = BACKOFF[Math.min(tries - 1, BACKOFF.length - 1)];
+      // 4xx 는 재시도해도 소용없다 — 실패로 확정하고 사용자에게 알린다
+      const fatal = e instanceof HttpError &amp;&amp; e.status &gt;= 400 &amp;&amp; e.status &lt; 500;
+      if (fatal || tries &gt; 12) {
+        db.prepare(`DELETE FROM outbox WHERE id=?`).run(r.id);
+        db.prepare(`UPDATE messages SET state='failed' WHERE id=?`).run(r.id);
+      } else {
+        db.prepare(`UPDATE outbox SET tries=?, next_at=? WHERE id=?`)
+          .run(tries, now + wait, r.id);
+      }
+    }
+  }
+}
+
+// 네트워크가 돌아오면 즉시 한 번 — 이벤트는 렌더러에서 받아 메인으로 넘긴다
+setInterval(flush, 3_000);
+ipcMain.on('net:online', () =&gt; flush());</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>navigator.onLine</code> 은 “랜선이 꽂혀 있다”만 알려 줍니다.</b>
+        사내 프록시·캡티브 포털에서는 <b>온라인인데 서버는 못 가는</b> 상태가 흔합니다.
+        <b>실제 판단 기준은 요청의 성공 여부</b>여야 하고,
+        <code>onLine</code> 은 <b>재시도를 앞당기는 힌트</b>로만 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">충돌 — 무엇을 고를 것인가</h4>
+      <div class="layer" style="margin-top:0">
+        <div class="lrow l-svc"><span class="tagn">LWW</span>
+          <div><b>나중에 쓴 쪽이 이긴다</b>
+          <span>구현이 가장 쉽고 <b>대부분의 사내 도구에 충분</b>합니다.
+          단, <b>서버 시각</b>을 기준으로 하세요 — PC 시계는 틀어져 있습니다.</span></div></div>
+        <div class="lrow l-web"><span class="tagn">필드 병합</span>
+          <div><b>바뀐 필드만 각각 적용</b>
+          <span>A 는 제목을, B 는 담당자를 바꿨다면 <b>둘 다 살립니다</b>.
+          이슈 트래커·설정 화면에 잘 맞습니다.</span></div></div>
+        <div class="lrow l-repo"><span class="tagn">CRDT</span>
+          <div><b>동시 편집 (Yjs · Automerge)</b>
+          <span>같은 문단을 <b>동시에 타이핑</b>해야 할 때만.
+          문서 크기·메모리 비용이 크므로 <b>필요할 때만</b> 도입하세요.</span></div></div>
+        <div class="lrow l-db"><span class="tagn">수동</span>
+          <div><b>사용자에게 물어보기</b>
+          <span>회계·계약처럼 <b>틀리면 안 되는 데이터</b>는
+          자동 병합하지 말고 <b>양쪽을 보여 주고 고르게</b> 하세요.</span></div></div>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>고르는 기준은 한 줄입니다</b> —
+        “두 사람이 <b>같은 값</b>을 동시에 바꾸는 일이 실제로 일어나는가?”
+        아니라면 <b>LWW 로 충분</b>합니다. CRDT 부터 꺼내는 것이 흔한 과설계입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">델타 동기화 — 매번 전부 받지 않기</h4>
+      <pre class="code" data-lang="ts"><code>// 서버는 단조 증가하는 seq(또는 커서)를 준다
+async function pull() {
+  const since = db.prepare(`SELECT COALESCE(MAX(server_seq),0) s FROM messages`)
+                  .get().s;
+  const { changes, nextSeq, reset } = await api('sync.pull', { since });
+
+  if (reset) return fullResync();     // 서버가 '너무 오래됐다'고 하면 전체 재동기화
+
+  db.transaction(() =&gt; {
+    for (const c of changes) {
+      if (c.deleted) db.prepare(`DELETE FROM messages WHERE id=?`).run(c.id);
+      else db.prepare(`INSERT INTO messages (id,room_id,body,created_at,server_seq,state)
+             VALUES (@id,@roomId,@body,@createdAt,@seq,'sent')
+             ON CONFLICT(id) DO UPDATE SET
+               body=excluded.body, server_seq=excluded.server_seq`).run(c);
+    }
+    db.prepare(`UPDATE meta SET cursor=?`).run(nextSeq);
+  })();
+}
+
+// 실시간은 WebSocket, 재연결 직후엔 반드시 pull() 한 번
+ws.on('open',    () =&gt; pull());        // 끊긴 동안의 변경분을 메운다
+ws.on('message', (m) =&gt; applyChange(JSON.parse(m)));</code></pre>
+      <ul class="tx">
+        <li><b>재연결 직후 pull 을 빼먹는 것</b>이 “가끔 메시지가 안 보여요”의 정체입니다</li>
+        <li>로컬 DB 는 <b>영원히 커집니다</b> — 오래된 방은 <b>정리 정책</b>을 두세요</li>
+        <li>스키마가 바뀌면 <b>마이그레이션이 필수</b>입니다(<code>user_version</code> 활용)</li>
+        <li>동기화 상태(<b>대기 N건 · 마지막 동기화 시각</b>)를 UI 에 <b>항상 보여 주세요</b></li>
+      </ul>
+      <div class="note warn" style="margin-bottom:0">
+        <b>낙관적 UI 의 마지막 1%</b> —
+        전송 실패한 항목을 <b>조용히 사라지게 하지 마세요</b>.
+        “보낸 줄 알았는데 안 갔다”는 <b>신뢰를 잃는 가장 빠른 방법</b>입니다.
+        실패 항목은 <b>남겨 두고 · 표시하고 · 다시 시도 버튼</b>을 주세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== e18 ==================== -->
+<section class="sec" id="e18">
+  <div class="sec-head rv">
+    <span class="no">ELECTRON 18</span>
     <h2>사내 도구 <span class="t">체크리스트</span></h2>
     <p class="lead">실제로 만들어 배포할 때 <b>놓치기 쉬운 것</b>들을 모았습니다.</p>
   </div>

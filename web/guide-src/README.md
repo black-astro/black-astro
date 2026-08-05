@@ -9,11 +9,11 @@
 
 | 가이드 | 소스 | 배포 경로 | 규모 |
 |---|---|---|---|
-| 🐍 Python | `guide-src/python/` | `/python-web/` | 14탭 · 200섹션 |
-| ☕ Java | `guide-src/java/` | `/java-web/` | 11탭 · 153섹션 |
-| 🟨 JS · TS | `guide-src/js-ts/` | `/js-ts-web/` | 10탭 · 152섹션 |
-| 🗄️ Database | `guide-src/db/` | `/db-web/` | 10탭 · 153섹션 |
-| 🌐 Web Server | `guide-src/server/` | `/server-web/` | 10탭 · 138섹션 |
+| 🐍 Python | `guide-src/python/` | `/python-web/` | 14탭 · 207섹션 |
+| ☕ Java | `guide-src/java/` | `/java-web/` | 11탭 · 166섹션 |
+| 🟨 JS · TS | `guide-src/js-ts/` | `/js-ts-web/` | 11탭 · 178섹션 |
+| 🗄️ Database | `guide-src/db/` | `/db-web/` | 10탭 · 154섹션 |
+| 🌐 Web Server | `guide-src/server/` | `/server-web/` | 11탭 · 152섹션 |
 
 다섯 가이드는 **CSS 5개(01~05)를 공유**합니다(테마 동일).
 각 폴더의 `css/06-*.css` 만 그 가이드 전용입니다.
@@ -36,6 +36,7 @@
 | `npm run build:guide -- java` | 특정 가이드만 (`python` · `java` · `js-ts` · `db` · `server`) |
 | `npm run dev:guide` | 조각이 바뀌면 자동 재빌드 (작업 중 켜두세요) |
 | `npm run check:guide` | 결과물이 조각과 일치하는지 검사만 (커밋 전 확인용) |
+| `npm run verify:guide` | 빌드 + **정합성 점검** — 사이드바 ↔ 섹션 · 탭 ↔ pane · SEC_LV/EZ/CAP 커버리지 |
 | `npm run build` | `prebuild` 훅으로 가이드 빌드가 **자동 선행**된 뒤 사이트 빌드 |
 
 ## 구조
@@ -61,12 +62,14 @@ guide-src/
         05-responsive.css            반응형 · 도구상자 · 터치 대응
         06-*.css                     ★ 그 가이드 전용 (계층도 · 비교표 · 배지)
       10-body-open.html    </style> ~ <body> 시작
-      11-sidebar.html      좌측 내비게이션 (탭별 목차) ★ 검색 색인의 원천
+      11-sidebar.html      좌측 내비게이션 — 주제 탭(그룹별) + 탭별 목차
+                           ★ 검색 색인의 원천 · 목차 그룹은 05-nav.js 가 접어 준다
       12-tabbar.html       상단 주제 탭 · 환영 배너
       panes/               탭 본문 — 여기가 실제 콘텐츠
       90-footer.html       푸터 · <script> 여는 태그
       js/                  스크립트
         00-core.js               공통 유틸 · 검색(TAB_KW/SEC_KW) · 하이라이터
+        05-nav.js                사이드바 목차 그룹 접기 (다섯 가이드 공통)
         20-tab-switch.js         탭 전환 · SEC_LV(난이도) · EZ(쉽게 말하면)
         90-demos.js              탭별 데모 (도구 찾기 필터 등)
         99-init.js               최초 실행 (항상 마지막)
@@ -82,9 +85,9 @@ Python 가이드만 데모 스크립트가 많아 `js/` 가 13개로 더 잘게 
 |---|---|
 | 🐍 Python | Python 기본 · uv · Pandas · NumPy · 이미지 · 윈도우 매크로 · PySide6 · 도구상자 · 알고리즘 · DB 연동 · **웹 · API** · **테스트** · **대규모 트래픽** · **전문가** |
 | ☕ Java | Java 기초 · 고급/동시성 · Spring Boot · WebFlux · 데이터/JPA · Security · Gateway · 실전 도구 · JavaFX · **대규모 트래픽** · **전문가** |
-| 🟨 JS · TS | JavaScript · TypeScript · Node.js · Express · NestJS · React Native · Electron · **대규모 트래픽** · 실전 도구 · **전문가** |
+| 🟨 JS · TS | JavaScript · TypeScript · Node.js · Express · NestJS · Electron · React Native · **네이티브 · 미디어** · **대규모 트래픽** · **전문가** · 실전 도구 |
 | 🗄️ Database | 시작·설치 · SQL 기초 · SQL 전문가 · Oracle · PostgreSQL · MySQL/MariaDB · SQLite3 · 설계·튜닝 · **전문가(내부)** · 앱 연동 |
-| 🌐 Web Server | 시작·개념 · Nginx · Apache · Tomcat · Caddy · HTTPS·인증서 · 언어별 연동 · 성능·튜닝 · 보안·운영 · **전문가(내부)** |
+| 🌐 Web Server | 시작·개념 · Nginx · Apache · Tomcat · Caddy · HTTPS·인증서 · **로드밸런싱** · 언어별 연동 · 성능·튜닝 · 보안·운영 · **전문가(내부)** |
 
 언어 가이드 세 개는 마지막 두 탭이 **대규모 트래픽 + 전문가**입니다.
 전문가 탭은 각 언어의 런타임 내부(CPython / JVM / V8)와
@@ -103,6 +106,9 @@ DB·웹서버 가이드는 **언어에 종속되지 않는 주제**를 다루므
    (**검색 색인이 이 링크에서 만들어집니다** — 빠뜨리면 검색에 안 잡힙니다)
 3. `parts/js/20-tab-switch.js` — `SEC_LV` 에 난이도(`b` 기초 / `i` 중급 / `a` 고급)
 4. `parts/js/20-tab-switch.js` — `EZ` 에 「쉽게 말하면」 한 줄 요약
+5. `parts/js/20-tab-switch.js` — `CAP` 에 「실전 도달점」(`s`/`p`/`e` + 한 문장)
+
+넣고 나서 `npm run verify:guide` 를 돌리면 위 다섯 곳 중 빠뜨린 것을 짚어 줍니다.
 
 검색어를 보강하려면 `parts/js/00-core.js` 의 `SEC_KW` 에 한글 키워드를 추가하세요.
 
@@ -144,3 +150,41 @@ npm run check:guide       # 결과물이 조각과 일치하는지
   - JS · TS(🧬) — V8 히든 클래스 · 마이크로태스크 · Proxy · WASM · 번들 최적화
   - Python(🧬) — CPython 바이트코드 · 참조 카운팅 · 디스크립터 · 메타클래스 · GIL 내부
   - 공통 — 메모리 누수 추적 · 프로파일링 · 함수형 · 디자인 패턴 · 공급망 보안 · 아키텍처
+
+## 탭·목차를 늘릴 때의 화면 규칙
+
+탭이 10개를 넘기면서 "고르기 어려움"이 먼저 온다는 것을 확인하고 다음 규칙을 뒀습니다.
+
+- **주제 탭은 그룹으로 묶습니다** — 사이드바(`11-sidebar.html` 의 `.navtab .tgrp`)와
+  상단 드롭다운(`12-tabbar.html` 의 `.tabs .tgrp`)에 같은 그룹 제목을 씁니다
+- **사이드바 라벨이 길면 한 줄을 통째로** 씁니다(`.wide`) — 잘려서 `대규모 트래..` 가 되면 고를 수 없습니다
+  (한글 2칸 · 영문 1칸으로 세어 12칸 초과면 `wide`)
+- **GUI · 코딩테스트처럼 곁가지 주제는 그룹 맨 아래**로 내립니다
+- **목차는 그룹 제목만 보이고 접혀 있습니다** — 읽는 중인 그룹은 자동으로 펼쳐지고,
+  접힘 상태는 가이드별로 `localStorage` 에 남습니다(`05-nav.js`)
+- **모바일 목차 시트**(`#toc`)도 같은 그룹으로 접힙니다 — 현재 그룹만 열린 채로 뜹니다
+- 단축키 `1`~`0` 은 `TAB_ORDER` 순서입니다. **탭 순서를 바꾸면 탭바의 `<span class="k">` 숫자도 함께** 고쳐야 하고,
+  `npm run verify:guide` 가 둘의 불일치를 잡아 줍니다
+
+## 그림(다이어그램)
+
+글로 열 줄 쓸 것이 그림 한 장이면 끝나는 자리가 있습니다(리버스 터널의 연결 방향, 프로세스 격리 구조 등).
+그런 곳에는 **인라인 SVG**를 씁니다 — 외부 이미지가 없으니 단일 HTML 원칙이 유지됩니다.
+
+```html
+<div class="diag rv">
+  <svg viewBox="0 0 660 160" role="img" aria-label="무엇을 보여 주는 그림인지 한 문장">
+    <rect class="bx" .../>              <!-- 상자 -->
+    <path class="ln" .../>              <!-- 고정선 -->
+    <path class="fl" .../>              <!-- 흐르는 선 (점선이 움직인다) -->
+    <circle class="pk" r="3.5">         <!-- 흐름 위를 도는 점 -->
+      <animateMotion dur="2s" repeatCount="indefinite" path="..."/></circle>
+  </svg>
+  <div class="cap">그림이 말하려는 한 문장</div>
+</div>
+```
+
+- 스타일은 각 가이드의 `css/06-*.css` 맨 아래 **`개념 그림` 블록**에 있습니다(다섯 가이드 동일)
+- `aria-label` 은 **필수** — 그림을 못 보는 사용자에게 이 문장이 그림입니다
+- `prefers-reduced-motion` 에서는 움직임이 꺼지도록 이미 처리돼 있습니다
+- **텍스트가 `viewBox` 밖으로 나가지 않게** 하세요(아래쪽 라벨은 높이에 여유를 두고 배치)

@@ -13,7 +13,7 @@
     여기까지 하면 <b>팀원과 CI가 똑같이 재현되는 개발 환경</b>을 만들어 두고 유지할 수 있습니다.
   </p>
   <div class="stats">
-    <div><b>8</b><span>SECTIONS</span></div>
+    <div><b>9</b><span>SECTIONS</span></div>
     <div><b>1</b><span>도구로 통합</span></div>
     <div><b>×10~100</b><span>pip 대비 속도</span></div>
     <div><b>0</b><span>venv 수동 활성화</span></div>
@@ -687,6 +687,85 @@ uv run python -c "import pandas, cv2, PySide6; print('OK')"</code></pre>
         <b>.env 다루기</b> — <code>uv add python-dotenv</code> 후
         <code>from dotenv import load_dotenv; load_dotenv()</code>.
         Spring의 <code>application.yml</code> + 프로파일에 해당하는 자리입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== u09 ==================== -->
+<section class="sec" id="u09">
+  <div class="sec-head rv">
+    <span class="no">UV 09</span>
+    <h2>팀으로 쓰기 — <span class="t">워크스페이스 · CI · 도커</span></h2>
+    <p class="lead">
+      혼자 쓸 때는 <code>uv add</code> 만 알면 됩니다.
+      <b>여러 명 · 여러 서버</b>가 되면 “내 PC 에선 되는데”가 시작되고,
+      그때 필요한 것이 <b>락파일을 신뢰하는 습관</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">워크스페이스 — 한 저장소에 여러 패키지</h4>
+      <pre class="code" data-lang="toml"><code># 루트 pyproject.toml
+[project]
+name = "acme"
+requires-python = "&gt;=3.12"
+
+[tool.uv.workspace]
+members = ["packages/*", "apps/*"]
+
+# apps/api/pyproject.toml — 사내 공용 패키지를 경로로 참조
+[project]
+name = "api"
+dependencies = ["acme-core", "fastapi&gt;=0.115"]
+
+[tool.uv.sources]
+acme-core = { workspace = true }        # PyPI 가 아니라 이 저장소의 것</code></pre>
+      <pre class="code" data-lang="bash"><code>uv sync                 # 워크스페이스 전체를 한 번에
+uv run --package api uvicorn app:api --reload
+uv add --package api httpx      # 특정 패키지에만 의존성 추가</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>락파일은 저장소에 하나입니다.</b>
+        패키지가 10개여도 <code>uv.lock</code> 은 루트에 한 개 —
+        <b>패키지끼리 다른 버전을 쓰는 사고</b>가 구조적으로 막힙니다.
+        <b>반드시 커밋하세요.</b>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI · 도커 — 재현 가능한 설치</h4>
+      <pre class="code" data-lang="yaml"><code># GitHub Actions
+- uses: astral-sh/setup-uv@v5
+  with:
+    enable-cache: true                  # ~/.cache/uv 를 캐시
+    cache-dependency-glob: "uv.lock"
+- run: uv sync --locked --all-extras --dev   # ★ 락파일과 다르면 실패
+- run: uv run pytest -q</code></pre>
+      <pre class="code" data-lang="docker"><code># 멀티스테이지 — 의존성 레이어를 코드와 분리해 캐시를 살린다
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS build
+WORKDIR /app
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+
+# 1) 의존성만 먼저 (코드가 바뀌어도 이 레이어는 재사용된다)
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-install-project --no-dev
+
+# 2) 코드
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev
+
+FROM python:3.12-slim-bookworm
+WORKDIR /app
+COPY --from=build /app /app
+ENV PATH="/app/.venv/bin:$PATH"
+CMD ["uvicorn", "app:api", "--host", "0.0.0.0", "--port", "8000"]</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>uv sync --locked</code> 와 그냥 <code>uv sync</code> 는 다릅니다.</b>
+        <code>--locked</code> 는 <b>락파일이 최신인지 확인만</b> 하고 다르면 실패합니다.
+        CI 에서 이걸 빼면 <b>빌드할 때마다 다른 버전</b>이 설치될 수 있어
+        “어제는 됐는데”가 생깁니다.
       </div>
     </div>
   </div>

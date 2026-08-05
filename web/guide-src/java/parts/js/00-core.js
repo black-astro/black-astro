@@ -168,6 +168,13 @@ const FIND_CHIPS = ["REST API 만들기","JPA 연관관계","가상 스레드","
                     "쿠버네티스 무중단","Spring Batch","트랜잭션","데스크탑 프로그램"];
 const SEC_KW = {
   /* 하려는 일을 한글로 쳤을 때 걸리게 하는 보강 키워드 */
+  g11:"타임아웃 예산 재시도 백오프 서킷브레이커 resilience4j 격벽 bulkhead 느린호출 폴백 장애전파",
+  g12:"bff 응답합성 monozip 카나리 가중치라우팅 weight 점진배포 무중단 베타헤더",
+  x11:"javafx 성능 tableview 가상화 셀팩토리 updateitem 대용량 페이지로딩 차트 다운샘플링 pulselogger",
+  x12:"jpackage jlink msi 설치본 자동업데이트 강제업데이트 크래시로그 uncaughtexception 서명 배포",
+  s11:"리프레시토큰 로테이션 재사용탐지 다중기기 세션관리 원격로그아웃 httponly쿠키 토큰탈취 로그인유지",
+  s12:"2단계인증 mfa totp otp 인증앱 크리덴셜스터핑 계정잠금 패스키 webauthn 로그인알림",
+  s13:"권한 rbac abac 소유권 인가 preauthorize 멀티테넌시 테넌트격리 rls 데이터분리",
   k01:"용량산정 rps tps p99 지연 리틀의법칙 동시접속",
   k02:"느림 병목 커넥션풀 hikari 톰캣 스레드 고갈 응답지연",
   k03:"캐시전략 look aside write through evict cacheable ttl",
@@ -373,12 +380,27 @@ document.addEventListener("keydown", e => {
 function tocOpen(){
   const nav = $(`.navset[data-nav="${currentTab}"]`);
   if (!nav) return;
-  let html = "";
-  [...nav.children].forEach(el => {
-    if (el.classList.contains("grp")) html += `<h4>${el.textContent}</h4>`;
-    else if (el.tagName === "A")
-      html += `<a href="${el.getAttribute("href")}">${el.innerHTML}</a>`;
+  /* 그룹은 <details> 로 접어 둔다 — 탭 하나에 섹션이 20개를 넘어
+     모바일 한 화면에 들어오지 않는다. 지금 읽고 있는 그룹만 펼쳐 준다. */
+  let html = "", head = "", buf = "", open = false;
+  const flush = () => {
+    if (!buf) return;
+    html += head
+      ? `<details class="tg"${open ? " open" : ""}><summary>${head}` +
+        `<span class="c">${(buf.match(/<a /g) || []).length}</span></summary>${buf}</details>`
+      : buf;
+    buf = ""; open = false;
+  };
+  nav.querySelectorAll('.grp, a[href^="#"]').forEach(el => {
+    if (el.classList.contains("grp")){
+      flush();
+      head = (el.querySelector(".lb") || el).textContent;
+    } else {
+      if (el.classList.contains("on")) open = true;
+      buf += `<a href="${el.getAttribute("href")}">${el.innerHTML}</a>`;
+    }
   });
+  flush();
   $("#tocBody").innerHTML = html;
   const t = $("#tocTitle");
   if (t) t.textContent = (TAB_LABEL[currentTab] || "") + " · 목차";
@@ -562,6 +584,8 @@ function setCode(sel, text){
       if (!e.isIntersecting) return;
       const id = e.target.id;
       links.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + id));
+      if (window.navReveal) navReveal(id);
+      if (window.navMark)   navMark();
     });
   }, {rootMargin:"-25% 0px -65% 0px"});
   secs.forEach(s => { if (s.id) spy.observe(s); });

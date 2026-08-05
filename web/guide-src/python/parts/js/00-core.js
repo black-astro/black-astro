@@ -172,6 +172,13 @@ const FIND_CHIPS = ["데스크탑 프로그램","엑셀","자동화","이미지 
                     "리스트 정렬","클래스","SQL 조인","코딩테스트","정규식",
                     "FastAPI 비동기","GIL","Celery 큐","대용량 처리","부하 테스트"];
 const SEC_KW = {
+  u09:"uv 워크스페이스 모노레포 락파일 uvlock locked ci 캐시 도커 멀티스테이지 재현성",
+  i11:"이미지 배치 대량처리 썸네일 webp exif 회전 프로세스풀 멀티프로세싱 libvips 디컴프레션폭탄",
+  i12:"ocr 문자인식 tesseract 영수증 명함 스캔 전처리 이진화 기울기보정 그림자제거 신뢰도",
+  a11:"무인실행 스케줄러 작업스케줄러 실패알림 스크린샷 재시도 상태초기화 로깅 매크로운영",
+  a12:"playwright 웹자동화 브라우저자동화 셀레니움대체 headless 다운로드 엑셀보고서 openpyxl",
+  x11:"testcontainers 통합테스트 진짜db 롤백픽스처 계약테스트 respx 목 freezegun 시간고정",
+  x12:"플레이키 flaky 랜덤순서 pytestrandomly xdist 병렬 재시도 reruns 커버리지 ci속도 마커",
   w01:"웹동작 요청응답 클라이언트 서버 dns 도메인 ip 포트 tcp tls keep-alive 무상태 stateless 브라우저 개발자도구 network",
   w02:"http메서드 get post put patch delete 멱등성 idempotent 상태코드 200 201 204 301 400 401 403 404 409 422 429 500 502 503 인증실패 권한없음",
   w03:"헤더 header 쿼리스트링 querystring 바디 body content-type json form-data urlencoded 파일업로드 curl url인코딩 authorization accept 쿠키",
@@ -408,12 +415,27 @@ document.addEventListener("keydown", e => {
 function tocOpen(){
   const nav = $(`.navset[data-nav="${currentTab}"]`);
   if (!nav) return;
-  let html = "";
-  [...nav.children].forEach(el => {
-    if (el.classList.contains("grp")) html += `<h4>${el.textContent}</h4>`;
-    else if (el.tagName === "A")
-      html += `<a href="${el.getAttribute("href")}">${el.innerHTML}</a>`;
+  /* 그룹은 <details> 로 접어 둔다 — 탭 하나에 섹션이 20개를 넘어
+     모바일 한 화면에 들어오지 않는다. 지금 읽고 있는 그룹만 펼쳐 준다. */
+  let html = "", head = "", buf = "", open = false;
+  const flush = () => {
+    if (!buf) return;
+    html += head
+      ? `<details class="tg"${open ? " open" : ""}><summary>${head}` +
+        `<span class="c">${(buf.match(/<a /g) || []).length}</span></summary>${buf}</details>`
+      : buf;
+    buf = ""; open = false;
+  };
+  nav.querySelectorAll('.grp, a[href^="#"]').forEach(el => {
+    if (el.classList.contains("grp")){
+      flush();
+      head = (el.querySelector(".lb") || el).textContent;
+    } else {
+      if (el.classList.contains("on")) open = true;
+      buf += `<a href="${el.getAttribute("href")}">${el.innerHTML}</a>`;
+    }
   });
+  flush();
   $("#tocBody").innerHTML = html;
   const t = $("#tocTitle");
   if (t) t.textContent = (TAB_LABEL[currentTab] || "") + " · 목차";
@@ -764,6 +786,8 @@ const nz = v => v === null ? '<span class="nan">NaN</span>' : v;
       if (!e.isIntersecting) return;
       const id = e.target.id;
       links.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + id));
+      if (window.navReveal) navReveal(id);
+      if (window.navMark)   navMark();
     });
   }, {rootMargin:"-25% 0px -65% 0px"});
   secs.forEach(s => { if (s.id) spy.observe(s); });

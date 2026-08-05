@@ -14,7 +14,7 @@
     WebFlux 기반이라 적은 스레드로 많은 연결을 버팁니다.
   </p>
   <div class="stats">
-    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>12</b><span>SECTIONS</span></div>
     <div><b>1</b><span>진입점</span></div>
     <div><b>N</b><span>백엔드 서비스</span></div>
     <div><b>0</b><span>중복 인증 코드</span></div>
@@ -1023,6 +1023,178 @@ grpc_health_probe -addr=localhost:9090    # 표준 헬스체크 — K8s 프로�
         ❌ 서비스가 2~3개뿐 — 도구·학습 비용이 이득보다 큽니다<br>
         ❌ <b>비동기로 풀어야 할 일</b> — 그건 gRPC 가 아니라 Kafka 입니다(⚡ k08).
         동기 호출 체인이 길어지면 <b>장애가 그대로 전파</b>됩니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== g11 ==================== -->
+<section class="sec" id="g11">
+  <div class="sec-head rv">
+    <span class="no">GATEWAY 11</span>
+    <h2>장애를 <span class="t">번지지 않게 — 타임아웃 예산 · 격벽</span></h2>
+    <p class="lead">
+      MSA 에서 서비스 하나가 느려지면 <b>게이트웨이가 먼저 죽습니다</b>.
+      스레드·커넥션이 그 서비스를 기다리다 전부 묶이기 때문입니다.
+      막는 방법은 <b>기다리는 시간에 예산을 매기는 것</b>입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 660 152" role="img"
+         aria-label="사용자가 허용하는 3초 안에서 게이트웨이·서비스·DB가 각자의 타임아웃 예산을 나눠 가지며, 안쪽으로 갈수록 시간이 짧아지는 구조">
+      <rect class="bx" x="10"  y="30" width="636" height="42"/>
+      <rect class="bx" x="30"  y="46" width="470" height="42"/>
+      <rect class="bx" x="50"  y="62" width="320" height="42"/>
+      <rect class="bx" x="70"  y="78" width="180" height="42"/>
+      <text x="600" y="56"  text-anchor="middle" class="lbl">사용자 3.0s</text>
+      <text x="470" y="72"  text-anchor="middle" class="lbl">게이트웨이 2.5s</text>
+      <text x="345" y="88"  text-anchor="middle" class="lbl">서비스 2.0s</text>
+      <text x="222" y="104" text-anchor="middle" class="lbl">DB 1.2s</text>
+      <text x="160" y="140" text-anchor="middle" class="lbl">안으로 갈수록 짧게 — 바깥이 먼저 포기하면 재시도가 폭증한다</text>
+      <path class="fl" d="M70 120 H250"/>
+    </svg>
+    <div class="cap">타임아웃은 <b>구간마다 따로 정하는 값이 아니라 하나의 예산을 쪼개는 일</b>입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">예산을 설정으로 못박기</h4>
+      <pre class="code" data-lang="yaml"><code>spring:
+  cloud:
+    gateway:
+      httpclient:
+        connect-timeout: 500            # ms — 연결은 빨리 포기
+        response-timeout: 2500ms        # 전체 상한
+      routes:
+        - id: order
+          uri: lb://order-service
+          predicates: [Path=/api/orders/**]
+          metadata:
+            response-timeout: 1200      # 라우트별로 더 짧게 조일 수 있다
+            connect-timeout: 300
+          filters:
+            - name: CircuitBreaker
+              args: { name: orderCB, fallbackUri: forward:/fallback/order }
+            - name: Retry
+              args:
+                retries: 2
+                methods: GET             # ★ POST 는 재시도 금지 (중복 생성)
+                series: SERVER_ERROR
+                backoff: { firstBackoff: 50ms, maxBackoff: 300ms, factor: 2 }</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>재시도는 장애를 키우는 가장 흔한 원인입니다.</b>
+        서비스가 느려서 5xx 가 뜨는데 게이트웨이가 3번씩 재시도하면
+        <b>트래픽이 3배</b>가 되어 회복을 막습니다.
+        재시도는 <b>GET 에만 · 2회까지 · 지터를 넣어</b>,
+        그리고 <b>서킷 브레이커와 함께</b> 씁니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">격벽(bulkhead) — 한 서비스가 전부를 잠식하지 않게</h4>
+      <pre class="code" data-lang="java"><code>// Resilience4j — 서비스별로 동시 호출 수를 따로 묶는다
+@Bean
+public Customizer&lt;Resilience4JCircuitBreakerFactory&gt; cbConfig() {
+    return factory -&gt; factory.configure(builder -&gt; builder
+        .circuitBreakerConfig(CircuitBreakerConfig.custom()
+            .slidingWindowType(SlidingWindowType.TIME_BASED)
+            .slidingWindowSize(10)              // 최근 10초를 본다
+            .minimumNumberOfCalls(20)           // 표본이 적으면 판단하지 않는다
+            .failureRateThreshold(50)           // 절반이 실패하면 연다
+            .slowCallDurationThreshold(Duration.ofSeconds(1))
+            .slowCallRateThreshold(60)          // ★ 느린 것도 실패로 센다
+            .waitDurationInOpenState(Duration.ofSeconds(10))
+            .permittedNumberOfCallsInHalfOpenState(5)
+            .build())
+        .build(), "orderCB");
+}</code></pre>
+      <ul class="tx">
+        <li><b>느린 호출을 실패로 세는 것</b>이 핵심입니다 —
+          장애는 보통 <b>에러가 아니라 지연</b>으로 옵니다</li>
+        <li><b>폴백은 “빈 값”이 아니라 의미 있는 응답</b>으로 —
+          캐시된 직전 값, 축소된 기능, 명확한 안내</li>
+        <li>서비스별 <b>커넥션 풀을 분리</b>하세요. 공유 풀은 한 곳이 다 먹습니다</li>
+        <li>서킷이 열렸다는 사실을 <b>메트릭·알림으로</b> 반드시 노출하세요</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>부하가 한계를 넘으면 “거절”이 정답입니다.</b>
+        모두를 느리게 받아 주는 것보다
+        <b>일부를 빨리 429 로 돌려보내는 편</b>이 전체 가용성을 지킵니다 —
+        <b>⚡ 대규모 트래픽 탭</b>의 부하 제어와 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g12 ==================== -->
+<section class="sec" id="g12">
+  <div class="sec-head rv">
+    <span class="no">GATEWAY 12</span>
+    <h2>BFF · <span class="t">무중단 전환 — 카나리 라우팅</span></h2>
+    <p class="lead">
+      화면 하나에 API 를 8번 호출하는 앱은 느립니다.
+      그리고 새 버전은 <b>전부에게 한 번에</b> 내보내면 안 됩니다.
+      게이트웨이가 두 문제를 함께 풉니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">BFF — 화면 하나에 요청 하나</h4>
+      <pre class="code" data-lang="java"><code>// 게이트웨이 뒤에 얇은 합성 계층을 둔다 (WebFlux)
+@GetMapping("/bff/home")
+public Mono&lt;HomeView&gt; home(@AuthenticationPrincipal Long uid) {
+    Mono&lt;Profile&gt;      p = users.profile(uid)
+                              .timeout(Duration.ofMillis(400))
+                              .onErrorReturn(Profile.EMPTY);      // 없어도 화면은 뜬다
+    Mono&lt;List&lt;Order&gt;&gt;  o = orders.recent(uid, 5)
+                              .timeout(Duration.ofMillis(600))
+                              .onErrorReturn(List.of());
+    Mono&lt;List&lt;Banner&gt;&gt; b = cms.banners()
+                              .timeout(Duration.ofMillis(300))
+                              .onErrorReturn(List.of());
+
+    return Mono.zip(p, o, b)                   // 셋을 동시에 — 순차 호출 금지
+               .map(t -&gt; new HomeView(t.getT1(), t.getT2(), t.getT3()));
+}</code></pre>
+      <ul class="tx">
+        <li><b>왕복 8번 → 1번.</b> 모바일 회선에서 체감 차이가 가장 큽니다</li>
+        <li><b>부분 실패를 허용</b>하세요 — 배너가 없다고 홈이 안 뜨면 안 됩니다</li>
+        <li>BFF 는 <b>클라이언트 종류별로</b> 둡니다(웹·앱·파트너). 하나로 합치면 다시 비대해집니다</li>
+        <li>BFF 에 <b>비즈니스 규칙을 넣지 마세요</b> — 조합·변환까지만</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">카나리 — 10%에게만 새 버전</h4>
+      <pre class="code" data-lang="java"><code>// 가중치 라우팅: 같은 Path 를 두 그룹으로 나눈다
+@Bean
+public RouteLocator routes(RouteLocatorBuilder b) {
+    return b.routes()
+        .route("order-v2", r -&gt; r.path("/api/orders/**")
+            .and().weight("order", 10)                 // 10%
+            .uri("lb://order-service-v2"))
+        .route("order-v1", r -&gt; r.path("/api/orders/**")
+            .and().weight("order", 90)                 // 90%
+            .uri("lb://order-service"))
+        .build();
+}</code></pre>
+      <pre class="code" data-lang="java"><code>// 사내 사용자·특정 헤더만 먼저 (더 안전한 1단계)
+.route("order-beta", r -&gt; r.path("/api/orders/**")
+    .and().header("X-Beta", "true")
+    .uri("lb://order-service-v2"))</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가중치는 “요청” 기준이지 “사람” 기준이 아닙니다.</b>
+        같은 사용자가 새로고침할 때마다 v1·v2 를 오가면
+        <b>화면이 널뛰고 캐시가 깨집니다</b>.
+        사용자 단위로 고정하려면 <b>userId 해시로 분기</b>하는 필터를 직접 두세요.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>카나리의 목적은 “배포”가 아니라 “관측”입니다.</b>
+        v2 의 <b>에러율·p99·비즈니스 지표</b>를 v1 과 나란히 볼 수 없다면
+        비율을 올릴 근거가 없습니다. <b>대시보드를 먼저 만들고</b> 트래픽을 흘리세요.
       </div>
     </div>
   </div>
