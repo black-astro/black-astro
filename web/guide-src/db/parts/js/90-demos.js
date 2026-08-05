@@ -158,6 +158,280 @@ function isoGo(k, el){
   $("#isoNote").innerHTML = i[2];
 }
 
+/* ── a00 · 언어 × DB 연동 조합 선택기 ─────────────────────── */
+const APPSEL = { lang: "py", db: "pg" };
+const APP_LANG_NAME = { py: "Python", java: "Java", node: "Node.js" };
+const APP_DB_NAME = { oracle: "Oracle", pg: "PostgreSQL", mysql: "MySQL · MariaDB", sqlite: "SQLite" };
+const APP_HL = { py: "python", java: "java", node: "js" };
+
+const APP_INS = {
+  py: {
+    pg:     'pip install "psycopg[binary]"  (풀까지 쓰려면 + psycopg_pool)',
+    mysql:  "pip install PyMySQL",
+    oracle: "pip install oracledb",
+    sqlite: "설치 불필요 — 파이썬에 내장 (import sqlite3)",
+  },
+  java: {
+    pg:     "Maven: org.postgresql : postgresql  +  com.zaxxer : HikariCP",
+    mysql:  "Maven: com.mysql : mysql-connector-j  +  com.zaxxer : HikariCP",
+    oracle: "Maven: com.oracle.database.jdbc : ojdbc11  +  com.zaxxer : HikariCP",
+    sqlite: "Maven: org.xerial : sqlite-jdbc",
+  },
+  node: {
+    pg:     "npm install pg",
+    mysql:  "npm install mysql2",
+    oracle: "npm install oracledb",
+    sqlite: "npm install better-sqlite3",
+  },
+};
+
+const APP_CODE = {
+  py: {
+    pg: `# PostgreSQL × Python — psycopg 3
+import psycopg
+from psycopg.rows import dict_row
+
+with psycopg.connect(
+        "postgresql://app:pw@localhost:5432/shop",
+        connect_timeout=5,
+        application_name="shop-api",
+        row_factory=dict_row) as conn:
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, name FROM member WHERE grade = %s", ("GOLD",))
+        for row in cur:
+            print(row["id"], row["name"])
+# with 블록 종료 시 커밋(예외면 롤백) 후 연결 닫힘`,
+    mysql: `# MySQL/MariaDB × Python — PyMySQL
+import pymysql
+
+conn = pymysql.connect(
+    host="127.0.0.1", port=3306,
+    user="app", password="pw", database="shop",
+    charset="utf8mb4",                # ★ 한글·이모지 필수
+    connect_timeout=5,
+    cursorclass=pymysql.cursors.DictCursor)
+try:
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, name FROM member WHERE grade = %s", ("GOLD",))
+        for row in cur.fetchall():
+            print(row["id"], row["name"])
+    conn.commit()                     # PyMySQL 은 autocommit 이 꺼져 있습니다
+finally:
+    conn.close()`,
+    oracle: `# Oracle × Python — python-oracledb (thin 모드: 클라이언트 설치 불필요)
+import oracledb
+
+conn = oracledb.connect(
+    user="app", password="pw",
+    dsn="localhost:1521/FREEPDB1")    # host:port/service_name
+with conn.cursor() as cur:
+    cur.execute(
+        "SELECT id, name FROM member WHERE grade = :g",   # ★ :이름 바인딩
+        g="GOLD")
+    for id_, name in cur:
+        print(id_, name)
+conn.close()`,
+    sqlite: `# SQLite × Python — 표준 라이브러리 sqlite3
+import sqlite3
+
+conn = sqlite3.connect("shop.db")
+conn.row_factory = sqlite3.Row        # 컬럼 이름으로 접근
+conn.execute("PRAGMA journal_mode=WAL")   # ★ 읽기·쓰기 동시성 개선
+conn.execute("PRAGMA foreign_keys=ON")    # ★ FK 는 켜야 동작합니다
+
+cur = conn.execute("SELECT id, name FROM member WHERE grade = ?", ("GOLD",))
+for row in cur:
+    print(row["id"], row["name"])
+conn.commit()
+conn.close()`,
+  },
+  java: {
+    pg: `// PostgreSQL × Java — JDBC + HikariCP
+HikariConfig cfg = new HikariConfig();
+cfg.setJdbcUrl("jdbc:postgresql://localhost:5432/shop");
+cfg.setUsername("app");
+cfg.setPassword("pw");
+cfg.setMaximumPoolSize(10);
+HikariDataSource ds = new HikariDataSource(cfg);
+
+String sql = "SELECT id, name FROM member WHERE grade = ?";
+try (Connection con = ds.getConnection();
+     PreparedStatement ps = con.prepareStatement(sql)) {
+    ps.setString(1, "GOLD");
+    try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) System.out.println(rs.getLong("id") + " " + rs.getString("name"));
+    }
+}
+// Spring Boot 라면 application.properties 두 줄이면 풀까지 자동:
+// spring.datasource.url=jdbc:postgresql://localhost:5432/shop
+// spring.datasource.username=app / password=pw`,
+    mysql: `// MySQL/MariaDB × Java — JDBC + HikariCP
+HikariConfig cfg = new HikariConfig();
+cfg.setJdbcUrl("jdbc:mysql://localhost:3306/shop"
+    + "?serverTimezone=Asia/Seoul&characterEncoding=UTF-8");
+cfg.setUsername("app");
+cfg.setPassword("pw");
+cfg.setMaximumPoolSize(10);
+HikariDataSource ds = new HikariDataSource(cfg);
+
+String sql = "SELECT id, name FROM member WHERE grade = ?";
+try (Connection con = ds.getConnection();
+     PreparedStatement ps = con.prepareStatement(sql)) {
+    ps.setString(1, "GOLD");
+    try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) System.out.println(rs.getLong("id") + " " + rs.getString("name"));
+    }
+}
+// MariaDB 전용 드라이버를 쓸 땐 jdbc:mariadb:// + org.mariadb.jdbc.Driver`,
+    oracle: `// Oracle × Java — JDBC(ojdbc11) + HikariCP
+HikariConfig cfg = new HikariConfig();
+cfg.setJdbcUrl("jdbc:oracle:thin:@//localhost:1521/FREEPDB1");
+cfg.setUsername("app");
+cfg.setPassword("pw");
+cfg.setMaximumPoolSize(10);
+HikariDataSource ds = new HikariDataSource(cfg);
+
+String sql = "SELECT id, name FROM member WHERE grade = ?";
+try (Connection con = ds.getConnection();
+     PreparedStatement ps = con.prepareStatement(sql)) {
+    ps.setString(1, "GOLD");
+    try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) System.out.println(rs.getLong("id") + " " + rs.getString("name"));
+    }
+}
+// SID 로 접속해야 하는 옛 서버는 @host:1521:SID (콜론) 형식입니다`,
+    sqlite: `// SQLite × Java — sqlite-jdbc (파일 DB라 풀 없이 씁니다)
+String url = "jdbc:sqlite:shop.db";
+
+try (Connection con = DriverManager.getConnection(url)) {
+    con.createStatement().execute("PRAGMA journal_mode=WAL");
+    con.createStatement().execute("PRAGMA foreign_keys=ON");
+
+    String sql = "SELECT id, name FROM member WHERE grade = ?";
+    try (PreparedStatement ps = con.prepareStatement(sql)) {
+        ps.setString(1, "GOLD");
+        try (ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) System.out.println(rs.getLong("id") + " " + rs.getString("name"));
+        }
+    }
+}
+// 서버가 아니라 '파일'입니다 — 여러 프로세스의 동시 쓰기에는 부적합`,
+  },
+  node: {
+    pg: `// PostgreSQL × Node.js — pg (Pool 이 기본)
+import pg from "pg";
+
+const pool = new pg.Pool({
+  connectionString: "postgresql://app:pw@localhost:5432/shop",
+  max: 10,
+  connectionTimeoutMillis: 5000,
+});
+
+const { rows } = await pool.query(
+  "SELECT id, name FROM member WHERE grade = $1",   // ★ $1, $2 바인딩
+  ["GOLD"]);
+console.log(rows);
+
+await pool.end();   // 앱 종료 시`,
+    mysql: `// MySQL/MariaDB × Node.js — mysql2 (Promise + Pool)
+import mysql from "mysql2/promise";
+
+const pool = mysql.createPool({
+  host: "127.0.0.1", port: 3306,
+  user: "app", password: "pw", database: "shop",
+  charset: "utf8mb4",
+  connectionLimit: 10,
+});
+
+const [rows] = await pool.query(
+  "SELECT id, name FROM member WHERE grade = ?",
+  ["GOLD"]);
+console.log(rows);
+
+await pool.end();`,
+    oracle: `// Oracle × Node.js — oracledb (thin 모드 기본)
+import oracledb from "oracledb";
+oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;   // 객체로 받기
+
+const pool = await oracledb.createPool({
+  user: "app", password: "pw",
+  connectString: "localhost:1521/FREEPDB1",
+  poolMax: 10,
+});
+
+const conn = await pool.getConnection();
+try {
+  const r = await conn.execute(
+    "SELECT id, name FROM member WHERE grade = :g",  // ★ :이름 바인딩
+    { g: "GOLD" });
+  console.log(r.rows);
+} finally {
+  await conn.close();     // ★ 풀에 반납 — 안 하면 커넥션 누수
+}`,
+    sqlite: `// SQLite × Node.js — better-sqlite3 (동기 API·가장 빠름)
+import Database from "better-sqlite3";
+
+const db = new Database("shop.db");
+db.pragma("journal_mode = WAL");      // ★ 동시성 개선
+db.pragma("foreign_keys = ON");
+
+const rows = db
+  .prepare("SELECT id, name FROM member WHERE grade = ?")
+  .all("GOLD");
+console.log(rows);
+
+db.close();
+// 동기 API 지만 로컬 파일이라 충분히 빠릅니다.
+// 서버에서 대량 동시 쓰기가 필요하면 SQLite 가 아니라 서버형 DB 를 쓰세요`,
+  },
+};
+
+const APP_NOTE = {
+  py: {
+    pg:     "<b>운영에서는 반드시 풀을 쓰세요</b> — <code>psycopg_pool.ConnectionPool</code>. PostgreSQL 은 커넥션마다 프로세스가 떠서 <b>풀 없이 붙으면 서버가 먼저 지칩니다</b>. 옛 자료의 <code>psycopg2</code> 는 유지보수 모드 — 신규는 psycopg 3 로 시작하세요.",
+    mysql:  "<b><code>charset=\"utf8mb4\"</code> 를 빠뜨리면</b> 이모지·일부 한자가 <code>???</code> 로 깨집니다. PyMySQL 은 <b>autocommit 이 꺼져 있어</b> <code>conn.commit()</code> 을 안 부르면 변경이 사라집니다. C 확장 성능이 필요하면 <code>mysqlclient</code> 로 교체할 수 있습니다(API 거의 동일).",
+    oracle: "<b>thin 모드가 기본</b>이라 Oracle Client 설치 없이 바로 붙습니다. 옛 자료의 <code>cx_Oracle</code> 은 이 라이브러리의 전신 — 신규는 <code>oracledb</code> 를 쓰세요. 지갑(Wallet)·고급 인증이 필요할 때만 thick 모드(<code>init_oracle_client()</code>)로 전환합니다.",
+    sqlite: "<b>동시에 쓰는 연결은 사실상 1개</b>입니다 — 웹 서버 여러 워커가 같이 쓰면 <code>database is locked</code> 가 납니다(WAL 로 완화, 근본 해결은 서버형 DB). <code>PRAGMA foreign_keys=ON</code> 은 <b>연결마다</b> 다시 켜야 합니다.",
+  },
+  java: {
+    pg:     "JDBC 를 직접 쓸 때도 <b>커넥션 풀(HikariCP)은 필수</b>입니다 — 연결 수립이 수십 ms 라 요청마다 새로 맺으면 그게 병목이 됩니다. Spring Boot 는 드라이버가 클래스패스에 있으면 <b>HikariCP 풀을 자동 구성</b>합니다.",
+    mysql:  "URL 에 <b><code>serverTimezone=Asia/Seoul</code></b> 이 없으면 시간이 9시간 어긋나는 사고가 흔합니다. 8.x 드라이버 클래스는 <code>com.mysql.cj.jdbc.Driver</code> — 옛 <code>com.mysql.jdbc.Driver</code> 는 deprecated 입니다.",
+    oracle: "<code>@//host:port/서비스명</code> (슬래시 2개)이 서비스명 방식, <code>@host:port:SID</code> (콜론)가 SID 방식입니다 — <b>이걸 헷갈리면 ORA-12514 가 납니다</b>. ojdbc 버전은 JDK 버전과 짝(ojdbc11 = JDK11+)을 맞추세요.",
+    sqlite: "파일 DB 라 <b>커넥션 풀이 오히려 독</b>이 될 수 있습니다(동시 쓰기 잠금). 임베디드·테스트 용도로는 훌륭하지만, <b>서버 애플리케이션의 주 DB 로는 권장하지 않습니다</b>.",
+  },
+  node: {
+    pg:     "바인딩이 <b><code>$1, $2</code> 순번 방식</b>인 것이 다른 DB 와 다른 점입니다. <code>pool.query()</code> 는 자동으로 빌려 쓰고 반납하지만, <b>트랜잭션은 <code>pool.connect()</code> 로 한 커넥션을 잡고</b> BEGIN…COMMIT 후 <code>release()</code> 해야 합니다.",
+    mysql:  "옛 <code>mysql</code> 패키지는 Promise 미지원 — <b><code>mysql2/promise</code></b> 를 쓰세요. <code>pool.query()</code> 는 자동 반납, <code>pool.getConnection()</code> 을 썼다면 <b>반드시 <code>conn.release()</code></b> — 안 하면 풀이 말라붙습니다.",
+    oracle: "<code>conn.close()</code> 는 연결 종료가 아니라 <b>풀 반납</b>입니다 — try/finally 로 반드시 부르세요. 기본 출력이 배열이라 <code>OUT_FORMAT_OBJECT</code> 설정을 앱 시작 시 한 번 해 두는 것이 편합니다.",
+    sqlite: "better-sqlite3 는 <b>일부러 동기 API</b> 입니다 — 로컬 파일 I/O 는 이벤트 루프를 잠깐만 막고, 그게 비동기 오버헤드보다 빠릅니다. 단 <b>무거운 집계 쿼리는 이벤트 루프를 오래 막으니</b> 워커 스레드로 빼세요.",
+  },
+};
+
+function appRender(){
+  const { lang, db } = APPSEL;
+  $("#appDep").innerHTML = "<b>설치</b> — " + DEMO_ESC(APP_INS[lang][db]);
+  const pre = $("#appCode");
+  pre.dataset.lang = APP_HL[lang];
+  setCode("#appCode", APP_CODE[lang][db]);
+  $("#appNote").innerHTML = APP_NOTE[lang][db];
+  const secRef = { py: "a02", java: "a03", node: "a04" }[lang];
+  $("#appRef").innerHTML =
+    `<b>${APP_LANG_NAME[lang]} × ${APP_DB_NAME[db]}</b> 조합을 보고 있습니다. ` +
+    `더 깊게 — 언어별 상세는 <b>${secRef === "a02" ? "02" : secRef === "a03" ? "03" : "04"}번 섹션</b>, ` +
+    `인젝션 방어는 <b>05</b>, 트랜잭션은 <b>06</b>, 타임아웃·커넥션 누수는 <b>07</b>번 섹션에서 이어집니다.`;
+}
+const DEMO_ESC = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function appLang(k, el){
+  APPSEL.lang = k;
+  $$("#appLangPick button").forEach(b => b.classList.toggle("on", b === el));
+  appRender();
+}
+function appDb(k, el){
+  APPSEL.db = k;
+  $$("#appDbPick button").forEach(b => b.classList.toggle("on", b === el));
+  appRender();
+}
+
 /* ── 치트시트 · 방언 대조표 검색 필터 (여러 탭에서 공용) ──── */
 function cheatFilter(inputId, tableId, countId){
   const q = ($("#" + inputId)?.value || "").trim().toLowerCase();
@@ -184,5 +458,6 @@ function cheatSet(inputId, tableId, countId, q){
 
 /* 탭별 최초 1회 초기화 */
 TAB_INIT.sql  = function(){ sqlStepInit(); joinGo("inner", $("#joinCtrl .chip")); };
+TAB_INIT.app  = function(){ appRender(); };
 TAB_INIT.tune = function(){ isoGo("rc", $("#isoCtrl .chip:nth-child(2)")); };
 TAB_INIT.pro  = function(){ cheatFilter("proQ", "proTable", "proCount"); };

@@ -110,6 +110,92 @@ function locGo(path, el){
   $$("#locList tr").forEach(tr => tr.classList.toggle("hl-row", tr.dataset.loc === c[0]));
 }
 
+/* ── b04 · 로드밸런싱 분산 시뮬레이터 ─────────────────────── */
+const LB = {
+  algo: "rr",
+  counts: [0, 0, 0],
+  active: [0, 0, 0],                    // 현재 처리 중인 연결 (least_conn 시연용)
+  rr: 0,
+  wrrSeq: [0, 0, 0, 1, 1, 2],           // weight 3:2:1 을 순서로 풀어놓은 것
+  wrrIdx: 0,
+  clients: ["203.0.113.10", "198.51.100.7", "192.0.2.55", "203.0.113.99"],
+  ipMap:   [0, 2, 0, 1],                // ip_hash 시연 — 클라이언트별 고정 서버
+  cIdx: 0,
+  tick: 0,
+  tie: 0,                               // least_conn 동점일 때 순환 선택용
+};
+const LB_NOTE = {
+  rr:    "<b>라운드로빈</b> — 순서대로 정확히 1/3 씩 갑니다. 그런데 <b>③번(느린 서버)의 '현재 연결'이 계속 쌓이는 것</b>을 보세요 — 처리 속도를 안 보고 똑같이 나눠 주기 때문입니다.",
+  wrr:   "<b>가중치 3:2:1</b> — ①번이 3배, ②번이 2배를 받습니다. <b>서버 사양이 다를 때</b> 비율로 조정하는 방식입니다.",
+  least: "<b>least_conn</b> — 매번 <b>현재 연결이 가장 적은 서버</b>를 고릅니다. 느린 ③번에는 자연히 덜 가게 되죠. <b>요청 처리 시간이 들쭉날쭉한 서비스</b>에서 효과가 큽니다.",
+  iphash:"<b>ip_hash</b> — 같은 IP 는 항상 같은 서버로 갑니다(마지막 요청의 IP 를 보세요). 세션 유지엔 편하지만 <b>분배가 기울 수 있고</b>, 그 서버가 죽으면 해당 사용자들의 세션이 사라집니다.",
+};
+function lbRender(){
+  const box = $("#lbBars");
+  if (!box) return;
+  if (!box.children.length){
+    box.innerHTML = [0, 1, 2].map(i =>
+      `<div class="lbrow${i === 2 ? " slow" : ""}">
+         <span class="nm">server-${i + 1}<small>${i === 2 ? "느린 서버 (처리 3배 걸림)" : "정상 속도"}</small></span>
+         <div class="bar"><i id="lbBar${i}"></i></div>
+         <span class="ct" id="lbCt${i}"></span>
+       </div>`).join("") + `<div class="lblast" id="lbLast"></div>`;
+  }
+  const max = Math.max(1, ...LB.counts);
+  const total = LB.counts[0] + LB.counts[1] + LB.counts[2];
+  [0, 1, 2].forEach(i => {
+    $("#lbBar" + i).style.width = (LB.counts[i] / max * 100) + "%";
+    $("#lbCt" + i).textContent = `${LB.counts[i]}건 · 연결 ${LB.active[i]}`;
+  });
+  $("#lbLast").textContent = total ? `총 ${total}건 처리` : "위 버튼으로 요청을 보내 보세요";
+  $("#lbNote").innerHTML = LB_NOTE[LB.algo];
+}
+function lbPick(){
+  const a = LB.algo;
+  if (a === "rr")    return LB.rr++ % 3;
+  if (a === "wrr")   return LB.wrrSeq[LB.wrrIdx++ % LB.wrrSeq.length];
+  if (a === "least"){
+    /* 동점이면 순환하며 고른다 — 실제 LB 도 동점 시 라운드로빈처럼 돕니다 */
+    let m = -1;
+    for (let k = 0; k < 3; k++){
+      const i = (LB.tie + k) % 3;
+      if (m < 0 || LB.active[i] < LB.active[m]) m = i;
+    }
+    LB.tie = (m + 1) % 3;
+    return m;
+  }
+  /* iphash — 4명의 클라이언트가 돌아가며 요청한다고 가정 */
+  return LB.ipMap[LB.cIdx % 4];
+}
+function lbReq(n){
+  let lastTxt = "";
+  for (let k = 0; k < n; k++){
+    const ip = LB.clients[LB.cIdx % 4];
+    const s = lbPick();
+    LB.counts[s]++; LB.active[s]++; LB.cIdx++; LB.tick++;
+    /* 처리 완료 시뮬레이션 — ①②는 요청 2건마다 1건, 느린 ③은 6건마다 1건 완료 */
+    if (LB.tick % 2 === 0){
+      LB.active[0] = Math.max(0, LB.active[0] - 1);
+      LB.active[1] = Math.max(0, LB.active[1] - 1);
+    }
+    if (LB.tick % 6 === 0) LB.active[2] = Math.max(0, LB.active[2] - 1);
+    lastTxt = `${ip} → server-${s + 1}`;
+  }
+  lbRender();
+  if (lastTxt) $("#lbLast").textContent =
+    `마지막 요청: ${lastTxt} · 총 ${LB.counts[0] + LB.counts[1] + LB.counts[2]}건`;
+}
+function lbReset(){
+  LB.counts = [0, 0, 0]; LB.active = [0, 0, 0];
+  LB.rr = 0; LB.wrrIdx = 0; LB.cIdx = 0; LB.tick = 0;
+  lbRender();
+}
+function lbAlgo(k, el){
+  LB.algo = k;
+  $$("#lbCtrl button").forEach(b => b.classList.toggle("on", b === el));
+  lbReset();
+}
+
 /* ── w11 · 오류 사전 필터 (여러 탭 공용) ──────────────────── */
 function cheatFilter(inputId, tableId, countId){
   const q = ($("#" + inputId)?.value || "").trim().toLowerCase();
@@ -136,3 +222,4 @@ function cheatSet(inputId, tableId, countId, q){
 
 /* 탭별 최초 1회 초기화 */
 TAB_INIT.nginx = function(){ locGo("/api/users", $('#locCtrl .chip[data-p="/api/users"]')); };
+TAB_INIT.lb = function(){ lbRender(); };

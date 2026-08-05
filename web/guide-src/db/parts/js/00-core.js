@@ -442,6 +442,7 @@ const SEC_KW = {
   z15:"장애대응 시나리오 디스크풀 커넥션고갈 복제지연 롱트랜잭션 대응절차 포스트모템",
   z16:"dba없이 체크리스트 운영 백업검증 모니터링 권한 정기점검",
 
+  a00:"조합 선택 언어 파이썬 자바 노드 python java node 연동 시작 빠른시작 설치 코드 복사 바로",
   a01:"드라이버 커넥션 연결문자열 dsn url 프로토콜 포트 옵션 ssl 타임아웃",
   a02:"파이썬 psycopg oracledb pymysql sqlite3 with 커서 파라미터 딕셔너리커서",
   a03:"자바 jdbc datasource hikari 풀설정 preparedstatement 배치 트랜잭션",

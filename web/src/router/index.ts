@@ -136,7 +136,7 @@ export const guides: Guide[] = [
     ],
     stats: [
       { value: '10', label: '주제 탭' },
-      { value: '153', label: '섹션' },
+      { value: '154', label: '섹션' },
       { value: '4', label: 'DB 전용 탭' },
     ],
   },
@@ -148,22 +148,22 @@ export const guides: Guide[] = [
     title: '웹서버 · Nginx · Apache · Tomcat · Caddy 실전 가이드 (별도 페이지)',
     heading: 'Web Server Visual Guide',
     desc:
-      '웹서버 설치부터 리버스 프록시·HTTPS 인증서 발급과 갱신, 언어별(Java·Python·Node·PHP) ' +
-      '배포 전 과정, 성능 튜닝과 보안 운영, 그리고 epoll·HTTP/3·로드밸런싱 같은 ' +
-      '내부 동작까지 Nginx·Apache·Tomcat·Caddy 를 한 페이지로 다룹니다.',
+      '웹서버 설치부터 리버스 프록시·HTTPS 발급-적용 전 과정, 언어별(Java·Python·Node·PHP) ' +
+      '배포, 로드밸런싱·무중단 배포·LB 이중화, 성능 튜닝과 보안 운영, 그리고 ' +
+      'epoll·HTTP/3 내부 동작까지 Nginx·Apache·Tomcat·Caddy 를 한 페이지로 다룹니다.',
     tags: [
       'Nginx',
       'Apache',
       'Tomcat',
       'Caddy',
       'HTTPS · 인증서',
-      '리버스 프록시',
-      '성능 튜닝',
+      '로드밸런싱',
+      '무중단 배포',
       '보안 운영',
     ],
     stats: [
-      { value: '10', label: '주제 탭' },
-      { value: '138', label: '섹션' },
+      { value: '11', label: '주제 탭' },
+      { value: '151', label: '섹션' },
       { value: '4', label: '서버 전용 탭' },
     ],
   },
