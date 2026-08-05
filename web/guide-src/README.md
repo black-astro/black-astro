@@ -1,10 +1,10 @@
-# 학습 가이드 소스 (Python · Java · JS/TS · Database · Web Server)
+# 학습 가이드 소스 (Python · Java · JS/TS · C#/Unity · Database · Web Server)
 
-`public/*-web/index.html` 다섯 개의 **원본**입니다.
+`public/*-web/index.html` 여섯 개의 **원본**입니다.
 편집은 여기서 하고, 빌드하면 조각들이 합쳐져 각각 단일 HTML로 나갑니다.
 
 > ⚠️ `public/python-web/` · `public/java-web/` · `public/js-ts-web/` ·
-> `public/db-web/` · `public/server-web/` 의 index.html 을
+> `public/csharp-web/` · `public/db-web/` · `public/server-web/` 의 index.html 을
 > 직접 고치지 마세요. 다음 빌드에서 덮어써집니다.
 
 | 가이드 | 소스 | 배포 경로 | 규모 |
@@ -12,10 +12,11 @@
 | 🐍 Python | `guide-src/python/` | `/python-web/` | 14탭 · 207섹션 |
 | ☕ Java | `guide-src/java/` | `/java-web/` | 11탭 · 166섹션 |
 | 🟨 JS · TS | `guide-src/js-ts/` | `/js-ts-web/` | 11탭 · 178섹션 |
+| 🟣 C# · Unity | `guide-src/csharp/` | `/csharp-web/` | 10탭 · 120섹션 |
 | 🗄️ Database | `guide-src/db/` | `/db-web/` | 10탭 · 154섹션 |
 | 🌐 Web Server | `guide-src/server/` | `/server-web/` | 11탭 · 152섹션 |
 
-다섯 가이드는 **CSS 5개(01~05)를 공유**합니다(테마 동일).
+여섯 가이드는 **CSS 5개(01~05)를 공유**합니다(테마 동일).
 각 폴더의 `css/06-*.css` 만 그 가이드 전용입니다.
 `build.mjs` 상단의 `GUIDES` 배열에 항목을 추가하면 가이드를 더 늘릴 수 있습니다.
 
@@ -32,8 +33,8 @@
 
 | 명령 | 하는 일 |
 |---|---|
-| `npm run build:guide` | 조각 → 각 `index.html` 생성 (다섯 가이드 모두) |
-| `npm run build:guide -- java` | 특정 가이드만 (`python` · `java` · `js-ts` · `db` · `server`) |
+| `npm run build:guide` | 조각 → 각 `index.html` 생성 (여섯 가이드 모두) |
+| `npm run build:guide -- java` | 특정 가이드만 (`python` · `java` · `js-ts` · `csharp` · `db` · `server`) |
 | `npm run dev:guide` | 조각이 바뀌면 자동 재빌드 (작업 중 켜두세요) |
 | `npm run check:guide` | 결과물이 조각과 일치하는지 검사만 (커밋 전 확인용) |
 | `npm run verify:guide` | 빌드 + **정합성 점검** — 사이드바 ↔ 섹션 · 탭 ↔ pane · SEC_LV/EZ/CAP 커버리지 |
@@ -47,7 +48,7 @@
 
 ```
 guide-src/
-  build.mjs            빌더 (의존성 없음 · 세 가이드를 모두 처리)
+  build.mjs            빌더 (의존성 없음 · 여섯 가이드를 모두 처리)
   README.md            이 문서
 
   <가이드>/            python · java · js-ts · db · server
@@ -87,6 +88,7 @@ Python 가이드만 데모 스크립트가 많아 `js/` 가 13개로 더 잘게 
 | ☕ Java | Java 기초 · 고급/동시성 · Spring Boot · WebFlux · 데이터/JPA · Security · Gateway · 실전 도구 · JavaFX · **대규모 트래픽** · **전문가** |
 | 🟨 JS · TS | JavaScript · TypeScript · Node.js · Express · NestJS · Electron · React Native · **네이티브 · 미디어** · **대규모 트래픽** · **전문가** · 실전 도구 |
 | 🗄️ Database | 시작·설치 · SQL 기초 · SQL 전문가 · Oracle · PostgreSQL · MySQL/MariaDB · SQLite3 · 설계·튜닝 · **전문가(내부)** · 앱 연동 |
+| 🟣 C# · Unity | C# 기초 · C# 고급 · **Unity 기초** · **Unity 실전** · **게임 서버** · ASP.NET Core · 대규모 트래픽 · 데스크탑 · 실전 도구 · **전문가(CLR)** |
 | 🌐 Web Server | 시작·개념 · Nginx · Apache · Tomcat · Caddy · HTTPS·인증서 · **로드밸런싱** · 언어별 연동 · 성능·튜닝 · 보안·운영 · **전문가(내부)** |
 
 언어 가이드 세 개는 마지막 두 탭이 **대규모 트래픽 + 전문가**입니다.
@@ -130,14 +132,15 @@ npm run check:guide       # 결과물이 조각과 일치하는지
 사이드바 링크 ↔ 섹션 id 일치, `SEC_LV`/`EZ` 커버리지, 태그 균형은
 빌드 결과물(`public/*-web/index.html`)을 대상으로 확인하는 것이 가장 확실합니다.
 
-## 다섯 가이드의 관계
+## 여섯 가이드의 관계
 
 - 각 가이드의 **사이드바·탭바에서 서로를 오갈 수 있습니다**
 - 포트폴리오 진입점(헤더 · 홈 히어로 · 홈 카드 · 푸터)은
   `src/router/index.ts` 의 `guides` 배열 **한 곳**에서만 정의합니다
   → 가이드를 추가하면 그 배열에도 항목을 넣어야 사이트에 노출됩니다
 - **역할 분담**
-  - 언어 가이드(🐍 ☕ 🟨) — 그 언어로 코드를 쓰는 법
+  - 언어 가이드(🐍 ☕ 🟨 🟣) — 그 언어로 코드를 쓰는 법
+    (🟣 C# 은 여기에 **게임 엔진 · 게임 서버 · 데스크탑**까지 한 언어로 이어 붙인 형태입니다)
   - 🗄️ Database — SQL 문법 · DB별 방언 · 설치 · 튜닝 · 내부 구조 (언어 무관)
   - 🌐 Web Server — 배포 · 프록시 · HTTPS · 운영 (언어 무관)
   - 파이썬 가이드의 `DB 연동` · `웹 · API` 탭은 **파이썬 관점**만 다루고

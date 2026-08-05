@@ -1,0 +1,794 @@
+<!-- ============================================================
+     C# 고급 PANE
+     ============================================================ -->
+<div class="pane" id="pane-adv">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> 비동기 · 메모리 · 성능</div>
+  <h1>돌아가는 코드에서<br>버티는 코드로</h1>
+  <p class="tx">
+    문법을 알면 기능은 만들어집니다. 하지만 <b>동시에 1만 명이 들어오거나</b>,
+    <b>초당 60번 도는 게임 루프</b>에서는 다른 지식이 필요합니다.
+    비동기·메모리·할당을 다룹니다.
+    <b>여기까지 마치면 "왜 느린가"를 추측이 아니라 측정으로 답할 수 있습니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>0</b><span>목표 GC 할당</span></div>
+    <div><b>async</b><span>서버의 기본</span></div>
+    <div><b>Span</b><span>복사 없는 처리</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== a01 ==================== -->
+<section class="sec" id="a01">
+  <div class="sec-head rv">
+    <span class="no">ADV 01</span>
+    <h2>async / await <span class="t">완전정복</span></h2>
+    <p class="lead">
+      "스레드를 하나 더 쓰는 것"이 <b>아닙니다.</b>
+      기다리는 동안 <b>스레드를 반납</b>하는 것 — 서버 처리량이 여기서 갈립니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 660 150" role="img"
+         aria-label="동기 호출은 응답을 기다리는 동안 스레드가 묶여 있고, 비동기는 대기 구간에서 스레드를 반납해 다른 요청을 처리한 뒤 완료 시 이어서 실행한다">
+      <rect class="bx" x="12" y="14" width="636" height="52"/>
+      <rect class="bx" x="12" y="86" width="636" height="52"/>
+      <text x="70" y="34" font-size="12">동기</text>
+      <text x="70" y="52" class="lbl">스레드 1개 점유</text>
+      <text x="70" y="106" font-size="12">비동기</text>
+      <text x="70" y="124" class="lbl">대기 중 반납</text>
+      <rect class="bx" x="150" y="24" width="70" height="32"/>
+      <rect class="bx bx-warn" x="228" y="24" width="300" height="32"/>
+      <rect class="bx" x="536" y="24" width="70" height="32"/>
+      <text x="185" y="45" text-anchor="middle" class="lbl">계산</text>
+      <text x="378" y="45" text-anchor="middle" class="lbl">DB 응답 대기 — 아무것도 못 함</text>
+      <text x="571" y="45" text-anchor="middle" class="lbl">응답</text>
+      <rect class="bx" x="150" y="96" width="70" height="32"/>
+      <rect class="bx" x="228" y="96" width="300" height="32"/>
+      <rect class="bx" x="536" y="96" width="70" height="32"/>
+      <text x="185" y="117" text-anchor="middle" class="lbl">계산</text>
+      <text x="378" y="117" text-anchor="middle" class="lbl">다른 요청 200개를 처리</text>
+      <text x="571" y="117" text-anchor="middle" class="lbl">이어서</text>
+      <path class="fl" d="M228 112 H528"/>
+    </svg>
+    <div class="cap">같은 서버가 <b>동시에 몇 명을 받느냐</b>는 대기 구간에서 스레드를 놓느냐로 결정됩니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">기본형과 규칙</h4>
+      <pre class="code" data-lang="csharp"><code>public async Task&lt;Player&gt; LoadAsync(int id, CancellationToken ct)
+{
+    var row  = await _db.FindAsync(id, ct);        // 대기 = 스레드 반납
+    var meta = await _http.GetAsync(url, ct);      // 순차로 필요하면 이렇게
+    return Map(row, meta);
+}
+
+// 서로 관계없는 작업은 동시에
+var (profile, items) = (LoadProfileAsync(id), LoadItemsAsync(id));
+await Task.WhenAll(profile, items);
+return new View(profile.Result, items.Result);
+
+// 타임아웃
+using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+cts.CancelAfter(TimeSpan.FromSeconds(3));
+await CallAsync(cts.Token);</code></pre>
+      <ul class="tx">
+        <li><b>async 는 위로 전파</b>됩니다 — 중간에서 끊지 말고 진입점까지 이어 주세요</li>
+        <li>반환은 <b><code>Task</code>·<code>Task&lt;T&gt;</code></b>. <code>async void</code> 는 <b>이벤트 핸들러에서만</b></li>
+        <li>취소 토큰은 <b>맨 아래까지 전달</b> — 안 그러면 취소해도 일이 계속 돕니다</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">터지는 세 가지 패턴</h4>
+      <div class="vs">
+        <div class="bad">
+          <h5>.Result · .Wait()</h5>
+          <pre class="code" data-lang="csharp"><code>var user = GetAsync().Result;
+// UI·구형 ASP.NET 에서 데드락
+// 서버에서는 스레드 고갈</code></pre>
+        </div>
+        <div class="good">
+          <h5>끝까지 await</h5>
+          <pre class="code" data-lang="csharp"><code>var user = await GetAsync();</code></pre>
+        </div>
+      </div>
+      <pre class="code" data-lang="csharp"><code>// ② async void — 예외를 잡을 수 없어 프로세스가 죽습니다
+async void Save() { await ...; }          // ✗
+async Task SaveAsync() { await ...; }     // ✓
+
+// ③ 루프 안에서 await — N번 왕복합니다
+foreach (var id in ids) await LoadAsync(id);            // ✗ 느림
+
+var tasks = ids.Select(LoadAsync);                       // ✓ 동시에
+var all   = await Task.WhenAll(tasks);
+
+// 단, 동시 수를 제한해야 상대 서버가 죽지 않습니다
+await Parallel.ForEachAsync(ids,
+    new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = ct },
+    async (id, token) =&gt; await LoadAsync(id, token));</code></pre>
+      <div class="note warn">
+        <b>Unity 에서는 이야기가 다릅니다.</b>
+        유니티의 API 는 <b>메인 스레드에서만</b> 호출할 수 있어
+        <code>await</code> 뒤에 다른 스레드로 넘어가면 터집니다.
+        게임 코드에서는 <b>코루틴</b>이나 <b>UniTask</b>(할당 없는 async)를 쓰세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a02 ==================== -->
+<section class="sec" id="a02">
+  <div class="sec-head rv">
+    <span class="no">ADV 02</span>
+    <h2>Task · ValueTask · <span class="t">취소와 재시도</span></h2>
+    <p class="lead">비동기의 나머지 절반 — <b>언제 멈추고, 실패하면 어떻게 하는가</b>.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">Task 와 ValueTask</h4>
+      <pre class="code" data-lang="csharp"><code>// Task — 힙에 객체 하나. 기본은 이걸로 충분합니다.
+public Task&lt;int&gt; GetAsync() =&gt; _db.CountAsync();
+
+// ValueTask — '대부분 이미 값이 있는' 경우의 할당 제거
+public ValueTask&lt;Item&gt; GetItemAsync(int id)
+{
+    if (_cache.TryGetValue(id, out var hit))
+        return new ValueTask&lt;Item&gt;(hit);        // 할당 0
+    return new ValueTask&lt;Item&gt;(LoadSlowAsync(id));
+}</code></pre>
+      <div class="note warn">
+        <b>ValueTask 는 두 번 await 하면 안 됩니다.</b>
+        결과를 재사용하려면 <code>.AsTask()</code> 로 바꾸세요.
+        <b>애매하면 Task</b> 를 쓰는 것이 안전하고, ValueTask 는
+        <b>측정해서 병목으로 확인된 뒤</b> 도입하세요.
+      </div>
+      <pre class="code" data-lang="csharp"><code>// 오래 걸리는 CPU 작업은 스레드풀로 (서버에서만)
+var result = await Task.Run(() =&gt; HeavyCompute(data), ct);
+
+// 진행률 보고
+var progress = new Progress&lt;int&gt;(p =&gt; bar.Value = p);
+await DownloadAsync(url, progress, ct);</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">취소 · 재시도 · 타임아웃</h4>
+      <pre class="code" data-lang="csharp"><code>// 취소는 '요청'입니다 — 받은 쪽이 확인해야 멈춥니다
+public async Task WorkAsync(CancellationToken ct)
+{
+    while (true)
+    {
+        ct.ThrowIfCancellationRequested();       // 협조 지점
+        await StepAsync(ct);
+    }
+}
+
+// 재시도 — 지수 백오프 + 지터
+static async Task&lt;T&gt; RetryAsync&lt;T&gt;(Func&lt;Task&lt;T&gt;&gt; act, int max = 3)
+{
+    for (int i = 0; ; i++)
+    {
+        try { return await act(); }
+        catch (Exception e) when (i &lt; max &amp;&amp; IsTransient(e))
+        {
+            var wait = TimeSpan.FromMilliseconds(
+                Math.Pow(2, i) * 200 + Random.Shared.Next(100));
+            await Task.Delay(wait);
+        }
+    }
+}</code></pre>
+      <div class="note tip">
+        <b>직접 만들기 전에 Polly 를 보세요.</b>
+        재시도·서킷 브레이커·타임아웃·벌크헤드가 한 줄 설정으로 붙습니다
+        (🧰 실전 도구 탭). 여기 코드는 <b>안에서 무슨 일이 일어나는지</b> 알기 위한 것입니다.
+      </div>
+      <div class="note warn">
+        <b>재시도해서는 안 되는 것도 있습니다.</b>
+        결제·아이템 지급처럼 <b>두 번 실행되면 안 되는 작업</b>은
+        멱등 키를 함께 보내야 안전합니다(🔷 ASP.NET Core 탭).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a03 ==================== -->
+<section class="sec" id="a03">
+  <div class="sec-head rv">
+    <span class="no">ADV 03</span>
+    <h2>스레드 · 동기화 · <span class="t">Channel</span></h2>
+    <p class="lead">게임 서버는 <b>여러 스레드가 같은 데이터</b>를 만집니다. 여기서 나는 버그는 재현이 안 됩니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">경쟁 상태와 lock</h4>
+      <pre class="code" data-lang="csharp"><code>private int _count;
+public void Add() =&gt; _count++;      // ✗ 원자적이지 않다 (읽기→더하기→쓰기)
+
+// ① lock — 가장 쉽고 대부분 충분
+private readonly object _gate = new();
+public void Add() { lock (_gate) { _count++; } }
+
+// ② Interlocked — 단순 연산은 락 없이
+Interlocked.Increment(ref _count);
+Interlocked.CompareExchange(ref _state, 1, 0);   // 0이면 1로
+
+// ③ 동시 컬렉션
+private readonly ConcurrentDictionary&lt;int, Session&gt; _sessions = new();
+_sessions.TryAdd(id, s);
+_sessions.AddOrUpdate(id, s, (_, old) =&gt; old.Merge(s));</code></pre>
+      <div class="note warn">
+        <b><code>lock</code> 안에서 <code>await</code> 는 불가능합니다.</b>
+        비동기 구간을 보호해야 하면 <code>SemaphoreSlim(1,1)</code> 을 쓰세요.
+        그리고 <b>락을 잡은 채 외부 호출(DB·HTTP)을 하지 마세요</b> —
+        전체가 그 속도에 묶입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">Channel — 생산자·소비자의 표준</h4>
+      <pre class="code" data-lang="csharp"><code>// 게임 서버에서 '패킷 수신 → 처리' 를 잇는 가장 깔끔한 방법
+var ch = Channel.CreateBounded&lt;Packet&gt;(new BoundedChannelOptions(10_000)
+{
+    FullMode = BoundedChannelFullMode.DropOldest,   // 밀리면 오래된 것부터 버림
+    SingleReader = true,
+});
+
+// 생산자 — 네트워크 스레드
+await ch.Writer.WriteAsync(packet, ct);
+
+// 소비자 — 로직 스레드 하나 (락이 필요 없어집니다)
+await foreach (var p in ch.Reader.ReadAllAsync(ct))
+    Handle(p);</code></pre>
+      <div class="note tip">
+        <b>락을 줄이는 가장 좋은 방법은 "공유하지 않는 것"입니다.</b>
+        게임 룸마다 <b>스레드(또는 액터) 하나가 그 룸만</b> 처리하게 만들면
+        룸 안의 데이터에는 락이 필요 없습니다 —
+        상용 게임 서버가 널리 쓰는 구조입니다(🌐 게임 서버 탭).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a04 ==================== -->
+<section class="sec" id="a04">
+  <div class="sec-head rv">
+    <span class="no">ADV 04</span>
+    <h2>Span&lt;T&gt; · <span class="t">Memory&lt;T&gt; — 복사 없는 처리</span></h2>
+    <p class="lead">
+      배열을 <b>자르지 않고 들여다보는</b> 방법.
+      패킷 파싱·문자열 처리에서 <b>할당을 0으로</b> 만듭니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">쓰는 법</h4>
+      <pre class="code" data-lang="csharp"><code>// Substring 은 새 문자열을 만든다 → 할당
+var head = text.Substring(0, 4);          // ✗ 힙 할당
+
+// Span 은 '창'만 만든다 → 할당 0
+ReadOnlySpan&lt;char&gt; span = text.AsSpan(0, 4);   // ✓
+
+// 패킷 파싱 (게임 서버의 핵심 경로)
+static bool TryParse(ReadOnlySpan&lt;byte&gt; buf, out Header h)
+{
+    if (buf.Length &lt; 8) { h = default; return false; }
+    h = new Header(
+        Id:   BinaryPrimitives.ReadInt32LittleEndian(buf),
+        Size: BinaryPrimitives.ReadInt32LittleEndian(buf[4..]));
+    return true;
+}
+
+// 스택에 임시 버퍼 (작은 크기만!)
+Span&lt;byte&gt; tmp = stackalloc byte[128];</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">규칙과 한계</h4>
+      <ul class="tx">
+        <li><b><code>Span&lt;T&gt;</code> 는 필드에 저장할 수 없습니다</b> — 스택 전용(ref struct)</li>
+        <li><b>async 메서드에서 쓸 수 없습니다</b> — 그때는 <code>Memory&lt;T&gt;</code></li>
+        <li><code>stackalloc</code> 은 <b>루프 안에서 금지</b> — 스택이 넘칩니다</li>
+        <li>큰 버퍼는 <b><code>ArrayPool&lt;T&gt;.Shared</code></b> 에서 빌려 쓰고 돌려주세요</li>
+      </ul>
+      <pre class="code" data-lang="csharp"><code>var buf = ArrayPool&lt;byte&gt;.Shared.Rent(64 * 1024);
+try
+{
+    var n = await stream.ReadAsync(buf.AsMemory(), ct);
+    Process(buf.AsSpan(0, n));
+}
+finally { ArrayPool&lt;byte&gt;.Shared.Return(buf); }   // ★ 반드시 반납</code></pre>
+      <div class="note tip">
+        <b>모든 코드에 Span 을 바를 필요는 없습니다.</b>
+        효과가 큰 곳은 <b>초당 수천 번 도는 경로</b>(패킷 수신·직렬화·로그 파싱)입니다.
+        나머지는 가독성이 더 중요합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a05 ==================== -->
+<section class="sec" id="a05">
+  <div class="sec-head rv">
+    <span class="no">ADV 05</span>
+    <h2>GC 와 <span class="t">할당 줄이기</span></h2>
+    <p class="lead">
+      "게임이 가끔 뚝뚝 끊긴다"의 범인은 대개 <b>GC</b> 입니다.
+      메모리를 아끼는 게 아니라 <b>새로 만드는 횟수</b>를 줄이는 것이 핵심입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">어디서 몰래 할당되는가</h4>
+      <pre class="code" data-lang="csharp"><code>void Update()
+{
+    // ① 문자열 — 매 프레임 새 객체
+    label.text = "HP " + hp;                     // ✗
+
+    // ② 박싱 — 값 타입이 object 로 변할 때
+    object o = 3;                                // ✗
+    Debug.Log(string.Format("{0}", hp));         // ✗ 박싱
+
+    // ③ 람다가 바깥 변수를 잡을 때(클로저)
+    list.ForEach(x =&gt; x.Add(offset));            // ✗ offset 캡처
+
+    // ④ LINQ · foreach on interface
+    var alive = enemies.Where(e =&gt; e.Hp &gt; 0);    // ✗ 반복자 객체
+
+    // ⑤ params · 배열
+    Log("a", "b");                               // params → 배열 생성
+}</code></pre>
+      <div class="note warn">
+        <b>이 다섯 개만 잡아도 프레임 튐의 대부분이 사라집니다.</b>
+        Unity 라면 <b>Profiler 의 GC Alloc 열</b>을 켜고
+        <b>0 B 가 아닌 줄</b>을 위에서부터 지워 나가세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">고치는 법</h4>
+      <pre class="code" data-lang="csharp"><code>// ① 값이 바뀔 때만 갱신 + 캐시
+private int _shownHp = -1;
+void Update()
+{
+    if (_shownHp == hp) return;
+    _shownHp = hp;
+    label.SetText("HP {0}", hp);      // TMP 의 할당 없는 API
+}
+
+// ② 재사용 버퍼
+private readonly List&lt;Collider&gt; _hits = new(32);
+_hits.Clear();
+Physics.OverlapSphereNonAlloc(pos, r, _buffer);   // NonAlloc 계열
+
+// ③ 구조체 + 정적 람다
+list.ForEach(static x =&gt; x.Reset());   // 캡처 없음을 컴파일러가 보장
+
+// ④ 오브젝트 풀
+var bullet = _pool.Rent();
+_pool.Return(bullet);</code></pre>
+      <div class="note tip">
+        <b>서버에서는 관점이 다릅니다.</b>
+        게임 클라이언트는 <b>순간 멈춤(프레임 튐)</b>이 문제고,
+        서버는 <b>처리량과 p99 지연</b>이 문제입니다.
+        서버 GC(<code>&lt;ServerGarbageCollection&gt;true&lt;/&gt;</code>)를 켜는 것만으로
+        처리량이 크게 오르는 경우가 많습니다(🔬 전문가 탭).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a06 ==================== -->
+<section class="sec" id="a06">
+  <div class="sec-head rv">
+    <span class="no">ADV 06</span>
+    <h2>의존성 주입 · <span class="t">설정</span></h2>
+    <p class="lead"><code>new</code> 를 코드 안에 흩뿌리지 않고 <b>한 곳에서 조립</b>합니다. 테스트가 쉬워집니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">기본형</h4>
+      <pre class="code" data-lang="csharp"><code>var builder = Host.CreateApplicationBuilder(args);
+
+builder.Services.AddSingleton&lt;IClock, SystemClock&gt;();      // 앱 전체 1개
+builder.Services.AddScoped&lt;IUserRepository, UserRepo&gt;();   // 요청마다 1개
+builder.Services.AddTransient&lt;IMailer, Mailer&gt;();          // 쓸 때마다 새로
+builder.Services.AddHttpClient&lt;IPayApi, PayApi&gt;();
+
+// 설정을 타입으로 받기
+builder.Services.Configure&lt;GameOptions&gt;(
+    builder.Configuration.GetSection("Game"));
+
+var app = builder.Build();
+
+// 생성자로 받기만 하면 됩니다
+public sealed class MatchService(
+    IUserRepository users,
+    IOptions&lt;GameOptions&gt; opt,
+    ILogger&lt;MatchService&gt; log)
+{
+    private readonly int _maxParty = opt.Value.MaxParty;
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">수명을 틀리면 생기는 일</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>수명</th><th>쓸 곳</th><th>주의</th></tr></thead>
+          <tbody>
+            <tr><td><b>Singleton</b></td><td>캐시 · 설정 · 커넥션 풀</td><td><b>상태를 넣으면 경쟁</b></td></tr>
+            <tr><td><b>Scoped</b></td><td>요청 단위 작업 · DbContext</td><td>싱글턴이 주입받으면 오류</td></tr>
+            <tr><td><b>Transient</b></td><td>가벼운 도우미</td><td>많이 만들면 할당</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>싱글턴이 Scoped 를 주입받으면 안 됩니다.</b>
+        요청이 끝나도 <b>붙잡고 있어</b> DbContext 가 망가집니다.
+        꼭 필요하면 <code>IServiceScopeFactory</code> 로 그때그때 범위를 만드세요.
+      </div>
+      <div class="note tip">
+        <b>Unity 에는 이 컨테이너가 없습니다.</b>
+        대신 <b>VContainer</b>·<b>Zenject</b> 를 쓰거나,
+        간단하면 <code>ScriptableObject</code> 에 설정을 담아 주입하는 방식이 흔합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a07 ==================== -->
+<section class="sec" id="a07">
+  <div class="sec-head rv">
+    <span class="no">ADV 07</span>
+    <h2>직렬화 — <span class="t">JSON · 바이너리</span></h2>
+    <p class="lead">저장·전송의 형식을 고르는 일. <b>사람이 읽을 것인가, 빨라야 하는가</b>로 갈립니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">System.Text.Json</h4>
+      <pre class="code" data-lang="csharp"><code>var opt = new JsonSerializerOptions
+{
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    Converters = { new JsonStringEnumConverter() },
+};
+
+var json = JsonSerializer.Serialize(dto, opt);
+var back = JsonSerializer.Deserialize&lt;Dto&gt;(json, opt);
+
+// 소스 제너레이터 — 리플렉션 없이 (AOT · 성능)
+[JsonSerializable(typeof(Dto))]
+internal partial class AppJson : JsonSerializerContext { }
+
+var fast = JsonSerializer.Serialize(dto, AppJson.Default.Dto);</code></pre>
+      <div class="note tip">
+        <b>Newtonsoft.Json 은 더 유연하지만 느리고 무겁습니다.</b>
+        새 코드는 <b>System.Text.Json</b> 을 기본으로 두고,
+        <b>다형 역직렬화</b> 같은 특수한 요구가 있을 때만 Newtonsoft 를 쓰세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">게임 패킷은 바이너리로</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>형식</th><th>크기</th><th>쓸 곳</th></tr></thead>
+          <tbody>
+            <tr><td>JSON</td><td>크다</td><td>설정 · REST API · 로그</td></tr>
+            <tr><td><b>MessagePack</b></td><td>작다</td><td>게임 패킷 · 캐시</td></tr>
+            <tr><td><b>Protobuf</b></td><td>작다</td><td>서버 간 통신 · gRPC</td></tr>
+            <tr><td>직접 만든 이진</td><td>가장 작다</td><td>초당 수만 패킷</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="csharp"><code>// MessagePack — 속성만 붙이면 됩니다
+[MessagePackObject]
+public class MovePacket
+{
+    [Key(0)] public int   Id { get; set; }
+    [Key(1)] public float X  { get; set; }
+    [Key(2)] public float Y  { get; set; }
+}
+
+var bytes = MessagePackSerializer.Serialize(p);   // 20바이트 수준
+var p2    = MessagePackSerializer.Deserialize&lt;MovePacket&gt;(bytes);</code></pre>
+      <div class="note warn">
+        <b>남이 보낸 데이터를 그대로 역직렬화하지 마세요.</b>
+        타입 정보를 함께 담는 설정(<code>TypeNameHandling</code> 등)은
+        <b>원격 코드 실행</b>으로 이어집니다(🔬 전문가 탭 보안).
+        <b>받을 타입을 코드가 정하고</b>, 크기 상한을 두세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a08 ==================== -->
+<section class="sec" id="a08">
+  <div class="sec-head rv">
+    <span class="no">ADV 08</span>
+    <h2>리플렉션 · <span class="t">소스 제너레이터</span></h2>
+    <p class="lead">"코드가 코드를 다루는" 영역. 편하지만 느립니다 — <b>빌드 시점으로 옮기는 것</b>이 요즘 방식입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">리플렉션</h4>
+      <pre class="code" data-lang="csharp"><code>// 타입 정보를 런타임에 읽는다
+var t = typeof(Player);
+foreach (var p in t.GetProperties())
+    Console.WriteLine($"{p.Name} : {p.PropertyType.Name}");
+
+// 속성(Attribute) 으로 표시하고 찾아 쓰기
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class CommandAttribute(string name) : Attribute
+{
+    public string Name { get; } = name;
+}
+
+var handlers = typeof(Program).Assembly.GetTypes()
+    .SelectMany(t =&gt; t.GetMethods())
+    .Where(m =&gt; m.GetCustomAttribute&lt;CommandAttribute&gt;() is not null);</code></pre>
+      <div class="note warn">
+        <b>리플렉션은 느리고, AOT 에서 잘립니다.</b>
+        Unity 의 IL2CPP 나 .NET Native AOT 에서는
+        <b>쓰지 않는 코드로 판단해 지워질 수 있습니다</b>.
+        시작할 때 한 번만 훑고 <b>결과를 캐시</b>하거나, 아래 소스 제너레이터로 옮기세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">소스 제너레이터 — 빌드 때 코드를 만든다</h4>
+      <pre class="code" data-lang="csharp"><code>// 쓰는 쪽은 partial 하나면 됩니다
+public partial class Player
+{
+    [GeneratedRegex(@"^[a-zA-Z0-9_]{3,16}$")]
+    private static partial Regex NameRule();     // 컴파일 시점 생성
+
+    public bool IsValidName(string n) =&gt; NameRule().IsMatch(n);
+}
+
+// 로깅도 같은 방식 — 문자열 포맷을 미리 만들어 둡니다
+public static partial class Log
+{
+    [LoggerMessage(Level = LogLevel.Warning,
+                   Message = "매칭 실패 {RoomId} 사유={Reason}")]
+    public static partial void MatchFailed(ILogger l, int roomId, string reason);
+}</code></pre>
+      <div class="note tip">
+        <b>효과가 확실한 세 곳</b> — <b>정규식</b>·<b>로깅</b>·<b>JSON</b>.
+        전부 <b>런타임 리플렉션을 빌드 시점으로 옮겨</b>
+        시작 속도와 AOT 호환성을 함께 얻습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a09 ==================== -->
+<section class="sec" id="a09">
+  <div class="sec-head rv">
+    <span class="no">ADV 09</span>
+    <h2>네이티브 상호운용 — <span class="t">P/Invoke</span></h2>
+    <p class="lead">C·C++ 로 된 기존 자산을 그대로 씁니다. 게임의 <b>물리·오디오·플랫폼 SDK</b> 연동에 필요합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">DllImport</h4>
+      <pre class="code" data-lang="csharp"><code>using System.Runtime.InteropServices;
+
+internal static partial class Native
+{
+    // C# 12+ — 소스 제너레이터 방식(빠르고 AOT 안전)
+    [LibraryImport("user32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool MessageBeep(uint type);
+
+    [LibraryImport("mylib", EntryPoint = "compute")]
+    internal static partial int Compute(
+        ReadOnlySpan&lt;float&gt; input, Span&lt;float&gt; output, int len);
+}</code></pre>
+      <div class="note warn">
+        <b>경계를 넘는 비용은 공짜가 아닙니다.</b>
+        한 번에 <b>큰 덩어리</b>를 넘기세요 — 루프 안에서 한 값씩 부르면
+        네이티브가 아무리 빨라도 <b>전체는 느려집니다</b>.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">지켜야 할 것</h4>
+      <ul class="tx">
+        <li><b>구조체 레이아웃</b>을 <code>[StructLayout(LayoutKind.Sequential)]</code> 로 고정</li>
+        <li>포인터로 넘길 배열은 <b>고정(<code>fixed</code>)</b>하거나 <code>Span</code> 사용 — GC 가 옮기면 터집니다</li>
+        <li>네이티브가 준 메모리는 <b>누가 해제하는지</b> 문서로 남기세요</li>
+        <li>플랫폼별 바이너리(<code>.dll</code>·<code>.so</code>·<code>.dylib</code>)를 <b>전부 배포</b>해야 합니다</li>
+      </ul>
+      <div class="note tip">
+        <b>Unity 에서는 더 조심해야 합니다.</b>
+        네이티브 플러그인은 <b>에디터에서 한 번 로드되면 안 내려갑니다</b> —
+        DLL 을 교체하려면 에디터를 재시작해야 하고,
+        플러그인이 죽으면 <b>에디터가 통째로 죽습니다</b>.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a10 ==================== -->
+<section class="sec" id="a10">
+  <div class="sec-head rv">
+    <span class="no">ADV 10</span>
+    <h2>성능 측정 — <span class="t">BenchmarkDotNet</span></h2>
+    <p class="lead"><b>추측하지 말고 재세요.</b> "이게 더 빠를 것 같다"는 대부분 틀립니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">벤치마크 작성</h4>
+      <pre class="code" data-lang="bash"><code>dotnet add package BenchmarkDotNet
+dotnet run -c Release          # ★ 반드시 Release</code></pre>
+      <pre class="code" data-lang="csharp"><code>[MemoryDiagnoser]                       // 할당량도 함께 측정
+[SimpleJob(RuntimeMoniker.Net100)]
+public class ParseBench
+{
+    private string _line = "12,34,56";
+
+    [Benchmark(Baseline = true)]
+    public int[] Split() =&gt; _line.Split(',').Select(int.Parse).ToArray();
+
+    [Benchmark]
+    public int SpanParse()
+    {
+        var s = _line.AsSpan(); int sum = 0;
+        foreach (var range in s.Split(','))
+            sum += int.Parse(s[range]);
+        return sum;
+    }
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">읽는 법 · 함정</h4>
+      <pre class="code" data-lang="text"><code>| Method    |      Mean | Ratio | Allocated |
+|---------- |----------:|------:|----------:|
+| Split     | 210.4 ns  |  1.00 |     264 B |
+| SpanParse |  38.7 ns  |  0.18 |       0 B |   ← 5배 · 할당 0</code></pre>
+      <ul class="tx">
+        <li><b>Allocated 열</b>을 먼저 보세요 — 게임에서는 이게 프레임 튐입니다</li>
+        <li><b>Mean 차이가 20% 이내면</b> 의미 없는 경우가 많습니다(측정 오차·환경)</li>
+        <li><b>실제 데이터 크기</b>로 재세요. 10개와 10만 개는 결과가 뒤집힙니다</li>
+        <li>Debug 빌드 측정은 <b>전부 무효</b>입니다</li>
+      </ul>
+      <div class="note tip">
+        <b>먼저 프로파일러로 병목을 찾고, 그다음 벤치마크로 대안을 비교하세요.</b>
+        순서를 바꾸면 <b>전체의 0.1% 를 5배 빠르게 만드는</b> 헛수고를 하게 됩니다
+        (🔬 전문가 탭 프로파일링).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a11 ==================== -->
+<section class="sec" id="a11">
+  <div class="sec-head rv">
+    <span class="no">ADV 11</span>
+    <h2>프로젝트 구조 · <span class="t">아키텍처</span></h2>
+    <p class="lead">파일이 200개를 넘으면 <b>폴더 구조가 곧 설계</b>가 됩니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">솔루션 나누기</h4>
+      <pre class="code" data-lang="text"><code>MyGame.sln
+  src/
+    MyGame.Domain/          도메인 규칙 — 아무것도 참조하지 않는다
+      Player.cs  Item.cs  IInventory.cs
+    MyGame.Application/     유스케이스 — Domain 만 참조
+      BuyItemHandler.cs
+    MyGame.Infrastructure/  DB·HTTP·Redis 구현 — Application 참조
+      EfInventory.cs  RedisRanking.cs
+    MyGame.Api/             진입점 — 전부 조립
+      Program.cs
+  tests/
+    MyGame.Domain.Tests/
+    MyGame.Api.IntegrationTests/</code></pre>
+      <div class="note tip">
+        <b>의존은 안쪽으로만 흐르게 합니다.</b>
+        Domain 이 EF Core 를 모르면, <b>DB 를 바꿔도 규칙 코드는 그대로</b>입니다.
+        인터페이스는 안쪽(Domain)에 두고 <b>구현은 바깥</b>에 둡니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">규칙을 코드로 강제하기</h4>
+      <pre class="code" data-lang="csharp"><code>// NetArchTest — 의존 방향이 깨지면 테스트가 실패합니다
+[Fact]
+public void 도메인은_인프라를_모른다()
+{
+    var result = Types.InAssembly(typeof(Player).Assembly)
+        .Should().NotHaveDependencyOn("MyGame.Infrastructure")
+        .GetResult();
+
+    Assert.True(result.IsSuccessful);
+}</code></pre>
+      <pre class="code" data-lang="xml"><code>&lt;!-- Directory.Build.props — 모든 프로젝트에 공통 설정 --&gt;
+&lt;Project&gt;
+  &lt;PropertyGroup&gt;
+    &lt;TargetFramework&gt;net10.0&lt;/TargetFramework&gt;
+    &lt;Nullable&gt;enable&lt;/Nullable&gt;
+    &lt;LangVersion&gt;latest&lt;/LangVersion&gt;
+    &lt;EnforceCodeStyleInBuild&gt;true&lt;/EnforceCodeStyleInBuild&gt;
+    &lt;AnalysisLevel&gt;latest-recommended&lt;/AnalysisLevel&gt;
+  &lt;/PropertyGroup&gt;
+&lt;/Project&gt;</code></pre>
+      <div class="note warn">
+        <b>Unity 프로젝트는 이 구조를 그대로 못 씁니다.</b>
+        대신 <b>Assembly Definition(asmdef)</b> 으로 폴더를 어셈블리로 나누면
+        <b>컴파일 시간이 크게 줄고</b> 의존 방향도 강제할 수 있습니다
+        (🕹️ Unity 실전 탭 01).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== a12 ==================== -->
+<section class="sec" id="a12">
+  <div class="sec-head rv">
+    <span class="no">ADV 12</span>
+    <h2>자주 하는 <span class="t">실수 모음</span></h2>
+    <p class="lead">코드 리뷰에서 반복해서 지적하게 되는 것들을 모았습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">언어 · 런타임</h4>
+      <ul class="tx">
+        <li><b><code>DateTime.Now</code></b> 대신 <code>DateTimeOffset.UtcNow</code> — 서버는 UTC 로 저장하고 표시할 때만 변환</li>
+        <li><b><code>new Random()</code> 을 반복 생성</b> — 같은 값이 나옵니다. <code>Random.Shared</code></li>
+        <li><b>IDisposable 을 안 닫음</b> — <code>using</code> 을 습관으로</li>
+        <li><b>예외를 흐름 제어로 사용</b> — 느리고 의도가 흐려집니다</li>
+        <li><b><code>==</code> 로 문자열 비교</b> 시 문화권 이슈 — <code>StringComparison</code> 명시</li>
+        <li><b>float 비교</b>를 <code>==</code> 로 — 오차 범위로 비교하세요</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">서버 · 게임</h4>
+      <ul class="tx">
+        <li><b>클라이언트를 믿는 것</b> — 좌표·데미지·재화는 <b>서버가 계산</b>합니다(🌐 게임 서버 탭)</li>
+        <li><b>동기 API 를 서버에서 호출</b> — <code>.Result</code> 하나로 처리량이 무너집니다</li>
+        <li><b>Update 안의 <code>GetComponent</code>·<code>Find</code></b> — <code>Awake</code> 에서 캐시</li>
+        <li><b>로그를 문자열로 조립</b> — 구조적 로깅(<code>log.Info("x {A}", a)</code>)</li>
+        <li><b>설정을 코드에 하드코딩</b> — 환경별로 갈라지는 순간 사고가 납니다</li>
+        <li><b>테스트 없는 리팩터링</b> — 성능 개선일수록 동작 보장이 먼저입니다</li>
+      </ul>
+      <div class="note tip">
+        <b>다음 단계</b> — 게임이라면 <b>🎮 Unity 기초</b>,
+        서버라면 <b>🌐 게임 서버</b> 또는 <b>🔷 ASP.NET Core</b>,
+        런타임 내부가 궁금하면 <b>🔬 전문가 · CLR 내부</b>로 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /pane-adv -->

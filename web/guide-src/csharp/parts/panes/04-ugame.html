@@ -1,0 +1,760 @@
+<!-- ============================================================
+     UNITY 실전 PANE
+     ============================================================ -->
+<div class="pane" id="pane-ugame">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> 상용 게임 수준 · 최적화 · 출시</div>
+  <h1>돌아가는 게임과<br>팔 수 있는 게임의<br>차이</h1>
+  <p class="tx">
+    프로토타입은 하루면 나옵니다. 그 뒤가 진짜입니다 —
+    <b>60fps 유지 · 메모리 관리 · 로딩 · 빌드 · 결제 · 치트 방지</b>.
+    상용 게임이 실제로 하는 일을 순서대로 다룹니다.
+    <b>여기까지 마치면 스토어에 올릴 수 있는 상태까지 게임을 끌어올릴 수 있습니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>60</b><span>목표 FPS</span></div>
+    <div><b>0 B</b><span>루프 내 할당</span></div>
+    <div><b>URP</b><span>기준 파이프라인</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== g01 ==================== -->
+<section class="sec" id="g01">
+  <div class="sec-head rv">
+    <span class="no">GAME 01</span>
+    <h2>프로젝트 구조 · <span class="t">어셈블리 분리</span></h2>
+    <p class="lead">스크립트가 300개를 넘으면 <b>저장할 때마다 20초씩 기다리게</b> 됩니다. 구조가 곧 개발 속도입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">폴더 규칙</h4>
+      <pre class="code" data-lang="text"><code>Assets/
+  _Project/              ← 우리 코드·에셋 (밑줄로 맨 위 고정)
+    Scripts/
+      Core/              공용 유틸 · 이벤트 버스
+      Gameplay/          플레이어 · 적 · 전투
+      UI/
+      Data/              ScriptableObject 정의
+      Editor/            에디터 확장 (빌드에 포함 안 됨)
+    Prefabs/  Scenes/  Art/  Audio/  Settings/
+  Plugins/               외부 SDK
+  StreamingAssets/       빌드 후에도 파일로 남는 것</code></pre>
+      <div class="note tip">
+        <b>에셋스토어에서 받은 것은 절대 <code>_Project</code> 안에 섞지 마세요.</b>
+        업데이트할 때 우리 수정본이 덮어씌워집니다.
+        받은 폴더 구조를 <b>그대로 두고</b> 필요한 것만 참조하세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">Assembly Definition — 컴파일 시간을 줄인다</h4>
+      <pre class="code" data-lang="json"><code>// Scripts/Gameplay/Gameplay.asmdef
+{
+  "name": "Game.Gameplay",
+  "references": ["Game.Core", "Unity.InputSystem"],
+  "autoReferenced": false
+}</code></pre>
+      <ul class="tx">
+        <li><b>고친 어셈블리만 다시 컴파일</b>됩니다 — 저장 후 대기 시간이 몇 배 줄어듭니다</li>
+        <li><b>의존 방향을 강제</b>할 수 있습니다 (Core 가 UI 를 참조하면 컴파일 에러)</li>
+        <li>테스트 어셈블리를 따로 두면 <b>빌드에서 자동 제외</b>됩니다</li>
+      </ul>
+      <div class="note warn">
+        <b>asmdef 를 나눈 뒤 "왜 클래스를 못 찾지"가 나오면</b>
+        참조(references)를 안 넣은 것입니다.
+        순환 참조는 <b>불가능</b>하므로, 서로가 필요하면
+        <b>인터페이스를 Core 에 두고</b> 양쪽이 그것을 보게 만드세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g02 ==================== -->
+<section class="sec" id="g02">
+  <div class="sec-head rv">
+    <span class="no">GAME 02</span>
+    <h2>오브젝트 풀링 — <span class="t">프레임 튐의 1순위 대책</span></h2>
+    <p class="lead"><code>Instantiate</code>/<code>Destroy</code> 를 반복하면 GC 가 돌고, 그때 화면이 멈칫합니다.</p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 660 140" role="img"
+         aria-label="생성과 파괴를 반복하면 쓰레기가 쌓여 GC가 돌지만, 풀은 미리 만들어 둔 객체를 껐다 켜며 재사용한다">
+      <rect class="bx bx-warn" x="12" y="14" width="310" height="112"/>
+      <rect class="bx" x="338" y="14" width="310" height="112"/>
+      <text x="167" y="36" text-anchor="middle" font-size="12.5">매번 생성 · 파괴</text>
+      <text x="493" y="36" text-anchor="middle" font-size="12.5">풀에서 빌려 쓰기</text>
+      <text x="167" y="62" text-anchor="middle" class="lbl">Instantiate → 힙 할당</text>
+      <text x="167" y="82" text-anchor="middle" class="lbl">Destroy → 쓰레기 누적</text>
+      <text x="167" y="106" text-anchor="middle" class="lbl">GC 발동 → 프레임 뚝</text>
+      <text x="493" y="62" text-anchor="middle" class="lbl">미리 50개 만들어 둠</text>
+      <text x="493" y="82" text-anchor="middle" class="lbl">SetActive(true/false)</text>
+      <text x="493" y="106" text-anchor="middle" class="lbl">할당 0 → 프레임 안정</text>
+      <path class="fl" d="M338 70 H322"/>
+    </svg>
+    <div class="cap">총알·이펙트·적·데미지 텍스트 — <b>반복해서 나타났다 사라지는 것</b>은 전부 풀 대상입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">직접 만들기 (원리)</h4>
+      <pre class="code" data-lang="csharp"><code>public class BulletPool : MonoBehaviour
+{
+    [SerializeField] private Bullet prefab;
+    [SerializeField] private int prewarm = 50;
+
+    private readonly Stack&lt;Bullet&gt; _idle = new();
+
+    void Awake()
+    {
+        for (int i = 0; i &lt; prewarm; i++)     // ★ 로딩 때 미리 만든다
+        {
+            var b = Instantiate(prefab, transform);
+            b.gameObject.SetActive(false);
+            _idle.Push(b);
+        }
+    }
+
+    public Bullet Get(Vector3 pos, Quaternion rot)
+    {
+        var b = _idle.Count &gt; 0 ? _idle.Pop() : Instantiate(prefab, transform);
+        b.transform.SetPositionAndRotation(pos, rot);
+        b.gameObject.SetActive(true);
+        return b;
+    }
+
+    public void Release(Bullet b)
+    {
+        b.gameObject.SetActive(false);
+        b.ResetState();                        // ★ 상태 초기화를 잊지 마세요
+        _idle.Push(b);
+    }
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">놓치기 쉬운 것</h4>
+      <ul class="tx">
+        <li><b>상태 초기화</b> — 속도·남은 시간·트레일이 남아 있으면 "이상하게 동작하는 총알"이 됩니다</li>
+        <li><b>파티클</b>은 <code>Stop(true, ClearBehaviour.Clear)</code> 로 잔상 제거</li>
+        <li><b>코루틴</b>은 비활성화되면 멈춥니다 — 재활성화 시 다시 시작해야 합니다</li>
+        <li><b>이벤트 구독</b>은 <code>OnEnable</code>/<code>OnDisable</code> 짝으로</li>
+        <li><b>최대 개수 상한</b>을 두세요 — 무한히 늘면 그냥 메모리 누수입니다</li>
+      </ul>
+      <div class="note tip">
+        <b>씬 로딩 때 미리 채워 두는 것(prewarm)이 핵심입니다.</b>
+        전투 중에 처음 50개를 만들면 <b>바로 그 순간</b> 멈칫합니다.
+        로딩 화면에서 미리 만들어 두면 사용자는 알아채지 못합니다.
+      </div>
+      <div class="note warn">
+        <b>풀이 만능은 아닙니다.</b>
+        가끔 한 번 나오는 오브젝트까지 풀에 넣으면
+        <b>메모리만 잡아먹습니다</b>. 기준은 <b>"초당 여러 번 생성되는가"</b> 입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g03 ==================== -->
+<section class="sec" id="g03">
+  <div class="sec-head rv">
+    <span class="no">GAME 03</span>
+    <h2>프로파일링 — <span class="t">추측 대신 측정</span></h2>
+    <p class="lead">"느린 것 같다"로 고치면 엉뚱한 곳을 만집니다. <b>어디서 몇 ms</b> 를 먼저 확인하세요.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">Profiler 읽는 순서</h4>
+      <ul class="tx">
+        <li><b>① 실제 기기에 연결</b> — 에디터 수치는 참고용일 뿐입니다(Development Build 체크)</li>
+        <li><b>② CPU 그래프에서 튀는 구간</b>을 클릭 → Timeline 으로 원인 함수 확인</li>
+        <li><b>③ GC Alloc 열을 정렬</b> — 0 B 가 아닌 것부터 없앱니다</li>
+        <li><b>④ Rendering</b> — Batches · SetPass Calls · Tris 를 봅니다</li>
+        <li><b>⑤ Memory</b> — 텍스처가 대부분입니다. Memory Profiler 패키지로 상세 분석</li>
+      </ul>
+      <pre class="code" data-lang="csharp"><code>using Unity.Profiling;
+
+// 내 코드 구간에 이름을 붙여 Profiler 에 표시
+static readonly ProfilerMarker s_ai = new("Game.AI.Think");
+
+void Think()
+{
+    using (s_ai.Auto())
+    {
+        // ... 무거운 AI 계산
+    }
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">숫자 기준</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>지표</th><th>목표</th><th>비고</th></tr></thead>
+          <tbody>
+            <tr><td>프레임 시간</td><td><b>16.6ms</b> (60fps)</td><td>모바일 33ms(30fps) 도 흔함</td></tr>
+            <tr><td>GC Alloc / 프레임</td><td><b>0 B</b></td><td>루프 안에서는 필수</td></tr>
+            <tr><td>SetPass Calls</td><td>모바일 <b>50~100</b></td><td>드로우콜보다 이게 중요</td></tr>
+            <tr><td>텍스처 메모리</td><td>모바일 <b>500MB 이하</b></td><td>기기별 상한 확인</td></tr>
+            <tr><td>씬 로딩</td><td><b>3초 이내</b></td><td>넘으면 로딩 연출 필요</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>가장 흔한 착각 — "평균 fps 가 60이면 괜찮다"</b>.
+        사용자가 느끼는 것은 <b>가장 느린 1%</b> 입니다.
+        평균보다 <b>스파이크(튀는 프레임)</b>를 먼저 없애세요 —
+        원인은 대부분 <b>GC · 씬 로딩 · 셰이더 컴파일</b> 셋 중 하나입니다.
+      </div>
+      <div class="note tip">
+        <b>셰이더 컴파일 멈칫</b>은 <code>Shader.WarmupAllShaders</code> 나
+        <b>Shader Variant Collection</b> 을 로딩 때 미리 돌려 해결합니다.
+        "처음 폭발할 때만 멈칫한다"의 정체입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g04 ==================== -->
+<section class="sec" id="g04">
+  <div class="sec-head rv">
+    <span class="no">GAME 04</span>
+    <h2>그래픽 최적화 — <span class="t">드로우콜 · 배칭</span></h2>
+    <p class="lead">GPU 가 아니라 <b>"몇 번 그리라고 시켰는가"</b> 가 병목인 경우가 대부분입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">배칭 — 여러 개를 한 번에</h4>
+      <ul class="tx">
+        <li><b>Static Batching</b> — 안 움직이는 물체에 <code>Static</code> 체크. 메모리를 쓰지만 효과가 큽니다</li>
+        <li><b>SRP Batcher</b> — URP 기본. <b>같은 셰이더</b>면 재질이 달라도 묶입니다</li>
+        <li><b>GPU Instancing</b> — 같은 메시·재질을 수백 개 (풀·나무·적)</li>
+        <li><b>텍스처 아틀라스</b> — 여러 이미지를 한 장으로 합쳐 재질 수를 줄입니다</li>
+      </ul>
+      <div class="note warn">
+        <b>배칭을 깨는 것들</b> —
+        런타임에 <code>material.color = ...</code> 로 재질을 건드리면
+        <b>그 오브젝트만 별도 재질(인스턴스)</b>이 되어 배칭에서 빠집니다.
+        색을 바꾸려면 <b><code>MaterialPropertyBlock</code></b> 을 쓰세요.
+      </div>
+      <pre class="code" data-lang="csharp"><code>private static readonly int ColorId = Shader.PropertyToID("_BaseColor");
+private MaterialPropertyBlock _mpb;
+
+void Awake() =&gt; _mpb = new MaterialPropertyBlock();
+
+void SetColor(Color c)
+{
+    _renderer.GetPropertyBlock(_mpb);
+    _mpb.SetColor(ColorId, c);
+    _renderer.SetPropertyBlock(_mpb);   // 재질 복제 없이 색만 변경
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">그 밖의 큰 것들</h4>
+      <ul class="tx">
+        <li><b>실시간 그림자를 줄이세요</b> — 모바일에서 가장 비쌉니다. 라이트맵 굽기로 대체</li>
+        <li><b>라이트는 굽고(Baked)</b>, 움직이는 것만 실시간</li>
+        <li><b>Overdraw</b> — 반투명(파티클·UI)이 겹치면 픽셀을 여러 번 그립니다</li>
+        <li><b>LOD</b> — 멀리 있는 모델은 저해상도로 교체</li>
+        <li><b>오클루전 컬링</b> — 벽 뒤 물체를 아예 안 그림</li>
+        <li><b>텍스처 압축</b> — Android <code>ASTC</code>, iOS <code>ASTC</code>, PC <code>DXT</code></li>
+      </ul>
+      <div class="note tip">
+        <b>모바일에서 가장 효과가 큰 순서</b> —
+        ① 텍스처 크기·압축 ② 실시간 그림자 제거 ③ 파티클 Overdraw
+        ④ SetPass Calls. 이 넷만 정리해도 발열과 배터리가 눈에 띄게 좋아집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g05 ==================== -->
+<section class="sec" id="g05">
+  <div class="sec-head rv">
+    <span class="no">GAME 05</span>
+    <h2>Addressables — <span class="t">메모리와 다운로드 관리</span></h2>
+    <p class="lead">모든 에셋을 앱에 넣으면 <b>설치 용량이 폭발</b>합니다. 필요할 때 받아서 쓰는 구조로 바꿉니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">기본 사용</h4>
+      <pre class="code" data-lang="csharp"><code>using UnityEngine.AddressableAssets;
+using UnityEngine.ResourceManagement.AsyncOperations;
+
+private AsyncOperationHandle&lt;GameObject&gt; _handle;
+
+async void LoadBoss()
+{
+    _handle = Addressables.LoadAssetAsync&lt;GameObject&gt;("Boss_Dragon");
+    var prefab = await _handle.Task;
+    Instantiate(prefab);
+}
+
+void OnDestroy()
+{
+    // ★ 반드시 해제 — 안 하면 메모리에 계속 남습니다
+    if (_handle.IsValid()) Addressables.Release(_handle);
+}
+
+// 인스턴스까지 한 번에 (해제도 함께)
+var go = await Addressables.InstantiateAsync("Boss_Dragon").Task;
+Addressables.ReleaseInstance(go);</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">운영 관점</h4>
+      <ul class="tx">
+        <li><b>초기 설치 용량을 줄입니다</b> — 스토어 상한(구글 150MB 등)을 넘기지 않게</li>
+        <li><b>콘텐츠만 갱신</b> 가능 — 앱 심사 없이 이벤트 에셋 교체(원격 카탈로그)</li>
+        <li><b>중복 제거</b> — 여러 번들이 같은 텍스처를 물면 메모리가 두 배가 됩니다</li>
+        <li><b>다운로드 진행률</b>을 사용자에게 보여 주세요</li>
+      </ul>
+      <pre class="code" data-lang="csharp"><code>// 다운로드 크기 확인 후 진행
+var size = await Addressables.GetDownloadSizeAsync(label).Task;
+if (size &gt; 0)
+{
+    var dl = Addressables.DownloadDependenciesAsync(label);
+    while (!dl.IsDone) { bar.value = dl.PercentComplete; await Task.Yield(); }
+    Addressables.Release(dl);
+}</code></pre>
+      <div class="note warn">
+        <b>해제를 빠뜨리면 조용히 메모리가 찹니다.</b>
+        Addressables 는 <b>참조 카운트</b>로 관리되므로
+        Load 와 Release 를 <b>짝으로</b> 맞춰야 합니다.
+        Memory Profiler 로 씬 전환 후 남은 번들을 확인하세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g06 ==================== -->
+<section class="sec" id="g06">
+  <div class="sec-head rv">
+    <span class="no">GAME 06</span>
+    <h2>DOTS · Job System · <span class="t">Burst</span></h2>
+    <p class="lead">수천 개를 동시에 움직여야 할 때. <b>멀티코어를 실제로 쓰는</b> 유일한 길입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">Job + Burst 부터</h4>
+      <pre class="code" data-lang="csharp"><code>using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Mathematics;
+
+[BurstCompile]                                  // ★ 네이티브 수준으로 컴파일
+public struct MoveJob : IJobParallelFor
+{
+    [ReadOnly] public NativeArray&lt;float3&gt; Dir;
+    public NativeArray&lt;float3&gt; Pos;
+    public float Dt;
+
+    public void Execute(int i) =&gt; Pos[i] += Dir[i] * Dt;
+}
+
+// 실행
+var job = new MoveJob { Pos = _pos, Dir = _dir, Dt = Time.deltaTime };
+var handle = job.Schedule(_pos.Length, innerloopBatchCount: 64);
+handle.Complete();                              // 결과가 필요한 시점에</code></pre>
+      <div class="note warn">
+        <b>Job 안에서는 Unity 오브젝트를 못 씁니다.</b>
+        <code>Transform</code>·<code>GameObject</code>·<code>Debug.Log</code> 전부 불가.
+        <b>순수한 숫자 계산만</b> 가능하며,
+        데이터는 <code>NativeArray</code> 로 넘기고 <b>반드시 <code>Dispose</code></b> 해야 합니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">언제 도입할 것인가</h4>
+      <div class="vs">
+        <div class="good">
+          <h5>효과가 큰 경우</h5>
+          <ul class="tx">
+            <li>같은 계산을 <b>수천 개</b>에 반복 (군중·탄막·파티클)</li>
+            <li>경로 탐색·시야 판정 대량 처리</li>
+            <li>절차적 생성 · 지형 계산</li>
+          </ul>
+        </div>
+        <div class="bad">
+          <h5>도입하면 손해</h5>
+          <ul class="tx">
+            <li>오브젝트가 수십 개뿐</li>
+            <li>UI · 게임 로직 대부분</li>
+            <li>팀이 ECS 를 처음 접함 (학습 비용이 큽니다)</li>
+          </ul>
+        </div>
+      </div>
+      <div class="note tip">
+        <b>전면 ECS 전환은 신중하게.</b>
+        기존 MonoBehaviour 게임에 <b>무거운 계산만 Job + Burst 로</b> 떼어내는
+        하이브리드가 현실적입니다.
+        <code>Unity.Mathematics</code> 의 <code>float3</code> 을 쓰면
+        <b>Burst 최적화(SIMD)</b>가 훨씬 잘 먹습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g07 ==================== -->
+<section class="sec" id="g07">
+  <div class="sec-head rv">
+    <span class="no">GAME 07</span>
+    <h2>모바일 최적화 · <span class="t">발열 관리</span></h2>
+    <p class="lead">PC 에서 잘 돌던 게임이 폰에서는 <b>5분 만에 뜨거워지고 느려집니다.</b></p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">먼저 할 것</h4>
+      <pre class="code" data-lang="csharp"><code>void Awake()
+{
+    Application.targetFrameRate = 60;      // ★ 안 정하면 기기 맘대로
+    QualitySettings.vSyncCount = 0;
+    Screen.sleepTimeout = SleepTimeout.NeverSleep;   // 필요할 때만
+}
+
+// 저사양 기기 자동 판별
+if (SystemInfo.systemMemorySize &lt; 3000)
+{
+    QualitySettings.SetQualityLevel(0);
+    Application.targetFrameRate = 30;      // 30 고정이 60 널뛰기보다 낫습니다
+}</code></pre>
+      <ul class="tx">
+        <li><b>해상도를 낮추세요</b> — <code>Screen.SetResolution</code> 으로 70~80% 만 써도 체감 차이가 적습니다</li>
+        <li><b>Texture Quality</b>·<b>Shadow Distance</b>를 품질 레벨로 묶어 관리</li>
+        <li><b>배터리·발열</b>은 GPU 부하가 주범 — 해상도와 Overdraw 부터</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">빌드 설정</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>항목</th><th>권장</th></tr></thead>
+          <tbody>
+            <tr><td>Scripting Backend</td><td><b>IL2CPP</b> (필수 · 성능·보안)</td></tr>
+            <tr><td>Api Compatibility</td><td>.NET Standard 2.1</td></tr>
+            <tr><td>Managed Stripping</td><td>Medium ~ High</td></tr>
+            <tr><td>Target Architectures</td><td>ARM64 (32비트는 이제 불필요)</td></tr>
+            <tr><td>Graphics API</td><td>Vulkan + GLES3 폴백</td></tr>
+            <tr><td>Texture Compression</td><td>ASTC</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>코드 스트리핑에 리플렉션이 잘립니다.</b>
+        JSON 역직렬화·DI 컨테이너처럼 <b>런타임에 타입을 찾는 코드</b>가
+        빌드에서만 터집니다. <code>link.xml</code> 로 보존하거나
+        <b>소스 제너레이터 방식</b>으로 바꾸세요(🧬 C# 고급 탭 08).
+      </div>
+      <div class="note tip">
+        <b>반드시 실제 기기에서 30분 이상 돌려 보세요.</b>
+        발열로 인한 <b>스로틀링</b>은 5분 뒤부터 나타나며,
+        벤치마크로는 절대 발견되지 않습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g08 ==================== -->
+<section class="sec" id="g08">
+  <div class="sec-head rv">
+    <span class="no">GAME 08</span>
+    <h2>빌드 · <span class="t">스토어 출시</span></h2>
+    <p class="lead">빌드는 <b>사람이 손으로 누르는 순간 사고가 납니다.</b> 자동화가 목표입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">빌드 스크립트</h4>
+      <pre class="code" data-lang="csharp"><code>// Assets/_Project/Scripts/Editor/BuildScript.cs
+public static class BuildScript
+{
+    public static void BuildAndroid()
+    {
+        PlayerSettings.Android.useCustomKeystore = true;
+        PlayerSettings.keystorePass = Env("KEYSTORE_PASS");
+        PlayerSettings.bundleVersion = Env("BUILD_VERSION");
+        PlayerSettings.Android.bundleVersionCode = int.Parse(Env("BUILD_NUMBER"));
+
+        var opts = new BuildPlayerOptions
+        {
+            scenes = EditorBuildSettings.scenes
+                        .Where(s =&gt; s.enabled).Select(s =&gt; s.path).ToArray(),
+            locationPathName = "build/game.aab",
+            target = BuildTarget.Android,
+            options = BuildOptions.None,
+        };
+
+        var report = BuildPipeline.BuildPlayer(opts);
+        if (report.summary.result != BuildResult.Succeeded)
+            EditorApplication.Exit(1);          // CI 에 실패를 알린다
+    }
+    static string Env(string k) =&gt; System.Environment.GetEnvironmentVariable(k) ?? "";
+}</code></pre>
+      <pre class="code" data-lang="bash"><code>Unity -quit -batchmode -nographics \
+  -projectPath . -executeMethod BuildScript.BuildAndroid \
+  -logFile build.log</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">출시 체크리스트</h4>
+      <ul class="tx">
+        <li>☐ <b>버전·빌드 번호</b> 자동 증가 (수동은 반드시 실수합니다)</li>
+        <li>☐ <b>키스토어 백업</b> — 잃으면 <b>앱을 영원히 업데이트할 수 없습니다</b></li>
+        <li>☐ 개발용 로그·치트 코드 제거 (<code>#if DEVELOPMENT_BUILD</code>)</li>
+        <li>☐ 권한 최소화 — 안 쓰는 권한은 심사에서 반려됩니다</li>
+        <li>☐ 개인정보 처리방침 URL · 연령 등급</li>
+        <li>☐ 저사양·구형 기기 실제 테스트</li>
+        <li>☐ 크래시 리포팅 연동 확인 (다음 섹션)</li>
+        <li>☐ 스토어 스크린샷 · 아이콘 (해상도별)</li>
+      </ul>
+      <div class="note warn">
+        <b>키스토어(안드로이드 서명 키)를 잃어버리면 끝입니다.</b>
+        같은 패키지명으로 업데이트를 올릴 수 없어
+        <b>새 앱으로 다시 시작</b>해야 합니다.
+        여러 곳에 백업하고, 비밀번호는 팀 비밀 저장소에 두세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g09 ==================== -->
+<section class="sec" id="g09">
+  <div class="sec-head rv">
+    <span class="no">GAME 09</span>
+    <h2>수익화 — <span class="t">인앱결제 · 광고</span></h2>
+    <p class="lead">결제는 <b>돈이 오가는 코드</b>입니다. 클라이언트만 믿으면 반드시 뚫립니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">영수증 검증은 서버에서</h4>
+      <div class="diag">
+        <svg viewBox="0 0 640 128" role="img"
+             aria-label="클라이언트가 스토어에서 결제하고 받은 영수증을 게임 서버로 보내면, 서버가 스토어 서버에 검증한 뒤 아이템을 지급한다">
+          <rect class="bx" x="10" y="34" width="130" height="54"/>
+          <rect class="bx" x="176" y="34" width="130" height="54"/>
+          <rect class="bx" x="342" y="34" width="130" height="54"/>
+          <rect class="bx" x="508" y="34" width="122" height="54"/>
+          <text x="75" y="58" text-anchor="middle" font-size="12">게임</text>
+          <text x="75" y="76" text-anchor="middle" class="lbl">결제 요청</text>
+          <text x="241" y="58" text-anchor="middle" font-size="12">스토어</text>
+          <text x="241" y="76" text-anchor="middle" class="lbl">영수증 발급</text>
+          <text x="407" y="58" text-anchor="middle" font-size="12">게임 서버</text>
+          <text x="407" y="76" text-anchor="middle" class="lbl">영수증 검증</text>
+          <text x="569" y="58" text-anchor="middle" font-size="12">지급</text>
+          <text x="569" y="76" text-anchor="middle" class="lbl">서버가 기록</text>
+          <path class="fl" d="M140 61 H176"/>
+          <path class="fl" d="M306 61 H342"/>
+          <path class="fl" d="M472 61 H508"/>
+        </svg>
+        <div class="cap">클라이언트가 <b>"샀어요"</b> 라고 말하는 것만으로 아이템을 주면 안 됩니다.</div>
+      </div>
+      <pre class="code" data-lang="csharp"><code>public PurchaseProcessingResult ProcessPurchase(PurchaseEventArgs e)
+{
+    // ★ 여기서 바로 아이템을 주지 않습니다
+    StartCoroutine(SendToServer(e.purchasedProduct.receipt,
+                                e.purchasedProduct.transactionID));
+    return PurchaseProcessingResult.Pending;   // 서버 확인 후 완료 처리
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">반드시 지킬 것</h4>
+      <ul class="tx">
+        <li><b>영수증 검증은 서버에서</b> — 스토어 서버 API 로 확인</li>
+        <li><b>중복 지급 방지</b> — <code>transactionID</code> 를 저장해 두 번 처리하지 않기</li>
+        <li><b>미완료 거래 복구</b> — 지급 전에 앱이 꺼지면 다음 실행 때 이어서 처리</li>
+        <li><b>가격은 스토어에서 받아 표시</b> — 지역·통화가 다릅니다</li>
+        <li><b>환불 처리</b>를 설계해 두세요 — 나중에 붙이면 데이터가 꼬입니다</li>
+      </ul>
+      <div class="note warn">
+        <b>광고 SDK 는 프레임과 용량을 잡아먹습니다.</b>
+        여러 개를 동시에 붙이면 <b>시작 시간이 몇 초씩 늘어납니다</b>.
+        보상형 광고는 <b>보상 지급도 서버 검증(SSV)</b> 을 붙이세요 —
+        안 그러면 무한 보상 치트의 표적이 됩니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g10 ==================== -->
+<section class="sec" id="g10">
+  <div class="sec-head rv">
+    <span class="no">GAME 10</span>
+    <h2>라이브 운영 — <span class="t">원격 설정 · 크래시</span></h2>
+    <p class="lead">출시가 끝이 아닙니다. <b>스토어 심사 없이 고칠 수 있는 범위</b>를 미리 확보해 두세요.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">원격으로 바꿀 수 있게</h4>
+      <pre class="code" data-lang="csharp"><code>// 게임 시작 시 서버에서 설정을 받는다
+[Serializable]
+public class RemoteConfig
+{
+    public bool  maintenance;        // 점검 중이면 안내 후 종료
+    public string minVersion;        // 이 버전 미만은 강제 업데이트
+    public float dropRateMultiplier; // 이벤트 배율
+    public bool  adsEnabled;
+    public string noticeUrl;
+}
+
+async Task BootAsync()
+{
+    var cfg = await Api.GetConfigAsync();
+    if (cfg.maintenance) { ShowMaintenance(); return; }
+    if (IsOlder(Application.version, cfg.minVersion)) { ForceUpdate(); return; }
+    Balance.Apply(cfg);
+}</code></pre>
+      <div class="note tip">
+        <b>강제 업데이트 스위치는 출시 첫 버전부터 넣으세요.</b>
+        서버 API 를 바꿔야 할 때 <b>유일한 탈출구</b>입니다.
+        나중에 넣으면 <b>이미 깔린 구버전</b>에는 적용할 수 없습니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">크래시와 지표</h4>
+      <ul class="tx">
+        <li><b>크래시 리포팅</b> — Firebase Crashlytics · Unity Cloud Diagnostics.
+          <b>심볼 파일 업로드</b>를 빌드에 포함해야 스택이 읽힙니다</li>
+        <li><b>핵심 지표</b> — 크래시 없는 사용자 비율(99.5%+ 목표) · 세션 길이 · 이탈 구간</li>
+        <li><b>퍼널 로그</b> — 튜토리얼 단계별 이탈률이 가장 많은 것을 알려 줍니다</li>
+        <li><b>A/B 테스트</b> — 밸런스는 감이 아니라 데이터로</li>
+      </ul>
+      <div class="note warn">
+        <b>개인정보를 로그에 넣지 마세요.</b>
+        기기 식별자·위치·연락처는 <b>스토어 정책 위반</b>이 될 수 있습니다.
+        무엇을 수집하는지 <b>개인정보 처리방침에 정확히</b> 적어야 합니다.
+      </div>
+      <div class="note tip">
+        <b>서버 쪽 운영</b>(무중단 배포·점검·모니터링)은
+        <b>⚡ 대규모 트래픽</b> 탭에서 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g11 ==================== -->
+<section class="sec" id="g11">
+  <div class="sec-head rv">
+    <span class="no">GAME 11</span>
+    <h2>치트 방지 · <span class="t">보안</span></h2>
+    <p class="lead">싱글 게임도 랭킹이 있으면 조작됩니다. <b>무엇을 지킬지</b> 정하는 것이 먼저입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">공격 방법과 대응</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>공격</th><th>대응</th></tr></thead>
+          <tbody>
+            <tr><td>메모리 값 조작<br><span class="sm">치트엔진</span></td><td>중요 값 <b>난독화·이중 저장</b> · 서버 검증</td></tr>
+            <tr><td>속도 핵<br><span class="sm">시간 가속</span></td><td>서버 시각 기준 검증 · <code>Time.timeScale</code> 감시</td></tr>
+            <tr><td>APK 리패킹</td><td>서명 검증 · IL2CPP · 무결성 체크</td></tr>
+            <tr><td>패킷 변조</td><td><b>서버 권위</b> · 암호화 · 재전송 방지</td></tr>
+            <tr><td>세이브 파일 수정</td><td>서버 저장 · 해시 서명</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="csharp"><code>// 값 하나를 두 벌로 들고 대조 (간단하지만 효과가 있습니다)
+public struct SecureInt
+{
+    private int _value, _check;
+    public int Value
+    {
+        get { if ((_value ^ Key) != _check) OnTamper(); return _value; }
+        set { _value = value; _check = value ^ Key; }
+    }
+    private const int Key = 0x5F3E;
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">현실적인 기준</h4>
+      <div class="note warn">
+        <b>클라이언트는 절대 신뢰할 수 없습니다.</b>
+        해커가 기기를 완전히 통제하므로 <b>클라이언트만의 방어는 시간 벌기</b>일 뿐입니다.
+        <b>돈·랭킹·경쟁에 영향을 주는 값은 서버가 계산</b>하는 것이 유일한 해법입니다.
+      </div>
+      <ul class="tx">
+        <li><b>싱글 · 비경쟁</b> — 최소한의 난독화면 충분합니다. 과투자하지 마세요</li>
+        <li><b>랭킹 있음</b> — 점수 계산 근거(플레이 로그)를 서버가 검증</li>
+        <li><b>실시간 대전</b> — <b>서버 권위</b> 필수(🌐 게임 서버 탭 06)</li>
+        <li><b>이상 탐지</b> — 통계적으로 불가능한 기록을 자동 플래그</li>
+      </ul>
+      <div class="note tip">
+        <b>차단보다 탐지가 실용적입니다.</b>
+        즉시 밴하면 우회 방법을 찾아냅니다.
+        <b>조용히 기록해 두었다가 주기적으로 일괄 처리</b>하는 것이
+        상용 게임의 일반적인 운영 방식입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== g12 ==================== -->
+<section class="sec" id="g12">
+  <div class="sec-head rv">
+    <span class="no">GAME 12</span>
+    <h2>출시 전 <span class="t">최종 점검</span></h2>
+    <p class="lead">개발이 끝났다고 생각한 시점에 <b>한 번 더 훑는</b> 목록입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">성능 · 안정성</h4>
+      <ul class="tx">
+        <li>☐ <b>최저 사양 기기</b>에서 30분 연속 플레이 (발열·스로틀링)</li>
+        <li>☐ Profiler 로 <b>GC Alloc 0 B</b> 확인 (전투 중)</li>
+        <li>☐ 씬 전환 <b>10회 반복</b> 후 메모리가 늘지 않는지</li>
+        <li>☐ 네트워크 끊김·비행기 모드에서 <b>앱이 죽지 않는지</b></li>
+        <li>☐ 백그라운드 전환 → 복귀 시 정상 동작</li>
+        <li>☐ 세이브 파일 손상 시 <b>기본값으로 시작</b>되는지</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">운영 준비</h4>
+      <ul class="tx">
+        <li>☐ <b>강제 업데이트</b>·<b>점검 모드</b> 스위치 동작 확인</li>
+        <li>☐ 크래시 리포팅에 <b>심볼 업로드</b> 완료</li>
+        <li>☐ 서버 <b>부하 테스트</b> 완료(예상 동시접속의 3배)</li>
+        <li>☐ 롤백 절차 문서화 — <b>누가 어떤 명령으로</b></li>
+        <li>☐ 고객 문의 창구 · 계정 복구 절차</li>
+        <li>☐ 첫 주 <b>모니터링 당번</b> 지정</li>
+      </ul>
+      <div class="note tip">
+        <b>다음 단계</b> —
+        온라인 기능이 있다면 <b>🌐 게임 서버</b>와 <b>⚡ 대규모 트래픽</b>,
+        계정·상점 같은 백엔드는 <b>🔷 ASP.NET Core</b>,
+        서버 배포·무중단 운영은 🌐 <b>웹서버 가이드</b>가 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /pane-ugame -->

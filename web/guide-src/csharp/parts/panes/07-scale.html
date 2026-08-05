@@ -1,0 +1,718 @@
+<!-- ============================================================
+     대규모 트래픽 PANE
+     ============================================================ -->
+<div class="pane" id="pane-scale">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> 동시접속 · 확장 · 장애 대응</div>
+  <h1>한 대로 되던 것이<br>안 되기<br>시작할 때</h1>
+  <p class="tx">
+    출시 첫날 동시접속이 예상의 10배로 오면 서버는 반드시 무너집니다.
+    <b>어디가 먼저 무너지는지</b>, 그때 <b>무엇을 늘려야 하는지</b>를 미리 알아 둡니다.
+    <b>여기까지 마치면 수만 동시접속을 견디는 구조를 설계하고 장애를 침착하게 처리할 수 있습니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>p99</b><span>보는 지표</span></div>
+    <div><b>×3</b><span>여유 배수</span></div>
+    <div><b>무상태</b><span>확장의 전제</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== k01 ==================== -->
+<section class="sec" id="k01">
+  <div class="sec-head rv">
+    <span class="no">SCALE 01</span>
+    <h2>규모의 <span class="t">감각 잡기</span></h2>
+    <p class="lead">"동시접속 10만"이 실제로 <b>초당 몇 요청</b>이고 서버 몇 대인지 계산해 봅니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">숫자로 환산하기</h4>
+      <pre class="code" data-lang="text"><code>동시접속(CCU) 10,000 인 모바일 RPG 가정
+
+일반 API (로비·상점·인벤토리)
+  사용자당 분당 6요청 → 10,000 × 6 / 60 = 1,000 RPS
+  한 요청 20ms → 서버 1대(4코어)가 대략 500~1,000 RPS
+  → 앱 서버 2~4대 + 여유
+
+실시간 전투 (20Hz 동기화)
+  방당 4명 · 초당 20틱 · 인당 200B
+  4 × 20 × 200 = 16 KB/s per room
+  방 2,500개(1만 명) → 40 MB/s = 320 Mbps ★ 대역폭이 먼저 한계
+
+DB
+  쓰기 초당 200건 · 읽기 800건
+  → 읽기는 캐시로 90% 흡수, 쓰기는 단일 인스턴스로도 가능</code></pre>
+      <div class="note tip">
+        <b>병목은 대개 순서가 정해져 있습니다.</b>
+        ① DB 커넥션 → ② 캐시 없는 반복 조회 → ③ 대역폭 → ④ CPU.
+        <b>먼저 무너질 곳부터</b> 대비하세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">먼저 정할 것</h4>
+      <ul class="tx">
+        <li><b>목표 지표(SLO)</b> — 예: "API p99 200ms · 가용성 99.5%"</li>
+        <li><b>예상 CCU 의 3배</b>로 부하 테스트 — 오픈 첫날은 항상 예상을 넘습니다</li>
+        <li><b>비용 한도</b> — 무한 확장은 가능하지만 돈이 듭니다</li>
+        <li><b>줄일 수 있는 기능</b> — 부하가 폭주하면 무엇을 끌 것인가(랭킹·상세 통계)</li>
+      </ul>
+      <div class="note warn">
+        <b>"일단 만들고 나중에 확장"은 절반만 맞습니다.</b>
+        <b>무상태(stateless)</b>·<b>멱등성</b>·<b>수평 확장 가능한 세션</b> —
+        이 셋은 <b>처음부터</b> 지켜야 합니다.
+        나중에 바꾸려면 사실상 다시 만들게 됩니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k02 ==================== -->
+<section class="sec" id="k02">
+  <div class="sec-head rv">
+    <span class="no">SCALE 02</span>
+    <h2>수평 확장 — <span class="t">서버를 늘릴 수 있는 상태</span></h2>
+    <p class="lead">한 대를 키우는 것(수직)에는 한계가 있습니다. <b>여러 대로 나누려면 조건</b>이 있습니다.</p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 660 168" role="img"
+         aria-label="로드밸런서 뒤에 여러 앱 서버가 있고 세션과 캐시는 Redis에, 데이터는 공용 DB에 두어 어느 서버가 요청을 받아도 같은 결과를 낸다">
+      <rect class="bx" x="12" y="60" width="110" height="48"/>
+      <rect class="bx" x="166" y="16" width="120" height="40"/>
+      <rect class="bx" x="166" y="64" width="120" height="40"/>
+      <rect class="bx" x="166" y="112" width="120" height="40"/>
+      <rect class="bx" x="352" y="30" width="132" height="44"/>
+      <rect class="bx" x="352" y="96" width="132" height="44"/>
+      <rect class="bx bx-warn" x="524" y="60" width="124" height="48"/>
+      <text x="67" y="80" text-anchor="middle" font-size="12">LB</text>
+      <text x="67" y="98" text-anchor="middle" class="lbl">분배</text>
+      <text x="226" y="40" text-anchor="middle" class="lbl">앱 서버 A</text>
+      <text x="226" y="88" text-anchor="middle" class="lbl">앱 서버 B</text>
+      <text x="226" y="136" text-anchor="middle" class="lbl">앱 서버 C</text>
+      <text x="418" y="52" text-anchor="middle" font-size="12">Redis</text>
+      <text x="418" y="68" text-anchor="middle" class="lbl">세션 · 캐시 · 랭킹</text>
+      <text x="418" y="118" text-anchor="middle" font-size="12">DB</text>
+      <text x="418" y="134" text-anchor="middle" class="lbl">영구 데이터</text>
+      <text x="586" y="80" text-anchor="middle" font-size="12">여기가 한계</text>
+      <text x="586" y="98" text-anchor="middle" class="lbl">쓰기는 결국 한 곳</text>
+      <path class="fl" d="M122 84 H166"/>
+      <path class="ln" d="M286 36 H352 M286 84 H352 M286 132 H352"/>
+      <path class="ln" d="M484 118 H524"/>
+    </svg>
+    <div class="cap">앱 서버는 <b>얼마든지 늘릴 수 있지만</b>, 상태를 들고 있으면 그 순간 못 늘립니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">무상태로 만들기</h4>
+      <div class="vs">
+        <div class="bad">
+          <h5>메모리에 상태</h5>
+          <pre class="code" data-lang="csharp"><code>static Dictionary&lt;int, Session&gt; _sessions;
+// A 서버에 로그인 → B 서버로 요청
+// → "로그인이 풀렸어요"</code></pre>
+        </div>
+        <div class="good">
+          <h5>바깥에 상태</h5>
+          <pre class="code" data-lang="csharp"><code>await redis.StringSetAsync(
+    $"sess:{token}", json,
+    TimeSpan.FromMinutes(30));
+// 어느 서버로 가도 같다</code></pre>
+        </div>
+      </div>
+      <ul class="tx">
+        <li><b>세션·캐시는 Redis</b>로</li>
+        <li><b>업로드 파일은 오브젝트 스토리지</b>로(로컬 디스크 금지)</li>
+        <li><b>스케줄 작업은 한 대만</b> 실행되게 락으로 보호</li>
+        <li><b>메모리 캐시</b>는 써도 되지만 <b>서버마다 다를 수 있음</b>을 전제로</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">게임 서버는 사정이 다릅니다</h4>
+      <div class="note warn">
+        <b>실시간 게임 서버는 무상태가 될 수 없습니다.</b>
+        방의 상태를 메모리에 들고 20Hz 로 돌려야 하기 때문입니다.
+        대신 <b>"방 단위로 나누는" 방식</b>으로 확장합니다.
+      </div>
+      <ul class="tx">
+        <li><b>방 배정 서버</b>(매치메이커)가 <b>어느 게임 서버로 갈지</b> 정합니다</li>
+        <li>게임 서버는 <b>자기 방만</b> 책임집니다 — 서로 통신하지 않습니다</li>
+        <li>서버가 죽으면 <b>그 방만</b> 영향받습니다(스냅샷으로 복구)</li>
+        <li>방 수요에 따라 <b>인스턴스를 늘렸다 줄입니다</b>(Agones 등)</li>
+      </ul>
+      <pre class="code" data-lang="csharp"><code>// 매치메이커가 여유 있는 서버를 골라 배정
+var node = _nodes.Where(n =&gt; n.Rooms &lt; n.Capacity)
+                 .OrderBy(n =&gt; n.Rooms)
+                 .FirstOrDefault()
+           ?? await ScaleOutAsync();          // 없으면 새 인스턴스 요청
+return new MatchResult(node.Host, node.Port, roomToken);</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k03 ==================== -->
+<section class="sec" id="k03">
+  <div class="sec-head rv">
+    <span class="no">SCALE 03</span>
+    <h2>Redis — <span class="t">캐시 · 랭킹 · 락</span></h2>
+    <p class="lead">게임 백엔드에서 <b>가장 많이 쓰이는 한 대</b>. 자료 구조를 알면 대부분 해결됩니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">자료 구조별 용도</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>구조</th><th>게임에서</th></tr></thead>
+          <tbody>
+            <tr><td><b>String</b></td><td>세션 토큰 · 설정 캐시</td></tr>
+            <tr><td><b>Hash</b></td><td>플레이어 요약 정보</td></tr>
+            <tr><td><b>Sorted Set</b></td><td><b>랭킹</b> · 대기열 · 만료 예약</td></tr>
+            <tr><td><b>Set</b></td><td>온라인 목록 · 친구</td></tr>
+            <tr><td><b>List</b></td><td>간단한 작업 큐</td></tr>
+            <tr><td><b>Pub/Sub</b></td><td>서버 간 알림 · 채팅</td></tr>
+            <tr><td><b>Stream</b></td><td>이벤트 로그(재처리 가능)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="csharp"><code>// 선착순 이벤트 — 원자적으로 감소
+var left = await db.StringDecrementAsync("event:stock");
+if (left &lt; 0)
+{
+    await db.StringIncrementAsync("event:stock");   // 되돌리기
+    return Result.SoldOut;
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">분산 락</h4>
+      <pre class="code" data-lang="csharp"><code>// 여러 서버 중 하나만 실행해야 할 때 (일일 정산 · 스케줄)
+public async Task&lt;bool&gt; TryRunOnceAsync(string key, TimeSpan ttl, Func&lt;Task&gt; work)
+{
+    var token = Guid.NewGuid().ToString();
+    if (!await db.StringSetAsync(key, token, ttl, When.NotExists))
+        return false;                     // 다른 서버가 잡았다
+
+    try { await work(); return true; }
+    finally
+    {
+        // ★ 내가 잡은 락만 푼다 (TTL 만료 후 남의 락을 푸는 사고 방지)
+        const string lua = @"
+            if redis.call('get', KEYS[1]) == ARGV[1]
+            then return redis.call('del', KEYS[1]) else return 0 end";
+        await db.ScriptEvaluateAsync(lua, [key], [token]);
+    }
+}</code></pre>
+      <div class="note warn">
+        <b>락 TTL 보다 작업이 오래 걸리면 두 대가 동시에 돕니다.</b>
+        TTL 을 넉넉히 잡고, <b>작업 자체를 멱등하게</b> 만들어
+        두 번 실행돼도 결과가 같게 설계하세요 — 이것이 더 근본적인 해법입니다.
+      </div>
+      <div class="note tip">
+        <b>Redis 도 단일 장애점입니다.</b>
+        세션을 Redis 에만 두면 <b>Redis 가 죽을 때 전원 로그아웃</b>됩니다.
+        영속화 설정·복제·클러스터를 검토하고,
+        <b>죽었을 때 어떻게 동작할지</b>를 정해 두세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k04 ==================== -->
+<section class="sec" id="k04">
+  <div class="sec-head rv">
+    <span class="no">SCALE 04</span>
+    <h2>캐시 전략 · <span class="t">스탬피드</span></h2>
+    <p class="lead">캐시는 <b>없앨 때가 어렵습니다.</b> 그리고 만료되는 순간이 가장 위험합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">캐시 스탬피드</h4>
+      <div class="note warn">
+        <b>인기 있는 키가 만료되는 순간</b>, 그 키를 기다리던
+        <b>수천 요청이 동시에 DB 로 몰립니다</b>.
+        평소에는 캐시가 막아 주던 부하가 <b>한꺼번에</b> 터지는 것입니다.
+      </div>
+      <pre class="code" data-lang="csharp"><code>// ① 하나만 계산하게 만든다 (나머지는 기다렸다 결과를 공유)
+private static readonly SemaphoreSlim _gate = new(1, 1);
+
+async Task&lt;T&gt; GetAsync&lt;T&gt;(string key, Func&lt;Task&lt;T&gt;&gt; load, TimeSpan ttl)
+{
+    if (_cache.TryGetValue(key, out T? hit)) return hit!;
+
+    await _gate.WaitAsync();
+    try
+    {
+        if (_cache.TryGetValue(key, out hit)) return hit!;   // 이중 확인
+        var v = await load();
+        // ② 만료 시각을 흩뿌린다 (한꺼번에 만료되지 않게)
+        var jitter = TimeSpan.FromSeconds(Random.Shared.Next(0, 60));
+        _cache.Set(key, v, ttl + jitter);
+        return v;
+    }
+    finally { _gate.Release(); }
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">무효화 전략</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>방식</th><th>설명</th><th>주의</th></tr></thead>
+          <tbody>
+            <tr><td><b>TTL</b></td><td>시간이 지나면 자동 삭제</td><td>가장 단순 · 잠깐 옛 값</td></tr>
+            <tr><td><b>쓰기 시 삭제</b></td><td>변경하면 키를 지움</td><td>지울 키를 빠뜨리기 쉬움</td></tr>
+            <tr><td><b>버전 키</b></td><td><code>shop:v12</code> 처럼 번호를 올림</td><td>옛 키는 TTL 로 정리</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>핫키 문제</b> — 랭킹 1페이지처럼 <b>모두가 보는 키</b>는
+        Redis 노드 하나에 부하가 몰립니다.
+        <b>앱 메모리에 1초짜리 로컬 캐시</b>를 한 겹 더 두면
+        Redis 호출이 수천 분의 일로 줄어듭니다.
+      </div>
+      <div class="note warn">
+        <b>재화·인벤토리는 캐시하지 마세요.</b>
+        "골드가 잘못 보인다"는 <b>신뢰를 잃는 버그</b>입니다.
+        읽기 성능이 필요하면 캐시 대신 <b>읽기 전용 복제본</b>을 쓰세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k05 ==================== -->
+<section class="sec" id="k05">
+  <div class="sec-head rv">
+    <span class="no">SCALE 05</span>
+    <h2>DB 확장 — <span class="t">복제 · 샤딩</span></h2>
+    <p class="lead">앱 서버는 쉽게 늘리지만 DB 는 아닙니다. <b>읽기부터, 그다음 쓰기</b> 순으로 나눕니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">① 읽기 복제본</h4>
+      <pre class="code" data-lang="csharp"><code>// 읽기 전용 쿼리를 복제본으로 보낸다
+builder.Services.AddDbContext&lt;GameDb&gt;(o =&gt; o.UseNpgsql(primary));
+builder.Services.AddDbContext&lt;GameReadDb&gt;(o =&gt; o.UseNpgsql(replica));
+
+// 랭킹·통계·목록 조회는 복제본
+var top = await readDb.Rankings.AsNoTracking()
+                      .OrderByDescending(r =&gt; r.Score).Take(100).ToListAsync();</code></pre>
+      <div class="note warn">
+        <b>복제 지연을 전제로 설계해야 합니다.</b>
+        아이템을 산 직후 인벤토리를 <b>복제본에서 읽으면 아직 없습니다</b>.
+        <b>쓰기 직후의 읽기는 주 DB</b>로 보내세요 —
+        게임에서 "샀는데 안 보여요" 문의의 원인입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">② 샤딩 — 마지막 수단</h4>
+      <pre class="code" data-lang="csharp"><code>// 플레이어 id 로 DB 를 나눈다
+int ShardOf(long playerId) =&gt; (int)(playerId % ShardCount);
+
+var db = _shards[ShardOf(playerId)];
+var player = await db.Players.FindAsync(playerId);</code></pre>
+      <ul class="tx">
+        <li><b>샤드 간 조인·트랜잭션이 불가능</b>합니다 — 설계가 크게 바뀝니다</li>
+        <li><b>샤드 수를 늘릴 때 재분배</b>가 필요합니다(미리 넉넉히 잡거나 일관 해싱)</li>
+        <li>길드·랭킹처럼 <b>가로지르는 데이터</b>는 별도 저장소로</li>
+      </ul>
+      <div class="note tip">
+        <b>샤딩 전에 할 수 있는 것들</b> —
+        인덱스 정리 · 쿼리 개선 · 캐시 · 읽기 복제 · 오래된 데이터 분리(아카이빙) ·
+        더 큰 인스턴스. 대부분의 게임은 <b>여기까지로 충분</b>합니다.
+        자세한 것은 🗄️ <b>데이터베이스 가이드</b>에서.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k06 ==================== -->
+<section class="sec" id="k06">
+  <div class="sec-head rv">
+    <span class="no">SCALE 06</span>
+    <h2>메시지 큐 — <span class="t">나중에 해도 되는 일</span></h2>
+    <p class="lead">요청 안에서 다 하려고 하면 느려집니다. <b>급하지 않은 일은 미룹니다.</b></p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">무엇을 미룰 것인가</h4>
+      <div class="vs">
+        <div class="bad">
+          <h5>요청 안에서 전부</h5>
+          <pre class="code" data-lang="text"><code>구매 요청
+ → 결제 처리
+ → 아이템 지급
+ → 우편 발송
+ → 통계 집계
+ → 푸시 알림
+= 800ms · 하나 실패하면 전부 실패</code></pre>
+        </div>
+        <div class="good">
+          <h5>핵심만 즉시</h5>
+          <pre class="code" data-lang="text"><code>구매 요청
+ → 결제 · 지급 (트랜잭션)
+ → 이벤트 발행
+= 80ms
+
+큐 소비자가 나머지를 처리</code></pre>
+        </div>
+      </div>
+      <pre class="code" data-lang="csharp"><code>// 아웃박스 — 트랜잭션 안에 이벤트도 함께 저장
+_db.Outbox.Add(new OutboxMessage
+{
+    Type = nameof(ItemPurchased),
+    Payload = JsonSerializer.Serialize(evt),
+});
+await _db.SaveChangesAsync(ct);      // 지급과 이벤트가 원자적으로 함께
+
+// 별도 워커가 outbox 를 읽어 큐로 보냅니다 (전송 실패해도 유실 없음)</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">소비자 쪽 규칙</h4>
+      <ul class="tx">
+        <li><b>같은 메시지를 두 번 받을 수 있습니다</b> — 처리를 멱등하게 (처리한 id 기록)</li>
+        <li><b>순서 보장은 파티션 안에서만</b> — 플레이어 id 로 파티션을 나누세요</li>
+        <li><b>실패 메시지는 DLQ</b>(죽은 편지 큐)로 — 무한 재시도로 큐를 막지 않게</li>
+        <li><b>소비 지연을 모니터링</b> — 밀리기 시작하면 소비자를 늘립니다</li>
+      </ul>
+      <div class="note tip">
+        <b>규모에 맞게 고르세요.</b>
+        작으면 <b>DB 테이블 큐</b>로도 충분하고,
+        중간 규모는 <b>Redis Stream</b>·<b>RabbitMQ</b>,
+        초당 수만 건이면 <b>Kafka</b>. 처음부터 Kafka 를 도입하면
+        <b>운영 부담이 이득보다 큽니다</b>.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k07 ==================== -->
+<section class="sec" id="k07">
+  <div class="sec-head rv">
+    <span class="no">SCALE 07</span>
+    <h2>부하 제어 — <span class="t">거절도 전략입니다</span></h2>
+    <p class="lead">전부 받아 주다 <b>전부 느려지는 것</b>보다, 일부를 빨리 돌려보내는 편이 낫습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">속도 제한</h4>
+      <pre class="code" data-lang="csharp"><code>builder.Services.AddRateLimiter(o =&gt;
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    o.AddPolicy("per-user", ctx =&gt;
+        RateLimitPartition.GetTokenBucketLimiter(
+            ctx.User.Identity?.Name ?? ctx.Connection.RemoteIpAddress!.ToString(),
+            _ =&gt; new TokenBucketRateLimiterOptions
+            {
+                TokenLimit = 20,               // 순간 버스트 허용
+                TokensPerPeriod = 10,          // 초당 10개 회복
+                ReplenishmentPeriod = TimeSpan.FromSeconds(1),
+                QueueLimit = 0,                // 대기 없이 즉시 거절
+            }));
+});
+
+app.MapPost("/shop/buy", BuyAsync).RequireRateLimiting("per-user");</code></pre>
+      <div class="note tip">
+        <b>429 응답에는 <code>Retry-After</code> 를 넣으세요.</b>
+        클라이언트가 <b>언제 다시 시도할지</b> 알 수 있어야
+        재시도 폭풍이 생기지 않습니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">대기열 · 점진 오픈</h4>
+      <ul class="tx">
+        <li><b>대기열</b> — 오픈 첫날 접속을 순서대로 받습니다.
+          <b>"몇 번째, 예상 몇 분"</b>을 보여 주는 것이 중요합니다</li>
+        <li><b>기능 차단</b> — 부하가 높으면 랭킹·통계 같은 <b>부가 기능부터</b> 끕니다</li>
+        <li><b>서킷 브레이커</b> — 외부 API 가 죽으면 <b>빠르게 실패</b>시키고 폴백</li>
+        <li><b>재시도 지터</b> — 클라이언트가 동시에 재접속하지 않게</li>
+      </ul>
+      <pre class="code" data-lang="csharp"><code>// Polly — 서킷 브레이커 + 타임아웃
+builder.Services.AddHttpClient&lt;IPayApi, PayApi&gt;()
+    .AddStandardResilienceHandler(o =&gt;
+    {
+        o.Retry.MaxRetryAttempts = 2;
+        o.CircuitBreaker.FailureRatio = 0.5;
+        o.AttemptTimeout.Timeout = TimeSpan.FromSeconds(3);
+    });</code></pre>
+      <div class="note warn">
+        <b>재시도는 장애를 키웁니다.</b>
+        서버가 느려서 실패하는데 <b>3번씩 재시도하면 부하가 3배</b>가 되어
+        회복을 막습니다. <b>서킷 브레이커와 반드시 함께</b> 쓰세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k08 ==================== -->
+<section class="sec" id="k08">
+  <div class="sec-head rv">
+    <span class="no">SCALE 08</span>
+    <h2>게임 서버 스케일링 — <span class="t">방 단위로</span></h2>
+    <p class="lead">웹 서버와 달리 <b>연결이 오래 유지되고 상태가 있습니다.</b> 그래서 방식이 다릅니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">인스턴스 관리</h4>
+      <pre class="code" data-lang="csharp"><code>// 게임 서버가 자기 상태를 주기적으로 보고
+public sealed class NodeReporter(IRedis redis) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            await redis.Db.HashSetAsync($"node:{NodeId}",
+            [
+                new("rooms", RoomManager.Count),
+                new("cpu",   Cpu.Percent()),
+                new("state", _draining ? "draining" : "ready"),
+            ]);
+            await redis.Db.KeyExpireAsync($"node:{NodeId}", TimeSpan.FromSeconds(15));
+            await Task.Delay(5000, ct);
+        }
+    }
+}</code></pre>
+      <ul class="tx">
+        <li><b>TTL 로 죽은 노드를 자동 제거</b> — 보고가 끊기면 목록에서 사라집니다</li>
+        <li><b>draining 상태</b> — 새 방은 안 받고 기존 방이 끝나면 종료</li>
+        <li><b>여유분을 미리</b> — 새 인스턴스가 뜨는 데 30초~2분이 걸립니다</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">축소가 더 어렵습니다</h4>
+      <div class="note warn">
+        <b>사람이 붙어 있는 서버를 끌 수 없습니다.</b>
+        웹은 요청이 끝나면 그만이지만, 게임은 <b>30분짜리 판</b>이 돌고 있습니다.
+        축소는 항상 <b>draining → 자연 종료</b> 순서여야 합니다.
+      </div>
+      <ul class="tx">
+        <li><b>축소는 천천히</b> — 트래픽이 줄어도 여유를 두고 줄이세요</li>
+        <li><b>방 이전(마이그레이션)</b>은 매우 어렵습니다. 대개 하지 않습니다</li>
+        <li><b>점검 공지</b> — 예정된 종료는 게임 안에서 미리 알립니다</li>
+        <li><b>스팟 인스턴스</b>는 게임 서버에 위험합니다(갑자기 회수)</li>
+      </ul>
+      <div class="note tip">
+        <b>Agones · Unity Game Server Hosting</b> 같은 전용 오케스트레이터는
+        위 과정(할당·드레인·스케일)을 표준화해 줍니다.
+        직접 만들기 전에 검토할 가치가 있습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k09 ==================== -->
+<section class="sec" id="k09">
+  <div class="sec-head rv">
+    <span class="no">SCALE 09</span>
+    <h2>무중단 배포 · <span class="t">점검</span></h2>
+    <p class="lead">업데이트를 <b>사용자가 모르게</b> 하거나, <b>확실히 알리고</b> 하거나. 둘 중 하나여야 합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">배포 전략</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>전략</th><th>설명</th><th>게임에서</th></tr></thead>
+          <tbody>
+            <tr><td><b>롤링</b></td><td>한 대씩 교체</td><td>API 서버에 적합</td></tr>
+            <tr><td><b>블루-그린</b></td><td>새 환경으로 한 번에 전환</td><td>롤백이 빠름</td></tr>
+            <tr><td><b>카나리</b></td><td>일부에게만 먼저</td><td>지표 비교 필요</td></tr>
+            <tr><td><b>점검</b></td><td>서비스 중단 후 교체</td><td>DB 대변경 시</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>DB 스키마 변경은 두 단계로 나누세요.</b>
+        ① 컬럼 <b>추가</b>(구버전도 동작) → 배포 →
+        ② 다음 배포에서 <b>옛 컬럼 제거</b>.
+        한 번에 바꾸면 <b>배포 중 두 버전이 공존하는 순간</b> 터집니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">점검을 해야 한다면</h4>
+      <ul class="tx">
+        <li><b>사전 공지</b> — 게임 내 배너 + 커뮤니티. 최소 하루 전</li>
+        <li><b>점검 모드 스위치</b> — 새 접속 차단, 진행 중인 판은 마무리</li>
+        <li><b>롤백 계획</b> — <b>언제까지 안 되면 되돌린다</b>를 미리 정하세요</li>
+        <li><b>점검 후 보상</b> — 우편 일괄 지급 도구를 준비</li>
+        <li><b>재접속 폭주 대비</b> — 점검이 끝나면 전원이 동시에 붙습니다</li>
+      </ul>
+      <div class="note tip">
+        <b>점검 종료 시각을 정확히 지키세요.</b>
+        연장은 신뢰를 크게 깎습니다.
+        <b>예상보다 넉넉히 잡고 일찍 끝내는 것</b>이 항상 낫습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k10 ==================== -->
+<section class="sec" id="k10">
+  <div class="sec-head rv">
+    <span class="no">SCALE 10</span>
+    <h2>모니터링 — <span class="t">무엇을 볼 것인가</span></h2>
+    <p class="lead">지표가 100개면 아무도 안 봅니다. <b>다섯 개</b>로 시작하세요.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">핵심 지표</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>지표</th><th>의미</th><th>경보 기준 예</th></tr></thead>
+          <tbody>
+            <tr><td><b>에러율</b></td><td>5xx 비율</td><td>1% 초과 5분</td></tr>
+            <tr><td><b>지연 p99</b></td><td>느린 1%</td><td>500ms 초과</td></tr>
+            <tr><td><b>CCU</b></td><td>동시접속</td><td>급감 시(장애 신호)</td></tr>
+            <tr><td><b>DB 커넥션</b></td><td>풀 사용률</td><td>80% 초과</td></tr>
+            <tr><td><b>큐 지연</b></td><td>처리 밀림</td><td>1분 초과</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="csharp"><code>static readonly Meter M = new("Game.Api");
+static readonly Counter&lt;long&gt; Purchases = M.CreateCounter&lt;long&gt;("shop.purchase");
+static readonly Histogram&lt;double&gt; Latency = M.CreateHistogram&lt;double&gt;("api.ms");
+
+Purchases.Add(1, new KeyValuePair&lt;string, object?&gt;("item", itemId));</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">경보 규칙</h4>
+      <ul class="tx">
+        <li><b>사용자가 겪는 것만 경보</b> — CPU 70% 는 경보가 아니라 대시보드입니다</li>
+        <li><b>지속 시간을 조건에</b> — 순간 스파이크로 새벽에 깨지 않게</li>
+        <li><b>알림에 조치 방법을 링크</b> — 런북이 없으면 당황합니다</li>
+        <li><b>비즈니스 지표도 보세요</b> — 결제 성공률이 갑자기 떨어지면 장애입니다</li>
+      </ul>
+      <div class="note warn">
+        <b>경보 피로가 가장 위험합니다.</b>
+        하루에 20번 울리면 <b>진짜일 때도 무시</b>합니다.
+        울렸는데 조치할 것이 없었다면 <b>그 경보를 지우세요</b>.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k11 ==================== -->
+<section class="sec" id="k11">
+  <div class="sec-head rv">
+    <span class="no">SCALE 11</span>
+    <h2>장애 대응 — <span class="t">시나리오별</span></h2>
+    <p class="lead">터졌을 때 <b>순서대로 확인할 목록</b>이 있으면 복구 시간이 절반이 됩니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">증상 → 원인 → 조치</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>증상</th><th>먼저 볼 곳</th></tr></thead>
+          <tbody>
+            <tr><td>전체 느림</td><td>DB 커넥션 풀 · 느린 쿼리 · 캐시 히트율</td></tr>
+            <tr><td>일부만 느림</td><td>특정 노드 · 특정 방 · 핫키</td></tr>
+            <tr><td>접속 실패 급증</td><td>LB 헬스체크 · 인증서 만료 · 노드 수</td></tr>
+            <tr><td>메모리 계속 증가</td><td>이벤트 미해지 · 캐시 무제한 · 세션 누수</td></tr>
+            <tr><td>결제만 실패</td><td>외부 API 상태 · 서킷 열림</td></tr>
+            <tr><td>배포 직후 오류</td><td><b>즉시 롤백</b> 후 원인 분석</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>배포 직후 장애는 원인을 찾기 전에 되돌리세요.</b>
+        원인 분석은 <b>서비스가 정상으로 돌아온 뒤</b> 해도 됩니다.
+        이 판단을 미리 합의해 두면 새벽에 고민하지 않습니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">사후 분석</h4>
+      <ul class="tx">
+        <li><b>타임라인</b> — 언제 시작 · 언제 인지 · 언제 복구</li>
+        <li><b>영향 범위</b> — 몇 명이 얼마 동안 무엇을 못 했는가</li>
+        <li><b>직접 원인</b>과 <b>왜 막지 못했는가</b>를 구분</li>
+        <li><b>재발 방지 항목</b>에 담당자와 기한</li>
+        <li><b>사람을 탓하지 않기</b> — 한 사람의 실수로 무너지는 시스템이 문제입니다</li>
+      </ul>
+      <div class="note warn">
+        <b>인지 시간이 복구 시간보다 긴 경우가 많습니다.</b>
+        "30분 전부터 안 됐는데 문의를 보고 알았다"가 흔합니다.
+        <b>경보가 제 역할을 했는지</b>를 사후 분석에 꼭 넣으세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== k12 ==================== -->
+<section class="sec" id="k12">
+  <div class="sec-head rv">
+    <span class="no">SCALE 12</span>
+    <h2>비용 · <span class="t">글로벌 서비스</span></h2>
+    <p class="lead">기술적으로 가능한 것과 <b>지속 가능한 것</b>은 다릅니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">비용이 새는 곳</h4>
+      <ul class="tx">
+        <li><b>대역폭</b> — 게임 서버에서 가장 큰 비용. 패킷 크기가 곧 요금입니다</li>
+        <li><b>과도한 인스턴스</b> — 새벽에도 최대치로 켜 두는 경우</li>
+        <li><b>로그·메트릭 보관</b> — 전부 무기한 보관하면 저장 비용이 서버를 넘습니다</li>
+        <li><b>리전 간 전송</b> — 같은 리전 안에서 처리하도록 배치</li>
+        <li><b>안 쓰는 리소스</b> — 테스트용 인스턴스·스냅샷이 남아 있습니다</li>
+      </ul>
+      <div class="note tip">
+        <b>패킷 20% 줄이기 = 대역폭 비용 20% 절감</b>입니다.
+        AOI·델타 압축·전송 주기 조정은 <b>성능 개선이자 비용 절감</b>입니다
+        (🌐 게임 서버 탭 04).
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">글로벌 서비스</h4>
+      <ul class="tx">
+        <li><b>지연은 물리 법칙</b> — 서울↔미국 서부 왕복 130ms 는 줄일 수 없습니다.
+          실시간 대전이면 <b>지역별 서버</b>가 유일한 답입니다</li>
+        <li><b>계정은 글로벌, 전투는 지역</b> 으로 나누는 구조가 일반적입니다</li>
+        <li><b>시간대·명절</b> — 이벤트 시각을 UTC 로 저장하고 표시할 때 변환</li>
+        <li><b>법규</b> — 개인정보 이전·연령 등급·확률 공시는 국가마다 다릅니다</li>
+      </ul>
+      <div class="note tip">
+        <b>다음 단계</b> — 서버 배포·프록시·HTTPS 운영은
+        🌐 <b>웹서버 가이드</b>, DB 튜닝은 🗄️ <b>데이터베이스 가이드</b>,
+        런타임 내부(GC·스레드풀)는 <b>🔬 전문가 · CLR 내부</b> 탭에서 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /pane-scale -->
