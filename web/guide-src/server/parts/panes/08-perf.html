@@ -1,0 +1,1045 @@
+<!-- ============================================================
+     성능 · 튜닝 PANE
+     ============================================================ -->
+<div class="pane" id="pane-perf">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> PERFORMANCE · KEEPALIVE · CACHE · KERNEL · LOAD TEST</div>
+  <h1>성능 —<br>측정하고<br>고칩니다</h1>
+  <p class="tx">
+    "느리다"를 <b>숫자로 바꾸는 것</b>이 시작입니다.
+    그다음 <b>어디가 병목인지 지목</b>하고, 효과가 큰 것부터 고칩니다.
+    설정부터 만지는 것은 거의 항상 잘못된 순서입니다 —
+    <b>측정 → 병목 지목 → 개선 → 재측정</b>의 순환을 익힙니다.
+  </p>
+  <div class="stats">
+    <div><b>14</b><span>SECTIONS</span></div>
+    <div><b>측정</b><span>먼저</span></div>
+    <div><b>p99</b><span>기준</span></div>
+  </div>
+</header>
+
+<!-- ==================== p01 ==================== -->
+<section class="sec" id="p01">
+  <div class="sec-head rv">
+    <span class="no">SECTION 01</span>
+    <h2>성능 <span class="t">지표</span> 읽기</h2>
+    <p class="lead">평균은 거짓말을 합니다. <b>백분위(percentile)</b>로 말해야 합니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:22%">지표</th><th>의미</th></tr>
+      <tr><td><b>RPS · TPS</b></td><td>초당 처리한 요청 수 — <b>처리량</b></td></tr>
+      <tr><td><b>지연 (latency)</b></td><td>요청 하나에 걸린 시간 — <b>체감 속도</b></td></tr>
+      <tr><td><b>p50 (중앙값)</b></td><td>절반의 사용자가 이보다 빠름</td></tr>
+      <tr><td><b>p95 · p99</b></td><td class="ok">★ <b>상위 5%·1% 느린 요청</b> — 실제 불만이 여기서 나옵니다</td></tr>
+      <tr><td><b>동시 접속</b></td><td>같은 시점에 열려 있는 연결 수</td></tr>
+      <tr><td><b>오류율</b></td><td>5xx 비율 — 성능 문제는 오류로 나타나는 경우가 많습니다</td></tr>
+      <tr><td><b>포화도</b></td><td>CPU·메모리·커넥션 풀의 사용률 — 한계에 얼마나 가까운가</td></tr>
+    </table>
+  </div>
+
+  <div class="note info rv d1">
+    <b>왜 평균이 아니라 p99 인가</b> —
+    응답 시간 100건 중 99건이 50ms, 1건이 5초라면 <b>평균은 99.5ms</b> 로 훌륭해 보입니다.
+    그런데 그 1건을 겪은 사용자는 <b>"사이트가 멈췄다"</b>고 느낍니다.
+    <br>페이지 하나가 요청 50개를 보낸다면, <b>p99 가 5초일 때
+    사용자의 40%가 최소 한 번은 그 5초를 경험</b>합니다.
+    <b>꼬리 지연(tail latency)이 실제 체감을 지배합니다.</b>
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># Nginx 로그에서 백분위 계산 (log_format 에 $request_time 이 있어야 합니다)
+awk '{print $NF}' /var/log/nginx/access.log | sort -n | awk '
+{ a[NR] = $1 }
+END {
+  printf "count=%d\n", NR
+  printf "p50=%.3f\n", a[int(NR*0.50)]
+  printf "p95=%.3f\n", a[int(NR*0.95)]
+  printf "p99=%.3f\n", a[int(NR*0.99)]
+  printf "max=%.3f\n", a[NR]
+}'</code></pre>
+  <div class="out rv d1">count=48213
+p50=0.042
+p95=0.310
+p99=1.850     ← 여기를 봐야 합니다
+max=30.002</div>
+
+  <h3 class="sub">목표를 먼저 정하세요</h3>
+  <pre class="code rv d2" data-lang="text"><code>나쁜 목표 : "빠르게 만들자"
+좋은 목표 : "상품 목록 API 를 p95 200ms 이내로, 초당 300건 처리"
+
+이렇게 정하면
+· 달성했는지 판단할 수 있고
+· 어디까지 최적화할지 멈출 지점이 생기고
+· 부하 테스트 시나리오가 저절로 나옵니다</code></pre>
+  <div class="note tip rv d2">
+    <b>용량 산정의 기본 공식</b>
+    <br><code>필요 동시 처리 수 ≈ 목표 RPS × 평균 응답 시간(초)</code>
+    <br>목표 300 RPS · 평균 0.2초 → 동시 60건을 처리할 수 있어야 합니다.
+    여기에 <b>여유 2배</b>를 두고 워커·스레드·커넥션 풀을 설계합니다.
+  </div>
+</section>
+
+<!-- ==================== p02 ==================== -->
+<section class="sec" id="p02">
+  <div class="sec-head rv">
+    <span class="no">SECTION 02</span>
+    <h2>worker 수와 <span class="t">커넥션</span></h2>
+    <p class="lead">Nginx 의 가장 기본적인 용량 설정입니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code>worker_processes auto;             # CPU 코어 수만큼 (권장)
+worker_rlimit_nofile 65535;        # 워커당 열 수 있는 파일·소켓 수
+
+events {
+    worker_connections 4096;       # 워커 하나가 다룰 최대 연결
+    multi_accept on;
+    use epoll;                     # 리눅스 기본 (명시 불필요)
+}</code></pre>
+
+  <div class="note info rv d1">
+    <b>동시 처리 가능 연결 수</b>
+    <br><code>worker_processes × worker_connections</code>
+    <br>다만 <b>프록시는 연결을 2개 씁니다</b>(클라이언트 1 + 업스트림 1).
+    그래서 실제 동시 사용자는 절반 정도로 봐야 합니다.
+    <br>8코어 × 4096 = 32,768 → <b>프록시 기준 약 16,000 동시 요청</b>
+  </div>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:30%">설정</th><th>지침</th></tr>
+      <tr><td><code>worker_processes</code></td>
+        <td class="ok"><code>auto</code> 로 두세요. 코어보다 많이 만들면 오히려 손해입니다</td></tr>
+      <tr><td><code>worker_connections</code></td>
+        <td>Nginx 기본값은 512, 배포판 설정 파일은 보통 768~1024 → <b>4096~8192</b> 로.
+          <code>worker_rlimit_nofile</code> 보다 작아야 합니다</td></tr>
+      <tr><td><code>worker_rlimit_nofile</code></td>
+        <td class="warn">시스템 <code>ulimit -n</code> 을 넘을 수 없습니다 — systemd 설정도 함께(p10)</td></tr>
+      <tr><td><code>worker_cpu_affinity</code></td>
+        <td>워커를 특정 코어에 고정. 대부분 필요 없습니다</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d2" data-lang="bash"><code># 현재 상태 확인
+nproc                                    # CPU 코어 수
+ulimit -n                                # 열 수 있는 파일 수
+cat /proc/$(pgrep -f 'nginx: master')/limits | grep 'open files'
+
+# 실제 연결 수 (stub_status 활성화 필요 — o08 참고)
+curl -s http://127.0.0.1/nginx_status</code></pre>
+  <div class="out rv d2">Active connections: 291
+server accepts handled requests
+ 16630948 16630948 31070465
+Reading: 6 Writing: 179 Waiting: 106</div>
+  <div class="note tip rv d2">
+    <b>읽는 법</b> —
+    <code>Active</code> 가 <code>worker_processes × worker_connections</code> 에 가까워지면 한계입니다.
+    <code>Waiting</code> 이 크면 <b>keepalive 연결이 많다</b>는 뜻으로 정상입니다.
+    <code>accepts</code> 와 <code>handled</code> 가 <b>다르면</b> 연결을 거부한 것이므로 즉시 조치가 필요합니다.
+  </div>
+</section>
+
+<!-- ==================== p03 ==================== -->
+<section class="sec" id="p03">
+  <div class="sec-head rv">
+    <span class="no">SECTION 03</span>
+    <h2><span class="t">keepalive</span> 이해하기</h2>
+    <p class="lead">
+      연결을 <b>끊지 않고 재사용</b>하는 것입니다. 연결을 새로 맺는 비용이 생각보다 큽니다.
+    </p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>keepalive 없음</h5>
+      <pre class="code" data-lang="text"><code>요청마다
+  TCP 3-way 핸드셰이크 (1 RTT)
++ TLS 핸드셰이크        (1~2 RTT)
++ 실제 요청·응답        (1 RTT)
+= 3~4 RTT
+
+지연 50ms 환경이면 요청당 150~200ms 가
+'연결 맺는 데만' 소모됩니다</code></pre>
+    </div>
+    <div class="good">
+      <h5>keepalive 사용</h5>
+      <pre class="code" data-lang="text"><code>첫 요청만 핸드셰이크
+이후 요청은 실제 요청·응답만 (1 RTT)
+
+페이지 하나에 요청 50개라면
+차이가 압도적입니다</code></pre>
+    </div>
+  </div>
+
+  <pre class="code rv d1" data-lang="conf"><code># ── 클라이언트 ↔ Nginx
+keepalive_timeout 65s;             # 유휴 연결 유지 시간
+keepalive_requests 1000;           # 한 연결로 처리할 최대 요청 수
+
+# ── Nginx ↔ 백엔드 (★ 기본이 꺼져 있어 매번 새로 연결합니다)
+upstream backend {
+    server 127.0.0.1:8080;
+    keepalive 64;                  # 워커당 유지할 유휴 연결 수
+    keepalive_timeout 60s;
+    keepalive_requests 1000;
+}
+
+server {
+    location / {
+        proxy_pass http://backend;
+        proxy_http_version 1.1;         # ★ 1.0 은 keepalive 미지원
+        proxy_set_header Connection "";  # ★ 기본 'close' 헤더를 지웁니다
+    }
+}</code></pre>
+
+  <div class="note warn rv d1">
+    <b>업스트림 keepalive 는 세 가지를 모두 해야 동작합니다.</b>
+    <br>① <code>upstream</code> 블록에 <code>keepalive N;</code>
+    <br>② <code>proxy_http_version 1.1;</code>
+    <br>③ <code>proxy_set_header Connection "";</code>
+    <br>하나라도 빠지면 <b>매 요청마다 새 TCP 연결</b>을 맺습니다.
+    이것만 고쳐도 지연이 눈에 띄게 줄어드는 경우가 많습니다.
+  </div>
+
+  <h3 class="sub">트레이드오프</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">값을 늘리면</th><th>효과</th></tr>
+      <tr><td><code>keepalive_timeout</code> ↑</td>
+        <td class="ok">재사용률 상승 · <span style="color:var(--rose)">유휴 연결이 자원을 점유</span></td></tr>
+      <tr><td><code>keepalive_requests</code> ↑</td>
+        <td class="ok">핸드셰이크 감소 · <span style="color:var(--rose)">한 연결에 편중될 수 있음</span></td></tr>
+      <tr><td><code>upstream keepalive</code> ↑</td>
+        <td class="ok">백엔드 연결 비용 감소 · <span style="color:var(--rose)">백엔드가 유지할 연결이 늘어남</span></td></tr>
+    </table>
+  </div>
+  <div class="note tip rv d2">
+    <b>백엔드 쪽 타임아웃과 맞추세요.</b>
+    백엔드의 유휴 타임아웃이 Nginx 의 <code>keepalive_timeout</code> 보다 <b>짧으면</b>,
+    Nginx 가 <b>이미 끊긴 연결</b>로 요청을 보내다 <b>502 가 간헐적으로</b> 발생합니다.
+    <br><b>Nginx 쪽을 백엔드보다 짧게</b> 잡는 것이 안전합니다.
+  </div>
+</section>
+
+<!-- ==================== p04 ==================== -->
+<section class="sec" id="p04">
+  <div class="sec-head rv">
+    <span class="no">SECTION 04</span>
+    <h2>정적 파일 <span class="t">최적화</span></h2>
+    <p class="lead">가장 값싸고 효과가 큰 최적화입니다. <b>요청 자체를 없앱니다.</b></p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code>http {
+    sendfile on;                   # ★ 커널이 직접 전송 (유저 공간 복사 생략)
+    tcp_nopush on;                 # 헤더와 본문을 모아서 전송
+    tcp_nodelay on;                # keepalive 연결에서는 즉시 전송
+
+    # 파일 메타데이터 캐시 (자주 요청되는 정적 파일에 효과적)
+    open_file_cache          max=10000 inactive=60s;
+    open_file_cache_valid    60s;
+    open_file_cache_min_uses 2;
+    open_file_cache_errors   on;
+}
+
+server {
+    # 해시가 붙은 빌드 산출물 — 영구 캐시
+    location ~* \.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp|avif)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    # 일반 이미지
+    location ~* \.(png|jpe?g|gif|svg|ico|webp|avif)$ {
+        expires 30d;
+        add_header Cache-Control "public";
+        access_log off;
+    }
+
+    # HTML 은 캐시하지 않음
+    location ~* \.html$ {
+        add_header Cache-Control "no-store, must-revalidate";
+    }
+}</code></pre>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:30%">캐시 헤더</th><th>동작</th></tr>
+      <tr><td><code>max-age=31536000</code></td><td>1년간 재요청하지 않음</td></tr>
+      <tr><td><code>immutable</code></td><td class="ok"><b>새로고침해도 재검증하지 않음</b> — 해시 붙은 파일에 필수</td></tr>
+      <tr><td><code>public</code></td><td>CDN·프록시도 캐시 가능</td></tr>
+      <tr><td><code>private</code></td><td>브라우저만 캐시 (사용자별 응답)</td></tr>
+      <tr><td><code>no-store</code></td><td>어디에도 저장 금지</td></tr>
+      <tr><td><code>must-revalidate</code></td><td>만료되면 반드시 서버에 확인</td></tr>
+      <tr><td><code>stale-while-revalidate=60</code></td><td>만료된 것을 주면서 뒤에서 갱신 (체감 속도 개선)</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d1">
+    <b>가장 빠른 요청은 보내지 않는 요청입니다.</b>
+    캐시 헤더 한 줄로 <b>재방문자의 요청 수십 개가 아예 발생하지 않습니다.</b>
+    서버 부하도 줄고 사용자 체감도 개선되는, 드물게 <b>양쪽 모두에 좋은</b> 최적화입니다.
+  </div>
+
+  <h3 class="sub">ETag 와 조건부 요청</h3>
+  <pre class="code rv d2" data-lang="conf"><code>etag on;                          # 기본값 (파일 크기+수정시각 기반)
+
+# 브라우저가 If-None-Match 로 물으면 Nginx 가 304 Not Modified 로 응답
+# → 본문 전송 없이 "안 바뀌었다"만 알려 줍니다
+
+# 여러 서버가 같은 파일을 서빙할 때 ETag 가 달라지면 캐시 효율이 떨어집니다
+# 이 경우 파일 해시 기반 파일명 + immutable 조합이 더 확실합니다</code></pre>
+  <pre class="code rv d2" data-lang="bash"><code># 캐시가 실제로 동작하는지 확인
+curl -I https://example.com/app.a1b2c3.js
+# cache-control: public, immutable
+# expires: ...
+
+# 조건부 요청 테스트
+curl -I -H 'If-None-Match: "abc123"' https://example.com/style.css
+# HTTP/2 304   ← 본문을 안 보냄</code></pre>
+</section>
+
+<!-- ==================== p05 ==================== -->
+<section class="sec" id="p05">
+  <div class="sec-head rv">
+    <span class="no">SECTION 05</span>
+    <h2>압축 <span class="t">전략</span></h2>
+    <p class="lead">CPU 를 써서 전송량을 줄이는 거래입니다. <b>균형점</b>이 있습니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code>gzip on;
+gzip_vary on;                      # ★ Vary: Accept-Encoding
+gzip_comp_level 5;                 # 1~9 · 5~6 이 최적
+gzip_min_length 1024;              # 작은 파일은 압축 이득이 없습니다
+gzip_proxied any;
+gzip_types
+    text/plain text/css text/xml
+    application/json application/javascript application/xml+rss
+    image/svg+xml font/ttf font/otf;
+
+# 미리 압축된 파일이 있으면 그것을 사용 (CPU 0)
+gzip_static on;
+
+# brotli (모듈 필요) — gzip 보다 15~20% 더 작습니다
+brotli on;
+brotli_comp_level 5;
+brotli_types text/plain text/css application/json application/javascript image/svg+xml;
+brotli_static on;</code></pre>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:22%">레벨</th><th>크기 감소</th><th>CPU</th></tr>
+      <tr><td>gzip 1</td><td>보통</td><td class="ok">매우 낮음</td></tr>
+      <tr><td class="ok">gzip 5~6</td><td class="ok"><b>거의 최대치</b></td><td class="ok">적정</td></tr>
+      <tr><td>gzip 9</td><td class="warn">6 대비 1~2% 추가</td><td class="no">몇 배 증가</td></tr>
+      <tr><td>brotli 5</td><td class="ok">gzip 대비 15~20% 더 작음</td><td>적정</td></tr>
+      <tr><td>brotli 11</td><td>최대</td><td class="no">매우 높음 — <b>사전 압축 전용</b></td></tr>
+    </table>
+  </div>
+
+  <div class="note warn rv d1">
+    <b>이미 압축된 것을 또 압축하지 마세요.</b>
+    JPG·PNG·WebP·MP4·ZIP·woff2 는 <b>이미 압축된 형식</b>입니다.
+    다시 압축하면 CPU 만 쓰고 <b>크기는 오히려 커질 수 있습니다.</b>
+    <code>gzip_types</code> 에 이미지·동영상을 넣지 마세요.
+  </div>
+
+  <h3 class="sub">사전 압축 — 가장 좋은 방법</h3>
+  <pre class="code rv d1" data-lang="bash"><code># 빌드 시점에 최고 레벨로 압축해 둡니다
+find dist -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.svg' \) \
+  -exec gzip -9 -k {} \; \
+  -exec brotli -q 11 -k {} \;
+
+# Nginx 는 요청 시 app.js.br · app.js.gz 를 찾아 그대로 전송합니다
+# → 압축 CPU 0 · 압축률 최대</code></pre>
+  <div class="note tip rv d2">
+    <b>정적 파일은 사전 압축, 동적 응답은 실시간 압축(레벨 5).</b>
+    이 조합이 CPU 와 전송량의 균형을 가장 잘 맞춥니다.
+    <br>트래픽이 아주 많은 서버에서는 <b>압축이 CPU 병목</b>이 될 수 있으니
+    <code>top</code> 으로 Nginx 워커의 CPU 사용률을 확인하세요.
+  </div>
+
+  <pre class="code rv d2" data-lang="bash"><code># 압축이 적용되는지 확인
+curl -H "Accept-Encoding: gzip, br" -I https://example.com/app.js | grep -i content-encoding
+
+# 크기 비교
+curl -s https://example.com/app.js | wc -c                          # 원본
+curl -s -H "Accept-Encoding: gzip" https://example.com/app.js | wc -c  # 압축</code></pre>
+</section>
+
+<!-- ==================== p06 ==================== -->
+<section class="sec" id="p06">
+  <div class="sec-head rv">
+    <span class="no">SECTION 06</span>
+    <h2>프록시 <span class="t">버퍼링</span></h2>
+    <p class="lead">
+      느린 클라이언트가 <b>앱 워커를 붙잡지 못하게</b> 막는 중요한 장치입니다.
+    </p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>버퍼링 없음</h5>
+      <pre class="code" data-lang="text"><code>앱 → (느린 3G 사용자에게 직접 전송)
+
+응답 1MB 를 보내는 데 10초가 걸리면
+그동안 앱 워커가 계속 묶여 있습니다
+
+워커 200개인데 느린 사용자 200명이면
+서비스 전체가 멈춥니다</code></pre>
+    </div>
+    <div class="good">
+      <h5>버퍼링 사용 (기본값)</h5>
+      <pre class="code" data-lang="text"><code>앱 → Nginx 가 응답 전체를 즉시 받아 저장
+     (앱 워커는 바로 풀려납니다)
+Nginx → 느린 사용자에게 천천히 전송
+
+앱은 빠른 Nginx 만 상대하면 됩니다
+느린 클라이언트는 Nginx 가 흡수합니다</code></pre>
+    </div>
+  </div>
+
+  <pre class="code rv d1" data-lang="conf"><code>location / {
+    proxy_pass http://backend;
+
+    proxy_buffering on;              # 기본값 · 켜 두세요
+    proxy_buffer_size 8k;            # 응답 헤더용 버퍼
+    proxy_buffers 16 8k;             # 본문 버퍼 개수 × 크기 (= 128k)
+    proxy_busy_buffers_size 16k;
+
+    # 버퍼를 넘으면 임시 파일에 씁니다
+    proxy_max_temp_file_size 1024m;
+    proxy_temp_file_write_size 16k;
+    proxy_temp_path /var/cache/nginx/proxy_temp;
+}</code></pre>
+
+  <h3 class="sub">버퍼링을 꺼야 하는 경우</h3>
+  <pre class="code rv d1" data-lang="conf"><code># SSE · 실시간 스트리밍 — 버퍼링하면 이벤트가 모였다가 한꺼번에 갑니다
+location /events {
+    proxy_pass http://backend;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    add_header X-Accel-Buffering no;
+}
+
+# 대용량 업로드 — 요청 본문 버퍼링을 끄고 스트리밍
+location /upload {
+    proxy_pass http://backend;
+    proxy_request_buffering off;
+    client_max_body_size 500m;
+}</code></pre>
+  <div class="note tip rv d1">
+    <b>앱에서 응답별로 끄는 방법</b> —
+    응답 헤더에 <code>X-Accel-Buffering: no</code> 를 넣으면
+    <b>그 응답만</b> 버퍼링이 꺼집니다.
+    location 전체를 바꾸지 않아도 되어 편리합니다.
+  </div>
+
+  <div class="note warn rv d2">
+    <b><code>upstream sent too big header</code> 오류</b>가 나면
+    <code>proxy_buffer_size</code> 를 늘려야 합니다.
+    세션 쿠키가 많거나 헤더가 큰 응답에서 발생합니다.
+    <br><code>proxy_buffer_size 16k; proxy_busy_buffers_size 24k;</code>
+  </div>
+
+  <pre class="code rv d2" data-lang="bash"><code># 임시 파일이 많이 생기면 버퍼가 부족하다는 신호입니다
+ls -l /var/cache/nginx/proxy_temp/ | head
+watch -n1 'ls /var/cache/nginx/proxy_temp/ | wc -l'
+
+# 디스크 IO 가 부담되면 proxy_buffers 를 늘려 메모리에서 처리하세요</code></pre>
+</section>
+
+<!-- ==================== p07 ==================== -->
+<section class="sec" id="p07">
+  <div class="sec-head rv">
+    <span class="no">SECTION 07</span>
+    <h2>업스트림 <span class="t">커넥션 재사용</span></h2>
+    <p class="lead">p03 의 keepalive 를 백엔드 쪽에 적용하는 이야기입니다. 효과가 큽니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code>upstream backend {
+    server 10.0.1.11:8080;
+    server 10.0.1.12:8080;
+
+    keepalive 64;                  # ★ 워커당 유지할 유휴 연결 수
+    keepalive_timeout 60s;
+    keepalive_requests 1000;
+}
+
+server {
+    location / {
+        proxy_pass http://backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+}</code></pre>
+
+  <div class="note info rv d1">
+    <b><code>keepalive</code> 값 정하기</b> —
+    <b>워커당</b> 값이므로 실제 유지 연결은 <code>worker_processes × keepalive</code> 입니다.
+    8코어에 <code>keepalive 64</code> 면 백엔드에 <b>최대 512개 유휴 연결</b>이 유지됩니다.
+    <br>백엔드가 감당할 수 있는지 확인하세요 — 톰캣 <code>maxConnections</code> ·
+    Node 의 파일 디스크립터 한계에 걸릴 수 있습니다.
+  </div>
+
+  <h3 class="sub">HTTPS 업스트림이라면</h3>
+  <pre class="code rv d1" data-lang="conf"><code>upstream backend_ssl {
+    server backend.internal:443;
+    keepalive 32;
+}
+
+location / {
+    proxy_pass https://backend_ssl;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+
+    proxy_ssl_session_reuse on;         # ★ TLS 세션 재사용 (핸드셰이크 생략)
+    proxy_ssl_server_name on;           # SNI 전송
+    proxy_ssl_name backend.internal;
+    proxy_ssl_verify on;
+    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-bundle.crt;
+}</code></pre>
+  <div class="note warn rv d1">
+    <b>업스트림이 HTTPS 면 매 연결마다 TLS 핸드셰이크가 추가</b>됩니다.
+    keepalive 와 <code>proxy_ssl_session_reuse</code> 를 함께 쓰지 않으면
+    <b>지연이 크게 늘어납니다.</b>
+    <br>같은 사설망 안이라면 <b>평문 HTTP 로 두고 망 자체를 보호</b>하는 구성도 흔합니다
+    (다만 보안 요구사항에 따라 다릅니다).
+  </div>
+
+  <pre class="code rv d2" data-lang="bash"><code># 재사용이 되고 있는지 확인 — 백엔드의 연결 수를 보면 알 수 있습니다
+ss -tn state established '( dport = :8080 )' | wc -l
+
+# keepalive 설정 전후로 이 값을 비교해 보세요
+# 설정 후에는 요청 수와 무관하게 연결 수가 안정적으로 유지됩니다</code></pre>
+</section>
+
+<!-- ==================== p08 ==================== -->
+<section class="sec" id="p08">
+  <div class="sec-head rv">
+    <span class="no">SECTION 08</span>
+    <h2>캐시 계층 <span class="t">설계</span></h2>
+    <p class="lead">앞쪽에서 막을수록 좋습니다. <b>네 개의 층</b>이 있습니다.</p>
+  </div>
+
+  <div class="pipe rv">
+    <div class="prow"><span class="tagn">1 · 브라우저</span>
+      <div><b>가장 빠릅니다 — 네트워크를 아예 안 씁니다</b>
+        <span><code>Cache-Control</code> 헤더로 제어. 정적 자원은 여기서 끝내는 것이 최선입니다.</span></div></div>
+    <div class="parrow">▼ 없으면</div>
+    <div class="prow"><span class="tagn">2 · CDN</span>
+      <div><b>사용자와 가까운 엣지에서 응답</b>
+        <span>전 세계 지연이 크게 줄고 오리진 부하가 사라집니다.</span></div></div>
+    <div class="parrow">▼ 없으면</div>
+    <div class="prow"><span class="tagn">3 · 웹서버</span>
+      <div><b><code>proxy_cache</code> — 앱을 거치지 않고 응답</b>
+        <span>동적 응답도 캐시할 수 있습니다(🟩 Nginx n13).</span></div></div>
+    <div class="parrow">▼ 없으면</div>
+    <div class="prow"><span class="tagn">4 · 앱 · Redis</span>
+      <div><b>계산 결과·DB 조회 결과를 캐시</b>
+        <span>여기까지 오면 이미 비용이 발생했습니다.</span></div></div>
+    <div class="parrow">▼ 없으면</div>
+    <div class="prow"><span class="tagn">5 · DB</span>
+      <div><b>가장 비쌉니다</b>
+        <span>DB 내부 캐시(버퍼 풀)도 있지만 여기까지 오는 요청을 줄이는 것이 핵심입니다.</span></div></div>
+  </div>
+
+  <h3 class="sub">무엇을 어디에 캐시할까</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">대상</th><th>위치와 TTL</th></tr>
+      <tr><td>해시 붙은 JS·CSS</td><td class="ok">브라우저 + CDN · <b>1년 (immutable)</b></td></tr>
+      <tr><td>이미지</td><td>브라우저 + CDN · 30일</td></tr>
+      <tr><td><code>index.html</code></td><td class="warn"><b>캐시 금지</b> (또는 매우 짧게)</td></tr>
+      <tr><td>공개 API 목록 (상품 목록 등)</td><td>웹서버 <code>proxy_cache</code> · 1~10분</td></tr>
+      <tr><td>사용자별 응답</td><td class="no"><b>공유 캐시 금지</b> — <code>private</code> 또는 캐시 안 함</td></tr>
+      <tr><td>DB 조회 결과</td><td>앱 · Redis · 수 분</td></tr>
+      <tr><td>실시간 데이터 (재고·잔액)</td><td class="no">캐시하지 않음</td></tr>
+    </table>
+  </div>
+
+  <div class="note warn rv d1">
+    <b>가장 위험한 사고 — 개인화된 응답의 공유 캐시</b>
+    <br>로그인한 A 의 응답이 캐시되어 <b>B 에게 그대로 전달</b>되는 사고입니다.
+    실제로 대형 서비스에서 여러 번 발생했습니다.
+    <br><b>기본을 "캐시하지 않음"으로 두고, 캐시할 것만 명시적으로</b> 지정하세요.
+    <code>Authorization</code> 헤더나 세션 쿠키가 있으면 <b>무조건 우회</b>하도록 설정합니다.
+  </div>
+
+  <h3 class="sub">캐시 무효화 전략</h3>
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:26%">전략</th><th>설명</th></tr>
+      <tr><td><b>URL 에 버전·해시</b></td>
+        <td class="ok">★ 가장 확실합니다. 내용이 바뀌면 URL 이 바뀌므로 무효화가 필요 없습니다</td></tr>
+      <tr><td><b>짧은 TTL</b></td>
+        <td>무효화 대신 <b>금방 만료</b>되게. 단순하고 안전합니다</td></tr>
+      <tr><td><b>stale-while-revalidate</b></td>
+        <td>만료된 것을 주면서 뒤에서 갱신 — 체감 속도가 좋습니다</td></tr>
+      <tr><td><b>명시적 퍼지</b></td>
+        <td class="warn">CDN API 로 삭제. Nginx 오픈소스는 <b>선택 삭제 기능이 없습니다</b></td></tr>
+    </table>
+  </div>
+  <div class="note tip rv d2">
+    <b>캐시 설계의 원칙</b> —
+    <b>무효화는 어렵습니다.</b> 그래서 "무효화가 필요 없는 구조"(URL 버저닝)를 우선하고,
+    그다음이 "짧은 TTL", 마지막이 "명시적 퍼지"입니다.
+    <br>"이 데이터가 5분 늦어도 괜찮은가?"를 <b>기능별로</b> 판단하세요.
+  </div>
+</section>
+
+<!-- ==================== p09 ==================== -->
+<section class="sec" id="p09">
+  <div class="sec-head rv">
+    <span class="no">SECTION 09</span>
+    <h2>커널 파라미터 <span class="t">튜닝</span></h2>
+    <p class="lead">동시 접속이 아주 많아지면 <b>OS 설정이 먼저 한계</b>에 닿습니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># /etc/sysctl.d/99-webserver.conf
+
+# ── 연결 대기열
+net.core.somaxconn = 65535               # accept 대기열 (기본 4096)
+net.ipv4.tcp_max_syn_backlog = 65535     # SYN 대기열
+net.core.netdev_max_backlog = 65535      # NIC 수신 대기열
+
+# ── 포트·연결 재사용
+net.ipv4.ip_local_port_range = 10240 65535
+net.ipv4.tcp_tw_reuse = 1                # TIME_WAIT 소켓 재사용 (클라이언트 방향)
+net.ipv4.tcp_fin_timeout = 15
+
+# ── keepalive
+net.ipv4.tcp_keepalive_time = 300
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 3
+
+# ── 파일 디스크립터
+fs.file-max = 2097152
+
+# ── 메모리 (대량 연결 시)
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+
+# ── SYN flood 완화
+net.ipv4.tcp_syncookies = 1
+
+# 적용
+# sudo sysctl --system
+# sysctl -a | grep somaxconn   로 확인</code></pre>
+
+  <div class="note warn rv d1">
+    <b><code>net.ipv4.tcp_tw_recycle</code> 을 쓰지 마세요.</b>
+    NAT 뒤의 여러 클라이언트가 <b>연결에 실패</b>하는 문제를 일으키며,
+    <b>리눅스 커널 4.12 에서 제거</b>됐습니다.
+    옛 튜닝 글에 자주 등장하니 주의하세요.
+    <code>tcp_tw_reuse</code> 는 안전합니다.
+  </div>
+
+  <pre class="code rv d1" data-lang="conf"><code># Nginx 쪽에서도 백로그를 맞춰야 합니다
+server {
+    listen 80 backlog=65535 reuseport;
+    # backlog 는 somaxconn 을 넘을 수 없습니다
+    # reuseport 는 커널이 워커별로 연결을 분배 (로드 불균형 완화)
+}</code></pre>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:30%">증상</th><th>확인할 파라미터</th></tr>
+      <tr><td>연결이 거부됨 (피크 시)</td><td><code>somaxconn</code> · <code>tcp_max_syn_backlog</code> · Nginx <code>backlog</code></td></tr>
+      <tr><td><code>TIME_WAIT</code> 이 수만 개</td><td><code>tcp_tw_reuse</code> · <b>업스트림 keepalive</b>(근본 해결)</td></tr>
+      <tr><td>포트 고갈</td><td><code>ip_local_port_range</code> · keepalive 로 연결 재사용</td></tr>
+      <tr><td>too many open files</td><td><code>fs.file-max</code> · <code>ulimit</code> · systemd <code>LimitNOFILE</code> (p10)</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d2" data-lang="bash"><code># 현재 상태 확인
+ss -s                                    # 소켓 상태 요약
+ss -tan state time-wait | wc -l          # TIME_WAIT 개수
+netstat -s | grep -i -E 'listen|overflow'  # 대기열 넘침 여부
+cat /proc/net/netstat | grep -i listen</code></pre>
+  <div class="note tip rv d2">
+    <b>커널 튜닝은 마지막 카드입니다.</b>
+    <b>초당 수천 연결 이상</b>을 다루는 서버가 아니라면
+    기본값으로도 충분합니다.
+    <b>먼저 애플리케이션·쿼리·캐시</b>를 개선하세요 — 효과가 훨씬 큽니다.
+  </div>
+</section>
+
+<!-- ==================== p10 ==================== -->
+<section class="sec" id="p10">
+  <div class="sec-head rv">
+    <span class="no">SECTION 10</span>
+    <h2>파일 디스크립터 <span class="t">한계</span></h2>
+    <p class="lead">
+      <code>too many open files</code> — 트래픽이 늘면 반드시 만나는 오류입니다.
+    </p>
+  </div>
+
+  <div class="note info rv">
+    <b>리눅스에서는 소켓도 파일입니다.</b>
+    연결 하나가 파일 디스크립터 하나를 씁니다.
+    프록시는 <b>연결당 2개</b>(클라이언트 + 업스트림)를 쓰므로,
+    동시 1만 연결이면 <b>2만 개 이상</b>이 필요합니다.
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 현재 한계 확인
+ulimit -n                                        # 셸의 한계
+cat /proc/$(pgrep -f 'nginx: master')/limits | grep 'open files'
+
+# 실제 사용량
+ls /proc/$(pgrep -f 'nginx: worker' | head -1)/fd | wc -l
+lsof -p &lt;pid&gt; | wc -l
+
+# 시스템 전체
+cat /proc/sys/fs/file-nr    # 사용중 / 미사용 / 최대</code></pre>
+
+  <h3 class="sub">세 곳을 모두 올려야 합니다</h3>
+  <pre class="code rv d1" data-lang="conf"><code># ① 커널 전체
+# /etc/sysctl.d/99-limits.conf
+fs.file-max = 2097152
+
+# ② 사용자 한계
+# /etc/security/limits.conf
+*       soft  nofile  65535
+*       hard  nofile  65535
+nginx   soft  nofile  65535
+nginx   hard  nofile  65535</code></pre>
+  <pre class="code rv d1" data-lang="ini"><code># ③ systemd 서비스 (★ 가장 자주 놓칩니다)
+# limits.conf 는 systemd 서비스에 적용되지 않습니다!
+# /etc/systemd/system/nginx.service.d/override.conf
+[Service]
+LimitNOFILE=65535
+
+# sudo systemctl daemon-reload &amp;&amp; sudo systemctl restart nginx</code></pre>
+  <pre class="code rv d1" data-lang="conf"><code># ④ Nginx 설정에도
+worker_rlimit_nofile 65535;
+events { worker_connections 16384; }
+# worker_connections 는 worker_rlimit_nofile 보다 작아야 합니다</code></pre>
+
+  <div class="note warn rv d1">
+    <b><code>/etc/security/limits.conf</code> 만 고치면 안 됩니다.</b>
+    이 파일은 <b>PAM 을 거치는 로그인 세션</b>에만 적용됩니다.
+    systemd 로 실행되는 서비스는 <b>유닛 파일의 <code>LimitNOFILE</code></b> 을 따릅니다.
+    "설정했는데 안 올라간다"는 문제의 대부분이 이것입니다.
+    <br>반드시 <code>/proc/&lt;pid&gt;/limits</code> 로 <b>실제 프로세스</b>의 값을 확인하세요.
+  </div>
+
+  <pre class="code rv d2" data-lang="bash"><code># 확인 (설정 후)
+cat /proc/$(pgrep -f 'nginx: master')/limits | grep -i 'open files'
+# Max open files            65535                65535                files</code></pre>
+  <div class="note tip rv d2">
+    <b>컨테이너에서는</b> 도커·쿠버네티스 설정에서 지정합니다.
+    <br>· Docker — <code>--ulimit nofile=65535:65535</code>
+    <br>· Compose — <code>ulimits: nofile: {soft: 65535, hard: 65535}</code>
+    <br>· 쿠버네티스 — 노드의 kubelet·컨테이너 런타임 설정을 따릅니다
+  </div>
+</section>
+
+<!-- ==================== p11 ==================== -->
+<section class="sec" id="p11">
+  <div class="sec-head rv">
+    <span class="no">SECTION 11</span>
+    <h2>CDN 앞단 <span class="t">구성</span></h2>
+    <p class="lead">
+      전 세계 어디서든 <b>가까운 곳에서</b> 파일을 받게 합니다. 오리진 부하도 크게 줍니다.
+    </p>
+  </div>
+
+  <div class="pipe rv">
+    <div class="prow"><span class="tagn">사용자</span>
+      <div><b>가장 가까운 엣지 서버로 연결</b><span>DNS 나 애니캐스트로 자동 라우팅됩니다.</span></div></div>
+    <div class="parrow">▼ 캐시에 있으면 즉시 응답</div>
+    <div class="prow"><span class="tagn">CDN 엣지</span>
+      <div><b>캐시된 응답을 반환</b><span>오리진까지 가지 않습니다 — 지연이 수십 ms 로 줄어듭니다.</span></div></div>
+    <div class="parrow">▼ 없으면 (캐시 미스)</div>
+    <div class="prow"><span class="tagn">오리진</span>
+      <div><b>우리 Nginx · 앱</b><span>응답을 만들어 주고, CDN 이 그것을 캐시합니다.</span></div></div>
+  </div>
+
+  <pre class="code rv d1" data-lang="conf"><code># 오리진(Nginx) 쪽 설정 — CDN 이 캐시할 수 있게 헤더를 정확히 보냅니다
+location ~* \.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp)$ {
+    expires 1y;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    add_header Vary "Accept-Encoding";
+}
+
+# 개인화된 응답은 CDN 이 캐시하지 않게
+location /api/me {
+    add_header Cache-Control "private, no-store";
+    proxy_pass http://backend;
+}
+
+# ★ CDN 뒤에서 실제 클라이언트 IP 복원
+set_real_ip_from 173.245.48.0/20;      # CDN 대역 (제공자 문서에서 확인)
+set_real_ip_from 103.21.244.0/22;
+real_ip_header CF-Connecting-IP;        # 또는 X-Forwarded-For
+real_ip_recursive on;</code></pre>
+
+  <div class="note warn rv d1">
+    <b>CDN 을 붙이면 실제 IP 가 가려집니다.</b>
+    <code>set_real_ip_from</code> 으로 <b>CDN 대역을 신뢰</b>하도록 설정하지 않으면
+    <br>· 로그에 CDN IP 만 남고
+    <br>· <b>rate limit 이 전 사용자를 하나로 묶어</b> 정상 트래픽까지 차단합니다
+    <br>· 지역·IP 기반 로직이 전부 오동작합니다
+    <br>CDN 제공자의 <b>공식 IP 대역 목록</b>을 주기적으로 갱신하세요.
+  </div>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">확인 항목</th><th>내용</th></tr>
+      <tr><td><b>오리진 보호</b></td>
+        <td>오리진 IP 가 노출되면 CDN 을 우회한 직접 공격이 가능합니다.
+          <b>방화벽에서 CDN 대역만 허용</b>하세요</td></tr>
+      <tr><td><b>캐시 키</b></td>
+        <td>쿼리스트링·쿠키·헤더 중 무엇을 키에 포함할지 — 잘못 설정하면 <b>적중률 급락 또는 개인정보 유출</b></td></tr>
+      <tr><td><b>Vary 헤더</b></td>
+        <td><code>Accept-Encoding</code> 은 필요하지만, <code>User-Agent</code> 를 넣으면 <b>캐시가 사실상 무력화</b>됩니다</td></tr>
+      <tr><td><b>퍼지 절차</b></td>
+        <td>배포 시 무효화가 필요한 경로와 방법을 미리 정해 두세요</td></tr>
+      <tr><td><b>HTTPS 구간</b></td>
+        <td>CDN ↔ 오리진 구간도 <b>HTTPS 로</b> (Full Strict 모드)</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>CDN 없이도 할 수 있는 것</b> —
+    정적 자원에 <b>긴 캐시 헤더</b>를 붙이는 것만으로도
+    재방문자의 요청이 대부분 사라집니다.
+    <b>CDN 은 첫 방문자와 지리적 거리 문제를 해결</b>합니다.
+    국내 사용자만 대상이라면 효과가 제한적일 수 있으니 <b>측정 후 판단</b>하세요.
+  </div>
+</section>
+
+<!-- ==================== p12 ==================== -->
+<section class="sec" id="p12">
+  <div class="sec-head rv">
+    <span class="no">SECTION 12</span>
+    <h2>부하 <span class="t">테스트</span></h2>
+    <p class="lead">
+      성능은 <b>측정하지 않으면 알 수 없습니다.</b> "몇 명까지 버티냐"에 숫자로 답합니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:20%">도구</th><th>특징</th></tr>
+      <tr><td><b>k6</b></td><td class="ok">★ JS 로 시나리오 작성 · 지표가 풍부 · CI 연동이 쉽습니다</td></tr>
+      <tr><td><b>wrk</b></td><td>가볍고 빠름 · 단순 부하에 적합</td></tr>
+      <tr><td><b>ab</b> (ApacheBench)</td><td>가장 단순 · 빠른 확인용 (keepalive 처리에 한계)</td></tr>
+      <tr><td><b>JMeter</b></td><td>GUI · 복잡한 시나리오 · 무겁습니다</td></tr>
+      <tr><td><b>Locust</b></td><td>파이썬으로 시나리오 작성</td></tr>
+      <tr><td><b>Gatling</b></td><td>Scala 기반 · 리포트가 훌륭합니다</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 빠른 확인
+ab -n 10000 -c 100 -k https://example.com/
+wrk -t4 -c200 -d30s --latency https://example.com/</code></pre>
+
+  <pre class="code rv d1" data-lang="js"><code>// k6 시나리오 — load-test.js
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+
+export const options = {
+  stages: [
+    { duration: '1m',  target: 50  },    // 워밍업
+    { duration: '3m',  target: 200 },    // 부하 상승
+    { duration: '5m',  target: 200 },    // 유지
+    { duration: '1m',  target: 0   },    // 감소
+  ],
+  thresholds: {
+    http_req_duration: ['p(95)&lt;500', 'p(99)&lt;1500'],   // ★ 목표를 여기에
+    http_req_failed:   ['rate&lt;0.01'],                  // 오류율 1% 미만
+  },
+};
+
+export default function () {
+  const res = http.get('https://example.com/api/products');
+  check(res, {
+    'status 200': (r) =&gt; r.status === 200,
+    'body ok':    (r) =&gt; r.body.length &gt; 0,
+  });
+  sleep(1);
+}
+
+// k6 run load-test.js</code></pre>
+
+  <div class="note warn rv d1">
+    <b>부하 테스트에서 흔한 실수</b>
+    <br>· <b>운영 환경에 그대로 실행</b> — 실제 사용자에게 장애를 일으킵니다
+    <br>· <b>워밍업 없이 측정</b> — JIT·캐시·커넥션 풀이 준비되기 전 수치는 의미가 없습니다
+    <br>· <b>테스트 도구가 병목</b> — 부하 생성기의 CPU·네트워크를 함께 확인하세요
+    <br>· <b>같은 데이터만 반복 요청</b> — 캐시에 다 걸려 실제보다 좋게 나옵니다
+    <br>· <b>평균만 보기</b> — p95·p99 를 봐야 합니다
+  </div>
+
+  <h3 class="sub">해석하는 법</h3>
+  <pre class="code rv d2" data-lang="text"><code>동시 사용자를 늘려 가며 관찰합니다
+
+    RPS
+     │        ┌──────  ← 한계점(saturation): 여기서 더 늘려도 처리량이 안 늘어남
+     │      ╱
+     │    ╱                     이 지점의 동시 사용자 수가 '용량'입니다
+     │  ╱
+     └────────────── 동시 사용자
+
+    p99
+     │              ╱   ← 한계를 넘으면 지연이 급격히 치솟습니다
+     │         ╱
+     │ ────────
+     └────────────── 동시 사용자
+
+★ 처리량이 평평해지는 지점 = 한계
+★ 그 지점 이후에는 지연만 늘고 처리량은 그대로입니다</code></pre>
+</section>
+
+<!-- ==================== p13 ==================== -->
+<section class="sec" id="p13">
+  <div class="sec-head rv">
+    <span class="no">SECTION 13</span>
+    <h2>병목 찾기 <span class="t">절차</span></h2>
+    <p class="lead">감으로 고치지 마세요. <b>순서</b>가 있습니다.</p>
+  </div>
+
+  <div class="pipe rv">
+    <div class="prow"><span class="tagn">1</span>
+      <div><b>어디가 느린지 구간을 나눕니다</b>
+        <span>로그의 <code>$request_time</code> 과 <code>$upstream_response_time</code> 을 비교합니다.
+          <b>둘 다 크면 앱</b>, <b>request_time 만 크면 네트워크·전송</b>입니다.</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">2</span>
+      <div><b>서버 자원을 봅니다</b>
+        <span>CPU · 메모리 · 디스크 IO · 네트워크 중 무엇이 포화인지 확인합니다.</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">3</span>
+      <div><b>앱 안에서 다시 나눕니다</b>
+        <span>앱이 느리다면 <b>DB 쿼리 · 외부 API · 로직</b> 중 어디인지. APM·로그로 확인합니다.</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">4</span>
+      <div><b>하나씩 바꾸고 재측정</b>
+        <span>여러 개를 동시에 바꾸면 <b>무엇이 효과였는지 알 수 없습니다.</b></span></div></div>
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># ── 구간 나누기 (Nginx 로그에 request_time · upstream_response_time 필요)
+awk '{print $(NF-1), $NF}' /var/log/nginx/access.log | tail -100
+# 예: rt=1.234 urt=1.200  → 앱이 느림
+#     rt=1.234 urt=0.020  → 전송이 느림 (큰 응답 · 느린 클라이언트)
+
+# ── 자원 확인
+top -o %CPU                              # CPU
+free -h                                  # 메모리
+iostat -x 1 5                            # 디스크 (%util 이 100 에 가까우면 포화)
+vmstat 1 5                               # 종합 (si·so 가 있으면 스왑 발생 = 심각)
+ss -s                                    # 소켓
+
+# ── 어느 URL 이 느린가
+awk '{print $NF, $7}' /var/log/nginx/access.log | sort -rn | head -20
+
+# ── 어느 URL 이 많이 호출되는가 (총 부하 = 횟수 × 시간)
+awk '{print $7}' /var/log/nginx/access.log | sort | uniq -c | sort -rn | head -20</code></pre>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">증상</th><th>가능성이 높은 원인</th></tr>
+      <tr><td>CPU 100%</td><td>압축 레벨 과다 · TLS 핸드셰이크 폭주 · 앱 로직 · 정규식</td></tr>
+      <tr><td>CPU 는 여유, 응답은 느림</td><td class="ok"><b>대기</b>가 원인 — DB · 외부 API · 락 · IO</td></tr>
+      <tr><td>메모리 부족 · 스왑</td><td>워커·프로세스 수 과다 · 앱 메모리 누수</td></tr>
+      <tr><td>디스크 IO 포화</td><td>로그 과다 · 프록시 임시 파일 · 캐시 쓰기</td></tr>
+      <tr><td>간헐적 502</td><td>업스트림 keepalive 불일치 · 앱 재시작 · 커넥션 한계</td></tr>
+      <tr><td>피크에만 느림</td><td>커넥션 풀·스레드 풀 포화 · 대기열 적체</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>가장 흔한 진실</b> —
+    웹서버 튜닝으로 해결되는 문제는 생각보다 적습니다.
+    <b>대부분의 병목은 앱과 DB에 있습니다.</b>
+    <br>느린 쿼리 하나가 전체 지연을 지배하는 경우가 압도적으로 많으니,
+    <a href="../db-web/"><b>🗄️ DB 가이드의 튜닝 탭</b></a>을 먼저 확인하는 것이
+    실제로는 더 빠른 길인 경우가 많습니다.
+  </div>
+</section>
+
+<!-- ==================== p14 ==================== -->
+<section class="sec" id="p14">
+  <div class="sec-head rv">
+    <span class="no">SECTION 14</span>
+    <h2>성능 <span class="t">체크리스트</span></h2>
+    <p class="lead">배포 전에 한 번씩 훑어보세요.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:20%">분류</th><th>확인 항목</th></tr>
+      <tr><td rowspan="4"><b>기본</b></td>
+        <td><code>worker_processes auto</code> · <code>worker_connections</code> 4096 이상</td></tr>
+      <tr><td><code>sendfile on</code> · <code>tcp_nopush on</code></td></tr>
+      <tr><td><code>keepalive_timeout</code> 설정 (클라이언트 쪽)</td></tr>
+      <tr><td><b>업스트림 <code>keepalive</code> + HTTP/1.1 + Connection ""</b></td></tr>
+
+      <tr><td rowspan="3"><b>정적</b></td>
+        <td>웹서버가 직접 서빙 (앱을 거치지 않음)</td></tr>
+      <tr><td>해시 파일 <b>1년 immutable</b> · HTML <b>캐시 금지</b></td></tr>
+      <tr><td>압축 활성 (레벨 5~6) · 이미지·동영상은 제외</td></tr>
+
+      <tr><td rowspan="3"><b>프록시</b></td>
+        <td>버퍼링 켜짐 (스트리밍 엔드포인트만 예외)</td></tr>
+      <tr><td>타임아웃이 앱 처리 시간에 맞게 설정됨</td></tr>
+      <tr><td>필요하면 <code>proxy_cache</code> — 개인화 응답은 제외</td></tr>
+
+      <tr><td rowspan="3"><b>OS</b></td>
+        <td><code>LimitNOFILE</code> 이 systemd 유닛에 설정됨</td></tr>
+      <tr><td><code>somaxconn</code> 과 Nginx <code>backlog</code> 가 맞음</td></tr>
+      <tr><td>스왑이 발생하지 않음</td></tr>
+
+      <tr><td rowspan="3"><b>관측</b></td>
+        <td>로그에 <code>$request_time</code>·<code>$upstream_response_time</code> 포함</td></tr>
+      <tr><td>p95·p99 를 대시보드에서 볼 수 있음</td></tr>
+      <tr><td>부하 테스트로 <b>한계 용량을 숫자로</b> 알고 있음</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">효과가 큰 순서</h3>
+  <div class="ladder rv d1">
+    <div class="lv-b">
+      <h5>🟢 즉시 · 큰 효과</h5>
+      <ul>
+        <li>정적 파일 캐시 헤더</li>
+        <li>압축 활성화</li>
+        <li>업스트림 keepalive</li>
+        <li>정적 파일을 앱에서 분리</li>
+        <li>느린 DB 쿼리 개선</li>
+      </ul>
+    </div>
+    <div class="lv-i">
+      <h5>🔵 설계가 필요</h5>
+      <ul>
+        <li>응답 캐시(proxy_cache)</li>
+        <li>CDN 도입</li>
+        <li>앱 서버 수평 확장</li>
+        <li>이미지 최적화(WebP·AVIF)</li>
+        <li>커넥션 풀 재조정</li>
+      </ul>
+    </div>
+    <div class="lv-a">
+      <h5>🟣 마지막에</h5>
+      <ul>
+        <li>커널 파라미터 튜닝</li>
+        <li>HTTP/3 도입</li>
+        <li>하드웨어 증설</li>
+        <li>아키텍처 변경</li>
+        <li>※ 앞의 것을 다 하고 나서</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>최적화의 원칙</b> —
+    <b>측정하지 않은 최적화는 최적화가 아닙니다.</b>
+    개선 전후를 같은 방법으로 측정해 <b>숫자로 증명</b>하세요.
+    효과가 없다면 <b>되돌리는 것도 개선</b>입니다 — 불필요한 복잡도가 줄어드니까요.
+  </div>
+</section>
+
+</div><!-- /pane-perf -->

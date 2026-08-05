@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 학습 가이드 빌더 (Python · Java · JS/TS)
+ * 학습 가이드 빌더 (Python · Java · JS/TS · Database · Web Server)
  *
  * guide-src/<가이드>/parts/** 조각들을 parts.json 순서대로 이어붙여
  * public/<출력경로>/index.html 을 만든다.
@@ -26,6 +26,8 @@ const GUIDES = [
   { name: 'python', out: 'python-web', label: '🐍 Python' },
   { name: 'java', out: 'java-web', label: '☕ Java' },
   { name: 'js-ts', out: 'js-ts-web', label: '🟨 JS · TS' },
+  { name: 'db', out: 'db-web', label: '🗄️ Database' },
+  { name: 'server', out: 'server-web', label: '🌐 Web Server' },
 ]
 
 const kb = (n) => `${(n / 1024).toFixed(0)} KB`

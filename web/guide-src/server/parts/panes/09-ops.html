@@ -1,0 +1,1116 @@
+<!-- ============================================================
+     보안 · 운영 PANE
+     ============================================================ -->
+<div class="pane" id="pane-ops">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> SECURITY HEADERS · WAF · 로그 · 모니터링 · 무중단 배포</div>
+  <h1>보안과 운영 —<br>돌아가게<br>유지하기</h1>
+  <p class="tx">
+    서버를 띄우는 것보다 <b>계속 안전하게 돌아가게 하는 것</b>이 어렵습니다.
+    설정 몇 줄로 막을 수 있는 공격이 많고,
+    로그·모니터링 없이는 <b>장애가 나도 원인을 못 찾습니다.</b>
+    실무에서 실제로 필요한 것만 정리합니다.
+  </p>
+  <div class="stats">
+    <div><b>14</b><span>SECTIONS</span></div>
+    <div><b>7</b><span>보안 헤더</span></div>
+    <div><b>체크</b><span>리스트 포함</span></div>
+  </div>
+</header>
+
+<!-- ==================== o01 ==================== -->
+<section class="sec" id="o01">
+  <div class="sec-head rv">
+    <span class="no">SECTION 01</span>
+    <h2>보안 <span class="t">헤더</span> 7종</h2>
+    <p class="lead">
+      브라우저에게 <b>"이렇게 지켜 줘"</b>라고 부탁하는 한 줄들입니다.
+      설정만으로 여러 공격의 성공률을 크게 낮춥니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># Nginx — server 블록에 (또는 snippets 로 빼서 include)
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+add_header X-Content-Type-Options    "nosniff" always;
+add_header X-Frame-Options           "SAMEORIGIN" always;
+add_header Referrer-Policy           "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy        "geolocation=(), microphone=(), camera=()" always;
+add_header Content-Security-Policy   "default-src 'self'; img-src 'self' data: https:; frame-ancestors 'self'" always;
+add_header Cross-Origin-Opener-Policy "same-origin" always;
+
+# 서버 정보 숨기기
+server_tokens off;</code></pre>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">헤더</th><th>막는 것</th></tr>
+      <tr><td><b>Strict-Transport-Security</b></td>
+        <td>HTTP 로 접속하려는 시도 자체를 브라우저가 차단 (SSL 스트리핑)</td></tr>
+      <tr><td><b>X-Content-Type-Options</b></td>
+        <td>브라우저의 <b>MIME 타입 추측</b> — 업로드된 텍스트가 스크립트로 실행되는 것을 막습니다</td></tr>
+      <tr><td><b>X-Frame-Options</b></td>
+        <td><b>클릭재킹</b> — 우리 사이트를 남의 iframe 에 넣어 클릭을 가로채는 공격</td></tr>
+      <tr><td><b>Referrer-Policy</b></td>
+        <td>외부 사이트로 이동할 때 <b>우리 URL(토큰이 포함될 수 있음)이 새는 것</b></td></tr>
+      <tr><td><b>Permissions-Policy</b></td>
+        <td>위치·카메라·마이크 등 <b>브라우저 기능 접근</b> 제한</td></tr>
+      <tr><td><b>Content-Security-Policy</b></td>
+        <td class="ok"><b>XSS 방어의 핵심</b> — 어디서 온 스크립트를 실행할지 통제</td></tr>
+      <tr><td><b>Cross-Origin-Opener-Policy</b></td>
+        <td>다른 출처 창과의 격리 (일부 사이드채널 공격 방어)</td></tr>
+    </table>
+  </div>
+
+  <div class="note warn rv d1">
+    <b><code>always</code> 를 빠뜨리지 마세요.</b>
+    없으면 <b>2xx·3xx 응답에만</b> 헤더가 붙고 <b>4xx·5xx 오류 페이지에는 빠집니다.</b>
+    오류 페이지도 공격 대상이 될 수 있으므로 <b>모든 응답에 적용</b>돼야 합니다.
+    <br>또 <b>Nginx 의 <code>add_header</code> 는 하위 블록에서 하나라도 쓰면
+    상위의 것이 전부 무효</b>가 됩니다 — location 안에서 헤더를 추가할 때는
+    <b>상위 헤더를 다시 써 주거나</b> <code>include</code> 로 관리하세요.
+  </div>
+
+  <h3 class="sub">CSP — 가장 강력하지만 가장 까다롭습니다</h3>
+  <pre class="code rv d1" data-lang="conf"><code># ① 먼저 리포트 전용으로 시작 (차단하지 않고 위반만 수집)
+add_header Content-Security-Policy-Report-Only
+  "default-src 'self'; report-uri /csp-report" always;
+
+# ② 수집된 위반을 보고 정책을 다듬은 뒤
+add_header Content-Security-Policy
+  "default-src 'self';
+   script-src 'self' https://cdn.example.com;
+   style-src  'self' 'unsafe-inline';
+   img-src    'self' data: https:;
+   font-src   'self' data:;
+   connect-src 'self' https://api.example.com;
+   frame-ancestors 'self';
+   base-uri 'self';
+   form-action 'self'" always;</code></pre>
+  <div class="note tip rv d2">
+    <b>CSP 를 처음부터 강하게 걸면 사이트가 깨집니다.</b>
+    <br>① <code>Report-Only</code> 로 시작해 <b>실제 위반을 수집</b>하고
+    <br>② 필요한 출처를 하나씩 허용한 뒤
+    <br>③ 확신이 섰을 때 실제 정책으로 전환하세요
+    <br><code>'unsafe-inline'</code>·<code>'unsafe-eval'</code> 은 CSP 의 효과를 크게 떨어뜨리므로
+    <b>가능하면 nonce·hash</b> 방식으로 옮기세요.
+  </div>
+
+  <pre class="code rv d2" data-lang="conf"><code># Apache 는 mod_headers 로 같은 일을
+Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+Header always set X-Content-Type-Options "nosniff"
+Header always set X-Frame-Options "SAMEORIGIN"
+Header always set Referrer-Policy "strict-origin-when-cross-origin"
+Header unset Server
+ServerTokens Prod
+ServerSignature Off</code></pre>
+</section>
+
+<!-- ==================== o02 ==================== -->
+<section class="sec" id="o02">
+  <div class="sec-head rv">
+    <span class="no">SECTION 02</span>
+    <h2>정보 노출 <span class="t">줄이기</span></h2>
+    <p class="lead">공격자에게 정보를 주지 마세요. <b>정찰 단계를 어렵게</b> 만듭니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="bash"><code># 지금 무엇이 노출되고 있는지 확인
+curl -I https://example.com</code></pre>
+  <div class="out rv">HTTP/2 200
+server: nginx/1.24.0              ← 버전 노출 (알려진 취약점을 바로 찾을 수 있습니다)
+x-powered-by: Express             ← 프레임워크 노출
+x-aspnet-version: 4.0.30319       ← 런타임 버전까지</div>
+
+  <pre class="code rv d1" data-lang="conf"><code># Nginx
+server_tokens off;                          # "nginx/1.24.0" → "nginx"
+proxy_hide_header X-Powered-By;             # 백엔드가 보낸 헤더 제거
+proxy_hide_header X-AspNet-Version;
+proxy_hide_header Server;
+
+# 디렉터리 목록 금지 (기본값이지만 확인)
+autoindex off;
+
+# 숨김 파일·백업 파일 차단
+location ~ /\.(?!well-known) { deny all; }
+location ~* \.(bak|old|sql|env|log|conf|ini|swp)$ { deny all; }
+location ~* /(\.git|\.svn|\.env|composer\.(json|lock)|package-lock\.json)$ { deny all; }</code></pre>
+
+  <div class="note warn rv d1">
+    <b>실제로 자주 유출되는 것들</b>
+    <br>· <code>/.git/</code> — <b>소스 코드 전체와 커밋 기록</b>이 복원됩니다. 스캐너가 가장 먼저 찾습니다
+    <br>· <code>/.env</code> — <b>DB 비밀번호·API 키</b>
+    <br>· <code>/backup.sql</code> · <code>/dump.sql</code> — DB 전체
+    <br>· <code>/phpinfo.php</code> — 서버 설정 전부
+    <br>· <code>/server-status</code> · <code>/nginx_status</code> — 실시간 요청 정보
+    <br>· 소스맵(<code>.js.map</code>) — 원본 코드
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 우리 서버가 노출하고 있는지 직접 확인
+for p in /.git/config /.env /backup.sql /phpinfo.php /server-status /.svn/entries; do
+  code=$(curl -s -o /dev/null -w "%{http_code}" "https://example.com$p")
+  echo "$code  $p"
+done
+# 전부 403 또는 404 여야 합니다</code></pre>
+
+  <h3 class="sub">오류 페이지</h3>
+  <pre class="code rv d2" data-lang="conf"><code># 기본 오류 페이지는 서버 종류·버전을 노출합니다
+error_page 400 401 403 404 /40x.html;
+error_page 500 502 503 504 /50x.html;
+
+location = /40x.html { root /var/www/error; internal; }
+location = /50x.html { root /var/www/error; internal; }
+
+# 앱의 스택 트레이스가 사용자에게 보이지 않게 하는 것도 중요합니다
+# (Django DEBUG=False · Spring server.error.include-stacktrace=never 등)</code></pre>
+  <div class="note tip rv d2">
+    <b>정보 은폐는 방어의 전부가 아닙니다.</b>
+    버전을 숨겨도 <b>취약한 버전이면 결국 뚫립니다.</b>
+    <b>패치를 제때 적용하는 것이 근본</b>이고,
+    정보 은폐는 <b>자동화된 스캔의 표적이 되는 것을 줄이는</b> 보조 수단입니다.
+  </div>
+</section>
+
+<!-- ==================== o03 ==================== -->
+<section class="sec" id="o03">
+  <div class="sec-head rv">
+    <span class="no">SECTION 03</span>
+    <h2>접근 제어 · <span class="t">IP 제한</span></h2>
+    <p class="lead">관리자 경로는 <b>인터넷 전체에 열어 둘 이유가 없습니다.</b></p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># IP 제한
+location ^~ /admin/ {
+    allow 10.0.0.0/8;              # 사내망
+    allow 203.0.113.5;             # 사무실 고정 IP
+    deny  all;
+
+    proxy_pass http://backend;
+}
+
+# Basic 인증 추가 (이중 방어)
+location ^~ /admin/ {
+    allow 10.0.0.0/8;
+    deny  all;
+
+    auth_basic "Restricted";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    proxy_pass http://backend;
+}
+
+# 특정 메서드만 허용
+location /api/public/ {
+    limit_except GET HEAD { deny all; }
+    proxy_pass http://backend;
+}</code></pre>
+
+  <pre class="code rv d1" data-lang="bash"><code># 비밀번호 파일 만들기
+sudo apt install -y apache2-utils
+sudo htpasswd -c /etc/nginx/.htpasswd admin
+sudo chmod 640 /etc/nginx/.htpasswd
+sudo chown root:www-data /etc/nginx/.htpasswd</code></pre>
+
+  <div class="note warn rv d1">
+    <b>프록시 뒤에서는 <code>allow</code>·<code>deny</code> 가 오작동합니다.</b>
+    <code>$remote_addr</code> 가 <b>앞단 프록시의 IP</b> 이기 때문입니다.
+    CDN·LB 를 쓴다면 <b><code>set_real_ip_from</code> 으로 실제 IP 를 복원</b>한 뒤에
+    접근 제어를 적용해야 합니다(🟩 Nginx n08).
+    <br>이것을 놓치면 <b>모든 요청이 차단되거나 모두 통과</b>합니다.
+  </div>
+
+  <h3 class="sub">더 나은 방법들</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:24%">방법</th><th>설명</th></tr>
+      <tr><td><b>VPN · 사설망</b></td><td class="ok">★ 가장 확실합니다. 관리자 경로를 아예 인터넷에 노출하지 않습니다</td></tr>
+      <tr><td><b>SSH 터널 · 배스천</b></td><td>점프 서버를 거쳐야만 접근 가능하게</td></tr>
+      <tr><td><b>IP 허용 목록</b></td><td>고정 IP 가 있을 때. 재택근무면 관리가 번거롭습니다</td></tr>
+      <tr><td><b>mTLS</b></td><td>클라이언트 인증서가 있어야 접근 (🔐 HTTPS s10)</td></tr>
+      <tr><td><b>제로트러스트 프록시</b></td><td>Cloudflare Access 등 — SSO 인증 후 접근</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>공개 서비스에서도 제한할 것이 있습니다</b>
+    <br>· 관리자 페이지 · 모니터링 엔드포인트 (<code>/actuator</code>·<code>/metrics</code>)
+    <br>· 개발용 문서 (<code>/swagger</code>·<code>/graphql</code> 플레이그라운드)
+    <br>· 파일 업로드 경로의 <b>실행 권한</b>
+    <br>· 내부 API (앞단에서만 호출되는 것)
+  </div>
+</section>
+
+<!-- ==================== o04 ==================== -->
+<section class="sec" id="o04">
+  <div class="sec-head rv">
+    <span class="no">SECTION 04</span>
+    <h2>rate limit · <span class="t">DDoS 완화</span></h2>
+    <p class="lead">
+      서버에서 막을 수 있는 것과 <b>막을 수 없는 것</b>을 구분해야 합니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># http 컨텍스트
+limit_req_zone  $binary_remote_addr zone=general:10m rate=30r/s;
+limit_req_zone  $binary_remote_addr zone=login:10m   rate=5r/m;
+limit_conn_zone $binary_remote_addr zone=perip:10m;
+
+limit_req_status  429;
+limit_conn_status 429;
+
+server {
+    limit_req  zone=general burst=60 nodelay;
+    limit_conn perip 20;
+
+    # 로그인·인증은 강하게
+    location = /api/login {
+        limit_req zone=login burst=3 nodelay;
+        proxy_pass http://backend;
+    }
+
+    # 헬스체크·정적은 제외
+    location = /health { limit_req off; return 200 "ok\n"; }
+}</code></pre>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:24%">공격 유형</th><th>Nginx 로 막을 수 있나</th></tr>
+      <tr><td><b>단일 IP 폭주</b></td><td class="ok">✓ <code>limit_req</code></td></tr>
+      <tr><td><b>무차별 대입 (로그인)</b></td><td class="ok">✓ rate limit + fail2ban</td></tr>
+      <tr><td><b>크롤러 폭주</b></td><td class="ok">✓ User-Agent 필터 + rate limit</td></tr>
+      <tr><td><b>Slowloris</b> (느린 연결 다수)</td><td class="ok">✓ <code>client_body_timeout</code>·<code>limit_conn</code></td></tr>
+      <tr><td><b>분산 DDoS</b> (수만 IP)</td><td class="no">✗ <b>서버에 도달하기 전에</b> 막아야 합니다 — CDN·클라우드 방화벽</td></tr>
+      <tr><td><b>대역폭 소진 공격</b></td><td class="no">✗ 회선이 먼저 막힙니다 — ISP·CDN 영역</td></tr>
+    </table>
+  </div>
+
+  <div class="note warn rv d1">
+    <b>대규모 DDoS 는 서버 설정으로 막을 수 없습니다.</b>
+    수만 대에서 오는 트래픽이 <b>회선을 가득 채우면</b>
+    Nginx 가 아무리 빨라도 소용이 없습니다.
+    <br><b>CDN·클라우드 DDoS 방어 서비스</b>를 앞에 두는 것이
+    유일한 실효적 대책입니다.
+    Nginx 의 rate limit 은 <b>어뷰징과 소규모 공격</b>에 효과적입니다.
+  </div>
+
+  <h3 class="sub">fail2ban — 반복 실패 IP 차단</h3>
+  <pre class="code rv d1" data-lang="conf"><code># /etc/fail2ban/jail.local
+[nginx-limit-req]
+enabled  = true
+filter   = nginx-limit-req
+logpath  = /var/log/nginx/error.log
+maxretry = 10
+findtime = 60
+bantime  = 3600
+action   = iptables-multiport[name=ReqLimit, port="http,https"]
+
+[nginx-badbots]
+enabled  = true
+filter   = nginx-badbots
+logpath  = /var/log/nginx/access.log
+maxretry = 2
+bantime  = 86400</code></pre>
+  <pre class="code rv d1" data-lang="bash"><code>sudo systemctl enable --now fail2ban
+sudo fail2ban-client status
+sudo fail2ban-client status nginx-limit-req
+sudo fail2ban-client set nginx-limit-req unbanip 1.2.3.4    # 오탐 해제</code></pre>
+
+  <h3 class="sub">Slowloris 방어</h3>
+  <pre class="code rv d2" data-lang="conf"><code># 연결을 열어 두고 아주 천천히 보내는 공격
+client_body_timeout   10s;      # 본문 수신 타임아웃
+client_header_timeout 10s;      # 헤더 수신 타임아웃
+send_timeout          10s;      # 응답 전송 타임아웃
+limit_conn perip 20;            # IP 당 동시 연결 제한
+
+# Nginx 는 이벤트 기반이라 구조적으로 Slowloris 에 강하지만
+# 위 설정으로 자원 점유를 더 확실히 제한할 수 있습니다</code></pre>
+</section>
+
+<!-- ==================== o05 ==================== -->
+<section class="sec" id="o05">
+  <div class="sec-head rv">
+    <span class="no">SECTION 05</span>
+    <h2><span class="t">WAF</span> (ModSecurity)</h2>
+    <p class="lead">알려진 공격 패턴을 <b>요청 단계에서</b> 걸러 냅니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="bash"><code># Nginx + ModSecurity (동적 모듈)
+sudo apt install -y libmodsecurity3 nginx-module-modsecurity   # 배포판에 따라 다름
+
+# OWASP Core Rule Set (CRS) — 사실상 표준 규칙 모음
+cd /etc/nginx
+sudo git clone https://github.com/coreruleset/coreruleset.git modsec-crs
+sudo cp modsec-crs/crs-setup.conf.example modsec-crs/crs-setup.conf</code></pre>
+
+  <pre class="code rv d1" data-lang="conf"><code># nginx.conf 최상단
+load_module modules/ngx_http_modsecurity_module.so;
+
+server {
+    modsecurity on;
+    modsecurity_rules_file /etc/nginx/modsec/main.conf;
+}
+
+# /etc/nginx/modsec/main.conf
+# Include /etc/nginx/modsec/modsecurity.conf
+# Include /etc/nginx/modsec-crs/crs-setup.conf
+# Include /etc/nginx/modsec-crs/rules/*.conf</code></pre>
+
+  <pre class="code rv d1" data-lang="conf"><code># modsecurity.conf 의 핵심 설정
+SecRuleEngine DetectionOnly        # ★ 처음에는 탐지만 (차단하지 않음)
+# SecRuleEngine On                 # 검증 후 차단 모드로
+
+SecAuditEngine RelevantOnly
+SecAuditLog /var/log/nginx/modsec_audit.log
+SecRequestBodyLimit 13107200       # 업로드 크기와 맞추세요</code></pre>
+
+  <div class="note warn rv d1">
+    <b>WAF 의 가장 큰 문제는 오탐(false positive)입니다.</b>
+    정상 요청이 차단되어 <b>사용자가 서비스를 못 쓰는</b> 사고가 흔합니다.
+    <br>· 반드시 <b><code>DetectionOnly</code> 로 시작</b>해 감사 로그를 수집하고
+    <br>· 오탐 규칙을 <b>하나씩 예외 처리</b>한 뒤
+    <br>· 충분히 검증되면 차단 모드로 전환하세요
+    <br>파일 업로드·리치 텍스트 에디터·JSON API 에서 오탐이 특히 잦습니다.
+  </div>
+
+  <pre class="code rv d2" data-lang="conf"><code># 오탐 예외 처리
+# 특정 경로에서 특정 규칙 끄기
+SecRule REQUEST_URI "@beginsWith /api/upload" \
+    "id:1000,phase:1,pass,nolog,ctl:ruleRemoveById=942100"
+
+# 특정 파라미터를 검사에서 제외
+SecRule REQUEST_URI "@beginsWith /admin/post" \
+    "id:1001,phase:2,pass,nolog,ctl:ruleRemoveTargetById=941100;ARGS:content"</code></pre>
+
+  <div class="note tip rv d2">
+    <b>WAF 를 도입하기 전에</b> —
+    <b>애플리케이션 레벨 방어가 먼저</b>입니다.
+    파라미터 바인딩(SQL 인젝션) · 출력 이스케이프(XSS) · CSRF 토큰이
+    제대로 돼 있다면 WAF 는 <b>추가 방어층</b>일 뿐입니다.
+    <br>WAF 는 <b>알려지지 않은 취약점의 시간을 벌어 주는</b> 역할이고,
+    운영 비용(오탐 조정·성능)이 만만치 않습니다.
+    <br>부담이 크다면 <b>클라우드 WAF</b>(관리형)를 쓰는 것이 현실적입니다.
+  </div>
+</section>
+
+<!-- ==================== o06 ==================== -->
+<section class="sec" id="o06">
+  <div class="sec-head rv">
+    <span class="no">SECTION 06</span>
+    <h2>파일 업로드 <span class="t">보안</span></h2>
+    <p class="lead">
+      업로드 폴더에서 <b>스크립트가 실행되면</b> 서버가 통째로 넘어갑니다.
+      침해 사고의 대표적인 경로입니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># ★ 업로드 폴더에서 실행 차단 (Nginx)
+location ^~ /uploads/ {
+    alias /var/data/uploads/;
+
+    # PHP·CGI 실행 금지
+    location ~ \.(php|phtml|php[0-9]|pl|py|cgi|sh|jsp|asp)$ { deny all; }
+
+    # 브라우저에서 실행되지 않고 다운로드되게
+    add_header Content-Disposition "attachment" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    # HTML·SVG 도 위험합니다 (XSS)
+    types { }
+    default_type application/octet-stream;
+}</code></pre>
+
+  <div class="note warn rv d1">
+    <b>SVG 는 이미지가 아니라 실행 가능한 문서입니다.</b>
+    SVG 안에 <code>&lt;script&gt;</code> 를 넣을 수 있어
+    <b>같은 도메인에서 XSS</b> 가 발생합니다.
+    <br>· 사용자 업로드 SVG 는 <b>별도 도메인</b>에서 서빙하거나
+    <br>· <code>Content-Disposition: attachment</code> 로 강제 다운로드하거나
+    <br>· 서버에서 <b>SVG 를 정제(sanitize)</b> 하세요
+  </div>
+
+  <h3 class="sub">업로드 보안 체크리스트</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">항목</th><th>내용</th></tr>
+      <tr><td><b>저장 위치</b></td>
+        <td class="ok">★ <b>문서 루트 밖</b>에 저장하고 앱을 통해 제공하거나,
+          별도 스토리지(S3)를 쓰는 것이 가장 안전합니다</td></tr>
+      <tr><td><b>파일명</b></td>
+        <td>사용자 입력을 그대로 쓰지 말고 <b>UUID 로 재생성</b>.
+          경로 순회(<code>../</code>)와 널 바이트를 차단</td></tr>
+      <tr><td><b>확장자 검증</b></td>
+        <td><b>허용 목록</b>으로. 차단 목록은 우회됩니다(<code>.pHp</code>·<code>.php5</code>·이중 확장자)</td></tr>
+      <tr><td><b>내용 검증</b></td>
+        <td>확장자만 믿지 말고 <b>매직 넘버</b>로 실제 형식을 확인</td></tr>
+      <tr><td><b>크기 제한</b></td>
+        <td>웹서버·앱 양쪽에 설정 (디스크 소진 방지)</td></tr>
+      <tr><td><b>실행 권한</b></td>
+        <td>저장된 파일은 <code>chmod 644</code> · 폴더에 실행 비트 제거</td></tr>
+      <tr><td><b>이미지 재처리</b></td>
+        <td class="ok">이미지는 <b>서버에서 다시 인코딩</b>하면 내장된 악성 코드가 제거됩니다</td></tr>
+      <tr><td><b>바이러스 검사</b></td>
+        <td>파일 공유 서비스라면 ClamAV 등으로 검사</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d2" data-lang="python"><code># 앱 레벨 검증 예 (Python)
+import uuid, pathlib, imghdr
+
+ALLOWED = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+MAX_SIZE = 10 * 1024 * 1024
+
+def save_upload(file, dest_dir):
+    ext = pathlib.Path(file.filename).suffix.lower()
+    if ext not in ALLOWED:
+        raise ValueError("허용되지 않은 확장자")
+    if file.size &gt; MAX_SIZE:
+        raise ValueError("파일이 너무 큽니다")
+
+    # ★ 실제 내용이 이미지인지 확인 (확장자만 믿지 않습니다)
+    head = file.read(512); file.seek(0)
+    if imghdr.what(None, head) is None:
+        raise ValueError("이미지 파일이 아닙니다")
+
+    # ★ 파일명을 새로 생성 (경로 순회·덮어쓰기 방지)
+    name = f"{uuid.uuid4().hex}{ext}"
+    path = pathlib.Path(dest_dir) / name
+    path.write_bytes(file.read())
+    path.chmod(0o644)
+    return name</code></pre>
+</section>
+
+<!-- ==================== o07 ==================== -->
+<section class="sec" id="o07">
+  <div class="sec-head rv">
+    <span class="no">SECTION 07</span>
+    <h2>로그 관리 · <span class="t">로테이션</span></h2>
+    <p class="lead">로그를 방치하면 <b>디스크가 가득 차서 서비스가 멈춥니다.</b></p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># /etc/logrotate.d/nginx (보통 패키지에 포함돼 있습니다)
+/var/log/nginx/*.log {
+    daily
+    rotate 30                  # 30일 보관
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0640 www-data adm
+    sharedscripts
+    postrotate
+        # ★ Nginx 에게 로그 파일을 다시 열라고 알립니다
+        [ -f /var/run/nginx.pid ] &amp;&amp; kill -USR1 $(cat /var/run/nginx.pid)
+    endscript
+}</code></pre>
+
+  <div class="note warn rv d1">
+    <b>로테이션 후 시그널을 보내지 않으면</b>
+    Nginx 가 <b>이름이 바뀐 옛 파일에 계속 씁니다.</b>
+    새 파일은 0바이트로 남고 <b>디스크는 계속 차오릅니다.</b>
+    <br>· Nginx — <code>kill -USR1</code> (또는 <code>nginx -s reopen</code>)
+    <br>· 톰캣 <code>catalina.out</code> — <code>copytruncate</code> 사용
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 테스트 (실제로 돌려 보기)
+sudo logrotate -d /etc/logrotate.d/nginx        # 시뮬레이션
+sudo logrotate -f /etc/logrotate.d/nginx        # 강제 실행
+
+# 디스크 사용량 확인
+du -sh /var/log/*
+df -h
+
+# 가장 큰 로그 파일 찾기
+sudo find /var/log -type f -size +100M -exec ls -lh {} \;</code></pre>
+
+  <h3 class="sub">로그 양 줄이기</h3>
+  <pre class="code rv d1" data-lang="conf"><code># 정적 파일·헬스체크는 기록하지 않기
+location = /health { access_log off; return 200 "ok\n"; }
+location ~* \.(css|js|png|jpg|svg|woff2|ico)$ { access_log off; expires 1y; }
+
+# 특정 조건만 기록
+map $status $loggable {
+    ~^[23]  0;                 # 2xx·3xx 는 제외
+    default 1;
+}
+access_log /var/log/nginx/errors.log main if=$loggable;
+
+# 버퍼링 (디스크 IO 감소)
+access_log /var/log/nginx/access.log main buffer=32k flush=5s;</code></pre>
+
+  <div class="note tip rv d2">
+    <b>중앙 로그 수집을 검토하세요.</b>
+    서버가 여러 대면 <b>각 서버에 SSH 로 들어가 로그를 뒤지는 것</b>은 현실적이지 않습니다.
+    <b>Loki·Elasticsearch·CloudWatch</b> 같은 중앙 저장소로 보내면
+    <b>여러 서버의 로그를 한 번에 검색</b>할 수 있습니다.
+    <br>이때 <b>JSON 로그 포맷</b>(🟩 Nginx n15)이 훨씬 다루기 편합니다.
+  </div>
+
+  <div class="note warn rv d2">
+    <b>로그에 개인정보가 들어가지 않게 주의하세요.</b>
+    URL 쿼리스트링에 토큰·비밀번호·주민번호가 들어가면
+    <b>로그에 평문으로 영구 기록</b>됩니다.
+    <br>· 민감 정보는 <b>POST 본문</b>으로 (URL 에 넣지 않기)
+    <br>· 필요하면 로그 수집 단계에서 <b>마스킹</b>
+    <br>· 보관 기간을 정하고 <b>기간이 지나면 삭제</b>
+  </div>
+</section>
+
+<!-- ==================== o08 ==================== -->
+<section class="sec" id="o08">
+  <div class="sec-head rv">
+    <span class="no">SECTION 08</span>
+    <h2>모니터링 · <span class="t">상태 페이지</span></h2>
+    <p class="lead">서버 상태를 <b>숫자로 보이게</b> 만들어 두면 장애를 미리 알 수 있습니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># Nginx 기본 상태 페이지
+server {
+    listen 127.0.0.1:8080;          # ★ 로컬만
+
+    location = /nginx_status {
+        stub_status;
+        access_log off;
+        allow 127.0.0.1;
+        deny all;
+    }
+}</code></pre>
+  <pre class="code rv d1" data-lang="bash"><code>curl -s http://127.0.0.1:8080/nginx_status</code></pre>
+  <div class="out rv d1">Active connections: 291
+server accepts handled requests
+ 16630948 16630948 31070465
+Reading: 6 Writing: 179 Waiting: 106</div>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:24%">지표</th><th>의미</th></tr>
+      <tr><td><b>Active connections</b></td><td>현재 열린 연결 수 (Waiting 포함)</td></tr>
+      <tr><td><b>accepts / handled</b></td><td class="warn"><b>두 값이 다르면 연결을 거부</b>한 것 — 즉시 조치</td></tr>
+      <tr><td><b>requests</b></td><td>누적 요청 수 — 연결당 요청 수를 계산하면 keepalive 효율을 알 수 있습니다</td></tr>
+      <tr><td><b>Reading</b></td><td>요청을 읽는 중</td></tr>
+      <tr><td><b>Writing</b></td><td>응답을 보내는 중</td></tr>
+      <tr><td><b>Waiting</b></td><td>유휴 keepalive 연결 (많아도 정상)</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">Prometheus 로 수집하기</h3>
+  <pre class="code rv d1" data-lang="bash"><code># nginx-prometheus-exporter
+docker run -d --name nginx-exporter --network host \
+  nginx/nginx-prometheus-exporter:latest \
+  --nginx.scrape-uri=http://127.0.0.1:8080/nginx_status
+
+curl -s localhost:9113/metrics | head -20</code></pre>
+  <pre class="code rv d1" data-lang="yaml"><code># prometheus.yml
+scrape_configs:
+  - job_name: nginx
+    static_configs:
+      - targets: ['localhost:9113']
+
+  - job_name: node
+    static_configs:
+      - targets: ['localhost:9100']    # node_exporter (CPU·메모리·디스크)
+
+  - job_name: blackbox
+    metrics_path: /probe
+    params: { module: [http_2xx] }
+    static_configs:
+      - targets: ['https://example.com']     # 외부에서 본 응답·인증서 만료</code></pre>
+
+  <h3 class="sub">무엇을 감시할까</h3>
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:26%">지표</th><th>알람 기준 예시</th></tr>
+      <tr><td><b>5xx 비율</b></td><td class="ok">★ 1% 초과가 5분 지속</td></tr>
+      <tr><td><b>p95 응답 시간</b></td><td>목표치의 2배 초과</td></tr>
+      <tr><td><b>연결 거부</b></td><td>accepts ≠ handled</td></tr>
+      <tr><td><b>디스크 사용률</b></td><td class="warn">80% 초과 — 로그가 원인인 경우가 많습니다</td></tr>
+      <tr><td><b>CPU · 메모리</b></td><td>80% 초과가 10분 지속</td></tr>
+      <tr><td><b>인증서 만료</b></td><td class="ok">★ 21일 이내 (🔐 HTTPS s11)</td></tr>
+      <tr><td><b>프로세스 다운</b></td><td>즉시</td></tr>
+      <tr><td><b>외부 접속 실패</b></td><td>외부에서 본 가용성 (내부 지표만으로는 못 잡습니다)</td></tr>
+    </table>
+  </div>
+  <div class="note tip rv d2">
+    <b>외부 모니터링을 반드시 함께 두세요.</b>
+    서버 내부 지표만 보면 <b>DNS 장애·방화벽 오설정·인증서 만료</b>를 못 잡습니다.
+    <b>외부에서 실제 URL 을 주기적으로 호출</b>하는 감시가 필요합니다
+    (blackbox_exporter · UptimeRobot 등).
+  </div>
+</section>
+
+<!-- ==================== o09 ==================== -->
+<section class="sec" id="o09">
+  <div class="sec-head rv">
+    <span class="no">SECTION 09</span>
+    <h2>무중단 배포 <span class="t">전략</span></h2>
+    <p class="lead">배포 중에도 <b>502 가 나지 않게</b> 만듭니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:22%">전략</th><th>설명</th><th>비용</th></tr>
+      <tr><td><b>롤링</b></td><td>서버를 한 대씩 교체</td><td class="ok">낮음 — 가장 흔합니다</td></tr>
+      <tr><td><b>블루-그린</b></td><td>새 환경을 통째로 띄우고 트래픽을 전환</td><td class="warn">서버 2배 필요 · 롤백이 즉시</td></tr>
+      <tr><td><b>카나리</b></td><td>일부 트래픽만 새 버전으로 보내 관찰</td><td>구성이 복잡 · 위험이 가장 낮음</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">롤링 배포 — Nginx 로</h3>
+  <pre class="code rv d1" data-lang="bash"><code>#!/usr/bin/env bash
+set -euo pipefail
+SERVERS=(10.0.1.11 10.0.1.12 10.0.1.13)
+
+for s in "${SERVERS[@]}"; do
+  echo "==== $s 배포 시작"
+
+  # 1) LB 에서 제외 (해당 server 줄에 down 을 붙이고 reload)
+  sudo sed -i "s|server $s:8080;|server $s:8080 down;|" /etc/nginx/conf.d/upstream.conf
+  sudo nginx -t &amp;&amp; sudo nginx -s reload
+
+  # 2) 진행 중 요청이 끝나기를 기다림
+  sleep 10
+
+  # 3) 배포
+  ssh "deploy@$s" 'sudo systemctl stop myapp &amp;&amp; \
+                   sudo cp /tmp/myapp.jar /opt/myapp/myapp.jar &amp;&amp; \
+                   sudo systemctl start myapp'
+
+  # 4) 준비될 때까지 대기
+  for i in $(seq 1 30); do
+    curl -fsS "http://$s:8080/health" &gt;/dev/null &amp;&amp; break
+    sleep 2
+  done
+
+  # 5) LB 에 복귀
+  sudo sed -i "s|server $s:8080 down;|server $s:8080;|" /etc/nginx/conf.d/upstream.conf
+  sudo nginx -t &amp;&amp; sudo nginx -s reload
+
+  echo "==== $s 완료"
+  sleep 5
+done</code></pre>
+
+  <h3 class="sub">블루-그린 — 포트 전환</h3>
+  <pre class="code rv d1" data-lang="conf"><code># /etc/nginx/conf.d/active.conf 를 심볼릭 링크로 관리
+upstream app { server 127.0.0.1:8080; }     # blue
+# upstream app { server 127.0.0.1:8081; }   # green
+
+# 전환
+# ln -sf /etc/nginx/upstreams/green.conf /etc/nginx/conf.d/active.conf
+# nginx -t &amp;&amp; nginx -s reload
+# → 롤백은 링크를 되돌리고 reload 하면 즉시</code></pre>
+
+  <div class="note warn rv d1">
+    <b>무중단 배포에서 놓치기 쉬운 것</b>
+    <br>· <b>DB 스키마</b> — 신구 버전이 동시에 도는 동안 <b>양쪽 모두 동작</b>해야 합니다
+      (확장-축소 패턴 → <a href="../db-web/">🗄️ DB 가이드</a>)
+    <br>· <b>세션</b> — 서버에 세션이 있으면 그 서버를 내릴 때 로그아웃됩니다
+    <br>· <b>정적 파일 버전 불일치</b> — 옛 HTML 이 새 JS 를 찾거나 그 반대
+    <br>· <b>진행 중인 배치</b> — 종료 시 중단되면 데이터가 반만 처리될 수 있습니다
+    <br>· <b>캐시 워밍업</b> — 새 인스턴스는 초기에 느립니다
+  </div>
+
+  <div class="note tip rv d2">
+    <b>쿠버네티스를 쓴다면</b> 이 과정을 플랫폼이 해 줍니다.
+    <code>readinessProbe</code>·<code>preStop</code>·<code>maxUnavailable</code> 설정만
+    제대로 하면 롤링 업데이트가 자동으로 무중단이 됩니다 → 다음 섹션.
+  </div>
+</section>
+
+<!-- ==================== o10 ==================== -->
+<section class="sec" id="o10">
+  <div class="sec-head rv">
+    <span class="no">SECTION 10</span>
+    <h2>설정 관리 · <span class="t">버전 관리</span></h2>
+    <p class="lead">
+      서버에서 직접 고친 설정은 <b>다음 사람이 알 수 없습니다.</b>
+      서버가 날아가면 복구도 못 합니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="bash"><code># 가장 단순한 방법 — /etc/nginx 를 git 저장소로
+cd /etc/nginx
+sudo git init
+sudo tee .gitignore &lt;&lt;'EOF'
+*.pem
+*.key
+.htpasswd
+EOF
+sudo git add -A
+sudo git commit -m "초기 설정"
+
+# 변경할 때마다
+sudo git diff
+sudo git commit -am "API 경로에 rate limit 추가"
+
+# 되돌리기
+sudo git log --oneline
+sudo git checkout HEAD~1 -- sites-available/myapp
+sudo nginx -t &amp;&amp; sudo systemctl reload nginx</code></pre>
+
+  <div class="note warn rv d1">
+    <b>인증서 개인키와 비밀번호 파일은 절대 커밋하지 마세요.</b>
+    <code>.gitignore</code> 로 제외하고, 실수로 커밋했다면
+    <b>파일을 지우는 것만으로는 부족합니다</b> — 기록에 영원히 남으므로
+    <b>키를 재발급</b>해야 합니다.
+  </div>
+
+  <h3 class="sub">한 단계 위 — 코드로 관리</h3>
+  <pre class="code rv d1" data-lang="yaml"><code># Ansible 예시 — 여러 서버에 같은 설정을 재현 가능하게
+- name: Nginx 설정 배포
+  hosts: web
+  become: yes
+  tasks:
+    - name: 설정 파일 템플릿
+      template:
+        src: nginx-site.conf.j2
+        dest: /etc/nginx/sites-available/myapp
+        owner: root
+        mode: '0644'
+      notify: reload nginx
+
+    - name: 사이트 활성화
+      file:
+        src: /etc/nginx/sites-available/myapp
+        dest: /etc/nginx/sites-enabled/myapp
+        state: link
+      notify: reload nginx
+
+  handlers:
+    - name: reload nginx
+      # ★ 문법 검사를 먼저
+      shell: nginx -t &amp;&amp; systemctl reload nginx</code></pre>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:24%">단계</th><th>방법</th></tr>
+      <tr><td><b>1. 최소</b></td><td class="ok">설정 폴더를 git 으로 — <b>지금 당장 할 수 있습니다</b></td></tr>
+      <tr><td><b>2. 자동화</b></td><td>Ansible·Chef·Puppet 으로 여러 서버에 배포</td></tr>
+      <tr><td><b>3. 이미지화</b></td><td>Docker 이미지에 설정을 포함 — <b>서버가 상태를 갖지 않게</b></td></tr>
+      <tr><td><b>4. 선언형</b></td><td>쿠버네티스 매니페스트 · Terraform — 인프라 전체를 코드로</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>왜 중요한가</b>
+    <br>· <b>서버가 날아가도 복구</b>할 수 있습니다
+    <br>· <b>누가 언제 왜 바꿨는지</b> 남습니다
+    <br>· <b>리뷰</b>를 거칠 수 있습니다 (설정 실수로 인한 장애 감소)
+    <br>· <b>스테이징과 운영이 같은 설정</b>임을 보장할 수 있습니다
+    <br>· 새 서버를 <b>동일하게</b> 만들 수 있습니다
+  </div>
+</section>
+
+<!-- ==================== o11 ==================== -->
+<section class="sec" id="o11">
+  <div class="sec-head rv">
+    <span class="no">SECTION 11</span>
+    <h2>컨테이너 · <span class="t">쿠버네티스</span></h2>
+    <p class="lead">
+      쿠버네티스에서는 <b>Ingress</b> 가 Nginx 역할을 합니다. 개념은 그대로입니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="yaml"><code># Ingress — Nginx 의 server 블록에 해당합니다
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp
+  annotations:
+    # Nginx 설정을 애노테이션으로 지정합니다
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/limit-rps: "30"
+    cert-manager.io/cluster-issuer: letsencrypt-prod    # 인증서 자동 발급
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [example.com]
+      secretName: example-tls
+  rules:
+    - host: example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service: { name: api-service, port: { number: 8080 } }
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: web-service, port: { number: 80 } }</code></pre>
+
+  <div class="tw rv d1">
+    <table class="df">
+      <thead><tr><th>전통적 구성</th><th>쿠버네티스</th></tr></thead>
+      <tbody>
+        <tr><td><code>server</code> 블록</td><td><b>Ingress</b> 리소스</td></tr>
+        <tr><td><code>upstream</code></td><td><b>Service</b> (엔드포인트 자동 관리)</td></tr>
+        <tr><td><code>location</code></td><td>Ingress 의 <b>path</b></td></tr>
+        <tr><td>certbot</td><td><b>cert-manager</b> (자동 발급·갱신)</td></tr>
+        <tr><td>systemd 재시작</td><td><b>Deployment</b> 롤링 업데이트</td></tr>
+        <tr><td>헬스체크 스크립트</td><td><b>liveness · readiness Probe</b></td></tr>
+        <tr><td>Nginx 설정 파일</td><td>Ingress Controller 의 <b>애노테이션·ConfigMap</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="yaml"><code># 무중단 배포에 필요한 설정 — 이 셋이 핵심입니다
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }   # 항상 최소 대수 유지
+  template:
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: app
+          readinessProbe:              # ★ 준비되기 전에는 트래픽을 안 보냄
+            httpGet: { path: /health/ready, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:               # 죽었으면 재시작
+            httpGet: { path: /health/live, port: 8080 }
+            periodSeconds: 10
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                # ★ LB 에서 빠질 시간을 벌어 줍니다
+                command: ["sh", "-c", "sleep 10"]</code></pre>
+
+  <div class="note warn rv d1">
+    <b><code>preStop</code> 의 <code>sleep</code> 이 필요한 이유</b> —
+    파드가 종료될 때 <b>엔드포인트 목록에서 빠지는 것</b>과
+    <b>SIGTERM 을 받는 것</b>이 동시에 일어납니다.
+    그래서 <b>이미 라우팅된 요청이 종료 중인 파드에 도달</b>해 502 가 납니다.
+    <br><code>preStop</code> 으로 <b>몇 초를 벌면</b> 그동안 LB 갱신이 완료됩니다.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>기본기는 그대로입니다.</b>
+    쿠버네티스를 쓰더라도 <b>프록시·타임아웃·헤더·캐시·TLS</b> 의 개념은 같습니다.
+    Ingress Controller 대부분이 <b>내부적으로 Nginx</b> 를 씁니다.
+    <b>이 가이드의 내용이 그대로 적용</b>되며, 설정 방법만 애노테이션으로 바뀝니다.
+  </div>
+</section>
+
+<!-- ==================== o12 ==================== -->
+<section class="sec" id="o12">
+  <div class="sec-head rv">
+    <span class="no">SECTION 12</span>
+    <h2>장애 대응 <span class="t">시나리오</span></h2>
+    <p class="lead">자주 나는 유형과 <b>대응 순서</b>입니다. 당황하지 않는 것이 절반입니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:24%">증상</th><th>확인 순서 → 조치</th></tr>
+      <tr><td><b>502 급증</b></td>
+        <td>① error 로그에서 <code>connect() failed</code> 확인
+          → ② 앱 프로세스 상태(<code>systemctl status</code>)
+          → ③ 앱에 직접 요청(<code>curl localhost:8080</code>)
+          → ④ 앱 로그에서 OOM·예외 확인
+          → ⑤ 필요하면 앱 재시작</td></tr>
+      <tr><td><b>504 급증</b></td>
+        <td>① 앱 응답 시간 확인 → ② 대개 <b>DB 쿼리·외부 API</b> 지연
+          → ③ DB 슬로우 쿼리·락 확인 → ④ 문제 기능을 일시 차단하는 것도 방법</td></tr>
+      <tr><td><b>전면 무응답</b></td>
+        <td>① Nginx 프로세스 생존 확인 → ② <code>ss -s</code> 로 연결 상태
+          → ③ 디스크 여유(<code>df -h</code>) → ④ 파일 디스크립터 한계
+          → ⑤ 로드 애버리지·스왑</td></tr>
+      <tr><td><b>디스크 가득 참</b></td>
+        <td>① <code>du -sh /var/log/* /var/cache/*</code>
+          → ② 큰 로그를 <b>지우지 말고 truncate</b>(<code>: &gt; file</code>)
+          → ③ 로테이션 설정 점검 → ④ 근본 원인 제거</td></tr>
+      <tr><td><b>인증서 만료</b></td>
+        <td>① <code>certbot renew --force-renewal</code>
+          → ② <b>reload</b> → ③ 갱신 자동화가 왜 실패했는지 확인</td></tr>
+      <tr><td><b>특정 IP 폭주</b></td>
+        <td>① access 로그에서 상위 IP 확인 → ② 임시 차단(<code>deny</code> + reload)
+          → ③ rate limit 조정 → ④ fail2ban 규칙 추가</td></tr>
+      <tr><td><b>배포 후 오류</b></td>
+        <td class="ok">① <b>먼저 롤백</b> → ② 그다음 원인 분석
+          <br>원인을 찾느라 장애를 길게 끌지 마세요</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 장애 시 첫 5분에 실행할 명령 모음
+systemctl status nginx myapp --no-pager
+sudo tail -100 /var/log/nginx/error.log
+sudo journalctl -u myapp --since "10 min ago" -p err --no-pager
+df -h; free -h; uptime
+ss -s
+curl -sS -o /dev/null -w "%{http_code} %{time_total}\n" http://127.0.0.1:8080/health
+
+# 상태 코드 분포 (최근 1000건)
+tail -1000 /var/log/nginx/access.log | awk '{print $9}' | sort | uniq -c | sort -rn
+
+# 응답이 느린 요청
+tail -5000 /var/log/nginx/access.log | awk '$NF &gt; 1 {print $NF, $7}' | sort -rn | head -20</code></pre>
+
+  <div class="note warn rv d1">
+    <b>장애 중에 하지 말아야 할 것</b>
+    <br>· <b>여러 조치를 동시에</b> — 무엇이 효과였는지 알 수 없게 됩니다
+    <br>· <b>상태 수집 없이 재시작</b> — 원인이 사라지고 다시 같은 장애가 납니다
+    <br>· <b>혼자 판단하고 되돌릴 수 없는 조치</b> — 데이터 삭제·강제 복구는 반드시 공유 후에
+    <br>· <b>원인 분석을 먼저</b> — 서비스 복구가 우선입니다. 분석은 그다음
+  </div>
+
+  <div class="note tip rv d2">
+    <b>사후에 반드시 할 것</b> —
+    <b>비난하지 않는 회고(blameless postmortem)</b>를 씁니다.
+    "왜 이 상황이 가능했는가", "왜 더 일찍 알지 못했는가",
+    "다음에 같은 일이 생기면 <b>자동으로 막히는가</b>".
+    사람을 탓하면 진짜 원인이 숨겨집니다.
+  </div>
+</section>
+
+<!-- ==================== o13 ==================== -->
+<section class="sec" id="o13">
+  <div class="sec-head rv">
+    <span class="no">SECTION 13</span>
+    <h2>정기 점검 <span class="t">체크리스트</span></h2>
+    <p class="lead">주기별로 무엇을 봐야 하는지 정리합니다.</p>
+  </div>
+
+  <h3 class="sub">매일 (자동화하세요)</h3>
+  <ul class="tx rv">
+    <li>5xx 비율·응답 시간 대시보드 확인</li>
+    <li>디스크 사용률</li>
+    <li>error 로그에 <b>새로운 유형</b>이 있는지</li>
+    <li>백업이 실제로 생성됐는지 (성공 알림이 아니라 <b>파일 크기와 시각</b>)</li>
+  </ul>
+
+  <h3 class="sub">매주</h3>
+  <ul class="tx rv d1">
+    <li>가장 느린 URL 상위 20개 — 새로 등장한 것이 있는지</li>
+    <li>가장 많이 호출되는 URL — 예상과 다른 것이 있는지</li>
+    <li>4xx 급증 여부 (스캔·어뷰징 신호)</li>
+    <li>로그·캐시 디스크 증가 추이</li>
+  </ul>
+
+  <h3 class="sub">매월</h3>
+  <ul class="tx rv d1">
+    <li class="ok"><b>보안 패치 적용</b> — <code>apt list --upgradable</code></li>
+    <li>인증서 만료일 확인 (자동 갱신이 돌고 있어도 눈으로 한 번)</li>
+    <li>불필요한 열린 포트 점검 (<code>ss -lntp</code>)</li>
+    <li>접근 권한 검토 — SSH 키·계정·sudo 권한</li>
+    <li>설정 파일이 git 과 일치하는지 (<code>git status</code>)</li>
+  </ul>
+
+  <h3 class="sub">분기</h3>
+  <ul class="tx rv d1">
+    <li class="ok"><b>백업에서 실제로 복구해 보기</b> — 이것을 안 하면 백업은 없는 것과 같습니다</li>
+    <li>부하 테스트로 현재 용량 재측정</li>
+    <li>SSL Labs 등급 재확인</li>
+    <li>노출된 경로 점검 (<code>/.git</code>·<code>/.env</code> 등)</li>
+    <li>장애 대응 절차 문서 갱신</li>
+  </ul>
+
+  <pre class="code rv d2" data-lang="bash"><code>#!/usr/bin/env bash
+# 매일 돌리는 점검 스크립트 예시
+echo "===== $(date) 점검 ====="
+
+echo "-- 디스크"
+df -h | awk '$5+0 &gt; 80 {print "  경고: " $6 " " $5}'
+
+echo "-- 서비스"
+for s in nginx myapp; do
+  systemctl is-active --quiet $s &amp;&amp; echo "  $s: 정상" || echo "  $s: 중지됨 ★"
+done
+
+echo "-- 인증서"
+for d in example.com api.example.com; do
+  end=$(echo | openssl s_client -connect "$d:443" -servername "$d" 2&gt;/dev/null \
+        | openssl x509 -noout -enddate | cut -d= -f2)
+  left=$(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 ))
+  [ "$left" -lt 21 ] &amp;&amp; echo "  경고: $d ${left}일 남음 ★" || echo "  $d: ${left}일"
+done
+
+echo "-- 최근 1시간 5xx"
+awk -v d="$(date -d '1 hour ago' '+%d/%b/%Y:%H')" '$4 ~ d &amp;&amp; $9 ~ /^5/' \
+  /var/log/nginx/access.log | wc -l</code></pre>
+</section>
+
+<!-- ==================== o14 ==================== -->
+<section class="sec" id="o14">
+  <div class="sec-head rv">
+    <span class="no">SECTION 14</span>
+    <h2>취약점 대응 · <span class="t">패치</span></h2>
+    <p class="lead">
+      "잘 돌아가니까 건드리지 말자"가 <b>가장 위험한 태도</b>입니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="bash"><code># 현재 버전 확인
+nginx -v
+apachectl -v
+java -version
+node -v
+
+# 업데이트 가능 목록
+apt list --upgradable 2&gt;/dev/null | grep -E 'nginx|apache|openssl|openjdk'
+
+# 보안 업데이트만 적용 (Ubuntu)
+sudo unattended-upgrade --dry-run -d
+sudo apt install -y unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades
+
+# 재시작이 필요한 서비스 확인
+sudo apt install -y needrestart
+sudo needrestart -r l</code></pre>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">정보원</th><th>내용</th></tr>
+      <tr><td><b>배포판 보안 공지</b></td><td>Ubuntu USN · RHEL RHSA — 패키지 단위로 알려 줍니다</td></tr>
+      <tr><td><b>Nginx 보안 공지</b></td><td>nginx.org/en/security_advisories.html</td></tr>
+      <tr><td><b>Apache 보안 공지</b></td><td>httpd.apache.org/security_report.html</td></tr>
+      <tr><td><b>Tomcat 보안 공지</b></td><td>tomcat.apache.org/security.html — <b>CVE 가 자주 나옵니다</b></td></tr>
+      <tr><td><b>KISA · CERT</b></td><td>국내 보안 공지</td></tr>
+      <tr><td><b>이미지 스캔</b></td><td>Trivy · Grype — 컨테이너 이미지의 취약점 검사</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 컨테이너 이미지 취약점 스캔
+trivy image nginx:1.28
+trivy image --severity HIGH,CRITICAL myapp:latest
+
+# CI 에 넣어 취약한 이미지가 배포되지 않게
+trivy image --exit-code 1 --severity CRITICAL myapp:latest</code></pre>
+
+  <h3 class="sub">패치 절차</h3>
+  <div class="pipe rv d1">
+    <div class="prow"><span class="tagn">1</span>
+      <div><b>영향 여부 확인</b>
+        <span>CVE 가 <b>우리 버전·우리가 쓰는 기능</b>에 해당하는지. 모든 CVE 가 우리에게 위험한 것은 아닙니다.</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">2</span>
+      <div><b>스테이징에서 먼저</b>
+        <span>패치가 기존 동작을 깨뜨리지 않는지 확인합니다.</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">3</span>
+      <div><b>롤백 계획을 준비하고 적용</b>
+        <span>이전 버전 패키지를 보관하거나 스냅숏을 떠 둡니다.</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">4</span>
+      <div><b>재시작이 필요한지 확인</b>
+        <span>OpenSSL 같은 라이브러리는 <b>이를 쓰는 모든 서비스</b>를 재시작해야 반영됩니다.</span></div></div>
+  </div>
+
+  <div class="note warn rv d2">
+    <b>라이브러리 패치의 함정</b> —
+    <code>libssl</code> 을 업데이트해도 <b>이미 실행 중인 프로세스는 옛 라이브러리를 메모리에</b> 들고 있습니다.
+    <code>needrestart</code> 나 <code>lsof | grep DEL</code> 로
+    <b>재시작이 필요한 서비스</b>를 찾아 반드시 재시작하세요.
+    <br>"패치는 했는데 여전히 취약한" 상태가 실제로 자주 발생합니다.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>현실적인 정책</b>
+    <br>· <b>보안 업데이트는 자동 적용</b>(unattended-upgrades) — 대부분의 경우 안전합니다
+    <br>· <b>메이저 업그레이드는 계획적으로</b> — 분기 단위로
+    <br>· <b>EOL(지원 종료) 버전은 쓰지 않기</b> — 패치 자체가 나오지 않습니다
+    <br>· 컨테이너라면 <b>베이스 이미지를 주기적으로 새로 빌드</b>하세요
+  </div>
+</section>
+
+</div><!-- /pane-ops -->

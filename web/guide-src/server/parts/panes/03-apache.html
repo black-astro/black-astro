@@ -1,0 +1,927 @@
+<!-- ============================================================
+     APACHE PANE
+     ============================================================ -->
+<div class="pane" id="pane-apache">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> APACHE HTTP SERVER 2.4 · MPM · mod_rewrite · .htaccess</div>
+  <h1>Apache —<br>가장 오래된<br>웹서버</h1>
+  <p class="tx">
+    1995년부터 웹을 떠받쳐 온 서버입니다. 신규 구축에서는 Nginx 에 자리를 내줬지만,
+    <b>기존 시스템·워드프레스·공유 호스팅에는 여전히 압도적으로 많습니다.</b>
+    실무에서 Apache 를 만나는 이유는 대부분 <b>유지보수</b>이므로,
+    이 탭은 <b>남이 만든 설정을 읽고 고치는 것</b>에 초점을 둡니다.
+  </p>
+  <div class="stats">
+    <div><b>14</b><span>SECTIONS</span></div>
+    <div><b>2.4</b><span>기준 버전</span></div>
+    <div><b>변환표</b><span>→ Nginx</span></div>
+  </div>
+</header>
+
+<!-- ==================== h01 ==================== -->
+<section class="sec" id="h01">
+  <div class="sec-head rv">
+    <span class="no">SECTION 01</span>
+    <h2><span class="t">MPM</span> — 세 가지 처리 방식</h2>
+    <p class="lead">
+      Apache 는 <b>요청을 어떻게 나눠 처리할지 골라 쓸 수 있습니다.</b>
+      이 선택이 메모리 사용량과 동시 처리 능력을 결정합니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="df">
+      <thead><tr><th>MPM</th><th>구조</th><th>메모리</th><th>동시성</th><th>쓰는 곳</th></tr></thead>
+      <tbody>
+        <tr><td><b>prefork</b></td><td>요청당 <b>프로세스</b> 1개</td><td class="no">많음</td><td class="no">낮음</td>
+            <td>스레드 안전하지 않은 모듈(옛 mod_php)이 있을 때</td></tr>
+        <tr><td><b>worker</b></td><td>프로세스 × 스레드</td><td class="warn">중간</td><td class="warn">중간</td>
+            <td>prefork 와 event 의 중간</td></tr>
+        <tr><td><b>event</b></td><td>worker + <b>유휴 연결 분리</b></td><td class="ok">적음</td><td class="ok">높음</td>
+            <td class="ok">★ 2.4 기본값 — 특별한 이유가 없으면 이것</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note info rv d1">
+    <b>event MPM 이 개선한 것</b> —
+    prefork·worker 는 <b>keepalive 로 놀고 있는 연결</b>도 프로세스·스레드를 붙잡고 있었습니다.
+    event MPM 은 <b>유휴 연결을 전담 스레드에 넘겨</b> 작업 스레드를 풀어 줍니다.
+    Nginx 의 이벤트 모델에 한 걸음 다가간 구조입니다.
+    <br>다만 <b>PHP 를 모듈(mod_php)로 쓰면</b> prefork 가 강제되므로,
+    <b>PHP-FPM 으로 분리</b>해야 event 를 쓸 수 있습니다.
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 현재 MPM 확인
+apachectl -V | grep MPM
+# Server MPM:     event
+
+# Ubuntu 계열에서 전환
+sudo a2dismod mpm_prefork
+sudo a2enmod mpm_event
+sudo systemctl restart apache2
+
+# ※ mod_php 가 켜져 있으면 event 로 전환되지 않습니다
+sudo a2dismod php8.3
+sudo a2enmod proxy_fcgi setenvif
+sudo a2enconf php8.3-fpm</code></pre>
+
+  <pre class="code rv d1" data-lang="conf"><code># mpm_event.conf — 동시 처리 설정
+&lt;IfModule mpm_event_module&gt;
+    StartServers             4
+    MinSpareThreads         25
+    MaxSpareThreads         75
+    ThreadsPerChild         25
+    MaxRequestWorkers      400      # ★ 동시에 처리할 최대 요청 수
+    MaxConnectionsPerChild   0      # 0 = 무제한 (메모리 누수가 있으면 10000 등으로)
+&lt;/IfModule&gt;</code></pre>
+  <div class="note warn rv d2">
+    <b><code>MaxRequestWorkers</code> 를 무작정 올리지 마세요.</b>
+    각 워커가 메모리를 쓰므로 <b>(워커 수 × 워커당 메모리) 가 물리 메모리를 넘으면</b>
+    스왑이 발생해 서버가 통째로 느려집니다.
+    <br><b>계산법</b> — <code>ps</code> 로 워커 하나의 실제 메모리를 재고,
+    <code>(가용 메모리 × 0.8) ÷ 워커당 메모리</code> 를 상한으로 잡으세요.
+  </div>
+</section>
+
+<!-- ==================== h02 ==================== -->
+<section class="sec" id="h02">
+  <div class="sec-head rv">
+    <span class="no">SECTION 02</span>
+    <h2>설치와 <span class="t">디렉터리</span></h2>
+    <p class="lead">
+      <b>배포판마다 이름과 경로가 다릅니다.</b> 이것만 정리하면 문서를 보고 헤매지 않습니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="df">
+      <thead><tr><th>항목</th><th>Ubuntu · Debian</th><th>RHEL · Rocky</th></tr></thead>
+      <tbody>
+        <tr><td>패키지·서비스명</td><td><code>apache2</code></td><td><code>httpd</code></td></tr>
+        <tr><td>주 설정 파일</td><td><code>/etc/apache2/apache2.conf</code></td><td><code>/etc/httpd/conf/httpd.conf</code></td></tr>
+        <tr><td>사이트 설정</td><td><code>sites-available/</code> + <code>a2ensite</code></td><td><code>/etc/httpd/conf.d/*.conf</code></td></tr>
+        <tr><td>모듈 설정</td><td><code>mods-available/</code> + <code>a2enmod</code></td><td><code>/etc/httpd/conf.modules.d/</code></td></tr>
+        <tr><td>실행 계정</td><td><code>www-data</code></td><td><code>apache</code></td></tr>
+        <tr><td>문서 루트</td><td><code>/var/www/html</code></td><td><code>/var/www/html</code></td></tr>
+        <tr><td>로그</td><td><code>/var/log/apache2/</code></td><td><code>/var/log/httpd/</code></td></tr>
+        <tr><td>제어 명령</td><td><code>apache2ctl</code> · <code>apachectl</code></td><td><code>apachectl</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 설치
+sudo apt install -y apache2          # Ubuntu
+sudo dnf install -y httpd            # RHEL
+
+sudo systemctl enable --now apache2  # 또는 httpd
+
+# 상태 확인
+apachectl -v                         # 버전
+apachectl -V                         # 컴파일 정보 · MPM
+apachectl -M                         # 로드된 모듈
+apachectl -S                         # 가상 호스트 목록 ← 아주 유용합니다
+apachectl configtest                 # 문법 검사
+
+sudo systemctl reload apache2        # 무중단 반영
+sudo apachectl graceful              # 같은 동작</code></pre>
+
+  <div class="note tip rv d2">
+    <b><code>apachectl -S</code> 를 먼저 실행하세요.</b>
+    가상 호스트가 여러 개일 때 <b>어떤 요청이 어느 블록으로 가는지</b>,
+    <b>기본(default) 이 무엇인지</b> 한눈에 보여 줍니다.
+    "설정을 고쳤는데 반영이 안 된다"는 문제의 절반이 <b>다른 VirtualHost 가 먼저 잡고 있어서</b>입니다.
+  </div>
+</section>
+
+<!-- ==================== h03 ==================== -->
+<section class="sec" id="h03">
+  <div class="sec-head rv">
+    <span class="no">SECTION 03</span>
+    <h2>설정 구조 · <span class="t">모듈</span></h2>
+    <p class="lead">Apache 의 기능은 대부분 <b>모듈</b>로 되어 있습니다. 필요한 것만 켜세요.</p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># apache2.conf 의 뼈대
+ServerRoot "/etc/apache2"
+Listen 80
+
+IncludeOptional mods-enabled/*.load
+IncludeOptional mods-enabled/*.conf
+IncludeOptional conf-enabled/*.conf
+IncludeOptional sites-enabled/*.conf      # ← 사이트 설정을 여기서 읽습니다
+
+User  ${APACHE_RUN_USER}
+Group ${APACHE_RUN_GROUP}
+
+ServerTokens Prod                         # 응답에 버전을 노출하지 않음
+ServerSignature Off
+Timeout 60
+KeepAlive On
+MaxKeepAliveRequests 100
+KeepAliveTimeout 5
+
+&lt;Directory /&gt;
+    Options FollowSymLinks
+    AllowOverride None
+    Require all denied                    # 기본은 전부 차단 (안전한 기본값)
+&lt;/Directory&gt;
+
+&lt;Directory /var/www/&gt;
+    Options Indexes FollowSymLinks
+    AllowOverride None
+    Require all granted
+&lt;/Directory&gt;</code></pre>
+
+  <h3 class="sub">자주 쓰는 모듈</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">모듈</th><th>하는 일</th></tr>
+      <tr><td><code>mod_rewrite</code></td><td>URL 재작성 — <b>거의 항상 켭니다</b></td></tr>
+      <tr><td><code>mod_proxy</code> · <code>mod_proxy_http</code></td><td>리버스 프록시</td></tr>
+      <tr><td><code>mod_ssl</code></td><td>HTTPS</td></tr>
+      <tr><td><code>mod_headers</code></td><td>응답 헤더 조작 (보안 헤더)</td></tr>
+      <tr><td><code>mod_deflate</code></td><td>gzip 압축</td></tr>
+      <tr><td><code>mod_expires</code></td><td>캐시 헤더</td></tr>
+      <tr><td><code>mod_remoteip</code></td><td>프록시 뒤에서 실제 IP 복원</td></tr>
+      <tr><td><code>mod_proxy_fcgi</code></td><td>PHP-FPM 연동</td></tr>
+      <tr><td><code>mod_status</code></td><td>서버 상태 페이지</td></tr>
+      <tr><td class="warn"><code>mod_autoindex</code></td><td>디렉터리 목록 표시 — <b>운영에서는 끄세요</b></td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># Ubuntu 계열
+sudo a2enmod rewrite proxy proxy_http headers deflate expires ssl remoteip
+sudo a2dismod autoindex status
+sudo systemctl restart apache2
+
+# RHEL 계열 — /etc/httpd/conf.modules.d/*.conf 에서 LoadModule 을 주석 처리·해제
+# LoadModule rewrite_module modules/mod_rewrite.so</code></pre>
+
+  <div class="note warn rv d2">
+    <b>안 쓰는 모듈은 끄세요.</b>
+    모듈마다 메모리를 차지하고, <b>공격 표면이 늘어납니다.</b>
+    특히 <code>mod_autoindex</code>(디렉터리 목록 노출)와
+    <code>mod_info</code>·<code>mod_status</code>(설정·상태 노출)는
+    <b>인터넷에 열려 있으면 심각한 정보 유출</b>이 됩니다.
+  </div>
+</section>
+
+<!-- ==================== h04 ==================== -->
+<section class="sec" id="h04">
+  <div class="sec-head rv">
+    <span class="no">SECTION 04</span>
+    <h2><span class="t">VirtualHost</span></h2>
+    <p class="lead">Nginx 의 <code>server</code> 블록과 같은 역할입니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># /etc/apache2/sites-available/example.com.conf
+&lt;VirtualHost *:80&gt;
+    ServerName  example.com
+    ServerAlias www.example.com
+    DocumentRoot /var/www/example
+
+    &lt;Directory /var/www/example&gt;
+        Options -Indexes +FollowSymLinks
+        AllowOverride None
+        Require all granted
+    &lt;/Directory&gt;
+
+    ErrorLog  ${APACHE_LOG_DIR}/example-error.log
+    CustomLog ${APACHE_LOG_DIR}/example-access.log combined
+
+    # HTTPS 로 리다이렉트
+    RewriteEngine On
+    RewriteCond %{HTTPS} off
+    RewriteRule ^(.*)$ https://%{HTTP_HOST}$1 [R=301,L]
+&lt;/VirtualHost&gt;
+
+&lt;VirtualHost *:443&gt;
+    ServerName example.com
+    DocumentRoot /var/www/example
+
+    SSLEngine on
+    SSLCertificateFile    /etc/letsencrypt/live/example.com/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/example.com/privkey.pem
+
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+&lt;/VirtualHost&gt;</code></pre>
+
+  <pre class="code rv d1" data-lang="bash"><code>sudo a2ensite example.com          # 활성화
+sudo a2dissite 000-default         # 기본 사이트 비활성화
+sudo apachectl configtest
+sudo systemctl reload apache2
+
+sudo apachectl -S                  # 어떤 VirtualHost 가 어떤 순서인지 확인</code></pre>
+
+  <div class="note warn rv d1">
+    <b>매칭 규칙</b> — 요청의 Host 헤더와 <code>ServerName</code>·<code>ServerAlias</code> 를 비교하고,
+    <b>어디에도 안 맞으면 첫 번째 VirtualHost</b> 가 처리합니다.
+    Nginx 의 <code>default_server</code> 같은 명시적 지정이 없으므로,
+    <b>파일 이름 순서(<code>000-default</code>)</b>로 기본을 정하는 관례가 있습니다.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>알 수 없는 Host 를 거부하려면</b> 맨 앞 순서에 오는 VirtualHost 를 하나 두고
+    <code>Redirect 404 /</code> 또는 빈 응답을 주도록 설정하세요.
+    봇 스캔이 <b>엉뚱한 사이트에 접근</b>하는 것을 막습니다.
+  </div>
+</section>
+
+<!-- ==================== h05 ==================== -->
+<section class="sec" id="h05">
+  <div class="sec-head rv">
+    <span class="no">SECTION 05</span>
+    <h2>Directory · Location · <span class="t">Files</span></h2>
+    <p class="lead">
+      셋 다 "어디에 적용할지" 정하지만 <b>기준이 다릅니다.</b> 이 구분이 Apache 설정의 핵심입니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:22%">지시어</th><th>기준</th><th>예</th></tr>
+      <tr><td><code>&lt;Directory&gt;</code></td><td><b>파일 시스템 경로</b></td><td><code>&lt;Directory /var/www/app&gt;</code></td></tr>
+      <tr><td><code>&lt;Location&gt;</code></td><td><b>URL 경로</b></td><td><code>&lt;Location /admin&gt;</code></td></tr>
+      <tr><td><code>&lt;Files&gt;</code></td><td><b>파일 이름</b></td><td><code>&lt;Files ".env"&gt;</code></td></tr>
+      <tr><td><code>&lt;FilesMatch&gt;</code></td><td>파일 이름 (정규식)</td><td><code>&lt;FilesMatch "\.(env|log)$"&gt;</code></td></tr>
+      <tr><td><code>&lt;LocationMatch&gt;</code></td><td>URL (정규식)</td><td><code>&lt;LocationMatch "^/api/v[0-9]+"&gt;</code></td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="conf"><code># 파일 시스템 기준 — 실제 폴더에 적용
+&lt;Directory /var/www/example&gt;
+    Options -Indexes +FollowSymLinks      # 디렉터리 목록 금지
+    AllowOverride None                    # .htaccess 무시 (성능·보안)
+    Require all granted
+&lt;/Directory&gt;
+
+# URL 기준 — 프록시 경로처럼 실제 파일이 없는 곳에도 적용됩니다
+&lt;Location /admin&gt;
+    Require ip 10.0.0.0/8
+    Require ip 203.0.113.5
+&lt;/Location&gt;
+
+# 민감한 파일 접근 차단 (반드시 넣으세요)
+&lt;FilesMatch "^\.|\.(env|git|sql|bak|log|ini|conf)$"&gt;
+    Require all denied
+&lt;/FilesMatch&gt;
+
+# 업로드 폴더에서 스크립트 실행 금지 (치명적 취약점 방지)
+&lt;Directory /var/www/example/uploads&gt;
+    php_admin_flag engine off
+    Options -ExecCGI
+    AddType text/plain .php .phtml .php3 .php5 .pl .py .cgi
+&lt;/Directory&gt;</code></pre>
+
+  <div class="note info rv d1">
+    <b>적용 순서</b> —
+    <code>&lt;Directory&gt;</code>(경로가 짧은 것부터) → <code>&lt;Files&gt;</code> →
+    <code>&lt;Location&gt;</code> 순서로 적용되며, <b>뒤에 적용된 것이 앞을 덮어씁니다</b>.
+    <code>&lt;Location&gt;</code> 이 가장 마지막이라 <b>가장 강력</b>합니다.
+  </div>
+
+  <h3 class="sub">Options 지시어</h3>
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:26%">옵션</th><th>의미</th></tr>
+      <tr><td class="warn"><code>Indexes</code></td><td>index 파일이 없으면 <b>디렉터리 목록을 보여 줍니다</b> — 운영에서는 반드시 <code>-Indexes</code></td></tr>
+      <tr><td><code>FollowSymLinks</code></td><td>심볼릭 링크를 따라감 (성능상 권장)</td></tr>
+      <tr><td><code>SymLinksIfOwnerMatch</code></td><td>소유자가 같을 때만 따라감 (더 안전하지만 느림)</td></tr>
+      <tr><td class="warn"><code>ExecCGI</code></td><td>CGI 실행 허용 — <b>필요한 곳에만</b></td></tr>
+      <tr><td><code>MultiViews</code></td><td>확장자 없이 접근 시 추측 — 예상 밖 동작의 원인이 되므로 끄는 편이 낫습니다</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== h06 ==================== -->
+<section class="sec" id="h06">
+  <div class="sec-head rv">
+    <span class="no">SECTION 06</span>
+    <h2><span class="t">.htaccess</span> — 쓸 것인가</h2>
+    <p class="lead">
+      Apache 만의 특징입니다. <b>폴더마다 두는 설정 파일</b>로, 서버 설정을 못 건드리는 환경에서 유용합니다.
+    </p>
+  </div>
+
+  <div class="vs rv">
+    <div class="good">
+      <h5>장점</h5>
+      <pre class="code" data-lang="text"><code>· 서버 재시작 없이 즉시 반영
+· 서버 설정 접근 권한 없이 사용 가능
+  (공유 호스팅의 핵심)
+· 애플리케이션과 함께 배포 가능
+  (워드프레스·라라벨이 기본 제공)
+· 폴더 단위로 권한 위임</code></pre>
+    </div>
+    <div class="bad">
+      <h5>단점</h5>
+      <pre class="code" data-lang="text"><code>· ★ 요청마다 파일을 읽습니다
+  (상위 폴더 전부를 거슬러 올라가며!)
+· 설정이 여러 곳에 흩어져 추적이 어려움
+· 문법 오류 시 500 오류 (검증 단계 없음)
+· 사용자가 보안 설정을 무력화할 수 있음</code></pre>
+    </div>
+  </div>
+
+  <div class="note warn rv d1">
+    <b>성능 비용이 생각보다 큽니다.</b>
+    <code>/var/www/app/a/b/c/file.php</code> 요청이 오면 Apache 는
+    <code>/</code> → <code>/var</code> → <code>/var/www</code> → … → <code>/c</code> 까지
+    <b>모든 폴더에서 .htaccess 를 찾습니다.</b> 요청 하나에 디스크 접근이 수 회 발생합니다.
+    <br><b>서버 설정을 직접 고칠 수 있다면 <code>AllowOverride None</code> 으로 끄고
+    VirtualHost 에 직접 쓰세요.</b>
+  </div>
+
+  <pre class="code rv d1" data-lang="conf"><code># 완전히 끄기 (권장 · 성능 향상)
+&lt;Directory /var/www/&gt;
+    AllowOverride None
+&lt;/Directory&gt;
+
+# 필요한 것만 허용
+&lt;Directory /var/www/app/&gt;
+    AllowOverride FileInfo Options=Indexes
+&lt;/Directory&gt;</code></pre>
+
+  <h3 class="sub">전형적인 .htaccess (워드프레스·라라벨)</h3>
+  <pre class="code rv d1" data-lang="conf"><code># 프런트 컨트롤러 패턴 — 실제 파일이 없으면 index.php 로
+&lt;IfModule mod_rewrite.c&gt;
+    RewriteEngine On
+    RewriteBase /
+
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [L]
+&lt;/IfModule&gt;
+
+# 민감 파일 차단
+&lt;FilesMatch "^\.|composer\.(json|lock)$"&gt;
+    Require all denied
+&lt;/FilesMatch&gt;
+
+# 디렉터리 목록 금지
+Options -Indexes</code></pre>
+
+  <div class="note tip rv d2">
+    <b>이 설정을 VirtualHost 로 옮기는 법</b> —
+    <code>.htaccess</code> 의 내용을 <code>&lt;Directory /var/www/app&gt;</code> 블록 안에
+    <b>그대로 복사</b>하고 <code>AllowOverride None</code> 으로 바꾸면 됩니다.
+    <code>RewriteBase</code> 만 상황에 맞게 조정하세요.
+    <b>성능이 개선되고 설정이 한 곳에 모입니다.</b>
+  </div>
+</section>
+
+<!-- ==================== h07 ==================== -->
+<section class="sec" id="h07">
+  <div class="sec-head rv">
+    <span class="no">SECTION 07</span>
+    <h2><span class="t">mod_rewrite</span></h2>
+    <p class="lead">
+      Apache 의 가장 강력한 기능이자 <b>가장 어려운 부분</b>입니다.
+      레거시 시스템 유지보수에서 반드시 만나게 됩니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code>RewriteEngine On
+
+# ── 기본 형태
+# RewriteCond  조건 (여러 개 가능 · AND 로 묶임)
+# RewriteRule  패턴  대체  [플래그]
+
+# HTTPS 강제
+RewriteCond %{HTTPS} off
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
+# www 제거
+RewriteCond %{HTTP_HOST} ^www\.(.+)$ [NC]
+RewriteRule ^(.*)$ https://%1/$1 [R=301,L]
+
+# 실제 파일이 없으면 index.php 로 (프런트 컨트롤러)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [L]
+
+# 옛 URL 을 새 URL 로
+RewriteRule ^article/([0-9]+)$ /posts/$1 [R=301,L]
+
+# 내부 재작성 (주소는 그대로, 처리만 다른 곳에서)
+RewriteRule ^api/(.*)$ /backend/api.php?path=$1 [QSA,L]</code></pre>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:16%">플래그</th><th>의미</th></tr>
+      <tr><td><code>L</code></td><td><b>Last</b> — 여기서 규칙 처리를 멈춥니다 (거의 항상 붙입니다)</td></tr>
+      <tr><td><code>R=301</code></td><td>브라우저에 리다이렉트 응답 (301 영구 · 302 임시)</td></tr>
+      <tr><td><code>QSA</code></td><td><b>Query String Append</b> — 원래 쿼리스트링을 유지</td></tr>
+      <tr><td><code>NC</code></td><td>대소문자 무시</td></tr>
+      <tr><td><code>P</code></td><td>프록시로 전달 (mod_proxy 필요)</td></tr>
+      <tr><td><code>F</code></td><td>403 Forbidden 응답</td></tr>
+      <tr><td><code>E=VAR:val</code></td><td>환경 변수 설정</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">디버깅 — 규칙이 왜 안 먹는지</h3>
+  <pre class="code rv d1" data-lang="conf"><code># 2.4 부터는 LogLevel 로 rewrite 추적을 켭니다
+LogLevel warn rewrite:trace3
+
+# error.log 에 각 단계가 기록됩니다
+# trace1(간단) ~ trace8(매우 상세) · 운영에서는 반드시 끄세요 (로그 폭증)</code></pre>
+  <div class="out rv d1">[rewrite:trace3] applying pattern '^(.*)$' to uri '/article/123'
+[rewrite:trace2] rewrite '/article/123' -&gt; '/posts/123'
+[rewrite:trace1] escaping /posts/123 for redirect</div>
+
+  <div class="note warn rv d2">
+    <b>mod_rewrite 의 흔한 함정</b>
+    <br>· <b>무한 루프</b> — 재작성 결과가 다시 같은 규칙에 걸립니다. <code>RewriteCond</code> 로 탈출 조건을 넣으세요
+    <br>· <b>.htaccess 에서는 경로 앞의 <code>/</code> 가 제거</b>됩니다 — VirtualHost 와 패턴이 달라집니다
+    <br>· <b><code>L</code> 플래그가 .htaccess 에서는 완전히 끝내지 않습니다</b> — 재작성 후 다시 처음부터 돕니다.
+      확실히 끝내려면 <code>END</code> 플래그(2.3.9+)를 쓰세요
+    <br>· <b>조건이 여러 개면 AND</b> 입니다. OR 를 원하면 <code>[OR]</code> 플래그를 붙이세요
+  </div>
+
+  <div class="note tip rv d2">
+    <b>단순한 리다이렉트에는 mod_rewrite 를 쓰지 마세요.</b>
+    <code>Redirect 301 /old /new</code> 나 <code>RedirectMatch</code> 가
+    <b>훨씬 빠르고 읽기 쉽습니다.</b>
+    mod_rewrite 는 <b>조건이 필요한 복잡한 경우</b>에만 씁니다.
+  </div>
+</section>
+
+<!-- ==================== h08 ==================== -->
+<section class="sec" id="h08">
+  <div class="sec-head rv">
+    <span class="no">SECTION 08</span>
+    <h2>리버스 프록시 <span class="t">mod_proxy</span></h2>
+    <p class="lead">Apache 도 프록시가 됩니다. Tomcat 앞단으로 쓰는 구성이 특히 흔합니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># 모듈 활성화
+# sudo a2enmod proxy proxy_http proxy_balancer lbmethod_byrequests headers
+
+&lt;VirtualHost *:80&gt;
+    ServerName example.com
+
+    ProxyPreserveHost On                  # 원래 Host 헤더를 유지
+    ProxyRequests Off                     # ★ 정방향 프록시 금지 (켜면 오픈 프록시가 됩니다)
+
+    ProxyPass        /api/ http://127.0.0.1:8080/api/
+    ProxyPassReverse /api/ http://127.0.0.1:8080/api/
+
+    # 실제 IP 전달
+    RequestHeader set X-Forwarded-Proto "http"
+    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
+
+    # 정적 파일은 프록시하지 않음
+    ProxyPass /static/ !
+    Alias /static/ /var/www/static/
+
+    ProxyTimeout 60
+&lt;/VirtualHost&gt;</code></pre>
+
+  <div class="note warn rv d1">
+    <b><code>ProxyRequests Off</code> 를 반드시 확인하세요.</b>
+    이것이 <code>On</code> 이면 <b>정방향 프록시</b>가 되어
+    누구나 우리 서버를 거쳐 아무 사이트에나 접속할 수 있습니다.
+    <b>스팸·불법 트래픽의 경유지가 되어 IP 가 차단</b>됩니다.
+    (기본값은 Off 이지만 잘못 켜 두는 사례가 있습니다)
+  </div>
+
+  <h3 class="sub">로드 밸런싱</h3>
+  <pre class="code rv d1" data-lang="conf"><code>&lt;Proxy balancer://mycluster&gt;
+    BalancerMember http://10.0.1.11:8080 loadfactor=3
+    BalancerMember http://10.0.1.12:8080
+    BalancerMember http://10.0.1.13:8080 status=+H      # H = 대기(핫 스탠바이)
+
+    ProxySet lbmethod=byrequests                        # bytraffic · bybusyness 도 있음
+&lt;/Proxy&gt;
+
+ProxyPass        / balancer://mycluster/
+ProxyPassReverse / balancer://mycluster/
+
+# 관리 화면 (내부에서만 접근 가능하게)
+&lt;Location /balancer-manager&gt;
+    SetHandler balancer-manager
+    Require ip 10.0.0.0/8
+&lt;/Location&gt;</code></pre>
+
+  <h3 class="sub">AJP — Tomcat 전용 프로토콜</h3>
+  <pre class="code rv d2" data-lang="conf"><code># sudo a2enmod proxy_ajp
+ProxyPass        /app/ ajp://127.0.0.1:8009/app/
+ProxyPassReverse /app/ ajp://127.0.0.1:8009/app/</code></pre>
+  <div class="note warn rv d2">
+    <b>AJP 는 신중하게 쓰세요.</b>
+    2020년 <b>Ghostcat(CVE-2020-1938)</b> 취약점 이후
+    Tomcat 은 AJP 커넥터를 <b>기본 비활성화</b>했고,
+    활성화하더라도 <code>secretRequired</code> 와 <code>address="127.0.0.1"</code> 이 필요합니다.
+    <b>특별한 이유가 없으면 그냥 HTTP 프록시</b>를 쓰세요 — 성능 차이는 미미합니다.
+  </div>
+</section>
+
+<!-- ==================== h09 ==================== -->
+<section class="sec" id="h09">
+  <div class="sec-head rv">
+    <span class="no">SECTION 09</span>
+    <h2><span class="t">HTTPS</span> 설정</h2>
+    <p class="lead">개념은 Nginx 와 같고 지시어 이름만 다릅니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code>&lt;VirtualHost *:443&gt;
+    ServerName example.com
+    DocumentRoot /var/www/example
+
+    SSLEngine on
+    SSLCertificateFile      /etc/letsencrypt/live/example.com/fullchain.pem
+    SSLCertificateKeyFile   /etc/letsencrypt/live/example.com/privkey.pem
+    # 2.4.8 미만에서는 체인을 따로 지정했습니다
+    # SSLCertificateChainFile /etc/letsencrypt/live/example.com/chain.pem
+
+    SSLProtocol             -all +TLSv1.2 +TLSv1.3
+    SSLHonorCipherOrder     off
+    SSLCipherSuite          ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384
+
+    SSLUseStapling on
+    SSLStaplingCache "shmcb:logs/ssl_stapling(32768)"
+
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+&lt;/VirtualHost&gt;
+
+# HTTP → HTTPS
+&lt;VirtualHost *:80&gt;
+    ServerName example.com
+    Redirect permanent / https://example.com/
+&lt;/VirtualHost&gt;</code></pre>
+
+  <pre class="code rv d1" data-lang="bash"><code># certbot 이 Apache 설정까지 자동으로 해 줍니다
+sudo apt install -y certbot python3-certbot-apache
+sudo certbot --apache -d example.com -d www.example.com
+
+# 인증서만 받고 설정은 직접
+sudo certbot certonly --apache -d example.com</code></pre>
+
+  <div class="note info rv d2">
+    <b>HTTP/2 를 쓰려면</b> —
+    <code>sudo a2enmod http2</code> 후 VirtualHost 에
+    <code>Protocols h2 http/1.1</code> 을 추가합니다.
+    다만 <b>prefork MPM 에서는 HTTP/2 가 동작하지 않습니다</b> — event MPM 이 필요합니다.
+    <br>인증서 발급·갱신·진단은 <b>🔐 HTTPS 탭</b>에서 자세히 다룹니다.
+  </div>
+</section>
+
+<!-- ==================== h10 ==================== -->
+<section class="sec" id="h10">
+  <div class="sec-head rv">
+    <span class="no">SECTION 10</span>
+    <h2>인증 · <span class="t">접근 제어</span></h2>
+    <p class="lead">Apache 는 이 부분이 특히 강합니다. 관리자 페이지 보호에 그대로 씁니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="bash"><code># 비밀번호 파일 만들기 (문서 루트 밖에 두세요)
+sudo htpasswd -c /etc/apache2/.htpasswd admin      # -c 는 최초 1회만
+sudo htpasswd /etc/apache2/.htpasswd user2         # 추가</code></pre>
+
+  <pre class="code rv d1" data-lang="conf"><code>&lt;Location /admin&gt;
+    AuthType Basic
+    AuthName "Restricted Area"
+    AuthUserFile /etc/apache2/.htpasswd
+    Require valid-user
+&lt;/Location&gt;
+
+# IP 제한
+&lt;Location /internal&gt;
+    Require ip 10.0.0.0/8
+    Require ip 203.0.113.5
+&lt;/Location&gt;
+
+# IP 또는 인증 (둘 중 하나만 통과하면 됨)
+&lt;Location /admin&gt;
+    &lt;RequireAny&gt;
+        Require ip 10.0.0.0/8
+        Require valid-user
+    &lt;/RequireAny&gt;
+&lt;/Location&gt;
+
+# IP 이면서 인증 (둘 다 필요)
+&lt;Location /danger&gt;
+    &lt;RequireAll&gt;
+        Require ip 10.0.0.0/8
+        Require valid-user
+    &lt;/RequireAll&gt;
+&lt;/Location&gt;</code></pre>
+
+  <div class="note warn rv d1">
+    <b>Basic 인증은 HTTPS 에서만 쓰세요.</b>
+    비밀번호가 <b>Base64 인코딩</b>될 뿐 암호화되지 않습니다.
+    HTTP 로 쓰면 네트워크에서 그대로 읽힙니다.
+    <br>또 <b>2.2 문법(<code>Order</code>·<code>Allow from</code>)은 2.4 에서 폐기</b>됐습니다.
+    옛 설정을 옮길 때는 <code>Require</code> 문법으로 바꿔야 합니다.
+  </div>
+
+  <h3 class="sub">2.2 → 2.4 접근 제어 문법 변환</h3>
+  <div class="tw rv d2">
+    <table class="df">
+      <thead><tr><th>2.2 (폐기)</th><th>2.4</th></tr></thead>
+      <tbody>
+        <tr><td><code>Order allow,deny</code><br><code>Allow from all</code></td><td><code>Require all granted</code></td></tr>
+        <tr><td><code>Order deny,allow</code><br><code>Deny from all</code></td><td><code>Require all denied</code></td></tr>
+        <tr><td><code>Allow from 10.0.0.0/8</code></td><td><code>Require ip 10.0.0.0/8</code></td></tr>
+        <tr><td><code>Allow from example.com</code></td><td><code>Require host example.com</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== h11 ==================== -->
+<section class="sec" id="h11">
+  <div class="sec-head rv">
+    <span class="no">SECTION 11</span>
+    <h2>압축 · <span class="t">캐시 헤더</span></h2>
+    <p class="lead">모듈을 켜고 설정하면 정적 자원 성능이 크게 달라집니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># sudo a2enmod deflate expires headers
+
+# ── 압축
+&lt;IfModule mod_deflate.c&gt;
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css
+    AddOutputFilterByType DEFLATE application/javascript application/json
+    AddOutputFilterByType DEFLATE application/xml image/svg+xml
+
+    DeflateCompressionLevel 5
+
+    # 이미 압축된 것은 제외
+    SetEnvIfNoCase Request_URI \.(?:gif|jpe?g|png|webp|zip|gz|mp4)$ no-gzip dont-vary
+&lt;/IfModule&gt;
+
+# ── 캐시 헤더
+&lt;IfModule mod_expires.c&gt;
+    ExpiresActive On
+    ExpiresByType image/jpeg      "access plus 1 month"
+    ExpiresByType image/png       "access plus 1 month"
+    ExpiresByType image/svg+xml   "access plus 1 month"
+    ExpiresByType text/css        "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType text/html       "access plus 0 seconds"
+&lt;/IfModule&gt;
+
+# 해시가 붙은 파일은 영구 캐시
+&lt;FilesMatch "\.[0-9a-f]{8,}\.(js|css)$"&gt;
+    Header set Cache-Control "public, max-age=31536000, immutable"
+&lt;/FilesMatch&gt;
+
+# index.html 은 캐시 금지
+&lt;Files "index.html"&gt;
+    Header set Cache-Control "no-store, must-revalidate"
+&lt;/Files&gt;</code></pre>
+
+  <h3 class="sub">보안 헤더도 여기서</h3>
+  <pre class="code rv d2" data-lang="conf"><code>&lt;IfModule mod_headers.c&gt;
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+    # 서버 정보 제거
+    Header unset X-Powered-By
+    Header unset Server
+&lt;/IfModule&gt;</code></pre>
+  <div class="note tip rv d2">
+    <b><code>always</code> 키워드를 붙이세요.</b>
+    없으면 <b>2xx·3xx 응답에만</b> 헤더가 붙고
+    <b>4xx·5xx 오류 응답에는 빠집니다.</b>
+    보안 헤더는 오류 페이지에도 적용돼야 의미가 있습니다.
+  </div>
+</section>
+
+<!-- ==================== h12 ==================== -->
+<section class="sec" id="h12">
+  <div class="sec-head rv">
+    <span class="no">SECTION 12</span>
+    <h2>로그와 <span class="t">진단</span></h2>
+    <p class="lead">Apache 의 error 로그는 정보량이 많습니다. 레벨만 조절할 줄 알면 됩니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># 로그 포맷 정의
+LogFormat "%h %l %u %t \"%r\" %&gt;s %b \"%{Referer}i\" \"%{User-Agent}i\" %D" combined_time
+# %D = 처리 시간(마이크로초) ← 성능 분석에 필수
+
+CustomLog ${APACHE_LOG_DIR}/access.log combined_time
+ErrorLog  ${APACHE_LOG_DIR}/error.log
+
+LogLevel warn                     # 평상시
+# LogLevel info rewrite:trace3    # rewrite 디버깅 시 (운영에서는 끄세요)
+# LogLevel debug proxy:trace5     # 프록시 디버깅
+
+# 특정 요청은 로그에서 제외
+SetEnvIf Request_URI "^/health$" dontlog
+SetEnvIf Request_URI "\.(css|js|png|jpg|svg)$" dontlog
+CustomLog ${APACHE_LOG_DIR}/access.log combined_time env=!dontlog</code></pre>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:16%">기호</th><th>의미</th></tr>
+      <tr><td><code>%h</code></td><td>클라이언트 IP</td></tr>
+      <tr><td><code>%t</code></td><td>시각</td></tr>
+      <tr><td><code>%r</code></td><td>요청 첫 줄 (<code>GET /path HTTP/1.1</code>)</td></tr>
+      <tr><td><code>%&gt;s</code></td><td>최종 상태 코드</td></tr>
+      <tr><td><code>%b</code></td><td>응답 크기</td></tr>
+      <tr><td><code>%D</code></td><td class="ok"><b>처리 시간 (마이크로초)</b></td></tr>
+      <tr><td><code>%T</code></td><td>처리 시간 (초)</td></tr>
+      <tr><td><code>%{X-Forwarded-For}i</code></td><td>임의 요청 헤더</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 상태 코드 집계
+awk '{print $9}' /var/log/apache2/access.log | sort | uniq -c | sort -rn
+
+# 가장 느린 요청 (마지막 필드가 %D 일 때)
+awk '{print $NF, $7}' /var/log/apache2/access.log | sort -rn | head -20
+
+# 실시간 오류만
+sudo tail -f /var/log/apache2/error.log | grep -E '\[(error|crit|alert|emerg)\]'</code></pre>
+
+  <h3 class="sub">서버 상태 페이지</h3>
+  <pre class="code rv d2" data-lang="conf"><code># sudo a2enmod status
+ExtendedStatus On
+&lt;Location /server-status&gt;
+    SetHandler server-status
+    Require ip 127.0.0.1
+    Require ip 10.0.0.0/8          # ★ 반드시 제한하세요
+&lt;/Location&gt;
+
+# curl http://localhost/server-status?auto</code></pre>
+  <div class="note warn rv d2">
+    <b><code>/server-status</code> 와 <code>/server-info</code> 를 인터넷에 열지 마세요.</b>
+    <b>현재 처리 중인 URL·클라이언트 IP·서버 설정</b>이 그대로 노출됩니다.
+    실제로 검색엔진에 노출된 사례가 많습니다.
+    반드시 <code>Require ip</code> 로 제한하세요.
+  </div>
+</section>
+
+<!-- ==================== h13 ==================== -->
+<section class="sec" id="h13">
+  <div class="sec-head rv">
+    <span class="no">SECTION 13</span>
+    <h2>Nginx <span class="t">vs</span> Apache</h2>
+    <p class="lead">감정적인 논쟁이 많은 주제입니다. <b>사실만 정리</b>합니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="df">
+      <thead><tr><th>항목</th><th class="c-ng">Nginx</th><th class="c-ap">Apache</th></tr></thead>
+      <tbody>
+        <tr><td>동시 접속 효율</td><td class="ng"><b>우수</b> (이벤트)</td><td class="ap">보통 (event MPM 이면 개선)</td></tr>
+        <tr><td>정적 파일</td><td class="ng"><b>빠름</b></td><td class="ap">보통</td></tr>
+        <tr><td>동적 언어 직접 실행</td><td class="ng">불가 (항상 프록시)</td><td class="ap"><b>모듈로 가능</b></td></tr>
+        <tr><td>디렉터리별 설정</td><td class="ng">없음</td><td class="ap"><b>.htaccess</b></td></tr>
+        <tr><td>설정 문법</td><td class="ng"><b>간결</b></td><td class="ap">장황함</td></tr>
+        <tr><td>URL 재작성</td><td class="ng">충분</td><td class="ap"><b>표현력이 더 큼</b></td></tr>
+        <tr><td>모듈 생태계</td><td class="ng">보통 (동적 모듈)</td><td class="ap"><b>방대함</b></td></tr>
+        <tr><td>메모리 사용</td><td class="ng"><b>적음</b></td><td class="ap">많음</td></tr>
+        <tr><td>자료·사례</td><td class="ng"><b>최신 자료가 많음</b></td><td class="ap">오래된 자료가 많음</td></tr>
+        <tr><td>공유 호스팅</td><td class="ng">부적합</td><td class="ap"><b>사실상 표준</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="sub">언제 무엇을</h3>
+  <div class="ladder rv d1">
+    <div class="lv-b">
+      <h5>🟢 Nginx 를 쓰세요</h5>
+      <ul>
+        <li>신규 구축</li>
+        <li>리버스 프록시·로드밸런서</li>
+        <li>정적 파일·SPA 서빙</li>
+        <li>동시 접속이 많은 서비스</li>
+        <li>컨테이너·쿠버네티스 환경</li>
+      </ul>
+    </div>
+    <div class="lv-i">
+      <h5>🔵 Apache 가 나은 경우</h5>
+      <ul>
+        <li>이미 Apache 로 돌아가는 시스템</li>
+        <li>.htaccess 가 필요한 공유 호스팅</li>
+        <li>특정 Apache 모듈에 의존</li>
+        <li>워드프레스 등 기본 지원이 Apache 인 솔루션</li>
+        <li>팀이 Apache 에 익숙할 때</li>
+      </ul>
+    </div>
+    <div class="lv-a">
+      <h5>🟣 둘 다 쓰는 구성</h5>
+      <ul>
+        <li>Nginx(앞) + Apache(뒤)</li>
+        <li>Nginx 가 정적·TLS·캐시를 처리</li>
+        <li>Apache 가 .htaccess 와 PHP 를 처리</li>
+        <li>레거시를 유지하며 점진적 이관</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>솔직한 결론</b> —
+    <b>순수 성능 차이는 예전만큼 크지 않습니다.</b>
+    event MPM + PHP-FPM 조합의 Apache 는 상당히 좋은 성능을 냅니다.
+    <br>실무에서 Nginx 를 고르는 진짜 이유는 <b>설정의 간결함·최신 자료의 양·
+    컨테이너 생태계와의 궁합</b>입니다.
+    <b>이미 잘 돌아가는 Apache 를 바꿀 이유는 대개 없습니다.</b>
+  </div>
+</section>
+
+<!-- ==================== h14 ==================== -->
+<section class="sec" id="h14">
+  <div class="sec-head rv">
+    <span class="no">SECTION 14</span>
+    <h2>설정 변환 <span class="t">대조표</span></h2>
+    <p class="lead">Apache 설정을 Nginx 로 옮길 때 하나씩 대응시키세요.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="df">
+      <thead><tr><th>목적</th><th class="c-ap">Apache</th><th class="c-ng">Nginx</th></tr></thead>
+      <tbody>
+        <tr><td>사이트 정의</td><td class="ap"><code>&lt;VirtualHost *:80&gt;</code></td><td class="ng"><code>server { listen 80; }</code></td></tr>
+        <tr><td>도메인</td><td class="ap"><code>ServerName</code> · <code>ServerAlias</code></td><td class="ng"><code>server_name a.com b.com;</code></td></tr>
+        <tr><td>문서 루트</td><td class="ap"><code>DocumentRoot /path</code></td><td class="ng"><code>root /path;</code></td></tr>
+        <tr><td>기본 파일</td><td class="ap"><code>DirectoryIndex index.html</code></td><td class="ng"><code>index index.html;</code></td></tr>
+        <tr><td>경로별 설정</td><td class="ap"><code>&lt;Location /api&gt;</code></td><td class="ng"><code>location /api { }</code></td></tr>
+        <tr><td>디렉터리 목록 금지</td><td class="ap"><code>Options -Indexes</code></td><td class="ng"><code>autoindex off;</code> (기본값)</td></tr>
+        <tr><td>접근 허용</td><td class="ap"><code>Require all granted</code></td><td class="ng">(기본 허용)</td></tr>
+        <tr><td>IP 제한</td><td class="ap"><code>Require ip 10.0.0.0/8</code></td><td class="ng"><code>allow 10.0.0.0/8; deny all;</code></td></tr>
+        <tr><td>Basic 인증</td><td class="ap"><code>AuthType Basic</code> …</td><td class="ng"><code>auth_basic "…"; auth_basic_user_file …;</code></td></tr>
+        <tr><td>리다이렉트</td><td class="ap"><code>Redirect 301 /old /new</code></td><td class="ng"><code>return 301 /new;</code></td></tr>
+        <tr><td>URL 재작성</td><td class="ap"><code>RewriteRule ^a/(.*)$ /b/$1 [L]</code></td><td class="ng"><code>rewrite ^/a/(.*)$ /b/$1 last;</code></td></tr>
+        <tr><td>프런트 컨트롤러</td><td class="ap"><code>RewriteCond !-f</code> + <code>RewriteRule ^ index.php</code></td>
+            <td class="ng"><code>try_files $uri $uri/ /index.php?$args;</code></td></tr>
+        <tr><td>리버스 프록시</td><td class="ap"><code>ProxyPass /api/ http://…</code></td><td class="ng"><code>proxy_pass http://…;</code></td></tr>
+        <tr><td>로드 밸런싱</td><td class="ap"><code>&lt;Proxy balancer://…&gt;</code></td><td class="ng"><code>upstream name { server …; }</code></td></tr>
+        <tr><td>HTTPS 인증서</td><td class="ap"><code>SSLCertificateFile</code></td><td class="ng"><code>ssl_certificate</code></td></tr>
+        <tr><td>압축</td><td class="ap"><code>AddOutputFilterByType DEFLATE</code></td><td class="ng"><code>gzip on; gzip_types …;</code></td></tr>
+        <tr><td>캐시 헤더</td><td class="ap"><code>ExpiresByType</code></td><td class="ng"><code>expires 1y;</code></td></tr>
+        <tr><td>응답 헤더 추가</td><td class="ap"><code>Header always set X "y"</code></td><td class="ng"><code>add_header X "y" always;</code></td></tr>
+        <tr><td>실제 IP 복원</td><td class="ap"><code>RemoteIPHeader X-Forwarded-For</code></td><td class="ng"><code>real_ip_header X-Forwarded-For;</code></td></tr>
+        <tr><td>로그 포맷</td><td class="ap"><code>LogFormat "…" name</code></td><td class="ng"><code>log_format name '…';</code></td></tr>
+        <tr><td>문법 검사</td><td class="ap"><code>apachectl configtest</code></td><td class="ng"><code>nginx -t</code></td></tr>
+        <tr><td>무중단 반영</td><td class="ap"><code>apachectl graceful</code></td><td class="ng"><code>nginx -s reload</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note warn rv d1">
+    <b>변환 시 반드시 확인할 것</b>
+    <br>① <b>.htaccess 를 쓰고 있었다면</b> 그 내용을 전부 Nginx 설정으로 옮겨야 합니다 (Nginx 에는 대응 기능이 없습니다)
+    <br>② <b>mod_php 를 쓰고 있었다면</b> PHP-FPM 으로 전환해야 합니다
+    <br>③ <b>복잡한 RewriteRule</b> 은 동작이 미묘하게 다를 수 있으니 <b>하나씩 테스트</b>하세요
+    <br>④ <b>MultiViews·ContentNegotiation</b> 같은 Apache 고유 기능은 대응 방법이 다릅니다
+  </div>
+
+  <div class="note tip rv d2">
+    <b>안전한 이관 절차</b> —
+    ① Nginx 를 <b>다른 포트(8080)</b>에 띄워 설정을 옮깁니다
+    ② <code>curl</code> 로 <b>주요 URL 을 양쪽에 요청해 응답을 비교</b>합니다
+    ③ 정적 파일·리다이렉트·프록시를 각각 확인합니다
+    ④ 문제가 없으면 포트를 바꿔 전환하고, <b>Apache 는 며칠간 남겨</b> 둡니다
+  </div>
+</section>
+
+</div><!-- /pane-apache -->

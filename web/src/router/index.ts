@@ -54,8 +54,8 @@ export const guides: Guide[] = [
       'CPython 내부',
     ],
     stats: [
-      { value: '12', label: '주제 탭' },
-      { value: '177', label: '섹션' },
+      { value: '14', label: '주제 탭' },
+      { value: '200', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -82,7 +82,7 @@ export const guides: Guide[] = [
     ],
     stats: [
       { value: '11', label: '주제 탭' },
-      { value: '150', label: '섹션' },
+      { value: '159', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -96,7 +96,7 @@ export const guides: Guide[] = [
     desc:
       'JavaScript 기본기와 TypeScript 타입 시스템부터 Node.js 런타임·Express·NestJS· ' +
       'React Native·Electron, 그리고 대규모 트래픽 운영과 V8 내부 동작까지 ' +
-      '초고급 영역을 실무 코드로 정리했습니다.',
+      '전문가 영역을 실무 코드로 정리했습니다.',
     tags: [
       'JavaScript',
       'TypeScript',
@@ -109,8 +109,62 @@ export const guides: Guide[] = [
     ],
     stats: [
       { value: '10', label: '주제 탭' },
-      { value: '150', label: '섹션' },
+      { value: '152', label: '섹션' },
       { value: '0', label: '설치 필요' },
+    ],
+  },
+  {
+    key: 'db',
+    label: 'DB Guide',
+    emoji: '🗄️',
+    href: `${import.meta.env.BASE_URL}db-web/`,
+    title: '데이터베이스 · SQL 실전 가이드 (별도 페이지)',
+    heading: 'Database Visual Guide',
+    desc:
+      '설치부터 SQL 기초·전문가 문법, Oracle·PostgreSQL·MySQL/MariaDB·SQLite3 각 DB의 ' +
+      '방언과 운영, 인덱스·실행계획·트랜잭션 튜닝, MVCC·WAL 같은 내부 구조, ' +
+      '그리고 파이썬·자바·노드 연동까지 프로그래밍을 몰라도 따라올 수 있게 정리했습니다.',
+    tags: [
+      'SQL',
+      'Oracle',
+      'PostgreSQL',
+      'MySQL · MariaDB',
+      'SQLite3',
+      '인덱스 · 튜닝',
+      '트랜잭션',
+      'DB 내부 구조',
+    ],
+    stats: [
+      { value: '10', label: '주제 탭' },
+      { value: '153', label: '섹션' },
+      { value: '4', label: 'DB 전용 탭' },
+    ],
+  },
+  {
+    key: 'server',
+    label: 'Server Guide',
+    emoji: '🌐',
+    href: `${import.meta.env.BASE_URL}server-web/`,
+    title: '웹서버 · Nginx · Apache · Tomcat · Caddy 실전 가이드 (별도 페이지)',
+    heading: 'Web Server Visual Guide',
+    desc:
+      '웹서버 설치부터 리버스 프록시·HTTPS 인증서 발급과 갱신, 언어별(Java·Python·Node·PHP) ' +
+      '배포 전 과정, 성능 튜닝과 보안 운영, 그리고 epoll·HTTP/3·로드밸런싱 같은 ' +
+      '내부 동작까지 Nginx·Apache·Tomcat·Caddy 를 한 페이지로 다룹니다.',
+    tags: [
+      'Nginx',
+      'Apache',
+      'Tomcat',
+      'Caddy',
+      'HTTPS · 인증서',
+      '리버스 프록시',
+      '성능 튜닝',
+      '보안 운영',
+    ],
+    stats: [
+      { value: '10', label: '주제 탭' },
+      { value: '138', label: '섹션' },
+      { value: '4', label: '서버 전용 탭' },
     ],
   },
 ]

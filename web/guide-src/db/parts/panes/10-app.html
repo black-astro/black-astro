@@ -1,0 +1,1006 @@
+<!-- ============================================================
+     앱 연동 PANE
+     ============================================================ -->
+<div class="pane" id="pane-app">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> PYTHON · JAVA · NODE · ORM · 마이그레이션 · 대량 적재</div>
+  <h1>앱 연동 —<br>코드에서<br>DB 다루기</h1>
+  <p class="tx">
+    SQL을 아는 것과 <b>애플리케이션에서 안전하게 쓰는 것</b>은 다른 문제입니다.
+    커넥션·트랜잭션 경계·인젝션 방어·N+1·마이그레이션 —
+    <b>실무 코드에서 실제로 사고가 나는 지점</b>만 모았습니다.
+    Python · Java · Node.js 코드를 네 DB 기준으로 나란히 정리합니다.
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>3</b><span>언어</span></div>
+    <div><b>복붙</b><span>바로 사용</span></div>
+  </div>
+</header>
+
+<!-- ==================== a01 ==================== -->
+<section class="sec" id="a01">
+  <div class="sec-head rv">
+    <span class="no">SECTION 01</span>
+    <h2>드라이버와 <span class="t">연결 문자열</span></h2>
+    <p class="lead">
+      드라이버는 <b>앱과 DB 사이의 번역기</b>입니다. 연결 문자열 한 줄에 주소·계정·옵션이 전부 들어갑니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="df">
+      <thead><tr><th>DB</th><th>Python</th><th>Java (JDBC)</th><th>Node.js</th></tr></thead>
+      <tbody>
+        <tr><td class="ora">Oracle</td><td class="ora"><code>oracledb</code></td><td><code>ojdbc11</code></td><td><code>oracledb</code></td></tr>
+        <tr><td class="pg">PostgreSQL</td><td class="pg"><code>psycopg[binary]</code></td><td><code>postgresql</code></td><td><code>pg</code></td></tr>
+        <tr><td class="my">MySQL</td><td class="my"><code>PyMySQL</code> · <code>mysqlclient</code></td><td><code>mysql-connector-j</code></td><td><code>mysql2</code></td></tr>
+        <tr><td class="lt">SQLite</td><td class="lt"><code>sqlite3</code> (내장)</td><td><code>sqlite-jdbc</code></td><td><code>better-sqlite3</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="sub">연결 문자열 형식</h3>
+  <pre class="code rv d1" data-lang="text"><code>PostgreSQL   postgresql://user:pass@host:5432/dbname?sslmode=require
+MySQL        mysql://user:pass@host:3306/dbname?charset=utf8mb4
+Oracle       oracle://user:pass@host:1521/?service_name=FREEPDB1
+SQLite       sqlite:///./shop.db          (파일 경로)
+             sqlite:///:memory:           (메모리)
+
+JDBC
+PostgreSQL   jdbc:postgresql://host:5432/dbname?ssl=true
+MySQL        jdbc:mysql://host:3306/dbname?useSSL=true&amp;serverTimezone=Asia/Seoul&amp;characterEncoding=UTF-8
+Oracle       jdbc:oracle:thin:@//host:1521/FREEPDB1
+SQLite       jdbc:sqlite:shop.db</code></pre>
+
+  <div class="note warn rv d1">
+    <b>연결 문자열을 코드에 넣지 마세요.</b>
+    깃 기록에 영원히 남습니다. <b>환경 변수</b>나 시크릿 관리 도구를 쓰세요.
+    실수로 커밋했다면 <b>파일을 지우는 것으로는 부족하고 비밀번호를 반드시 교체</b>해야 합니다.
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 환경 변수로
+export DATABASE_URL="postgresql://app:pw@db.internal:5432/shop?sslmode=require"
+
+# 로컬 개발은 .env (반드시 .gitignore 에 추가)
+# 운영은 AWS Secrets Manager · Vault · K8s Secret</code></pre>
+
+  <h3 class="sub">꼭 넣어야 할 옵션</h3>
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:26%">옵션</th><th>이유</th></tr>
+      <tr><td><b>연결 타임아웃</b></td><td>DB가 응답하지 않을 때 <b>무한 대기</b>를 막습니다</td></tr>
+      <tr><td><b>쿼리 타임아웃</b></td><td>느린 쿼리 하나가 커넥션을 무한정 점유하는 것을 막습니다</td></tr>
+      <tr><td><b>SSL/TLS</b></td><td>사설망이라도 켜세요. 비용이 거의 없습니다</td></tr>
+      <tr><td><b>문자셋</b> (MySQL)</td><td><code>utf8mb4</code> — 안 넣으면 한글·이모지가 깨질 수 있습니다</td></tr>
+      <tr><td><b>타임존</b></td><td>서버·DB·앱의 시간대를 명시적으로 맞춥니다</td></tr>
+      <tr><td><b>애플리케이션 이름</b></td><td class="ok">DB 세션 목록에서 <b>어느 앱이 보낸 쿼리인지</b> 보입니다 — 장애 대응에 큰 도움</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== a02 ==================== -->
+<section class="sec" id="a02">
+  <div class="sec-head rv">
+    <span class="no">SECTION 02</span>
+    <h2><span class="t">Python</span> 연결 4종</h2>
+    <p class="lead">네 DB에 붙는 코드를 그대로 복사해 쓸 수 있게 정리했습니다.</p>
+  </div>
+
+  <div class="quad rv">
+    <div class="q-pg"><h5>PostgreSQL — psycopg 3</h5>
+      <pre class="code" data-lang="python"><code># pip install "psycopg[binary]"
+import psycopg
+from psycopg.rows import dict_row
+
+with psycopg.connect(
+        "postgresql://app:pw@localhost/shop",
+        connect_timeout=5,
+        application_name="shop-api",
+        row_factory=dict_row) as conn:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, name FROM member WHERE grade = %s",
+            ("GOLD",))
+        for row in cur:
+            print(row["id"], row["name"])
+# with 블록이 끝나면 커밋(예외 시 롤백) 후 종료</code></pre></div>
+    <div class="q-my"><h5>MySQL — PyMySQL</h5>
+      <pre class="code" data-lang="python"><code># pip install PyMySQL
+import pymysql
+
+conn = pymysql.connect(
+    host="127.0.0.1", user="app", password="pw",
+    database="shop", charset="utf8mb4",
+    connect_timeout=5,
+    cursorclass=pymysql.cursors.DictCursor,
+    autocommit=False)
+try:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, name FROM member WHERE grade = %s",
+            ("GOLD",))
+        for row in cur.fetchall():
+            print(row["id"], row["name"])
+    conn.commit()
+finally:
+    conn.close()</code></pre></div>
+    <div class="q-ora"><h5>Oracle — oracledb</h5>
+      <pre class="code" data-lang="python"><code># pip install oracledb   (Thin 모드 = 클라이언트 설치 불필요)
+import oracledb
+
+with oracledb.connect(
+        user="app", password="pw",
+        dsn="localhost:1521/FREEPDB1") as conn:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, name FROM member WHERE grade = :g",
+            g="GOLD")                     # ★ 오라클은 :이름 바인딩
+        for id_, name in cur:
+            print(id_, name)
+    conn.commit()                          # ★ 오라클은 자동 커밋이 꺼져 있습니다</code></pre></div>
+    <div class="q-lt"><h5>SQLite — 표준 라이브러리</h5>
+      <pre class="code" data-lang="python"><code>import sqlite3
+
+conn = sqlite3.connect("shop.db", timeout=5.0)
+conn.row_factory = sqlite3.Row
+conn.execute("PRAGMA foreign_keys = ON")
+conn.execute("PRAGMA journal_mode = WAL")
+
+with conn:                                 # 자동 커밋 · 예외 시 롤백
+    cur = conn.execute(
+        "SELECT id, name FROM member WHERE grade = ?",
+        ("GOLD",))                         # ★ SQLite 는 ? 바인딩
+    for row in cur:
+        print(row["id"], row["name"])
+conn.close()</code></pre></div>
+  </div>
+
+  <div class="note warn rv d1">
+    <b>바인딩 표기가 드라이버마다 다릅니다.</b>
+    <code>%s</code>(psycopg·PyMySQL) · <code>?</code>(sqlite3) · <code>:이름</code>(oracledb).
+    <b>psycopg 의 <code>%s</code> 는 파이썬 문자열 포맷이 아닙니다</b> —
+    <code>%</code> 연산자로 값을 끼워 넣으면 <b>인젝션에 그대로 노출</b>됩니다.
+    반드시 <b>두 번째 인자로 값을 넘기세요</b>.
+  </div>
+
+  <h3 class="sub">SQLAlchemy — 여러 DB를 같은 코드로</h3>
+  <pre class="code rv d2" data-lang="python"><code>from sqlalchemy import create_engine, text
+
+engine = create_engine(
+    "postgresql+psycopg://app:pw@localhost/shop",
+    pool_size=10, max_overflow=10,
+    pool_pre_ping=True,        # ★ 끊긴 커넥션 자동 감지
+    pool_recycle=1800,
+)
+
+with engine.connect() as conn:
+    rows = conn.execute(
+        text("SELECT id, name FROM member WHERE grade = :g"),
+        {"g": "GOLD"}).mappings().all()
+    for r in rows:
+        print(r["id"], r["name"])
+
+# pandas 와 함께
+import pandas as pd
+df = pd.read_sql("SELECT * FROM orders WHERE ordered_at &gt;= :d",
+                 engine, params={"d": "2026-01-01"})</code></pre>
+</section>
+
+<!-- ==================== a03 ==================== -->
+<section class="sec" id="a03">
+  <div class="sec-head rv">
+    <span class="no">SECTION 03</span>
+    <h2><span class="t">Java</span> — JDBC · HikariCP</h2>
+    <p class="lead">풀 설정이 성능의 절반입니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="java"><code>// 순수 JDBC — try-with-resources 로 반드시 닫습니다
+String sql = "SELECT id, name FROM member WHERE grade = ?";
+try (Connection c = dataSource.getConnection();
+     PreparedStatement ps = c.prepareStatement(sql)) {
+    ps.setString(1, "GOLD");                 // ★ 파라미터 바인딩
+    ps.setQueryTimeout(5);                   // ★ 쿼리 타임아웃
+    try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+            System.out.println(rs.getLong("id") + " " + rs.getString("name"));
+        }
+    }
+}</code></pre>
+
+  <pre class="code rv d1" data-lang="properties"><code># Spring Boot — application.properties
+spring.datasource.url=jdbc:postgresql://db:5432/shop
+spring.datasource.username=app
+spring.datasource.password=${DB_PASSWORD}
+
+spring.datasource.hikari.maximum-pool-size=20
+spring.datasource.hikari.minimum-idle=20
+spring.datasource.hikari.connection-timeout=3000
+spring.datasource.hikari.validation-timeout=2000
+spring.datasource.hikari.max-lifetime=1740000        # 29분 (DB 타임아웃보다 짧게)
+spring.datasource.hikari.leak-detection-threshold=20000
+spring.datasource.hikari.pool-name=shop-pool</code></pre>
+
+  <div class="note tip rv d1">
+    <b><code>max-lifetime</code> 은 DB 쪽 타임아웃보다 짧아야 합니다.</b>
+    MySQL <code>wait_timeout</code> 이 600초인데 풀의 max-lifetime 이 1800초면,
+    <b>DB가 이미 끊은 커넥션</b>을 풀이 계속 들고 있다가
+    사용 시점에 <code>Communications link failure</code> 를 냅니다.
+    <b>DB 타임아웃보다 30초 이상 짧게</b> 잡으세요.
+  </div>
+
+  <h3 class="sub">배치 처리</h3>
+  <pre class="code rv d1" data-lang="java"><code>String sql = "INSERT INTO member (name, email) VALUES (?, ?)";
+try (Connection c = dataSource.getConnection();
+     PreparedStatement ps = c.prepareStatement(sql)) {
+    c.setAutoCommit(false);
+    int n = 0;
+    for (Member m : members) {
+        ps.setString(1, m.getName());
+        ps.setString(2, m.getEmail());
+        ps.addBatch();
+        if (++n % 1000 == 0) ps.executeBatch();   // 1000건마다 전송
+    }
+    ps.executeBatch();
+    c.commit();
+}
+// ★ MySQL 은 URL 에 rewriteBatchedStatements=true 를 넣어야
+//   진짜 다중 INSERT 로 묶입니다 (없으면 배치 효과가 거의 없습니다)</code></pre>
+
+  <div class="note info rv d2">
+    <b>Spring Data JPA 를 쓰더라도</b> 아래는 알고 있어야 합니다 —
+    <b>N+1 문제</b>(a08) · <b>트랜잭션 전파</b>(a07) · <b>커넥션 풀 사이징</b>(⚙️ t13).
+    ORM 이 SQL 을 감춰 주지만 <b>DB 는 그대로</b>입니다.
+    JPA 심화는 <a href="../java-web/">☕ 자바 가이드</a>의 데이터 탭에 있습니다.
+  </div>
+</section>
+
+<!-- ==================== a04 ==================== -->
+<section class="sec" id="a04">
+  <div class="sec-head rv">
+    <span class="no">SECTION 04</span>
+    <h2><span class="t">Node.js</span> 연결</h2>
+    <p class="lead">비동기라 <code>await</code> 를 빠뜨리면 <b>조용히 망가집니다.</b></p>
+  </div>
+
+  <pre class="code rv" data-lang="js"><code>// PostgreSQL — pg
+import pg from 'pg';
+
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 10,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 3_000,
+  application_name: 'shop-api',
+});
+
+const { rows } = await pool.query(
+  'SELECT id, name FROM member WHERE grade = $1', ['GOLD']);   // ★ $1 바인딩
+console.log(rows);
+
+// 트랜잭션은 커넥션 하나를 잡고 진행합니다
+const client = await pool.connect();
+try {
+  await client.query('BEGIN');
+  await client.query('UPDATE stock SET qty = qty - 1 WHERE id = $1 AND qty &gt;= 1', [10]);
+  await client.query('INSERT INTO orders (member_id) VALUES ($1)', [1]);
+  await client.query('COMMIT');
+} catch (e) {
+  await client.query('ROLLBACK');
+  throw e;
+} finally {
+  client.release();        // ★ 반드시 반납 — 빠뜨리면 커넥션 누수
+}</code></pre>
+
+  <pre class="code rv d1" data-lang="js"><code>// MySQL — mysql2 (프로미스 버전)
+import mysql from 'mysql2/promise';
+
+const pool = mysql.createPool({
+  host: '127.0.0.1', user: 'app', password: process.env.DB_PW,
+  database: 'shop', charset: 'utf8mb4',
+  connectionLimit: 10, waitForConnections: true, queueLimit: 0,
+  timezone: '+09:00',
+});
+
+const [rows] = await pool.query(
+  'SELECT id, name FROM member WHERE grade = ?', ['GOLD']);
+
+// 트랜잭션
+const conn = await pool.getConnection();
+try {
+  await conn.beginTransaction();
+  await conn.query('UPDATE stock SET qty = qty - 1 WHERE id = ? AND qty &gt;= 1', [10]);
+  await conn.commit();
+} catch (e) {
+  await conn.rollback();
+  throw e;
+} finally {
+  conn.release();
+}</code></pre>
+
+  <pre class="code rv d1" data-lang="js"><code>// SQLite — better-sqlite3 (동기 · 가장 빠름)
+import Database from 'better-sqlite3';
+
+const db = new Database('shop.db');
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+const stmt = db.prepare('SELECT id, name FROM member WHERE grade = ?');
+console.log(stmt.all('GOLD'));
+
+const insertMany = db.transaction((rows) =&gt; {     // 트랜잭션으로 묶기
+  const ins = db.prepare('INSERT INTO member (name) VALUES (?)');
+  for (const r of rows) ins.run(r);
+});
+insertMany(['김하늘', '박바다']);</code></pre>
+
+  <div class="note warn rv d2">
+    <b>Node 에서 가장 흔한 사고 두 가지</b>
+    <br>① <b><code>await</code> 누락</b> — 쿼리가 끝나기 전에 다음 코드가 실행되고,
+    에러가 <b>unhandled rejection</b> 으로 조용히 사라집니다
+    <br>② <b><code>release()</code> 누락</b> — 예외 경로에서 커넥션을 반납하지 않아
+    풀이 고갈됩니다. <b>반드시 <code>finally</code></b> 에 넣으세요
+  </div>
+</section>
+
+<!-- ==================== a05 ==================== -->
+<section class="sec" id="a05">
+  <div class="sec-head rv">
+    <span class="no">SECTION 05</span>
+    <h2><span class="t">SQL 인젝션</span> — 바인딩</h2>
+    <p class="lead">
+      원인은 하나입니다 — <b>문자열을 이어 붙여 쿼리를 만드는 것</b>.
+      파라미터 바인딩을 쓰면 원천 차단됩니다.
+    </p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>✗ 문자열 연결 — 즉시 뚫립니다</h5>
+      <pre class="code" data-lang="python"><code>uid = request.args.get("id")
+cur.execute(f"SELECT * FROM member WHERE id = {uid}")
+
+# 공격자가 id 에 이렇게 넣으면
+#   1 OR 1=1
+#   1; DROP TABLE member; --
+#   1 UNION SELECT password FROM admin --</code></pre>
+    </div>
+    <div class="good">
+      <h5>✓ 파라미터 바인딩</h5>
+      <pre class="code" data-lang="python"><code>cur.execute("SELECT * FROM member WHERE id = %s", (uid,))
+
+# DB 가 쿼리 구조와 값을 분리해 처리하므로
+# 값 안에 무엇이 들어와도 '값'으로만 취급됩니다</code></pre>
+    </div>
+  </div>
+
+  <div class="note info rv d1">
+    <b>왜 안전한가</b> — 바인딩을 쓰면 DB가 <b>쿼리 구조를 먼저 파싱해 확정</b>하고
+    나중에 값을 채웁니다. 값 안의 <code>'</code> 나 <code>;</code> 가
+    <b>구문으로 해석될 여지 자체가 없습니다.</b>
+    "특수문자를 이스케이프한다"는 접근은 <b>빠뜨리는 경우가 반드시 생기므로</b> 권장되지 않습니다.
+  </div>
+
+  <h3 class="sub">바인딩할 수 없는 것 — 테이블·컬럼 이름</h3>
+  <pre class="code rv d1" data-lang="python"><code># ✗ 이건 바인딩이 안 됩니다 (구조는 파라미터가 될 수 없음)
+cur.execute("SELECT * FROM member ORDER BY %s", (sort_col,))    # 동작 안 함
+
+# ✓ 화이트리스트로 검증
+ALLOWED = {"id", "name", "joined_at"}
+if sort_col not in ALLOWED:
+    raise ValueError("허용되지 않은 정렬 기준")
+cur.execute(f"SELECT * FROM member ORDER BY {sort_col}")        # 검증했으므로 안전
+
+# 정렬 방향도 마찬가지
+direction = "DESC" if desc else "ASC"</code></pre>
+
+  <h3 class="sub">IN 절에 목록 넣기</h3>
+  <pre class="code rv d1" data-lang="python"><code># ✗ 문자열 join 은 위험
+ids_str = ",".join(ids)
+cur.execute(f"SELECT * FROM member WHERE id IN ({ids_str})")
+
+# ✓ 자리표시자를 개수만큼 만들기
+ph = ",".join(["%s"] * len(ids))
+cur.execute(f"SELECT * FROM member WHERE id IN ({ph})", tuple(ids))
+
+# ✓ PostgreSQL 은 배열로 더 깔끔하게
+cur.execute("SELECT * FROM member WHERE id = ANY(%s)", (ids,))</code></pre>
+
+  <div class="note warn rv d2">
+    <b>ORM 을 써도 안전하지 않은 경우가 있습니다.</b>
+    <br>· <code>raw()</code> · <code>text()</code> · <code>createQuery()</code> 에 <b>문자열을 조립</b>해 넣는 경우
+    <br>· 정렬·필터 컬럼명을 <b>사용자 입력에서 그대로</b> 받는 경우
+    <br>· <code>LIKE</code> 패턴을 조립하는 경우 (<code>%</code>·<code>_</code> 이스케이프 필요)
+    <br><b>"ORM 을 쓰니 안전하다"는 착각</b>이 실제 사고로 이어집니다.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>추가 방어선</b> —
+    ① <b>앱 계정에 DDL 권한을 주지 않기</b> (인젝션이 성공해도 DROP 불가)
+    ② <b>에러 메시지를 사용자에게 노출하지 않기</b> (스키마 정보가 새어 나갑니다)
+    ③ <b>쿼리 타임아웃</b> (시간 기반 블라인드 인젝션을 어렵게)
+    ④ WAF·정적 분석 도구로 <b>문자열 조립 패턴 탐지</b>
+  </div>
+</section>
+
+<!-- ==================== a06 ==================== -->
+<section class="sec" id="a06">
+  <div class="sec-head rv">
+    <span class="no">SECTION 06</span>
+    <h2><span class="t">ORM</span>을 쓸 것인가</h2>
+    <p class="lead">
+      "ORM 이냐 생쿼리냐"는 잘못된 질문입니다. <b>어디에 무엇을 쓸지</b>가 옳은 질문입니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:22%">상황</th><th>권장</th></tr>
+      <tr><td><b>단순 CRUD</b></td><td class="ok">ORM — 반복 코드가 사라집니다</td></tr>
+      <tr><td><b>도메인 로직이 있는 저장</b></td><td class="ok">ORM — 객체 상태 관리가 편합니다</td></tr>
+      <tr><td><b>복잡한 조회·통계</b></td><td class="ok"><b>생쿼리 또는 쿼리 빌더</b> — ORM 으로 짜면 읽기도 튜닝하기도 어렵습니다</td></tr>
+      <tr><td><b>대량 배치</b></td><td class="ok">생쿼리 · 전용 대량 적재(a10)</td></tr>
+      <tr><td><b>리포트·집계</b></td><td class="ok">생쿼리 — 윈도우 함수·CTE 를 그대로 씁니다</td></tr>
+      <tr><td><b>성능이 중요한 API</b></td><td>측정 후 결정. 필요한 컬럼만 조회하는 <b>프로젝션</b>이 핵심</td></tr>
+    </table>
+  </div>
+
+  <div class="tw rv d1">
+    <table class="df">
+      <thead><tr><th>언어</th><th>ORM</th><th>쿼리 빌더 · 경량</th></tr></thead>
+      <tbody>
+        <tr><td>Python</td><td>SQLAlchemy ORM · Django ORM</td><td>SQLAlchemy Core</td></tr>
+        <tr><td>Java</td><td>JPA/Hibernate</td><td>QueryDSL · MyBatis · jOOQ</td></tr>
+        <tr><td>Node/TS</td><td>Prisma · TypeORM</td><td>Kysely · Drizzle · knex</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="sub">ORM 이 만드는 전형적 문제</h3>
+  <ul class="tx rv d1">
+    <li><b>N+1 쿼리</b> — 지연 로딩이 반복문 안에서 터집니다(a08). 가장 흔한 성능 문제</li>
+    <li><b>SELECT *</b> — 엔티티 전체를 가져오느라 필요 없는 컬럼·LOB 까지 읽습니다</li>
+    <li><b>예상 못 한 UPDATE</b> — 변경 감지(dirty checking)로 <b>의도하지 않은 쿼리</b>가 나갑니다</li>
+    <li><b>복잡한 쿼리의 가독성 붕괴</b> — 메서드 체인 20줄보다 SQL 10줄이 명확한 경우가 많습니다</li>
+    <li><b>실행되는 SQL 을 모름</b> — <b>로그를 반드시 켜세요</b></li>
+  </ul>
+
+  <pre class="code rv d1" data-lang="properties"><code># 개발 환경에서는 반드시 SQL 로그를 켜세요
+# Spring Boot
+logging.level.org.hibernate.SQL=DEBUG
+logging.level.org.hibernate.orm.jdbc.bind=TRACE
+
+# SQLAlchemy
+create_engine(url, echo=True)
+
+# Prisma
+new PrismaClient({ log: ['query'] })
+
+# Django
+LOGGING = {'loggers': {'django.db.backends': {'level': 'DEBUG'}}}</code></pre>
+
+  <div class="note tip rv d2">
+    <b>실무의 현실적 조합</b> —
+    <b>기본은 ORM, 무거운 조회는 생쿼리.</b>
+    한 프로젝트에서 섞어 쓰는 것이 이상한 일이 아닙니다.
+    자바에서는 <b>JPA + MyBatis(또는 QueryDSL)</b>,
+    파이썬에서는 <b>SQLAlchemy ORM + Core</b> 조합이 흔합니다.
+  </div>
+</section>
+
+<!-- ==================== a07 ==================== -->
+<section class="sec" id="a07">
+  <div class="sec-head rv">
+    <span class="no">SECTION 07</span>
+    <h2>코드에서 <span class="t">트랜잭션</span> 다루기</h2>
+    <p class="lead">
+      경계를 <b>어디서 열고 어디서 닫는가</b>가 핵심입니다. 잘못 잡으면 롤백이 안 됩니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="python"><code># Python — 컨텍스트 매니저로 경계를 명확히
+from contextlib import contextmanager
+
+@contextmanager
+def transaction(conn):
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise                      # ★ 반드시 다시 던지세요 — 삼키면 호출자가 성공으로 오해합니다
+
+with transaction(conn) as tx:
+    tx.execute("UPDATE stock SET qty = qty - 1 WHERE id = %s AND qty &gt;= 1", (10,))
+    if tx.rowcount == 0:
+        raise ValueError("재고 부족")        # 예외 → 자동 롤백
+    tx.execute("INSERT INTO orders (member_id) VALUES (%s)", (1,))</code></pre>
+
+  <pre class="code rv d1" data-lang="java"><code>// Spring — 선언적 트랜잭션
+@Service
+public class OrderService {
+
+    @Transactional                                    // 서비스 계층에 경계를 둡니다
+    public Order create(Long memberId, Long productId) {
+        int updated = stockRepository.decrease(productId);
+        if (updated == 0) throw new OutOfStockException();   // 런타임 예외 → 롤백
+        return orderRepository.save(new Order(memberId));
+    }
+
+    @Transactional(readOnly = true)                   // 읽기 전용 힌트 (최적화 · 실수 방지)
+    public List&lt;Order&gt; findByMember(Long memberId) { ... }
+}</code></pre>
+
+  <div class="note warn rv d1">
+    <b>Spring <code>@Transactional</code> 의 3대 함정</b>
+    <br>① <b>자기 호출(self-invocation)</b> — 같은 클래스 안에서 <code>this.method()</code> 로 부르면
+    <b>프록시를 거치지 않아 트랜잭션이 안 걸립니다</b>
+    <br>② <b>체크 예외는 기본적으로 롤백하지 않습니다</b> —
+    <code>@Transactional(rollbackFor = Exception.class)</code> 를 명시하세요
+    <br>③ <b>예외를 잡아 삼키면</b> 롤백되지 않습니다 (catch 후 로깅만 하고 끝내는 코드)
+  </div>
+
+  <h3 class="sub">경계를 정하는 원칙</h3>
+  <ul class="tx rv d1">
+    <li><b>서비스(유스케이스) 계층에</b> — 컨트롤러나 리포지토리가 아니라</li>
+    <li><b>짧게</b> — 외부 API 호출·파일 IO·사용자 입력 대기를 안에 두지 마세요</li>
+    <li><b>중첩을 의식적으로</b> — 전파 속성(<code>REQUIRED</code>·<code>REQUIRES_NEW</code>)이
+      의도대로인지 확인. <b>REQUIRES_NEW 는 별도 커넥션을 쓰므로 데드락 위험</b>이 있습니다</li>
+    <li><b>읽기 전용 표시</b> — 실수로 쓰는 것을 막고 복제본 라우팅에 활용할 수 있습니다</li>
+  </ul>
+
+  <pre class="code rv d2" data-lang="js"><code>// Node — 트랜잭션 헬퍼로 반납 누락을 막습니다
+async function withTransaction(pool, fn) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+await withTransaction(pool, async (c) =&gt; {
+  await c.query('UPDATE stock SET qty = qty - 1 WHERE id = $1 AND qty &gt;= 1', [10]);
+  await c.query('INSERT INTO orders (member_id) VALUES ($1)', [1]);
+});</code></pre>
+</section>
+
+<!-- ==================== a08 ==================== -->
+<section class="sec" id="a08">
+  <div class="sec-head rv">
+    <span class="no">SECTION 08</span>
+    <h2><span class="t">N+1</span> 문제와 배치 조회</h2>
+    <p class="lead">
+      목록 100건을 불러오는데 <b>쿼리가 101번</b> 나갑니다. 실무 성능 문제 1위입니다.
+    </p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>✗ N+1</h5>
+      <pre class="code" data-lang="python"><code>orders = db.query("SELECT * FROM orders LIMIT 100")   # 1번
+
+for o in orders:                                     # 100번
+    member = db.query(
+        "SELECT * FROM member WHERE id = %s", o.member_id)
+    print(member.name)
+
+# 총 101번. 각 쿼리가 2ms 면 202ms.
+# 네트워크 왕복이 5ms 면 500ms 를 넘습니다</code></pre>
+    </div>
+    <div class="good">
+      <h5>✓ 배치 조회 — 2번</h5>
+      <pre class="code" data-lang="python"><code>orders = db.query("SELECT * FROM orders LIMIT 100")
+
+ids = list({o.member_id for o in orders})
+members = db.query(
+    "SELECT * FROM member WHERE id = ANY(%s)", (ids,))
+by_id = {m.id: m for m in members}
+
+for o in orders:
+    print(by_id[o.member_id].name)
+
+# 총 2번</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">ORM 에서의 해법</h3>
+  <pre class="code rv d1" data-lang="python"><code># SQLAlchemy
+from sqlalchemy.orm import selectinload, joinedload
+
+# ✗ 지연 로딩 → N+1
+orders = session.query(Order).limit(100).all()
+for o in orders: print(o.member.name)
+
+# ✓ selectinload : IN 절로 한 번에 (컬렉션에 유리)
+orders = session.query(Order).options(selectinload(Order.member)).limit(100).all()
+
+# ✓ joinedload : 조인 한 번으로 (단일 연관에 유리)
+orders = session.query(Order).options(joinedload(Order.member)).limit(100).all()</code></pre>
+  <pre class="code rv d1" data-lang="java"><code>// JPA — 페치 조인
+@Query("SELECT o FROM Order o JOIN FETCH o.member WHERE o.status = :s")
+List&lt;Order&gt; findWithMember(@Param("s") String status);
+
+// 또는 @EntityGraph
+@EntityGraph(attributePaths = {"member", "items"})
+List&lt;Order&gt; findByStatus(String status);
+
+// 컬렉션은 batch size 로 (IN 절로 묶어 가져옵니다)
+// application.properties:
+//   spring.jpa.properties.hibernate.default_batch_fetch_size=100</code></pre>
+  <pre class="code rv d1" data-lang="js"><code>// Prisma
+const orders = await prisma.order.findMany({
+  take: 100,
+  include: { member: true },        // 연관을 함께 로드
+});</code></pre>
+
+  <div class="note warn rv d2">
+    <b>페치 조인의 함정</b> —
+    <b>컬렉션(1:N)을 조인하면 행이 곱해집니다.</b>
+    주문 100건에 각 품목 5개면 500행이 되고, 페이징이 <b>의도대로 동작하지 않습니다</b>
+    (JPA는 메모리에서 페이징하며 경고를 냅니다).
+    <br><b>1:N 은 조인이 아니라 <code>batch_fetch_size</code>·<code>selectinload</code></b> 로 푸세요.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>N+1 을 찾는 법</b> — 개발 환경에서 <b>SQL 로그를 켜고</b>
+    화면 하나를 열었을 때 나가는 쿼리 수를 세어 보세요.
+    같은 형태의 쿼리가 수십 번 반복되면 N+1 입니다.
+    <b>테스트에서 쿼리 수를 검증</b>하는 도구(datasource-proxy·pytest 픽스처)를 붙이면
+    회귀를 자동으로 막을 수 있습니다.
+  </div>
+</section>
+
+<!-- ==================== a09 ==================== -->
+<section class="sec" id="a09">
+  <div class="sec-head rv">
+    <span class="no">SECTION 09</span>
+    <h2>스키마 <span class="t">마이그레이션</span> 도구</h2>
+    <p class="lead">
+      손으로 <code>ALTER TABLE</code> 을 치는 순간 <b>재현이 불가능</b>해집니다.
+      스키마도 코드처럼 버전 관리해야 합니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="df">
+      <thead><tr><th>언어</th><th>도구</th><th>특징</th></tr></thead>
+      <tbody>
+        <tr><td>Python</td><td><b>Alembic</b></td><td>SQLAlchemy 기반. 모델 변경에서 마이그레이션 자동 생성</td></tr>
+        <tr><td>Python</td><td>Django migrations</td><td>Django 내장</td></tr>
+        <tr><td>Java</td><td><b>Flyway</b></td><td>SQL 파일 기반. 단순하고 예측 가능 — 실무 선호도가 높습니다</td></tr>
+        <tr><td>Java</td><td>Liquibase</td><td>XML·YAML 로 DB 중립 기술. 롤백 지원이 강합니다</td></tr>
+        <tr><td>Node</td><td><b>Prisma Migrate</b></td><td>스키마 파일에서 생성</td></tr>
+        <tr><td>공통</td><td>Atlas · Sqitch</td><td>언어 독립</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="sql"><code>-- Flyway : 파일명 규칙이 곧 버전입니다
+-- src/main/resources/db/migration/
+--   V1__create_member.sql
+--   V2__add_member_phone.sql
+--   V3__create_orders.sql
+
+-- V2__add_member_phone.sql
+ALTER TABLE member ADD COLUMN phone VARCHAR(20);
+CREATE INDEX idx_member_phone ON member (phone);</code></pre>
+  <pre class="code rv d1" data-lang="bash"><code>flyway migrate     # 적용
+flyway info        # 적용 상태 확인
+flyway validate    # 파일이 변조되지 않았는지 검증
+
+# Alembic
+alembic revision --autogenerate -m "add phone"
+alembic upgrade head
+alembic downgrade -1</code></pre>
+
+  <div class="note warn rv d1">
+    <b>적용된 마이그레이션 파일을 수정하지 마세요.</b>
+    도구는 파일의 체크섬을 저장해 두고 <b>변경을 감지하면 실패</b>시킵니다.
+    이미 운영에 적용됐다면 <b>새 버전 파일을 추가</b>해 고치는 것이 원칙입니다.
+  </div>
+
+  <h3 class="sub">무중단 배포를 위한 확장-축소 패턴</h3>
+  <div class="pipe rv d1">
+    <div class="prow"><span class="tagn">1 · 확장</span>
+      <div><b>새 컬럼을 NULL 허용으로 추가</b>
+        <span>기존 코드는 이 컬럼을 모르지만 아무 문제 없습니다. 배포 순서에 자유가 생깁니다.</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">2 · 양쪽 쓰기</span>
+      <div><b>새 코드가 구·신 컬럼에 모두 씁니다</b><span>이 시점에 롤백해도 데이터가 깨지지 않습니다.</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">3 · 백필</span>
+      <div><b>기존 행의 새 컬럼을 채웁니다</b><span>배치로 청크를 나눠 실행합니다(🎓 e13).</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">4 · 전환</span>
+      <div><b>읽기를 새 컬럼으로</b><span>충분히 검증한 뒤 전환합니다.</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">5 · 축소</span>
+      <div><b>옛 컬럼 제거 · NOT NULL 적용</b><span>보통 <b>며칠~몇 주 뒤</b>에 별도 배포로 합니다.</span></div></div>
+  </div>
+
+  <div class="note warn rv d2">
+    <b>운영 DB에서 위험한 DDL</b>
+    <br>· <b>컬럼 타입 변경</b> — 대부분 테이블 재작성 (🐬 m13)
+    <br>· <b>NOT NULL 추가</b> — 기존 행 검증 필요. 기본값과 함께 하면 DB에 따라 즉시 완료
+    <br>· <b>인덱스 생성</b> — <code>CONCURRENTLY</code>(PG) · <code>ALGORITHM=INPLACE, LOCK=NONE</code>(MySQL)
+    <br>· <b>외래키 추가</b> — 기존 데이터 전체 검증이 일어납니다
+    <br><b>큰 테이블이면 반드시 스테이징에서 시간을 측정</b>하고 진행하세요.
+  </div>
+</section>
+
+<!-- ==================== a10 ==================== -->
+<section class="sec" id="a10">
+  <div class="sec-head rv">
+    <span class="no">SECTION 10</span>
+    <h2>대량 적재 <span class="t">100배 빠르게</span></h2>
+    <p class="lead">
+      한 건씩 INSERT 하면 10만 건에 몇 분, 전용 방식을 쓰면 <b>몇 초</b>입니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:24%">방법</th><th>10만 건 기준 대략적 소요</th></tr>
+      <tr><td>건별 INSERT + 건별 커밋</td><td class="no">수 분 (fsync 10만 번)</td></tr>
+      <tr><td>건별 INSERT + 일괄 커밋</td><td class="warn">수십 초</td></tr>
+      <tr><td>다중 행 INSERT (1000건씩)</td><td class="ok">수 초</td></tr>
+      <tr><td><b>전용 대량 적재</b> (COPY·LOAD DATA)</td><td class="ok"><b>1초 내외</b></td></tr>
+    </table>
+  </div>
+
+  <div class="quad rv d1">
+    <div class="q-pg"><h5>PostgreSQL — COPY</h5>
+      <pre class="code" data-lang="python"><code>import psycopg
+
+with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+    with cur.copy(
+        "COPY member (name, email) FROM STDIN"
+    ) as copy:
+        for name, email in rows:
+            copy.write_row((name, email))
+    conn.commit()
+
+# CSV 파일에서 직접
+# \copy member(name,email) FROM 'data.csv' CSV HEADER</code></pre></div>
+    <div class="q-my"><h5>MySQL — LOAD DATA</h5>
+      <pre class="code" data-lang="sql"><code>LOAD DATA LOCAL INFILE '/tmp/member.csv'
+INTO TABLE member
+FIELDS TERMINATED BY ',' ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(name, email);
+
+-- 서버·클라이언트 양쪽에서 local_infile 을 켜야 합니다</code></pre></div>
+    <div class="q-ora"><h5>Oracle — 배열 바인딩</h5>
+      <pre class="code" data-lang="python"><code>cur.executemany(
+    "INSERT INTO member (name, email) VALUES (:1, :2)",
+    rows, batcherrors=True)      # 일부 실패해도 계속
+conn.commit()
+
+# 더 큰 규모는 SQL*Loader 또는
+# INSERT /*+ APPEND */ ... SELECT</code></pre></div>
+    <div class="q-lt"><h5>SQLite — executemany + 트랜잭션</h5>
+      <pre class="code" data-lang="python"><code>conn.execute("PRAGMA journal_mode=WAL")
+conn.execute("PRAGMA synchronous=NORMAL")
+
+with conn:
+    conn.executemany(
+        "INSERT INTO member (name, email) VALUES (?, ?)",
+        rows)
+# 트랜잭션으로 묶는 것만으로 수백 배 빨라집니다</code></pre></div>
+  </div>
+
+  <h3 class="sub">더 빠르게 — 적재 전후 처리</h3>
+  <ul class="tx rv d1">
+    <li><b>인덱스를 잠시 제거</b> — 적재 후 다시 만드는 편이 빠른 경우가 많습니다
+      (다만 그동안 조회 성능이 떨어집니다)</li>
+    <li><b>외래키·제약 검사 지연</b> — PostgreSQL <code>SET CONSTRAINTS ALL DEFERRED</code>,
+      MySQL <code>SET FOREIGN_KEY_CHECKS=0</code> (적재 후 반드시 되돌리고 <b>정합성 검증</b>)</li>
+    <li><b>적재 후 통계 갱신</b> — <code>ANALYZE</code> 를 빠뜨리면 이후 쿼리 계획이 엉망이 됩니다</li>
+    <li><b>스테이징 테이블 활용</b> — 임시 테이블에 적재 후 검증하고 본 테이블로 옮깁니다</li>
+  </ul>
+
+  <div class="note warn rv d2">
+    <b>대량 적재는 복제 지연을 만듭니다.</b>
+    수백만 건을 한 번에 넣으면 복제본이 그것을 따라 하느라 <b>수 분간 밀립니다</b>.
+    운영 시간에는 <b>청크로 나누고 사이에 쉬는 시간</b>을 두세요(🎓 e13).
+  </div>
+</section>
+
+<!-- ==================== a11 ==================== -->
+<section class="sec" id="a11">
+  <div class="sec-head rv">
+    <span class="no">SECTION 11</span>
+    <h2>재시도 · 타임아웃 · <span class="t">누수</span></h2>
+    <p class="lead">
+      네트워크는 <b>반드시</b> 끊깁니다. 페일오버도 일어납니다.
+      이를 가정하지 않은 코드는 장애 때 <b>서비스 전체를 멈춥니다.</b>
+    </p>
+  </div>
+
+  <h3 class="sub">재시도해도 되는 오류와 안 되는 오류</h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:16%">판단</th><th>오류</th></tr>
+      <tr><td class="ok"><b>재시도 O</b></td>
+        <td>연결 실패·타임아웃 · <b>데드락</b> · 직렬화 충돌(SERIALIZABLE) ·
+          페일오버 중 일시 오류 · 락 대기 타임아웃</td></tr>
+      <tr><td class="no"><b>재시도 X</b></td>
+        <td>문법 오류 · 제약조건 위반 · 권한 없음 · 데이터 오류
+          — <b>다시 해도 같은 결과</b>이므로 재시도는 낭비입니다</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="python"><code>import time, random
+import psycopg
+
+RETRYABLE = ("40001", "40P01", "08000", "08003", "08006")   # 직렬화·데드락·연결 오류
+
+def with_retry(fn, attempts=3, base=0.1):
+    for i in range(attempts):
+        try:
+            return fn()
+        except psycopg.Error as e:
+            code = getattr(e, "sqlstate", None)
+            if code not in RETRYABLE or i == attempts - 1:
+                raise
+            # 지수 백오프 + 지터 (동시에 몰려 재시도하는 것을 막습니다)
+            time.sleep(base * (2 ** i) + random.uniform(0, base))
+    raise RuntimeError("unreachable")</code></pre>
+
+  <div class="note warn rv d1">
+    <b>재시도는 멱등할 때만 안전합니다.</b>
+    <code>INSERT</code> 를 재시도하면 <b>중복 데이터</b>가 생길 수 있습니다.
+    <br>· <b>멱등 키</b>를 두고 UNIQUE 제약으로 중복을 막거나
+    <br>· <code>ON CONFLICT DO NOTHING</code> 으로 처리하거나
+    <br>· <b>조회 → 없으면 삽입</b>이 아니라 <b>UPSERT</b> 로 (🎓 e08)
+  </div>
+
+  <h3 class="sub">타임아웃 — 계층마다 설정</h3>
+  <pre class="code rv d1" data-lang="sql"><code>-- DB 쪽에서 강제하는 것이 가장 확실합니다
+-- PostgreSQL
+SET statement_timeout = '5s';                    -- 쿼리 최대 실행 시간
+SET lock_timeout = '3s';                         -- 락 대기 최대
+SET idle_in_transaction_session_timeout = '30s'; -- ★ 방치된 트랜잭션 자동 종료
+
+-- MySQL
+SET SESSION max_execution_time = 5000;           -- ms (SELECT 만)
+SET SESSION innodb_lock_wait_timeout = 5;
+
+-- Oracle
+-- 프로파일의 CPU_PER_CALL 또는 Resource Manager 로 제어</code></pre>
+  <div class="note tip rv d1">
+    <b><code>idle_in_transaction_session_timeout</code> 은 PostgreSQL 운영의 필수 설정입니다.</b>
+    애플리케이션 버그로 커밋하지 않은 세션이 남으면
+    <b>VACUUM 이 막히고 락이 유지</b>됩니다. 이 설정 하나가 큰 사고를 예방합니다.
+  </div>
+
+  <h3 class="sub">커넥션 누수 잡기</h3>
+  <pre class="code rv d2" data-lang="sql"><code>-- PostgreSQL : 오래 idle in transaction 인 세션
+SELECT pid, usename, application_name, state,
+       now() - state_change AS 지속, query
+FROM   pg_stat_activity
+WHERE  state = 'idle in transaction' AND now() - state_change &gt; interval '1 min';
+
+-- MySQL
+SELECT * FROM information_schema.processlist WHERE command = 'Sleep' AND time &gt; 60;
+
+-- 애플리케이션 이름별 커넥션 수 (어느 앱이 새고 있나)
+SELECT application_name, count(*) FROM pg_stat_activity GROUP BY 1 ORDER BY 2 DESC;</code></pre>
+  <div class="note info rv d2">
+    <b>누수를 코드에서 막는 법</b> —
+    Python <code>with</code> · Java <b>try-with-resources</b> ·
+    Node <b><code>finally { client.release() }</code></b>.
+    <b>HikariCP 의 <code>leak-detection-threshold</code></b> 를 켜 두면
+    설정 시간 이상 반납되지 않은 커넥션의 <b>스택 트레이스를 로그로</b> 남겨 줍니다.
+  </div>
+</section>
+
+<!-- ==================== a12 ==================== -->
+<section class="sec" id="a12">
+  <div class="sec-head rv">
+    <span class="no">SECTION 12</span>
+    <h2>테스트에서 <span class="t">DB 다루기</span></h2>
+    <p class="lead">
+      "테스트는 SQLite 로, 운영은 PostgreSQL 로"는 <b>운영에서만 터지는 버그</b>를 만듭니다.
+    </p>
+  </div>
+
+  <div class="note warn rv">
+    <b>왜 DB를 바꿔 테스트하면 안 되나</b>
+    <br>· 타입·제약 동작이 다릅니다 (SQLite 는 타입을 강제하지 않습니다)
+    <br>· <b>방언 SQL 이 테스트를 통과하지 못하거나, 반대로 운영에서만 실패</b>합니다
+    <br>· 격리 수준·락 동작이 완전히 다릅니다
+    <br>· 함수·인덱스 종류가 다릅니다
+    <br>결과적으로 <b>초록불인데 배포하면 깨지는</b> 상황이 반복됩니다.
+  </div>
+
+  <h3 class="sub">권장 — Testcontainers 로 진짜 DB를</h3>
+  <pre class="code rv d1" data-lang="python"><code># pip install testcontainers[postgres] pytest
+import pytest
+from testcontainers.postgres import PostgresContainer
+from sqlalchemy import create_engine, text
+
+@pytest.fixture(scope="session")
+def engine():
+    with PostgresContainer("postgres:18") as pg:      # 컨테이너 자동 기동·정리
+        eng = create_engine(pg.get_connection_url())
+        with eng.begin() as c:
+            c.execute(text(open("schema.sql").read()))
+        yield eng
+
+@pytest.fixture
+def conn(engine):
+    """테스트마다 트랜잭션을 열고 끝나면 롤백 → 완전 격리"""
+    connection = engine.connect()
+    tx = connection.begin()
+    yield connection
+    tx.rollback()
+    connection.close()
+
+def test_insert_member(conn):
+    conn.execute(text("INSERT INTO member (id, name) VALUES (1, '테스트')"))
+    n = conn.execute(text("SELECT count(*) FROM member")).scalar()
+    assert n == 1
+    # 롤백되므로 다음 테스트에 영향이 없습니다</code></pre>
+
+  <pre class="code rv d1" data-lang="java"><code>// Java — Testcontainers + Spring Boot
+@SpringBootTest
+@Testcontainers
+class OrderServiceTest {
+
+    @Container
+    static PostgreSQLContainer&lt;?&gt; db = new PostgreSQLContainer&lt;&gt;("postgres:18");
+
+    @DynamicPropertySource
+    static void props(DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", db::getJdbcUrl);
+        r.add("spring.datasource.username", db::getUsername);
+        r.add("spring.datasource.password", db::getPassword);
+    }
+
+    @Test
+    @Transactional            // 테스트가 끝나면 자동 롤백
+    void 재고가_부족하면_주문이_실패한다() { ... }
+}</code></pre>
+
+  <h3 class="sub">테스트 데이터 격리 전략</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:24%">전략</th><th>장단점</th></tr>
+      <tr><td><b>트랜잭션 롤백</b></td>
+        <td class="ok">가장 빠르고 깔끔합니다. 단, <b>테스트 대상이 스스로 커밋하면</b> 쓸 수 없습니다</td></tr>
+      <tr><td><b>매번 TRUNCATE</b></td>
+        <td>확실하지만 느립니다. 외래키 순서를 고려해야 합니다</td></tr>
+      <tr><td><b>테스트마다 새 스키마</b></td>
+        <td>완전 격리 · 병렬 실행 가능. 준비 비용이 있습니다</td></tr>
+      <tr><td><b>컨테이너 재기동</b></td>
+        <td class="no">가장 느립니다. 스위트 단위로만</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>CI 에서 느리다면</b> —
+    ① 컨테이너를 <b>세션 스코프</b>로 한 번만 띄우고
+    ② 테스트마다 <b>트랜잭션 롤백</b>으로 격리하고
+    ③ <code>tmpfs</code> 에 데이터 디렉터리를 두어 디스크 IO를 없애고
+    ④ <code>fsync=off</code> 같은 <b>테스트 전용 설정</b>을 씁니다(운영에는 절대 금지).
+  </div>
+
+  <div class="note info rv d2">
+    <b>무엇을 테스트할 것인가</b> —
+    ORM 이 SELECT 를 잘 만드는지는 테스트할 필요가 없습니다(라이브러리를 믿으세요).
+    <b>우리가 짠 제약·트랜잭션 경계·동시성 처리</b>를 테스트하세요.
+    특히 <b>재고 차감·중복 방지·롤백</b> 같은 정합성 로직은 반드시 테스트 대상입니다.
+  </div>
+</section>
+
+</div><!-- /pane-app -->

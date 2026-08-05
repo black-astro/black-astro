@@ -1,0 +1,1024 @@
+<!-- ============================================================
+     전문가 · 서버 내부 PANE
+     ============================================================ -->
+<div class="pane" id="pane-deep">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> EXPERT · SOCKET · EPOLL · HTTP/2·3 · LOAD BALANCING</div>
+  <h1>전문가 —<br>서버 안에서<br>무슨 일이</h1>
+  <p class="tx">
+    여기서부터는 <b>"왜 그렇게 동작하는가"</b>입니다.
+    워커 4개가 어떻게 수만 연결을 다루는지, HTTP/2 가 정말 빠른지,
+    프록시를 거치면 왜 IP 가 사라지는지 —
+    <b>설정으로 안 풀리는 문제</b>는 이 층위에서 원인을 찾습니다.
+  </p>
+  <div class="stats">
+    <div><b>14</b><span>SECTIONS</span></div>
+    <div><b>커널</b><span>수준까지</span></div>
+    <div><b>설계</b><span>분산 · 관측</span></div>
+  </div>
+</header>
+
+<!-- ==================== z01 ==================== -->
+<section class="sec" id="z01">
+  <div class="sec-head rv">
+    <span class="no">SECTION 01</span>
+    <h2>소켓부터 — <span class="t">accept 와 커넥션</span></h2>
+    <p class="lead">
+      연결은 웹서버가 받기 전에 <b>커널의 대기줄</b>에 먼저 쌓입니다.
+      이 줄이 넘치면 접속이 거부됩니다.
+    </p>
+  </div>
+
+  <div class="pipe rv">
+    <div class="prow"><span class="tagn">1</span>
+      <div><b>SYN 도착 → SYN 큐</b>
+        <span>3-way 핸드셰이크가 <b>진행 중인</b> 연결이 여기 쌓입니다.
+          크기는 <code>tcp_max_syn_backlog</code>.</span></div></div>
+    <div class="parrow">▼ 핸드셰이크 완료</div>
+    <div class="prow"><span class="tagn">2</span>
+      <div><b>accept 큐 (완성 큐)</b>
+        <span>연결은 <b>이미 성립됐지만</b> 애플리케이션이 아직 <code>accept()</code> 하지 않은 상태.
+          크기는 <code>min(somaxconn, listen backlog)</code>.</span></div></div>
+    <div class="parrow">▼ nginx 가 accept()</div>
+    <div class="prow"><span class="tagn">3</span>
+      <div><b>워커가 처리</b>
+        <span>이제부터 epoll 이 관리하는 연결이 됩니다.</span></div></div>
+  </div>
+
+  <div class="note warn rv d1">
+    <b>accept 큐가 넘치면</b> 커널이 연결을 <b>조용히 버리거나 RST</b> 를 보냅니다.
+    클라이언트는 <b>타임아웃 또는 connection reset</b> 을 보게 됩니다.
+    <br>이때 웹서버 로그에는 <b>아무것도 안 남습니다</b> — 요청이 도달하지 못했으니까요.
+    <b>"서버는 멀쩡한데 접속이 안 된다"</b>는 상황의 원인입니다.
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 큐 넘침 확인
+netstat -s | grep -i -E 'listen|overflow'
+# 12345 times the listen queue of a socket overflowed    ← 이 값이 증가하면 문제
+# 12345 SYNs to LISTEN sockets dropped
+
+# 현재 큐 상태 (Send-Q = 큐 최대 크기, Recv-Q = 대기 중인 연결 수)
+ss -lnt
+# State   Recv-Q  Send-Q  Local Address:Port
+# LISTEN  0       511     0.0.0.0:80              ← Send-Q 가 backlog
+
+# 커널 설정
+sysctl net.core.somaxconn net.ipv4.tcp_max_syn_backlog</code></pre>
+
+  <pre class="code rv d1" data-lang="conf"><code># 세 곳을 맞춰야 합니다
+# ① 커널
+net.core.somaxconn = 65535
+net.ipv4.tcp_max_syn_backlog = 65535
+
+# ② Nginx listen 지시어
+listen 80 backlog=65535;
+# ★ backlog 는 somaxconn 을 넘을 수 없습니다 (조용히 잘립니다)
+
+# ③ 앱 서버 (톰캣 acceptCount · Node backlog 등)</code></pre>
+
+  <div class="note info rv d2">
+    <b>Nginx 의 기본 backlog 는 511</b> 입니다(리눅스).
+    피크 트래픽이 크다면 이 값이 병목이 될 수 있습니다.
+    다만 <b>큐를 키우는 것은 근본 해결이 아닙니다</b> —
+    처리 속도가 따라오지 않으면 <b>대기 시간만 길어질</b> 뿐입니다.
+    큐 넘침이 계속되면 <b>워커·서버를 늘리는 것</b>이 답입니다.
+  </div>
+</section>
+
+<!-- ==================== z02 ==================== -->
+<section class="sec" id="z02">
+  <div class="sec-head rv">
+    <span class="no">SECTION 02</span>
+    <h2>이벤트 루프 · <span class="t">epoll</span></h2>
+    <p class="lead">
+      워커 하나가 수천 연결을 다루는 비결입니다. <b>"준비된 것만 알려 줘"</b>가 핵심입니다.
+    </p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>select · poll — 옛 방식</h5>
+      <pre class="code" data-lang="text"><code>"이 1000개 소켓 중 준비된 게 있나?"
+→ 커널이 1000개를 전부 검사
+→ 매 호출마다 O(n)
+
+연결이 10,000개면 매번 10,000개 검사
+select 는 1024개 제한도 있습니다</code></pre>
+    </div>
+    <div class="good">
+      <h5>epoll — 리눅스</h5>
+      <pre class="code" data-lang="text"><code>epoll_create()  감시 목록을 커널에 만들고
+epoll_ctl()     관심 소켓을 등록해 두면
+epoll_wait()    준비된 것만 돌려받습니다
+                → O(준비된 개수)
+
+연결이 10,000개여도
+실제로 데이터가 온 10개만 처리</code></pre>
+    </div>
+  </div>
+
+  <pre class="code rv d1" data-lang="text"><code># Nginx 워커의 개념적 루프
+while (true) {
+    events = epoll_wait(epfd, ...)          // 준비된 이벤트만 받음 (블로킹)
+
+    for (ev in events) {
+        if (ev is 새 연결)      accept() 후 epoll 에 등록
+        else if (ev is 읽기 가능) 요청을 읽고 파싱
+        else if (ev is 쓰기 가능) 응답을 조금 보냄
+    }
+
+    타이머 처리 (타임아웃된 연결 정리)
+}</code></pre>
+
+  <div class="note warn rv d1">
+    <b>이 구조의 치명적 약점 — 블로킹</b>
+    <br>루프 안에서 <b>블로킹 작업</b>(느린 디스크 읽기·DNS 조회·동기 연산)이 일어나면
+    <b>그 워커가 담당하는 수천 개 연결이 전부 멈춥니다.</b>
+    <br>그래서 Nginx 는 <b>무거운 작업을 절대 직접 하지 않고</b> 뒤로 넘깁니다.
+    Node.js 의 이벤트 루프도 같은 원리이며,
+    <b>동기 함수 하나가 서버 전체를 멈추는</b> 이유가 이것입니다.
+  </div>
+
+  <pre class="code rv d2" data-lang="conf"><code># 디스크 IO 를 별도 스레드 풀로 분리 (파일이 크고 캐시 미스가 잦을 때)
+thread_pool default threads=32 max_queue=65536;
+
+location /downloads/ {
+    aio threads=default;        # 비동기 파일 읽기
+    directio 4m;                # 4MB 넘는 파일은 페이지 캐시를 우회
+    sendfile off;               # aio 와 함께 쓸 때
+}</code></pre>
+  <div class="note info rv d2">
+    <b>다른 OS 의 대응 기술</b> —
+    BSD·macOS 는 <b>kqueue</b>, Solaris 는 <b>event ports</b>, Windows 는 <b>IOCP</b>.
+    Nginx 는 이를 자동으로 선택합니다.
+    최신 리눅스에는 <b><code>io_uring</code></b> 이라는 더 발전된 방식도 있습니다.
+  </div>
+</section>
+
+<!-- ==================== z03 ==================== -->
+<section class="sec" id="z03">
+  <div class="sec-head rv">
+    <span class="no">SECTION 03</span>
+    <h2>Nginx 워커 <span class="t">모델</span> 내부</h2>
+    <p class="lead">워커가 여러 개일 때 <b>연결을 어떻게 나눠 갖는지</b>가 성능에 영향을 줍니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:26%">방식</th><th>동작</th></tr>
+      <tr><td><b>accept_mutex</b></td>
+        <td>워커들이 <b>순서대로 돌아가며</b> accept. 예전 기본값 — 지연이 생길 수 있습니다</td></tr>
+      <tr><td><b>모든 워커가 대기</b></td>
+        <td>연결 하나에 <b>모든 워커가 깨어나는</b> 문제(thundering herd).
+          현대 커널은 대부분 완화돼 있습니다</td></tr>
+      <tr><td><b>SO_REUSEPORT</b></td>
+        <td class="ok">★ <b>커널이 직접 분배</b> — 워커마다 독립된 리슨 소켓.
+          경합이 없고 분배가 고릅니다</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="conf"><code>events {
+    accept_mutex off;               # 1.11.3+ 기본값 (off)
+}
+
+server {
+    listen 80 reuseport;            # ★ SO_REUSEPORT 활성화
+    # 워커마다 커널이 별도 큐를 만들어 연결을 나눠 줍니다
+}</code></pre>
+
+  <div class="note warn rv d1">
+    <b><code>reuseport</code> 는 <b>같은 주소·포트에 한 번만</b> 써야 합니다.</b>
+    여러 server 블록에서 같은 <code>listen 80</code> 을 쓸 때
+    <b>첫 블록에만</b> 붙이세요. 여러 곳에 쓰면 설정 오류가 납니다.
+    <br>또 <b>reload 시 짧은 순간 연결이 유실</b>될 수 있다는 보고가 있으므로,
+    무중단이 극도로 중요한 환경에서는 검증 후 도입하세요.
+  </div>
+
+  <h3 class="sub">워커 간 불균형</h3>
+  <pre class="code rv d1" data-lang="bash"><code># 워커별 연결 수 확인
+for pid in $(pgrep -f 'nginx: worker'); do
+  echo "$pid : $(ls /proc/$pid/fd 2>/dev/null | wc -l) fds"
+done</code></pre>
+  <div class="note info rv d1">
+    <b>워커마다 연결 수가 크게 다르면</b> 분배가 고르지 않은 것입니다.
+    <b>keepalive 연결이 특정 워커에 몰리면</b> 그 워커만 바빠집니다.
+    <code>reuseport</code> 가 이 문제를 상당히 개선합니다.
+  </div>
+
+  <h3 class="sub">공유 메모리 존</h3>
+  <pre class="code rv d2" data-lang="conf"><code># 워커는 별도 프로세스라 메모리를 공유하지 않습니다
+# rate limit · 캐시 키 · SSL 세션은 '공유 메모리 존'에 둡니다
+
+limit_req_zone $binary_remote_addr zone=req:10m rate=30r/s;   # 모든 워커가 공유
+ssl_session_cache shared:SSL:10m;                              # shared: 접두사
+proxy_cache_path /var/cache/nginx keys_zone=cache:100m ...;
+
+# shared 가 아닌 builtin 캐시를 쓰면 워커마다 따로 관리되어
+# 실제 제한이 '워커 수 × 설정값' 이 되어 버립니다</code></pre>
+  <div class="note tip rv d2">
+    <b>존 크기 계산</b> —
+    <code>10m</code> 은 대략 <b>16만 개의 IP 상태</b>를 담습니다
+    (<code>$binary_remote_addr</code> 기준 항목당 약 64바이트).
+    <b>존이 가득 차면 오래된 항목부터 제거</b>되며,
+    심하면 <code>limit_req</code> 가 제대로 동작하지 않습니다.
+  </div>
+</section>
+
+<!-- ==================== z04 ==================== -->
+<section class="sec" id="z04">
+  <div class="sec-head rv">
+    <span class="no">SECTION 04</span>
+    <h2>Apache MPM <span class="t">내부 비교</span></h2>
+    <p class="lead">Apache 가 메모리를 더 쓰는 이유를 구조로 설명합니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="df">
+      <thead><tr><th>MPM</th><th>연결 1000개일 때</th><th>메모리 추정</th></tr></thead>
+      <tbody>
+        <tr><td><b>prefork</b></td><td>프로세스 1000개</td><td class="no">프로세스당 20~50MB → <b>수십 GB</b></td></tr>
+        <tr><td><b>worker</b></td><td>프로세스 40개 × 스레드 25개</td><td class="warn">스레드 스택 + 프로세스 → 수 GB</td></tr>
+        <tr><td><b>event</b></td><td>worker 와 같지만 <b>유휴 연결은 전담 스레드가 관리</b></td><td class="ok">worker 보다 크게 절약</td></tr>
+        <tr><td>(Nginx)</td><td>워커 4개</td><td class="ok">수십~수백 MB</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note info rv d1">
+    <b>event MPM 이 개선한 지점</b> —
+    HTTP keepalive 로 <b>연결은 열려 있지만 아무 요청도 없는</b> 상태가 대부분입니다.
+    prefork·worker 는 그동안에도 <b>프로세스·스레드를 붙잡고</b> 있었습니다.
+    event MPM 은 이 유휴 연결을 <b>전담 리스너 스레드</b>에 넘겨
+    작업 스레드를 즉시 반납합니다.
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 실제 메모리 사용 측정
+ps -ylC apache2 --sort:rss | awk '{sum+=$8; n++} END {print "평균 " sum/n/1024 " MB · 프로세스 " n "개"}'
+
+# MaxRequestWorkers 계산
+# (가용 메모리 MB × 0.8) ÷ 프로세스당 평균 MB
+free -m | awk '/^Mem:/ {print "가용: " $7 " MB"}'</code></pre>
+
+  <div class="note warn rv d1">
+    <b>PHP 를 쓰면 event MPM 을 못 쓰는 경우가 있습니다.</b>
+    <code>mod_php</code> 는 스레드 안전하지 않아 <b>prefork 를 강제</b>합니다.
+    <br><b>해결</b> — <code>mod_php</code> 를 끄고 <b>PHP-FPM + proxy_fcgi</b> 로 전환하면
+    event MPM 을 쓸 수 있고 메모리 사용이 크게 줄어듭니다.
+    이것이 <b>현대 Apache + PHP 구성의 표준</b>입니다.
+  </div>
+
+  <pre class="code rv d2" data-lang="text"><code># 왜 Nginx 가 메모리를 적게 쓰나
+
+Apache prefork : 연결 = 프로세스
+  · 각 프로세스가 PHP 인터프리터·모듈 전체를 메모리에 적재
+  · 연결이 늘면 메모리가 선형으로 증가
+
+Nginx : 연결 = 자료구조 (수 KB)
+  · 워커 프로세스 수는 고정 (CPU 코어 수)
+  · 연결이 늘어도 메모리는 완만하게 증가
+  · 대신 동적 언어를 직접 실행하지 못합니다 (항상 프록시)
+
+★ 트레이드오프입니다. Apache 는 '한 프로세스가 전부 처리',
+  Nginx 는 '나는 전달만 하고 실행은 남에게'</code></pre>
+</section>
+
+<!-- ==================== z05 ==================== -->
+<section class="sec" id="z05">
+  <div class="sec-head rv">
+    <span class="no">SECTION 05</span>
+    <h2>HTTP/1.1 · <span class="t">2 · 3</span></h2>
+    <p class="lead">"HTTP/2 를 켜면 빨라진다"는 <b>상황에 따라 다릅니다.</b> 왜 그런지 봅니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="df">
+      <thead><tr><th>항목</th><th>HTTP/1.1</th><th>HTTP/2</th><th>HTTP/3</th></tr></thead>
+      <tbody>
+        <tr><td>전송 계층</td><td>TCP</td><td>TCP</td><td class="ok"><b>QUIC (UDP)</b></td></tr>
+        <tr><td>동시 요청</td><td>연결당 1개 (브라우저가 6개 연결)</td><td class="ok">한 연결에 다중화</td><td class="ok">한 연결에 다중화</td></tr>
+        <tr><td>헤더</td><td>텍스트 · 매번 전체</td><td>HPACK 압축</td><td>QPACK 압축</td></tr>
+        <tr><td>HOL 블로킹</td><td>애플리케이션 레벨</td><td class="warn"><b>TCP 레벨에 남음</b></td><td class="ok">해결</td></tr>
+        <tr><td>연결 수립</td><td>TCP + TLS (2~3 RTT)</td><td>TCP + TLS</td><td class="ok"><b>1 RTT · 재접속 0-RTT</b></td></tr>
+        <tr><td>네트워크 전환</td><td>연결 재수립</td><td>연결 재수립</td><td class="ok"><b>연결 유지</b> (Connection ID)</td></tr>
+        <tr><td>서버 푸시</td><td>없음</td><td class="warn">있었으나 <b>사실상 폐기</b></td><td>없음</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note info rv d1">
+    <b>HOL (Head-of-Line) 블로킹</b> —
+    HTTP/2 는 한 TCP 연결에 여러 스트림을 실어 보내는데,
+    <b>패킷 하나가 유실되면 TCP 가 재전송을 기다리며</b>
+    <b>그 연결의 모든 스트림이 멈춥니다.</b>
+    <br>HTTP/3 은 QUIC(UDP 기반)으로 <b>스트림마다 독립적으로</b> 처리해
+    이 문제를 해결했습니다. <b>패킷 손실이 잦은 모바일에서 차이가 큽니다.</b>
+  </div>
+
+  <h3 class="sub">언제 효과가 있나</h3>
+  <div class="ladder rv d1">
+    <div class="lv-b">
+      <h5>🟢 HTTP/2 효과 큼</h5>
+      <ul>
+        <li>작은 파일이 <b>많은</b> 페이지</li>
+        <li>지연이 큰 네트워크</li>
+        <li>번들링하지 않은 사이트</li>
+        <li>이미지가 많은 페이지</li>
+      </ul>
+    </div>
+    <div class="lv-i">
+      <h5>🔵 효과 작음</h5>
+      <ul>
+        <li>이미 번들링된 SPA (파일 2~3개)</li>
+        <li>대용량 파일 하나를 받는 경우</li>
+        <li>빠른 유선 네트워크</li>
+        <li>CDN 이 이미 앞에 있는 경우</li>
+      </ul>
+    </div>
+    <div class="lv-a">
+      <h5>🟣 HTTP/3 이 유리</h5>
+      <ul>
+        <li>모바일 · 불안정한 네트워크</li>
+        <li>패킷 손실이 있는 환경</li>
+        <li>네트워크 전환이 잦은 사용자</li>
+        <li>전 세계 대상 서비스</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note warn rv d2">
+    <b>HTTP/2 를 켠 뒤 오히려 느려지는 경우</b>
+    <br>· <b>도메인 샤딩</b>(정적 파일을 여러 도메인에 분산)을 그대로 두면
+      HTTP/2 의 다중화 이점이 사라집니다 — <b>한 도메인으로 합치는 것</b>이 맞습니다
+    <br>· <b>스프라이트 이미지·인라인 CSS</b> 같은 HTTP/1.1 시대 최적화도
+      HTTP/2 에서는 <b>불필요하거나 역효과</b>일 수 있습니다
+    <br>· 서버 푸시는 <b>브라우저에서 제거</b>됐으므로 쓰지 마세요
+  </div>
+</section>
+
+<!-- ==================== z06 ==================== -->
+<section class="sec" id="z06">
+  <div class="sec-head rv">
+    <span class="no">SECTION 06</span>
+    <h2>TLS 종료 <span class="t">위치와 성능</span></h2>
+    <p class="lead">암호화를 어디서 푸느냐가 <b>성능과 구조</b>를 좌우합니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:22%">위치</th><th>장단점</th></tr>
+      <tr><td><b>CDN·LB 에서</b></td>
+        <td class="ok">사용자와 가장 가까워 <b>핸드셰이크 지연이 최소</b>. 인증서 관리가 한 곳.
+          <br><span style="color:var(--rose)">뒤쪽 구간이 평문이면 내부망 보안에 의존</span></td></tr>
+      <tr><td><b>웹서버(Nginx)에서</b></td>
+        <td class="ok">가장 흔한 구성. 앱은 평문만 다루면 됩니다</td></tr>
+      <tr><td><b>앱에서</b></td>
+        <td class="warn">인증서 관리가 앱마다 필요. 언어별 방식이 달라 번거롭습니다</td></tr>
+      <tr><td><b>재암호화</b></td>
+        <td>구간 전체 암호화. <b>CPU 비용이 두 배</b>, 지연도 늘어납니다</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">TLS 비용은 어디서 발생하나</h3>
+  <pre class="code rv d1" data-lang="text"><code>① 핸드셰이크 (연결당 1회)
+   · 비대칭키 연산 (RSA·ECDSA 서명·검증) ← 비쌉니다
+   · RSA 2048 서명 1회 ≈ ECDSA P-256 의 여러 배
+   · 세션 재개(session resumption)로 생략 가능 ★
+
+② 대칭키 암복호화 (모든 데이터)
+   · AES-GCM 은 현대 CPU 의 AES-NI 명령으로 매우 빠름
+   · 실질적 부담은 크지 않습니다
+
+★ 결론 : TLS 비용의 대부분은 '핸드셰이크'입니다
+  → keepalive 와 세션 재개가 가장 효과적인 최적화입니다</code></pre>
+
+  <pre class="code rv d1" data-lang="conf"><code># 핸드셰이크 비용 줄이기
+ssl_session_cache shared:SSL:50m;      # 서버 측 세션 캐시 (약 20만 세션)
+ssl_session_timeout 1d;
+ssl_session_tickets off;               # 티켓 키를 안전하게 순환할 수 없다면 끄세요
+
+keepalive_timeout 65s;                 # 연결 재사용 = 핸드셰이크 자체를 줄임
+
+ssl_stapling on;                       # OCSP 응답을 서버가 미리 받아 전달
+ssl_stapling_verify on;                # (클라이언트의 별도 검증 왕복을 없앰)
+resolver 1.1.1.1 8.8.8.8 valid=300s;
+
+# ECDSA 인증서가 RSA 보다 가볍습니다 (둘 다 발급해 병행 제공도 가능)
+# ssl_certificate     ecdsa.crt;  ssl_certificate_key ecdsa.key;
+# ssl_certificate     rsa.crt;    ssl_certificate_key rsa.key;</code></pre>
+
+  <div class="note warn rv d1">
+    <b>세션 티켓의 트레이드오프</b> —
+    <code>ssl_session_tickets on</code> 은 서버가 상태를 저장하지 않아도 되어 편리하지만,
+    <b>티켓 키가 유출되면 과거 세션이 복호화</b>될 수 있습니다(전방 비밀성 약화).
+    <br>키를 <b>주기적으로 순환</b>할 수 없다면 <b>끄는 편이 안전</b>합니다.
+    여러 서버가 있다면 세션 캐시 공유가 어려우므로 <b>티켓 + 키 순환</b>이 현실적입니다.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>측정 방법</b> —
+    <code>curl -w "%{time_appconnect}"</code> 로 TLS 구간 시간을 재고,
+    <b>같은 연결로 여러 요청</b>을 보냈을 때 이 값이 0에 가까워지는지 확인하세요.
+    세션 재개가 동작하면 <b>두 번째 접속부터 크게 줄어듭니다.</b>
+  </div>
+</section>
+
+<!-- ==================== z07 ==================== -->
+<section class="sec" id="z07">
+  <div class="sec-head rv">
+    <span class="no">SECTION 07</span>
+    <h2>제로카피 · <span class="t">sendfile</span></h2>
+    <p class="lead">정적 파일 전송이 왜 그렇게 빠른지, 커널 수준에서 봅니다.</p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>일반적인 파일 전송</h5>
+      <pre class="code" data-lang="text"><code>read(file, buf)   디스크 → 커널 버퍼 → 유저 버퍼
+write(sock, buf)  유저 버퍼 → 커널 소켓 버퍼 → NIC
+
+복사 4회 · 컨텍스트 스위치 4회
+1MB 파일이면 그만큼의 메모리 대역폭 소모</code></pre>
+    </div>
+    <div class="good">
+      <h5>sendfile — 제로카피</h5>
+      <pre class="code" data-lang="text"><code>sendfile(sock, file)
+  디스크 → 커널 버퍼 → (직접) NIC
+
+유저 공간을 거치지 않습니다
+복사 2회 · 컨텍스트 스위치 2회
+CPU 와 메모리 대역폭을 크게 절약</code></pre>
+    </div>
+  </div>
+
+  <pre class="code rv d1" data-lang="conf"><code>sendfile on;
+tcp_nopush on;        # sendfile 과 함께 — 헤더와 파일 시작을 한 패킷에 모아 전송
+tcp_nodelay on;       # keepalive 연결에서는 지연 없이 즉시 전송
+
+# 큰 파일은 청크로 나눠 보내 다른 연결을 굶기지 않게
+sendfile_max_chunk 512k;
+
+# 매우 큰 파일 — 페이지 캐시를 오염시키지 않게 우회
+directio 8m;
+output_buffers 2 512k;</code></pre>
+
+  <div class="note warn rv d1">
+    <b>sendfile 이 동작하지 않는 경우</b>
+    <br>· <b>gzip 압축을 하는 경우</b> — 내용을 변형해야 하므로 유저 공간을 거칩니다
+    <br>· <b>TLS 를 쓰는 경우</b> — 암호화가 필요하므로 마찬가지
+      (커널 TLS 인 <code>kTLS</code> 를 쓰면 가능하지만 설정이 까다롭습니다)
+    <br>· <b>프록시 응답</b> — 파일이 아니므로 해당 없음
+    <br>즉 <b>HTTPS + 압축이 기본인 요즘</b>에는 sendfile 의 이득이 예전만큼 크지 않습니다.
+    <b>사전 압축 파일</b>을 서빙할 때는 여전히 유효합니다.
+  </div>
+
+  <pre class="code rv d2" data-lang="bash"><code># 실제로 sendfile 이 호출되는지 확인
+sudo strace -f -e trace=sendfile,write -p $(pgrep -f 'nginx: worker' | head -1) 2&gt;&amp;1 | head -20
+
+# kTLS 지원 여부 (1.21.4+ · OpenSSL 3.0+ · 커널 4.13+)
+nginx -V 2&gt;&amp;1 | grep -o ssl_conf_command
+# ssl_conf_command Options KTLS;  로 활성화</code></pre>
+</section>
+
+<!-- ==================== z08 ==================== -->
+<section class="sec" id="z08">
+  <div class="sec-head rv">
+    <span class="no">SECTION 08</span>
+    <h2>백프레셔와 <span class="t">버퍼</span></h2>
+    <p class="lead">
+      보내는 쪽이 빠르고 받는 쪽이 느릴 때 어떻게 되는지 — <b>버퍼가 그 완충 장치</b>입니다.
+    </p>
+  </div>
+
+  <div class="pipe rv">
+    <div class="prow"><span class="tagn">백엔드</span>
+      <div><b>1MB 응답을 즉시 생성</b><span>로컬 네트워크라 순식간에 전송할 수 있습니다.</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">Nginx 버퍼</span>
+      <div><b>응답을 통째로 받아 보관</b>
+        <span>백엔드는 여기서 <b>즉시 해방</b>됩니다. 버퍼를 넘으면 임시 파일에 씁니다.</span></div></div>
+    <div class="parrow">▼ 느리게</div>
+    <div class="prow"><span class="tagn">느린 클라이언트</span>
+      <div><b>3G 로 10초에 걸쳐 수신</b>
+        <span>그동안 붙잡히는 것은 <b>Nginx 의 가벼운 연결 자료구조</b>뿐입니다.</span></div></div>
+  </div>
+
+  <div class="note info rv d1">
+    <b>이것이 리버스 프록시의 숨은 가치입니다.</b>
+    앱 워커(스레드·프로세스)는 <b>비쌉니다</b>(메모리 수십 MB).
+    Nginx 의 연결은 <b>쌉니다</b>(수 KB).
+    <b>비싼 자원을 빨리 해방시키고 싼 자원이 기다리게</b> 하는 것이
+    프록시 버퍼링의 본질입니다.
+  </div>
+
+  <h3 class="sub">Slowloris — 이 구조를 역이용하는 공격</h3>
+  <pre class="code rv d1" data-lang="text"><code>공격자가 연결을 수천 개 열고
+헤더를 아주 천천히(1분에 한 글자씩) 보냅니다
+
+Apache prefork : 연결마다 프로세스 → 수천 프로세스 → 자원 고갈
+Nginx          : 연결마다 수 KB → 구조적으로 훨씬 강합니다
+
+그래도 방어 설정은 필요합니다:
+  client_header_timeout 10s;
+  client_body_timeout   10s;
+  limit_conn perip 20;</code></pre>
+
+  <h3 class="sub">스트리밍에서는 버퍼링이 방해가 됩니다</h3>
+  <pre class="code rv d2" data-lang="conf"><code># SSE · 실시간 로그 · 대용량 다운로드 스트리밍
+location /events {
+    proxy_pass http://backend;
+    proxy_buffering off;              # 오는 대로 즉시 전달
+    proxy_cache off;
+    chunked_transfer_encoding off;
+    proxy_read_timeout 3600s;
+}
+
+# 앱에서 응답별로 제어
+# 응답 헤더에 X-Accel-Buffering: no 를 넣으면 그 응답만 버퍼링이 꺼집니다</code></pre>
+  <div class="note warn rv d2">
+    <b>버퍼링을 끄면 느린 클라이언트가 앱을 붙잡습니다.</b>
+    스트리밍이 꼭 필요한 엔드포인트에만 적용하고,
+    <b>동시 스트리밍 연결 수에 제한</b>을 두세요.
+    수천 개의 SSE 연결이 앱 워커를 하나씩 붙잡으면 <b>서비스가 멈춥니다.</b>
+    이 때문에 실시간 기능은 <b>비동기 프레임워크</b>(ASGI·Node·WebFlux)로 만드는 것이 좋습니다.
+  </div>
+</section>
+
+<!-- ==================== z09 ==================== -->
+<section class="sec" id="z09">
+  <div class="sec-head rv">
+    <span class="no">SECTION 09</span>
+    <h2>커넥션과 <span class="t">파일 디스크립터</span></h2>
+    <p class="lead">연결을 오래 유지하면 빠르지만 <b>자원을 계속 차지</b>합니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="text"><code>프록시 구성에서 요청 하나가 쓰는 파일 디스크립터
+
+  클라이언트 ↔ Nginx      : 1개
+  Nginx      ↔ 백엔드     : 1개
+  (+ 로그 파일 · 캐시 파일 등)
+
+동시 10,000 요청 = 최소 20,000개
+여기에 keepalive 유휴 연결까지 더해집니다</code></pre>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">설정</th><th>영향</th></tr>
+      <tr><td><code>keepalive_timeout</code> ↑</td>
+        <td>재사용률 상승 ↔ <b>유휴 연결이 FD 를 점유</b></td></tr>
+      <tr><td><code>upstream keepalive</code> ↑</td>
+        <td>백엔드 연결 비용 감소 ↔ <b>백엔드도 그만큼 FD 사용</b></td></tr>
+      <tr><td><code>worker_connections</code> ↑</td>
+        <td>동시 처리 증가 ↔ <b>FD 한계에 걸릴 수 있음</b></td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="bash"><code># 실시간 FD 사용량
+for pid in $(pgrep -f 'nginx: worker'); do
+  echo "worker $pid : $(ls /proc/$pid/fd 2&gt;/dev/null | wc -l)"
+done
+
+# 한계 확인
+cat /proc/$(pgrep -f 'nginx: master')/limits | grep 'open files'
+
+# 시스템 전체
+cat /proc/sys/fs/file-nr       # 사용중  미사용  최대
+
+# 소켓 상태 분포
+ss -s
+ss -tan state established | wc -l
+ss -tan state time-wait  | wc -l</code></pre>
+
+  <div class="note warn rv d1">
+    <b><code>TIME_WAIT</code> 이 수만 개 쌓인다면</b>
+    <b>연결을 계속 새로 맺고 끊고</b> 있다는 신호입니다.
+    <br>· <b>근본 해결</b> — 업스트림 keepalive 활성화 (연결 재사용)
+    <br>· 완화 — <code>net.ipv4.tcp_tw_reuse = 1</code>
+    <br>· <b><code>tcp_tw_recycle</code> 은 쓰지 마세요</b> — NAT 환경에서 연결 실패를 일으키며 커널에서 제거됐습니다
+  </div>
+
+  <div class="note tip rv d2">
+    <b>포트 고갈</b> —
+    Nginx 가 백엔드로 연결할 때 <b>로컬 포트</b>를 하나씩 씁니다.
+    기본 범위가 약 28,000개이므로 <b>초당 수천 연결을 새로 맺으면</b>
+    TIME_WAIT 과 겹쳐 포트가 고갈됩니다.
+    <br><code>net.ipv4.ip_local_port_range = 10240 65535</code> 로 넓히고,
+    <b>keepalive 로 연결 자체를 줄이는 것</b>이 정답입니다.
+  </div>
+</section>
+
+<!-- ==================== z10 ==================== -->
+<section class="sec" id="z10">
+  <div class="sec-head rv">
+    <span class="no">SECTION 10</span>
+    <h2>프록시 프로토콜 · <span class="t">실제 IP</span></h2>
+    <p class="lead">
+      프록시를 여러 번 거치면 <b>진짜 방문자 IP 를 잃어버립니다.</b> 게다가 <b>위조도 가능</b>합니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="text"><code>사용자(1.2.3.4) → CDN(5.6.7.8) → LB(10.0.0.1) → Nginx → 앱
+
+앱이 보는 것 : 10.0.0.1  (바로 앞 프록시)
+X-Forwarded-For: 1.2.3.4, 5.6.7.8, 10.0.0.1
+                 └ 진짜 ┘  └── 거쳐 온 프록시들 ──┘
+
+★ 문제 : 클라이언트가 직접 X-Forwarded-For 를 넣어 보낼 수 있습니다
+  "X-Forwarded-For: 8.8.8.8" 로 보내면
+  최종 헤더는 "8.8.8.8, 1.2.3.4, 5.6.7.8, 10.0.0.1"
+  → 맨 앞을 그대로 믿으면 위조된 IP 를 진짜로 인식합니다</code></pre>
+
+  <div class="note warn rv d1">
+    <b>맨 앞 값을 그대로 믿으면 안 됩니다.</b>
+    <b>오른쪽부터 신뢰할 수 있는 프록시를 하나씩 걷어내고</b>
+    <b>처음 만나는 신뢰하지 않는 값</b>이 실제 클라이언트 IP 입니다.
+    <br>이것을 틀리면 <b>IP 기반 차단·rate limit·지역 판별이 전부 우회</b>됩니다.
+  </div>
+
+  <pre class="code rv d1" data-lang="conf"><code># Nginx 가 이 계산을 대신해 줍니다
+set_real_ip_from 10.0.0.0/8;          # 우리 LB 대역
+set_real_ip_from 172.16.0.0/12;
+set_real_ip_from 173.245.48.0/20;     # CDN 대역 (제공자 문서에서)
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;                 # ★ 신뢰 대역을 재귀적으로 걷어냄
+
+# 이제 $remote_addr 자체가 실제 클라이언트 IP 가 됩니다
+# → 로그 · rate limit · allow/deny 가 전부 올바르게 동작합니다</code></pre>
+
+  <h3 class="sub">PROXY protocol — 더 확실한 방법</h3>
+  <pre class="code rv d1" data-lang="conf"><code># L4 로드밸런서(TCP 레벨)는 HTTP 헤더를 넣을 수 없습니다
+# 대신 연결을 맺자마자 '누가 접속했는지'를 먼저 알려 주는 방식
+
+server {
+    listen 443 ssl proxy_protocol;        # ★ PROXY protocol 수신
+
+    set_real_ip_from 10.0.0.0/8;
+    real_ip_header proxy_protocol;
+
+    location / {
+        proxy_pass http://backend;
+        proxy_set_header X-Real-IP $proxy_protocol_addr;
+    }
+}</code></pre>
+  <div class="note warn rv d1">
+    <b><code>proxy_protocol</code> 을 켜면 일반 연결은 전부 실패합니다.</b>
+    앞단이 <b>반드시</b> PROXY protocol 을 보내야 하며,
+    직접 접속하면 <code>broken header</code> 오류가 납니다.
+    <br>따라서 <b>앞단 LB 설정과 반드시 짝을 맞춰</b> 적용하고,
+    <b>전환 시 순간적인 장애</b>가 없도록 별도 포트로 먼저 검증하세요.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>보안 원칙</b> —
+    <b>신뢰 대역을 명시적으로 지정하지 않은 헤더는 믿지 마세요.</b>
+    <code>set_real_ip_from</code> 없이 <code>real_ip_header</code> 만 쓰면
+    <b>누구나 IP 를 위조</b>할 수 있습니다.
+    앱 쪽에서도 마찬가지입니다 —
+    Express 의 <code>trust proxy: true</code>, Uvicorn 의 <code>--forwarded-allow-ips '*'</code> 는
+    <b>모두 위험한 설정</b>입니다.
+  </div>
+</section>
+
+<!-- ==================== z11 ==================== -->
+<section class="sec" id="z11">
+  <div class="sec-head rv">
+    <span class="no">SECTION 11</span>
+    <h2>로드밸런싱 <span class="t">알고리즘</span></h2>
+    <p class="lead">상황마다 정답이 다릅니다. 각각의 성질을 알아야 고를 수 있습니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:22%">알고리즘</th><th>동작과 성질</th></tr>
+      <tr><td><b>라운드 로빈</b></td>
+        <td>순서대로. <b>요청 처리 시간이 비슷할 때</b> 가장 고르게 분산됩니다</td></tr>
+      <tr><td><b>가중 라운드 로빈</b></td>
+        <td>서버 성능이 다를 때 <code>weight</code> 로 비율 조정</td></tr>
+      <tr><td><b>least_conn</b></td>
+        <td class="ok">연결 수가 적은 곳으로. <b>처리 시간이 들쭉날쭉할 때</b> 유리합니다</td></tr>
+      <tr><td><b>ip_hash</b></td>
+        <td class="warn">IP 로 서버 고정. <b>서버 수가 바뀌면 대부분 재배치</b>됩니다</td></tr>
+      <tr><td><b>hash $key consistent</b></td>
+        <td class="ok"><b>일관된 해싱</b> — 서버가 바뀌어도 재배치가 최소화됩니다</td></tr>
+      <tr><td><b>random two</b></td>
+        <td>둘을 무작위로 뽑아 덜 바쁜 쪽. <b>서버가 아주 많을 때</b> 유리합니다</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">일관된 해싱이 중요한 이유</h3>
+  <pre class="code rv d1" data-lang="text"><code>일반 해시 : server = hash(key) % N
+
+  서버 3대 → 4대가 되면 N 이 바뀌어
+  거의 모든 키의 배정이 달라집니다
+  → 캐시 서버라면 캐시 전체가 무효화됩니다 ★
+
+일관된 해싱 : 원형 공간에 서버와 키를 배치
+
+  서버 하나를 추가하면
+  그 구간의 키만 이동합니다 (약 1/N)
+  → 캐시 적중률이 유지됩니다</code></pre>
+
+  <pre class="code rv d1" data-lang="conf"><code># 캐시 서버 계층에 유용합니다
+upstream cache_servers {
+    hash $request_uri consistent;      # 같은 URL 은 항상 같은 서버로
+    server cache1:8080;
+    server cache2:8080;
+    server cache3:8080;
+}
+
+# 사용자별 고정이 필요하면 (세션이 서버에 있을 때)
+upstream app {
+    hash $cookie_sessionid consistent;
+    server app1:8080;
+    server app2:8080;
+}</code></pre>
+
+  <div class="note warn rv d1">
+    <b>세션 고정(sticky)은 근본 해결이 아닙니다.</b>
+    <br>· 서버가 죽으면 그 서버에 붙어 있던 사용자는 <b>로그아웃</b>됩니다
+    <br>· 부하가 <b>고르게 분산되지 않습니다</b>
+    <br>· 배포·확장이 어려워집니다
+    <br><b>세션을 Redis 등 외부에 두고 앱을 무상태로</b> 만드는 것이 정답입니다.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>실무 기본값</b> —
+    앱이 무상태라면 <b>라운드 로빈</b>으로 시작하세요.
+    응답 시간 편차가 크면(파일 업로드·리포트 생성 등) <b><code>least_conn</code></b> 으로 바꿉니다.
+    캐시 계층에는 <b>일관된 해싱</b>을 씁니다.
+  </div>
+</section>
+
+<!-- ==================== z12 ==================== -->
+<section class="sec" id="z12">
+  <div class="sec-head rv">
+    <span class="no">SECTION 12</span>
+    <h2>헬스체크 · <span class="t">서킷 브레이킹</span></h2>
+    <p class="lead">죽은 서버에 요청을 계속 보내지 않게 하고, <b>장애 전파를 막습니다.</b></p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:24%">방식</th><th>설명</th></tr>
+      <tr><td><b>수동적 (passive)</b></td>
+        <td>실제 요청이 실패하면 그 서버를 잠시 제외. <b>Nginx 오픈소스의 방식</b></td></tr>
+      <tr><td><b>능동적 (active)</b></td>
+        <td class="ok">주기적으로 <code>/health</code> 를 호출해 미리 판단.
+          <b>Nginx Plus · Caddy · 클라우드 LB</b> 가 제공</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="conf"><code># Nginx 오픈소스 — 수동적 헬스체크
+upstream backend {
+    server 10.0.1.11:8080 max_fails=3 fail_timeout=30s;
+    server 10.0.1.12:8080 max_fails=3 fail_timeout=30s;
+}
+
+location / {
+    proxy_pass http://backend;
+
+    proxy_next_upstream error timeout http_502 http_503 http_504;
+    proxy_next_upstream_tries 2;
+    proxy_next_upstream_timeout 10s;
+
+    proxy_connect_timeout 3s;      # ★ 짧게 — 죽은 서버를 빨리 감지
+    proxy_read_timeout   30s;
+}</code></pre>
+
+  <div class="note warn rv d1">
+    <b>재시도 대상에 <code>http_500</code> 을 넣지 마세요.</b>
+    500 은 <b>앱 코드의 오류</b>라 다른 서버에서도 똑같이 실패합니다.
+    재시도는 <b>부하만 3배로</b> 만듭니다.
+    <br>또 <b>POST·PUT 같은 변경 요청의 재시도</b>는 중복 처리를 일으킬 수 있으니
+    <code>non_idempotent</code> 를 함부로 넣지 마세요.
+  </div>
+
+  <h3 class="sub">헬스체크 엔드포인트 설계</h3>
+  <pre class="code rv d1" data-lang="text"><code>구분해서 만드세요
+
+/health/live   — "프로세스가 살아 있나"
+  · 단순히 200 만 반환
+  · 실패하면 → 재시작
+
+/health/ready  — "트래픽을 받을 준비가 됐나"
+  · DB 연결 · 캐시 · 필수 외부 의존성 확인
+  · 실패하면 → LB 에서 제외 (재시작하지 않음)
+
+★ 이 둘을 구분하지 않으면
+  DB 가 잠시 느릴 때 앱이 계속 재시작되는 재앙이 벌어집니다</code></pre>
+
+  <pre class="code rv d1" data-lang="conf"><code># 헬스체크는 로그에서 제외하고 rate limit 도 면제
+location = /health/live {
+    access_log off;
+    limit_req off;
+    proxy_pass http://backend;
+}</code></pre>
+
+  <h3 class="sub">서킷 브레이커 — 장애 격리</h3>
+  <div class="note info rv d2">
+    <b>개념</b> — 특정 백엔드가 계속 실패하면 <b>일정 시간 아예 호출하지 않습니다</b>.
+    <br>· <b>닫힘(Closed)</b> — 정상. 요청을 통과시킵니다
+    <br>· <b>열림(Open)</b> — 실패가 임계치를 넘으면 <b>즉시 실패 응답</b>(빠른 실패)
+    <br>· <b>반열림(Half-Open)</b> — 일정 시간 후 일부 요청만 시험적으로 통과
+    <br><b>왜 필요한가</b> — 죽은 서비스를 계속 호출하면 <b>타임아웃을 기다리느라
+    우리 스레드까지 고갈</b>되어 장애가 전파됩니다.
+    <br>Nginx 의 <code>max_fails</code> 는 <b>단순한 형태의 서킷 브레이커</b>이고,
+    본격적인 구현은 애플리케이션(Resilience4j 등)이나 서비스 메시에서 합니다.
+    자세한 패턴은 <a href="../java-web/">☕ 자바 가이드</a>의 대규모 트래픽 탭에 있습니다.
+  </div>
+</section>
+
+<!-- ==================== z13 ==================== -->
+<section class="sec" id="z13">
+  <div class="sec-head rv">
+    <span class="no">SECTION 13</span>
+    <h2>관측 가능성 · <span class="t">추적 ID</span></h2>
+    <p class="lead">
+      서버가 여러 대면 <b>로그가 흩어집니다.</b> 요청 하나를 끝까지 따라갈 방법이 필요합니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="conf"><code># Nginx 가 요청마다 고유 ID 를 만들어 전달합니다
+log_format traced '$remote_addr - [$time_local] "$request" $status '
+                  'rt=$request_time urt=$upstream_response_time '
+                  'rid=$request_id';
+
+server {
+    access_log /var/log/nginx/access.log traced;
+
+    location / {
+        proxy_set_header X-Request-Id $request_id;     # ★ 앱에 전달
+        add_header       X-Request-Id $request_id;     # 응답에도 (사용자 문의 대응)
+        proxy_pass http://backend;
+    }
+}</code></pre>
+
+  <pre class="code rv d1" data-lang="text"><code># 이제 로그가 이렇게 이어집니다
+
+Nginx : rid=a1b2c3d4 "GET /api/orders/123" 200 rt=1.234
+앱    : [a1b2c3d4] OrderController.get(123) 시작
+앱    : [a1b2c3d4] OrderService.find(123)
+DB    : [a1b2c3d4] SELECT * FROM orders WHERE id=123  (1.1s) ← 범인
+앱    : [a1b2c3d4] 응답 완료 1.2s
+
+★ 사용자가 "느려요"라고 하면
+  응답 헤더의 X-Request-Id 만 받아 이 전체를 재구성할 수 있습니다</code></pre>
+
+  <div class="quad rv d1">
+    <div class="q-std"><h5>Spring Boot (MDC)</h5>
+      <pre class="code" data-lang="java"><code>@Component
+public class RequestIdFilter extends OncePerRequestFilter {
+  protected void doFilterInternal(HttpServletRequest req,
+      HttpServletResponse res, FilterChain chain) throws Exception {
+    String id = req.getHeader("X-Request-Id");
+    MDC.put("requestId", id != null ? id : UUID.randomUUID().toString());
+    try { chain.doFilter(req, res); }
+    finally { MDC.clear(); }
+  }
+}
+// logback 패턴에 %X{requestId} 추가</code></pre></div>
+    <div class="q-std"><h5>Python (contextvars)</h5>
+      <pre class="code" data-lang="python"><code>import contextvars, logging
+request_id = contextvars.ContextVar("request_id", default="-")
+
+class RequestIdFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = request_id.get()
+        return True
+
+# 미들웨어에서
+# request_id.set(request.headers.get("X-Request-Id", uuid4().hex))
+# 포맷: "%(asctime)s [%(request_id)s] %(message)s"</code></pre></div>
+  </div>
+
+  <h3 class="sub">한 단계 위 — 분산 추적</h3>
+  <div class="note info rv d2">
+    <b>OpenTelemetry</b> 는 요청 ID 를 넘어 <b>구간별 소요 시간</b>까지 추적합니다.
+    <br>· <b>Trace</b> — 요청 하나의 전체 여정
+    <br>· <b>Span</b> — 그 안의 각 구간(HTTP 처리 · DB 쿼리 · 외부 API)
+    <br>· <b>W3C Trace Context</b> — <code>traceparent</code> 헤더로 서비스 간 전파
+    <br>Jaeger·Tempo·Zipkin 같은 도구로 <b>어느 구간이 느린지 그림으로</b> 볼 수 있습니다.
+    마이크로서비스 환경에서는 사실상 필수입니다.
+  </div>
+
+  <pre class="code rv d2" data-lang="conf"><code># 외부에서 온 추적 헤더가 있으면 그것을 이어받고, 없으면 새로 만듭니다
+map $http_x_request_id $req_id {
+    default   $http_x_request_id;
+    ""        $request_id;
+}
+
+location / {
+    proxy_set_header X-Request-Id  $req_id;
+    proxy_set_header traceparent   $http_traceparent;   # W3C 표준 전파
+    proxy_pass http://backend;
+}</code></pre>
+</section>
+
+<!-- ==================== z14 ==================== -->
+<section class="sec" id="z14">
+  <div class="sec-head rv">
+    <span class="no">SECTION 14</span>
+    <h2>아키텍처 <span class="t">정리</span></h2>
+    <p class="lead">전체 그림을 한 장으로. 설계 회의와 면접에서 그대로 쓸 수 있습니다.</p>
+  </div>
+
+  <pre class="code rv" data-lang="text"><code>                          [ 사용자 ]
+                               │ HTTPS
+                    ┌──────────▼──────────┐
+                    │  DNS · CDN           │  정적 캐시 · DDoS 방어 · 지리 분산
+                    └──────────┬──────────┘
+                    ┌──────────▼──────────┐
+                    │  L4/L7 로드밸런서     │  TLS 종료 · 헬스체크 · 트래픽 분산
+                    └──────────┬──────────┘
+              ┌────────────────┼────────────────┐
+     ┌────────▼───────┐ ┌──────▼───────┐ ┌──────▼───────┐
+     │ Nginx (웹서버)  │ │ Nginx        │ │ Nginx        │
+     │ · 정적 파일     │ │              │ │              │
+     │ · 압축 · 캐시   │ │              │ │              │
+     │ · rate limit    │ │              │ │              │
+     │ · 보안 헤더     │ │              │ │              │
+     └────────┬───────┘ └──────┬───────┘ └──────┬───────┘
+              └────────────────┼────────────────┘
+                    ┌──────────▼──────────┐
+                    │  앱 서버 (WAS)       │  비즈니스 로직
+                    │  Tomcat·Gunicorn·Node│  무상태(stateless)
+                    └──────────┬──────────┘
+              ┌────────────────┼────────────────┐
+     ┌────────▼───────┐ ┌──────▼───────┐ ┌──────▼───────┐
+     │  DB (주)        │ │ 캐시 (Redis) │ │ 큐 · 오브젝트 │
+     │  + 읽기 복제본  │ │ 세션 · 캐시  │ │ 스토리지      │
+     └────────────────┘ └──────────────┘ └──────────────┘
+
+관측  : 로그 수집 · 메트릭(Prometheus) · 추적(OpenTelemetry) · 알람</code></pre>
+
+  <h3 class="sub">각 계층이 담당하는 것</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:22%">계층</th><th>책임</th></tr>
+      <tr><td><b>CDN</b></td><td>정적 캐시 · 지리적 분산 · DDoS 1차 방어</td></tr>
+      <tr><td><b>LB</b></td><td>트래픽 분산 · 헬스체크 · TLS 종료 · 무중단 배포 지원</td></tr>
+      <tr><td><b>웹서버</b></td><td>정적 파일 · 압축 · 캐시 · 보안 헤더 · rate limit · 라우팅</td></tr>
+      <tr><td><b>앱 서버</b></td><td class="ok"><b>비즈니스 로직만</b> — 무상태로 만들어 자유롭게 확장</td></tr>
+      <tr><td><b>캐시</b></td><td>세션 · 반복 조회 결과 · 분산 락</td></tr>
+      <tr><td><b>DB</b></td><td>정합성이 필요한 데이터 (읽기는 복제본으로 분산)</td></tr>
+      <tr><td><b>관측</b></td><td>모든 계층의 로그·지표·추적을 한 곳에서</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">규모별 현실적인 구성</h3>
+  <div class="ladder rv d1">
+    <div class="lv-b">
+      <h5>🟢 개인 · 소규모</h5>
+      <ul>
+        <li>서버 1대</li>
+        <li>Caddy 또는 Nginx + 앱 + DB</li>
+        <li>인증서 자동 갱신</li>
+        <li>정기 백업</li>
+        <li><b>이것으로 상당한 트래픽을 감당합니다</b></li>
+      </ul>
+    </div>
+    <div class="lv-i">
+      <h5>🔵 성장기</h5>
+      <ul>
+        <li>웹서버 · 앱 · DB 분리</li>
+        <li>앱 서버 2대 이상 + LB</li>
+        <li>Redis 세션 · 캐시</li>
+        <li>DB 읽기 복제본</li>
+        <li>모니터링 · 알람 체계</li>
+      </ul>
+    </div>
+    <div class="lv-a">
+      <h5>🟣 대규모</h5>
+      <ul>
+        <li>CDN + 다중 리전</li>
+        <li>쿠버네티스 · 오토스케일</li>
+        <li>분산 추적 · 중앙 로그</li>
+        <li>DB 샤딩 · 큐 기반 비동기</li>
+        <li>카나리 배포 · 서비스 메시</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note warn rv d2">
+    <b>가장 흔한 실수 — 필요하지 않은 복잡도</b>
+    <br>사용자 1000명 서비스에 쿠버네티스·마이크로서비스·서비스 메시를 도입하면
+    <b>운영 부담만 폭증</b>합니다.
+    <br><b>서버 한 대로 감당되는 규모</b>가 생각보다 큽니다.
+    <b>병목이 실제로 생겼을 때 그 지점만 확장</b>하는 것이
+    거의 항상 옳은 순서입니다.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>여기까지 왔다면</b> —
+    웹 인프라의 전체 그림을 이해하고 각 계층에서 무엇을 해야 하는지 알게 됐습니다.
+    <br>다음은 <b>실제로 만들어 보는 것</b>입니다.
+    도메인 하나를 사서 이 가이드대로 배포해 보세요.
+    <br>데이터 계층은 <a href="../db-web/"><b>🗄️ 데이터베이스 가이드</b></a>에,
+    언어별 대규모 트래픽 대응은
+    <a href="../java-web/">☕ 자바</a> ·
+    <a href="../python-web/">🐍 파이썬</a> ·
+    <a href="../js-ts-web/">🟨 JS · TS</a> 가이드에 이어집니다.
+  </div>
+</section>
+
+</div><!-- /pane-deep -->

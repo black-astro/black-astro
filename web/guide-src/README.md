@@ -1,9 +1,10 @@
-# 학습 가이드 소스 (Python · Java · JS/TS)
+# 학습 가이드 소스 (Python · Java · JS/TS · Database · Web Server)
 
-`public/*-web/index.html` 세 개의 **원본**입니다.
+`public/*-web/index.html` 다섯 개의 **원본**입니다.
 편집은 여기서 하고, 빌드하면 조각들이 합쳐져 각각 단일 HTML로 나갑니다.
 
-> ⚠️ `public/python-web/` · `public/java-web/` · `public/js-ts-web/` 의 index.html 을
+> ⚠️ `public/python-web/` · `public/java-web/` · `public/js-ts-web/` ·
+> `public/db-web/` · `public/server-web/` 의 index.html 을
 > 직접 고치지 마세요. 다음 빌드에서 덮어써집니다.
 
 | 가이드 | 소스 | 배포 경로 | 규모 |
@@ -11,8 +12,10 @@
 | 🐍 Python | `guide-src/python/` | `/python-web/` | 14탭 · 200섹션 |
 | ☕ Java | `guide-src/java/` | `/java-web/` | 11탭 · 153섹션 |
 | 🟨 JS · TS | `guide-src/js-ts/` | `/js-ts-web/` | 10탭 · 152섹션 |
+| 🗄️ Database | `guide-src/db/` | `/db-web/` | 10탭 · 153섹션 |
+| 🌐 Web Server | `guide-src/server/` | `/server-web/` | 10탭 · 138섹션 |
 
-세 가이드는 **CSS 5개(01~05)를 공유**합니다(테마 동일).
+다섯 가이드는 **CSS 5개(01~05)를 공유**합니다(테마 동일).
 각 폴더의 `css/06-*.css` 만 그 가이드 전용입니다.
 `build.mjs` 상단의 `GUIDES` 배열에 항목을 추가하면 가이드를 더 늘릴 수 있습니다.
 
@@ -29,8 +32,8 @@
 
 | 명령 | 하는 일 |
 |---|---|
-| `npm run build:guide` | 조각 → 각 `index.html` 생성 (세 가이드 모두) |
-| `npm run build:guide -- java` | 특정 가이드만 (`python` · `java` · `js-ts`) |
+| `npm run build:guide` | 조각 → 각 `index.html` 생성 (다섯 가이드 모두) |
+| `npm run build:guide -- java` | 특정 가이드만 (`python` · `java` · `js-ts` · `db` · `server`) |
 | `npm run dev:guide` | 조각이 바뀌면 자동 재빌드 (작업 중 켜두세요) |
 | `npm run check:guide` | 결과물이 조각과 일치하는지 검사만 (커밋 전 확인용) |
 | `npm run build` | `prebuild` 훅으로 가이드 빌드가 **자동 선행**된 뒤 사이트 빌드 |
@@ -38,7 +41,7 @@
 ## 구조
 
 빌드 순서는 각 가이드의 `parts.json` 에 적힌 배열 그대로입니다.
-세 가이드가 같은 뼈대를 씁니다. 조각을 추가·삭제하면
+다섯 가이드가 같은 뼈대를 씁니다. 조각을 추가·삭제하면
 **`parts.json` 도 함께 고쳐야 합니다** (누락·고아 파일은 빌드가 에러로 잡아 줍니다).
 
 ```
@@ -46,7 +49,7 @@ guide-src/
   build.mjs            빌더 (의존성 없음 · 세 가이드를 모두 처리)
   README.md            이 문서
 
-  <가이드>/            python · java · js-ts
+  <가이드>/            python · java · js-ts · db · server
     parts.json         조각 순서 = 최종 파일의 순서
     parts/
       00-head.html         doctype · <head> · <style> 여는 태그
@@ -77,13 +80,18 @@ Python 가이드만 데모 스크립트가 많아 `js/` 가 13개로 더 잘게 
 
 | 가이드 | 탭 |
 |---|---|
-| 🐍 Python | Python 기본 · uv · Pandas · NumPy · 이미지 · 윈도우 매크로 · PySide6 · 도구상자 · 알고리즘 · DB · **웹 기초** · **테스트** · **대규모 트래픽** · **초고급** |
-| ☕ Java | Java 기초 · 고급/동시성 · Spring Boot · WebFlux · 데이터/JPA · Security · Gateway · 실전 도구 · JavaFX · **대규모 트래픽** · **초고급** |
-| 🟨 JS · TS | JavaScript · TypeScript · Node.js · Express · NestJS · React Native · Electron · **대규모 트래픽** · 실전 도구 · **초고급** |
+| 🐍 Python | Python 기본 · uv · Pandas · NumPy · 이미지 · 윈도우 매크로 · PySide6 · 도구상자 · 알고리즘 · DB 연동 · **웹 · API** · **테스트** · **대규모 트래픽** · **전문가** |
+| ☕ Java | Java 기초 · 고급/동시성 · Spring Boot · WebFlux · 데이터/JPA · Security · Gateway · 실전 도구 · JavaFX · **대규모 트래픽** · **전문가** |
+| 🟨 JS · TS | JavaScript · TypeScript · Node.js · Express · NestJS · React Native · Electron · **대규모 트래픽** · 실전 도구 · **전문가** |
+| 🗄️ Database | 시작·설치 · SQL 기초 · SQL 전문가 · Oracle · PostgreSQL · MySQL/MariaDB · SQLite3 · 설계·튜닝 · **전문가(내부)** · 앱 연동 |
+| 🌐 Web Server | 시작·개념 · Nginx · Apache · Tomcat · Caddy · HTTPS·인증서 · 언어별 연동 · 성능·튜닝 · 보안·운영 · **전문가(내부)** |
 
-세 가이드 모두 마지막 두 탭이 **대규모 트래픽 + 초고급**입니다.
-초고급 탭은 각 언어의 런타임 내부(CPython / JVM / V8)와
+언어 가이드 세 개는 마지막 두 탭이 **대규모 트래픽 + 전문가**입니다.
+전문가 탭은 각 언어의 런타임 내부(CPython / JVM / V8)와
 메모리·프로파일링·보안·아키텍처를 같은 뼈대로 다룹니다.
+
+DB·웹서버 가이드는 **언어에 종속되지 않는 주제**를 다루므로
+언어 가이드에서 상호 링크로 이어집니다.
 
 ## 자주 하는 작업
 
@@ -115,17 +123,23 @@ npm run check:guide       # 결과물이 조각과 일치하는지
 사이드바 링크 ↔ 섹션 id 일치, `SEC_LV`/`EZ` 커버리지, 태그 균형은
 빌드 결과물(`public/*-web/index.html`)을 대상으로 확인하는 것이 가장 확실합니다.
 
-## 세 가이드의 관계
+## 다섯 가이드의 관계
 
 - 각 가이드의 **사이드바·탭바에서 서로를 오갈 수 있습니다**
 - 포트폴리오 진입점(헤더 · 홈 히어로 · 홈 카드 · 푸터)은
   `src/router/index.ts` 의 `guides` 배열 **한 곳**에서만 정의합니다
   → 가이드를 추가하면 그 배열에도 항목을 넣어야 사이트에 노출됩니다
-- **대규모 트래픽** 탭은 세 가이드 모두에 있지만 관점이 다릅니다
+- **역할 분담**
+  - 언어 가이드(🐍 ☕ 🟨) — 그 언어로 코드를 쓰는 법
+  - 🗄️ Database — SQL 문법 · DB별 방언 · 설치 · 튜닝 · 내부 구조 (언어 무관)
+  - 🌐 Web Server — 배포 · 프록시 · HTTPS · 운영 (언어 무관)
+  - 파이썬 가이드의 `DB 연동` · `웹 · API` 탭은 **파이썬 관점**만 다루고
+    나머지는 위 두 가이드로 링크합니다
+- **대규모 트래픽** 탭은 언어 가이드 세 개에 있지만 관점이 다릅니다
   - Java — 스레드 풀 · JVM · 분산 락(Redisson) · Kafka
   - JS · TS — 이벤트 루프 · 싱글 스레드 · BullMQ · 무상태 확장
   - Python — GIL · 비동기 함정 · Celery · 멀티프로세싱
-- **초고급** 탭도 마찬가지로 같은 주제를 언어별 관점으로 다룹니다
+- **전문가** 탭도 마찬가지로 같은 주제를 언어별 관점으로 다룹니다
   - Java(🔬) — 바이트코드/JIT · JMM · CAS · GC 내부 · JFR/힙덤프 · 역직렬화 보안
   - JS · TS(🧬) — V8 히든 클래스 · 마이크로태스크 · Proxy · WASM · 번들 최적화
   - Python(🧬) — CPython 바이트코드 · 참조 카운팅 · 디스크립터 · 메타클래스 · GIL 내부
