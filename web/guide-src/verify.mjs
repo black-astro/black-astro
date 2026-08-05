@@ -65,10 +65,8 @@ for (const g of GUIDES) {
   const ez = grab('EZ', /const EZ = \{([\s\S]*?)\n\};/)
   const cap = grab('CAP', /const CAP = \{([\s\S]*?)\n\};/)
   for (const id of secIds) {
-    // 파이썬 도구상자 탭(t*)은 자체 필터를 쓰므로 난이도·요약 맵에서 제외한다
-    const skip = g === 'python-web' && navIds.get(id) === 'toolbox'
-    if (!skip && !lv.has(id)) err.push(`SEC_LV 누락 ${id}`)
-    if (!skip && !ez.has(id)) err.push(`EZ 누락 ${id}`)
+    if (!lv.has(id)) err.push(`SEC_LV 누락 ${id}`)
+    if (!ez.has(id)) err.push(`EZ 누락 ${id}`)
     if (!cap.has(id)) err.push(`CAP 누락 ${id}`)
   }
 
