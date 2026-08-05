@@ -1,0 +1,1703 @@
+<!-- ============================================================
+     ELECTRON 심화 · 네이티브 · 미디어 PANE
+     ============================================================ -->
+<div class="pane" id="pane-native">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> NATIVE · C++ · RUST · WEBRTC · OSR · GPU · 전문가</div>
+  <h1>Discord · VS Code<br>수준으로<br>끌어올리기</h1>
+  <p class="tx">
+    앞 탭이 <b>사내 도구</b>를 만드는 법이었다면, 여기는 <b>수천만 명이 쓰는 앱</b>의 기술입니다.
+    JS 로 안 되는 성능은 <b>C++·Rust 애드온</b>으로 내려가고,
+    음성 채팅·화면 공유·오버레이는 <b>WebRTC·OSR·GPU</b> 영역입니다.
+    <b>여기까지 마치면 네이티브 모듈을 직접 붙이고, 음성·화면 파이프라인을 설계하며,
+    시작 시간과 크래시를 수치로 관리할 수 있습니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>16</b><span>SECTIONS</span></div>
+    <div><b>C++·Rust</b><span>네이티브 확장</span></div>
+    <div><b>OSR</b><span>GPU 텍스처 공유</span></div>
+    <div><b>WebRTC</b><span>보이스 · 화면</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== v01 ==================== -->
+<section class="sec" id="v01">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 01</span>
+    <h2>대규모 앱 <span class="t">아키텍처</span></h2>
+    <p class="lead">VS Code 와 Discord 는 <b>어떻게 무거워지지 않았는가</b>. 구조가 답입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">VS Code 식 — 프로세스로 격리</h4>
+      <pre class="code" data-lang="text"><code>┌─────────────────────────────────────────┐
+│ Main (Node)                             │  창·메뉴·업데이트만
+│  가볍게 유지 — 여기가 막히면 전부 멈춤    │
+└──┬───────────┬──────────────┬───────────┘
+   │ IPC       │ MessagePort  │ fork
+   ▼           ▼              ▼
+┌────────┐ ┌──────────────┐ ┌────────────┐
+│Renderer│ │ Extension    │ │ 파일검색·  │
+│  UI만  │ │ Host         │ │ Git·LSP    │
+│        │ │ (확장 격리)   │ │ (유틸리티) │
+└────────┘ └──────────────┘ └────────────┘
+
+핵심 원칙
+ ① UI 스레드에서 무거운 일을 절대 하지 않는다
+ ② 남의 코드(확장·플러그인)는 별도 프로세스에 가둔다
+ ③ 하나가 죽어도 앱 전체가 죽지 않는다</code></pre>
+      <div class="note tip">
+        <b>VS Code 가 "확장이 느려도 에디터는 안 멈추는" 이유</b> —
+        확장 코드는 <b>Extension Host 라는 별도 Node 프로세스</b>에서 돕니다.
+        확장이 무한 루프를 돌아도 <b>UI 렌더러는 멀쩡</b>합니다.
+        플러그인 시스템을 만든다면 <b>같은 프로세스에서 실행하지 마세요.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Discord 식 — 미디어를 네이티브로</h4>
+      <pre class="code" data-lang="text"><code>┌──────────────┐
+│  Renderer    │  React UI · 오디오 제어
+└───┬──────────┘
+    │ MessagePort (고빈도·저지연 · v03)
+    ▼
+┌──────────────────────────────┐
+│  Native Voice Engine (C++)   │  ★ JS 밖에서 도는 부분
+│   Opus 인코딩 · 지터버퍼      │
+│   에코 제거(AEC) · 노이즈 억제 │
+│   디바이스 I/O (WASAPI 등)    │
+└──────────────────────────────┘
+
+왜 네이티브인가
+ · 오디오는 10ms 단위 실시간 — GC 멈춤을 못 견딤
+ · OS 오디오 API 는 JS 에서 못 건드림
+ · 인코딩·DSP 는 SIMD 로 몇 배 차이</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>처음부터 이 구조로 만들지 마세요.</b>
+        먼저 <b>웹 표준(WebRTC·WebAudio)으로 구현</b>하고(v09),
+        <b>지연·품질을 실측</b>한 뒤 병목이 확인된 부분만 네이티브로 내리는 것이 순서입니다.
+        네이티브 모듈은 <b>OS×아키텍처마다 빌드·배포 비용</b>이 붙습니다(v07).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">무엇을 어디에 둘 것인가</h3>
+  <div class="tw rv d1">
+    <table class="df">
+      <thead><tr><th>일</th><th>어디서</th><th>이유</th></tr></thead>
+      <tbody>
+        <tr><td>화면 그리기·상태</td><td>Renderer</td><td>그 외의 것을 여기 두면 UI 가 끊깁니다</td></tr>
+        <tr><td>창·메뉴·트레이·업데이트</td><td>Main</td><td>OS 와 대화하는 유일한 곳</td></tr>
+        <tr><td>파일 파싱·인덱싱·압축</td><td class="ok"><b>utilityProcess</b></td><td>크래시가 나도 앱은 살아남습니다 (v02)</td></tr>
+        <tr><td>플러그인·사용자 스크립트</td><td class="ok"><b>별도 프로세스</b></td><td>남의 코드는 반드시 격리</td></tr>
+        <tr><td>오디오 DSP·코덱</td><td>네이티브 애드온</td><td>실시간성 · GC 회피 (v04·v09)</td></tr>
+        <tr><td>암호화·해싱 대량 연산</td><td>네이티브 또는 워커</td><td>CPU 바운드는 이벤트 루프를 막습니다</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+
+<!-- ==================== v02 ==================== -->
+<section class="sec" id="v02">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 02</span>
+    <h2>프로세스 <span class="t">모델 심화</span></h2>
+    <p class="lead">Electron 에는 무거운 일을 내보낼 곳이 <b>네 군데</b> 있습니다. 고르는 기준이 있습니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="df">
+      <thead><tr><th>방식</th><th>실체</th><th>쓸 때</th><th>주의</th></tr></thead>
+      <tbody>
+        <tr><td><b>worker_threads</b></td><td>같은 프로세스의 스레드</td>
+          <td>CPU 연산 (파싱·이미지 변환)</td><td>크래시 시 <b>프로세스 전체 사망</b></td></tr>
+        <tr><td class="ok"><b>utilityProcess</b></td><td>Electron 관리 자식 프로세스</td>
+          <td class="ok">★ 대부분의 백그라운드 작업</td><td>Electron 22+ · Node API 전부 사용 가능</td></tr>
+        <tr><td><b>child_process</b></td><td>임의의 외부 실행 파일</td>
+          <td>ffmpeg · 파이썬 스크립트 호출</td><td>경로·인자 이스케이프 <b>주입 위험</b></td></tr>
+        <tr><td><b>hidden BrowserWindow</b></td><td>보이지 않는 렌더러</td>
+          <td>Canvas·WebGL 이 필요한 처리</td><td>메모리가 큽니다 — 남용 금지</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">utilityProcess — 기본으로 쓸 것</h4>
+      <pre class="code" data-lang="typescript"><code>import { utilityProcess, MessageChannelMain } from "electron";
+
+const { port1, port2 } = new MessageChannelMain();
+
+const child = utilityProcess.fork(
+  path.join(__dirname, "workers/indexer.js"),
+  [],                                  // argv
+  {
+    serviceName: "indexer",            // ★ 작업 관리자에 이 이름으로 보입니다
+    stdio: "pipe",
+    execArgv: ["--max-old-space-size=512"],   // 워커만 메모리 제한
+  }
+);
+
+// 포트를 넘겨 주면 이후 통신은 메인을 거치지 않습니다
+child.postMessage({ type: "init" }, [port1]);
+
+child.on("exit", (code) =&gt; {
+  log.warn("indexer 종료", code);
+  if (code !== 0) respawn();           // ★ 죽으면 되살리기
+});
+
+child.stdout?.on("data", (d) =&gt; log.info("[indexer]", d.toString()));</code></pre>
+      <div class="note tip">
+        <b><code>serviceName</code> 을 꼭 지정하세요.</b>
+        지정하지 않으면 작업 관리자에 <code>Electron Helper</code> 로만 보여
+        <b>사용자도 개발자도 어느 프로세스가 CPU 를 먹는지 알 수 없습니다.</b>
+        Chrome 의 작업 관리자(<code>Shift+Esc</code> 개념)처럼 앱 안에
+        <code>app.getAppMetrics()</code> 기반 진단 화면을 두면 지원 문의가 크게 줄어듭니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">플러그인 격리 패턴</h4>
+      <pre class="code" data-lang="typescript"><code>// 남의 코드를 돌린다면 — 프로세스 격리 + 권한 제한 + 감시
+const host = utilityProcess.fork(pluginHostPath, [pluginId], {
+  serviceName: `plugin:${pluginId}`,
+  execArgv: ["--max-old-space-size=256"],
+});
+
+// ① 응답 없음 감시 (하트비트)
+let alive = true;
+const hb = setInterval(() =&gt; {
+  if (!alive) { host.kill(); onPluginHang(pluginId); return; }
+  alive = false;
+  host.postMessage({ type: "ping" });
+}, 5000);
+host.on("message", (m) =&gt; { if (m.type === "pong") alive = true; });
+
+// ② 종료 시 정리
+host.on("exit", () =&gt; clearInterval(hb));
+
+// ③ 플러그인이 할 수 있는 일은 "메인이 제공하는 RPC" 로만 제한
+//    fs 를 직접 주지 말고, 허용된 디렉터리만 다루는 함수를 제공합니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>vm</code> 모듈은 샌드박스가 아닙니다.</b>
+        Node 공식 문서도 <b>보안 경계로 쓰지 말라</b>고 명시합니다 —
+        <code>this.constructor.constructor("return process")()</code> 같은 방법으로 탈출할 수 있습니다.
+        신뢰할 수 없는 코드는 <b>반드시 별도 프로세스</b>(가능하면 OS 샌드박스까지)에 두세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v03 ==================== -->
+<section class="sec" id="v03">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 03</span>
+    <h2>고성능 <span class="t">IPC</span></h2>
+    <p class="lead"><code>ipcRenderer.invoke</code> 로는 감당이 안 되는 <b>고빈도·대용량</b> 구간을 다룹니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 IPC 의 비용</h4>
+      <pre class="code" data-lang="text"><code>ipcRenderer.invoke 의 실제 경로
+
+렌더러 → [구조화 복제 직렬화] → 메인 IPC 큐
+       → 메인 스레드에서 처리 → [다시 직렬화] → 렌더러
+
+비용이 커지는 지점
+ ① 구조화 복제 — 객체가 크고 깊을수록 급증
+ ② 메인 스레드 경유 — 메인이 바쁘면 전부 대기
+ ③ 초당 수백 회 호출 시 큐가 밀림
+
+체감 기준 (대략)
+ · 작은 객체 · 초당 수십 회      → 그냥 invoke 로 충분
+ · 수 MB 데이터 · 초당 수백 회   → MessagePort 로
+ · 오디오·비디오 프레임 (연속)   → 공유 메모리 · 네이티브로</code></pre>
+      <div class="note warn">
+        <b>가장 흔한 실수</b> — 렌더러가 <b>1초에 60번</b>
+        <code>invoke("state:get")</code> 을 호출하는 폴링 구조입니다.
+        <b>메인이 밀어 주는(push) 구조</b>로 바꾸고,
+        변경이 잦으면 <b>합치기(coalescing)</b> 를 적용하세요 —
+        16ms 안에 들어온 갱신은 한 번만 보냅니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">MessagePort — 메인을 건너뛰기</h4>
+      <pre class="code" data-lang="typescript"><code>// 메인 — 워커와 렌더러를 직접 연결해 줍니다
+import { MessageChannelMain } from "electron";
+
+const { port1, port2 } = new MessageChannelMain();
+
+worker.postMessage({ type: "port" }, [port1]);          // 워커에 한쪽
+mainWindow.webContents.postMessage("port:worker", null, [port2]);  // 렌더러에 반대쪽
+
+// ★ 이후 워커 ↔ 렌더러 통신은 메인 스레드를 전혀 거치지 않습니다</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 프리로드 — 포트를 받아 렌더러에 전달
+ipcRenderer.on("port:worker", (e) =&gt; {
+  const port = e.ports[0];
+  port.start();
+  contextBridge.exposeInMainWorld("workerPort", {
+    send: (msg: unknown) =&gt; port.postMessage(msg),
+    onMessage: (cb: (m: unknown) =&gt; void) =&gt; {
+      port.onmessage = (ev) =&gt; cb(ev.data);
+    },
+  });
+});</code></pre>
+      <h4 class="mini">대용량 — 복사 없이 넘기기</h4>
+      <pre class="code" data-lang="typescript"><code>// ① Transferable — 소유권 이전 (복사 0)
+const buf = new ArrayBuffer(16 * 1024 * 1024);
+port.postMessage({ type: "frame", buf }, [buf]);
+// ★ 넘긴 쪽에서는 buf 가 즉시 사용 불가(detached)가 됩니다
+
+// ② SharedArrayBuffer — 양쪽이 동시에 접근 (링 버퍼에 적합)
+//    렌더러에서 쓰려면 교차 출처 격리 헤더가 필요합니다
+session.defaultSession.webRequest.onHeadersReceived((d, cb) =&gt; {
+  cb({ responseHeaders: {
+    ...d.responseHeaders,
+    "Cross-Origin-Opener-Policy": ["same-origin"],
+    "Cross-Origin-Embedder-Policy": ["require-corp"],
+  }});
+});</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>오디오 같은 연속 스트림에는 <code>SharedArrayBuffer</code> + <code>Atomics</code> 링 버퍼</b>가 정석입니다.
+        메시지를 주고받는 것이 아니라 <b>정해진 메모리를 서로 읽고 쓰기만</b> 하므로
+        할당도 직렬화도 없습니다. AudioWorklet 과의 연결에 그대로 씁니다(v08).
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v04 ==================== -->
+<section class="sec" id="v04">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 04</span>
+    <h2>C++ 애드온 — <span class="t">N-API</span></h2>
+    <p class="lead">JS 로 안 되는 성능·OS 기능은 여기서 해결합니다. <b>처음부터 끝까지</b> 만들어 봅니다.</p>
+  </div>
+
+  <div class="note info rv">
+    <b>왜 N-API(Node-API) 인가</b> —
+    예전 방식(NAN·V8 직접 호출)은 <b>Node·V8 버전이 바뀔 때마다 재컴파일</b>이 필요했습니다.
+    N-API 는 <b>ABI 안정성</b>을 보장해 <b>한 번 빌드한 <code>.node</code> 가 여러 버전에서 동작</b>합니다.
+    Electron 도 N-API 를 지원하므로 <b>새 Electron 으로 올려도 다시 빌드할 필요가 없습니다</b> —
+    이것이 <code>better-sqlite3</code> 재빌드 고생과 갈리는 지점입니다(v07).
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 프로젝트 구성</h4>
+      <div class="dep"><code>npm i -D node-addon-api node-gyp</code></div>
+      <pre class="code" data-lang="json"><code>// binding.gyp — 빌드 설정
+{
+  "targets": [{
+    "target_name": "fastcalc",
+    "sources": [ "src/fastcalc.cc" ],
+    "include_dirs": [
+      "&lt;!@(node -p \"require('node-addon-api').include\")"
+    ],
+    "defines": [ "NAPI_DISABLE_CPP_EXCEPTIONS" ],
+    "cflags_cc": [ "-O3", "-std=c++17" ],
+    "msvs_settings": {
+      "VCCLCompilerTool": { "ExceptionHandling": 1, "Optimization": 2 }
+    },
+    "xcode_settings": {
+      "CLANG_CXX_LANGUAGE_STANDARD": "c++17",
+      "MACOSX_DEPLOYMENT_TARGET": "11.0"
+    }
+  }]
+}</code></pre>
+      <pre class="code" data-lang="json"><code>// package.json
+{
+  "gypfile": true,
+  "scripts": {
+    "build:native": "node-gyp rebuild",
+    "rebuild:electron": "electron-rebuild -f -w fastcalc"
+  }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② C++ 코드 — 동기 함수</h4>
+      <pre class="code" data-lang="cpp"><code>#include &lt;napi.h&gt;
+#include &lt;vector&gt;
+#include &lt;cstdint&gt;
+
+// TypedArray 를 복사 없이 그대로 받습니다
+Napi::Value SumSquares(const Napi::CallbackInfo&amp; info) {
+  Napi::Env env = info.Env();
+
+  if (info.Length() &lt; 1 || !info[0].IsTypedArray()) {
+    Napi::TypeError::New(env, "Float32Array 가 필요합니다")
+        .ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  Napi::Float32Array arr = info[0].As&lt;Napi::Float32Array&gt;();
+  const float* data = arr.Data();      // ★ JS 힙을 직접 참조 (복사 0)
+  size_t len = arr.ElementLength();
+
+  double sum = 0.0;
+  for (size_t i = 0; i &lt; len; ++i) sum += static_cast&lt;double&gt;(data[i]) * data[i];
+
+  return Napi::Number::New(env, sum);
+}
+
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+  exports.Set("sumSquares", Napi::Function::New(env, SumSquares));
+  return exports;
+}
+
+NODE_API_MODULE(fastcalc, Init)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>동기 함수는 이벤트 루프를 막습니다.</b>
+        <b>1ms 이상 걸리는 일은 반드시 AsyncWorker</b>(오른쪽)로 빼세요.
+        메인 프로세스에서 막히면 <b>모든 창의 IPC 가 함께 멈춥니다.</b>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ 비동기 — AsyncWorker</h4>
+      <pre class="code" data-lang="cpp"><code>class HashWorker : public Napi::AsyncWorker {
+ public:
+  HashWorker(Napi::Env env, std::vector&lt;uint8_t&gt; data)
+      : Napi::AsyncWorker(env),
+        deferred_(Napi::Promise::Deferred::New(env)),
+        data_(std::move(data)) {}
+
+  Napi::Promise GetPromise() { return deferred_.Promise(); }
+
+  // ★ 워커 스레드에서 실행 — 여기서 JS 객체를 만지면 안 됩니다
+  void Execute() override {
+    result_ = heavy_hash(data_.data(), data_.size());
+  }
+
+  // ★ 다시 JS 스레드 — 여기서만 JS 값을 다룹니다
+  void OnOK() override {
+    Napi::HandleScope scope(Env());
+    deferred_.Resolve(Napi::String::New(Env(), result_));
+  }
+  void OnError(const Napi::Error&amp; e) override {
+    deferred_.Reject(e.Value());
+  }
+
+ private:
+  Napi::Promise::Deferred deferred_;
+  std::vector&lt;uint8_t&gt; data_;
+  std::string result_;
+};
+
+Napi::Value HashAsync(const Napi::CallbackInfo&amp; info) {
+  auto buf = info[0].As&lt;Napi::Buffer&lt;uint8_t&gt;&gt;();
+  // ★ 워커 스레드에서 쓸 데이터는 반드시 복사해 둡니다
+  std::vector&lt;uint8_t&gt; copy(buf.Data(), buf.Data() + buf.Length());
+
+  auto* w = new HashWorker(info.Env(), std::move(copy));
+  w-&gt;Queue();
+  return w-&gt;GetPromise();
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">④ C++ → JS 콜백 (ThreadSafeFunction)</h4>
+      <pre class="code" data-lang="cpp"><code>// 오디오 콜백처럼 "네이티브 스레드가 JS 를 부르는" 경우
+Napi::ThreadSafeFunction tsfn;
+
+Napi::Value Start(const Napi::CallbackInfo&amp; info) {
+  tsfn = Napi::ThreadSafeFunction::New(
+      info.Env(),
+      info[0].As&lt;Napi::Function&gt;(),   // JS 콜백
+      "AudioCallback",
+      0,      // 큐 무제한
+      1);     // 스레드 1개가 사용
+
+  std::thread([] {
+    while (running) {
+      float level = capture_level();
+      // ★ 다른 스레드에서 안전하게 JS 호출
+      tsfn.BlockingCall([level](Napi::Env env, Napi::Function cb) {
+        cb.Call({ Napi::Number::New(env, level) });
+      });
+    }
+    tsfn.Release();                   // ★ 반드시 해제
+  }).detach();
+
+  return info.Env().Undefined();
+}</code></pre>
+      <pre class="code" data-lang="typescript"><code>// JS 쪽 사용
+const native = require("./build/Release/fastcalc.node");
+
+const buf = new Float32Array(1_000_000);
+console.log(native.sumSquares(buf));        // 동기
+await native.hashAsync(Buffer.from(data));  // 비동기
+
+native.start((level: number) =&gt; updateMeter(level));   // 콜백</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>ThreadSafeFunction 을 <code>Release()</code> 하지 않으면 앱이 종료되지 않습니다.</b>
+        참조가 남아 이벤트 루프가 계속 살아 있기 때문입니다 —
+        "종료를 눌러도 프로세스가 안 죽는" 버그의 대표적 원인입니다.
+        <code>BlockingCall</code> 은 큐가 가득 차면 <b>네이티브 스레드를 멈춥니다</b> —
+        오디오 스레드에서는 <code>NonBlockingCall</code> 을 쓰고 <b>드롭을 감수</b>하는 편이 안전합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v05 ==================== -->
+<section class="sec" id="v05">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 05</span>
+    <h2>Rust 애드온 — <span class="t">napi-rs</span></h2>
+    <p class="lead">C++ 보다 <b>안전하고 빌드가 쉽습니다.</b> 새로 시작한다면 이쪽을 권합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">시작하기</h4>
+      <div class="dep"><code>npm create napi@latest my-native</code> — 프로젝트·CI·크로스빌드 설정이 한 번에 생성됩니다</div>
+      <pre class="code" data-lang="toml"><code># Cargo.toml
+[package]
+name = "my_native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", features = ["napi8", "async", "tokio_rt"] }
+napi-derive = "2"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3</code></pre>
+      <pre class="code" data-lang="rust"><code>// src/lib.rs
+#![deny(clippy::all)]
+use napi_derive::napi;
+
+#[napi]
+pub fn sum_squares(data: &amp;[f32]) -&gt; f64 {
+  data.iter().map(|&amp;x| (x as f64) * (x as f64)).sum()
+}
+
+// ★ 자동으로 Promise 가 됩니다 — 스레드 풀에서 실행
+#[napi]
+pub async fn hash_file(path: String) -&gt; napi::Result&lt;String&gt; {
+  let bytes = tokio::fs::read(&amp;path).await
+      .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+  Ok(blake3::hash(&amp;bytes).to_hex().to_string())
+}
+
+// 구조체도 그대로 오갑니다
+#[napi(object)]
+pub struct Stats { pub count: u32, pub mean: f64 }
+
+#[napi]
+pub fn analyze(data: Vec&lt;f64&gt;) -&gt; Stats {
+  let n = data.len() as u32;
+  let mean = data.iter().sum::&lt;f64&gt;() / n as f64;
+  Stats { count: n, mean }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">콜백 · 타입 · 배포</h4>
+      <pre class="code" data-lang="rust"><code>use napi::threadsafe_function::{
+  ThreadsafeFunction, ThreadsafeFunctionCallMode, ErrorStrategy,
+};
+
+#[napi]
+pub fn watch_level(
+  callback: ThreadsafeFunction&lt;f64, ErrorStrategy::Fatal&gt;,
+) -&gt; napi::Result&lt;()&gt; {
+  std::thread::spawn(move || {
+    loop {
+      let level = capture_level();
+      // ★ C++ 의 ThreadSafeFunction 과 같은 역할인데 훨씬 짧습니다
+      callback.call(level, ThreadsafeFunctionCallMode::NonBlocking);
+      std::thread::sleep(std::time::Duration::from_millis(16));
+    }
+  });
+  Ok(())
+}</code></pre>
+      <pre class="code" data-lang="typescript"><code>// ★ index.d.ts 가 자동 생성됩니다 — 타입을 직접 쓸 필요가 없습니다
+export function sumSquares(data: Float32Array): number
+export function hashFile(path: string): Promise&lt;string&gt;
+export function analyze(data: Array&lt;number&gt;): Stats
+export interface Stats { count: number; mean: number }</code></pre>
+      <pre class="code" data-lang="yaml"><code># CI — OS·아키텍처별 바이너리를 미리 만들어 배포합니다
+strategy:
+  matrix:
+    settings:
+      - host: windows-latest
+        target: x86_64-pc-windows-msvc
+      - host: macos-latest
+        target: aarch64-apple-darwin
+      - host: macos-latest
+        target: x86_64-apple-darwin
+      - host: ubuntu-latest
+        target: x86_64-unknown-linux-gnu
+# → my-native-win32-x64-msvc 같은 패키지로 나뉘어 게시되고,
+#   설치 시 해당 플랫폼 것만 내려받습니다 (optionalDependencies)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>napi-rs 의 결정적 장점</b> —
+        타입 정의 자동 생성, <code>Result</code> 가 JS 예외로 자동 변환,
+        <b>메모리 안전성</b>(세그폴트로 앱이 죽는 사고가 구조적으로 줄어듭니다),
+        그리고 <b>크로스 컴파일 체계</b>가 처음부터 갖춰져 있다는 점입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">C++ 과 Rust, 무엇을 고를까</h3>
+  <div class="tw rv d1">
+    <table class="df">
+      <thead><tr><th>기준</th><th>C++ (node-addon-api)</th><th>Rust (napi-rs)</th></tr></thead>
+      <tbody>
+        <tr><td>기존 C/C++ 라이브러리 연동</td><td class="ok"><b>압도적으로 유리</b> (헤더만 포함)</td><td>bindgen 등 한 겹이 더 필요</td></tr>
+        <tr><td>메모리 안전</td><td>전적으로 개발자 책임</td><td class="ok"><b>컴파일러가 강제</b></td></tr>
+        <tr><td>빌드 체계</td><td>node-gyp · 환경 의존적</td><td class="ok"><b>cargo · 재현성 높음</b></td></tr>
+        <tr><td>타입 정의</td><td>손으로 작성</td><td class="ok"><b>자동 생성</b></td></tr>
+        <tr><td>OS API 직접 호출</td><td class="ok">가장 직접적</td><td>windows·core-foundation 크레이트로 가능</td></tr>
+        <tr><td>팀 학습 비용</td><td>익숙한 사람이 많음</td><td>소유권·수명 개념 학습 필요</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note tip rv d1" style="margin-bottom:0">
+    <b>현실적인 기준</b> —
+    <b>기존 C++ SDK(오디오 엔진·하드웨어 드라이버·코덱)를 감싸는 일</b>이면 C++,
+    <b>새로 로직을 작성</b>하는 것이면 Rust 가 유지보수 비용이 훨씬 낮습니다.
+    한 프로젝트에 <b>둘을 섞어 쓰는 것도 문제없습니다</b> — 결과물은 똑같은 <code>.node</code> 파일입니다.
+  </div>
+</section>
+
+
+<!-- ==================== v06 ==================== -->
+<section class="sec" id="v06">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 06</span>
+    <h2>FFI · <span class="t">WASM</span> — 컴파일 없이</h2>
+    <p class="lead">애드온을 만들지 않고도 네이티브 코드를 부르는 두 가지 길입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">FFI — DLL·dylib 를 직접 호출</h4>
+      <div class="dep"><code>npm i koffi</code> — <code>ffi-napi</code> 는 사실상 유지보수가 멈춰 koffi 가 현재 표준입니다</div>
+      <pre class="code" data-lang="typescript"><code>import koffi from "koffi";
+
+// Windows API 를 직접 부르는 예 — 애드온 빌드가 전혀 필요 없습니다
+const user32 = koffi.load("user32.dll");
+
+const MessageBoxW = user32.func(
+  "int __stdcall MessageBoxW(void* hwnd, str16 text, str16 caption, uint type)"
+);
+MessageBoxW(null, "안녕하세요", "알림", 0);
+
+// 구조체도 다룰 수 있습니다
+const POINT = koffi.struct("POINT", { x: "long", y: "long" });
+const GetCursorPos = user32.func("bool __stdcall GetCursorPos(_Out_ POINT* p)");
+
+const pt = {};
+GetCursorPos(pt);
+console.log(pt.x, pt.y);</code></pre>
+      <div class="note warn">
+        <b>FFI 의 대가</b> —
+        <b>호출당 오버헤드</b>가 애드온보다 큽니다(초당 수만 회 호출에는 부적합).
+        시그니처를 <b>한 글자라도 틀리면 즉시 크래시</b>하고, 타입 안전성도 없습니다.
+        <b>가끔 호출하는 OS API</b> 에는 훌륭하지만,
+        <b>오디오 콜백 같은 실시간 경로에는 쓰지 마세요.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WASM — 이식성이 필요할 때</h4>
+      <pre class="code" data-lang="typescript"><code>// C/C++/Rust 를 WASM 으로 컴파일해 렌더러에서 직접 실행
+const wasm = await WebAssembly.instantiateStreaming(
+  fetch("codec.wasm"),
+  { env: { memory: new WebAssembly.Memory({ initial: 256 }) } }
+);
+
+// SIMD·스레드까지 쓰면 네이티브의 상당 부분을 따라잡습니다
+// (스레드는 SharedArrayBuffer → 교차 출처 격리 헤더 필요 · v03)
+const { encode } = wasm.instance.exports;</code></pre>
+      <div class="tw" style="margin:14px 0">
+        <table class="df">
+          <thead><tr><th></th><th>네이티브 애드온</th><th>WASM</th></tr></thead>
+          <tbody>
+            <tr><td>속도</td><td class="ok"><b>최고</b></td><td>대략 네이티브의 절반~80%</td></tr>
+            <tr><td>OS API 접근</td><td class="ok"><b>가능</b></td><td class="no">불가 (샌드박스)</td></tr>
+            <tr><td>배포</td><td>OS×아키텍처별 바이너리</td><td class="ok"><b>파일 하나로 전부</b></td></tr>
+            <tr><td>렌더러에서 실행</td><td>불가 (메인·워커만)</td><td class="ok"><b>가능</b></td></tr>
+            <tr><td>크래시 영향</td><td>프로세스 사망</td><td class="ok">예외로 처리됨</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>고르는 순서</b> —
+        ① <b>OS 기능·하드웨어</b>가 필요하면 애드온(v04·v05) ·
+        ② <b>순수 계산</b>이고 배포를 단순하게 하고 싶으면 WASM ·
+        ③ <b>기존 DLL 을 몇 번 부르는 정도</b>면 FFI.
+        이미지 처리·압축·암호 연산은 <b>WASM 으로도 충분한 경우가 많습니다.</b>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v07 ==================== -->
+<section class="sec" id="v07">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 07</span>
+    <h2>네이티브 모듈 <span class="t">운영</span></h2>
+    <p class="lead">"내 PC 에선 되는데 사용자 PC 에선 안 되는" 문제의 <b>거의 전부</b>가 여기 있습니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ABI — 재빌드가 필요한 이유</h4>
+      <pre class="code" data-lang="text"><code>같은 .node 파일이 아무 데서나 돌지 않는 이유
+
+  ① Node 용으로 빌드한 것 ≠ Electron 용
+     → Electron 은 자체 V8·헤더를 씁니다
+  ② 아키텍처가 다르면 불가 (x64 / arm64)
+  ③ OS 가 다르면 불가 (win / mac / linux)
+  ④ NAN·V8 직접 사용 모듈은 버전마다 다시 빌드
+
+  → N-API 모듈은 ①④ 가 사라집니다 (ABI 안정)
+    그래도 ②③ 은 남으므로 플랫폼별 바이너리는 필요합니다</code></pre>
+      <pre class="code" data-lang="bash"><code># Electron 용으로 다시 빌드
+npx electron-rebuild
+npx electron-rebuild -f -w better-sqlite3     # 특정 모듈만
+
+# 직접 지정할 때
+npm rebuild --runtime=electron --target=42.0.0 \
+            --dist-url=https://electronjs.org/headers
+
+# 확인 — 어떤 런타임용으로 빌드됐는지
+node -p "process.versions.modules"        # Node 의 ABI 버전
+npx electron -p "process.versions.modules"  # Electron 의 ABI 버전</code></pre>
+      <div class="note tip">
+        <b>가장 확실한 해법은 "재빌드가 필요 없게 만드는 것"입니다.</b>
+        ① <b>N-API 모듈만 고르기</b> ·
+        ② <b>prebuild 를 제공하는 패키지</b> 쓰기 ·
+        ③ 내장 기능으로 대체하기(예: <code>better-sqlite3</code> → <code>node:sqlite</code>) ·
+        ④ 직접 만든다면 <b>napi-rs 로 플랫폼별 사전 빌드</b>를 게시(v05).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">패키징에서 빠뜨리는 것들</h4>
+      <pre class="code" data-lang="yaml"><code># electron-builder.yml
+asar: true
+asarUnpack:
+  - "**/*.node"                 # ★ 네이티브 바이너리는 asar 밖에 있어야 로드됩니다
+  - "**/node_modules/sharp/**"
+
+# 아키텍처별로 따로 빌드 — universal 로 묶을 수도 있습니다
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]        # 또는 universal</code></pre>
+      <pre class="code" data-lang="typescript"><code>// asar 안팎 경로 차이를 흡수하는 관용구
+const nativePath = app.isPackaged
+  ? path.join(process.resourcesPath, "app.asar.unpacked",
+              "node_modules", "my-native", "index.node")
+  : path.join(__dirname, "../node_modules/my-native/index.node");
+
+// 로드 실패를 조용히 넘기지 말 것 — 원인을 사용자에게 알립니다
+let native: NativeApi | null = null;
+try {
+  native = require(nativePath);
+} catch (e) {
+  log.error("네이티브 모듈 로드 실패", e);
+  dialog.showErrorBox(
+    "구성 요소를 불러오지 못했습니다",
+    "재설치해도 계속되면 로그를 보내 주세요.\n" + String(e)
+  );
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>런타임 의존성도 함께 배포해야 합니다.</b>
+        Windows 애드온은 <b>Visual C++ 재배포 패키지(MSVC 런타임)</b>가 필요할 수 있고,
+        Linux 는 <b>glibc 버전</b>이 낮은 배포판에서 로드가 실패합니다.
+        <b>정적 링크</b>하거나(<code>/MT</code>), <b>가장 낮은 지원 배포판에서 빌드</b>하는 것이 정석입니다.
+        macOS 는 <code>MACOSX_DEPLOYMENT_TARGET</code> 을 낮게 잡아야 구형 OS 에서 실행됩니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v08 ==================== -->
+<section class="sec" id="v08">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 08</span>
+    <h2>오디오 <span class="t">파이프라인</span></h2>
+    <p class="lead">음성 기능의 토대입니다. <b>실시간 오디오는 일반 JS 와 규칙이 다릅니다.</b></p>
+  </div>
+
+  <div class="note warn rv">
+    <b>실시간 오디오의 제1 원칙 — 오디오 스레드에서는 절대 멈추면 안 됩니다.</b>
+    48kHz 스테레오에서 <b>128 프레임 블록은 약 2.7ms</b> 안에 처리를 끝내야 합니다.
+    이 안에서 <b>메모리 할당·파일 I/O·<code>console.log</code>·락 대기</b>를 하면
+    그대로 <b>뚝뚝 끊기는 소리(글리치)</b>가 됩니다.
+    그래서 버퍼는 <b>미리 할당</b>하고, 통신은 <b>락 없는 링 버퍼</b>로 합니다.
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">AudioWorklet — 오디오 전용 스레드</h4>
+      <pre class="code" data-lang="typescript"><code>// ❌ ScriptProcessorNode 는 폐기됐습니다 (메인 스레드에서 돌아 끊깁니다)
+// ✅ AudioWorklet — 별도 오디오 스레드에서 실행
+
+// processor.js — 오디오 스레드에서 도는 코드
+class LevelProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    // ★ 생성자에서 미리 할당 — process() 안에서는 할당 금지
+    this._sum = 0; this._count = 0;
+  }
+
+  process(inputs, outputs) {
+    const input = inputs[0][0];        // 첫 입력의 첫 채널
+    if (!input) return true;
+
+    let peak = 0;
+    for (let i = 0; i &lt; input.length; i++) {
+      const a = Math.abs(input[i]);
+      if (a &gt; peak) peak = a;
+      outputs[0][0][i] = input[i];     // 그대로 통과
+    }
+
+    // ★ 매 블록마다 postMessage 하지 말 것 — 초당 375회가 됩니다
+    if (++this._count % 16 === 0) this.port.postMessage(peak);
+
+    return true;                       // false 를 반환하면 노드가 정리됩니다
+  }
+}
+registerProcessor("level", LevelProcessor);</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 메인 스레드(렌더러)에서 연결
+const ctx = new AudioContext({
+  sampleRate: 48000,
+  latencyHint: "interactive",          // ★ 통화용 — 지연 최소
+});
+await ctx.audioWorklet.addModule("processor.js");
+
+const src = ctx.createMediaStreamSource(micStream);
+const level = new AudioWorkletNode(ctx, "level");
+level.port.onmessage = (e) =&gt; setMeter(e.data);
+
+src.connect(level).connect(ctx.destination);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">디바이스 관리 — 실제로 까다로운 부분</h4>
+      <pre class="code" data-lang="typescript"><code>// 목록 — label 을 보려면 먼저 권한을 받아야 합니다
+const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+const devices = await navigator.mediaDevices.enumerateDevices();
+const mics = devices.filter(d =&gt; d.kind === "audioinput");
+const speakers = devices.filter(d =&gt; d.kind === "audiooutput");
+
+// ★ 장치 교체(헤드셋 연결·해제)는 반드시 처리해야 합니다
+navigator.mediaDevices.addEventListener("devicechange", async () =&gt; {
+  const list = await navigator.mediaDevices.enumerateDevices();
+  // 쓰던 장치가 사라졌으면 기본 장치로 되돌립니다
+  if (!list.some(d =&gt; d.deviceId === currentMicId)) {
+    await switchMic("default");
+    notify("마이크가 분리되어 기본 장치로 전환했습니다");
+  }
+});
+
+// 특정 장치 지정 — exact 를 쓰면 없을 때 실패합니다(폴백 필요)
+const s = await navigator.mediaDevices.getUserMedia({
+  audio: {
+    deviceId: { exact: micId },
+    echoCancellation: true,            // AEC
+    noiseSuppression: true,            // 노이즈 억제
+    autoGainControl: true,             // 자동 게인
+    channelCount: 1,
+    sampleRate: 48000,
+  },
+});</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 출력 장치 변경 — HTMLMediaElement 에만 적용됩니다
+await audioEl.setSinkId(speakerId);
+// ★ AudioContext 자체의 출력 장치 지정은 지원이 제한적이므로,
+//   재생은 &lt;audio&gt; 엘리먼트로 하고 setSinkId 를 쓰는 구성이 안전합니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Electron 에서의 권한</b> —
+        macOS 는 마이크 접근에 <b>시스템 권한</b>이 필요합니다.
+        <code>Info.plist</code> 에 <code>NSMicrophoneUsageDescription</code> 을 넣지 않으면
+        <b>권한 요청 없이 그냥 실패</b>합니다.
+        <code>systemPreferences.askForMediaAccess("microphone")</code> 로 명시적으로 요청하고,
+        <code>getMediaAccessStatus</code> 로 상태를 확인해 <b>거부 상태면 설정 화면으로 안내</b>하세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v09 ==================== -->
+<section class="sec" id="v09">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 09</span>
+    <h2>음성 채팅 — <span class="t">Discord 수준</span></h2>
+    <p class="lead">"그냥 WebRTC 쓰면 되는 것" 이 아닙니다. <b>품질을 만드는 요소</b>를 하나씩 봅니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">토폴로지 — 인원수가 구조를 정합니다</h4>
+      <pre class="code" data-lang="text"><code>① P2P (메시) — 2~4명
+   각자가 모두에게 직접 전송
+   N명이면 각자 N-1개 업링크 → 5명만 돼도 한계
+
+② SFU (선택적 전달) ★ 음성 채팅의 표준
+   각자 서버로 1개만 올림 → 서버가 나눠 줌
+   업링크 1개 · 다운링크 N-1개
+   서버는 디코딩하지 않음 → CPU 저렴
+   구현체: mediasoup · LiveKit · Janus · Pion
+
+③ MCU (혼합)
+   서버가 전부 디코딩해 하나로 합쳐 전송
+   클라이언트 부담 최소 · 서버 CPU 매우 비쌈
+   → 전화 접속·저사양 단말이 섞일 때만
+
+Discord·Slack·Teams 전부 ② SFU 계열입니다</code></pre>
+      <div class="note tip">
+        <b>서버 없이 시작하지 마세요.</b>
+        P2P 는 데모에서는 잘 되지만 <b>대칭형 NAT·기업 방화벽</b>에서 연결이 실패합니다.
+        <b>TURN 서버</b>(coturn)는 사실상 필수이고,
+        어차피 TURN 을 둘 거라면 <b>SFU 로 가는 편이 확장성에서 낫습니다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">연결 · 코덱 설정</h4>
+      <pre class="code" data-lang="typescript"><code>const pc = new RTCPeerConnection({
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "turn:turn.example.com:3478",
+      username: shortLivedUser,          // ★ 단기 자격증명 (서버가 발급)
+      credential: shortLivedPass },
+  ],
+  bundlePolicy: "max-bundle",
+  rtcpMuxPolicy: "require",
+});
+
+// 오디오 송신 파라미터 — 음성은 대역폭보다 안정성이 중요합니다
+const sender = pc.addTrack(track, stream);
+const params = sender.getParameters();
+params.encodings = [{
+  maxBitrate: 64_000,                    // 음성 32~64kbps 면 충분
+  networkPriority: "high",
+  priority: "high",
+}];
+await sender.setParameters(params);
+
+// Opus 세부 설정은 SDP 를 직접 손봅니다
+function tuneOpus(sdp: string) {
+  return sdp.replace(
+    /a=fmtp:111 .*/,
+    "a=fmtp:111 minptime=10;useinbandfec=1;stereo=0;maxaveragebitrate=64000;usedtx=1"
+  );
+  // useinbandfec=1 → 패킷 손실 복구 (FEC)
+  // usedtx=1       → 무음 구간 전송 중단 (대역폭 절약)
+  // minptime=10    → 10ms 패킷 (지연 감소)
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">품질을 만드는 4가지 — 3A 와 지터버퍼</h3>
+  <div class="tw rv d1">
+    <table class="df">
+      <thead><tr><th>요소</th><th>없으면 생기는 일</th><th>해결</th></tr></thead>
+      <tbody>
+        <tr><td><b>AEC</b> (음향 반향 제거)</td>
+          <td class="no">스피커 소리가 마이크로 되돌아가 <b>상대가 자기 목소리를 다시 듣습니다</b></td>
+          <td><code>echoCancellation: true</code> · 헤드셋 미사용자에게 필수</td></tr>
+        <tr><td><b>NS</b> (노이즈 억제)</td>
+          <td>키보드·팬·에어컨 소리가 그대로 전달</td>
+          <td>브라우저 기본 NS · 더 강하게는 <b>RNNoise</b>(WASM·네이티브)</td></tr>
+        <tr><td><b>AGC</b> (자동 게인)</td>
+          <td>사람마다 볼륨이 제각각</td>
+          <td><code>autoGainControl: true</code></td></tr>
+        <tr><td><b>지터 버퍼</b></td>
+          <td class="no">패킷 도착 간격이 흔들려 <b>소리가 튑니다</b></td>
+          <td>WebRTC 내장(적응형) — <b>직접 만들면 여기서 대부분 실패합니다</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">VAD — 말할 때만 보내기</h4>
+      <pre class="code" data-lang="typescript"><code>// 음성 활동 감지 — "말하는 중" 표시와 대역폭 절약에 씁니다
+class VAD extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.speaking = false;
+    this.hold = 0;                       // ★ 히스테리시스 (깜빡임 방지)
+  }
+  process(inputs) {
+    const x = inputs[0][0];
+    if (!x) return true;
+
+    let energy = 0;
+    for (let i = 0; i &lt; x.length; i++) energy += x[i] * x[i];
+    const rms = Math.sqrt(energy / x.length);
+    const db = 20 * Math.log10(rms + 1e-9);
+
+    // 켜는 문턱과 끄는 문턱을 다르게 (-45 / -50)
+    if (db &gt; -45) { this.hold = 25; }     // 약 0.7초 유지
+    else if (this.hold &gt; 0) this.hold--;
+
+    const now = this.hold &gt; 0;
+    if (now !== this.speaking) {
+      this.speaking = now;
+      this.port.postMessage({ speaking: now });
+    }
+    return true;
+  }
+}
+registerProcessor("vad", VAD);</code></pre>
+      <div class="note warn">
+        <b>문턱값 하나로 판정하면 안 됩니다.</b>
+        말하는 중간의 짧은 무음마다 표시가 깜빡이게 됩니다.
+        <b>켜는 문턱 &gt; 끄는 문턱</b>(히스테리시스)과 <b>유지 시간(hold)</b> 을 두는 것이 필수이고,
+        실제로는 <b>에너지 + 영교차율 + 스펙트럼</b>을 함께 보거나
+        <b>Silero VAD</b> 같은 학습 모델을 WASM 으로 돌립니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">품질 측정 — 감이 아니라 수치로</h4>
+      <pre class="code" data-lang="typescript"><code>// getStats() — 통화 품질의 근거 데이터
+setInterval(async () =&gt; {
+  const stats = await pc.getStats();
+  stats.forEach((r) =&gt; {
+    if (r.type === "inbound-rtp" &amp;&amp; r.kind === "audio") {
+      const lossRate = r.packetsLost / (r.packetsReceived + r.packetsLost);
+      metrics.record({
+        loss: lossRate,                    // ★ 3% 넘으면 체감됩니다
+        jitter: r.jitter,                  // 0.03(30ms) 이상이면 불안정
+        jitterBufferDelay: r.jitterBufferDelay / r.jitterBufferEmittedCount,
+        concealed: r.concealedSamples,     // 손실을 메운 샘플 수
+      });
+    }
+    if (r.type === "candidate-pair" &amp;&amp; r.state === "succeeded") {
+      metrics.record({ rtt: r.currentRoundTripTime });   // 0.15초 넘으면 대화가 겹칩니다
+    }
+    if (r.type === "remote-inbound-rtp") {
+      metrics.record({ remoteLoss: r.fractionLost });    // 상대가 겪는 손실
+    }
+  });
+}, 2000);</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 나쁜 회선에 적응 — 비트레이트를 낮추고 사용자에게 알립니다
+if (lossRate &gt; 0.05) {
+  await setBitrate(sender, 24_000);
+  ui.showWarning("네트워크가 불안정합니다");
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Electron 만의 이점</b> —
+        브라우저와 달리 <b>내장 Chromium 버전을 우리가 고정</b>합니다.
+        즉 <b>모든 사용자가 동일한 WebRTC 구현</b>을 쓰므로
+        "특정 브라우저에서만 나는 오디오 버그"가 없습니다.
+        대신 <b>Chromium 을 올릴 때 오디오 동작이 바뀔 수 있으므로</b>
+        업그레이드 시 통화 품질 회귀 테스트를 반드시 포함하세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v10 ==================== -->
+<section class="sec" id="v10">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 10</span>
+    <h2>시스템 오디오 <span class="t">캡처</span></h2>
+    <p class="lead">"게임 소리까지 같이 방송하기" — <b>웹 표준만으로는 안 되는</b> 대표적 기능입니다.</p>
+  </div>
+
+  <div class="tw rv">
+    <table class="df">
+      <thead><tr><th>OS</th><th>방법</th><th>제약</th></tr></thead>
+      <tbody>
+        <tr><td><b>Windows</b></td>
+          <td class="ok"><code>getDisplayMedia({audio:true})</code> 로 시스템 오디오 캡처 가능</td>
+          <td>화면 공유와 함께여야 함 · 더 세밀하게는 <b>WASAPI 루프백</b>(네이티브)</td></tr>
+        <tr><td><b>macOS</b></td>
+          <td>OS 차원의 루프백 장치가 <b>없습니다</b></td>
+          <td class="no">가상 오디오 드라이버(BlackHole 등) 설치 또는
+            <b>ScreenCaptureKit</b>(macOS 13+) 네이티브 연동</td></tr>
+        <tr><td><b>Linux</b></td>
+          <td>PulseAudio·PipeWire 의 <b>모니터 소스</b></td>
+          <td>배포판·오디오 서버 구성에 따라 편차가 큽니다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Windows — 화면 공유에 소리 얹기</h4>
+      <pre class="code" data-lang="typescript"><code>// 메인 — Electron 27+ 는 화면 공유 요청을 이 핸들러로 받습니다
+import { session, desktopCapturer } from "electron";
+
+session.defaultSession.setDisplayMediaRequestHandler(
+  async (request, callback) =&gt; {
+    const sources = await desktopCapturer.getSources({
+      types: ["screen", "window"],
+      thumbnailSize: { width: 320, height: 180 },
+    });
+
+    // ★ 반드시 우리 UI 로 사용자에게 고르게 하세요 (무단 캡처 방지)
+    const chosen = await showPickerWindow(sources);
+    if (!chosen) return callback(null);
+
+    callback({
+      video: chosen,
+      audio: "loopback",              // ★ Windows 시스템 오디오
+      // "loopbackWithMute" — 시스템 스피커는 끄고 캡처만
+    });
+  },
+  { useSystemPicker: true }           // OS 기본 선택 UI 사용 (지원 환경에서)
+);</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 렌더러 — 웹 표준 그대로 부릅니다
+const stream = await navigator.mediaDevices.getDisplayMedia({
+  video: { frameRate: 30 },
+  audio: true,
+});
+// stream 에 화면 트랙 + 시스템 오디오 트랙이 함께 들어옵니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">macOS — 네이티브가 필요한 지점</h4>
+      <pre class="code" data-lang="text"><code>선택지
+
+① 가상 오디오 드라이버 안내 (BlackHole·Loopback)
+   · 구현 비용 0, 사용자 설치 부담 큼
+   · 사내 도구라면 현실적인 선택
+
+② ScreenCaptureKit 네이티브 애드온 (macOS 13+)
+   · Apple 공식 API — 시스템 오디오 + 화면을 함께
+   · 앱 단위 오디오 분리 캡처까지 가능
+   · Swift/ObjC++ 로 애드온 작성 필요 (v04)
+
+③ Core Audio 탭(tap) API (macOS 14.4+)
+   · 프로세스별 오디오 탭 — 가장 세밀
+   · 최신 OS 에서만 동작</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 애드온에서 캡처한 PCM 을 JS 로 넘기는 경로
+// ★ 매 버퍼마다 ThreadSafeFunction 을 부르면 오버헤드가 큽니다
+// → SharedArrayBuffer 링 버퍼에 쓰고, 인덱스만 Atomics 로 갱신 (v03)
+
+void OnAudioBuffer(const float* pcm, size_t frames) {
+  size_t w = write_index.load(std::memory_order_relaxed);
+  for (size_t i = 0; i &lt; frames; ++i)
+    ring[(w + i) % RING_SIZE] = pcm[i];
+  write_index.store(w + frames, std::memory_order_release);
+  // JS 쪽 AudioWorklet 이 read_index 를 따라가며 소비합니다
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>macOS 권한을 반드시 확인하세요.</b>
+        화면 녹화 권한은 <code>systemPreferences.getMediaAccessStatus("screen")</code> 으로 확인합니다.
+        <b>권한은 앱 서명 단위로 기억</b>되므로, 서명 없이 개발하면
+        <b>빌드할 때마다 권한이 초기화</b>되어 디버깅이 매우 혼란스러워집니다 —
+        개발 단계에서도 <b>서명된 빌드로 테스트</b>하세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v11 ==================== -->
+<section class="sec" id="v11">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 11</span>
+    <h2>화면 공유 · <span class="t">녹화</span></h2>
+    <p class="lead">캡처 자체보다 <b>인코딩 부하와 권한</b>이 실제 과제입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">소스 선택 UI 만들기</h4>
+      <pre class="code" data-lang="typescript"><code>// 메인 — 화면·창 목록과 썸네일
+ipcMain.handle("capture:sources", async () =&gt; {
+  const sources = await desktopCapturer.getSources({
+    types: ["screen", "window"],
+    thumbnailSize: { width: 320, height: 180 },
+    fetchWindowIcons: true,
+  });
+  return sources.map(s =&gt; ({
+    id: s.id,
+    name: s.name,
+    thumbnail: s.thumbnail.toDataURL(),     // ★ 큰 이미지는 dataURL 로 넘기면 무겁습니다
+    appIcon: s.appIcon?.toDataURL() ?? null,
+    display_id: s.display_id,
+  }));
+});</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 렌더러 — 선택한 소스로 스트림 얻기
+const stream = await navigator.mediaDevices.getUserMedia({
+  audio: false,
+  video: {
+    // @ts-expect-error Electron 전용 제약
+    mandatory: {
+      chromeMediaSource: "desktop",
+      chromeMediaSourceId: sourceId,
+      maxWidth: 1920, maxHeight: 1080, maxFrameRate: 30,
+    },
+  },
+});
+
+// 공유 중임을 항상 눈에 보이게 — 신뢰의 문제입니다
+showSharingIndicator();
+stream.getVideoTracks()[0].addEventListener("ended", stopSharing);</code></pre>
+      <div class="note warn">
+        <b>사용자 모르게 캡처할 수 있으면 안 됩니다.</b>
+        <code>desktopCapturer</code> 는 <b>메인 프로세스 권한</b>이므로 기술적으로는 조용히 캡처가 가능합니다.
+        <b>선택 UI · 공유 중 표시 · 종료 버튼</b>을 반드시 제공하고,
+        보안 감사에서 지적받지 않도록 <b>캡처 시작·종료를 로그로 남기세요.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">녹화 · 인코딩</h4>
+      <pre class="code" data-lang="typescript"><code>// 간단한 녹화 — MediaRecorder (하드웨어 가속 사용)
+const rec = new MediaRecorder(stream, {
+  mimeType: "video/webm;codecs=vp9,opus",
+  videoBitsPerSecond: 4_000_000,
+});
+
+const chunks: Blob[] = [];
+rec.ondataavailable = (e) =&gt; { if (e.data.size) chunks.push(e.data); };
+rec.onstop = async () =&gt; {
+  const blob = new Blob(chunks, { type: "video/webm" });
+  const buf = Buffer.from(await blob.arrayBuffer());
+  await window.api.saveRecording(buf);      // ★ 큰 파일은 스트리밍 저장이 낫습니다
+};
+
+rec.start(1000);                             // 1초마다 청크</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 긴 녹화는 메모리에 쌓지 말고 바로 디스크로 흘려보냅니다
+rec.ondataavailable = async (e) =&gt; {
+  const buf = new Uint8Array(await e.data.arrayBuffer());
+  window.api.appendRecording(buf);           // 메인에서 createWriteStream 에 append
+};
+
+// 메인
+const out = fs.createWriteStream(outPath);
+ipcMain.on("rec:append", (_e, chunk: Uint8Array) =&gt; out.write(Buffer.from(chunk)));</code></pre>
+      <h4 class="mini">부하를 줄이는 실전 선택</h4>
+      <ul class="tx">
+        <li><b>프레임률을 낮추세요</b> — 문서·코드 공유는 <b>5~15fps</b> 로 충분합니다. 60fps 는 CPU 를 몇 배로 씁니다</li>
+        <li><b>해상도 상한</b>을 두세요 — 4K 화면을 그대로 인코딩하면 어떤 CPU 도 버겁습니다</li>
+        <li><b>하드웨어 인코더</b>가 실제로 쓰이는지 확인 — <code>chrome://gpu</code> 의 Video Encode 항목(v13)</li>
+        <li>장시간 고품질 녹화는 <b>ffmpeg 를 child_process 로</b> 돌리는 편이 안정적입니다</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>화면 공유의 체감 품질은 "선명도 vs 부드러움" 선택입니다.</b>
+        WebRTC 송신 시 <code>contentHint</code> 를 지정하세요 —
+        <code>track.contentHint = "detail"</code>(텍스트·코드, 선명도 우선) ·
+        <code>"motion"</code>(영상·게임, 프레임률 우선).
+        한 줄로 체감이 크게 달라집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v12 ==================== -->
+<section class="sec" id="v12">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 12</span>
+    <h2>OSR — <span class="t">오프스크린 렌더링</span></h2>
+    <p class="lead">웹 화면을 <b>창이 아니라 픽셀로</b> 받습니다. 게임 오버레이·가상 배경·서버 렌더링의 기반입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇에 쓰나</h4>
+      <pre class="code" data-lang="text"><code>OSR 이 필요한 상황
+
+① 게임 오버레이
+   게임의 DirectX/OpenGL 화면 위에 웹 UI 를 합성
+   (Discord 인게임 오버레이가 이 방식)
+
+② 다른 렌더러에 웹을 얹기
+   Unity·Unreal·네이티브 앱 안에 웹 UI 를 텍스처로
+
+③ 서버 사이드 렌더링·썸네일 생성
+   화면 없이 웹을 그려 이미지로 저장
+
+④ 커스텀 합성
+   웹 화면 + 비디오 + 3D 를 한 캔버스에서 합성
+
+※ 단순히 "안 보이는 창"이 필요한 것이라면
+  win.hide() 로 충분합니다 — OSR 은 비용이 큽니다</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 기본형 — CPU 로 비트맵 받기
+const win = new BrowserWindow({
+  width: 1280, height: 720,
+  show: false,
+  webPreferences: {
+    offscreen: true,                 // ★ 오프스크린 모드
+    nodeIntegration: false,
+    contextIsolation: true,
+  },
+});
+
+win.webContents.setFrameRate(30);    // ★ 반드시 제한하세요 (기본은 60)
+
+win.webContents.on("paint", (event, dirty, image) =&gt; {
+  // image 는 NativeImage — BGRA 비트맵
+  const buf = image.getBitmap();     // Buffer (width*height*4)
+  pushToEncoder(buf, image.getSize());
+});
+
+win.loadURL("https://example.com/overlay");</code></pre>
+      <div class="note warn">
+        <b>기본 OSR 은 느립니다.</b>
+        GPU 가 그린 결과를 <b>시스템 메모리로 복사(readback)</b> 해서 넘겨 주기 때문입니다.
+        1080p·60fps 면 <b>초당 약 500MB</b> 를 복사하는 셈이라 CPU 가 그대로 녹습니다.
+        <b>프레임률을 낮추거나</b>, 아래의 <b>공유 텍스처</b>를 쓰세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">공유 텍스처 — GPU 에서 GPU 로</h4>
+      <pre class="code" data-lang="typescript"><code>// Electron 30+ — GPU 텍스처 핸들을 그대로 받습니다 (복사 없음)
+const win = new BrowserWindow({
+  webPreferences: {
+    offscreen: { useSharedTexture: true },   // ★ 객체 형태로 지정
+  },
+});
+
+win.webContents.on("paint", (event, dirty, image) =&gt; {
+  const tex = event.texture;
+  if (!tex) return;                          // 폴백: image 사용
+
+  // tex.textureInfo 에 OS별 핸들이 들어 있습니다
+  //   Windows : sharedTextureHandle  (D3D11 공유 핸들)
+  //   macOS   : ioSurface            (IOSurfaceRef)
+  //   Linux   : planes (dma-buf fd)
+  nativeCompositor.submit(tex.textureInfo);  // ★ 네이티브 애드온으로 전달 (v04)
+
+  tex.release();                             // ★ 반드시 해제 — 안 하면 GPU 메모리 고갈
+});</code></pre>
+      <pre class="code" data-lang="text"><code>성능 차이 (1080p 기준 · 대략적인 감각)
+
+  일반 OSR        GPU → 시스템 메모리 복사 → JS Buffer
+                  30fps 에서도 CPU 한 코어를 상당히 소모
+
+  공유 텍스처     GPU 메모리에 그대로 둔 채 핸들만 전달
+                  복사 0 · 60fps 도 현실적
+
+  → 게임 오버레이처럼 매 프레임 합성해야 하는 용도는
+    공유 텍스처가 사실상 필수입니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>공유 텍스처는 네이티브 코드가 있어야 의미가 있습니다.</b>
+        받은 핸들을 D3D11·Metal·OpenGL 텍스처로 여는 것은
+        <b>JS 에서 할 수 없는 일</b>이라 반드시 애드온(v04·v05)이 필요합니다.
+        또 <code>release()</code> 를 빠뜨리면 <b>수 초 만에 GPU 메모리가 고갈</b>되어
+        전체 시스템이 느려집니다 — <code>try/finally</code> 로 감싸세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">입력 주입 — 오버레이는 클릭도 받아야 합니다</h3>
+  <pre class="code rv d1" data-lang="typescript"><code>// OSR 창은 실제 창이 아니므로 마우스·키보드를 직접 넣어 줘야 합니다
+win.webContents.sendInputEvent({
+  type: "mouseMove", x: 320, y: 180,
+});
+win.webContents.sendInputEvent({
+  type: "mouseDown", x: 320, y: 180, button: "left", clickCount: 1,
+});
+win.webContents.sendInputEvent({
+  type: "mouseUp", x: 320, y: 180, button: "left", clickCount: 1,
+});
+win.webContents.sendInputEvent({
+  type: "keyDown", keyCode: "Enter",
+});
+
+// ★ 게임 오버레이라면 "오버레이가 입력을 먹을 때"와
+//   "게임으로 넘길 때"를 구분해야 합니다 —
+//   보통 UI 영역의 히트 테스트 결과로 결정합니다</code></pre>
+</section>
+
+
+<!-- ==================== v13 ==================== -->
+<section class="sec" id="v13">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 13</span>
+    <h2>GPU · <span class="t">그래픽</span></h2>
+    <p class="lead">"어떤 PC 에서만 화면이 깨진다"는 문의의 <b>대부분이 GPU 문제</b>입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">먼저 확인 — 무엇이 가속되고 있나</h4>
+      <pre class="code" data-lang="typescript"><code>// 앱 안에서 GPU 상태 확인
+app.whenReady().then(async () =&gt; {
+  const info = await app.getGPUInfo("complete");
+  log.info("GPU", info);
+
+  const status = app.getGPUFeatureStatus();
+  log.info(status);
+  // { gpu_compositing: "enabled",
+  //   video_decode: "enabled",
+  //   webgl: "enabled",
+  //   vulkan: "disabled_off", ... }
+});
+
+// GPU 프로세스가 죽었을 때 — 흔합니다(드라이버 버그)
+app.on("child-process-gone", (_e, details) =&gt; {
+  if (details.type === "GPU") {
+    log.error("GPU 프로세스 종료", details.reason);
+    metrics.increment("gpu_crash");
+    // 반복되면 소프트웨어 렌더링으로 폴백 (아래)
+  }
+});</code></pre>
+      <pre class="code" data-lang="text"><code>디버깅 도구
+  chrome://gpu     — DevTools 주소창에 입력하면 그대로 열립니다
+                     어떤 기능이 하드웨어 가속인지 전부 나옵니다
+  chrome://media-internals  — 코덱·디코더 선택 확인
+  chrome://webrtc-internals — 통화 품질 실시간 그래프 (v09)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스위치 — 신중하게 쓰기</h4>
+      <pre class="code" data-lang="typescript"><code>// ★ app.whenReady() 이전에 설정해야 적용됩니다
+import { app } from "electron";
+
+// 문제가 있는 환경에서만 폴백 (설정으로 켜고 끄게 하세요)
+if (userPrefs.disableGpu) {
+  app.disableHardwareAcceleration();
+}
+
+// 하드웨어 비디오 디코딩 명시적 활성화
+app.commandLine.appendSwitch(
+  "enable-features",
+  "PlatformHEVCDecoderSupport,VaapiVideoDecodeLinuxGL"
+);
+
+// 배터리 절약보다 성능이 중요할 때 (백그라운드 타이머 감속 해제)
+app.commandLine.appendSwitch("disable-background-timer-throttling");
+
+// ⚠️ 아래는 보안·안정성을 해칩니다 — 근거 없이 복사하지 마세요
+// app.commandLine.appendSwitch("no-sandbox");          ❌
+// app.commandLine.appendSwitch("ignore-gpu-blocklist"); ⚠️ 크래시 유발 가능</code></pre>
+      <div class="note warn">
+        <b>인터넷의 "성능 향상 스위치 모음"을 그대로 붙이지 마세요.</b>
+        Chromium 스위치는 <b>버전마다 사라지거나 의미가 바뀝니다.</b>
+        지금 효과가 있어도 <b>다음 Electron 에서 무시되거나 크래시를 유발</b>할 수 있습니다.
+        <b>실측으로 효과를 확인한 것만</b> 남기고, 업그레이드마다 재검증하세요.
+      </div>
+      <h4 class="mini">렌더링이 끊길 때 점검 순서</h4>
+      <ul class="tx">
+        <li>① <b>레이아웃 스래싱</b> — DOM 읽기·쓰기를 번갈아 하고 있지 않은지 (🧬 전문가 탭)</li>
+        <li>② <b>합성 레이어 폭발</b> — <code>will-change</code>·<code>transform</code> 남용으로 GPU 메모리 초과</li>
+        <li>③ <b>큰 이미지</b> — 4000px 이미지를 CSS 로 축소해 표시하면 매번 리샘플링됩니다</li>
+        <li>④ <b>백그라운드 창</b> — <code>setBackgroundThrottling</code> 이 의도대로인지</li>
+        <li>⑤ <b>GPU 가속 비활성화</b> — 위 <code>getGPUFeatureStatus</code> 로 확인</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>WebGPU 는 Electron 에서 이미 쓸 수 있습니다.</b>
+        Chromium 기반이라 <b>브라우저 지원 여부를 신경 쓸 필요가 없다</b>는 것이
+        데스크탑 앱의 큰 장점입니다 —
+        데이터 시각화·이미지 처리를 <b>GPU 컴퓨트 셰이더</b>로 돌리면
+        네이티브 애드온 없이도 큰 성능을 얻을 수 있습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v14 ==================== -->
+<section class="sec" id="v14">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 14</span>
+    <h2>시작 시간 · <span class="t">극한 성능</span></h2>
+    <p class="lead">VS Code 가 <b>1초 안에</b> 뜨는 것은 우연이 아닙니다. 측정하고 깎는 방법입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">먼저 분해해서 재기</h4>
+      <pre class="code" data-lang="typescript"><code>// 구간별 시간을 실제로 찍어 봅니다 — 감으로 최적화하지 마세요
+const t0 = Date.now();
+const mark = (label: string) =&gt; log.info(`[boot] ${label} +${Date.now() - t0}ms`);
+
+app.whenReady().then(() =&gt; {
+  mark("app-ready");            // Electron 런타임 초기화까지
+  createWindow();
+  mark("window-created");
+});
+
+mainWindow.webContents.once("did-finish-load", () =&gt; mark("renderer-loaded"));
+mainWindow.once("ready-to-show", () =&gt; mark("ready-to-show"));
+
+// 렌더러 쪽 — 실제 사용자가 느끼는 시점
+// performance.mark("app-interactive") 후
+// performance.measure 로 구간을 남기고 DevTools Performance 에서 확인</code></pre>
+      <pre class="code" data-lang="text"><code>전형적인 시간 분포와 대응
+
+  Electron 런타임 초기화   200~400ms  ← 우리가 못 줄임
+  메인 스크립트 평가        50~500ms  ★ require 를 줄이면 크게 감소
+  창 생성 · 첫 페인트      100~300ms  ★ show:false + ready-to-show
+  렌더러 번들 파싱·실행    100~1000ms ★ 코드 분할·지연 로딩
+  초기 데이터 로드          0~수초    ★ 창을 띄운 뒤로 미루기</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가장 효과가 큰 세 가지</h4>
+      <pre class="code" data-lang="typescript"><code>// ① 지연 require — 메인 시작 스크립트에서 무거운 것을 걷어냅니다
+// ❌ 최상단에서 전부 불러오기
+import Database from "better-sqlite3";
+import { autoUpdater } from "electron-updater";
+
+// ✅ 실제로 필요할 때 불러오기
+let db: Database.Database | null = null;
+function getDb() {
+  if (!db) {
+    const Database = require("better-sqlite3");   // 이 시점에 로드
+    db = new Database(dbPath);
+  }
+  return db;
+}
+
+// ② 창을 먼저 띄우고 나머지는 뒤로
+app.whenReady().then(() =&gt; {
+  createWindow();                                  // 최우선
+  setTimeout(() =&gt; {
+    require("electron-updater").autoUpdater.checkForUpdates();
+    warmupDatabase();
+  }, 3000);                                        // 사용자가 화면을 보는 동안
+});</code></pre>
+      <pre class="code" data-lang="typescript"><code>// ③ V8 코드 캐시 — 파싱·컴파일 결과를 저장해 재사용
+// 렌더러 번들이 클수록 효과가 큽니다 (수백 ms 절감 사례가 흔합니다)
+import { app } from "electron";
+app.setPath("sessionData", path.join(app.getPath("userData"), "session"));
+// Chromium 이 이 경로에 코드 캐시를 자동 저장합니다
+
+// 더 나아가려면 — 빌드 시점에 스냅샷을 굽습니다
+//   npx electron-mksnapshot  (@electron/mksnapshot)
+//   자주 쓰는 모듈을 스냅샷에 넣어 두면 시작 시 파싱이 사라집니다
+//   VS Code 가 실제로 쓰는 기법이지만 빌드 파이프라인이 복잡해집니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>측정 없이 스냅샷부터 손대지 마세요.</b>
+        대부분의 앱은 <b>지연 require + 번들 분할</b>만으로 <b>절반 이하</b>로 줄어듭니다.
+        스냅샷·커스텀 빌드는 <b>그 뒤에도 부족할 때</b> 꺼내는 카드입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v15 ==================== -->
+<section class="sec" id="v15">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 15</span>
+    <h2>보안 <span class="t">강화</span> — Fuses · 무결성</h2>
+    <p class="lead">기본 설정(🖥️ Electron e04) 위에, <b>배포된 앱이 변조되는 것</b>을 막는 층입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Fuses — 런타임 기능을 아예 잠그기</h4>
+      <div class="dep"><code>npm i -D @electron/fuses</code> — 빌드된 바이너리의 <b>플래그 비트를 직접 꺼 버립니다</b></div>
+      <pre class="code" data-lang="typescript"><code>import { flipFuses, FuseVersion, FuseV1Options } from "@electron/fuses";
+
+await flipFuses(appBinaryPath, {
+  version: FuseVersion.V1,
+
+  // ★ 공격자가 우리 앱으로 임의 코드를 실행하는 통로를 막습니다
+  [FuseV1Options.RunAsNode]: false,
+  //   ELECTRON_RUN_AS_NODE=1 로 실행해 Node 로 쓰는 것을 차단
+
+  [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
+  //   NODE_OPTIONS=--require=악성.js 주입 차단
+
+  [FuseV1Options.EnableNodeCliInspectArguments]: false,
+  //   --inspect 로 디버거를 붙여 메모리를 들여다보는 것 차단
+
+  [FuseV1Options.EnableCookieEncryption]: true,
+  //   쿠키를 OS 키로 암호화
+
+  [FuseV1Options.OnlyLoadAppFromAsar]: true,
+  //   ★ asar 밖의 파일을 앱 코드로 로드하지 않음
+
+  [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
+  //   ★ asar 무결성 검증 (변조 시 실행 거부)
+});</code></pre>
+      <div class="note warn">
+        <b>이 조합은 실제 공격을 막습니다.</b>
+        <code>RunAsNode</code> 가 켜져 있으면 공격자가 <b>이미 설치된 서명된 우리 앱</b>을
+        <b>임의 스크립트 실행기로 악용</b>할 수 있습니다 —
+        백신·EDR 이 서명된 앱을 신뢰하기 때문에 탐지도 어렵습니다.
+        <b>Node 로 실행할 필요가 없다면 반드시 끄세요.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ASAR 무결성 · 그 밖의 층</h4>
+      <pre class="code" data-lang="yaml"><code># electron-builder — 무결성 검증 활성화
+# 실행 파일에 asar 해시를 심고, 시작 시 대조합니다
+# (macOS · Windows 지원 · 코드 서명과 함께여야 의미가 있습니다)
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+  enableCookieEncryption: true</code></pre>
+      <pre class="code" data-lang="typescript"><code>// CSP — 렌더러에서 실행 가능한 것을 좁힙니다
+session.defaultSession.webRequest.onHeadersReceived((details, cb) =&gt; {
+  cb({
+    responseHeaders: {
+      ...details.responseHeaders,
+      "Content-Security-Policy": [
+        "default-src 'self'; " +
+        "script-src 'self'; " +               // ★ unsafe-inline 금지
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: https:; " +
+        "connect-src 'self' https://api.example.com wss://rtc.example.com",
+      ],
+    },
+  });
+});
+
+// 예상 밖 이동·창 열기 차단
+app.on("web-contents-created", (_e, contents) =&gt; {
+  contents.on("will-navigate", (e, url) =&gt; {
+    if (new URL(url).origin !== ALLOWED_ORIGIN) e.preventDefault();
+  });
+  contents.setWindowOpenHandler(({ url }) =&gt; {
+    if (isSafeExternal(url)) shell.openExternal(url);
+    return { action: "deny" };
+  });
+  contents.session.setPermissionRequestHandler((_wc, permission, cb) =&gt; {
+    // ★ 필요한 권한만 허용 (기본 거부)
+    cb(["media", "clipboard-sanitized-write"].includes(permission));
+  });
+});</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>"소스 보호"에 대한 현실</b> —
+        asar·난독화·바이트코드(<code>bytenode</code>) 모두 <b>시간을 버는 수단</b>일 뿐
+        <b>결정적인 보호가 아닙니다.</b>
+        정말 지켜야 할 알고리즘·키는 <b>서버에 두고 API 로</b> 호출하세요.
+        클라이언트에 넣은 비밀은 <b>언젠가 반드시 노출된다</b>고 가정하고 설계하는 것이 맞습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== v16 ==================== -->
+<section class="sec" id="v16">
+  <div class="sec-head rv">
+    <span class="no">NATIVE 16</span>
+    <h2>크래시 · 관측 · <span class="t">대규모 배포</span></h2>
+    <p class="lead">사용자 수가 늘면 <b>재현되지 않는 버그</b>가 일상이 됩니다. 데이터로 잡아야 합니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">네이티브 크래시까지 수집</h4>
+      <pre class="code" data-lang="typescript"><code>// JS 예외는 Sentry 로, C++ 크래시는 minidump 로 — 둘 다 필요합니다
+import { crashReporter, app } from "electron";
+
+crashReporter.start({
+  productName: "MyApp",
+  companyName: "MyCompany",
+  submitURL: "https://crash.example.com/submit",
+  uploadToServer: true,
+  compress: true,
+  extra: {                                  // ★ 원인 좁히기용 컨텍스트
+    version: app.getVersion(),
+    channel: releaseChannel,
+  },
+});
+
+// 렌더러가 죽었을 때
+app.on("render-process-gone", (_e, wc, details) =&gt; {
+  log.error("렌더러 종료", details.reason, details.exitCode);
+  // reason: crashed · oom · killed · launch-failed ...
+  if (details.reason === "oom") notifyUser("메모리가 부족해 창을 다시 엽니다");
+  recreateWindow(wc);
+});
+
+// 자식 프로세스(GPU·유틸리티)가 죽었을 때
+app.on("child-process-gone", (_e, d) =&gt; {
+  metrics.increment(`child_gone.${d.type}.${d.reason}`);
+});</code></pre>
+      <div class="note warn">
+        <b>네이티브 애드온을 쓰기 시작하면 크래시의 성격이 바뀝니다.</b>
+        JS 예외는 스택이 나오지만, <b>C++ 세그폴트는 프로세스가 즉사</b>합니다.
+        <code>crashReporter</code> 의 minidump 와 <b>빌드 시 생성한 심볼 파일</b>을 함께 보관해야
+        나중에 스택을 복원할 수 있습니다 —
+        <b>심볼을 버리면 덤프는 쓸모없는 바이너리</b>가 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">채널 · 점진 배포</h4>
+      <pre class="code" data-lang="yaml"><code># 채널을 나눠 위험을 줄입니다
+publish:
+  provider: generic
+  url: https://updates.example.com/${channel}/
+  channel: stable        # stable · beta · alpha
+
+# 사내 정책 배포(Windows) — 자동 업데이트를 끄고 IT 가 관리
+# MSI 패키징 + 그룹 정책으로 배포하는 조직이 많습니다</code></pre>
+      <pre class="code" data-lang="typescript"><code>// 점진 배포 — 서버가 "이 사용자에게 새 버전을 줄지" 결정합니다
+autoUpdater.channel = userPrefs.channel ?? "stable";
+
+// 서버에서 롤아웃 비율을 확인 (문제 발견 시 즉시 중단할 수 있게)
+const { rollout, minVersion } = await fetchReleasePolicy();
+if (hashUserId(userId) % 100 &lt; rollout) {
+  autoUpdater.checkForUpdates();
+}
+
+// ★ 강제 업데이트 — 보안 패치나 API 비호환 시
+if (semver.lt(app.getVersion(), minVersion)) {
+  showBlockingUpdateScreen();     // 사용을 막고 업데이트만 허용
+}</code></pre>
+      <h4 class="mini">운영 지표 — 이 정도는 보세요</h4>
+      <ul class="tx">
+        <li><b>시작 시간 p50·p95</b> — 회귀를 가장 먼저 알려 주는 지표 (v14)</li>
+        <li><b>크래시율</b> (세션 대비) — 프로세스 종류별로 분리 (렌더러·GPU·유틸리티)</li>
+        <li><b>버전 분포</b> — 업데이트가 실제로 도달하는지. 구버전이 오래 남으면 업데이트 경로에 문제가 있습니다</li>
+        <li><b>메모리 p95</b> — 누수는 평균이 아니라 꼬리에서 드러납니다</li>
+        <li>음성 앱이라면 <b>손실률·지터·RTT</b> 분포 (v09)</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>수집에는 반드시 동의를 받으세요.</b>
+        크래시 덤프에는 <b>메모리 조각(파일 경로·입력 내용)</b>이 담길 수 있습니다.
+        <b>옵트인·익명화·보관 기간</b>을 명시하고, 사내 도구라도 개인정보 정책과 함께 안내해야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">전문가 영역 체크리스트</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">네이티브를 도입하기 전에</h4>
+      <ul class="tx">
+        <li>☐ <b>정말 병목인지 측정</b>했는가 — 대부분은 알고리즘·번들 문제입니다</li>
+        <li>☐ <b>WASM 으로 충분</b>하지 않은가 (v06) — 배포가 압도적으로 쉽습니다</li>
+        <li>☐ N-API 를 쓰는가 — <b>Electron 업그레이드마다 재빌드</b>를 피할 유일한 길 (v04)</li>
+        <li>☐ <b>플랫폼별 CI 매트릭스</b>가 준비됐는가 (v05·v07)</li>
+        <li>☐ 로드 실패 시 <b>앱이 죽지 않고 안내</b>하는가 (v07)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">미디어 기능을 넣기 전에</h4>
+      <ul class="tx">
+        <li>☐ OS별 <b>권한 요청·거부 상태 처리</b>가 있는가 (v08·v10)</li>
+        <li>☐ <b>장치 교체(핫플러그)</b> 를 처리하는가 — 실제 사용 중 가장 흔한 사고</li>
+        <li>☐ <b>공유 중 표시와 종료 수단</b>이 항상 보이는가 (v11)</li>
+        <li>☐ 품질을 <b>수치로 관측</b>하는가 — 손실·지터·RTT (v09)</li>
+        <li>☐ OSR 이라면 <b>텍스처 해제</b>를 빠뜨리지 않았는가 (v12)</li>
+        <li>☐ Chromium 업그레이드 시 <b>미디어 회귀 테스트</b> 계획이 있는가</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>다음 단계</b> —
+        JS 엔진·이벤트 루프·메모리 내부는 <b>🧬 전문가 탭</b>,
+        서버 쪽 대규모 처리는 <b>⚡ 대규모 트래픽 탭</b>,
+        빌드·CI 도구는 <b>🧰 실전 도구 탭</b>에서 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /pane-native -->

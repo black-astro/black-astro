@@ -95,8 +95,8 @@ export const guides: Guide[] = [
     heading: 'JS · TS Visual Guide',
     desc:
       'JavaScript 기본기와 TypeScript 타입 시스템부터 Node.js 런타임·Express·NestJS· ' +
-      'React Native·Electron, 그리고 대규모 트래픽 운영과 V8 내부 동작까지 ' +
-      '전문가 영역을 실무 코드로 정리했습니다.',
+      'React Native·Electron, C++·Rust 네이티브 확장과 음성·화면 공유·OSR 같은 ' +
+      '상용 데스크탑 앱 기술, 대규모 트래픽 운영과 V8 내부 동작까지 정리했습니다.',
     tags: [
       'JavaScript',
       'TypeScript',
@@ -104,12 +104,12 @@ export const guides: Guide[] = [
       'NestJS',
       'React Native',
       'Electron',
-      '대규모 트래픽',
-      'V8 · 성능',
+      'C++ · Rust 네이티브',
+      'WebRTC · OSR',
     ],
     stats: [
-      { value: '10', label: '주제 탭' },
-      { value: '152', label: '섹션' },
+      { value: '11', label: '주제 탭' },
+      { value: '168', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
