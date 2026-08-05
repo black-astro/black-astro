@@ -177,6 +177,21 @@ npm run check:guide       # 결과물이 조각과 일치하는지
 - 단축키 `1`~`0` 은 `TAB_ORDER` 순서입니다. **탭 순서를 바꾸면 헤더·드롭다운의 `<span class="k">` 숫자도 함께** 고쳐야 하고,
   `npm run verify:guide` 가 둘의 불일치를 잡아 줍니다
 
+## 여백은 CSS 가 잡습니다 — 인라인 style 로 맞추지 마세요
+
+카드·그리드 사이 여백은 `02-typography-components.css` 가 책임집니다.
+
+- `.card > :first-child{margin-top:0}` · `.card > :last-child{margin-bottom:0}` —
+  카드 안쪽 여백은 `.card` 의 `padding` 하나로 결정됩니다.
+  조각에 `style="margin-top:0"` 을 붙이지 않아도 위아래가 맞습니다
+- `section.sec > * + .grid2 / .grid3 / .grid-a / .card / .tw{margin-top:22px}` —
+  `.grid2` 를 연달아 쓰면 카드가 맞붙던 문제를 막습니다.
+  `sec-head`·`h3.sub`·`h4.mini` 바로 뒤는 각자의 margin 을 쓰므로 예외입니다
+- `pre.code + .out{margin-top:-6px}` — 실행 결과 상자는 **코드 바로 밑일 때만** 붙습니다
+
+새 섹션을 넣은 뒤 눈으로 보기 전에, 브라우저 콘솔에서 인접 블록 간격을 한 번 재 보면 빠릅니다
+(`.rv` 리빌 애니메이션 때문에 측정 전 `document.body.classList.add('noanim')` 를 켜야 값이 정확합니다).
+
 ## 그림(다이어그램)
 
 글로 열 줄 쓸 것이 그림 한 장이면 끝나는 자리가 있습니다(리버스 터널의 연결 방향, 프로세스 격리 구조 등).
