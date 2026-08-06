@@ -584,6 +584,32 @@ window.addEventListener("hashchange", () => {
   else go();
 })();
 
+/* ── 지금 보고 있는 자리를 주소에 남긴다 ──
+   주소창을 복사해 메신저에 붙이면 받는 쪽이 '그 탭 그 섹션'에서 시작한다.
+   예전에는 탭을 옮겨도 주소가 그대로여서 무엇을 보고 있든 첫 화면만 공유됐다.
+   pushState 가 아니라 replaceState 라 뒤로 가기 기록은 늘지 않는다. */
+function syncShareHash(){
+  const secs = $(".pane.on .sec[id]");
+  if (!secs.length) return;
+  const line = secTop() + 16;              // 헤더에 가린 만큼 내려서 판정
+  let cur = secs[0];
+  for (const s of secs){
+    if (s.getBoundingClientRect().top <= line) cur = s;
+    else break;                            // 문서 순서라 하나 넘어가면 끝
+  }
+  if ("#" + cur.id === location.hash) return;
+  try { history.replaceState(null, "", "#" + cur.id); } catch(e){}
+}
+window.syncShareHash = syncShareHash;
+
+(function watchShareHash(){
+  let t = null;
+  addEventListener("scroll", () => {       // 스크롤이 멎은 뒤에만 (주소를 매 프레임 고치지 않는다)
+    clearTimeout(t);
+    t = setTimeout(syncShareHash, 160);
+  }, { passive:true });
+})();
+
 /* --- 맨 위로 버튼 (모바일) --- */
 (function topBtn(){
   const b = document.createElement("div");

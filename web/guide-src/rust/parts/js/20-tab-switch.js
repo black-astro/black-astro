@@ -29,6 +29,8 @@ function switchTab(name){
   const tc = $("#tabcurTxt");
   if (tc && TAB_LABEL[name]) tc.textContent = TAB_LABEL[name];
   tabDrop(false);
+  // 탭을 옮기면 주소도 그 탭의 첫 섹션으로 (공유 링크가 지금 화면을 가리키도록)
+  if (window.syncShareHash) requestAnimationFrame(window.syncShareHash);
   try { sessionStorage.setItem("rustg-tab", name); } catch(e) {}
 
   requestAnimationFrame(() => {

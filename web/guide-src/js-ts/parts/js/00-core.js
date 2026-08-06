@@ -160,6 +160,10 @@ const TAB_KW = {
   native:"네이티브 native 애드온 addon c++ cpp rust 러스트 napi node-addon-api napi-rs binding.gyp ffi koffi dll wasm webassembly 전문가 고급 아키텍처 vscode discord 디스코드 멀티프로세스 utilityprocess 격리 플러그인 messageport 공유메모리 sharedarraybuffer 오디오 audio audioworklet 음성 보이스 voice 통화 webrtc sfu turn opus 지터 에코제거 aec 노이즈억제 vad 마이크 시스템오디오 루프백 화면공유 화면캡처 desktopcapturer getdisplaymedia 녹화 osr 오프스크린 offscreen 오버레이 게임오버레이 sharedtexture gpu 그래픽 webgpu 하드웨어가속 디코딩 시작시간 startup 스냅샷 코드캐시 fuses 무결성 크래시 crashreporter minidump 배포채널 롤아웃",
   scale:"대규모 트래픽 대용량 성능 부하 확장 스케일 scale 캐시 cache redis 레디스 분산락 lock redlock 동시성 재고 선착순 멱등 idempotent 중복결제 큐 queue bullmq 카프카 kafka 메시지 이벤트 비동기 서킷브레이커 circuit breaker 타임아웃 폴백 재시도 백오프 rate limit 처리율제한 429 커넥션풀 수평확장 무상태 stateless 세션 pm2 클러스터 모니터링 관측 opentelemetry prometheus grafana pino 부하테스트 k6 autocannon p99 rps 병목 이벤트루프지연 도커 docker 쿠버네티스 k8s 무중단 배포 graceful",
   tool:"도구 패키지매니저 npm pnpm yarn 모노레포 monorepo workspace turborepo 번들러 bundler vite esbuild tsup rollup webpack eslint prettier biome 린트 포맷 테스트 vitest jest 커버리지 e2e playwright cypress zod 검증 스키마 axios ky fetch dayjs 날짜 lodash 유틸 로깅 pino winston 로그 환경변수 dotenv husky lint-staged 커밋 commitlint ci cd github actions 도커 docker 이미지 최적화 테스트심화 속성기반 propertybased fast-check 반례 shrinking 뮤테이션 mutation stryker 변이 계약테스트 contract pact broker 스냅샷 snapshot 테스트피라미드 msw testcontainers",
+  html:"html 에이치티엠엘 마크업 태그 시맨틱 semantic 문서 구조 doctype head meta viewport charset 인코딩 utf8 제목 heading h1 문단 목록 ul ol li 링크 a href 이미지 img alt srcset lazy 지연로딩 폼 form input label placeholder 검증 validation required pattern formdata 전송 시맨틱 header main footer nav article section aside 접근성 a11y aria role aria-label aria-expanded 스크린리더 낭독기 키보드 tabindex 포커스 표 table caption scope thead 스크립트 defer async preload prefetch 메타태그 og 오픈그래프 opengraph canonical seo 공유 카카오톡 미리보기 dialog 모달 details 아코디언 popover datalist picture progress 웹표준",
+  css:"css 스타일 스타일시트 캐스케이드 cascade 명시도 specificity important layer 선택자 selector class id 의사클래스 hover focus focus-visible has is where not nth-child 박스모델 box-sizing border-box padding margin 마진겹침 gap 단위 px rem em vw vh dvh ch clamp min max calc 변수 커스텀프로퍼티 custom property var flex flexbox 플렉스 justify-content align-items grid 그리드 template-columns auto-fit minmax areas position relative absolute fixed sticky z-index 쌓임맥락 stacking context 반응형 responsive 미디어쿼리 media query 컨테이너쿼리 container 모바일 타이포그래피 폰트 font-family line-height word-break keep-all 웹폰트 font-display 말줄임 ellipsis 애니메이션 animation transition transform opacity keyframes 다크모드 dark mode prefers-color-scheme 테마 theme aspect-ratio scroll-margin 중첩 nesting oklch 논리속성 bem tailwind css modules 초기화 reset",
+  react:"리액트 react 컴포넌트 component jsx 상태 state usestate props 렌더링 render 리렌더 rerender 훅 hook useeffect 이펙트 정리 cleanup 의존성 배열 usememo usecallback memo 메모이제이션 리스트 key 키 배열 map 폼 form 제어 uncontrolled controlled formdata useactionstate 상태끌어올리기 lifting context usecontext provider 커스텀훅 custom hook 성능 profiler 가상스크롤 virtual 코드분할 lazy suspense usedeferredvalue 데이터 fetch tanstack query 캐시 mutation 라우팅 react router 넥스트 nextjs app router 서버컴포넌트 rsc use client ssr 하이드레이션 strictmode 컴파일러 react19 에러 디버깅 devtools",
+  vue:"뷰 vue vue3 컴포넌트 sfc single file component script setup template style scoped 반응성 reactivity ref reactive value torefs shallowref 컴퓨티드 computed watch watcheffect 감시 디렉티브 directive v-if v-show v-for v-bind v-on v-model 양방향 defineprops defineemits definemodel withdefaults props emit 슬롯 slot 스코프슬롯 scoped slot 생명주기 lifecycle onmounted onunmounted nexttick 템플릿ref 컴포저블 composable 재사용 피니아 pinia 스토어 store storetorefs 상태관리 라우터 vue router 라우팅 가드 guard 네비게이션 keepalive teleport 텔레포트 suspense transition 트랜지션 deep 옵션api composition api 마이그레이션 devtools",
   deep:"전문가 초고급 고급 심화 내부동작 v8 엔진 engine jit 컴파일 히든클래스 hidden class 인라인캐시 최적화 deopt 메모리 memory gc 가비지컬렉션 힙 heap 누수 leak 스냅샷 마이크로태스크 microtask 매크로태스크 프로파일링 profiling flame cpu proxy reflect 메타프로그래밍 symbol weakmap weakref finalizationregistry 함수형 불변성 커링 합성 디자인패턴 pattern 싱글턴 팩토리 옵저버 타입레벨 동시성 abortcontroller 세마포어 보안 프로토타입오염 공급망 supply chain 아키텍처 헥사고날 ddd 계층",
 };
 const FIND_CHIPS = ["JWT 인증 만들기","이벤트 루프 순서","제네릭","유틸리티 타입",
@@ -589,6 +593,32 @@ window.addEventListener("hashchange", () => {
   const go = () => { const id = hashId(); if (id && document.getElementById(id)) goSec(id); };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", go, {once:true});
   else go();
+})();
+
+/* ── 지금 보고 있는 자리를 주소에 남긴다 ──
+   주소창을 복사해 메신저에 붙이면 받는 쪽이 '그 탭 그 섹션'에서 시작한다.
+   예전에는 탭을 옮겨도 주소가 그대로여서 무엇을 보고 있든 첫 화면만 공유됐다.
+   pushState 가 아니라 replaceState 라 뒤로 가기 기록은 늘지 않는다. */
+function syncShareHash(){
+  const secs = $(".pane.on .sec[id]");
+  if (!secs.length) return;
+  const line = secTop() + 16;              // 헤더에 가린 만큼 내려서 판정
+  let cur = secs[0];
+  for (const s of secs){
+    if (s.getBoundingClientRect().top <= line) cur = s;
+    else break;                            // 문서 순서라 하나 넘어가면 끝
+  }
+  if ("#" + cur.id === location.hash) return;
+  try { history.replaceState(null, "", "#" + cur.id); } catch(e){}
+}
+window.syncShareHash = syncShareHash;
+
+(function watchShareHash(){
+  let t = null;
+  addEventListener("scroll", () => {       // 스크롤이 멎은 뒤에만 (주소를 매 프레임 고치지 않는다)
+    clearTimeout(t);
+    t = setTimeout(syncShareHash, 160);
+  }, { passive:true });
 })();
 
 /* --- 맨 위로 버튼 (모바일) --- */
