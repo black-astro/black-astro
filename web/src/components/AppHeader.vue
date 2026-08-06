@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { navRoutes, externalNavLinks } from '@/router'
+import { navRoutes } from '@/router'
 import ThemeToggle from './ThemeToggle.vue'
 import logoUrl from '@/style/img/matrix_hyeon.png'
 </script>
@@ -16,15 +16,6 @@ import logoUrl from '@/style/img/matrix_hyeon.png'
         <RouterLink v-for="r in navRoutes" :key="r.name" :to="r.path" class="nav-link">
           {{ r.meta?.label }}
         </RouterLink>
-        <a
-          v-for="l in externalNavLinks"
-          :key="l.label"
-          :href="l.href"
-          :title="l.title"
-          class="nav-link nav-link-ext"
-        >
-          {{ l.label }}<span class="ext" aria-hidden="true">↗</span>
-        </a>
       </nav>
 
       <div class="hd-right">
@@ -109,21 +100,6 @@ import logoUrl from '@/style/img/matrix_hyeon.png'
 .nav-link.router-link-active {
   color: var(--accent);
   font-weight: 600;
-}
-/* 외부 페이지 링크 — 내부 메뉴와 섞이지 않게 색으로 구분 */
-.nav-link-ext {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--accent);
-}
-.nav-link-ext:hover {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-.nav-link-ext .ext {
-  font-size: 0.72em;
-  opacity: 0.7;
 }
 .hd-right {
   flex-shrink: 0;

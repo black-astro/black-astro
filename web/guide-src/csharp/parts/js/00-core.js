@@ -322,15 +322,34 @@ const fEsc = t => t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt
 /* '엑셀'이 pandas 키워드에는 낱말로, auto 키워드에는 '엑셀자동화' 안에만 있을 때
    낱말 쪽을 우선하기 위한 검사 */
 const fWord = (hay, t) => (" " + hay + " ").includes(" " + t + " ");
+/* 검색어에 형광펜. 자리는 '원문'에서 찾고 이스케이프는 마지막에 한다.
+   이스케이프한 뒤에 찾으면 사람 눈에 안 보이는 글자에 걸린다 —
+   '&' 는 '&amp;' 가 되어 amp 로 검색하면 엔티티 한가운데가 잘리고,
+   mark 로 검색하면 앞서 넣은 <mark> 태그 자체를 쪼개 화면이 깨졌다. */
 function fMark(text, toks){
-  let out = fEsc(text);
+  const low = text.toLowerCase();
+  const hits = [];
   toks.forEach(t => {
     if (!t) return;
-    const i = out.toLowerCase().indexOf(t);
-    if (i < 0) return;
-    out = out.slice(0, i) + "<mark>" + out.slice(i, i + t.length) + "</mark>" + out.slice(i + t.length);
+    const i = low.indexOf(t);
+    if (i >= 0) hits.push([i, i + t.length]);
   });
-  return out;
+  if (!hits.length) return fEsc(text);
+
+  hits.sort((a, b) => a[0] - b[0]);          // 겹치는 구간은 하나로 합친다
+  const span = [];
+  for (const h of hits){
+    const last = span[span.length - 1];
+    if (last && h[0] <= last[1]) last[1] = Math.max(last[1], h[1]);
+    else span.push(h);
+  }
+
+  let out = "", at = 0;
+  for (const [s, e] of span){
+    out += fEsc(text.slice(at, s)) + "<mark>" + fEsc(text.slice(s, e)) + "</mark>";
+    at = e;
+  }
+  return out + fEsc(text.slice(at));
 }
 function findRun(){
   const q   = $("#findInput").value.trim().toLowerCase();
@@ -541,6 +560,13 @@ let goSecRun = 0;                    // 연속 클릭 시 이전 보정 루프�
 function goSec(id){
   const el = document.getElementById(id);
   if (!el) return;
+  /* ★ 숨어 있는 탭 안의 섹션이면 그 탭부터 연다.
+     .pane 은 display:none 이라 열기 전에는 좌표가 0 으로 나온다.
+     그래서 탭을 안 열고 스크롤하면 맨 위로 튀고 끝났다 —
+     공유받은 링크(#s09)로 들어오거나 뒤로 가기를 누를 때가 그랬다. */
+  const pane = el.closest(".pane");
+  if (pane && !pane.classList.contains("on") && typeof switchTab === "function")
+    switchTab(pane.id.replace(/^pane-/, ""));
   const my = ++goSecRun;
   const html = document.documentElement;
   const pad = secTop();
@@ -574,10 +600,23 @@ document.addEventListener("click", e => {
   try { history.replaceState(null, "", "#" + id); } catch(err){}
   setTimeout(() => goSec(id), 0);          // 목차 시트가 먼저 닫히도록 한 틱 양보
 });
+/* 주소창의 #조각. 한글 앵커가 %ED.. 로 들어오므로 되돌려 읽는다
+   (망가진 시퀀스면 원문 그대로 쓴다 — 던지게 두면 이동 자체가 죽는다) */
+function hashId(){
+  const raw = location.hash.slice(1);
+  try { return decodeURIComponent(raw); } catch(e){ return raw; }
+}
 window.addEventListener("hashchange", () => {
-  const id = location.hash.slice(1);
+  const id = hashId();
   if (id && document.getElementById(id)) goSec(id);
 });
+/* 첫 진입 때의 #조각 — 공유받은 링크를 그 섹션까지 열어 준다.
+   탭 복원(99-init)보다 뒤여야 해시가 이기므로 마지막 스크립트까지 기다린다. */
+(function openHash(){
+  const go = () => { const id = hashId(); if (id && document.getElementById(id)) goSec(id); };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", go, {once:true});
+  else go();
+})();
 
 /* --- 맨 위로 버튼 (모바일) --- */
 (function topBtn(){

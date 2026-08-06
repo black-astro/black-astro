@@ -1,0 +1,2572 @@
+<!-- ============================================================
+     C ABI · FFI PANE
+     ============================================================ -->
+<div class="pane" id="pane-ffi">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> extern "C" · ctypes · 불투명 포인터 · 소유권 규약</div>
+  <h1>한 번 만들어<br>모든 언어에서<br>부릅니다</h1>
+  <p class="tx">
+    바인딩 라이브러리 없이, <b>컴파일도 없이</b> 파이썬에서 <code>.dll</code>·<code>.so</code> 를 바로 부르는 길입니다.
+    문법은 언어마다 달라도 <b>C 함수를 부르는 법은 모든 언어가 압니다</b>.
+    그래서 C ABI 가 <b>언어 사이의 공용어</b>입니다.
+  </p>
+  <div class="stats">
+    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>0</b><span>바인딩 라이브러리</span></div>
+    <div><b>6+</b><span>부를 수 있는 언어</span></div>
+    <div><b>4</b><span>깊이 층</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== f01 ==================== -->
+<section class="sec" id="f01">
+  <div class="sec-head rv">
+    <span class="no">FFI 01</span>
+    <h2>C ABI 가 <span class="t">공용어</span>인 이유</h2>
+    <p class="lead">
+      C++ 의 클래스도, 템플릿도, 예외도 다른 언어는 이해하지 못합니다.
+      <b>모든 언어가 공통으로 아는 것은 “C 함수를 부르는 방법”</b> 하나뿐입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ABI 란 무엇인가</h4>
+      <pre class="code" data-lang="text"><code>API : 소스 코드 수준의 약속 — "이 함수는 이런 인자를 받는다"
+ABI : 기계어 수준의 약속 — 실제로 어떻게 부르는가
+
+  · 인자를 어느 레지스터·스택 위치에 놓는가
+  · 반환값은 어디로 받는가
+  · 스택 정리는 누가 하는가
+  · 구조체는 메모리에 어떻게 배치되는가
+  · 함수 이름이 심볼로 어떻게 기록되는가
+
+C ABI 는 이 규칙이 OS·아키텍처마다 '문서로 고정'되어 있습니다.
+그래서 어떤 언어로 만들었든 이 규칙만 지키면 서로 부를 수 있습니다.
+
+★ C++ 는 표준 ABI 가 없습니다
+  같은 리눅스에서도 GCC 와 Clang 의 이름 맹글링·예외 구현이 다를 수 있고,
+  MSVC 는 아예 다릅니다. 그래서 C++ 클래스를 그대로 노출하면
+  '같은 컴파일러로 빌드한 경우에만' 동작합니다(🔬 d07).</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 가지 길 — 무엇을 고를까</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%"></th><th>바인딩(pybind11)</th><th>C ABI + FFI</th></tr>
+        <tr><td>대상 언어</td><td>파이썬 전용</td><td><b>거의 모든 언어</b></td></tr>
+        <tr><td>빌드</td><td>파이썬 버전마다</td><td><b>한 번만</b> ★</td></tr>
+        <tr><td>표현력</td><td>클래스·예외·numpy</td><td>함수·숫자·포인터만</td></tr>
+        <tr><td>타입 안전성</td><td>컴파일러가 검사</td><td><b>없음</b> — 틀리면 크래시</td></tr>
+        <tr><td>호출 비용</td><td>낮음</td><td>ctypes 는 조금 큼</td></tr>
+        <tr><td>설치</td><td>wheel 빌드 필요</td><td><b>파일 하나 복사</b></td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무에서의 선택</b> — <b>파이썬만 쓴다면</b> pybind11 이 압도적으로 편합니다(🐍 탭).
+        <b>여러 언어에서 써야 하거나</b>, <b>이미 있는 <code>.dll</code>/<code>.so</code> 를 부른다면</b>
+        C ABI 가 답입니다. 둘을 <b>같이 제공</b>하는 라이브러리도 많습니다 —
+        핵심은 C API 로 만들고, 파이썬용 편의 래퍼를 pybind11 로 얹는 형태입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">C ABI 로 표현할 수 있는 것</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">넘길 수 있는 것 / 없는 것</h4>
+      <pre class="code" data-lang="cpp"><code>// ✅ 안전하게 넘길 수 있는 것
+int32_t  int64_t  uint8_t  double  float      // 고정폭 숫자
+bool                                          // ⚠ 크기가 언어마다 다를 수 있음
+const char*                                   // 널 종료 문자열
+void*                                         // 불투명 핸들 ★
+struct { int32_t a; double b; }               // 표준 배치 구조체
+int (*)(int, void*)                           // 함수 포인터 (콜백)
+포인터 + 길이                                  // 배열 (항상 이 쌍으로) ★
+
+// ❌ 넘길 수 없는 것 (C++ 내부에만 두세요)
+std::string  std::vector  std::map            // 구현이 컴파일러마다 다름
+클래스 · 상속 · 가상 함수                       // vtable 배치가 표준이 아님
+템플릿                                         // 컴파일 시점 개념
+예외                                           // 경계를 넘으면 UB ★
+참조(&amp;)                                        // 포인터로 바꾸세요
+오버로딩                                        // 이름이 하나여야 함
+
+// 그래서 C API 는 이런 모양이 됩니다
+extern "C" {
+    int32_t mylib_smooth(const double* in, int64_t n,
+                         double* out, int32_t window);
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 구현을 C API 로 감싸기</h4>
+      <pre class="code" data-lang="cpp"><code>// ── 내부는 자유롭게 현대 C++ 로
+namespace impl {
+std::vector&lt;double&gt; smooth(std::span&lt;const double&gt; in, int window);
+}
+
+// ── 밖으로는 C 함수 하나만
+extern "C" int32_t mylib_smooth(const double* in, int64_t n,
+                                double* out, int32_t window) {
+    if (!in || !out || n &lt; 0)      return MYLIB_ERR_INVALID;
+    if (window &lt;= 0 || window &gt; n) return MYLIB_ERR_INVALID;
+
+    try {                                        // ★ 예외를 여기서 전부 잡기
+        auto r = impl::smooth({in, static_cast&lt;std::size_t&gt;(n)}, window);
+        std::memcpy(out, r.data(), r.size() * sizeof(double));
+        return MYLIB_OK;
+    } catch (const std::bad_alloc&amp;) {
+        return MYLIB_ERR_NOMEM;
+    } catch (...) {
+        return MYLIB_ERR_UNKNOWN;                // 절대 밖으로 안 나가게
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>이 형태가 규칙입니다</b> — <b>얇은 C 껍질 + 풍부한 C++ 내부</b>.
+        껍질에서 하는 일은 셋뿐입니다 —
+        <b>인자 검증 · 예외를 에러 코드로 변환 · 메모리 복사</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">누가 이 방식을 쓰나</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">우리가 매일 쓰는 것들이 이 구조입니다</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>SQLite</b> — C API 하나로 파이썬·자바·Go·러스트·모바일 전부가 씁니다</li>
+        <li><b>OpenSSL · zlib · libcurl</b> — 시스템 라이브러리의 표준 형태</li>
+        <li><b>CUDA · OpenCL</b> — GPU 드라이버 인터페이스</li>
+        <li><b>ffmpeg(libav*)</b> — 거의 모든 영상 처리 도구의 뿌리</li>
+        <li><b>ONNX Runtime · llama.cpp</b> — C++ 로 만들고 C API 로 노출한 최신 사례</li>
+        <li><b>OS API 전부</b> — Win32 · POSIX · 시스템 콜</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>공통점</b> — <b>수명이 긴 라이브러리</b>일수록 C API 를 택합니다.
+        언어 하나에 묶이지 않고, <b>수십 년 뒤에도 그대로 부를 수 있기</b> 때문입니다.
+        사내 공용 엔진을 만든다면 진지하게 고려할 만한 이유입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설계할 때 먼저 정할 것</h4>
+      <pre class="code" data-lang="c"><code>/* ① 이름 규칙 — 접두어를 반드시 붙입니다 (전역 심볼이므로) */
+mylib_init  mylib_free  mylib_smooth        /* ✅ */
+init  process                                /* ❌ 다른 라이브러리와 충돌 */
+
+/* ② 에러 전달 방식 — 반환값 하나로 통일 */
+typedef enum {
+    MYLIB_OK = 0,
+    MYLIB_ERR_INVALID = -1,
+    MYLIB_ERR_NOMEM   = -2,
+    MYLIB_ERR_IO      = -3,
+} mylib_status;
+
+/* ③ 메모리 소유권 — 문서에 못 박기 (f07) */
+/*    "돌려준 포인터는 mylib_free() 로 해제해야 합니다" */
+
+/* ④ 버전 — 구조체와 함수에 (f09) */
+int32_t mylib_version(void);        /* 10203 = 1.2.3 */
+
+/* ⑤ 스레드 안전성 — 명시 */
+/*    "핸들 하나를 여러 스레드에서 동시에 쓰면 안 됩니다" */</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">호출 규약과 스택</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인자가 실제로 어디로 가나</h4>
+      <pre class="code" data-lang="text"><code>x86-64 System V (리눅스 · 맥)
+  정수·포인터 인자 : RDI, RSI, RDX, RCX, R8, R9  순서대로
+  실수 인자        : XMM0~XMM7
+  나머지           : 스택
+  반환             : RAX (정수) · XMM0 (실수)
+  큰 구조체        : 호출자가 공간을 잡고 그 주소를 숨은 첫 인자로
+
+Windows x64
+  정수 인자 : RCX, RDX, R8, R9  (4개만!)
+  실수 인자 : XMM0~XMM3
+  ★ 레지스터 순서가 다릅니다 — 그래서 규약이 안 맞으면 인자가 뒤섞입니다
+
+32비트 시절의 유산 (윈도우 DLL 에서 아직 보입니다)
+  __cdecl    : 호출자가 스택 정리 (C 기본)
+  __stdcall  : 피호출자가 정리 (Win32 API)
+  → 안 맞으면 스택이 망가져 호출 직후 크래시합니다
+  → 64비트에서는 규약이 하나로 통일돼 이 문제가 거의 사라졌습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 확인하기</h4>
+      <pre class="code" data-lang="bash"><code># 어셈블리로 인자 배치 보기
+g++ -O2 -S -masm=intel -o - test.cpp | head -30
+#   mov edi, ...  ← 첫 인자가 RDI 로 들어가는 것이 보입니다
+
+# godbolt.org 에서 컴파일러를 바꿔 가며 비교하면 더 명확합니다
+
+# 심볼이 C 이름인지 확인 (맹글링 여부)
+nm -D mylib.so | grep mylib_
+#   T mylib_smooth        ← extern "C" 가 적용된 모습 ✅
+#   T _Z12mylib_smoothPKdlPdi  ← C++ 맹글링된 이름 ❌
+
+# 윈도우
+dumpbin /exports mylib.dll
+
+# 함수 포인터로 직접 부르기 (dlopen 경로)
+#include &lt;dlfcn.h&gt;
+void* h = dlopen("./mylib.so", RTLD_NOW);
+auto f = reinterpret_cast&lt;int32_t(*)(const double*,int64_t,double*,int32_t)&gt;(
+             dlsym(h, "mylib_smooth"));
+f(in, n, out, 3);
+dlclose(h);</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>왜 알아야 하나</b> — FFI 에서 <b>인자 타입을 잘못 선언하면</b>
+        컴파일러도 인터프리터도 잡아 주지 못하고 <b>실행 중에 이상한 값이나 크래시</b>로 나타납니다.
+        규약을 알면 “왜 세 번째 인자만 쓰레기 값이 오는가” 같은 증상을 <b>추론할 수 있게</b> 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> C ABI 는 <b>언어 사이의 유일한 공용어</b>입니다.
+    C++ 클래스·템플릿·예외는 넘길 수 없고, <b>숫자 · 포인터 · 함수 포인터 · 표준 배치 구조체</b>만 넘어갑니다.
+    구조는 항상 같습니다 — <b>얇은 <code>extern "C"</code> 껍질 + 자유로운 C++ 내부</b>.</div>
+</section>
+
+
+<!-- ==================== f02 ==================== -->
+<section class="sec" id="f02">
+  <div class="sec-head rv">
+    <span class="no">FFI 02</span>
+    <h2><code>extern "C"</code> 와 <span class="t">이름 맹글링</span></h2>
+    <p class="lead">
+      C++ 컴파일러는 함수 이름을 내부적으로 바꿔 버립니다.
+      <b>오버로딩 때문에</b> 그래야 하는데, 그러면 다른 언어가 찾지 못합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이름이 어떻게 바뀌나</h4>
+      <pre class="code" data-lang="cpp"><code>void f(int);
+void f(double);
+void f(int, char*);
+//  세 함수의 이름이 전부 "f" 라면 링커가 구분할 수 없습니다.
+//  그래서 컴파일러가 인자 타입을 이름에 인코딩합니다.
+
+//   _Z1fi          ← f(int)          (GCC/Clang · Itanium ABI)
+//   _Z1fd          ← f(double)
+//   _Z1fiPc        ← f(int, char*)
+//   ?f@@YAXH@Z     ← MSVC 는 형식이 완전히 다릅니다
+
+// extern "C" 를 붙이면 맹글링하지 않습니다
+extern "C" void g(int);      // 심볼 이름이 그냥 "g" (또는 "_g")
+//   → 대신 오버로딩을 쓸 수 없습니다 (이름이 하나여야 하므로)
+
+// 헤더 전체에 적용하는 관용구
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int32_t mylib_smooth(const double*, int64_t, double*, int32_t);
+
+#ifdef __cplusplus
+}
+#endif
+//   ★ 이 헤더를 C 에서 include 하면 extern "C" 가 없고,
+//     C++ 에서 include 하면 적용됩니다 — 양쪽에서 쓸 수 있게 됩니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">확인하고 진단하기</h4>
+      <pre class="code" data-lang="bash"><code># 심볼 목록 (-C 는 사람이 읽을 수 있게 복원)
+nm -D --defined-only mylib.so | grep mylib
+nm -DC --defined-only mylib.so | grep mylib     # 복원된 이름
+
+# 맹글링된 이름을 원래대로
+echo "_Z1fi" | c++filt          # → f(int)
+
+# 윈도우
+dumpbin /exports mylib.dll
+undname "?f@@YAXH@Z"
+
+# ★ FFI 에서 "심볼을 못 찾음" 이 나오면 첫 번째로 이걸 확인합니다
+python -c "
+import ctypes
+lib = ctypes.CDLL('./mylib.so')
+lib.mylib_smooth           # AttributeError 면 심볼 이름 문제
+"</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 실수</b> — 헤더에는 <code>extern "C"</code> 를 썼는데
+        <b><code>.cpp</code> 에서 그 헤더를 include 하지 않고</b> 함수를 정의한 경우입니다.
+        그러면 정의 쪽은 맹글링되어 <b>선언과 정의가 서로 다른 심볼</b>이 됩니다.
+        <b>구현 파일에서 반드시 자기 헤더를 include</b> 하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">내보내기와 가시성</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 OS 를 하나의 매크로로</h4>
+      <pre class="code" data-lang="cpp"><code>// mylib_export.h
+#pragma once
+
+#if defined(_WIN32)
+  #ifdef MYLIB_BUILDING              // 라이브러리를 빌드할 때 정의
+    #define MYLIB_API __declspec(dllexport)
+  #else                              // 쓰는 쪽에서 include 할 때
+    #define MYLIB_API __declspec(dllimport)
+  #endif
+#else
+  #define MYLIB_API __attribute__((visibility("default")))
+#endif
+
+#ifdef __cplusplus
+  #define MYLIB_EXTERN extern "C"
+#else
+  #define MYLIB_EXTERN
+#endif
+
+#define MYLIB_EXPORT MYLIB_EXTERN MYLIB_API
+
+// 사용
+MYLIB_EXPORT int32_t mylib_smooth(const double*, int64_t, double*, int32_t);</code></pre>
+      <pre class="code" data-lang="cmake"><code>add_library(mylib SHARED src/api.cpp)
+target_compile_definitions(mylib PRIVATE MYLIB_BUILDING)
+set_target_properties(mylib PROPERTIES
+    CXX_VISIBILITY_PRESET hidden        # ★ 기본은 숨기고
+    VISIBILITY_INLINES_HIDDEN ON)       #   표시한 것만 내보내기</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">내보낼 것을 명시적으로 통제하기</h4>
+      <pre class="code" data-lang="bash"><code># 리눅스 — 버전 스크립트로 심볼 목록을 고정
+# mylib.map
+MYLIB_1.0 {
+  global:
+    mylib_*;          # 이것만 내보냅니다
+  local:
+    *;                # 나머지는 전부 숨김
+};</code></pre>
+      <pre class="code" data-lang="cmake"><code>target_link_options(mylib PRIVATE
+    "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/mylib.map")</code></pre>
+      <pre class="code" data-lang="text"><code>왜 숨기는가
+
+  ① 심볼이 적을수록 로딩이 빠릅니다 (동적 링커의 재배치 작업 감소)
+  ② 내부 심볼이 다른 라이브러리와 충돌하지 않습니다 ★
+     — 같은 프로세스에 두 확장 모듈이 같은 이름을 내보내면
+       나중에 로드된 쪽이 앞의 것을 가릴 수 있습니다
+  ③ 컴파일러가 더 공격적으로 최적화할 수 있습니다
+     (밖에서 부를 수 없다면 인라인·제거가 자유로워집니다)
+  ④ API 표면이 문서와 일치하게 유지됩니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">링크 에러를 심볼 수준에서 읽기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">증상별 진단</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">증상</th><th>원인과 확인</th></tr>
+        <tr><td><code>undefined reference to 'f'</code><br>(맹글링 안 된 이름)</td><td>C 로 선언했는데 C++ 로 정의. <code>nm</code> 로 실제 심볼 확인</td></tr>
+        <tr><td><code>undefined reference to '_Z1fi'</code><br>(맹글링된 이름)</td><td>C++ 로 선언했는데 <code>extern "C"</code> 로 정의했거나 그 반대</td></tr>
+        <tr><td>ctypes <code>AttributeError</code></td><td>심볼이 안 내보내짐 — 가시성·<code>__declspec</code> 확인</td></tr>
+        <tr><td>윈도우 <code>LNK2019</code></td><td><code>dllimport</code>/<code>dllexport</code> 불일치</td></tr>
+        <tr><td>로드는 되는데 호출 시 크래시</td><td>인자 타입·개수 불일치(f04) 또는 호출 규약</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># 진단 3종 세트
+nm -DC mylib.so | grep 함수이름       # 있는가 · 이름이 맞는가
+ldd mylib.so                          # 의존 라이브러리가 다 있는가
+LD_DEBUG=bindings python app.py 2&gt;&amp;1 | grep 함수이름   # 실제로 뭘 찾는지</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C 와 C++ 를 함께 쓰는 프로젝트</h4>
+      <pre class="code" data-lang="cpp"><code>// C 라이브러리 헤더를 C++ 에서 include 할 때
+// (헤더에 extern "C" 가드가 없는 옛 라이브러리라면 직접 감쌉니다)
+extern "C" {
+#include "old_c_lib.h"
+}
+
+// 반대로, C++ 로 만든 것을 C 에서 쓰게 하려면
+// ① 헤더에는 C 문법만 (클래스·네임스페이스·기본 인자 금지)
+// ② 불투명 포인터로 객체를 감춤 (f03)
+// ③ C++ 표준 라이브러리를 정적 링크하거나 의존성 명시
+
+// C 링커로 링크할 때는 C++ 런타임을 직접 붙여야 합니다
+//   gcc main.c -lmylib -lstdc++      ← C++ 표준 라이브러리 명시
+//   또는 라이브러리를 g++ 로 링크해 런타임을 안에 포함
+
+// 전역 객체 초기화에 주의 ★
+//   C++ 전역 객체의 생성자는 라이브러리 로드 시점에 불립니다.
+//   그 안에서 예외가 나거나 다른 라이브러리를 쓰면
+//   초기화 순서 문제로 crash 가 납니다.
+//   → 지연 초기화(함수 안 static)로 피하세요
+Engine&amp; instance() {
+    static Engine e;          // 첫 호출 때 만들어집니다 (스레드 안전)
+    return e;
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">심볼 해석의 실제 순서</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동적 링커가 하는 일</h4>
+      <pre class="code" data-lang="text"><code>프로그램 시작 시
+  ① 실행 파일의 DT_NEEDED 목록을 읽어 필요한 .so 를 찾습니다
+     탐색 순서: DT_RPATH → LD_LIBRARY_PATH → DT_RUNPATH
+                → /etc/ld.so.cache → 기본 경로
+  ② 각 .so 를 메모리에 매핑
+  ③ 심볼을 해석(binding) — 기본은 지연(lazy), 첫 호출 때 결정
+  ④ 초기화 함수 실행 (C++ 전역 생성자 포함)
+
+★ 전역 심볼 인터포지션
+  먼저 로드된 라이브러리의 심볼이 나중 것을 '가립니다'.
+  두 확장 모듈이 같은 이름의 전역 함수를 내보내면
+  둘 다 '먼저 로드된 쪽'을 부르게 됩니다 — 조용한 버그의 원인 ★
+
+확인
+  LD_DEBUG=libs    python app.py    # 어떤 파일을 어디서 찾았는지
+  LD_DEBUG=bindings python app.py   # 어느 심볼이 어디에 묶였는지
+  ldd -r mylib.so                   # 해석되지 않은 심볼 표시</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">RPATH 와 배포</h4>
+      <pre class="code" data-lang="cmake"><code># 내 .so 옆에 있는 의존 라이브러리를 찾게 하기
+set_target_properties(mylib PROPERTIES
+    INSTALL_RPATH "$ORIGIN"          # 리눅스: 자기 위치 기준
+    BUILD_WITH_INSTALL_RPATH TRUE)
+# 맥은 @loader_path
+if(APPLE)
+  set_target_properties(mylib PROPERTIES INSTALL_RPATH "@loader_path")
+endif()</code></pre>
+      <pre class="code" data-lang="bash"><code># 확인·수정
+readelf -d mylib.so | grep -E "RPATH|RUNPATH|NEEDED"
+patchelf --set-rpath '$ORIGIN' mylib.so          # 사후 수정
+otool -L mylib.dylib                              # 맥
+install_name_tool -change 옛경로 @loader_path/새경로 mylib.dylib
+
+# 윈도우는 RPATH 가 없습니다 — DLL 을 같은 폴더에 두거나
+# AddDllDirectory / os.add_dll_directory() 를 씁니다
+python -c "
+import os, ctypes
+os.add_dll_directory(r'C:\\mylib\\bin')    # 파이썬 3.8+ 에서 필수 ★
+ctypes.CDLL('mylib.dll')
+"</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>윈도우 파이썬 3.8+ 의 함정</b> — 보안 강화로 <b><code>PATH</code> 에 있어도
+        DLL 을 자동으로 찾지 않습니다</b>. <code>os.add_dll_directory()</code> 를
+        명시적으로 불러야 합니다. “리눅스에선 되는데 윈도우에서만 못 찾는” 문제의 단골 원인입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> C++ 는 오버로딩 때문에 함수 이름을 바꿉니다(맹글링).
+    다른 언어가 찾을 수 있게 하려면 <b><code>extern "C"</code></b> 를 붙이고,
+    <b><code>__declspec(dllexport)</code> / <code>visibility("default")</code></b> 로 내보내야 합니다.
+    문제가 생기면 <b><code>nm -DC</code> 로 실제 심볼 이름부터</b> 확인하세요.</div>
+</section>
+
+
+<!-- ==================== f03 ==================== -->
+<section class="sec" id="f03">
+  <div class="sec-head rv">
+    <span class="no">FFI 03</span>
+    <h2>헤더 설계 — <span class="t">불투명 포인터</span></h2>
+    <p class="lead">
+      C++ 객체를 다른 언어에 노출하는 표준 방법입니다.
+      <b>내부는 감추고 포인터 하나만</b> 넘깁니다 — 라이브러리 배포의 정석입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">핸들 패턴</h4>
+      <pre class="code" data-lang="c"><code>/* ── mylib.h — 쓰는 쪽이 보는 전부 ─────────────── */
+#ifndef MYLIB_H
+#define MYLIB_H
+#include &lt;stdint.h&gt;
+#include "mylib_export.h"
+
+typedef struct mylib_engine mylib_engine;   /* ★ 정의 없이 이름만 */
+
+MYLIB_EXPORT mylib_engine* mylib_engine_create(int32_t window);
+MYLIB_EXPORT void          mylib_engine_destroy(mylib_engine* e);
+
+MYLIB_EXPORT int32_t mylib_engine_feed(mylib_engine* e,
+                                       const double* data, int64_t n);
+MYLIB_EXPORT int32_t mylib_engine_result(const mylib_engine* e,
+                                         double* out, int64_t* out_n);
+#endif</code></pre>
+      <pre class="code" data-lang="cpp"><code>// ── api.cpp — 구현 ────────────────────────────
+#include "mylib.h"
+#include "engine.hpp"          // 진짜 C++ 클래스
+
+// 불완전 타입 mylib_engine 을 실제 클래스로 정의
+struct mylib_engine {
+    impl::Engine e;            // 안에 무엇이 있든 밖에서는 모릅니다
+};
+
+extern "C" mylib_engine* mylib_engine_create(int32_t window) {
+    if (window &lt;= 0) return nullptr;
+    try { return new mylib_engine{impl::Engine(window)}; }
+    catch (...) { return nullptr; }
+}
+
+extern "C" void mylib_engine_destroy(mylib_engine* e) {
+    delete e;                  // nullptr 도 안전합니다
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 이 구조인가</h4>
+      <ul class="tx">
+        <li><b>내부를 바꿔도 쓰는 쪽이 다시 컴파일할 필요가 없습니다</b> —
+            구조체 크기가 헤더에 없으므로 ABI 가 안 깨집니다(🔬 d07)</li>
+        <li><b>C++ 표준 라이브러리가 헤더에 새어 나가지 않습니다</b> —
+            <code>std::vector</code> 를 헤더에 쓰면 C 에서 못 씁니다</li>
+        <li><b>수명 관리가 명확합니다</b> — <code>create</code>/<code>destroy</code> 쌍</li>
+        <li><b>모든 언어에서 같은 모양</b>으로 감쌀 수 있습니다</li>
+      </ul>
+      <pre class="code" data-lang="c"><code>/* 타입 안전성을 조금 더 — void* 대신 이름 있는 구조체 포인터 */
+typedef struct mylib_engine  mylib_engine;
+typedef struct mylib_session mylib_session;
+/*  둘을 바꿔 넣으면 C 컴파일러가 경고를 줍니다.
+    void* 로 하면 아무것도 못 잡습니다. ★                */</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>SQLite 가 정확히 이 형태입니다</b> — <code>sqlite3*</code>,
+        <code>sqlite3_stmt*</code> 가 불투명 핸들이고,
+        <code>sqlite3_open</code>/<code>sqlite3_close</code> 가 수명을 관리합니다.
+        20년 넘게 ABI 를 유지할 수 있었던 이유이기도 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">API 형태 다듬기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">출력 크기를 모를 때의 관용구</h4>
+      <pre class="code" data-lang="c"><code>/* 2단계 호출 — 먼저 크기를 묻고, 버퍼를 잡아 다시 부릅니다 ★ */
+MYLIB_EXPORT int32_t mylib_result(const mylib_engine* e,
+                                  double* out, int64_t* n);
+/*  out == NULL 이면 필요한 크기만 *n 에 채워 돌려줍니다  */
+
+/* 쓰는 쪽 */
+int64_t n = 0;
+mylib_result(e, NULL, &amp;n);              /* ① 크기 조회 */
+double* buf = malloc(n * sizeof(double));
+mylib_result(e, buf, &amp;n);               /* ② 실제 채우기 */
+free(buf);
+
+/* 대안 — 라이브러리가 할당하고 전용 해제 함수를 제공 (f07) */
+MYLIB_EXPORT int32_t mylib_result_alloc(const mylib_engine* e,
+                                        double** out, int64_t* n);
+MYLIB_EXPORT void    mylib_free(void* p);
+/*  ★ 반드시 같은 라이브러리의 free 를 쓰게 해야 합니다
+    (윈도우에서 DLL 마다 힙이 달라 malloc/free 가 어긋나면 크래시) */</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조체를 주고받을 때</h4>
+      <pre class="code" data-lang="c"><code>/* 설정처럼 값이 많으면 구조체가 편합니다 */
+typedef struct {
+    int32_t version;        /* ★ 첫 필드는 버전 (f09) */
+    int32_t window;
+    int32_t threads;
+    double  tolerance;
+} mylib_config;
+
+MYLIB_EXPORT void    mylib_config_init(mylib_config* c);  /* 기본값 채우기 */
+MYLIB_EXPORT int32_t mylib_run(const mylib_config* c, ...);
+
+/* 쓰는 쪽 — init 을 부르게 하면 새 필드가 생겨도 안전합니다 */
+mylib_config cfg;
+mylib_config_init(&amp;cfg);
+cfg.window = 5;
+mylib_run(&amp;cfg, ...);
+
+/* 규칙
+   · 필드는 뒤에만 추가 (순서 변경·삭제 금지)
+   · 크기가 고정된 타입만 (int32_t · double · 포인터)
+   · bool 대신 int32_t (언어마다 bool 크기가 다름) ★
+   · 포인터 정렬을 위해 큰 것부터 배치하면 패딩이 줄어듭니다 */</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">쓰기 좋은 C API 의 조건</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">체크리스트</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>모든 함수에 접두어</b> — <code>mylib_</code></li>
+        <li><b>create/destroy 쌍</b>이 명확하고, <code>destroy(NULL)</code> 이 안전한가</li>
+        <li><b>에러는 반환값으로</b>, 값은 출력 인자로(f09)</li>
+        <li><b>포인터 + 길이</b>를 항상 쌍으로 (배열만 넘기지 않기)</li>
+        <li><b>const 를 정확히</b> — 입력은 <code>const T*</code></li>
+        <li><b>예외가 절대 새지 않게</b> — 모든 <code>extern "C"</code> 함수에 try/catch</li>
+        <li><b>스레드 안전성 문서화</b> — 핸들 공유 가능 여부</li>
+        <li><b>버전 함수</b> — <code>mylib_version()</code></li>
+        <li><b>재진입 가능</b> — 전역 상태를 두지 않기</li>
+      </ul>
+      <div class="note warn" style="margin-bottom:0">
+        <b>전역 상태는 특히 위험합니다</b> — 파이썬에서 여러 스레드가 부르거나,
+        같은 프로세스에 여러 사용자가 있으면 <b>서로 간섭</b>합니다.
+        <b>상태는 전부 핸들 안에</b> 두세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">테스트를 C 로도 작성하기</h4>
+      <pre class="code" data-lang="c"><code>/* tests/test_c_api.c — 헤더가 정말 C 에서 컴파일되는지 검증 ★ */
+#include "mylib.h"
+#include &lt;assert.h&gt;
+#include &lt;stdio.h&gt;
+
+int main(void) {
+    mylib_engine* e = mylib_engine_create(3);
+    assert(e != NULL);
+
+    double data[] = {1, 2, 3, 4, 5};
+    assert(mylib_engine_feed(e, data, 5) == MYLIB_OK);
+
+    double out[5]; int64_t n = 5;
+    assert(mylib_engine_result(e, out, &amp;n) == MYLIB_OK);
+
+    mylib_engine_destroy(e);
+    mylib_engine_destroy(NULL);        /* NULL 도 안전해야 합니다 */
+
+    assert(mylib_engine_create(-1) == NULL);   /* 잘못된 인자 */
+    printf("모두 통과\n");
+    return 0;
+}</code></pre>
+      <pre class="code" data-lang="cmake"><code># ★ C 컴파일러로 빌드해야 의미가 있습니다
+enable_language(C)
+add_executable(test_c_api tests/test_c_api.c)
+target_link_libraries(test_c_api PRIVATE mylib)
+add_test(NAME c_api COMMAND test_c_api)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">핸들을 안전하게 만들기</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">잘못된 핸들 방어</h4>
+      <pre class="code" data-lang="cpp"><code>// FFI 경계에서는 사용자가 아무 값이나 넘길 수 있습니다.
+// 해제된 핸들·엉뚱한 포인터·정수를 그대로 넘기는 일이 실제로 일어납니다.
+
+struct mylib_engine {
+    uint32_t magic;              // ★ 검증용 서명
+    impl::Engine e;
+};
+static constexpr uint32_t kMagic = 0x4D594C42;   // 'MYLB'
+
+static impl::Engine* check(mylib_engine* h) {
+    if (!h || h-&gt;magic != kMagic) return nullptr;
+    return &amp;h-&gt;e;
+}
+
+extern "C" int32_t mylib_engine_feed(mylib_engine* h,
+                                     const double* d, int64_t n) {
+    auto* e = check(h);
+    if (!e) return MYLIB_ERR_INVALID_HANDLE;      // 크래시 대신 에러 ★
+    ...
+}
+
+extern "C" void mylib_engine_destroy(mylib_engine* h) {
+    if (!h) return;
+    h-&gt;magic = 0;                // ★ 해제 표시 → 이중 해제를 잡아냅니다
+    delete h;
+}
+
+// 더 강한 방법 — 핸들을 '정수 ID' 로 주고 내부 테이블에서 조회
+//   포인터를 아예 노출하지 않아 잘못된 주소 접근이 불가능해집니다
+//   (대신 조회 비용과 락이 필요합니다)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스레드 안전성 설계</h4>
+      <pre class="code" data-lang="c"><code>/* 문서에 반드시 명시할 세 가지 등급 */
+
+/* ① 스레드 안전 없음 (기본)
+      "하나의 핸들을 여러 스레드에서 동시에 쓰면 안 됩니다.
+       서로 다른 핸들은 동시에 써도 됩니다."       ← 가장 흔한 형태 */
+
+/* ② 읽기 동시 가능
+      "여러 스레드가 동시에 읽을 수 있습니다.
+       쓰는 동안에는 다른 접근이 없어야 합니다."   ← const 함수만 */
+
+/* ③ 완전 스레드 안전
+      "모든 함수를 동시에 호출할 수 있습니다."     ← 내부 락 필요 */
+
+/* 라이브러리 전역 초기화가 필요하면 명시 */
+MYLIB_EXPORT int32_t mylib_global_init(void);    /* 한 번만 · 스레드 하나에서 */
+MYLIB_EXPORT void    mylib_global_shutdown(void);</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파이썬에서 쓸 때 중요합니다</b> — GIL 이 있으면 <code>ctypes</code> 호출이
+        사실상 직렬화되지만, <code>ctypes</code> 는 <b>호출 중 GIL 을 해제합니다</b>.
+        즉 <b>C 함수는 진짜로 동시에 실행될 수 있습니다</b>.
+        “파이썬이니까 안전하겠지”는 <b>FFI 에서는 성립하지 않습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> C++ 객체는 <b>불투명 포인터(핸들)</b>로 넘깁니다.
+    헤더에는 <code>typedef struct mylib_engine mylib_engine;</code> 처럼
+    <b>이름만</b> 두고, 실제 정의는 <code>.cpp</code> 안에.
+    <b>create/destroy 쌍</b>과 <b>포인터+길이 쌍</b>, 이 두 관용구가 C API 설계의 기본입니다.</div>
+</section>
+
+<!-- ==================== f04 ==================== -->
+<section class="sec" id="f04">
+  <div class="sec-head rv">
+    <span class="no">FFI 04</span>
+    <h2>파이썬 <span class="t">ctypes</span> 로 바로 부르기</h2>
+    <p class="lead">
+      설치할 것도, 빌드할 것도 없습니다. 파이썬 표준 라이브러리만으로
+      <code>.dll</code>·<code>.so</code> 를 <b>즉시 불러 씁니다.</b>
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">5분 만에 부르기</h4>
+      <pre class="code" data-lang="python"><code>import ctypes, numpy as np
+from ctypes import c_double, c_int32, c_int64, POINTER
+
+# ① 라이브러리 로드
+lib = ctypes.CDLL("./libmylib.so")        # 리눅스
+# lib = ctypes.CDLL("./mylib.dll")        # 윈도우
+# lib = ctypes.CDLL("./libmylib.dylib")   # 맥
+
+# ② ★ 시그니처를 반드시 선언하세요 (이걸 빼면 크래시의 원인)
+lib.mylib_smooth.argtypes = [
+    POINTER(c_double),   # const double* in
+    c_int64,             # int64_t n
+    POINTER(c_double),   # double* out
+    c_int32,             # int32_t window
+]
+lib.mylib_smooth.restype = c_int32        # 반환 타입
+
+# ③ numpy 배열을 그대로 넘깁니다 — 복사 없음 ★
+a   = np.random.rand(1_000_000)
+out = np.empty_like(a)
+
+rc = lib.mylib_smooth(
+    a.ctypes.data_as(POINTER(c_double)),
+    a.size,
+    out.ctypes.data_as(POINTER(c_double)),
+    3,
+)
+if rc != 0:
+    raise RuntimeError(f"mylib_smooth 실패 (코드 {rc})")</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>argtypes</code> 를 빼면 안 됩니다</b> — 선언하지 않으면 ctypes 가
+        <b>모든 인자를 int 로 추측</b>합니다. 64비트에서 포인터가 잘리거나
+        double 이 정수 레지스터로 들어가 <b>즉시 크래시하거나 쓰레기 값</b>이 됩니다.
+        “가끔 되고 가끔 안 되는” FFI 코드의 1순위 원인입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">타입 대응표</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">C</th><th>ctypes</th></tr>
+        <tr><td><code>int32_t</code></td><td><code>c_int32</code></td></tr>
+        <tr><td><code>int64_t</code> · <code>size_t</code></td><td><code>c_int64</code> · <code>c_size_t</code></td></tr>
+        <tr><td><code>double</code> · <code>float</code></td><td><code>c_double</code> · <code>c_float</code></td></tr>
+        <tr><td><code>uint8_t</code></td><td><code>c_uint8</code></td></tr>
+        <tr><td><code>const char*</code></td><td><code>c_char_p</code> ★</td></tr>
+        <tr><td><code>void*</code> · 핸들</td><td><code>c_void_p</code></td></tr>
+        <tr><td><code>double*</code></td><td><code>POINTER(c_double)</code></td></tr>
+        <tr><td><code>bool</code></td><td><code>c_bool</code> — <b>크기 주의</b></td></tr>
+        <tr><td>구조체</td><td><code>class X(Structure)</code></td></tr>
+        <tr><td>함수 포인터</td><td><code>CFUNCTYPE(...)</code></td></tr>
+        <tr><td>출력 인자</td><td><code>byref(x)</code></td></tr>
+      </table></div>
+      <pre class="code" data-lang="python"><code># 출력 인자 받기
+n = c_int64()
+lib.mylib_result(handle, None, ctypes.byref(n))   # 크기 조회
+print(n.value)
+
+# 문자열
+lib.mylib_name.restype = c_char_p
+name = lib.mylib_name().decode("utf-8")           # bytes → str ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">핸들과 구조체 다루기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">불투명 핸들을 파이썬 클래스로</h4>
+      <pre class="code" data-lang="python"><code>import ctypes
+from ctypes import c_void_p, c_int32, c_int64, c_double, POINTER
+
+lib.mylib_engine_create.argtypes  = [c_int32]
+lib.mylib_engine_create.restype   = c_void_p        # ★ 불투명 핸들
+lib.mylib_engine_destroy.argtypes = [c_void_p]
+lib.mylib_engine_destroy.restype  = None
+lib.mylib_engine_feed.argtypes    = [c_void_p, POINTER(c_double), c_int64]
+lib.mylib_engine_feed.restype     = c_int32
+
+class Engine:
+    """C 핸들을 파이썬 객체로 감쌉니다."""
+
+    def __init__(self, window: int = 3):
+        self._h = lib.mylib_engine_create(window)
+        if not self._h:
+            raise ValueError(f"엔진 생성 실패 (window={window})")
+
+    def feed(self, data) -&gt; None:
+        a = np.ascontiguousarray(data, dtype=np.float64)
+        rc = lib.mylib_engine_feed(
+            self._h, a.ctypes.data_as(POINTER(c_double)), a.size)
+        if rc != 0:
+            raise RuntimeError(_msg(rc))
+
+    def close(self) -&gt; None:
+        if getattr(self, "_h", None):
+            lib.mylib_engine_destroy(self._h)
+            self._h = None                    # ★ 이중 해제 방지
+
+    __del__ = close                            # GC 될 때도 정리
+    def __enter__(self):  return self
+    def __exit__(self, *e): self.close(); return False</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>restype = c_void_p</code> 를 꼭 지정하세요</b> — 기본값은
+        <code>c_int</code>(32비트)라 <b>64비트 포인터가 잘립니다</b>.
+        핸들을 다시 넘길 때 엉뚱한 주소가 되어 크래시합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조체 주고받기</h4>
+      <pre class="code" data-lang="python"><code>class Config(ctypes.Structure):
+    _fields_ = [
+        ("version",   c_int32),
+        ("window",    c_int32),
+        ("threads",   c_int32),
+        ("_pad",      c_int32),      # ★ 패딩을 명시하면 오해가 없습니다
+        ("tolerance", c_double),
+    ]
+
+# 정렬을 C 와 맞추기 — 기본은 자연 정렬(C 와 동일)
+# _pack_ = 1 은 C 쪽도 #pragma pack(1) 일 때만 쓰세요
+
+lib.mylib_config_init.argtypes = [POINTER(Config)]
+lib.mylib_run.argtypes = [POINTER(Config)]
+lib.mylib_run.restype  = c_int32
+
+cfg = Config()
+lib.mylib_config_init(ctypes.byref(cfg))      # 기본값 채우기
+cfg.window = 5
+lib.mylib_run(ctypes.byref(cfg))
+
+# ★ 크기를 반드시 검증하세요 — 안 맞으면 조용히 값이 깨집니다
+assert ctypes.sizeof(Config) == lib.mylib_config_size(), \
+       "구조체 크기 불일치 — 헤더와 파이썬 정의가 어긋났습니다"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>C 쪽에 크기 확인 함수를 두세요</b> —
+        <code>int32_t mylib_config_size(void) { return sizeof(mylib_config); }</code>
+        한 줄이면 <b>구조체 정의가 어긋난 것을 즉시</b> 잡을 수 있습니다.
+        이 버그는 안 잡으면 <b>몇 시간을 태웁니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">라이브러리 찾기와 배포</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">경로 문제를 확실히 해결하기</h4>
+      <pre class="code" data-lang="python"><code>import ctypes, os, sys
+from ctypes.util import find_library
+from pathlib import Path
+
+def load_mylib() -&gt; ctypes.CDLL:
+    here = Path(__file__).resolve().parent      # ★ 패키지 안에 동봉
+
+    names = {
+        "win32":  ["mylib.dll"],
+        "darwin": ["libmylib.dylib"],
+    }.get(sys.platform, ["libmylib.so"])
+
+    # 윈도우 3.8+ 는 DLL 검색 경로를 명시해야 합니다 ★
+    if sys.platform == "win32":
+        os.add_dll_directory(str(here))
+
+    for n in names:
+        p = here / n
+        if p.exists():
+            return ctypes.CDLL(str(p))
+
+    # 시스템에 설치된 것 찾기
+    if (found := find_library("mylib")):
+        return ctypes.CDLL(found)
+
+    raise ImportError(
+        f"mylib 을 찾을 수 없습니다. 찾은 경로: {here}\n"
+        f"설치: pip install mylib-binary 또는 LD_LIBRARY_PATH 설정")
+
+lib = load_mylib()</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">GIL 과 스레드</h4>
+      <pre class="code" data-lang="python"><code># ★ ctypes 의 CDLL 은 호출 중 GIL 을 해제합니다
+#   → C 함수가 오래 걸려도 다른 파이썬 스레드가 돕니다 (좋음)
+#   → 동시에, C 함수가 진짜로 병렬 실행됩니다 (스레드 안전성 필요)
+from concurrent.futures import ThreadPoolExecutor
+with ThreadPoolExecutor(8) as ex:
+    list(ex.map(run_native, chunks))     # 실제로 8코어를 씁니다
+
+# GIL 을 유지한 채 부르려면 PyDLL 을 씁니다
+lib_gil = ctypes.PyDLL("./libmylib.so")  # 파이썬 객체를 만지는 C 코드용
+
+# ⚠ 콜백 안에서 파이썬을 부를 때는 CFUNCTYPE 이 GIL 을 알아서 잡아 줍니다
+CB = ctypes.CFUNCTYPE(None, c_double)    # GIL 획득 O
+CB_NO = ctypes.WINFUNCTYPE(None, c_double)  # 윈도우 stdcall
+
+# 콜백 객체는 반드시 살려 두세요 ★
+_cb = CB(lambda x: print(x))             # 지역변수로 두면 GC 되어 크래시
+lib.mylib_set_callback(_cb)              # 전역이나 인스턴스 멤버로 보관</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>콜백 객체 수명이 대표적인 함정입니다</b> — 파이썬이 콜백 래퍼를 회수하면
+        C 쪽에는 <b>죽은 함수 포인터</b>가 남습니다.
+        반드시 <b>모듈 전역이나 객체 멤버로 참조를 유지</b>하세요(f08).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">ctypes 의 호출 비용</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">얼마나 느린가</h4>
+      <pre class="code" data-lang="python"><code>import ctypes, timeit
+lib = ctypes.CDLL("./libnoop.so")
+lib.noop.argtypes = []
+lib.noop.restype  = None
+
+t = timeit.timeit(lambda: lib.noop(), number=1_000_000)
+print(f"ctypes  호출당 {t:.3f} μs")
+
+# 대략적인 감각 (환경마다 다릅니다 — 직접 재세요)
+#   순수 파이썬 함수 호출   : ~0.05 μs
+#   pybind11 확장 호출      : ~0.1  μs
+#   ctypes 호출             : ~0.5~1 μs   ★ 5~10배
+#   cffi (ABI 모드)         : ctypes 와 비슷
+#   cffi (API 모드)         : pybind11 급 (컴파일하므로)
+#
+# 이유 — ctypes 는 호출 때마다 인자 타입을 '해석'하고
+#        libffi 로 동적으로 호출 프레임을 만듭니다(런타임 작업).
+#        pybind11 은 컴파일 시점에 고정된 코드를 생성합니다.
+
+# ★ 결론: 호출 횟수가 적고 계산이 크면 ctypes 로 충분합니다.
+#   호출이 잦으면(초당 수십만 회) cffi API 모드나 pybind11 로 가세요.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최적화 기법</h4>
+      <pre class="code" data-lang="python"><code># ① 함수 객체를 지역 변수로 캐시 (속성 조회 제거)
+smooth = lib.mylib_smooth          # 루프 밖에서 한 번
+for chunk in chunks:
+    smooth(...)
+
+# ② 배열 포인터를 미리 만들어 재사용
+ptr_in  = a.ctypes.data_as(POINTER(c_double))    # 매번 만들지 않기
+ptr_out = out.ctypes.data_as(POINTER(c_double))
+
+# ③ 더 빠른 포인터 변환 — numpy 의 ctypes 속성은 매번 객체를 만듭니다
+addr_in = a.ctypes.data                # 정수 주소
+lib.f.argtypes = [c_void_p, c_int64]
+lib.f(addr_in, a.size)                 # 정수를 그대로 넘기면 더 쌉니다
+
+# ④ 애초에 호출 횟수를 줄이기 (이 가이드의 일관된 원칙)
+lib.mylib_process_batch(ptrs, counts, n_chunks)   # 한 번에 여러 개
+
+# ⑤ numpy.ctypeslib 로 배열 타입을 선언하면 검증까지 됩니다
+from numpy.ctypeslib import ndpointer
+lib.mylib_smooth.argtypes = [
+    ndpointer(np.float64, flags="C_CONTIGUOUS"),   # ★ 자동 검증
+    c_int64,
+    ndpointer(np.float64, flags="C_CONTIGUOUS, WRITEABLE"),
+    c_int32,
+]
+lib.mylib_smooth(a, a.size, out, 3)    # 배열을 그대로 넘길 수 있습니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>numpy.ctypeslib.ndpointer</code> 를 쓰세요</b> — dtype·연속성·쓰기 가능 여부를
+        <b>ctypes 가 자동으로 검사</b>해 주고, 배열을 그대로 넘길 수 있어 코드도 짧아집니다.
+        수동 <code>data_as</code> 보다 안전합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>ctypes.CDLL</code> 로 로드하고
+    <b><code>argtypes</code>·<code>restype</code> 을 반드시 선언</b>하면 끝입니다.
+    numpy 배열은 <code>ndpointer</code> 로 <b>복사 없이</b> 넘어가고,
+    핸들은 <b><code>c_void_p</code></b> 로 받아 파이썬 클래스로 감싸세요.
+    빌드도 설치도 없다는 것이 이 방식의 가장 큰 장점입니다.</div>
+</section>
+
+
+<!-- ==================== f05 ==================== -->
+<section class="sec" id="f05">
+  <div class="sec-head rv">
+    <span class="no">FFI 05</span>
+    <h2><span class="t">cffi</span> 와 구조체 정렬</h2>
+    <p class="lead">
+      cffi 는 <b>C 헤더를 그대로 붙여넣어</b> 쓰는 방식입니다.
+      타입을 손으로 옮겨 적지 않아도 되고, API 모드로 컴파일하면 <b>ctypes 보다 훨씬 빠릅니다.</b>
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ABI 모드 — 컴파일 없이</h4>
+      <pre class="code" data-lang="python"><code>from cffi import FFI
+ffi = FFI()
+
+# ★ C 선언을 그대로 붙여넣습니다 (헤더에서 복사)
+ffi.cdef("""
+    typedef struct mylib_engine mylib_engine;
+
+    mylib_engine* mylib_engine_create(int32_t window);
+    void          mylib_engine_destroy(mylib_engine* e);
+    int32_t       mylib_smooth(const double* in, int64_t n,
+                               double* out, int32_t window);
+""")
+
+lib = ffi.dlopen("./libmylib.so")      # 컴파일 없이 로드
+
+# 배열 넘기기 — numpy 와 연결
+import numpy as np
+a   = np.random.rand(1000)
+out = np.empty_like(a)
+p_in  = ffi.cast("const double*", ffi.from_buffer(a))    # 복사 없음 ★
+p_out = ffi.cast("double*",       ffi.from_buffer(out))
+rc = lib.mylib_smooth(p_in, a.size, p_out, 3)
+
+# 핸들
+e = lib.mylib_engine_create(3)
+try:
+    ...
+finally:
+    lib.mylib_engine_destroy(e)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">API 모드 — 빠르고 안전합니다 ★</h4>
+      <pre class="code" data-lang="python"><code># build_mylib.py — 빌드 시점에 C 확장을 생성합니다
+from cffi import FFI
+ffibuilder = FFI()
+
+ffibuilder.cdef("""
+    int32_t mylib_smooth(const double*, int64_t, double*, int32_t);
+""")
+
+ffibuilder.set_source(
+    "_mylib_cffi",
+    '#include "mylib.h"',              # ★ 진짜 헤더를 include
+    libraries=["mylib"],
+    include_dirs=["include"],
+    library_dirs=["build"],
+)
+
+if __name__ == "__main__":
+    ffibuilder.compile(verbose=True)</code></pre>
+      <pre class="code" data-lang="python"><code>from _mylib_cffi import lib, ffi      # 컴파일된 확장을 import
+lib.mylib_smooth(p_in, n, p_out, 3)   # pybind11 급 속도
+
+# API 모드의 이점
+#   · 컴파일러가 시그니처를 실제 헤더와 대조 → 타입 오류를 빌드 때 잡음 ★
+#   · 호출 비용이 훨씬 낮음
+#   · 매크로·인라인 함수·enum 값도 쓸 수 있음</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>고르는 기준</b> — <b>이미 배포된 <code>.so</code> 를 부르기만</b> 하면 ABI 모드,
+        <b>내 라이브러리와 함께 배포</b>한다면 API 모드입니다.
+        API 모드는 빌드가 필요한 대신 <b>타입 안전성과 속도</b>를 둘 다 얻습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">구조체 정렬과 패딩</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 값이 깨지는가</h4>
+      <pre class="code" data-lang="c"><code>/* C 쪽 */
+typedef struct {
+    char    a;      /* 오프셋 0 */
+                    /* 패딩 7바이트 ★ */
+    double  b;      /* 오프셋 8  (8의 배수여야 함) */
+    int32_t c;      /* 오프셋 16 */
+                    /* 패딩 4바이트 (전체가 8의 배수가 되도록) */
+} Rec;              /* sizeof == 24 */</code></pre>
+      <pre class="code" data-lang="python"><code># ❌ 패딩을 모르고 선언하면 오프셋이 어긋납니다
+class Rec(ctypes.Structure):
+    _pack_ = 1                       # ← C 는 pack 을 안 했는데 여기서 1로
+    _fields_ = [("a", c_char), ("b", c_double), ("c", c_int32)]
+# sizeof == 13 → b 를 잘못된 위치에서 읽습니다 (값이 쓰레기)
+
+# ✅ 기본 정렬을 그대로 쓰고, 크기를 검증합니다
+class Rec(ctypes.Structure):
+    _fields_ = [("a", c_char), ("b", c_double), ("c", c_int32)]
+
+assert ctypes.sizeof(Rec) == 24
+assert Rec.b.offset == 8             # ★ 오프셋까지 확인
+print([(f[0], getattr(Rec, f[0]).offset) for f in Rec._fields_])</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>디버깅이 가장 어려운 버그 중 하나입니다</b> — 컴파일도 되고 크래시도 안 나는데
+        <b>값만 이상합니다</b>. 구조체를 주고받는다면
+        <b>C 쪽에 <code>sizeof</code> 와 <code>offsetof</code> 를 돌려주는 함수</b>를 두고
+        파이썬에서 검증하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">애초에 안 겪는 방법</h4>
+      <pre class="code" data-lang="c"><code>/* ① 구조체를 아예 넘기지 않기 — 인자로 풀어서 ★ 가장 안전 */
+int32_t mylib_run(int32_t window, int32_t threads, double tol);
+
+/* ② 넘겨야 한다면 정렬 걱정이 없는 배치로 설계 */
+typedef struct {
+    double  tolerance;   /* 큰 것부터 */
+    int64_t count;
+    int32_t window;
+    int32_t threads;     /* 4+4 = 8 로 딱 맞음 → 패딩 0 */
+} mylib_config;          /* sizeof == 24, 어느 컴파일러에서나 동일 */
+
+/* ③ 검증 함수를 노출 */
+int32_t mylib_config_size(void)   { return (int32_t)sizeof(mylib_config); }
+int32_t mylib_config_offset_window(void) {
+    return (int32_t)offsetof(mylib_config, window);
+}
+
+/* ④ C 쪽에서도 컴파일 시점에 못 박기 */
+static_assert(sizeof(mylib_config) == 24, "ABI 변경 감지");
+static_assert(offsetof(mylib_config, window) == 16, "필드 위치 변경");</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>cffi 의 장점이 여기서 드러납니다</b> — API 모드는
+        <b>실제 헤더를 컴파일러로 파싱</b>하므로 정렬이 자동으로 맞습니다.
+        구조체를 많이 주고받는다면 cffi API 모드가 ctypes 보다 훨씬 안전합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">세 방식 비교</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 무엇을</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:22%"></th><th>ctypes</th><th>cffi ABI</th><th>cffi API</th></tr>
+        <tr><td>의존성</td><td><b>없음</b></td><td>cffi</td><td>cffi + 컴파일러</td></tr>
+        <tr><td>선언 방식</td><td>손으로</td><td><b>C 문법 복사</b></td><td>진짜 헤더</td></tr>
+        <tr><td>타입 검증</td><td>없음</td><td>실행 시</td><td><b>빌드 시</b> ★</td></tr>
+        <tr><td>속도</td><td>느림</td><td>비슷</td><td><b>빠름</b></td></tr>
+        <tr><td>정렬 안전</td><td>수동</td><td>수동</td><td><b>자동</b></td></tr>
+        <tr><td>배포</td><td>가장 쉬움</td><td>쉬움</td><td>wheel 필요</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무 권장</b> — <b>시스템 라이브러리를 몇 번 부르는 정도</b>면 ctypes,
+        <b>내 C 라이브러리를 파이썬 패키지로 배포</b>하면 cffi API 모드,
+        <b>C++ 기능을 풍부하게 노출</b>해야 하면 pybind11(🐍 탭).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">공통으로 지킬 것</h4>
+      <pre class="code" data-lang="python"><code># ① 파이썬 쪽 래퍼로 감싸 raw FFI 를 노출하지 않기
+#    사용자가 c_void_p 를 직접 만지게 하면 반드시 사고가 납니다
+
+# ② 에러 코드를 예외로 변환
+_MSG = {-1: "잘못된 인자", -2: "메모리 부족", -3: "입출력 오류"}
+def _check(rc: int) -&gt; None:
+    if rc != 0:
+        raise RuntimeError(f"mylib 오류 {rc}: {_MSG.get(rc, '알 수 없음')}")
+
+# ③ 버전 검사 — 헤더와 .so 가 어긋나면 조용히 깨집니다 ★
+EXPECTED = (1, 2)
+v = lib.mylib_version()
+if (v // 10000, (v // 100) % 100) != EXPECTED:
+    raise ImportError(f"mylib 버전 불일치: {v} (기대 {EXPECTED})")
+
+# ④ 배열은 항상 정규화해서 넘기기
+a = np.ascontiguousarray(data, dtype=np.float64)
+
+# ⑤ 반드시 테스트 — 특히 빈 배열과 경계값
+</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">엔디언과 이식성</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">플랫폼마다 다른 것들</h4>
+      <pre class="code" data-lang="text"><code>① 정수 크기
+   long : 리눅스 64비트 8바이트 · 윈도우 64비트 4바이트 ★
+   → 인터페이스에는 int32_t · int64_t 만 쓰세요
+
+② bool 크기
+   C++ bool 은 대개 1바이트지만 표준이 보장하지 않습니다
+   → int32_t 로 주고받으세요
+
+③ enum 크기
+   구현 정의입니다 (보통 int 지만 최적화로 작아질 수 있음)
+   → 인터페이스에는 int32_t 로, 값만 enum 상수로 정의
+
+④ 엔디언
+   x86 · ARM(리틀) 이 대부분이지만, 네트워크로 보낼 때는 다릅니다
+   → 파일·프로토콜은 명시적 직렬화, 같은 프로세스 내 FFI 는 신경 안 써도 됨
+
+⑤ 구조체 반환
+   작은 구조체는 레지스터로, 큰 것은 숨은 포인터로 반환됩니다.
+   규칙이 ABI 마다 달라 오류가 잦으므로
+   ★ 구조체는 '포인터로 받아 채우는' 형태를 쓰세요
+     int32_t mylib_get(mylib_config* out);   ← 이 형태가 안전</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자동 생성으로 실수 없애기</h4>
+      <pre class="code" data-lang="bash"><code># ① 헤더에서 파이썬 바인딩을 자동 생성
+pip install ctypesgen
+ctypesgen -l mylib include/mylib.h -o mylib_ffi.py
+#   → argtypes·restype·구조체 정의가 자동으로 만들어집니다 ★
+
+# ② C++ 쪽에서 헤더를 자동 생성 (Rust 진영의 cbindgen 과 같은 자리)
+#    C++ 는 표준 도구가 없어 보통 손으로 관리합니다.
+#    대신 검증을 자동화하세요:
+
+# ③ CI 에서 ABI 검증
+abidiff old/libmylib.so new/libmylib.so    # ABI 가 깨졌는지 (🔬 d07)
+
+# ④ 구조체 레이아웃 덤프해 비교
+pahole -C mylib_config build/libmylib.so   # 필드 오프셋·패딩을 표로
+#   커밋에 이 출력을 남겨 두면 변경이 리뷰에서 보입니다 ★
+
+# ⑤ 파이썬 쪽 정의와 실제를 대조하는 테스트
+python -c "
+from mylib import _ffi, lib
+assert _ffi.sizeof('mylib_config') == lib.mylib_config_size()
+"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>자동화가 답입니다</b> — 헤더와 FFI 선언을 <b>손으로 두 곳에 유지</b>하면
+        반드시 어긋납니다. 생성하거나, 최소한 <b>CI 에서 크기·오프셋을 대조</b>하세요.
+        이 검사 하나가 <b>가장 찾기 어려운 버그를 통째로</b> 막아 줍니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> cffi 는 <b>C 선언을 그대로 붙여넣어</b> 쓰는 방식입니다.
+    <b>ABI 모드</b>는 컴파일 없이 즉시, <b>API 모드</b>는 컴파일해서 빠르고 안전하게.
+    구조체를 주고받을 때는 <b>패딩 때문에 오프셋이 어긋나기 쉬우니</b>
+    <code>sizeof</code>·<code>offsetof</code> 를 <b>양쪽에서 대조</b>하세요.</div>
+</section>
+
+<!-- ==================== f06 ==================== -->
+<section class="sec" id="f06">
+  <div class="sec-head rv">
+    <span class="no">FFI 06</span>
+    <h2>Node · Deno 에서 <span class="t">컴파일 없이</span> 부르기</h2>
+    <p class="lead">
+      같은 <code>.so</code>·<code>.dll</code> 을 JavaScript 에서도 그대로 부릅니다.
+      네이티브 애드온을 빌드하지 않아도 됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Node — koffi (현재 표준)</h4>
+      <pre class="code" data-lang="bash"><code>npm install koffi
+#   ffi-napi 는 오래 방치돼 최신 Node 에서 자주 깨집니다.
+#   koffi 가 사실상 후속입니다 (더 빠르고 유지보수됨) ★</code></pre>
+      <pre class="code" data-lang="javascript"><code>import koffi from 'koffi'
+
+const lib = koffi.load('./libmylib.so')      // .dll · .dylib
+
+// 시그니처를 C 문법 그대로 적습니다
+const smooth = lib.func(
+  'int32_t mylib_smooth(const double* in, int64_t n, double* out, int32_t w)')
+
+const n = 1_000_000
+const input  = new Float64Array(n).fill(1)
+const output = new Float64Array(n)
+
+const rc = smooth(input, n, output, 3)       // TypedArray 를 그대로 ★
+if (rc !== 0) throw new Error(`실패 코드 ${rc}`)
+
+// 불투명 핸들
+const Engine = koffi.opaque('mylib_engine')
+const create  = lib.func('mylib_engine* mylib_engine_create(int32_t)')
+const destroy = lib.func('void mylib_engine_destroy(mylib_engine*)')
+
+const e = create(3)
+try { /* ... */ } finally { destroy(e) }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비동기 호출 — 이벤트 루프를 막지 않게</h4>
+      <pre class="code" data-lang="javascript"><code>// ★ 동기 호출은 Node 의 이벤트 루프를 통째로 멈춥니다
+const rc = smooth(input, n, output, 3)      // 500ms 걸리면 서버가 500ms 멈춤
+
+// koffi 의 비동기 호출 — 워커 스레드에서 실행됩니다
+smooth.async(input, n, output, 3, (err, rc) =&gt; {
+  if (err) return console.error(err)
+  console.log('완료', rc)
+})
+
+// Promise 로 감싸기
+import { promisify } from 'node:util'
+const smoothAsync = promisify(smooth.async)
+const rc2 = await smoothAsync(input, n, output, 3)
+
+// ⚠ 비동기 호출 중에 입력 버퍼를 건드리면 안 됩니다
+//   (C 함수가 다른 스레드에서 그 메모리를 읽고 있습니다)
+
+// 구조체
+const Config = koffi.struct('mylib_config', {
+  tolerance: 'double',
+  count:     'int64_t',
+  window:    'int32_t',
+  threads:   'int32_t',
+})
+const run = lib.func('int32_t mylib_run(const mylib_config* c)')
+run({ tolerance: 0.01, count: 100n, window: 5, threads: 4 })</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>서버에서는 반드시 비동기로</b> — Node 는 단일 스레드라
+        동기 FFI 호출이 <b>모든 요청을 멈춥니다</b>.
+        계산이 <b>1ms 를 넘으면</b> 비동기를 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">Deno · Bun</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Deno — 런타임에 내장돼 있습니다</h4>
+      <pre class="code" data-lang="typescript"><code>// deno run --allow-ffi --unstable-ffi main.ts
+const lib = Deno.dlopen("./libmylib.so", {
+  mylib_smooth: {
+    parameters: ["buffer", "i64", "buffer", "i32"],
+    result: "i32",
+  },
+  mylib_version: { parameters: [], result: "i32" },
+
+  // 비동기 — 별도 스레드에서 실행 (nonblocking)
+  mylib_heavy: {
+    parameters: ["buffer", "i64"],
+    result: "f64",
+    nonblocking: true,        // ★ Promise 를 반환합니다
+  },
+} as const);
+
+const input  = new Float64Array(1000).fill(1);
+const output = new Float64Array(1000);
+const rc = lib.symbols.mylib_smooth(input, 1000n, output, 3);
+
+const r = await lib.symbols.mylib_heavy(input, 1000n);   // 비동기
+lib.close();</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Deno 의 장점</b> — FFI 가 <b>런타임에 내장</b>되어 있어 npm 패키지가 필요 없고,
+        <code>--allow-ffi</code> 권한 모델로 <b>보안 경계가 명시적</b>입니다.
+        타입 선언이 TypeScript 로 되어 있어 오타도 잡힙니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Bun — 가장 빠른 FFI</h4>
+      <pre class="code" data-lang="javascript"><code>import { dlopen, FFIType, ptr } from "bun:ffi"
+
+const { symbols } = dlopen("./libmylib.so", {
+  mylib_smooth: {
+    args: [FFIType.ptr, FFIType.i64, FFIType.ptr, FFIType.i32],
+    returns: FFIType.i32,
+  },
+})
+
+const input  = new Float64Array(1000).fill(1)
+const output = new Float64Array(1000)
+symbols.mylib_smooth(ptr(input), 1000n, ptr(output), 3)
+
+// Bun 은 FFI 호출을 JIT 컴파일해 오버헤드가 거의 없습니다 ★
+//   (벤치마크상 네이티브 애드온에 근접)</code></pre>
+      <pre class="code" data-lang="text"><code>세 런타임 비교
+
+  koffi (Node) : 생태계가 가장 크고 안정적. 비동기 지원 좋음
+  Deno         : 내장 · 권한 모델 · TypeScript 타입
+  Bun          : 가장 빠름. 다만 생태계가 아직 작음
+
+공통 주의점
+  · TypedArray 의 메모리는 GC 가 옮길 수 있습니다.
+    비동기 호출 중에는 참조를 유지해 회수를 막으세요 ★
+  · Node 는 Buffer 와 TypedArray 가 다릅니다(Buffer 는 ArrayBuffer 뷰)
+  · 64비트 정수는 BigInt 로 주고받습니다 (1000n)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">FFI 와 네이티브 애드온 중 무엇을</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">판단표</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:40%">FFI (koffi·Deno)</th><th>네이티브 애드온 (N-API)</th></tr>
+        <tr><td>빌드 불필요 · 설치가 쉬움</td><td>빌드 필요 · prebuild 배포</td></tr>
+        <tr><td>여러 언어가 같은 <code>.so</code> 공유 ★</td><td>Node 전용</td></tr>
+        <tr><td>호출 비용이 조금 큼</td><td><b>가장 빠름</b></td></tr>
+        <tr><td>JS 객체를 다루기 어려움</td><td>JS 객체·클래스 자유롭게</td></tr>
+        <tr><td>타입 오류가 런타임 크래시</td><td>컴파일러가 검사</td></tr>
+        <tr><td>ABI 안정 — Node 버전과 무관</td><td>Node 버전마다 재빌드</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>같은 코어를 두 방식으로 노출할 수 있습니다</b> —
+        C API 를 만들어 두면 <b>FFI 로도, N-API 애드온으로도</b> 감쌀 수 있습니다.
+        먼저 FFI 로 빠르게 검증하고, 성능이 필요해지면 애드온을 얹는 순서가 실용적입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Electron 에서 쓸 때</h4>
+      <pre class="code" data-lang="javascript"><code>// ★ Electron 은 Node 와 V8 버전이 달라 네이티브 애드온이 자주 깨집니다.
+//   FFI 는 ABI 에 의존하지 않아 이 문제가 없습니다 — 큰 장점입니다.
+
+// 메인 프로세스에서만 FFI 를 쓰세요 (렌더러는 보안상 격리)
+// main.js
+import koffi from 'koffi'
+const lib = koffi.load(path.join(process.resourcesPath, 'libmylib.so'))
+
+ipcMain.handle('smooth', async (_e, arr, window) =&gt; {
+  const out = new Float64Array(arr.length)
+  await smoothAsync(arr, arr.length, out, window)
+  return out
+})
+
+// 패키징 — 네이티브 파일을 asar 밖으로 빼야 합니다 ★
+// electron-builder 설정
+// "asarUnpack": ["**/*.node", "**/lib*.so", "**/*.dll"]
+// "extraResources": [{ "from": "native/", "to": "." }]</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>asar 안의 파일은 로드할 수 없습니다</b> — 공유 라이브러리는
+        <b>실제 파일 경로</b>가 필요하므로 <code>asarUnpack</code> 또는
+        <code>extraResources</code> 로 빼내야 합니다.
+        “개발에선 되는데 패키징하면 못 찾는” 문제의 원인입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">JS 엔진과 메모리 경계</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">GC 가 버퍼를 옮길 수 있습니다</h4>
+      <pre class="code" data-lang="javascript"><code>// V8 의 TypedArray 는 두 종류의 메모리를 가집니다
+//   ① 힙 안 (작은 배열) — GC 가 이동시킬 수 있습니다 ★
+//   ② 외부 메모리 (큰 배열 · ArrayBuffer) — 고정
+
+// 동기 호출은 안전합니다 (호출 중 GC 가 돌지 않음)
+smooth(input, n, output, 3)
+
+// ❌ 비동기 호출에서 위험 — C 가 읽는 동안 GC 가 이동시킬 수 있습니다
+smooth.async(input, n, output, 3, cb)
+input = null                      // 참조를 지우면 회수 대상이 됩니다
+
+// ✅ 콜백이 끝날 때까지 참조를 유지
+const keep = { input, output }
+smooth.async(input, n, output, 3, (err, rc) =&gt; {
+  void keep                       // 이 시점까지 살아 있음이 보장됩니다
+  ...
+})
+
+// ✅ 더 확실한 방법 — 네이티브 쪽에서 메모리를 할당해 쓰기
+//   C 가 소유한 버퍼라면 JS GC 와 무관합니다
+const buf = koffi.alloc('double', n)
+smooth.async(buf, n, outBuf, 3, cb)
+// koffi.free(buf)  ← 명시적 해제</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호출 비용 비교와 최적화</h4>
+      <pre class="code" data-lang="javascript"><code>// 벤치마크 — 빈 함수 호출
+import { performance } from 'node:perf_hooks'
+const t0 = performance.now()
+for (let i = 0; i &lt; 1_000_000; i++) noop()
+console.log(`${(performance.now()-t0).toFixed(1)}ms / 1M calls`)
+
+// 대략적인 감각 (직접 재세요)
+//   순수 JS 함수      : ~1ns
+//   N-API 애드온      : ~50~100ns
+//   koffi (동기)      : ~100~300ns
+//   koffi (비동기)    : ~수 μs (스레드 전환 비용)
+//   Bun FFI           : ~10~50ns  ★ JIT 로 거의 네이티브
+
+// 최적화
+//   ① 함수 핸들을 모듈 레벨에 캐시
+//   ② 배열을 재사용 (매번 new Float64Array 하지 않기)
+//   ③ 호출을 배치로 묶기 — 이 가이드의 일관된 원칙
+//   ④ 비동기는 계산이 충분히 클 때만 (전환 비용 때문에)
+
+// 실측으로 손익분기 찾기
+for (const n of [100, 10_000, 1_000_000]) {
+  // 동기 vs 비동기 vs 순수 JS 를 같은 n 으로 비교
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Node 에서 특히 중요한 판단</b> — 계산이 <b>1ms 미만</b>이면 동기 FFI 가 낫고,
+        <b>10ms 이상</b>이면 반드시 비동기입니다. 그 사이는 <b>동시 요청 수</b>에 따라 갈립니다 —
+        요청이 몰리는 서버라면 짧아도 비동기가 안전합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> Node 는 <b>koffi</b>, Deno 는 <b>내장 <code>Deno.dlopen</code></b>,
+    Bun 은 <b><code>bun:ffi</code></b> 로 같은 <code>.so</code> 를 부릅니다.
+    핵심 규칙 둘 — <b>서버에서는 비동기로</b> 부르고,
+    <b>비동기 중에는 버퍼 참조를 유지</b>하세요.</div>
+</section>
+
+
+<!-- ==================== f07 ==================== -->
+<section class="sec" id="f07">
+  <div class="sec-head rv">
+    <span class="no">FFI 07</span>
+    <h2>문자열과 <span class="t">메모리 소유권 규약</span></h2>
+    <p class="lead">
+      FFI 버그의 절반이 여기서 납니다 —
+      <b>“이 메모리는 누가 해제하는가”</b>를 정하지 않으면 반드시 새거나 두 번 해제됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">네 가지 소유권 패턴</h4>
+      <pre class="code" data-lang="c"><code>/* ① 호출자가 버퍼를 주고, 라이브러리가 채운다  ★ 가장 안전 */
+int32_t mylib_get_name(mylib_engine* e, char* buf, int32_t buf_size);
+/*   호출자가 할당·해제 → 소유권 이동이 없어 사고가 없습니다        */
+
+/* ② 라이브러리가 할당하고, 전용 해제 함수를 제공한다 */
+int32_t mylib_get_name_alloc(mylib_engine* e, char** out);
+void    mylib_free(void* p);       /* ★ 반드시 같은 라이브러리의 free */
+
+/* ③ 라이브러리가 소유한 것을 '빌려준다' (해제 금지) */
+const char* mylib_version_string(void);
+/*   정적 문자열이나 내부 버퍼 → 다음 호출까지만 유효할 수 있음 ★    */
+
+/* ④ 호출자가 준 것을 라이브러리가 보관한다 */
+int32_t mylib_set_name(mylib_engine* e, const char* name);
+/*   → 라이브러리가 내부에 복사해야 합니다 (포인터만 저장하면 위험)  */
+
+/* 어떤 패턴인지 반드시 문서와 이름으로 드러내세요 */
+/*   _alloc 접미사 · @return 주석 · 헤더 상단의 규약 설명           */</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>윈도우에서는 더 심각합니다</b> — DLL 마다 <b>다른 힙</b>을 쓸 수 있어,
+        A 에서 <code>malloc</code> 한 것을 B 에서 <code>free</code> 하면 <b>즉시 크래시</b>합니다.
+        <b>반드시 할당한 쪽이 제공하는 해제 함수</b>를 쓰게 하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문자열 다루기</h4>
+      <pre class="code" data-lang="cpp"><code>// C++ std::string 은 넘길 수 없습니다. 세 가지 방법이 있습니다.
+
+// ① 호출자 버퍼 (권장) — 크기 조회 후 채우기
+extern "C" int32_t mylib_name(const mylib_engine* h,
+                              char* buf, int32_t* size) {
+    const std::string&amp; s = h-&gt;e.name();
+    const int32_t need = static_cast&lt;int32_t&gt;(s.size()) + 1;   // +1 = '\0'
+    if (!buf) { *size = need; return MYLIB_OK; }               // 크기만
+    if (*size &lt; need) { *size = need; return MYLIB_ERR_BUFFER; }
+    std::memcpy(buf, s.c_str(), need);
+    *size = need;
+    return MYLIB_OK;
+}
+
+// ② 라이브러리 할당 + 전용 해제
+extern "C" char* mylib_name_alloc(const mylib_engine* h) {
+    const std::string&amp; s = h-&gt;e.name();
+    auto* p = static_cast&lt;char*&gt;(std::malloc(s.size() + 1));
+    if (p) std::memcpy(p, s.c_str(), s.size() + 1);
+    return p;                       // NULL 이면 실패
+}
+extern "C" void mylib_string_free(char* p) { std::free(p); }
+
+// ③ 정적 문자열 빌려주기 (버전 등 변하지 않는 것만)
+extern "C" const char* mylib_version_string(void) {
+    return "1.2.3";                 // 정적 저장 기간 → 항상 유효
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">인코딩과 파이썬 쪽 처리</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한글이 깨지지 않게</h4>
+      <pre class="code" data-lang="python"><code>import ctypes
+from ctypes import c_char_p, c_int32, create_string_buffer, byref
+
+# C 문자열은 '바이트'입니다. 인코딩을 반드시 명시하세요 ★
+lib.mylib_set_name.argtypes = [c_void_p, c_char_p]
+lib.mylib_set_name(h, "김민준".encode("utf-8"))       # str → bytes
+
+# 받을 때
+lib.mylib_version_string.restype = c_char_p
+ver = lib.mylib_version_string().decode("utf-8")      # bytes → str
+
+# ① 호출자 버퍼 패턴
+size = c_int32(0)
+lib.mylib_name(h, None, byref(size))                  # 크기 조회
+buf = create_string_buffer(size.value)                # 버퍼 할당
+lib.mylib_name(h, buf, byref(size))
+name = buf.value.decode("utf-8")                      # ★ .value 는 널까지
+
+# ② 라이브러리 할당 패턴 — 반드시 해제해야 합니다
+lib.mylib_name_alloc.restype = c_void_p               # ★ c_char_p 아님!
+p = lib.mylib_name_alloc(h)
+try:
+    name = ctypes.cast(p, c_char_p).value.decode("utf-8")
+finally:
+    lib.mylib_string_free(p)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>restype = c_char_p</code> 의 함정 ★</b> — ctypes 가 <b>자동으로 bytes 로 변환</b>하면서
+        <b>원래 포인터를 잃어버립니다</b>. 그러면 해제할 수 없어 <b>메모리가 샙니다</b>.
+        <b>해제해야 하는 문자열은 <code>c_void_p</code> 로 받고</b>
+        <code>ctypes.cast</code> 로 읽으세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">윈도우 경로와 와이드 문자</h4>
+      <pre class="code" data-lang="c"><code>/* 윈도우는 파일 경로에 UTF-16(wchar_t) 를 씁니다.
+   한글 경로를 다루려면 두 가지 방법이 있습니다.       */
+
+/* ① UTF-8 을 받아 내부에서 변환 (권장) ★ 인터페이스가 단순해집니다 */
+int32_t mylib_open(const char* utf8_path);
+/*   구현에서 MultiByteToWideChar 로 변환해 _wfopen 사용            */
+
+/* ② 플랫폼별 함수를 따로 노출 */
+#ifdef _WIN32
+int32_t mylib_open_w(const wchar_t* path);
+#endif</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 구현 — 윈도우에서 UTF-8 경로를 여는 표준적인 방법
+#ifdef _WIN32
+static std::wstring to_wide(const char* s) {
+    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0);
+    std::wstring w(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s, -1, w.data(), n);
+    w.resize(n - 1);
+    return w;
+}
+std::ifstream f(to_wide(path));      // ★ MSVC 는 wstring 오버로드가 있습니다
+#else
+std::ifstream f(path);
+#endif
+
+// C++17 이후에는 filesystem::path 로 통일할 수도 있습니다
+std::filesystem::path p = std::filesystem::u8path(utf8_path);</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>인터페이스는 UTF-8 로 통일하세요</b> — 파이썬·Node·Go 모두 UTF-8 이 기본입니다.
+        윈도우 변환은 <b>라이브러리 안에서 처리</b>하는 것이
+        쓰는 쪽 코드를 플랫폼 독립적으로 유지하는 길입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">규약을 문서와 코드로 못 박기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">헤더에 규약을 적습니다</h4>
+      <pre class="code" data-lang="c"><code>/**
+ * 엔진의 이름을 가져옵니다.
+ *
+ * @param h     [in]     엔진 핸들. NULL 이면 MYLIB_ERR_INVALID.
+ * @param buf   [out]    결과를 담을 버퍼. NULL 이면 필요한 크기만 *size 에.
+ * @param size  [in,out] 입력: buf 크기. 출력: 필요한 크기(널 문자 포함).
+ *
+ * @return MYLIB_OK           성공
+ *         MYLIB_ERR_BUFFER   buf 가 작음 (*size 에 필요한 크기)
+ *         MYLIB_ERR_INVALID  잘못된 인자
+ *
+ * @note 문자열은 UTF-8 입니다.
+ * @note 반환된 buf 는 호출자가 소유합니다. 라이브러리는 보관하지 않습니다.
+ * @threadsafety 같은 핸들에 대한 동시 호출은 안전하지 않습니다.
+ */
+MYLIB_EXPORT int32_t mylib_name(const mylib_engine* h,
+                                char* buf, int32_t* size);</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 다섯 줄이 라이브러리의 품질을 정합니다</b> —
+        <b>[in]/[out] · NULL 허용 여부 · 소유권 · 인코딩 · 스레드 안전성</b>.
+        FFI 사용자는 소스를 볼 수 없으므로 <b>헤더 주석이 유일한 계약서</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">누수를 자동으로 잡기</h4>
+      <pre class="code" data-lang="python"><code># 파이썬 래퍼는 항상 컨텍스트 매니저로
+class Engine:
+    def __enter__(self): return self
+    def __exit__(self, *e): self.close(); return False
+
+with Engine(3) as e:      # ★ 예외가 나도 반드시 해제됩니다
+    e.feed(data)
+
+# 반복 호출 후 메모리 검사 (테스트로 자동화)
+def test_no_leak():
+    import resource
+    before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    for _ in range(10_000):
+        with Engine(3) as e:
+            e.feed(np.zeros(1000))
+    after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    assert after - before &lt; 20_000, f"{after-before}KB 누수 의심"</code></pre>
+      <pre class="code" data-lang="bash"><code># C 쪽 누수는 valgrind·ASan 으로
+valgrind --leak-check=full python test_ffi.py 2&gt;&amp;1 | grep -A5 "definitely lost"
+
+# 파이썬 자체의 노이즈가 많으므로 억제 파일을 쓰세요
+valgrind --suppressions=$(python -c "import sysconfig;print(sysconfig.get_config_var('srcdir'))")/Misc/valgrind-python.supp ...
+
+# 더 간단한 방법 — C 테스트를 따로 두고 거기서 검사 ★
+valgrind --leak-check=full ./build/test_c_api</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">할당자를 주입하는 설계</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호출자가 메모리를 관리하게 하기</h4>
+      <pre class="code" data-lang="c"><code>/* 고급 라이브러리들이 쓰는 패턴 — 할당자를 사용자가 지정 */
+typedef struct {
+    void* (*alloc)(size_t size, void* user);
+    void  (*free)(void* p, void* user);
+    void* user;
+} mylib_allocator;
+
+MYLIB_EXPORT int32_t mylib_init(const mylib_allocator* alloc);
+/*   NULL 이면 기본(malloc/free) 사용                             */
+
+/* 왜 이렇게 하나
+   · 게임 엔진 : 프레임 단위 아레나 할당자를 쓰고 싶음
+   · 임베디드  : 힙을 아예 못 쓰는 환경
+   · 추적      : 라이브러리가 얼마나 쓰는지 정확히 계측
+   · 파이썬    : PyMem_Malloc 을 써서 파이썬 메모리 통계에 잡히게 ★ */</code></pre>
+      <pre class="code" data-lang="python"><code># 파이썬에서 할당 추적을 붙이는 예
+ALLOC = ctypes.CFUNCTYPE(c_void_p, c_size_t, c_void_p)
+FREE  = ctypes.CFUNCTYPE(None, c_void_p, c_void_p)
+
+_total = 0
+@ALLOC
+def _alloc(size, user):
+    global _total; _total += size
+    return ctypes.cast(ctypes.create_string_buffer(size), c_void_p).value
+#   ⚠ 실제 구현은 더 정교해야 합니다 (버퍼 수명 유지 등)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">경계에서의 메모리 규칙 정리</h4>
+      <pre class="code" data-lang="text"><code>지켜야 할 다섯 가지
+
+  ① 할당한 쪽이 해제한다
+     라이브러리가 준 것은 라이브러리 함수로, 내가 준 것은 내가.
+
+  ② 포인터는 항상 길이와 함께
+     길이 없는 포인터는 버퍼 오버런의 예약입니다.
+
+  ③ 빌려준 포인터의 유효 기간을 명시
+     "다음 호출까지" · "핸들이 살아 있는 동안" · "영구"
+
+  ④ 라이브러리는 받은 포인터를 보관하지 않는다
+     보관해야 하면 반드시 복사하고, 그 사실을 문서에 적습니다.
+
+  ⑤ NULL 을 언제나 허용하거나, 언제나 거부하거나
+     함수마다 다르면 사용자가 반드시 틀립니다.
+     → destroy(NULL) 은 안전하게, 나머지는 에러 코드로.
+
+검증
+  · ASan 으로 이중 해제·누수·해제 후 사용을 잡습니다
+  · C 테스트를 valgrind 로 돌립니다
+  · 파이썬 래퍼에 반복 호출 누수 테스트를 둡니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>이 규칙들이 지켜지지 않으면</b> — 증상이
+        <b>“한참 뒤에 엉뚱한 곳에서 크래시”</b>로 나타납니다.
+        FFI 에서 가장 비싼 디버깅이고, <b>규약을 문서화하는 30분이 며칠을 아낍니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>“누가 해제하는가”</b>를 함수마다 정하고 <b>헤더에 적으세요</b>.
+    가장 안전한 형태는 <b>호출자가 버퍼를 주고 라이브러리가 채우는</b> 방식이고,
+    라이브러리가 할당했다면 <b>반드시 전용 해제 함수</b>를 제공해야 합니다.
+    문자열은 <b>UTF-8 바이트</b>로 통일하세요.</div>
+</section>
+
+
+<!-- ==================== f08 ==================== -->
+<section class="sec" id="f08">
+  <div class="sec-head rv">
+    <span class="no">FFI 08</span>
+    <h2>콜백을 <span class="t">C ABI 로</span> 넘기기</h2>
+    <p class="lead">
+      진행률 보고, 이벤트 통지, 사용자 정의 규칙 —
+      다른 언어의 함수를 C++ 가 거꾸로 부르는 경우입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">함수 포인터 + user data 관용구 ★</h4>
+      <pre class="code" data-lang="c"><code>/* C 콜백의 표준 형태 — 반드시 void* user 를 함께 받습니다 */
+typedef int32_t (*mylib_progress_fn)(double frac, void* user);
+/*   반환 0 = 계속, 그 외 = 중단                                  */
+
+MYLIB_EXPORT int32_t mylib_run(mylib_engine* h,
+                               mylib_progress_fn cb, void* user);
+
+/* ★ void* user 가 없으면 콜백이 '전역 상태'에만 접근할 수 있어
+     여러 인스턴스를 동시에 쓸 수 없습니다. C API 설계의 기본 관용구입니다. */</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 구현 — C++ 쪽
+extern "C" int32_t mylib_run(mylib_engine* h,
+                             mylib_progress_fn cb, void* user) {
+    if (!h) return MYLIB_ERR_INVALID;
+    try {
+        return h-&gt;e.run([&amp;](double f) -&gt; bool {
+            if (!cb) return true;
+            return cb(f, user) == 0;          // 0 이면 계속
+        }) ? MYLIB_OK : MYLIB_ERR_CANCELED;
+    } catch (...) {
+        return MYLIB_ERR_UNKNOWN;             // ★ 예외를 절대 밖으로
+    }
+}
+//  ⚠ 콜백이 예외를 던질 수 있다는 것도 고려해야 합니다
+//    (다른 언어의 예외가 C 프레임을 통과하면 UB)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬에서 콜백 넘기기</h4>
+      <pre class="code" data-lang="python"><code>import ctypes
+from ctypes import c_double, c_int32, c_void_p, CFUNCTYPE
+
+# 시그니처 정의 — C 선언과 정확히 일치해야 합니다
+PROGRESS = CFUNCTYPE(c_int32, c_double, c_void_p)
+
+lib.mylib_run.argtypes = [c_void_p, PROGRESS, c_void_p]
+lib.mylib_run.restype  = c_int32
+
+class Engine:
+    def run(self, on_progress=None):
+        def _cb(frac, _user):
+            try:
+                if on_progress:
+                    on_progress(frac)
+                return 0                      # 계속
+            except KeyboardInterrupt:
+                return 1                      # 중단 ★
+            except Exception:
+                return 1                      # 예외를 C 로 넘기지 않습니다
+
+        self._cb = PROGRESS(_cb)              # ★ 인스턴스에 보관 (GC 방지)
+        rc = lib.mylib_run(self._h, self._cb, None)
+        if rc != 0:
+            raise RuntimeError(f"실행 실패 {rc}")</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>두 가지를 반드시 지키세요</b> —
+        ① <b>콜백 객체를 살려 두기</b>(<code>self._cb</code> 처럼).
+        지역 변수로 두면 GC 후 <b>죽은 포인터</b>가 남습니다.
+        ② <b>파이썬 예외를 콜백 밖으로 내보내지 않기</b>.
+        <code>try/except</code> 로 감싸 <b>에러 코드로 변환</b>해야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">언어별 콜백</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Node · Deno</h4>
+      <pre class="code" data-lang="javascript"><code>// koffi
+const ProgressFn = koffi.proto('int32_t Progress(double frac, void* user)')
+const run = lib.func('int32_t mylib_run(mylib_engine* h, Progress* cb, void* user)')
+
+const cb = koffi.register((frac, _user) =&gt; {
+  process.stdout.write(`\r${(frac*100).toFixed(0)}%`)
+  return 0
+}, koffi.pointer(ProgressFn))
+
+try {
+  run(engine, cb, null)
+} finally {
+  koffi.unregister(cb)          // ★ 반드시 해제 (안 하면 누수)
+}
+
+// ⚠ 콜백은 '호출한 스레드'에서 실행됩니다.
+//   비동기(run.async) 로 부르면 워커 스레드에서 JS 를 부르게 되어
+//   대부분의 런타임에서 문제가 됩니다 — 동기 호출에서만 콜백을 쓰거나,
+//   네이티브 애드온의 ThreadSafeFunction 을 쓰세요(🟨 Node 탭).</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">콜백 대신 폴링 — 훨씬 안전합니다 ★</h4>
+      <pre class="code" data-lang="c"><code>/* 콜백은 언어 경계·스레드·예외·수명이 전부 얽힙니다.
+   가능하면 '상태를 물어보는' 형태로 바꾸세요.                    */
+
+/* 라이브러리는 백그라운드로 진행하고, 상태만 노출 */
+MYLIB_EXPORT int32_t mylib_start(mylib_engine* h);
+MYLIB_EXPORT int32_t mylib_poll(const mylib_engine* h,
+                                double* progress, int32_t* done);
+MYLIB_EXPORT int32_t mylib_cancel(mylib_engine* h);</code></pre>
+      <pre class="code" data-lang="python"><code># 파이썬 쪽 — 훨씬 단순하고 안전합니다
+lib.mylib_start(h)
+prog, done = c_double(), c_int32()
+while True:
+    lib.mylib_poll(h, byref(prog), byref(done))
+    if done.value:
+        break
+    bar.update(prog.value)
+    try:
+        time.sleep(0.05)
+    except KeyboardInterrupt:
+        lib.mylib_cancel(h)          # ★ Ctrl+C 도 자연스럽게 처리
+        raise</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>폴링의 장점</b> — GIL·GC·예외 전파 문제가 <b>전부 사라집니다</b>.
+        진행률처럼 <b>정밀도가 중요하지 않은</b> 용도라면 거의 항상 폴링이 낫습니다.
+        콜백은 <b>이벤트를 놓치면 안 되는 경우</b>에만 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">스레드를 넘나드는 콜백</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어느 스레드에서 불리는지가 전부입니다</h4>
+      <pre class="code" data-lang="c"><code>/* 헤더에 반드시 명시하세요 */
+
+/* ① 같은 스레드에서 불림 (동기) — 가장 안전 ★ */
+/*    "콜백은 mylib_run 을 호출한 스레드에서 실행됩니다."          */
+
+/* ② 라이브러리 워커 스레드에서 불림 */
+/*    "콜백은 내부 스레드에서 실행됩니다.
+       파이썬 객체를 만지려면 GIL 을 획득해야 하고,
+       JS 는 ThreadSafeFunction 이 필요합니다."                  */
+
+/* ③ 여러 스레드에서 동시에 불릴 수 있음 */
+/*    "콜백은 재진입 가능해야 하며 스레드 안전해야 합니다."         */</code></pre>
+      <pre class="code" data-lang="python"><code># ② 인 경우 파이썬에서 GIL 을 잡아야 합니다
+# ★ ctypes 의 CFUNCTYPE 은 GIL 을 자동으로 획득합니다 (안전)
+#    다만 그 순간 다른 파이썬 스레드가 멈추므로 짧게 유지하세요
+
+# 워커 스레드 콜백에서 무거운 파이썬 코드를 실행하면
+# 병렬 계산이 GIL 때문에 직렬화됩니다 → 큐에 넣고 메인에서 처리
+import queue
+q = queue.Queue()
+
+def _cb(frac, _user):
+    q.put(frac)          # 넣기만 (아주 짧음)
+    return 0
+
+# 메인 스레드에서 소비
+while not done:
+    frac = q.get(timeout=1)
+    update_ui(frac)      # 무거운 작업은 여기서</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">취소와 타임아웃</h4>
+      <pre class="code" data-lang="cpp"><code>// 취소는 '플래그를 보는' 방식이 가장 단순합니다
+struct mylib_engine {
+    impl::Engine e;
+    std::atomic&lt;bool&gt; cancel{false};      // ★ atomic 필수
+};
+
+extern "C" int32_t mylib_cancel(mylib_engine* h) {
+    if (!h) return MYLIB_ERR_INVALID;
+    h-&gt;cancel.store(true, std::memory_order_relaxed);
+    return MYLIB_OK;
+}
+
+// 계산 루프 안에서 주기적으로 확인
+for (std::size_t i = 0; i &lt; n; ++i) {
+    if ((i &amp; 0xFFFF) == 0 &amp;&amp;                       // 65536 번마다
+        h-&gt;cancel.load(std::memory_order_relaxed))
+        return MYLIB_ERR_CANCELED;
+    work(i);
+}
+//   ★ 확인 주기가 너무 잦으면 성능이 떨어지고,
+//     너무 드물면 Ctrl+C 반응이 느려집니다. 수십 ms 간격이 적당합니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Ctrl+C 가 안 먹는 확장 모듈</b>은 사용자를 가장 화나게 합니다.
+        <b>취소 플래그를 반드시 제공</b>하고, 파이썬 래퍼에서
+        <code>KeyboardInterrupt</code> 를 잡아 <code>cancel()</code> 을 부르게 하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">콜백의 비용과 대안</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">경계를 거꾸로 넘는 비용</h4>
+      <pre class="code" data-lang="text"><code>C → 파이썬 콜백 한 번 (ctypes CFUNCTYPE)
+  ① GIL 획득
+  ② libffi 로 인자 변환 (C 값 → 파이썬 객체)
+  ③ 파이썬 함수 호출
+  ④ 반환값 변환
+  ⑤ GIL 해제
+  합계 대략 1~3 μs — 정방향 호출보다 오히려 비쌉니다 ★
+
+C → JS 콜백 (koffi register)
+  ① V8 컨텍스트 진입 · 인자 변환 · 호출
+  대략 0.5~2 μs
+
+★ 즉 '원소마다 콜백'은 어떤 언어에서도 불가능합니다.
+  호출 횟수를 데이터 크기와 분리하는 것이 유일한 답입니다.
+
+대안 비교
+  폴링      : 콜백 0회 · 가장 안전 · 정밀도 낮음        ← 기본 선택
+  배치 콜백 : 청크마다 1회 · 균형                        ← 진행률에 적합
+  규칙 주입 : 콜백 대신 '설정값'으로 표현                ← 필터·정렬 기준
+  결과 반환 : 전부 계산해 배열로 한 번에                 ← 가능하면 이것</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">콜백 없이 사용자 규칙을 받는 법</h4>
+      <pre class="code" data-lang="c"><code>/* ① 조건을 데이터로 표현 */
+typedef enum { OP_GT, OP_LT, OP_EQ } mylib_op;
+int32_t mylib_filter(const double* in, int64_t n,
+                     int32_t col, mylib_op op, double value,
+                     double* out, int64_t* out_n);
+
+/* ② 미리 정의된 함수를 이름으로 선택 */
+int32_t mylib_transform(const double* in, int64_t n,
+                        const char* mode,      /* "log" · "sqrt" · "zscore" */
+                        double* out);
+
+/* ③ 간단한 수식을 문자열로 받아 내부에서 파싱·컴파일 */
+int32_t mylib_eval(const char* expr,           /* "x * 2 + 1" */
+                   const double* in, int64_t n, double* out);
+/*    exprtk · muparser 같은 라이브러리로 구현 —
+      한 번 파싱해 두면 루프 안에서는 경계를 안 넘습니다 ★         */
+
+/* ④ 사용자가 진짜 코드를 넣어야 한다면
+      → 그 부분만 C ABI 함수로 컴파일해 넘기게 합니다
+        (파이썬이면 numba @cfunc · Cython 이 C 함수 포인터를 만들어 줍니다) */</code></pre>
+      <pre class="code" data-lang="python"><code>from numba import cfunc, types
+sig = types.int32(types.float64, types.voidptr)
+
+@cfunc(sig)                       # ★ 진짜 기계어 함수가 만들어집니다
+def my_rule(x, user):
+    return 1 if x &gt; 0.5 else 0
+
+lib.mylib_run(h, my_rule.ctypes, None)    # 경계 비용 없이 호출됩니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>numba <code>@cfunc</code> 은 강력한 우회로입니다</b> — 파이썬 코드를
+        <b>C ABI 함수 포인터로 컴파일</b>해 주므로, 원소마다 불려도
+        <b>GIL 도 인터프리터도 거치지 않습니다</b>.
+        사용자 정의 규칙이 꼭 필요한 라이브러리에서 고려할 만합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> C 콜백은 <b>함수 포인터 + <code>void* user</code></b> 가 표준형입니다.
+    파이썬에서는 <b>콜백 객체를 반드시 살려 두고</b>,
+    <b>예외를 콜백 밖으로 내보내지 마세요</b>(에러 코드로 변환).
+    그리고 가능하면 <b>콜백 대신 폴링</b>이 훨씬 안전합니다.</div>
+</section>
+
+
+<!-- ==================== f09 ==================== -->
+<section class="sec" id="f09">
+  <div class="sec-head rv">
+    <span class="no">FFI 09</span>
+    <h2>에러 코드와 <span class="t">버전 관리</span></h2>
+    <p class="lead">
+      예외를 쓸 수 없으니 <b>반환값으로 실패를 알립니다</b>.
+      그리고 <b>나중에 기능을 추가해도 옛 사용자가 안 깨지게</b> 설계해야 합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러 코드 설계</h4>
+      <pre class="code" data-lang="c"><code>/* ① 값을 명시적으로 고정 — 나중에 순서가 바뀌면 안 됩니다 */
+typedef enum {
+    MYLIB_OK              =  0,
+    MYLIB_ERR_INVALID     = -1,   /* 잘못된 인자 */
+    MYLIB_ERR_NOMEM       = -2,   /* 메모리 부족 */
+    MYLIB_ERR_IO          = -3,   /* 파일·네트워크 */
+    MYLIB_ERR_BUFFER      = -4,   /* 버퍼가 작음 */
+    MYLIB_ERR_CANCELED    = -5,   /* 사용자 취소 */
+    MYLIB_ERR_UNSUPPORTED = -6,   /* 이 빌드에서 지원 안 함 */
+    MYLIB_ERR_HANDLE      = -7,   /* 잘못된 핸들 */
+    MYLIB_ERR_UNKNOWN     = -99,  /* 예상 못 한 예외 */
+} mylib_status;
+
+/* ② 사람이 읽을 메시지도 제공 */
+MYLIB_EXPORT const char* mylib_strerror(int32_t code);
+
+/* ③ 더 자세한 정보는 스레드 로컬로 (errno 방식) */
+MYLIB_EXPORT const char* mylib_last_error(void);
+/*   "행 12: 예상치 못한 토큰 ']'" 처럼 맥락이 담긴 메시지 ★      */</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 구현 — 스레드 로컬 저장
+static thread_local std::string g_last_error;
+
+extern "C" const char* mylib_last_error(void) {
+    return g_last_error.c_str();          // 다음 호출까지 유효 ★ 문서화
+}
+
+extern "C" int32_t mylib_parse(const char* text) {
+    try {
+        impl::parse(text);
+        g_last_error.clear();
+        return MYLIB_OK;
+    } catch (const impl::ParseError&amp; e) {
+        g_last_error = e.what();          // 상세 메시지 저장
+        return MYLIB_ERR_INVALID;
+    } catch (const std::bad_alloc&amp;) {
+        g_last_error = "메모리 부족";
+        return MYLIB_ERR_NOMEM;
+    } catch (...) {
+        g_last_error = "알 수 없는 오류";
+        return MYLIB_ERR_UNKNOWN;
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬에서 예외로 바꾸기</h4>
+      <pre class="code" data-lang="python"><code>class MylibError(Exception):
+    """모든 mylib 오류의 부모."""
+    def __init__(self, code: int, detail: str = ""):
+        self.code = code
+        super().__init__(f"[{code}] {detail}" if detail else f"코드 {code}")
+
+class MylibValueError(MylibError, ValueError): pass
+class MylibMemoryError(MylibError, MemoryError): pass
+class MylibIOError(MylibError, OSError): pass
+
+_MAP = {
+    -1: MylibValueError,
+    -2: MylibMemoryError,
+    -3: MylibIOError,
+    -4: MylibValueError,
+    -5: KeyboardInterrupt,
+}
+
+def _check(rc: int) -&gt; None:
+    if rc == 0:
+        return
+    detail = lib.mylib_last_error().decode("utf-8", "replace")
+    exc = _MAP.get(rc, MylibError)
+    if exc is KeyboardInterrupt:
+        raise KeyboardInterrupt(detail)
+    raise exc(rc, detail)
+
+# 사용
+_check(lib.mylib_parse(text.encode()))</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파이썬 표준 예외를 <b>다중 상속</b>하세요</b> —
+        <code>MylibValueError(MylibError, ValueError)</code> 로 만들면
+        사용자가 <code>except ValueError</code> 로도 잡을 수 있어
+        <b>기존 코드에 자연스럽게 녹아듭니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">확장 가능한 인터페이스</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조체에 버전 · 크기 필드를 두기 ★</h4>
+      <pre class="code" data-lang="c"><code>typedef struct {
+    int32_t struct_size;      /* ★ 첫 필드는 sizeof(자기 자신) */
+    int32_t window;
+    int32_t threads;
+    int32_t _reserved;
+    double  tolerance;
+    /* v2 에서 추가 — 옛 사용자는 여기까지 모릅니다 */
+    int32_t mode;
+} mylib_config;
+
+MYLIB_EXPORT void mylib_config_init(mylib_config* c);
+/*   구현: memset 후 c-&gt;struct_size = sizeof(mylib_config) 로 채움 */
+
+MYLIB_EXPORT int32_t mylib_run(const mylib_config* c);
+/*   구현에서 크기로 버전을 판단합니다                              */</code></pre>
+      <pre class="code" data-lang="cpp"><code>extern "C" int32_t mylib_run(const mylib_config* c) {
+    if (!c || c-&gt;struct_size &lt; 24) return MYLIB_ERR_INVALID;
+
+    int32_t mode = 0;                          // 기본값
+    if (c-&gt;struct_size &gt;= offsetof(mylib_config, mode) + 4)
+        mode = c-&gt;mode;                        // ★ 새 필드가 있을 때만 읽기
+
+    ...
+}
+//  → 옛 프로그램이 새 .so 를 써도 안전하고,
+//    새 프로그램이 옛 .so 를 쓰면 구조체가 커서 에러로 걸립니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버전 조회와 기능 탐지</h4>
+      <pre class="code" data-lang="c"><code>/* ① 숫자 버전 — 비교하기 쉽게 */
+MYLIB_EXPORT int32_t mylib_version(void);        /* 10203 = 1.2.3 */
+MYLIB_EXPORT const char* mylib_version_string(void);  /* "1.2.3-rc1" */
+
+/* ② 기능 탐지 — 버전보다 이쪽이 견고합니다 ★ */
+MYLIB_EXPORT int32_t mylib_has_feature(const char* name);
+/*   mylib_has_feature("simd_avx512")
+     mylib_has_feature("gpu")            → 있으면 1                */
+
+/* ③ 빌드 정보 */
+MYLIB_EXPORT const char* mylib_build_info(void);
+/*   "GCC 13.2 · AVX2 · 2026-08-06 · a1b2c3d"                     */</code></pre>
+      <pre class="code" data-lang="python"><code># 파이썬 래퍼에서 로드 직후 검증
+_MIN = 10200        # 1.2.0 이상 필요
+v = lib.mylib_version()
+if v &lt; _MIN:
+    raise ImportError(
+        f"mylib {v//10000}.{v//100%100}.{v%100} 은 너무 낮습니다 "
+        f"(최소 1.2.0). 업그레이드하세요.")
+
+if not lib.mylib_has_feature(b"simd_avx2"):
+    warnings.warn("AVX2 미지원 빌드입니다. 성능이 낮을 수 있습니다.")</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">호환성을 지키는 규칙</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">해도 되는 변경 / 하면 안 되는 변경</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:48%">✅ 안전 (하위 호환)</th><th>❌ ABI 파괴</th></tr>
+        <tr><td>새 함수 추가</td><td>함수 시그니처 변경</td></tr>
+        <tr><td>구조체 <b>끝에</b> 필드 추가<br><span style="color:var(--dim)">(크기 필드가 있을 때)</span></td><td>구조체 <b>중간에</b> 삽입 · 순서 변경</td></tr>
+        <tr><td>새 에러 코드 추가</td><td>기존 에러 코드 값 변경</td></tr>
+        <tr><td>내부 구현 변경</td><td>불투명 타입을 공개 구조체로</td></tr>
+        <tr><td>새 enum 값을 <b>끝에</b></td><td>enum 값 재배치</td></tr>
+        <tr><td>동작 개선(같은 결과)</td><td>기본값·의미 변경 ★</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 교묘한 파괴</b> — <b>기본값이나 동작의 의미를 바꾸는 것</b>입니다.
+        컴파일도 되고 링크도 되지만 <b>결과가 달라집니다</b>.
+        이건 ABI 도구로 잡히지 않으므로 <b>테스트와 문서</b>로만 막을 수 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI 로 ABI 를 지키기</h4>
+      <pre class="code" data-lang="bash"><code># ① abidiff — 이전 릴리스와 비교 (libabigail)
+sudo apt install abigail-tools
+abidiff --headers-dir1 old/include --headers-dir2 new/include \
+        old/libmylib.so new/libmylib.so
+#   ABI 가 깨지면 0 이 아닌 코드로 종료 → CI 에서 실패시킵니다 ★
+
+# ② 심볼 목록을 커밋에 남기기 (리뷰에서 변경이 보이게)
+nm -D --defined-only libmylib.so | awk '{print $3}' | sort &gt; abi/symbols.txt
+git diff --exit-code abi/symbols.txt || echo "심볼 변경됨 — 리뷰 필요"
+
+# ③ 구조체 레이아웃 기록
+pahole -C mylib_config libmylib.so &gt; abi/layout.txt
+
+# ④ 옛 클라이언트로 새 라이브러리 테스트
+#    이전 태그의 테스트 바이너리를 보관해 두고 새 .so 로 실행
+git checkout v1.0 -- tests/
+./build/test_c_api_v1_0            # 새 .so 를 로드해서 통과해야 합니다</code></pre>
+      <pre class="code" data-lang="text"><code>버전 번호 규칙 (semver)
+  주(major) : ABI 파괴 — soname 도 올립니다 (libmylib.so.2)
+  부(minor) : 기능 추가 (하위 호환)
+  수(patch) : 버그 수정
+
+  libmylib.so       → 심볼릭 링크 (개발용)
+  libmylib.so.1     → soname (런타임이 찾는 이름) ★
+  libmylib.so.1.2.3 → 실제 파일</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">심볼 버전과 다중 공존</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">같은 함수의 여러 버전을 동시에</h4>
+      <pre class="code" data-lang="text"><code>glibc 가 쓰는 기법 — 한 .so 안에 같은 이름의 여러 버전을 둡니다
+
+  mylib.map
+    MYLIB_1.0 { global: mylib_run; local: *; };
+    MYLIB_2.0 { global: mylib_run; } MYLIB_1.0;
+
+  구현
+    __asm__(".symver mylib_run_v1, mylib_run@MYLIB_1.0");
+    __asm__(".symver mylib_run_v2, mylib_run@@MYLIB_2.0");   /* 기본 */
+
+  결과
+    · 옛 프로그램은 mylib_run@MYLIB_1.0 에 묶여 옛 동작을 유지
+    · 새로 컴파일하면 자동으로 2.0 에 묶임
+    → ABI 를 깨지 않고 동작을 바꿀 수 있습니다 ★
+
+  ⚠ 리눅스(ELF) 전용입니다. 윈도우·맥에는 이 기능이 없어
+    보통 함수 이름에 버전을 넣습니다 — mylib_run2()</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실전에서는 더 단순한 길</h4>
+      <pre class="code" data-lang="c"><code>/* ① 새 이름으로 함수를 추가하고 옛 것은 유지 (가장 흔한 방법) ★ */
+MYLIB_EXPORT int32_t mylib_run(const mylib_config*);        /* v1 */
+MYLIB_EXPORT int32_t mylib_run_ex(const mylib_config*, int32_t flags); /* v2 */
+/*   Win32 API 가 CreateFileEx · GetVersionEx 로 해 온 방식입니다   */
+
+/* ② 옛 함수는 새 것을 부르게 구현 — 코드 중복 없음 */
+int32_t mylib_run(const mylib_config* c) {
+    return mylib_run_ex(c, 0);          /* 기본 플래그 */
+}
+
+/* ③ 폐기 예고 — 컴파일 시 경고 */
+#if defined(__GNUC__)
+  #define MYLIB_DEPRECATED __attribute__((deprecated("mylib_run_ex 를 쓰세요")))
+#elif defined(_MSC_VER)
+  #define MYLIB_DEPRECATED __declspec(deprecated("mylib_run_ex 를 쓰세요"))
+#else
+  #define MYLIB_DEPRECATED
+#endif
+
+MYLIB_DEPRECATED MYLIB_EXPORT int32_t mylib_run(const mylib_config*);
+
+/* ④ 폐기 일정을 문서에 명시
+      "mylib_run 은 2.0 에서 폐기 예고, 3.0 에서 제거 예정" */</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무 조언</b> — 심볼 버전은 <b>glibc 급 라이브러리</b>가 아니면 과합니다.
+        <b><code>_ex</code> 접미사로 함수를 추가</b>하고 옛 것을 유지하는 방식이
+        <b>세 OS 에서 모두 통하고 이해하기도 쉽습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 예외 대신 <b>에러 코드를 반환</b>하고,
+    상세 메시지는 <b>스레드 로컬 <code>last_error</code></b> 로 제공합니다.
+    파이썬 래퍼에서 <b>표준 예외를 다중 상속한 예외</b>로 변환하세요.
+    호환성은 <b>구조체에 크기 필드</b>를 두고 <b>필드는 뒤에만 추가</b>하면 지킬 수 있습니다.</div>
+</section>
+
+
+<!-- ==================== f10 ==================== -->
+<section class="sec" id="f10">
+  <div class="sec-head rv">
+    <span class="no">FFI 10</span>
+    <h2>C# · 자바 · Go 에서 <span class="t">같은 라이브러리를</span></h2>
+    <p class="lead">
+      한 번 만든 C API 를 여러 언어에서 그대로 씁니다.
+      <b>이것이 C ABI 를 택하는 가장 큰 이유</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C# — P/Invoke</h4>
+      <pre class="code" data-lang="csharp"><code>using System.Runtime.InteropServices;
+
+internal static partial class Native
+{
+    private const string Lib = "mylib";     // mylib.dll · libmylib.so
+
+    // .NET 7+ 소스 제너레이터 방식 (권장 — 마샬링 코드가 생성됩니다)
+    [LibraryImport(Lib)]
+    internal static partial int mylib_smooth(
+        ReadOnlySpan&lt;double&gt; input, long n,
+        Span&lt;double&gt; output, int window);
+
+    [LibraryImport(Lib)]
+    internal static partial IntPtr mylib_engine_create(int window);
+
+    [LibraryImport(Lib)]
+    internal static partial void mylib_engine_destroy(IntPtr h);
+}
+
+// 안전한 래퍼 — SafeHandle 로 확실하게 해제
+sealed class Engine : SafeHandleZeroOrMinusOneIsInvalid
+{
+    public Engine(int window) : base(true)
+        =&gt; SetHandle(Native.mylib_engine_create(window));
+
+    protected override bool ReleaseHandle()
+    {
+        Native.mylib_engine_destroy(handle);
+        return true;
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자바 — FFM API (Java 22+)</h4>
+      <pre class="code" data-lang="java"><code>import java.lang.foreign.*;
+import java.lang.invoke.MethodHandle;
+
+// ★ JNI 는 이제 마지막 수단입니다. FFM(Panama)이 표준이 됐습니다.
+try (Arena arena = Arena.ofConfined()) {
+    SymbolLookup lib = SymbolLookup.libraryLookup("mylib", arena);
+    Linker linker = Linker.nativeLinker();
+
+    MethodHandle smooth = linker.downcallHandle(
+        lib.find("mylib_smooth").orElseThrow(),
+        FunctionDescriptor.of(ValueLayout.JAVA_INT,      // 반환
+            ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
+            ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
+
+    MemorySegment in  = arena.allocateArray(ValueLayout.JAVA_DOUBLE, data);
+    MemorySegment out = arena.allocate(ValueLayout.JAVA_DOUBLE, data.length);
+
+    int rc = (int) smooth.invokeExact(in, (long) data.length, out, 3);
+    double[] result = out.toArray(ValueLayout.JAVA_DOUBLE);
+}   // Arena 를 닫으면 메모리가 자동 해제됩니다 ★
+
+// jextract 로 헤더에서 바인딩을 자동 생성할 수도 있습니다
+//   jextract --output src -t com.example.mylib include/mylib.h</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">Go · Rust · 그 외</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Go — cgo</h4>
+      <pre class="code" data-lang="go"><code>package mylib
+
+/*
+#cgo LDFLAGS: -L${SRCDIR}/lib -lmylib
+#cgo CFLAGS: -I${SRCDIR}/include
+#include "mylib.h"
+#include &lt;stdlib.h&gt;
+*/
+import "C"
+import (
+    "errors"
+    "unsafe"
+)
+
+func Smooth(in []float64, window int) ([]float64, error) {
+    out := make([]float64, len(in))
+    rc := C.mylib_smooth(
+        (*C.double)(unsafe.Pointer(&amp;in[0])),
+        C.int64_t(len(in)),
+        (*C.double)(unsafe.Pointer(&amp;out[0])),
+        C.int32_t(window),
+    )
+    if rc != 0 {
+        return nil, errors.New(C.GoString(C.mylib_last_error()))
+    }
+    return out, nil
+}
+
+// ⚠ Go 의 GC 가 슬라이스를 옮길 수 있습니다.
+//   cgo 호출 중에는 고정되지만, C 가 포인터를 '보관'하면 안 됩니다 ★
+// ⚠ cgo 호출은 goroutine 스케줄링을 막아 비용이 있습니다(~수백 ns)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Rust · 그 외 언어</h4>
+      <pre class="code" data-lang="rust"><code>// Rust — extern "C" 블록 (🦀 가이드에서 자세히)
+#[link(name = "mylib")]
+extern "C" {
+    fn mylib_smooth(input: *const f64, n: i64,
+                    output: *mut f64, window: i32) -&gt; i32;
+}
+
+pub fn smooth(input: &amp;[f64], window: i32) -&gt; Result&lt;Vec&lt;f64&gt;, i32&gt; {
+    let mut out = vec![0.0; input.len()];
+    let rc = unsafe {
+        mylib_smooth(input.as_ptr(), input.len() as i64,
+                     out.as_mut_ptr(), window)
+    };
+    if rc == 0 { Ok(out) } else { Err(rc) }
+}
+// bindgen 으로 헤더에서 자동 생성하는 것이 표준입니다</code></pre>
+      <pre class="code" data-lang="text"><code>그 외 — 거의 모든 언어에 FFI 가 있습니다
+
+  Ruby    : Fiddle (표준) · ffi gem
+  PHP     : FFI 확장 (7.4+)
+  Lua     : LuaJIT ffi (아주 빠름)
+  Julia   : ccall (내장 · 오버헤드 거의 0)
+  R       : .C / .Call · Rcpp
+  Swift   : 모듈 맵으로 C 헤더를 직접 import
+  Kotlin/Native : cinterop
+  Zig     : @cImport 로 헤더를 그대로 ★
+  WASM    : Emscripten 으로 컴파일하면 브라우저에서도</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">다언어 배포 전략</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">저장소 구조</h4>
+      <pre class="code" data-lang="text"><code>mylib/
+  include/mylib/*.h          ← 하나의 C API (진실의 원천) ★
+  src/*.cpp                  ← C++ 구현
+  tests/test_c_api.c         ← C 로 작성한 계약 테스트
+
+  bindings/
+    python/                  ← ctypes 또는 cffi 래퍼 + wheel
+    node/                    ← koffi 래퍼 + npm 패키지
+    csharp/                  ← P/Invoke + NuGet
+    java/                    ← FFM + Maven
+    go/                      ← cgo 모듈
+
+  .github/workflows/
+    build-native.yml         ← 3 OS × 2 아키텍처 → 바이너리 아티팩트
+    publish-python.yml       ← 그 바이너리를 담아 wheel 배포
+    publish-node.yml
+    ...</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>핵심은 “한 번 빌드, 여러 번 포장”</b> — 네이티브 바이너리를
+        <b>한 CI 잡에서 만들어 아티팩트로 올리고</b>,
+        각 언어 패키지는 그것을 <b>내려받아 포장만</b> 합니다.
+        언어마다 컴파일하면 <b>버전이 어긋나기 시작합니다</b>.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">계약 테스트로 일관성 유지</h4>
+      <pre class="code" data-lang="yaml"><code># 모든 언어 바인딩이 같은 테스트 케이스를 통과해야 합니다
+# tests/cases.yaml — 언어 중립적인 명세 ★
+- name: smooth_basic
+  input:  [1.0, 2.0, 3.0, 4.0, 5.0]
+  window: 3
+  expect: [1.5, 2.0, 3.0, 4.0, 4.5]
+  tolerance: 1e-9
+
+- name: smooth_empty
+  input:  []
+  window: 3
+  expect: []
+
+- name: smooth_invalid_window
+  input:  [1.0, 2.0]
+  window: 0
+  error:  MYLIB_ERR_INVALID</code></pre>
+      <pre class="code" data-lang="python"><code># 각 언어의 테스트가 이 파일을 읽어 실행합니다
+import yaml, numpy as np, mylib
+for case in yaml.safe_load(open("tests/cases.yaml")):
+    if "error" in case:
+        with pytest.raises(mylib.MylibError):
+            mylib.smooth(case["input"], case["window"])
+    else:
+        np.testing.assert_allclose(
+            mylib.smooth(case["input"], case["window"]),
+            case["expect"], rtol=case.get("tolerance", 1e-9))</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>언어별로 결과가 미묘하게 다른 경우가 실제로 생깁니다</b> —
+        기본 인자 처리, 빈 입력, 에러 매핑에서 갈립니다.
+        <b>공통 케이스 파일</b>을 두고 모든 바인딩이 통과하게 하면
+        이 문제를 구조적으로 막을 수 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">언어별 FFI 비용 비교</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호출 오버헤드의 차이</h4>
+      <pre class="code" data-lang="text"><code>같은 C 함수를 부를 때의 대략적인 비용 (직접 재 보세요)
+
+  Zig · Rust · C++      ~0ns    직접 호출과 동일 (컴파일 시점에 결정)
+  Julia ccall           ~1ns    JIT 가 인라인
+  Bun FFI               ~10ns   JIT
+  C# LibraryImport      ~5~20ns 소스 제너레이터 (DllImport 보다 빠름)
+  Java FFM              ~10~30ns
+  Go cgo                ~50~200ns  ★ 고루틴 스케줄러 전환 비용
+  Node koffi            ~100~300ns
+  Python ctypes         ~500~1000ns  ★ 가장 비쌈
+  Python cffi(API)      ~100ns
+
+★ 함의
+  · Go 는 cgo 호출이 의외로 비쌉니다 — 배치 처리가 특히 중요합니다
+  · 파이썬 ctypes 는 '큰 작업을 가끔' 부르는 용도로 설계됐습니다
+  · 어느 언어든 결론은 같습니다 — 경계를 자주 넘지 마세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">GC 언어와의 메모리 경계</h4>
+      <pre class="code" data-lang="text"><code>GC 가 있는 언어(Java · C# · Go · JS)의 공통 함정
+
+  ① 객체 이동(compaction)
+     GC 가 메모리를 정리하며 객체를 옮길 수 있습니다.
+     C 에 넘긴 포인터가 그 사이 무효가 됩니다.
+     → 고정(pinning) 하거나, 네이티브 메모리를 따로 할당
+
+     C#  : fixed 블록 · GCHandle.Alloc(pinned)
+     Java: Arena 로 할당한 MemorySegment (힙 밖) ★
+     Go  : cgo 호출 중에는 고정되지만 보관은 금지
+     JS  : 큰 TypedArray 는 외부 메모리라 비교적 안전
+
+  ② 콜백 수명
+     콜백 객체가 GC 되면 C 쪽 함수 포인터가 죽습니다.
+     → 전역 참조로 유지 (C# GCHandle · Java Arena · Python 멤버)
+
+  ③ 예외·패닉
+     각 언어의 예외가 C 프레임을 통과하면 UB 입니다.
+     → 콜백 안에서 전부 잡아 에러 코드로 변환
+
+★ 이 세 가지가 언어를 불문하고 동일하게 나타납니다.
+  C API 를 설계할 때 '콜백 대신 폴링'을 권하는 이유이기도 합니다(f08).</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>다언어를 목표로 한다면</b> — 인터페이스를
+        <b>“큰 배열을 한 번에 넘기고 결과를 받는”</b> 형태로 만드세요.
+        그러면 <b>어느 언어에서도 오버헤드가 무의미</b>해지고,
+        GC·콜백 문제도 대부분 피할 수 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 같은 <code>.so</code> 하나를
+    C#(<code>LibraryImport</code>) · 자바(FFM) · Go(cgo) · Rust · Ruby · Julia 에서
+    <b>전부 부를 수 있습니다</b>. 언어별 함정은 거의 동일합니다 —
+    <b>GC 의 객체 이동 · 콜백 수명 · 예외 전파</b>.
+    <b>배열을 한 번에 넘기는 설계</b>가 이 모두를 한꺼번에 해결합니다.</div>
+</section>
+
+</div><!-- /pane-ffi -->

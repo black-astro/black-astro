@@ -1,11 +1,9 @@
-# 학습 가이드 소스 (Python · Java · JS/TS · C#/Unity · Database · Web Server)
+# 학습 가이드 소스 (Python · Java · JS/TS · C#/Unity · C++ · Rust · Database · Web Server)
 
-`public/*-web/index.html` 여섯 개의 **원본**입니다.
+`public/*-web/index.html` 여덟 개의 **원본**입니다.
 편집은 여기서 하고, 빌드하면 조각들이 합쳐져 각각 단일 HTML로 나갑니다.
 
-> ⚠️ `public/python-web/` · `public/java-web/` · `public/js-ts-web/` ·
-> `public/csharp-web/` · `public/db-web/` · `public/server-web/` 의 index.html 을
-> 직접 고치지 마세요. 다음 빌드에서 덮어써집니다.
+> ⚠️ `public/*-web/index.html` 을 직접 고치지 마세요. 다음 빌드에서 덮어써집니다.
 
 | 가이드 | 소스 | 배포 경로 | 규모 |
 |---|---|---|---|
@@ -13,10 +11,30 @@
 | ☕ Java | `guide-src/java/` | `/java-web/` | 11탭 · 166섹션 |
 | 🟨 JS · TS | `guide-src/js-ts/` | `/js-ts-web/` | 11탭 · 178섹션 |
 | 🟣 C# · Unity | `guide-src/csharp/` | `/csharp-web/` | 10탭 · 120섹션 |
+| 🔵 C++ | `guide-src/cpp/` | `/cpp-web/` | 8탭 · 88섹션 |
+| 🦀 Rust | `guide-src/rust/` | `/rust-web/` | 8탭 · 88섹션 |
 | 🗄️ Database | `guide-src/db/` | `/db-web/` | 10탭 · 154섹션 |
 | 🌐 Web Server | `guide-src/server/` | `/server-web/` | 11탭 · 152섹션 |
 
-여섯 가이드는 **CSS 5개(01~05)를 공유**합니다(테마 동일).
+여덟 가이드는 **뼈대 CSS 5개와 사이드바 스크립트를 공유**합니다(테마 동일).
+공유 조각은 `guide-src/shared/` 한 곳에만 있습니다 — **한 번 고치면 여덟 가이드에 함께 반영됩니다.**
+예전에는 가이드마다 복사본을 두고 `cp` 로 퍼뜨렸는데, 한두 곳이 빠져 서로 어긋나는 일이 반복됐습니다.
+
+## 🔵 C++ · 🦀 Rust 가이드의 4층 구조
+
+두 가이드는 **한 섹션 안에 난이도 층을 쌓습니다**. 숨김 필터는 없고,
+스크롤만 내리면 전문가 층까지 그대로 보입니다.
+
+| 층 | h3 형태 | 배지 | `data-lv` |
+|---|---|---|---|
+| 기초 | (섹션 본문 카드) | JS 가 자동 주입 | — |
+| 중급 | `이렇게도 쓸 수 있다 — …` | `<span class="lvl m">🟡 중급</span>` | `i` |
+| 실무 | `실무에선 이렇게 — …` | `<span class="lvl h">🔴 실무</span>` | `a` |
+| 전문가 | `한 단계 더 — …` | `<span class="lvl x">🧬 전문가</span>` | `x` |
+
+두 가이드는 같은 다섯 원칙으로 수렴합니다 —
+① 경계를 넘는 횟수를 데이터 크기와 분리 ② 좁고 안정된 경계(C ABI·abi3·N-API)
+③ 측정하고 결정 ④ 되돌릴 수 있게(폴백 + parity 테스트) ⑤ 안 쓰는 판단도 실력.
 각 폴더의 `css/06-*.css` 만 그 가이드 전용입니다.
 `build.mjs` 상단의 `GUIDES` 배열에 항목을 추가하면 가이드를 더 늘릴 수 있습니다.
 
@@ -33,8 +51,8 @@
 
 | 명령 | 하는 일 |
 |---|---|
-| `npm run build:guide` | 조각 → 각 `index.html` 생성 (여섯 가이드 모두) |
-| `npm run build:guide -- java` | 특정 가이드만 (`python` · `java` · `js-ts` · `csharp` · `db` · `server`) |
+| `npm run build:guide` | 조각 → 각 `index.html` 생성 (여덟 가이드 모두) |
+| `npm run build:guide -- java` | 특정 가이드만 (`python` · `java` · `js-ts` · `csharp` · `cpp` · `rust` · `db` · `server`) |
 | `npm run dev:guide` | 조각이 바뀌면 자동 재빌드 (작업 중 켜두세요) |
 | `npm run check:guide` | 결과물이 조각과 일치하는지 검사만 (커밋 전 확인용) |
 | `npm run verify:guide` | 빌드 + **정합성 점검** — 사이드바 ↔ 섹션 · 탭 ↔ pane · SEC_LV/EZ/CAP 커버리지 |
@@ -43,24 +61,31 @@
 ## 구조
 
 빌드 순서는 각 가이드의 `parts.json` 에 적힌 배열 그대로입니다.
-다섯 가이드가 같은 뼈대를 씁니다. 조각을 추가·삭제하면
+여덟 가이드가 같은 뼈대를 씁니다. 조각을 추가·삭제하면
 **`parts.json` 도 함께 고쳐야 합니다** (누락·고아 파일은 빌드가 에러로 잡아 줍니다).
 
 ```
 guide-src/
-  build.mjs            빌더 (의존성 없음 · 여섯 가이드를 모두 처리)
+  build.mjs            빌더 (의존성 없음 · 여덟 가이드를 모두 처리)
+  verify.mjs           결과물 정합성 · 회귀 점검
   README.md            이 문서
 
-  <가이드>/            python · java · js-ts · db · server
+  shared/              ★ 여덟 가이드가 글자 하나까지 같이 쓰는 조각
+    css/                 여기를 고치면 여덟 가이드가 함께 바뀝니다
+      01-tokens-base-layout.css    디자인 토큰 · 기본 · 레이아웃
+      02-typography-components.css 히어로 · 섹션 · 카드 · 코드 · 표 · 컨트롤
+      03-demo-stage.css            데모 스테이지 · 탭별 전용 위젯
+      04-panels-beginner.css       옵션 패널 · 초보자 편의 · 리빌 · 푸터
+      05-responsive.css            반응형 · 도구상자 · 터치 대응
+    js/
+      05-nav.js          사이드바 그룹 ↔ 헤더 탭 줄 · 목차 난이도 색 · 탭 ↔ 내용 연결
+
+  <가이드>/            python · java · js-ts · csharp · cpp · rust · db · server
     parts.json         조각 순서 = 최종 파일의 순서
+                       ("shared/…" 로 시작하면 공용 폴더에서 읽습니다)
     parts/
       00-head.html         doctype · <head> · <style> 여는 태그
-      css/                 스타일 (01~05 는 세 가이드 공통)
-        01-tokens-base-layout.css    디자인 토큰 · 기본 · 레이아웃
-        02-typography-components.css 히어로 · 섹션 · 카드 · 코드 · 표 · 컨트롤
-        03-demo-stage.css            데모 스테이지 · 탭별 전용 위젯
-        04-panels-beginner.css       옵션 패널 · 초보자 편의 · 리빌 · 푸터
-        05-responsive.css            반응형 · 도구상자 · 터치 대응
+      css/
         06-*.css                     ★ 그 가이드 전용 (계층도 · 비교표 · 배지)
       10-body-open.html    </style> ~ <body> 시작
       11-sidebar.html      좌측 내비게이션 — 주제 '그룹' + 탭별 목차
@@ -69,13 +94,15 @@ guide-src/
       panes/               탭 본문 — 여기가 실제 콘텐츠
       90-footer.html       푸터 · <script> 여는 태그
       js/                  스크립트
-        00-core.js               공통 유틸 · 검색(TAB_KW/SEC_KW) · 하이라이터
-        05-nav.js                사이드바 그룹 ↔ 헤더 탭 줄 연결 · 목차 난이도 색 (공통)
+        00-core.js               공통 유틸 · 검색(TAB_KW/SEC_KW) · 하이라이터 · 섹션 이동
         20-tab-switch.js         탭 전환 · SEC_LV(난이도) · EZ(쉽게 말하면)
         90-demos.js              탭별 데모 (도구 찾기 필터 등)
         99-init.js               최초 실행 (항상 마지막)
       99-tail.html         </script> · </body>
 ```
+
+공용 조각을 고칠 때는 **여덟 가이드가 모두 바뀐다는 점**을 염두에 두세요.
+`npm run verify:guide` 가 여덟 개를 한꺼번에 점검하므로 어긋나면 바로 드러납니다.
 
 Python 가이드만 데모 스크립트가 많아 `js/` 가 13개로 더 잘게 쪼개져 있습니다
 (`10-pandas-demos.js`, `30-numpy.js`, `80-algo.js` 등).
@@ -132,7 +159,7 @@ npm run check:guide       # 결과물이 조각과 일치하는지
 사이드바 링크 ↔ 섹션 id 일치, `SEC_LV`/`EZ` 커버리지, 태그 균형은
 빌드 결과물(`public/*-web/index.html`)을 대상으로 확인하는 것이 가장 확실합니다.
 
-## 여섯 가이드의 관계
+## 여덟 가이드의 관계
 
 - 각 가이드의 **사이드바·탭바에서 서로를 오갈 수 있습니다**
 - 포트폴리오 진입점(헤더 · 홈 히어로 · 홈 카드 · 푸터)은
@@ -213,7 +240,7 @@ npm run check:guide       # 결과물이 조각과 일치하는지
 </div>
 ```
 
-- 스타일은 각 가이드의 `css/06-*.css` 맨 아래 **`개념 그림` 블록**에 있습니다(다섯 가이드 동일)
+- 스타일은 각 가이드의 `css/06-*.css` 맨 아래 **`개념 그림` 블록**에 있습니다(여덟 가이드 동일)
 - `aria-label` 은 **필수** — 그림을 못 보는 사용자에게 이 문장이 그림입니다
 - `prefers-reduced-motion` 에서는 움직임이 꺼지도록 이미 처리돼 있습니다
 - **텍스트가 `viewBox` 밖으로 나가지 않게** 하세요(아래쪽 라벨은 높이에 여유를 두고 배치)

@@ -1,0 +1,2983 @@
+<!-- ============================================================
+     소유권 · 트레이트 PANE
+     ============================================================ -->
+<div class="pane" id="pane-own">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> 소유권 · 빌림 · 라이프타임 · 트레이트 · 에러 처리</div>
+  <h1>Rust 가 GC 없이<br>안전한 이유<br>여기 전부 있습니다</h1>
+  <p class="tx">
+    이 탭이 Rust 의 심장입니다. <b>“값의 주인은 한 명”</b> 이라는 한 줄에서
+    빌림·라이프타임·<code>Result</code>·<code>Arc</code> 가 전부 따라 나옵니다.
+    <b>여기를 넘으면 남의 Rust 코드가 읽히고</b>, 컴파일 에러가 잔소리가 아니라 조언으로 보이기 시작합니다.
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>3</b><span>소유권 규칙</span></div>
+    <div><b>0</b><span>GC · 런타임</span></div>
+    <div><b>4</b><span>깊이 층</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== o01 ==================== -->
+<section class="sec" id="o01">
+  <div class="sec-head rv">
+    <span class="no">OWN 01</span>
+    <h2>소유권 규칙 — <span class="t">세 줄</span>이 전부입니다</h2>
+    <p class="lead">
+      Rust 에는 GC 가 없고, <code>free()</code> 도 직접 부르지 않습니다.
+      그런데도 메모리가 새지 않고 이중 해제도 없습니다.
+      비밀은 <b>세 줄짜리 규칙</b>과, 그것을 컴파일 타임에 검사하는 것뿐입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규칙 세 줄 ★</h4>
+      <pre class="code" data-lang="text"><code>① 모든 값에는 주인(owner)이 있다.
+② 주인은 한 번에 한 명이다.
+③ 주인이 스코프를 벗어나면 값은 해제된다.</code></pre>
+      <pre class="code" data-lang="rust"><code>{
+    let s = String::from("안녕");   // ① s 가 주인
+    // s 를 쓴다
+}                                   // ③ 스코프 끝 → 힙 메모리 해제 (drop 호출)
+
+let a = String::from("안녕");
+let b = a;                          // ② 주인이 b 로 이동 (a 는 무효)
+
+// 그래서 다음이 전부 자동으로 보장됩니다
+//   · 해제를 빠뜨릴 수 없다      (주인이 사라지면 반드시 해제)
+//   · 두 번 해제할 수 없다        (주인은 한 명)
+//   · 해제 후 접근할 수 없다      (무효가 된 이름은 컴파일 에러)
+//
+// ★ C++ 의 RAII 와 같은 아이디어인데, C++ 는 '지키면 좋은 관례'이고
+//   Rust 는 '어기면 컴파일이 안 되는 규칙'입니다. 이 차이가 전부입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 해제되는지 눈으로 보기</h4>
+      <pre class="code" data-lang="rust"><code>struct Res(&amp;'static str);
+impl Drop for Res {
+    fn drop(&amp;mut self) { println!("[{}] 해제", self.0); }
+}
+
+fn take(r: Res) { println!("[{}] 받음", r.0); }   // r 이 주인이 됨
+
+fn main() {
+    let a = Res("A");
+    let b = Res("B");
+    take(b);                     // ★ 여기서 B 가 해제됩니다 (함수 끝에서)
+    println!("함수 뒤");
+}                                // A 해제
+
+// 출력
+//   [B] 받음
+//   [B] 해제        ← take 가 끝나는 시점
+//   함수 뒤
+//   [A] 해제
+
+// ★ "값을 함수에 넘기면 그 함수가 주인이 되고, 함수가 끝나면 해제된다"
+//   이 감각이 잡히면 소유권 에러의 90%가 이해됩니다.</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>파이썬과 비교</b> — 파이썬은 참조 카운트가 0이 될 때 해제되므로
+        <b>“언제 해제되는지 코드만 봐서는 모릅니다”</b>.
+        Rust 는 <b>스코프를 보면 정확히 알 수 있습니다</b> —
+        그래서 파일·소켓·락 같은 자원도 메모리와 똑같이 다룰 수 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">RAII — 메모리가 아닌 자원까지</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Drop 이 자동 뒷정리를 합니다</h4>
+      <pre class="code" data-lang="rust"><code>use std::fs::File;
+use std::io::Write;
+
+fn write_log(msg: &amp;str) -&gt; std::io::Result&lt;()&gt; {
+    let mut f = File::create("app.log")?;
+    writeln!(f, "{msg}")?;
+    Ok(())
+}   // ★ f 가 여기서 닫힙니다. close() 를 부를 필요도, 잊을 수도 없습니다.
+    //   중간에 ? 로 조기 반환해도 마찬가지입니다.
+
+// 파이썬의 with 문이 '항상 자동으로 걸려 있는' 상태라고 보면 됩니다
+//   with open("app.log") as f:   ← Rust 에는 이 구문 자체가 필요 없습니다
+
+// 락도 같습니다 (⚡ e07)
+{
+    let guard = mutex.lock().unwrap();
+    *guard += 1;
+}   // ★ 락이 여기서 풀립니다. unlock 을 빠뜨릴 수 없습니다.
+
+// 직접 만들기 — 시간 측정 · 임시 파일 · 연결 반납에 씁니다
+struct Timer(&amp;'static str, std::time::Instant);
+impl Timer {
+    fn new(name: &amp;'static str) -&gt; Self { Timer(name, std::time::Instant::now()) }
+}
+impl Drop for Timer {
+    fn drop(&amp;mut self) { println!("{} {:?}", self.0, self.1.elapsed()); }
+}
+let _t = Timer::new("파싱");     // ★ _t 로 이름을 줘야 스코프 끝까지 삽니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">해제 순서와 조기 해제</h4>
+      <pre class="code" data-lang="rust"><code>// 해제는 '선언의 역순'입니다 (r05)
+let conn = connect();
+let tx = conn.begin();          // tx 가 conn 을 빌리고 있다면
+// → tx 가 먼저 해제되어야 합니다. Rust 는 이 순서를 보장합니다. ★
+
+// 일찍 놓고 싶을 때
+let data = mutex.lock().unwrap().clone();   // ★ 락을 최소 범위로
+// (임시값의 락 가드가 이 문장 끝에서 바로 풀립니다)
+
+let guard = mutex.lock().unwrap();
+let v = guard.value;
+drop(guard);                    // 명시적으로 지금 해제
+expensive_work(v);              // 락을 잡은 채로 오래 일하지 않기 ★
+
+// Drop 을 막고 싶을 때 (FFI 로 소유권을 넘길 때 · 🔗 f06)
+let b = Box::new(42);
+let raw = Box::into_raw(b);     // ★ Drop 이 호출되지 않습니다
+// … C 쪽에 넘김 …
+unsafe { drop(Box::from_raw(raw)); }   // 나중에 다시 받아 해제
+
+std::mem::forget(value);        // 해제하지 않고 잊기 (거의 쓸 일 없음)
+let m = std::mem::ManuallyDrop::new(v);  // 더 안전한 방식</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>Drop</code> 안에서 패닉하지 마세요</b> — 이미 패닉 중에 <code>drop</code> 이 또 패닉하면
+        프로세스가 <b>즉시 abort</b> 합니다. <code>Drop</code> 구현은 <b>실패할 수 없는 일만</b> 하고,
+        실패할 수 있는 정리는 <code>close()</code> 같은 명시적 메서드로 두세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">소유권을 설계 도구로 쓴다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">데이터가 흐르는 방향을 먼저 정합니다</h4>
+      <pre class="code" data-lang="rust"><code>// ★ 설계 질문 하나: "이 데이터의 주인은 누구인가?"
+//   이 질문에 답하면 시그니처가 저절로 정해집니다.
+
+// 파이프라인 — 소유권이 한 방향으로 흐릅니다 (가장 다루기 쉬움)
+fn read(path: &amp;Path) -&gt; io::Result&lt;Vec&lt;u8&gt;&gt;;      // 만들어서 준다
+fn decode(raw: Vec&lt;u8&gt;) -&gt; Result&lt;Image&gt;;         // 받아서 변환
+fn resize(img: Image, w: u32) -&gt; Image;           // 받아서 돌려줌
+fn save(img: &amp;Image, path: &amp;Path) -&gt; io::Result&lt;()&gt;;  // 빌려서 씀
+
+let out = save(&amp;resize(decode(read(p)?)?, 800), q)?;
+
+// 저장소 — 하나가 소유하고 나머지는 빌립니다
+struct App { users: Vec&lt;User&gt; }              // App 이 주인
+impl App {
+    fn find(&amp;self, id: u64) -&gt; Option&lt;&amp;User&gt; { }     // 빌려 줌
+    fn add(&amp;mut self, u: User) { self.users.push(u) } // 받아서 보관
+}
+
+// ★ 이 두 형태로 대부분이 해결됩니다.
+//   Rc&lt;RefCell&lt;T&gt;&gt; 가 필요해졌다면 대개 설계를 한 번 더 볼 신호입니다 (o10).</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ · 파이썬 개발자가 자주 하는 실수</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ ① 자기 참조 구조체 — 만들 수 없습니다
+// struct Bad { data: String, view: &amp;str }    // view 가 data 를 가리킴
+// ✅ 인덱스나 범위로 표현하세요
+struct Ok { data: String, view: std::ops::Range&lt;usize&gt; }
+impl Ok { fn view(&amp;self) -&gt; &amp;str { &amp;self.data[self.view.clone()] } }
+
+// ❌ ② 양방향 링크 (부모 ↔ 자식)
+// struct Node { parent: &amp;Node, children: Vec&lt;Node&gt; }
+// ✅ 인덱스 기반 아레나 — 트리·그래프의 정석입니다 ★
+struct Tree { nodes: Vec&lt;Node&gt; }
+struct Node { parent: Option&lt;usize&gt;, children: Vec&lt;usize&gt; }
+// (slotmap · petgraph 크레이트가 이걸 잘 만들어 둔 것입니다)
+
+// ❌ ③ 전역 가변 상태
+// static mut CACHE: HashMap&lt;..&gt; = ..;        // unsafe · 2024 에디션 금지
+// ✅
+use std::sync::{OnceLock, Mutex};
+static CACHE: OnceLock&lt;Mutex&lt;HashMap&lt;String, u64&gt;&gt;&gt; = OnceLock::new();
+
+// ❌ ④ 클래스 상속을 흉내 내기
+// ✅ 합성 + 트레이트 (o05)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“Rust 와 싸우고 있다”면</b> 대개 <b>다른 언어의 자료 구조를 그대로 옮기려는 중</b>입니다.
+        특히 <b>그래프·트리는 인덱스</b>로, <b>상속은 합성</b>으로 바꾸면 대부분 풀립니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">소유권은 런타임에 무엇을 남기나</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비용은 0 입니다 — 검사가 컴파일 타임이니까</h4>
+      <pre class="code" data-lang="rust"><code>// 소유권·빌림 검사는 전부 컴파일 타임에 끝납니다.
+// 생성된 기계어에는 '검사 코드'가 한 줄도 없습니다. ★
+
+fn sum(v: &amp;[i32]) -&gt; i32 { v.iter().sum() }
+// → C 로 손으로 쓴 for 루프와 동일한 어셈블리가 나옵니다 (⚡ e03)
+
+// 남는 것은 딱 하나: drop 호출
+//   컴파일러가 각 스코프 끝에 drop 호출을 '끼워 넣습니다'.
+//   조건부로 이동됐을 수 있으면 'drop flag' (스택의 bool)를 씁니다.
+
+let s = String::new();
+if cond { consume(s); }
+// → 컴파일러가 숨은 bool 하나를 두고, 스코프 끝에서
+//   "아직 내 것이면 drop" 을 판단합니다.
+//   이 플래그는 보통 최적화로 사라집니다.
+
+// 확인 방법
+//   cargo asm / godbolt.org 에서 -O 어셈블리 비교 (⚡ e03)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Drop 을 구현하면 잃는 것들</h4>
+      <pre class="code" data-lang="rust"><code>struct Guard { data: Vec&lt;u8&gt; }
+impl Drop for Guard { fn drop(&amp;mut self) { } }
+
+// ★ Drop 을 구현하면 '부분 이동'이 금지됩니다
+// fn take(g: Guard) -&gt; Vec&lt;u8&gt; { g.data }
+//   error[E0509]: cannot move out of type `Guard`,
+//                 which implements the `Drop` trait
+//   (필드를 빼가면 drop 이 무엇을 정리해야 할지 모호해지기 때문)
+
+// 해법 — Option 으로 감싸고 take
+struct Guard2 { data: Option&lt;Vec&lt;u8&gt;&gt; }
+impl Guard2 {
+    fn take(mut self) -&gt; Vec&lt;u8&gt; { self.data.take().unwrap() }
+}
+impl Drop for Guard2 {
+    fn drop(&amp;mut self) { if let Some(d) = self.data.take() { /* 정리 */ } }
+}
+
+// Copy 와 Drop 은 함께 못 씁니다 (해제할 것이 있는데 비트 복사는 모순)
+// ManuallyDrop 으로 우회하는 패턴은 FFI 에서 나옵니다 (🔗 f06 · 🔬 d04)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Drop 순서의 미묘한 함정</b> — 구조체 필드는 <b>선언 순서대로</b> 해제됩니다.
+        <code>runtime</code> 필드와 그것을 쓰는 <code>handle</code> 필드가 있다면
+        <b>선언 순서가 곧 종료 순서</b>가 되어, tokio 런타임 종료 시 행이 걸리는 원인이 되곤 합니다(⚡ e08).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>주인은 한 명, 주인이 사라지면 값도 사라진다</b> — 이게 전부입니다.
+    그래서 메모리뿐 아니라 <b>파일·락·연결도 똑같이 자동 정리</b>됩니다.
+    설계할 때는 <b>“이 데이터의 주인은 누구인가”</b>를 먼저 정하세요.
+    검사는 컴파일 타임에 끝나므로 <b>런타임 비용은 0</b> 입니다.</div>
+</section>
+
+
+<!-- ==================== o02 ==================== -->
+<section class="sec" id="o02">
+  <div class="sec-head rv">
+    <span class="no">OWN 02</span>
+    <h2>빌림 — <span class="t">읽기는 여럿, 쓰기는 하나</span></h2>
+    <p class="lead">
+      값을 넘길 때마다 소유권이 옮겨 가면 아무것도 못 합니다.
+      그래서 <b>잠깐 빌려 보는 참조(<code>&amp;</code>)</b>가 있습니다.
+      규칙은 딱 하나 — <b>“읽기 참조는 여러 개, 쓰기 참조는 하나, 둘은 공존 못 함”</b>.
+      이 한 줄이 데이터 경쟁을 언어 차원에서 없앱니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌림 규칙</h4>
+      <pre class="code" data-lang="rust"><code>let mut s = String::from("안녕");
+
+// ✅ 불변 참조는 여러 개
+let r1 = &amp;s;
+let r2 = &amp;s;
+println!("{r1} {r2}");
+
+// ✅ 가변 참조는 하나
+let m = &amp;mut s;
+m.push_str(" 세상");
+
+// ❌ 불변과 가변은 함께 못 씁니다
+// let r = &amp;s;
+// let m = &amp;mut s;      // error[E0502]: cannot borrow `s` as mutable
+// println!("{r}");     //   because it is also borrowed as immutable
+
+// ★ 왜 이 규칙인가
+//   "읽는 동안 아무도 못 바꾼다" 가 보장되면
+//   · 이터레이터 무효화가 없고 (r06)
+//   · 데이터 경쟁이 없고 (⚡ e06)
+//   · 컴파일러가 값을 레지스터에 캐시해도 안전합니다 (최적화 이득)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">참조는 언제까지 살아 있나 (NLL)</h4>
+      <pre class="code" data-lang="rust"><code>let mut s = String::from("안녕");
+
+let r = &amp;s;
+println!("{r}");        // ★ r 의 '마지막 사용'이 여기
+let m = &amp;mut s;         // ✅ 통과합니다! r 은 이미 끝났으니까
+m.push('!');
+
+// 이것을 NLL (non-lexical lifetimes) 이라고 합니다.
+// 참조의 수명은 스코프 끝이 아니라 '마지막으로 쓰인 곳'까지입니다.
+// → 2018 이전 Rust 의 악명 높은 답답함이 대부분 여기서 사라졌습니다. ★
+
+// 그래서 이런 코드도 됩니다
+let mut v = vec![1, 2, 3];
+let first = v[0];        // 값을 복사 (참조가 아님)
+v.push(4);               // ✅ 문제없음
+
+// 이건 여전히 안 됩니다 (참조를 계속 쓰니까)
+// let first = &amp;v[0];
+// v.push(4);
+// println!("{first}");  // ❌</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>에러가 났을 때 첫 번째 시도</b> — <b>참조를 쓰는 위치를 앞으로 당기거나,
+        값을 복사(<code>copied()</code>·<code>clone()</code>)</b>해 보세요.
+        NLL 덕분에 <b>순서만 바꿔도 통과</b>하는 경우가 아주 많습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">실전에서 만나는 빌림 에러 다섯 가지</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">패턴과 해법 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ① 순회하면서 수정
+// for x in &amp;v { if bad(x) { v.remove(0); } }     // ❌
+v.retain(|x| !bad(x));                            // ✅
+let to_remove: Vec&lt;usize&gt; = /* 인덱스 수집 */;    // ✅ 두 단계로
+
+// ② self 의 두 필드를 동시에 (메서드 안에서)
+// fn f(&amp;mut self) { self.update(&amp;self.data); }   // ❌ self 를 두 번 빌림
+fn f(&amp;mut self) {
+    let data = std::mem::take(&amp;mut self.data);    // ✅ 꺼냈다가
+    self.update(&amp;data);
+    self.data = data;                              //    돌려놓기
+}
+// 또는 필드를 분리해 함수로 빼기 (구조체 분해)
+fn f2(&amp;mut self) {
+    let Self { data, cache, .. } = self;           // ✅ 필드 단위로 빌림
+    cache.update(data);                            //    컴파일러가 구분해 줍니다
+}
+
+// ③ HashMap 에서 꺼내 쓰면서 다른 키 넣기
+// if let Some(v) = m.get("a") { m.insert("b", v+1); }   // ❌
+let v = m.get("a").copied();                       // ✅ 값을 복사해 끊기
+if let Some(v) = v { m.insert("b".into(), v + 1); }
+
+// ④ 클로저가 캡처를 오래 붙잡기 → o11 에서
+// ⑤ 반환값이 인자를 빌리는 경우 → o03 (라이프타임)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러 메시지를 해석하기</h4>
+      <pre class="code" data-lang="text"><code>error[E0502]: cannot borrow `v` as mutable because it is also
+              borrowed as immutable
+  --&gt; src/main.rs:4:5
+   |
+3  |     let first = &amp;v[0];
+   |                  - immutable borrow occurs here   ← ① 빌린 곳
+4  |     v.push(4);
+   |     ^^^^^^^^^ mutable borrow occurs here          ← ② 충돌한 곳
+5  |     println!("{first}");
+   |               ------- immutable borrow later used here  ← ③ 왜 아직 사나
+
+# 읽는 순서: ③ → ① → ②
+#   "③ 에서 아직 쓰고 있으니 ① 의 빌림이 살아 있고,
+#    그래서 ② 의 가변 빌림이 안 된다"
+#
+# ★ 고치는 방법은 셋 중 하나입니다
+#   · ③ 을 ② 앞으로 옮긴다        (순서 바꾸기 — 가장 흔한 답)
+#   · ① 에서 값을 복사한다          (&amp;v[0] → v[0])
+#   · 구조를 나눈다                (필드 분해 · 함수 추출)</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>세 줄이 항상 있습니다</b> — <b>빌린 곳 · 충돌한 곳 · 나중에 쓴 곳</b>.
+        이 세 곳 중 <b>어느 하나를 옮기면</b> 대부분 해결됩니다.
+        “왜 안 되지”가 아니라 <b>“셋 중 뭘 옮길까”</b>로 생각하면 훨씬 빠릅니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">빌림 규칙을 전제로 설계한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메서드 시그니처가 곧 동시성 계약</h4>
+      <pre class="code" data-lang="rust"><code>impl Cache {
+    fn get(&amp;self, k: &amp;str) -&gt; Option&lt;&amp;Value&gt;;    // 읽기 — 동시에 여럿 가능
+    fn insert(&amp;mut self, k: String, v: Value);   // 쓰기 — 배타적
+}
+
+// ★ &amp;self 와 &amp;mut self 를 나눠 두면
+//   "동시에 호출해도 되는가"가 타입에 적힌 셈이 됩니다.
+//   나중에 RwLock 을 씌울 때 그대로 대응됩니다 (⚡ e07).
+
+// 인자를 여러 개 빌릴 때 — 서로 다른 것이면 문제없습니다
+fn merge(dst: &amp;mut Vec&lt;u8&gt;, src: &amp;[u8]) { dst.extend_from_slice(src); }
+// merge(&amp;mut v, &amp;v);      // ❌ 같은 것을 동시에 가변·불변으로
+
+// 슬라이스를 나눠 각각 가변으로 (병렬 처리의 기초 · ⚡ e05)
+let (left, right) = v.split_at_mut(mid);      // ✅ 겹치지 않음이 보장됨
+std::thread::scope(|s| {
+    s.spawn(|| process(left));
+    s.spawn(|| process(right));
+});</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">반환 타입으로 빌림을 끊기</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 참조를 돌려주면 호출자가 그동안 원본을 못 고칩니다
+fn names(&amp;self) -&gt; Vec&lt;&amp;str&gt; { }
+let n = cache.names();
+// cache.insert(..);        // ❌ n 이 살아 있는 동안 불가
+
+// ✅ 선택지 ① 소유 값을 돌려준다 (복사 비용을 감수)
+fn names(&amp;self) -&gt; Vec&lt;String&gt; { }
+
+// ✅ 선택지 ② 이터레이터를 돌려주고 즉시 소비하게 한다
+fn names(&amp;self) -&gt; impl Iterator&lt;Item = &amp;str&gt; { }
+
+// ✅ 선택지 ③ 콜백으로 뒤집는다 (내부 이터레이션)
+fn for_each_name(&amp;self, f: impl FnMut(&amp;str)) { }
+
+// ★ 라이브러리 API 를 만들 때의 실무 기준
+//   · 작고 자주 부름          → 소유 값 (String) — 사용자가 편합니다
+//   · 크고 성능이 중요        → 참조·이터레이터 + 문서에 수명 설명
+//   · FFI 경계를 넘어간다     → 반드시 소유 값 (🔗 f06)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>라이브러리 초심자가 자주 하는 과최적화</b> — 모든 반환을 <code>&amp;str</code> 로 만들어
+        <b>사용자가 라이프타임 지옥에 빠지게</b> 하는 것입니다.
+        <b>내부는 참조, 공개 API 는 소유 값</b>이 대체로 좋은 균형입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">빌림 검사기는 실제로 무엇을 보는가</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">MIR 위의 흐름 분석</h4>
+      <pre class="code" data-lang="text"><code>빌림 검사(borrowck)는 소스가 아니라 MIR(중간 표현) 위에서 돕니다 (🔬 d10).
+
+  ① 각 참조가 '살아 있는 지점들'의 집합을 계산 (liveness)
+  ② 각 지점에서 어떤 빌림이 활성인지 추적
+  ③ 충돌(같은 자리에서 가변+불변, 또는 가변 둘)을 찾으면 에러
+
+# 컴파일러가 보는 것을 직접 보기 (nightly)
+cargo +nightly rustc -- -Z dump-mir=main
+RUSTC_LOG=rustc_borrowck cargo +nightly build
+
+★ 중요한 성질: borrowck 는 '함수 하나 안에서만' 봅니다.
+  함수 경계는 시그니처(라이프타임)만 보고 판단합니다 (o03).
+  그래서 시그니처가 정확하면 구현을 바꿔도 호출자가 안 깨집니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">아직 안 되는 것 — 그리고 우회법</h4>
+      <pre class="code" data-lang="rust"><code>// ★ 유명한 한계: 조건부로 빌림을 반환하는 패턴 (NLL 문제 사례 #3)
+// fn get_or_insert&lt;'a&gt;(m: &amp;'a mut HashMap&lt;K,V&gt;, k: K) -&gt; &amp;'a mut V {
+//     if let Some(v) = m.get_mut(&amp;k) { return v; }   // ❌ 여기서 빌림이
+//     m.insert(k, V::default());                    //    끝나지 않은 것으로 봄
+//     m.get_mut(&amp;k).unwrap()
+// }
+
+// ✅ 우회 ① entry API (표준 라이브러리가 이걸 위해 존재합니다)
+fn get_or_insert&lt;'a&gt;(m: &amp;'a mut HashMap&lt;String, V&gt;, k: String) -&gt; &amp;'a mut V {
+    m.entry(k).or_default()
+}
+
+// ✅ 우회 ② contains_key 로 먼저 확인 (조회가 두 번)
+// ✅ 우회 ③ polonius (차세대 borrowck) 를 기다리기 — 이 패턴을 허용합니다
+
+// ★ 실무 감각: borrowck 가 막는 것의 대부분은 '진짜 문제'입니다.
+//   위 사례처럼 '안전한데 못 통과하는' 경우는 손에 꼽을 정도이고,
+//   전부 표준 라이브러리에 우회 API 가 마련돼 있습니다.</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>읽기 참조는 여럿, 쓰기 참조는 하나, 둘은 공존 불가</b>.
+    참조의 수명은 <b>마지막 사용까지</b>(NLL)라 순서만 바꿔도 풀리는 경우가 많습니다.
+    에러 메시지의 <b>빌린 곳 · 충돌한 곳 · 나중에 쓴 곳</b> 세 줄 중 하나를 옮기세요.
+    설계에서는 <b><code>&amp;self</code>/<code>&amp;mut self</code> 구분이 곧 동시성 계약</b>입니다.</div>
+</section>
+
+
+<!-- ==================== o03 ==================== -->
+<section class="sec" id="o03">
+  <div class="sec-head rv">
+    <span class="no">OWN 03</span>
+    <h2>라이프타임 — <span class="t">'a 는 무엇을 말하는가</span></h2>
+    <p class="lead">
+      <code>'a</code> 를 보면 겁이 나지만, 뜻은 단순합니다 —
+      <b>“이 참조는 저것보다 오래 살면 안 된다”</b>는 표시일 뿐입니다.
+      <b>대부분은 컴파일러가 알아서 붙여 줍니다</b>. 우리가 적어야 하는 경우는 몇 가지로 정해져 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 필요한가 — 댕글링을 막습니다</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 컴파일러가 이걸 막아야 합니다
+// fn longest(a: &amp;str, b: &amp;str) -&gt; &amp;str {
+//     if a.len() &gt; b.len() { a } else { b }
+// }
+//   error[E0106]: missing lifetime specifier
+//   help: this function's return type contains a borrowed value, but
+//         the signature does not say whether it is borrowed from `a` or `b`
+
+// ✅ "반환값은 a, b 둘 다보다 오래 살지 않는다" 고 적어 줍니다
+fn longest&lt;'a&gt;(a: &amp;'a str, b: &amp;'a str) -&gt; &amp;'a str {
+    if a.len() &gt; b.len() { a } else { b }
+}
+
+// 이 표시 덕분에 호출자 쪽에서 이런 코드가 막힙니다
+let r;
+{
+    let tmp = String::from("짧다");
+    r = longest(&amp;long, &amp;tmp);      // ❌ tmp 가 곧 죽는데 r 은 밖에 있음
+}
+// println!("{r}");</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>중요한 오해 하나</b> — <code>'a</code> 는 <b>수명을 “정하는” 것이 아니라 “관계를 적는” 것</b>입니다.
+        값이 더 오래 살게 만들지 않습니다. <b>컴파일러에게 검사 기준을 알려 줄 뿐</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">생략 규칙 — 안 적어도 되는 경우 ★</h4>
+      <pre class="code" data-lang="rust"><code>// 컴파일러가 자동으로 붙이는 규칙 세 개
+//   ① 각 참조 인자에 서로 다른 라이프타임을 준다
+//   ② 인자가 참조 하나뿐이면, 반환값도 그것으로 정한다
+//   ③ 메서드에 &amp;self 가 있으면, 반환값은 self 로 정한다
+
+fn first(s: &amp;str) -&gt; &amp;str { }              // ② → &lt;'a&gt;(s: &amp;'a str) -&gt; &amp;'a str
+impl Doc {
+    fn title(&amp;self) -&gt; &amp;str { }            // ③ → &amp;'a self -&gt; &amp;'a str
+}
+
+// ★ 이 세 규칙 덕분에 실무 코드의 90% 는 라이프타임을 안 적습니다.
+//   적어야 하는 경우는 사실상 둘뿐입니다
+//     · 참조 인자가 둘 이상이고 반환값이 참조일 때 (longest)
+//     · 구조체가 참조를 필드로 가질 때 (아래)
+
+// 구조체가 참조를 담을 때
+struct Parser&lt;'a&gt; {
+    input: &amp;'a str,        // "Parser 는 input 보다 오래 못 산다"
+    pos: usize,
+}
+impl&lt;'a&gt; Parser&lt;'a&gt; {
+    fn new(input: &amp;'a str) -&gt; Self { Self { input, pos: 0 } }
+    fn rest(&amp;self) -&gt; &amp;'a str { &amp;self.input[self.pos..] }
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">'static 과 흔한 오해</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">'static 은 두 가지 뜻입니다 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ① &amp;'static T — "이 참조는 프로그램이 끝날 때까지 유효"
+let s: &amp;'static str = "리터럴";     // 바이너리에 박혀 있음
+static NAME: &amp;str = "앱";
+
+// ② T: 'static (바운드) — "이 타입에는 빌린 것이 없다" ★ 훨씬 자주 만납니다
+fn spawn&lt;F: FnOnce() + Send + 'static&gt;(f: F) { }
+// → 스레드에 넘기려면 '빌린 참조가 없어야' 합니다. 소유 값이면 만족합니다.
+
+String::from("동적")     // 이것도 'static 바운드를 만족합니다! (빌린 게 없으니)
+                         // ★ "영원히 산다"는 뜻이 아닙니다
+
+// 자주 보는 에러
+// std::thread::spawn(|| println!("{}", local));
+//   error: closure may outlive the current function
+// ✅
+std::thread::spawn(move || println!("{}", local));    // 소유권을 넘김
+// ✅ 또는 스코프 스레드 (⚡ e07)
+std::thread::scope(|s| { s.spawn(|| println!("{}", local)); });</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>'static</code> 을 붙여 에러를 없애려 하지 마세요</b> — 대부분 잘못된 처방입니다.
+        <b>진짜 필요한 것은 소유권을 넘기는 것</b>(<code>move</code>, <code>to_owned()</code>)이거나
+        <b>구조를 바꾸는 것</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조체에 참조를 넣을지 말지</h4>
+      <pre class="code" data-lang="rust"><code>// ① 참조를 담는다 — 복사가 없어 빠르지만 전염됩니다
+struct View&lt;'a&gt; { data: &amp;'a [u8] }
+// → 이걸 담는 모든 타입에 &lt;'a&gt; 가 붙습니다 ★
+struct Wrapper&lt;'a&gt; { v: View&lt;'a&gt; }
+struct App&lt;'a&gt; { w: Wrapper&lt;'a&gt; }        // 전염
+
+// ② 소유한다 — 라이프타임이 사라집니다
+struct Owned { data: Vec&lt;u8&gt; }
+
+// ★ 실무 판단 기준
+//   · 수명이 짧고 성능이 중요한 파서·이터레이터 → 참조 (①)
+//   · 오래 보관하는 설정·상태·핸들            → 소유 (②)
+//   · 애매하면 소유로 시작                      ← 초심자 권장 ★
+//
+// 파싱 라이브러리(serde, nom)가 ① 을 쓰는 이유는
+// "입력 버퍼가 살아 있는 동안만 쓰인다"가 명확하기 때문입니다.
+
+// 둘 다 지원하기 — Cow (Clone on Write)
+use std::borrow::Cow;
+fn normalize(s: &amp;str) -&gt; Cow&lt;'_, str&gt; {
+    if s.contains(' ') { Cow::Owned(s.replace(' ', "_")) }   // 고칠 때만 복사
+    else { Cow::Borrowed(s) }                                // 아니면 빌린 채로
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">라이프타임 에러를 푸는 순서</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">처방을 순서대로 시도합니다 ★</h4>
+      <pre class="code" data-lang="text"><code>① 소유 값으로 바꿔 본다
+     &amp;str → String,  &amp;[T] → Vec&lt;T&gt;
+     → 90% 는 여기서 끝납니다. 복사 비용은 대개 무시할 수준입니다.
+
+② 참조를 반환하지 말고 인덱스·범위를 반환한다
+     fn find(&amp;self) -&gt; &amp;str        →  fn find(&amp;self) -&gt; Range&lt;usize&gt;
+
+③ 콜백으로 뒤집는다 (내부 이터레이션)
+     fn items(&amp;self) -&gt; Vec&lt;&amp;T&gt;    →  fn for_each(&amp;self, f: impl FnMut(&amp;T))
+
+④ Rc/Arc 로 공유 소유권을 만든다 (o10)
+     여러 곳이 진짜로 같은 값을 오래 봐야 할 때만
+
+⑤ 그래도 안 되면 구조를 바꾼다
+     아레나 · 인덱스 기반 (o01)
+
+★ 순서를 지키는 게 중요합니다. ①을 건너뛰고 ④부터 가면
+  Rc&lt;RefCell&lt;T&gt;&gt; 로 뒤덮인, 런타임에 패닉하는 코드가 됩니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 만나는 에러 두 개</h4>
+      <pre class="code" data-lang="text"><code># ① 지역 변수를 참조로 반환
+error[E0106]: missing lifetime specifier
+   fn make() -&gt; &amp;str { let s = String::new(); &amp;s }
+help: consider using the `'static` lifetime   ← ❌ 이 조언은 대개 틀립니다
+✅ 답: String 을 반환하세요
+
+# ② 빌린 값이 충분히 오래 못 삼
+error[E0597]: `tmp` does not live long enough
+   |     let r = process(&amp;tmp);
+   |                      --- borrowed value does not live long enough
+   | }
+   | - `tmp` dropped here while still borrowed
+   | println!("{r}");
+   |            - borrow later used here
+✅ 답: tmp 를 더 바깥 스코프로 올리거나, 결과를 소유 값으로 받으세요
+
+# ★ 컴파일러의 help: 가 'static 을 제안하면 의심하세요.
+#   대부분 "소유 값으로 바꾸라"가 진짜 답입니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">변성 · HRTB · 라이프타임의 정체</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">변성(variance) — 왜 어떤 건 되고 어떤 건 안 되나</h4>
+      <pre class="code" data-lang="rust"><code>// &amp;'long T 를 &amp;'short T 가 필요한 자리에 넣을 수 있습니다 (공변)
+fn takes_short&lt;'s&gt;(x: &amp;'s str) { }
+let long: &amp;'static str = "리터럴";
+takes_short(long);            // ✅ 더 오래 사는 건 언제나 OK
+
+// 하지만 &amp;mut T 는 T 에 대해 '불변(invariant)' 입니다
+// fn f&lt;'a&gt;(x: &amp;mut &amp;'a str, y: &amp;'a str) { *x = y; }
+//   → &amp;mut 안의 라이프타임은 늘리지도 줄이지도 못합니다.
+//   이걸 허용하면 짧은 참조를 긴 자리에 심을 수 있게 됩니다.
+
+// 정리
+//   &amp;'a T          'a 에 공변, T 에 공변
+//   &amp;'a mut T      'a 에 공변, T 에 불변  ★ 여기가 에러의 근원
+//   fn(T) -&gt; U     T 에 반변, U 에 공변
+//   Cell&lt;T&gt;        T 에 불변
+//
+// PhantomData 로 변성을 직접 지정하는 일은 unsafe 추상화에서 나옵니다 (🔬 d08)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">HRTB — 어떤 라이프타임이든</h4>
+      <pre class="code" data-lang="rust"><code>// "어떤 'a 에 대해서든 동작하는 함수"를 받고 싶을 때
+fn apply&lt;F&gt;(f: F)
+where F: for&lt;'a&gt; Fn(&amp;'a str) -&gt; &amp;'a str      // ★ higher-ranked trait bound
+{
+    let s = String::from("안녕");
+    println!("{}", f(&amp;s));
+}
+apply(|x| x);           // ✅
+
+// 대부분은 생략해도 컴파일러가 붙여 줍니다
+fn apply2&lt;F: Fn(&amp;str) -&gt; &amp;str&gt;(f: F) { }     // 위와 같은 뜻
+
+// 실제로 만나는 자리 — 클로저를 받는 API, serde 의 Deserialize&lt;'de&gt;
+// trait Deserialize&lt;'de&gt;: Sized {
+//     fn deserialize&lt;D: Deserializer&lt;'de&gt;&gt;(d: D) -&gt; Result&lt;Self, D::Error&gt;;
+// }
+// → "입력 버퍼에서 빌려 오는 역직렬화"를 표현하기 위한 것입니다.
+
+// 라이프타임의 정체
+//   런타임에는 아무것도 남지 않습니다. 타입 검사용 표시일 뿐입니다. ★
+//   즉 &amp;'a str 와 &amp;'b str 는 실행 파일에서 완전히 동일합니다 (포인터+길이).</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무에서 HRTB 를 직접 쓸 일은 거의 없습니다.</b>
+        <code>for&lt;'a&gt;</code> 가 에러 메시지에 나타나면
+        대개 <b>클로저 인자의 참조를 반환하려 해서</b>입니다 —
+        소유 값을 반환하도록 바꾸면 사라집니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>'a</code> 는 <b>“이것보다 오래 살지 마라”는 관계 표시</b>일 뿐, 수명을 늘리지 않습니다.
+    생략 규칙 덕분에 <b>실무 코드의 90% 는 안 적습니다</b>.
+    막히면 <b>①소유 값으로 바꾸기 → ②인덱스 반환 → ③콜백 → ④Arc</b> 순서로 시도하세요.
+    <code>'static</code> 을 붙여 에러를 지우는 것은 대개 잘못된 처방입니다.</div>
+</section>
+
+
+<!-- ==================== o04 ==================== -->
+<section class="sec" id="o04">
+  <div class="sec-head rv">
+    <span class="no">OWN 04</span>
+    <h2>슬라이스 — <span class="t">복사 없이 들여다보는 창</span></h2>
+    <p class="lead">
+      슬라이스는 <b>“어디서부터 몇 개”</b>만 담은 두 워드짜리 값입니다.
+      복사가 없어 빠르지만, <b>원본이 바뀌면 창이 무효</b>가 됩니다 —
+      그 위험을 컴파일러가 막아 주는 것이 핵심입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">슬라이스의 정체</h4>
+      <pre class="code" data-lang="rust"><code>let v = vec![10, 20, 30, 40, 50];
+let s: &amp;[i32] = &amp;v[1..4];        // [20, 30, 40]
+
+// 메모리에는 이것뿐입니다 — 데이터 복사 없음
+//   { ptr: v.as_ptr() + 1*4,  len: 3 }
+assert_eq!(std::mem::size_of::&lt;&amp;[i32]&gt;(), 16);   // 포인터 8 + 길이 8
+
+// 문자열도 같습니다
+let text = String::from("안녕 세상");
+let word: &amp;str = &amp;text[0..6];    // "안녕"  (바이트 인덱스 · r06)
+assert_eq!(std::mem::size_of::&lt;&amp;str&gt;(), 16);
+
+// 소유 ↔ 빌림 대응표
+//   String  → &amp;str
+//   Vec&lt;T&gt;  → &amp;[T]
+//   Box&lt;[T]&gt; → &amp;[T]
+//   [T; N]  → &amp;[T]
+// ★ 함수 인자는 항상 오른쪽(빌림)으로 받으세요 — 왼쪽 전부를 받을 수 있습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가변 슬라이스와 분할</h4>
+      <pre class="code" data-lang="rust"><code>let mut v = vec![3, 1, 2];
+let s: &amp;mut [i32] = &amp;mut v;
+s.sort();                          // 제자리 정렬
+s[0] = 99;
+
+// 겹치지 않게 둘로 나누기 — 병렬 처리의 기초 ★
+let (a, b) = v.split_at_mut(1);    // 둘 다 &amp;mut, 겹치지 않음이 보장됨
+a[0] += 1;
+b[0] += 1;
+
+// 청크로 나누기
+for chunk in v.chunks_mut(2) { chunk.sort(); }
+for pair in v.windows(2) { }                    // 겹치는 창 (불변만)
+
+// 채우기·복사 — memcpy 로 최적화됩니다 (⚡ e02)
+dst.copy_from_slice(&amp;src);         // 길이가 같아야 함 (T: Copy)
+dst.clone_from_slice(&amp;src);        // Clone 이면
+buf.fill(0);
+
+// 검색
+v.binary_search(&amp;30);              // 정렬돼 있을 때 O(log n)
+v.iter().position(|x| *x == 30);   // 선형
+v.contains(&amp;30);</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">무효화를 컴파일러가 막는다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 에서는 크래시, Rust 에서는 빌드 에러</h4>
+      <pre class="code" data-lang="rust"><code>let mut v = vec![1, 2, 3];
+let s = &amp;v[..];
+// v.push(4);              // ❌ error[E0502]
+// println!("{s:?}");
+
+// push 가 재할당을 일으키면 s 의 포인터는 해제된 메모리를 가리킵니다.
+// C++ 의 std::span, std::string_view 로 같은 코드를 쓰면
+// '컴파일되고, 대부분 잘 돌다가, 어느 날 크래시'합니다. ★
+
+// 슬라이스를 오래 들고 있어야 한다면
+let owned: Vec&lt;i32&gt; = v[1..4].to_vec();     // 복사해서 소유
+let boxed: Box&lt;[i32]&gt; = v.into_boxed_slice(); // 더 안 늘릴 때
+
+// 인덱스 범위만 저장 (o01 의 자기 참조 회피 패턴)
+struct Token { start: usize, end: usize }
+impl Doc {
+    fn text(&amp;self, t: &amp;Token) -&gt; &amp;str { &amp;self.src[t.start..t.end] }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">범위를 벗어나면 패닉합니다</h4>
+      <pre class="code" data-lang="rust"><code>let v = vec![1, 2, 3];
+// let x = &amp;v[1..10];        // panic: range end index 10 out of range
+
+// ✅ 패닉 없이
+let s = v.get(1..10);        // Option&lt;&amp;[i32]&gt; → None
+let s = &amp;v[1..v.len().min(10)];
+
+// 문자열은 문자 경계도 봅니다 (r06)
+let t = "안녕";
+// &amp;t[0..1];                 // panic: not a char boundary
+t.get(0..1);                 // None
+
+// ★ 성능 이야기: 슬라이싱마다 범위 검사가 들어갑니다.
+//   루프 안에서 v[i] 를 반복하면 검사가 매번 돕니다.
+//   이터레이터를 쓰면 검사가 사라집니다 (⚡ e03)
+for x in &amp;v { }              // ✅ 검사 없음
+for i in 0..v.len() { v[i]; }// 검사가 남을 수 있음
+
+// 검사를 지우는 unsafe 는 마지막 수단입니다 (🔬 d01)
+// unsafe { *v.get_unchecked(i) }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">버퍼를 다루는 API 설계</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호출자가 버퍼를 주게 만들기 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 매번 새로 할당 — 루프에서 부르면 할당이 병목이 됩니다
+fn process(input: &amp;[u8]) -&gt; Vec&lt;u8&gt; { }
+
+// ✅ 출력 버퍼를 받아 재사용하게 하기
+fn process_into(input: &amp;[u8], out: &amp;mut Vec&lt;u8&gt;) {
+    out.clear();                       // 용량은 유지됩니다 ★
+    out.extend(input.iter().map(|b| b ^ 0xFF));
+}
+
+let mut buf = Vec::with_capacity(4096);
+for chunk in stream {
+    process_into(chunk, &amp;mut buf);     // 할당은 첫 회 한 번뿐
+    write(&amp;buf)?;
+}
+
+// ✅ 둘 다 제공하는 것이 친절합니다 (표준 라이브러리 방식)
+pub fn process(input: &amp;[u8]) -&gt; Vec&lt;u8&gt; {
+    let mut out = Vec::new();
+    process_into(input, &amp;mut out);
+    out
+}
+
+// ★ 이 패턴이 네이티브 모듈에서 특히 중요합니다.
+//   파이썬·Node 에서 초당 수천 번 부르는 함수라면
+//   할당 하나가 전체 성능을 좌우합니다 (🐍 y06 · ⚡ e02)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">바이트를 안전하게 해석하기</h4>
+      <pre class="code" data-lang="rust"><code>// 네트워크·파일에서 온 바이트를 구조체로 읽기
+fn read_header(buf: &amp;[u8]) -&gt; Option&lt;(u32, u16)&gt; {
+    if buf.len() &lt; 6 { return None; }              // ★ 길이 검사 먼저
+    let len = u32::from_be_bytes(buf[0..4].try_into().ok()?);
+    let kind = u16::from_be_bytes(buf[4..6].try_into().ok()?);
+    Some((len, kind))
+}
+// try_into() 로 &amp;[u8] → [u8; 4] 변환 — 길이가 안 맞으면 Err ★
+
+// 엔디안을 명시하세요 (FFI·프로토콜 · 🔗 f03)
+u32::from_le_bytes(..);  u32::from_be_bytes(..);
+x.to_le_bytes();         x.to_be_bytes();
+
+// 문자열로 해석
+let s = std::str::from_utf8(&amp;buf)?;                // 검증 (실패 가능)
+let s = String::from_utf8_lossy(&amp;buf);            // 깨진 건 � 로 (실패 없음)
+
+// ❗ unsafe 캐스팅은 정렬 문제로 UB 가 됩니다 (🔬 d03)
+// let h: &amp;Header = unsafe { &amp;*(buf.as_ptr() as *const Header) };  // ❌
+// ✅ bytemuck · zerocopy 크레이트가 안전하게 해 줍니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">DST 와 팻 포인터</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크기를 컴파일 타임에 모르는 타입</h4>
+      <pre class="code" data-lang="rust"><code>// [T] 와 str 은 '크기가 정해지지 않은 타입'(DST) 입니다.
+// 그래서 그 자체로는 변수에 담을 수 없습니다.
+// let x: [i32];        // ❌ the size for values of type `[i32]`
+//                      //    cannot be known at compilation time
+
+// 항상 포인터 뒤에 있어야 합니다 — 그때 길이가 함께 붙습니다 (팻 포인터)
+let a: &amp;[i32] = &amp;v;               // 16바이트 (ptr + len)
+let b: Box&lt;[i32]&gt; = v.into_boxed_slice();
+let c: &amp;str = "안녕";
+let d: &amp;dyn Draw = &amp;circle;       // 16바이트 (ptr + vtable) · o06
+
+// 제네릭 기본 제약은 Sized 입니다
+fn f&lt;T&gt;(x: T) { }                 // 사실은 T: Sized
+fn g&lt;T: ?Sized&gt;(x: &amp;T) { }        // ?Sized 로 풀면 DST 도 받습니다 ★
+
+// 표준 라이브러리 예
+//   impl&lt;T: ?Sized&gt; AsRef&lt;T&gt; for &amp;T
+//   Box&lt;dyn Error&gt;  ·  Arc&lt;str&gt;  ·  Rc&lt;[T]&gt;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Arc&lt;str&gt; · Box&lt;[T]&gt; 로 메모리 아끼기</h4>
+      <pre class="code" data-lang="rust"><code>use std::sync::Arc;
+use std::mem::size_of;
+
+// 자주 쓰는 트릭 — 더 이상 안 늘어날 데이터
+size_of::&lt;String&gt;();          // 24 (ptr + cap + len)
+size_of::&lt;Box&lt;str&gt;&gt;();        // 16 (ptr + len)  ★ 8바이트 절약
+size_of::&lt;Arc&lt;str&gt;&gt;();        // 16
+
+let s: Box&lt;str&gt; = "고정".into();
+let shared: Arc&lt;str&gt; = Arc::from("여러 곳에서 공유");
+let shared2 = Arc::clone(&amp;shared);          // 카운터만 +1 (o10)
+
+// ★ 실무 효과: 문자열 수백만 개를 담는 인덱스·심볼 테이블에서
+//   String → Box&lt;str&gt; 만 바꿔도 메모리가 눈에 띄게 줍니다.
+//   (직접 재 보세요 — 데이터 성격에 따라 차이가 큽니다)
+
+// Vec 도 마찬가지
+let fixed: Box&lt;[u8]&gt; = vec.into_boxed_slice();
+let shared: Arc&lt;[u8]&gt; = Arc::from(vec);      // 여러 스레드가 읽기만 할 때 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>Arc&lt;[T]&gt;</code> 가 유용한 자리</b> — 큰 읽기 전용 데이터를 여러 스레드가 공유할 때
+        <code>Arc&lt;Vec&lt;T&gt;&gt;</code> 보다 간접 참조가 한 단계 적습니다.
+        병렬 처리에서 자주 씁니다(⚡ e05).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 슬라이스는 <b>포인터 + 길이</b>일 뿐이라 복사가 없습니다.
+    함수 인자는 <b><code>&amp;[T]</code>·<code>&amp;str</code></b> 로 받는 것이 정석이고,
+    출력은 <b>버퍼를 받아 재사용</b>하게 만들면 할당이 사라집니다.
+    원본이 바뀌면 창이 무효가 되는 문제를 <b>컴파일러가 막아 줍니다</b> — C++ 와 갈리는 지점입니다.</div>
+</section>
+
+
+<!-- ==================== o05 ==================== -->
+<section class="sec" id="o05">
+  <div class="sec-head rv">
+    <span class="no">OWN 05</span>
+    <h2>트레이트 — <span class="t">“이런 일을 할 수 있다”</span>는 자격증</h2>
+    <p class="lead">
+      Rust 에는 상속이 없습니다. 공통 동작은 전부 <b>트레이트</b>로 표현합니다.
+      자바 인터페이스와 비슷하지만 결정적인 차이가 둘 있습니다 —
+      <b>남의 타입에도 붙일 수 있고</b>, <b>기본 구현을 담을 수 있습니다</b>.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">정의하고 구현하기</h4>
+      <pre class="code" data-lang="rust"><code>trait Shape {
+    fn area(&amp;self) -&gt; f64;                     // 구현해야 하는 것
+
+    fn name(&amp;self) -&gt; &amp;str { "도형" }          // 기본 구현 ★
+    fn describe(&amp;self) -&gt; String {             // 기본 구현이 다른 걸 부름
+        format!("{}의 넓이는 {:.2}", self.name(), self.area())
+    }
+}
+
+struct Circle { r: f64 }
+struct Square { s: f64 }
+
+impl Shape for Circle {
+    fn area(&amp;self) -&gt; f64 { std::f64::consts::PI * self.r * self.r }
+    fn name(&amp;self) -&gt; &amp;str { "원" }            // 기본 구현을 덮어쓰기
+}
+impl Shape for Square {
+    fn area(&amp;self) -&gt; f64 { self.s * self.s }  // name 은 기본값 "도형"
+}
+
+println!("{}", Circle { r: 1.0 }.describe());  // 원의 넓이는 3.14
+
+// 트레이트를 인자로 받기
+fn print_area(s: &amp;impl Shape) { println!("{}", s.area()); }
+fn print_area2&lt;T: Shape&gt;(s: &amp;T) { }            // 같은 뜻</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">남의 타입에 내 트레이트 붙이기 ★</h4>
+      <pre class="code" data-lang="rust"><code>// 자바·C# 에서는 불가능한 일입니다
+trait Summary {
+    fn summary(&amp;self) -&gt; String;
+}
+
+impl Summary for String {                  // 표준 타입에 붙이기
+    fn summary(&amp;self) -&gt; String {
+        self.chars().take(20).collect::&lt;String&gt;() + "…"
+    }
+}
+impl&lt;T: std::fmt::Debug&gt; Summary for Vec&lt;T&gt; {    // 제네릭하게
+    fn summary(&amp;self) -&gt; String { format!("{}개 항목", self.len()) }
+}
+
+"긴 문장입니다".to_string().summary();
+vec![1, 2, 3].summary();
+
+// ★ 고아 규칙 (r09): 트레이트나 타입 중 '하나는 내 것'이어야 합니다.
+//   impl Display for Vec&lt;u8&gt;  → ❌ 둘 다 남의 것
+//   impl Summary for Vec&lt;u8&gt;  → ✅ 트레이트가 내 것
+//   impl Display for MyType   → ✅ 타입이 내 것
+
+// 이 성질을 '확장 트레이트' 패턴이라고 부릅니다.
+// itertools · anyhow::Context 등 유명 크레이트가 전부 이걸 씁니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">표준 트레이트를 구현한다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가장 많이 구현하는 것들 ★</h4>
+      <pre class="code" data-lang="rust"><code>use std::fmt;
+
+// Display — 사용자에게 보여 줄 문자열 ({} 로 출력)
+impl fmt::Display for Point {
+    fn fmt(&amp;self, f: &amp;mut fmt::Formatter&lt;'_&gt;) -&gt; fmt::Result {
+        write!(f, "({}, {})", self.x, self.y)
+    }
+}
+// ★ Display 를 구현하면 .to_string() 이 공짜로 생깁니다 (ToString 자동 구현)
+
+// From — 변환 (Into 가 자동으로 따라옵니다) ★ 아주 중요
+impl From&lt;(f64, f64)&gt; for Point {
+    fn from(t: (f64, f64)) -&gt; Self { Point { x: t.0, y: t.1 } }
+}
+let p: Point = (1.0, 2.0).into();
+let p = Point::from((1.0, 2.0));
+
+// FromStr — "문자열에서 파싱" (.parse() 가 생깁니다)
+impl std::str::FromStr for Point {
+    type Err = ParseError;
+    fn from_str(s: &amp;str) -&gt; Result&lt;Self, Self::Err&gt; { }
+}
+let p: Point = "1,2".parse()?;
+
+// Default · PartialEq · Ord — 대개 derive 로 (r07)
+// Iterator — 직접 구현하면 for 문에 쓸 수 있습니다 (o12)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">트레이트 상속과 제네릭 구현</h4>
+      <pre class="code" data-lang="rust"><code>// 슈퍼트레이트 — "Shape 이려면 Debug 도 있어야 한다"
+trait Shape: std::fmt::Debug {
+    fn area(&amp;self) -&gt; f64;
+    fn report(&amp;self) { println!("{:?} → {}", self, self.area()); }
+    //                          ^^^^^^ Debug 가 보장되므로 쓸 수 있음
+}
+
+// 블랭킷 구현 — 조건을 만족하는 모든 타입에 한 번에 ★
+trait Loggable { fn log(&amp;self); }
+impl&lt;T: std::fmt::Debug&gt; Loggable for T {
+    fn log(&amp;self) { eprintln!("[log] {self:?}"); }
+}
+42.log();  "문자열".log();  vec![1].log();      // 전부 됩니다
+
+// ★ 표준 라이브러리의 대표 사례
+//   impl&lt;T: Display&gt; ToString for T          — Display 면 to_string 이 생김
+//   impl&lt;T, U: From&lt;T&gt;&gt; Into&lt;U&gt; for T        — From 을 쓰면 Into 가 따라옴
+//
+// 블랭킷 구현은 강력하지만 '고아 규칙과 충돌'하기 쉬우니
+// 라이브러리에서는 신중하게 쓰세요.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">추상화의 경계를 정한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">테스트를 위한 추상화</h4>
+      <pre class="code" data-lang="rust"><code>// 외부 의존(HTTP · DB · 시계)을 트레이트로 뽑으면 테스트가 쉬워집니다
+trait Clock { fn now(&amp;self) -&gt; SystemTime; }
+
+struct SystemClock;
+impl Clock for SystemClock { fn now(&amp;self) -&gt; SystemTime { SystemTime::now() } }
+
+struct FixedClock(SystemTime);
+impl Clock for FixedClock { fn now(&amp;self) -&gt; SystemTime { self.0 } }
+
+struct Service&lt;C: Clock&gt; { clock: C }
+impl&lt;C: Clock&gt; Service&lt;C&gt; {
+    fn is_expired(&amp;self, t: SystemTime) -&gt; bool { self.clock.now() &gt; t }
+}
+
+#[test]
+fn expiry() {
+    let s = Service { clock: FixedClock(fixed_time) };   // ★ 시간을 고정
+    assert!(s.is_expired(past));
+}
+
+// ★ 주의: 모든 것을 트레이트로 뽑지 마세요.
+//   구현이 하나뿐인 트레이트는 '간접 층'만 늘립니다.
+//   두 번째 구현(테스트용 포함)이 실제로 필요할 때 만드세요.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">공개 트레이트를 설계할 때</h4>
+      <pre class="code" data-lang="rust"><code>// ① 메서드를 나중에 추가해도 안 깨지게 — 기본 구현을 주세요
+pub trait Codec {
+    fn encode(&amp;self, v: &amp;Value) -&gt; Vec&lt;u8&gt;;
+    fn name(&amp;self) -&gt; &amp;str { "unknown" }        // 나중에 추가해도 OK
+}
+
+// ② 외부에서 구현하지 못하게 막기 (sealed 패턴)
+mod private { pub trait Sealed {} }
+pub trait Format: private::Sealed { }
+impl private::Sealed for Json {}
+impl Format for Json {}
+// → 사용자는 Format 을 구현할 수 없습니다.
+//   나중에 메서드를 추가해도 하위 호환이 깨지지 않습니다 ★
+
+// ③ dyn 으로 쓸 수 있게 유지 (o06)
+//   제네릭 메서드나 Self 반환이 있으면 dyn 이 불가능해집니다
+pub trait Draw {
+    fn draw(&amp;self);                        // ✅ dyn 가능
+    // fn clone_box(&amp;self) -&gt; Self;        // ❌ dyn 불가
+    fn clone_box(&amp;self) -&gt; Box&lt;dyn Draw&gt;;  // ✅ 이렇게 우회
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>버전 호환의 핵심</b> — 공개 트레이트에 메서드를 추가하면
+        <b>그것을 구현한 모든 사용자 코드가 깨집니다</b>.
+        기본 구현을 주거나 sealed 로 막아 두는 것이 라이브러리의 기본 방어입니다(🛠️ b03).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">연관 타입 · GAT · 트레이트 해석</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">연관 상수와 타입</h4>
+      <pre class="code" data-lang="rust"><code>trait Codec {
+    const NAME: &amp;'static str;              // 연관 상수
+    type Output;                            // 연관 타입 (r10)
+    type Error: std::error::Error;          // 제약도 걸 수 있습니다
+
+    fn decode(&amp;self, b: &amp;[u8]) -&gt; Result&lt;Self::Output, Self::Error&gt;;
+}
+
+impl Codec for Json {
+    const NAME: &amp;'static str = "json";
+    type Output = Value;
+    type Error = serde_json::Error;
+    fn decode(&amp;self, b: &amp;[u8]) -&gt; Result&lt;Value, serde_json::Error&gt; { }
+}
+
+// 쓰는 쪽
+fn run&lt;C: Codec&gt;(c: &amp;C, b: &amp;[u8]) -&gt; Result&lt;C::Output, C::Error&gt; {
+    println!("{}", C::NAME);
+    c.decode(b)
+}
+
+// GAT — 연관 타입이 라이프타임을 받을 수 있습니다 (1.65+)
+trait Lender {
+    type Item&lt;'a&gt; where Self: 'a;
+    fn next&lt;'a&gt;(&amp;'a mut self) -&gt; Option&lt;Self::Item&lt;'a&gt;&gt;;
+}
+// → "빌려 주는 이터레이터"를 표현합니다. 버퍼 재사용 API 에 씁니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메서드 해석 순서와 모호성</h4>
+      <pre class="code" data-lang="rust"><code>// 이름이 같은 메서드가 여러 곳에 있을 때
+trait Pilot { fn fly(&amp;self); }
+trait Wizard { fn fly(&amp;self); }
+struct Human;
+impl Pilot for Human { fn fly(&amp;self) { println!("조종"); } }
+impl Wizard for Human { fn fly(&amp;self) { println!("마법"); } }
+impl Human { fn fly(&amp;self) { println!("팔 흔들기"); } }
+
+let h = Human;
+h.fly();                        // "팔 흔들기" — 고유 메서드가 우선 ★
+Pilot::fly(&amp;h);                 // "조종"
+Wizard::fly(&amp;h);                // "마법"
+&lt;Human as Wizard&gt;::fly(&amp;h);     // 완전 수식 문법 (연관 함수일 때 필요)
+
+// 컴파일러의 메서드 탐색 순서
+//   ① 값 자체의 고유 impl        (Human::fly)
+//   ② &amp;self / &amp;mut self 로 자동 참조
+//   ③ Deref 를 따라가며 반복      (String → str → …) · o07
+//   ④ 스코프에 있는 트레이트의 impl
+//
+// ★ "메서드가 없다"는 에러의 흔한 원인: 트레이트를 use 하지 않은 것
+//   use std::io::Read;         ← 이게 없으면 .read() 가 안 보입니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>method not found</code> 에러의 첫 번째 확인 사항</b> —
+        <b>그 트레이트를 <code>use</code> 했는지</b> 보세요.
+        <code>Read</code>, <code>Write</code>, <code>Iterator</code> 확장 트레이트(itertools)가 대표적입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 트레이트는 <b>“이런 일을 할 수 있다”는 자격증</b>이고, 상속을 대신합니다.
+    <b>남의 타입에도 붙일 수 있고</b>(고아 규칙 안에서), <b>기본 구현</b>을 담을 수 있습니다.
+    실무에서는 <code>Display</code>·<code>From</code>·<code>FromStr</code> 를 구현할 일이 가장 많습니다.
+    <b>구현이 하나뿐인 트레이트는 만들지 마세요</b> — 간접 층만 늘어납니다.</div>
+</section>
+
+
+<!-- ==================== o06 ==================== -->
+<section class="sec" id="o06">
+  <div class="sec-head rv">
+    <span class="no">OWN 06</span>
+    <h2>트레이트 객체 vs 제네릭 — <span class="t">빠르게냐 유연하게냐</span></h2>
+    <p class="lead">
+      같은 트레이트를 쓰는 두 가지 방법이 있습니다.
+      <b>제네릭(<code>&lt;T: Trait&gt;</code>)은 타입별로 코드를 만들어 빠르고</b>,
+      <b>트레이트 객체(<code>dyn Trait</code>)는 하나의 코드로 여러 타입을 담습니다.</b>
+      고르는 기준은 명확합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 방식을 나란히</h4>
+      <pre class="code" data-lang="rust"><code>trait Draw { fn draw(&amp;self); }
+
+// ① 제네릭 — 정적 디스패치
+fn render_static&lt;T: Draw&gt;(x: &amp;T) { x.draw(); }
+//  컴파일러가 타입별로 함수를 복사해 만듭니다 (단형화 · r10)
+//  → 호출이 인라인될 수 있고, 비용이 0 입니다
+
+// ② 트레이트 객체 — 동적 디스패치
+fn render_dyn(x: &amp;dyn Draw) { x.draw(); }
+//  실행 중에 vtable 을 보고 어느 draw 인지 찾습니다
+//  → 함수 포인터 한 번 경유 (인라인 불가)
+
+// ★ 결정적 차이: 여러 타입을 한 컬렉션에 담기
+let shapes: Vec&lt;Box&lt;dyn Draw&gt;&gt; = vec![
+    Box::new(Circle { r: 1.0 }),
+    Box::new(Square { s: 2.0 }),        // ✅ 서로 다른 타입이 한 Vec 에
+];
+for s in &amp;shapes { s.draw(); }
+
+// let v: Vec&lt;impl Draw&gt; = vec![circle, square];   // ❌ 불가능</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고르는 기준 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th></th><th>제네릭</th><th><code>dyn</code></th></tr>
+        <tr><td>호출 비용</td><td><b>0 (인라인)</b></td><td>포인터 1회</td></tr>
+        <tr><td>코드 크기</td><td>타입만큼 ↑</td><td><b>하나</b></td></tr>
+        <tr><td>빌드 시간</td><td>느림</td><td><b>빠름</b></td></tr>
+        <tr><td>한 컬렉션에</td><td>불가</td><td><b>가능</b></td></tr>
+        <tr><td>런타임 결정</td><td>불가</td><td><b>가능</b></td></tr>
+        <tr><td>제네릭 메서드</td><td>가능</td><td>불가</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// ★ 실무 기준선
+//   · 안쪽 루프에서 초당 수백만 번 호출  → 제네릭
+//   · 플러그인·핸들러 목록                → dyn
+//   · 설정에 따라 구현이 바뀜             → dyn
+//   · 라이브러리 공개 API                 → dyn 쪽이 사용자에게 편할 때가 많음
+//   · 빌드 시간이 아프다                  → dyn
+//
+// 실제 비용 감각 (직접 재 보세요 · ⚡ e01)
+//   dyn 호출 오버헤드는 보통 나노초 단위입니다.
+//   함수 본문이 조금이라도 하는 일이 있으면 차이가 묻힙니다.
+//   "dyn 은 느리다"는 대부분 측정 없이 하는 말입니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">dyn 이 안 되는 경우</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">객체 안전성 (object safety)</h4>
+      <pre class="code" data-lang="rust"><code>// 이 트레이트는 dyn 으로 못 씁니다
+trait Bad {
+    fn new() -&gt; Self;                    // ❌ Self 를 반환
+    fn compare&lt;T&gt;(&amp;self, x: T);          // ❌ 제네릭 메서드
+    fn clone_me(&amp;self) -&gt; Self;          // ❌ Self 반환
+}
+// let x: &amp;dyn Bad = ..;
+//   error[E0038]: the trait `Bad` cannot be made into an object
+
+// 왜? vtable 에는 '함수 포인터'만 들어갑니다.
+//   · Self 를 반환하면 크기를 모릅니다 (타입마다 다름)
+//   · 제네릭 메서드는 함수가 여러 개라 포인터 하나로 못 담습니다
+
+// ✅ 우회법
+trait Good {
+    fn clone_box(&amp;self) -&gt; Box&lt;dyn Good&gt;;      // Self 대신 Box&lt;dyn&gt;
+    fn compare(&amp;self, x: &amp;dyn std::any::Any);  // 제네릭 대신 dyn
+    fn new_default() -&gt; Self where Self: Sized; // where Self: Sized 로
+    //   → 이 메서드만 dyn 에서 제외됩니다 ★
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">dyn 을 담는 그릇들</h4>
+      <pre class="code" data-lang="rust"><code>&amp;dyn Draw                 // 빌린 것 (16바이트: 데이터 ptr + vtable ptr)
+Box&lt;dyn Draw&gt;             // 힙에 소유
+Rc&lt;dyn Draw&gt;              // 단일 스레드 공유 (o10)
+Arc&lt;dyn Draw + Send + Sync&gt;   // 멀티 스레드 공유 ★ 자주 씁니다
+
+// 에러 타입에서 가장 많이 봅니다 (o09)
+Box&lt;dyn std::error::Error&gt;
+Box&lt;dyn std::error::Error + Send + Sync&gt;      // 스레드 경계를 넘을 때
+
+// 클로저도 dyn 으로 담습니다 (o11)
+let handlers: Vec&lt;Box&lt;dyn Fn(&amp;Event)&gt;&gt; = vec![
+    Box::new(|e| println!("{e:?}")),
+    Box::new(move |e| log.write(e)),
+];
+
+// 다운캐스팅 — 구체 타입으로 되돌리기 (가끔 필요합니다)
+use std::any::Any;
+fn downcast(x: &amp;dyn Any) {
+    if let Some(c) = x.downcast_ref::&lt;Circle&gt;() { }
+}
+// ★ Any 를 쓰기 시작하면 대개 설계를 다시 볼 신호입니다 (enum 이 나을 때가 많음)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">enum 이 답인 경우가 많다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 번째 선택지 ★</h4>
+      <pre class="code" data-lang="rust"><code>// 구현이 '내가 아는 유한한 집합' 이라면 enum 이 대개 낫습니다
+enum Shape { Circle(Circle), Square(Square) }
+
+impl Shape {
+    fn area(&amp;self) -&gt; f64 {
+        match self {
+            Shape::Circle(c) =&gt; c.area(),
+            Shape::Square(s) =&gt; s.area(),
+        }
+    }
+}
+let shapes: Vec&lt;Shape&gt; = vec![Shape::Circle(c), Shape::Square(s)];
+
+// ★ enum 의 장점
+//   · 힙 할당 없음 (Box 불필요)
+//   · 인라인 가능 (dyn 보다 빠름)
+//   · 빠짐없음 검사 (r04) — 새 도형을 추가하면 컴파일러가 짚어 줍니다
+//   · Clone·PartialEq 를 derive 할 수 있음
+
+// dyn 의 장점
+//   · 사용자가 새 구현을 추가할 수 있음 (플러그인)
+//   · 내 크레이트를 고치지 않아도 됨
+
+// 판단 한 줄
+//   "외부에서 구현을 추가할 수 있어야 하나?"
+//     예 → dyn / 아니오 → enum ★
+// (enum_dispatch 크레이트가 이 변환을 자동화해 줍니다)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">제네릭이 API 를 오염시킬 때</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 제네릭이 전염됩니다
+struct Server&lt;S: Storage, L: Logger, C: Clock&gt; { s: S, l: L, c: C }
+// → 쓰는 쪽이 매번 타입 3개를 적어야 하고, 함수 시그니처마다 따라다닙니다
+
+// ✅ 경계에서 dyn 으로 바꿔 가둡니다
+struct Server {
+    storage: Box&lt;dyn Storage + Send + Sync&gt;,
+    logger: Arc&lt;dyn Logger + Send + Sync&gt;,
+}
+impl Server {
+    fn new(s: impl Storage + Send + Sync + 'static) -&gt; Self {
+        Self { storage: Box::new(s), .. }     // ★ 생성자만 제네릭
+    }
+}
+
+// ★ 실무 패턴: '바깥은 제네릭으로 편하게 받고, 안에서는 dyn 으로 저장'
+//   빌드 시간이 줄고, 타입 시그니처가 짧아지고, 성능 차이는 대개 무시할 수준입니다.
+//   (초당 수백만 호출되는 안쪽 루프만 제네릭으로 남기세요)</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>측정 없이 제네릭을 고르지 마세요</b> — 대형 Rust 프로젝트의 빌드 시간 문제는
+        <b>거의 항상 과도한 제네릭</b>에서 옵니다(🛠️ b10). <code>dyn</code> 으로 바꿨을 때
+        실제로 느려지는지 <b>먼저 재 보세요</b>(⚡ e01).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">vtable 은 실제로 어떻게 생겼나</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">팻 포인터 두 워드</h4>
+      <pre class="code" data-lang="text"><code>&amp;dyn Draw 의 메모리 (64비트)
+  ┌──────────────┬──────────────┐
+  │ data pointer │ vtable ptr   │   16바이트
+  └──────────────┴──────────────┘
+                        │
+                        ▼
+      vtable (정적 데이터 · 타입마다 하나)
+        [0] drop_in_place 함수 포인터
+        [1] size
+        [2] align
+        [3] draw 함수 포인터
+        [4] … (트레이트 메서드 순서대로)
+
+★ C++ 와 다른 점
+  C++ 는 vtable 포인터가 '객체 안'에 들어갑니다 (객체가 8바이트 커짐).
+  Rust 는 '참조 쪽'에 붙습니다 → 객체 자체는 커지지 않습니다.
+  그래서 같은 타입을 dyn 으로도, 제네릭으로도 비용 없이 쓸 수 있습니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비용을 실제로 재기</h4>
+      <pre class="code" data-lang="rust"><code>// criterion 으로 두 방식을 비교 (⚡ e01)
+fn bench(c: &amp;mut Criterion) {
+    let shapes_dyn: Vec&lt;Box&lt;dyn Shape&gt;&gt; = make_dyn();
+    let shapes_enum: Vec&lt;ShapeEnum&gt; = make_enum();
+
+    c.bench_function("dyn", |b| b.iter(||
+        shapes_dyn.iter().map(|s| s.area()).sum::&lt;f64&gt;()));
+    c.bench_function("enum", |b| b.iter(||
+        shapes_enum.iter().map(|s| s.area()).sum::&lt;f64&gt;()));
+}
+
+// ★ 결과 해석의 요령 (환경마다 다르니 직접 재세요)
+//   · 함수 본문이 아주 짧으면 enum/제네릭이 눈에 띄게 빠릅니다
+//     (인라인 + 벡터화가 걸리기 때문 · ⚡ e09)
+//   · 본문이 수십 나노초 이상 일하면 차이가 거의 사라집니다
+//   · 캐시 지역성이 더 큰 변수입니다 — Box&lt;dyn&gt; 은 힙에 흩어집니다 (⚡ e04)
+
+// 인라인이 걸렸는지 확인
+//   cargo asm --lib '내함수'  또는 godbolt.org</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>흩어진 힙이 진짜 비용입니다</b> — <code>Vec&lt;Box&lt;dyn T&gt;&gt;</code> 는 원소마다 힙 할당이라
+        <b>캐시 미스가 vtable 비용보다 훨씬 큽니다</b>.
+        성능이 중요하면 <code>enum</code> + <code>Vec</code> 로 <b>연속 배치</b>하는 것이 먼저입니다(⚡ e04).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>제네릭은 빠르고 코드가 늘어나고, <code>dyn</code> 은 유연하고 코드가 하나</b>입니다.
+    구현 집합이 닫혀 있으면 <b><code>enum</code> 이 셋 중 대개 최선</b>입니다 —
+    할당도 없고 빠짐없음 검사도 받습니다.
+    <b>“외부에서 구현을 추가할 수 있어야 하나?”</b> 한 질문으로 고르세요.</div>
+</section>
+
+
+<!-- ==================== o07 ==================== -->
+<section class="sec" id="o07">
+  <div class="sec-head rv">
+    <span class="no">OWN 07</span>
+    <h2>Deref · Drop · <span class="t">연산자 오버로딩</span></h2>
+    <p class="lead">
+      Rust 의 연산자는 전부 트레이트입니다 — <code>+</code> 는 <code>Add</code>, <code>[]</code> 는 <code>Index</code>.
+      그리고 <code>Deref</code> 는 <b><code>String</code> 을 <code>&amp;str</code> 자리에 넣을 수 있게 하는 장치</b>입니다.
+      이 둘을 알면 표준 라이브러리가 왜 그렇게 편한지 이해됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Deref — 자동 변환의 정체 ★</h4>
+      <pre class="code" data-lang="rust"><code>fn greet(s: &amp;str) { }
+let owned = String::from("안녕");
+greet(&amp;owned);          // ★ &amp;String 인데 &amp;str 자리에 들어갑니다
+
+// 이유: String 이 Deref&lt;Target = str&gt; 을 구현하기 때문입니다.
+// 컴파일러가 필요할 때 자동으로 &amp;String → &amp;str 로 바꿔 줍니다 (deref coercion)
+
+// 표준 라이브러리의 Deref 사슬
+//   String  → str
+//   Vec&lt;T&gt;  → [T]
+//   Box&lt;T&gt;  → T
+//   Rc&lt;T&gt;   → T
+//   Arc&lt;T&gt;  → T
+//   MutexGuard&lt;T&gt; → T      ★ *guard 로 안을 쓰는 이유
+
+// 그래서 이게 됩니다
+let v = vec![3, 1, 2];
+v.sort();               // sort 는 [T] 의 메서드인데 Vec 에서 그냥 불림
+let b = Box::new(user);
+println!("{}", b.name); // Box 를 벗기고 필드 접근
+
+// 직접 구현 — 뉴타입에서 자주 씁니다 (r07)
+use std::ops::Deref;
+struct Meters(f64);
+impl Deref for Meters {
+    type Target = f64;
+    fn deref(&amp;self) -&gt; &amp;f64 { &amp;self.0 }
+}
+let m = Meters(3.5);
+println!("{}", m.sqrt());     // f64 의 메서드가 그대로 쓰입니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Deref 를 남용하지 마세요</b> — <b>“스마트 포인터일 때만”</b> 구현하는 것이 원칙입니다.
+        상속 흉내를 내려고 <code>Deref</code> 를 쓰면 <b>메서드가 어디서 왔는지 알 수 없게</b> 되어
+        읽기 어려운 코드가 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">연산자 트레이트</h4>
+      <pre class="code" data-lang="rust"><code>use std::ops::{Add, Mul, Index, AddAssign, Neg};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Vec2 { x: f64, y: f64 }
+
+impl Add for Vec2 {
+    type Output = Vec2;
+    fn add(self, o: Vec2) -&gt; Vec2 { Vec2 { x: self.x + o.x, y: self.y + o.y } }
+}
+impl Mul&lt;f64&gt; for Vec2 {                  // 스칼라 곱 (오른쪽 타입이 다름)
+    type Output = Vec2;
+    fn mul(self, k: f64) -&gt; Vec2 { Vec2 { x: self.x * k, y: self.y * k } }
+}
+impl AddAssign for Vec2 {                 // +=
+    fn add_assign(&amp;mut self, o: Vec2) { self.x += o.x; self.y += o.y; }
+}
+impl Neg for Vec2 { type Output = Vec2; fn neg(self) -&gt; Vec2 { self * -1.0 } }
+
+let c = Vec2 { x:1.0, y:2.0 } + Vec2 { x:3.0, y:4.0 };
+let d = c * 2.0;
+
+// 인덱싱
+impl Index&lt;usize&gt; for Grid {
+    type Output = [u8];
+    fn index(&amp;self, row: usize) -&gt; &amp;[u8] { &amp;self.data[row*self.w..(row+1)*self.w] }
+}
+grid[2][3];
+
+// 비교는 derive 로 (PartialEq, PartialOrd)
+// == 는 PartialEq, &lt; 는 PartialOrd 가 담당합니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">AsRef · Borrow · Into 의 구분</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비슷해 보이는 넷을 구분하기 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>트레이트</th><th>뜻</th><th>쓰는 자리</th></tr>
+        <tr><td><code>AsRef&lt;T&gt;</code></td><td>싸게 참조로 보기</td><td>인자를 넓게 받기</td></tr>
+        <tr><td><code>Borrow&lt;T&gt;</code></td><td>같은 해시·순서 보장</td><td>HashMap 조회</td></tr>
+        <tr><td><code>Deref</code></td><td>자동 변환</td><td>스마트 포인터</td></tr>
+        <tr><td><code>Into&lt;T&gt;</code></td><td>소유권 변환</td><td>값 받기</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// AsRef — "이걸 &amp;T 로 볼 수 있으면 다 받는다"
+fn open(p: impl AsRef&lt;Path&gt;) { let p = p.as_ref(); }
+open("a.txt"); open(String::from("b")); open(&amp;path_buf);
+
+// Into — "이걸 T 로 바꿀 수 있으면 다 받는다" (소유권을 가져감)
+fn set_name(&amp;mut self, n: impl Into&lt;String&gt;) { self.name = n.into(); }
+set_name("리터럴");  set_name(owned_string);
+
+// ★ 고르는 법
+//   읽기만 하고 버린다  → AsRef
+//   보관한다            → Into
+//
+// Borrow 는 HashMap&lt;String, V&gt; 에서 &amp;str 로 조회되는 이유입니다 (r06)
+//   fn get&lt;Q&gt;(&amp;self, k: &amp;Q) -&gt; Option&lt;&amp;V&gt; where String: Borrow&lt;Q&gt;
+//   → "빌린 형태가 같은 해시·순서를 준다"는 추가 약속이 있습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">From 을 구현하면 따라오는 것들</h4>
+      <pre class="code" data-lang="rust"><code>struct Celsius(f64);
+struct Fahrenheit(f64);
+
+impl From&lt;Celsius&gt; for Fahrenheit {
+    fn from(c: Celsius) -&gt; Self { Fahrenheit(c.0 * 9.0 / 5.0 + 32.0) }
+}
+
+// 자동으로 생기는 것들 ★
+let f: Fahrenheit = Celsius(100.0).into();       // Into 가 공짜로
+let f = Fahrenheit::from(Celsius(100.0));
+fn takes(x: impl Into&lt;Fahrenheit&gt;) { }           // 인자로 넓게 받기
+
+// 에러 변환에서 가장 많이 씁니다 — ? 연산자가 From 을 씁니다 (o08) ★
+impl From&lt;std::io::Error&gt; for MyError {
+    fn from(e: std::io::Error) -&gt; Self { MyError::Io(e) }
+}
+fn run() -&gt; Result&lt;(), MyError&gt; {
+    let s = std::fs::read_to_string("a")?;   // io::Error → MyError 자동 변환
+    Ok(())
+}
+
+// TryFrom — 실패할 수 있는 변환
+impl TryFrom&lt;i64&gt; for Port {
+    type Error = &amp;'static str;
+    fn try_from(v: i64) -&gt; Result&lt;Self, Self::Error&gt; { }
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">Drop 으로 자원을 관리한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">FFI 핸들을 감싸는 정석 패턴 ★</h4>
+      <pre class="code" data-lang="rust"><code>// C 라이브러리의 핸들을 Rust 타입으로 감쌉니다 (🔗 f08)
+pub struct Decoder {
+    raw: *mut ffi::Decoder,        // C 가 준 포인터
+}
+
+impl Decoder {
+    pub fn new() -&gt; Result&lt;Self, Error&gt; {
+        let raw = unsafe { ffi::decoder_create() };
+        if raw.is_null() { return Err(Error::Alloc); }
+        Ok(Decoder { raw })
+    }
+    pub fn decode(&amp;mut self, input: &amp;[u8]) -&gt; Result&lt;Vec&lt;u8&gt;, Error&gt; { }
+}
+
+impl Drop for Decoder {
+    fn drop(&amp;mut self) {
+        unsafe { ffi::decoder_destroy(self.raw) };    // ★ 반드시 해제됩니다
+    }
+}
+
+// Send/Sync 를 손으로 붙여야 할 수도 있습니다 (⚡ e06 · 🔬 d08)
+unsafe impl Send for Decoder {}    // C 라이브러리가 스레드 안전하다면
+
+// ★ 이 패턴이 "안전 추상화"의 기본형입니다.
+//   사용자는 unsafe 를 한 줄도 쓰지 않고, 해제를 빠뜨릴 수도 없습니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Drop 을 쓸 때의 실무 규칙</h4>
+      <pre class="code" data-lang="rust"><code>// ① 실패할 수 있는 정리는 명시 메서드로도 제공하세요
+impl Writer {
+    pub fn finish(mut self) -&gt; io::Result&lt;()&gt; {     // 에러를 받을 수 있음
+        self.flush()?;
+        self.done = true;
+        Ok(())
+    }
+}
+impl Drop for Writer {
+    fn drop(&amp;mut self) {
+        if !self.done { let _ = self.flush(); }      // ★ 에러를 삼킬 수밖에 없음
+    }
+}
+
+// ② Drop 안에서 블로킹·await 하지 마세요 (⚡ e08)
+//    async 런타임 안에서 Drop 이 블로킹하면 전체가 멈춥니다.
+
+// ③ 순환 참조가 있으면 Drop 이 안 불립니다 (Rc · o10)
+
+// ④ 프로세스가 abort 하면 Drop 이 안 불립니다
+//    std::process::exit()  ·  panic = "abort" 프로파일 (🛠️ b06)
+//    → 파일 flush 를 Drop 에만 의존하지 마세요
+
+// ⑤ 테스트로 확인하기
+#[test]
+fn drops_once() {
+    let counter = Arc::new(AtomicUsize::new(0));
+    { let _g = Guard(counter.clone()); }
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">Deref 강제 변환의 규칙</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 자동으로 벗겨지나</h4>
+      <pre class="code" data-lang="rust"><code>// deref coercion 이 일어나는 자리
+//   ① 함수 인자로 넘길 때        &amp;String → &amp;str
+//   ② 메서드 호출의 수신자        v.sort() 에서 &amp;Vec → &amp;[T]
+//   ③ 명시적 &amp; 표현식            let s: &amp;str = &amp;owned;
+
+// 일어나지 않는 자리 ★
+//   · 제네릭 타입 매칭
+fn f&lt;T: AsRef&lt;str&gt;&gt;(x: T) { }
+// f(&amp;owned_string) 은 되지만
+fn g&lt;T&gt;(x: &amp;T) { }
+// g::&lt;str&gt;(&amp;owned) 는 안 됩니다 — T 를 String 으로 추론하고 끝
+
+//   · 트레이트 구현 매칭
+// impl Trait for str {} 가 있어도 String 이 자동으로 그 impl 을 쓰진 않습니다
+
+// 여러 단계도 따라갑니다
+let b: Box&lt;String&gt; = Box::new("안녕".into());
+let s: &amp;str = &amp;b;                 // Box&lt;String&gt; → String → str  ★ 두 단계
+
+// DerefMut 도 같은 규칙 (&amp;mut 쪽)
+// Deref 는 '싸야' 합니다 — 안에서 계산하면 성능 함정이 됩니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Drop 순서 · 패닉 · 언와인딩</h4>
+      <pre class="code" data-lang="rust"><code>// 패닉이 나면 스택을 되감으며 Drop 이 호출됩니다 (unwinding)
+// → RAII 가 패닉 상황에서도 동작하는 이유입니다
+
+// 하지만 두 경우엔 Drop 이 안 불립니다
+//   ① panic = "abort" 프로파일 (🛠️ b06 · 바이너리가 작아집니다)
+//   ② Drop 안에서 다시 패닉 → 즉시 abort
+
+// 이미 패닉 중인지 확인
+impl Drop for X {
+    fn drop(&amp;mut self) {
+        if std::thread::panicking() {
+            return;                    // ★ 패닉 중엔 정리를 건너뜀
+        }
+        self.commit();
+    }
+}
+
+// ★ FFI 에서 결정적으로 중요합니다 (🔗 f09)
+//   패닉이 C 코드를 가로질러 되감기면 정의되지 않은 동작입니다.
+//   extern "C" 함수는 반드시 catch_unwind 로 감싸세요.
+extern "C" fn callback() {
+    let _ = std::panic::catch_unwind(|| { /* Rust 코드 */ });
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Rust 2024 부터</b> <code>extern "C"</code> 함수는 기본적으로 패닉 시 <b>abort</b> 하도록
+        바뀌어 UB 는 피하지만, <b>프로세스가 죽습니다</b>.
+        여전히 <b>경계에서 잡아 에러 코드로 바꾸는 것</b>이 정답입니다(🔗 f09).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>Deref</code> 가 <b><code>String</code>→<code>&amp;str</code> 자동 변환</b>의 정체이고,
+    연산자는 전부 트레이트입니다. 인자를 넓게 받을 땐 <b>읽으면 <code>AsRef</code>, 보관하면 <code>Into</code></b>.
+    <code>Drop</code> 은 <b>FFI 핸들을 감싸는 안전 추상화의 기본형</b>이지만,
+    <b>실패할 수 있는 정리는 명시 메서드로도</b> 제공하세요.</div>
+</section>
+
+
+<!-- ==================== o08 ==================== -->
+<section class="sec" id="o08">
+  <div class="sec-head rv">
+    <span class="no">OWN 08</span>
+    <h2>Result 와 <span class="t">? 연산자</span> — 예외가 없는 에러 처리</h2>
+    <p class="lead">
+      Rust 에는 예외가 없습니다. 실패는 <b>반환값</b>이고, 호출자는 <b>반드시 처리해야</b> 합니다.
+      번거로울 것 같지만 <b><code>?</code> 한 글자</b>가 그 부담을 거의 없앱니다 —
+      그리고 <b>어느 함수가 실패할 수 있는지 시그니처만 보면 알 수 있게</b> 됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Result 와 ?</h4>
+      <pre class="code" data-lang="rust"><code>// enum Result&lt;T, E&gt; { Ok(T), Err(E) }
+
+fn read_config(path: &amp;str) -&gt; Result&lt;String, std::io::Error&gt; {
+    let s = std::fs::read_to_string(path)?;    // ★ 실패면 즉시 Err 반환
+    Ok(s)
+}
+
+// ? 가 없다면 이렇게 써야 합니다
+fn read_config_verbose(path: &amp;str) -&gt; Result&lt;String, std::io::Error&gt; {
+    match std::fs::read_to_string(path) {
+        Ok(s) =&gt; Ok(s),
+        Err(e) =&gt; return Err(e),
+    }
+}
+
+// 연쇄로 쓰면 진가가 드러납니다
+fn load() -&gt; Result&lt;Config, Error&gt; {
+    let raw = std::fs::read_to_string("config.toml")?;
+    let cfg: Config = toml::from_str(&amp;raw)?;      // 다른 에러 타입인데도 됨 ★
+    cfg.validate()?;
+    Ok(cfg)
+}
+// ? 는 From&lt;다른에러&gt; for Error 를 자동으로 씁니다 (o07)
+
+// Option 에도 씁니다
+fn first_char(s: &amp;str) -&gt; Option&lt;char&gt; {
+    let c = s.chars().next()?;      // None 이면 즉시 None 반환
+    Some(c.to_ascii_uppercase())
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬 예외와 비교</h4>
+      <pre class="code" data-lang="python"><code># 파이썬 — 어떤 예외가 날지 시그니처에 없습니다
+def load():
+    raw = open("config.toml").read()     # FileNotFoundError?
+    return parse(raw)                    # ValueError? KeyError?
+
+try:
+    cfg = load()
+except Exception as e:                   # 무엇을 잡는지 모호해집니다
+    ...</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>파이썬</th><th>Rust</th></tr>
+        <tr><td><code>raise E()</code></td><td><code>return Err(E)</code></td></tr>
+        <tr><td>자동 전파</td><td><code>?</code></td></tr>
+        <tr><td><code>try/except</code></td><td><code>match</code> / <code>if let</code></td></tr>
+        <tr><td><code>finally</code></td><td><code>Drop</code> (자동)</td></tr>
+        <tr><td>스택 트레이스</td><td>백트레이스(선택)</td></tr>
+        <tr><td>어디서든 발생</td><td><b>시그니처에 명시</b></td></tr>
+      </table></div>
+      <div class="note java" style="margin-bottom:0">
+        <b>실무에서 오는 가장 큰 차이</b> — 리뷰할 때
+        <b>“이 함수가 실패할 수 있나”를 본문을 읽지 않고 알 수 있습니다</b>.
+        그리고 실패를 <b>무시하면 컴파일 경고</b>가 뜹니다(<code>#[must_use]</code>).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">Result 를 다루는 관용구</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">꺼내고 변환하는 방법들</h4>
+      <pre class="code" data-lang="rust"><code>let r: Result&lt;i32, String&gt; = Ok(5);
+
+r.unwrap();                     // 실패면 panic (테스트·프로토타입)
+r.expect("설정 읽기 실패");      // panic 하되 이유를 남김 ★
+r.unwrap_or(0);
+r.unwrap_or_else(|e| { log(e); 0 });
+r.unwrap_or_default();
+
+r.is_ok();  r.is_err();
+r.ok();                         // Result → Option (에러 버림)
+r.err();                        // 에러만
+r.map(|v| v * 2);               // 성공 값 변환
+r.map_err(|e| MyError::from(e)); // ★ 에러 타입 변환 — 자주 씁니다
+r.and_then(|v| next_step(v));   // Result 를 반환하는 함수 연결
+r.or_else(|_| fallback());      // 실패하면 대안
+
+// 이터레이터에서 — 하나라도 실패하면 전체 실패 ★
+let nums: Result&lt;Vec&lt;i32&gt;, _&gt; =
+    ["1", "2", "x"].iter().map(|s| s.parse::&lt;i32&gt;()).collect();
+// Err(ParseIntError)
+
+// 실패한 것만 걸러 내기
+let nums: Vec&lt;i32&gt; = strs.iter().filter_map(|s| s.parse().ok()).collect();
+
+// 에러를 모으기
+let (ok, err): (Vec&lt;_&gt;, Vec&lt;_&gt;) = results.into_iter().partition(|r| r.is_ok());</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">main 에서 ? 쓰기</h4>
+      <pre class="code" data-lang="rust"><code>// main 도 Result 를 반환할 수 있습니다
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let cfg = load()?;
+    run(cfg)?;
+    Ok(())
+}
+// 실패하면 Debug 출력 후 종료 코드 1 로 끝납니다
+
+// 종료 코드를 직접 정하려면
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("오류: {e}");
+        std::process::exit(2);        // ★ Drop 이 안 불립니다 (o07)
+    }
+}
+
+// 테스트에서도 (r11)
+#[test]
+fn t() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let n: i32 = "42".parse()?;
+    Ok(())
+}
+
+// ★ 반환값을 무시하면 경고가 납니다
+// std::fs::remove_file("a");        // warning: unused `Result`
+let _ = std::fs::remove_file("a");   // 의도적 무시는 이렇게 명시</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">panic 과 Result 를 나눈다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기준: 호출자가 대응할 수 있는가 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>상황</th><th>선택</th></tr>
+        <tr><td>파일 없음 · 네트워크 실패</td><td><code>Result</code></td></tr>
+        <tr><td>사용자 입력이 잘못됨</td><td><code>Result</code></td></tr>
+        <tr><td>설정 파싱 실패</td><td><code>Result</code></td></tr>
+        <tr><td>인덱스 범위 초과</td><td><code>panic</code> (버그)</td></tr>
+        <tr><td>불변식 위반</td><td><code>panic</code></td></tr>
+        <tr><td>OOM · 스택 오버플로</td><td>abort</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// ★ 한 줄 기준
+//   "이건 프로그래머의 버그인가, 환경의 문제인가?"
+//     버그   → panic!  (고쳐야 할 코드가 있다)
+//     환경   → Result  (호출자가 재시도·대체·보고할 수 있다)
+
+// 라이브러리라면 panic 을 문서에 적으세요
+/// # 패닉
+/// `idx` 가 길이 이상이면 패닉합니다.
+pub fn get(&amp;self, idx: usize) -&gt; &amp;T { &amp;self.data[idx] }
+
+// 패닉을 잡을 수도 있습니다 (경계에서만 · 🔗 f09)
+let r = std::panic::catch_unwind(|| risky());
+// ★ 일반 흐름 제어에 쓰지 마세요. FFI·서버 워커 격리용입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러를 잃지 않고 전달하기</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 원인이 사라집니다
+fn load() -&gt; Result&lt;Config, String&gt; {
+    std::fs::read_to_string(p).map_err(|_| "읽기 실패".to_string())?;
+}
+// → "읽기 실패" 만 남고 '어느 파일인지 · 권한인지 없는 건지' 가 사라짐
+
+// ✅ 맥락을 더하되 원인을 보존 (o09 에서 자세히)
+use anyhow::Context;
+fn load(p: &amp;Path) -&gt; anyhow::Result&lt;Config&gt; {
+    let raw = std::fs::read_to_string(p)
+        .with_context(|| format!("설정 파일 읽기 실패: {}", p.display()))?;
+    let cfg = toml::from_str(&amp;raw)
+        .with_context(|| "설정 파싱 실패")?;
+    Ok(cfg)
+}
+
+// 출력 예
+//   Error: 설정 파일 읽기 실패: /etc/app.toml
+//
+//   Caused by:
+//       No such file or directory (os error 2)      ★ 원인이 남습니다
+
+// 백트레이스 켜기
+//   RUST_BACKTRACE=1 cargo run</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>에러 메시지에 “실패했습니다”만 남기지 마세요</b> —
+        운영 중 이 로그 하나로 원인을 찾아야 합니다.
+        <b>무엇을 하려다, 어떤 값으로, 왜</b> 셋이 들어가야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">? 는 무엇으로 컴파일되나</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Try 트레이트</h4>
+      <pre class="code" data-lang="rust"><code>// x? 는 대략 이렇게 펼쳐집니다
+match std::ops::Try::branch(x) {
+    ControlFlow::Continue(v) =&gt; v,
+    ControlFlow::Break(r) =&gt; return FromResidual::from_residual(r),
+}
+
+// Result 의 경우 실질적으로
+match x {
+    Ok(v) =&gt; v,
+    Err(e) =&gt; return Err(From::from(e)),      // ★ From 변환이 여기서
+}
+
+// 그래서 이런 것이 가능합니다
+struct MyErr;
+impl From&lt;std::io::Error&gt; for MyErr { }
+impl From&lt;std::num::ParseIntError&gt; for MyErr { }
+
+fn f() -&gt; Result&lt;(), MyErr&gt; {
+    let s = std::fs::read_to_string("a")?;    // io::Error → MyErr
+    let n: i32 = s.trim().parse()?;           // ParseIntError → MyErr
+    Ok(())
+}
+
+// 비용: 없습니다. 분기 하나입니다.
+// Result 는 예외 테이블도, 언와인딩도 쓰지 않습니다 ★
+// → 그래서 '에러가 자주 나는 경로'도 빠릅니다 (C++ 예외와 반대)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Result 의 크기가 성능에 미치는 영향</h4>
+      <pre class="code" data-lang="rust"><code>use std::mem::size_of;
+
+size_of::&lt;Result&lt;(), std::io::Error&gt;&gt;();      // 8  (io::Error 는 박싱돼 있음)
+size_of::&lt;Result&lt;u64, BigError&gt;&gt;();           // BigError 가 200바이트면 208 ★
+
+// ❗ 성공 경로도 이 크기를 냅니다 — 반환마다 200바이트를 복사합니다
+// ✅ 에러를 박싱하세요
+enum MyError { Io(std::io::Error), Parse(Box&lt;ParseDetail&gt;) }
+type Result&lt;T&gt; = std::result::Result&lt;T, Box&lt;MyError&gt;&gt;;
+
+// 확인
+//   cargo clippy 의 result_large_err 린트 (기본 128바이트 이상 경고)
+//   cargo +nightly rustc -- -Zprint-type-sizes | grep Result
+
+// ★ 실무 효과: 파서·직렬화처럼 작은 함수를 초당 수백만 번 부르는 코드에서
+//   Result 크기를 줄이는 것만으로 눈에 띄게 빨라지는 경우가 있습니다.
+//   (직접 재 보세요 — ⚡ e01)
+
+// #[must_use] 로 무시를 막기
+#[must_use = "이 결과를 확인하세요"]
+pub fn try_send(&amp;self) -&gt; Result&lt;(), SendError&gt; { }</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 실패는 <b>예외가 아니라 <code>Result</code> 반환값</b>이고, <code>?</code> 한 글자로 전파합니다.
+    <code>?</code> 는 <b><code>From</code> 변환을 자동으로</b> 쓰므로 에러 타입을 갈아 끼울 수 있습니다.
+    <b>버그면 <code>panic</code>, 환경 문제면 <code>Result</code></b> 로 나누고,
+    에러에는 <b>무엇을 하려다 · 어떤 값으로 · 왜</b>를 남기세요.</div>
+</section>
+
+
+<!-- ==================== o09 ==================== -->
+<section class="sec" id="o09">
+  <div class="sec-head rv">
+    <span class="no">OWN 09</span>
+    <h2>에러 타입 설계 — <span class="t">thiserror 와 anyhow</span></h2>
+    <p class="lead">
+      에러 처리에서 실제로 고민할 것은 하나입니다 — <b>“내 에러 타입을 만들 것인가”</b>.
+      답은 간단합니다. <b>라이브러리면 <code>thiserror</code>, 애플리케이션이면 <code>anyhow</code></b>.
+      이 한 줄만 알아도 실무 설계가 끝납니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">thiserror — 라이브러리용 ★</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+thiserror = "2"</code></pre>
+      <pre class="code" data-lang="rust"><code>use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum ConfigError {
+    #[error("설정 파일을 읽을 수 없습니다: {path}")]
+    Read { path: String, #[source] source: std::io::Error },
+
+    #[error("TOML 문법 오류")]
+    Parse(#[from] toml::de::Error),          // ★ From 이 자동 생성 → ? 로 변환됨
+
+    #[error("필수 항목이 없습니다: {0}")]
+    Missing(String),
+
+    #[error("포트 번호가 범위를 벗어남: {0} (1~65535)")]
+    BadPort(u32),
+}
+
+pub type Result&lt;T&gt; = std::result::Result&lt;T, ConfigError&gt;;
+
+// 쓰는 쪽
+fn load(p: &amp;str) -&gt; Result&lt;Config&gt; {
+    let raw = std::fs::read_to_string(p)
+        .map_err(|e| ConfigError::Read { path: p.into(), source: e })?;
+    let cfg: Config = toml::from_str(&amp;raw)?;      // #[from] 덕분에 자동 변환
+    Ok(cfg)
+}
+
+// ★ 왜 라이브러리는 구체 타입인가
+//   사용자가 match 로 '어떤 실패인지' 구분해 대응할 수 있어야 합니다.
+//   Box&lt;dyn Error&gt; 를 돌려주면 문자열 비교밖에 못 합니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">anyhow — 애플리케이션용 ★</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+anyhow = "1"</code></pre>
+      <pre class="code" data-lang="rust"><code>use anyhow::{Context, Result, bail, ensure};
+
+fn run(path: &amp;str) -&gt; Result&lt;()&gt; {           // Result&lt;(), anyhow::Error&gt;
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("설정 읽기 실패: {path}"))?;    // 맥락 추가 ★
+
+    let cfg: Config = toml::from_str(&amp;raw).context("TOML 파싱 실패")?;
+
+    ensure!(cfg.port &gt; 0, "포트는 0보다 커야 합니다 (받은 값: {})", cfg.port);
+    if cfg.hosts.is_empty() { bail!("호스트 목록이 비었습니다"); }
+
+    Ok(())
+}
+
+fn main() -&gt; Result&lt;()&gt; {
+    run("app.toml")
+}
+
+// 출력
+//   Error: 설정 읽기 실패: app.toml
+//
+//   Caused by:
+//       No such file or directory (os error 2)
+
+// ★ anyhow 의 장점
+//   · 어떤 에러 타입이든 ? 로 받습니다 (타입을 안 만들어도 됨)
+//   · 맥락을 층층이 쌓아 원인 사슬을 만듭니다
+//   · 백트레이스를 자동으로 담습니다 (RUST_BACKTRACE=1)
+//   단점: 사용자가 종류별로 대응할 수 없습니다 → 라이브러리에는 부적합</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">둘을 함께 쓰는 실제 구조</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">계층별로 나눕니다</h4>
+      <pre class="code" data-lang="text"><code>내 프로젝트 구조
+
+  crates/parser/     ← 라이브러리: thiserror 로 ParserError
+  crates/storage/    ← 라이브러리: thiserror 로 StorageError
+  src/main.rs        ← 애플리케이션: anyhow 로 전부 받아 사람에게 보고
+
+★ 경계에서 자연스럽게 이어집니다
+  anyhow::Error 는 어떤 std::error::Error 든 받아들입니다.
+  그래서 라이브러리는 구체 타입을 내보내고,
+  앱은 ? 하나로 전부 모읍니다.</code></pre>
+      <pre class="code" data-lang="rust"><code>// 라이브러리 (thiserror)
+pub fn parse(s: &amp;str) -&gt; Result&lt;Ast, ParserError&gt; { }
+
+// 앱 (anyhow)
+fn main() -&gt; anyhow::Result&lt;()&gt; {
+    let ast = parser::parse(&amp;src).context("소스 파싱")?;   // ✅ 그냥 됩니다
+    let out = storage::save(&amp;ast).context("저장")?;
+    Ok(())
+}
+
+// 앱에서도 특정 에러에 대응해야 한다면
+match parser::parse(&amp;src) {
+    Err(ParserError::UnexpectedEof) =&gt; retry_with_more_input(),
+    Err(e) =&gt; return Err(e.into()),
+    Ok(a) =&gt; a,
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러 사슬을 읽고 다루기</h4>
+      <pre class="code" data-lang="rust"><code>use std::error::Error;
+
+fn print_chain(e: &amp;dyn Error) {
+    eprintln!("오류: {e}");
+    let mut src = e.source();
+    while let Some(s) = src {
+        eprintln!("  원인: {s}");
+        src = s.source();
+    }
+}
+
+// anyhow 는 더 쉽습니다
+fn handle(e: anyhow::Error) {
+    eprintln!("{e:?}");                 // 사슬 + 백트레이스 전부
+    eprintln!("{e:#}");                 // 사슬을 한 줄로
+
+    // 구체 타입으로 되돌리기
+    if let Some(io) = e.downcast_ref::&lt;std::io::Error&gt;() {
+        if io.kind() == std::io::ErrorKind::NotFound { }
+    }
+    // 사슬 전체에서 찾기
+    for cause in e.chain() {
+        if cause.is::&lt;ParserError&gt;() { }
+    }
+}
+
+// 로깅과 함께 (tracing 크레이트)
+tracing::error!(error = ?e, "요청 처리 실패");</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">FFI 경계의 에러 설계</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬·Node 로 나갈 에러 ★</h4>
+      <pre class="code" data-lang="rust"><code>// 내부는 thiserror 로 잘 나눠 두고
+#[derive(Error, Debug)]
+pub enum CoreError {
+    #[error("입력이 비었습니다")]              Empty,
+    #[error("길이 초과: {0} &gt; {1}")]            TooLong(usize, usize),
+    #[error("인코딩 오류")]                    Encoding(#[from] std::str::Utf8Error),
+}
+
+// 경계에서 그 언어의 예외로 변환합니다
+#[cfg(feature = "python")]
+impl From&lt;CoreError&gt; for pyo3::PyErr {
+    fn from(e: CoreError) -&gt; Self {
+        use pyo3::exceptions::*;
+        match e {
+            CoreError::Empty =&gt; PyValueError::new_err(e.to_string()),
+            CoreError::TooLong(..) =&gt; PyOverflowError::new_err(e.to_string()),
+            CoreError::Encoding(_) =&gt; PyUnicodeDecodeError::new_err(e.to_string()),
+        }
+    }
+}
+// → 파이썬 쪽에서 except ValueError 로 자연스럽게 잡힙니다 (🐍 y08)
+
+// ★ 원칙: 에러 '종류'를 언어 경계에서 잃지 마세요.
+//   전부 RuntimeError 로 던지면 쓰는 사람이 대응할 수 없습니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C ABI 로 나갈 때는 에러 코드</h4>
+      <pre class="code" data-lang="rust"><code>// C 에는 Result 가 없습니다 → 정수 코드 + 마지막 메시지 (🔗 f09)
+#[repr(i32)]
+pub enum Code { Ok = 0, Empty = 1, TooLong = 2, Internal = 99 }
+
+thread_local! {
+    static LAST_ERROR: std::cell::RefCell&lt;String&gt; = Default::default();
+}
+
+#[no_mangle]
+pub extern "C" fn my_process(input: *const u8, len: usize) -&gt; i32 {
+    let r = std::panic::catch_unwind(|| {          // ★ 패닉 차단 (🔗 f09)
+        let s = unsafe { std::slice::from_raw_parts(input, len) };
+        core_process(s)
+    });
+    match r {
+        Ok(Ok(_)) =&gt; Code::Ok as i32,
+        Ok(Err(e)) =&gt; { set_last_error(e.to_string()); code_of(&amp;e) }
+        Err(_) =&gt; { set_last_error("내부 패닉".into()); Code::Internal as i32 }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn my_last_error(buf: *mut u8, cap: usize) -&gt; usize { }</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>에러 코드는 절대 바꾸지 마세요</b> — 한 번 배포하면 <b>다른 언어의 코드가 그 숫자에 의존</b>합니다.
+        새 실패는 <b>새 코드를 추가</b>하고, 알 수 없는 코드는 “일반 오류”로 처리하도록
+        <b>문서에 명시</b>하세요(🔗 f09).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">std::error::Error 의 안쪽</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 구현하면 이렇게 됩니다</h4>
+      <pre class="code" data-lang="rust"><code>use std::fmt;
+
+#[derive(Debug)]
+pub struct MyError { msg: String, source: Option&lt;Box&lt;dyn std::error::Error + Send + Sync&gt;&gt; }
+
+impl fmt::Display for MyError {
+    fn fmt(&amp;self, f: &amp;mut fmt::Formatter&lt;'_&gt;) -&gt; fmt::Result {
+        write!(f, "{}", self.msg)        // ★ 자기 것만 씁니다 (원인은 source 로)
+    }
+}
+
+impl std::error::Error for MyError {
+    fn source(&amp;self) -&gt; Option&lt;&amp;(dyn std::error::Error + 'static)&gt; {
+        self.source.as_ref().map(|b| &amp;**b as _)
+    }
+}
+
+// ★ Display 에 원인까지 넣지 마세요 — 사슬을 출력할 때 중복됩니다
+//   ❌ write!(f, "{}: {}", self.msg, self.source)
+//   ✅ write!(f, "{}", self.msg)   + source() 구현
+
+// thiserror 가 만들어 주는 것이 정확히 이 코드입니다.
+// #[source] · #[from] 이 source() 구현을 생성합니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러 설계 체크리스트 ★</h4>
+      <pre class="code" data-lang="text"><code>□ 에러 타입이 작은가 (128바이트 이하 · o08)
+    큰 필드는 Box 로 감싸세요
+
+□ Send + Sync 인가
+    스레드·async 를 쓰면 필수입니다 (⚡ e06)
+    Box&lt;dyn Error&gt; 가 아니라 Box&lt;dyn Error + Send + Sync&gt;
+
+□ #[non_exhaustive] 를 붙였는가 (라이브러리)
+    나중에 배리언트를 추가해도 사용자 코드가 안 깨집니다 (r08)
+
+□ 원인을 보존하는가 (#[source] / #[from])
+    map_err(|_| "실패") 는 조사 불가능한 로그를 만듭니다
+
+□ 메시지가 소문자로 시작하고 마침표가 없는가
+    Rust 관례: "failed to read config"  (상위가 이어 붙이기 좋게)
+    한글이면 "설정 파일을 읽지 못했습니다" 정도로 통일
+
+□ 민감 정보가 들어가지 않는가
+    비밀번호·토큰이 에러 메시지로 로그에 남는 사고가 흔합니다 ★
+
+□ 재시도 가능한 실패를 구분할 수 있는가
+    fn is_retryable(&amp;self) -&gt; bool 같은 메서드를 두면 호출자가 편합니다</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>라이브러리는 <code>thiserror</code> 로 구체 타입</b>,
+    <b>애플리케이션은 <code>anyhow</code> 로 맥락을 쌓기</b> — 이 한 줄이면 됩니다.
+    둘은 자연스럽게 이어지므로 계층별로 나눠 쓰세요.
+    <b>원인을 지우는 <code>map_err(|_| "실패")</code></b> 만은 피하세요 — 운영에서 조사할 수 없게 됩니다.</div>
+</section>
+
+
+<!-- ==================== o10 ==================== -->
+<section class="sec" id="o10">
+  <div class="sec-head rv">
+    <span class="no">OWN 10</span>
+    <h2>Box · Rc · RefCell — <span class="t">규칙의 탈출구 세 개</span></h2>
+    <p class="lead">
+      “주인은 한 명”이 답답할 때가 있습니다 — <b>여러 곳이 같은 값을 봐야 하거나</b>,
+      <b>불변인데 안을 고쳐야 할 때</b>입니다.
+      그럴 때 쓰는 도구가 셋 있지만, <b>먼저 설계로 풀 수 있는지 확인하는 것</b>이 순서입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Box — 힙에 하나 두기</h4>
+      <pre class="code" data-lang="rust"><code>let b = Box::new(42);          // 힙에 값, 스택엔 포인터 8바이트
+println!("{}", *b);            // 역참조 (Deref 로 대개 생략됨)
+
+// ① 재귀 타입 — 크기를 정할 수 있게 ★
+enum List { Cons(i32, Box&lt;List&gt;), Nil }
+//   Box 없이는 "무한 크기" 라 컴파일 안 됩니다
+
+struct Node { value: i32, next: Option&lt;Box&lt;Node&gt;&gt; }   // 링크드 리스트
+
+// ② 큰 값을 옮길 때 (복사 비용 회피 · r05)
+fn make() -&gt; Box&lt;[u8; 1_000_000]&gt; { Box::new([0; 1_000_000]) }
+
+// ③ 트레이트 객체 (o06)
+let d: Box&lt;dyn Draw&gt; = Box::new(circle);
+
+// ④ 에러 타입 (o08 · o09)
+Box&lt;dyn std::error::Error + Send + Sync&gt;
+
+// Box 는 '소유권이 하나'라는 규칙을 그대로 지킵니다.
+// 그래서 성능 비용이 사실상 없습니다 (역참조 한 번).</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Rc · Arc — 주인이 여럿</h4>
+      <pre class="code" data-lang="rust"><code>use std::rc::Rc;
+use std::sync::Arc;
+
+let a = Rc::new(vec![1, 2, 3]);
+let b = Rc::clone(&amp;a);          // ★ 데이터 복사가 아니라 카운터 +1
+println!("{}", Rc::strong_count(&amp;a));   // 2
+// 마지막 Rc 가 사라질 때 데이터가 해제됩니다
+
+// Rc  — 단일 스레드 전용 (카운터가 원자 연산이 아니라 빠름)
+// Arc — 여러 스레드 (원자 카운터 · ⚡ e06)
+let shared = Arc::new(config);
+std::thread::spawn({
+    let c = Arc::clone(&amp;shared);
+    move || use_config(&amp;c)
+});
+
+// ★ 중요: Rc/Arc 안의 값은 '불변'입니다
+// let mut v = Rc::new(vec![1]);
+// v.push(2);              // ❌ Rc&lt;Vec&gt; 를 통해 고칠 수 없습니다
+
+// 고치려면 안쪽 가변성이 필요합니다 ↓
+Rc&lt;RefCell&lt;T&gt;&gt;        // 단일 스레드
+Arc&lt;Mutex&lt;T&gt;&gt;         // 멀티 스레드 ★ 가장 흔한 조합 (⚡ e07)
+Arc&lt;RwLock&lt;T&gt;&gt;        // 읽기가 훨씬 많을 때
+
+// 순환 참조 끊기 — Weak
+use std::rc::Weak;
+struct Node { parent: Weak&lt;Node&gt;, children: Vec&lt;Rc&lt;Node&gt;&gt; }
+// Weak 는 카운트를 올리지 않습니다. upgrade() 로 Option&lt;Rc&gt; 를 얻습니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">RefCell — 검사를 런타임으로 미루기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌림 검사를 실행 중에 합니다 ★</h4>
+      <pre class="code" data-lang="rust"><code>use std::cell::RefCell;
+
+let c = RefCell::new(vec![1, 2, 3]);
+
+c.borrow_mut().push(4);            // 가변 빌림
+println!("{:?}", c.borrow());      // 불변 빌림
+
+// ★ 규칙은 같습니다. 다만 어길 때 '컴파일 에러'가 아니라 '패닉'입니다
+let b1 = c.borrow();
+// let b2 = c.borrow_mut();        // 💥 panic: already borrowed
+
+// 패닉 대신 확인하기
+if let Ok(mut v) = c.try_borrow_mut() { v.push(5); }
+
+// Cell — Copy 타입 전용, 통째로 바꾸기만 (빌림이 없어 패닉도 없음)
+use std::cell::Cell;
+let count = Cell::new(0);
+count.set(count.get() + 1);
+
+// 언제 쓰나
+//   · &amp;self 메서드 안에서 캐시를 갱신해야 할 때 ★
+//   · 그래프·트리에서 부모를 가리켜야 할 때
+//   · 콜백 안에서 바깥 상태를 바꿔야 할 때 (o11)
+
+struct Lazy { cache: RefCell&lt;Option&lt;String&gt;&gt; }
+impl Lazy {
+    fn get(&amp;self) -&gt; String {           // &amp;self 인데 안을 고칩니다
+        let mut c = self.cache.borrow_mut();
+        c.get_or_insert_with(|| expensive()).clone()
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>RefCell</code> 패닉은 운영에서 터집니다</b> — 컴파일러가 못 막아 주므로
+        <b>빌림 범위를 최대한 짧게</b> 유지하세요(<code>let v = c.borrow().clone();</code> 처럼).
+        <code>OnceCell</code>·<code>LazyCell</code> 로 대체할 수 있으면 그쪽이 안전합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고르는 표 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>필요</th><th>단일 스레드</th><th>멀티 스레드</th></tr>
+        <tr><td>힙에 하나</td><td><code>Box&lt;T&gt;</code></td><td><code>Box&lt;T&gt;</code></td></tr>
+        <tr><td>공유 (읽기)</td><td><code>Rc&lt;T&gt;</code></td><td><code>Arc&lt;T&gt;</code></td></tr>
+        <tr><td>공유 + 수정</td><td><code>Rc&lt;RefCell&gt;</code></td><td><code>Arc&lt;Mutex&gt;</code></td></tr>
+        <tr><td>읽기 多</td><td><code>Rc&lt;RefCell&gt;</code></td><td><code>Arc&lt;RwLock&gt;</code></td></tr>
+        <tr><td>숫자 카운터</td><td><code>Cell</code></td><td><code>Atomic*</code></td></tr>
+        <tr><td>한 번만 초기화</td><td><code>OnceCell</code></td><td><code>OnceLock</code></td></tr>
+        <tr><td>순환 끊기</td><td><code>Weak</code></td><td><code>Weak</code></td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// 비용 감각 (직접 재 보세요 · ⚡ e01)
+//   Box       역참조 1회 — 사실상 0
+//   Rc clone  비원자 증감 — 매우 쌈
+//   Arc clone 원자 증감 — 경합 없으면 쌈, 있으면 캐시 핑퐁 (⚡ e06)
+//   RefCell   런타임 카운터 확인 — 쌈
+//   Mutex     경합 없으면 수십 ns, 있으면 컨텍스트 스위치 ★
+
+// ❗ 안티패턴: 루프 안에서 Arc::clone
+for _ in 0..1_000_000 { let c = Arc::clone(&amp;x); }   // 원자 연산 100만 번
+// ✅ 루프 밖에서 한 번 clone 하고 참조를 쓰세요</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">Arc&lt;Mutex&lt;T&gt;&gt; 를 쓰기 전에</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">먼저 대안을 검토합니다 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ① 데이터를 나눠 준다 (공유하지 않기) — 가장 좋은 답
+let (a, b) = data.split_at_mut(mid);      // o02
+rayon 의 par_chunks_mut                    // ⚡ e05
+
+// ② 메시지로 주고받는다 (채널)
+let (tx, rx) = std::sync::mpsc::channel();
+// "메모리를 공유해 소통하지 말고, 소통해서 메모리를 공유하라"
+
+// ③ 읽기 전용으로 공유한다
+let shared = Arc::new(big_readonly_data);  // Mutex 불필요 ★
+
+// ④ 원자 타입으로 충분한가
+let counter = Arc::new(AtomicU64::new(0));
+counter.fetch_add(1, Ordering::Relaxed);   // Mutex 보다 훨씬 쌈
+
+// ⑤ 그래도 필요하면
+let state = Arc::new(Mutex::new(State::new()));
+
+// ★ 순서를 지키면 Mutex 를 쓸 일이 절반으로 줍니다.
+//   Rust 는 ①②③ 을 안전하게 쓸 수 있게 만들어 둔 언어입니다 (⚡ e06).</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">락을 쓸 때의 규칙</h4>
+      <pre class="code" data-lang="rust"><code>// ① 락 범위를 최소로
+// ❌
+let mut s = state.lock().unwrap();
+let result = expensive_io(&amp;s.config);      // 락을 잡은 채 I/O ★ 최악
+s.results.push(result);
+
+// ✅
+let config = { state.lock().unwrap().config.clone() };   // 락 즉시 해제
+let result = expensive_io(&amp;config);
+state.lock().unwrap().results.push(result);
+
+// ② 락을 잡은 채 다른 락을 잡지 마세요 (데드락)
+//    꼭 필요하면 '항상 같은 순서로' 잡으세요
+
+// ③ async 안에서 std::sync::Mutex 를 await 너머로 들고 있지 마세요 (⚡ e08)
+//    → tokio::sync::Mutex 를 쓰거나, await 전에 놓으세요
+
+// ④ 락 오염(poisoning) — 락을 든 스레드가 패닉하면
+let g = m.lock().unwrap_or_else(|e| e.into_inner());   // 무시하고 진행
+//    parking_lot 크레이트는 오염 개념이 없어 더 단순하고 빠릅니다
+
+// ⑤ 데드락 진단
+//    RUST_BACKTRACE=1 + gdb thread apply all bt
+//    parking_lot 의 deadlock_detection feature</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>Rust 가 막아 주는 것과 못 막는 것</b> — <b>데이터 경쟁은 컴파일러가 막습니다</b>(⚡ e06).
+        하지만 <b>데드락은 못 막습니다</b> — 그건 논리 오류이지 메모리 안전 문제가 아니기 때문입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">안쪽 가변성의 원리</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">UnsafeCell — 유일한 예외</h4>
+      <pre class="code" data-lang="rust"><code>// Rust 의 핵심 가정: &amp;T 가 있으면 그 값은 절대 안 바뀐다
+// → 컴파일러가 값을 레지스터에 캐시하고 재정렬해도 안전합니다.
+//
+// UnsafeCell&lt;T&gt; 만이 이 가정에서 제외됩니다. ★
+// Cell · RefCell · Mutex · RwLock · Atomic* 전부 내부적으로 UnsafeCell 입니다.
+
+pub struct Cell&lt;T&gt; { value: UnsafeCell&lt;T&gt; }
+
+// 직접 쓸 일은 거의 없지만, unsafe 추상화를 만들 때 필요합니다 (🔬 d08)
+struct MyCell&lt;T&gt; { v: std::cell::UnsafeCell&lt;T&gt; }
+impl&lt;T: Copy&gt; MyCell&lt;T&gt; {
+    fn get(&amp;self) -&gt; T { unsafe { *self.v.get() } }
+    fn set(&amp;self, x: T) { unsafe { *self.v.get() = x } }
+}
+// ❗ 이 타입은 Sync 가 아니어야 합니다 (UnsafeCell 이 자동으로 !Sync)
+//    아니면 두 스레드가 동시에 set 해 데이터 경쟁이 납니다
+
+// 확인: Cell 은 Send 지만 Sync 가 아닙니다
+// Mutex 는 둘 다입니다 (락으로 보호하니까)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Rc 의 메모리 배치와 함정</h4>
+      <pre class="code" data-lang="text"><code>Rc&lt;T&gt; 의 힙 배치
+  ┌──────────┬──────────┬─────────┐
+  │ strong   │ weak     │  T      │
+  │ (usize)  │ (usize)  │         │
+  └──────────┴──────────┴─────────┘
+        ▲
+     Rc&lt;T&gt; = 이 블록을 가리키는 포인터 하나 (8바이트)
+
+★ 실무에서 알아야 할 것
+  · T 가 해제되는 시점: strong == 0
+  · 블록 자체가 해제되는 시점: strong == 0 && weak == 0
+    → Weak 가 살아 있으면 메모리 블록은 남습니다 (T 는 이미 해제됨)
+  · 순환 참조가 있으면 strong 이 0 이 안 되어 '진짜로 샙니다' ★
+    Rust 가 막아 주지 않는 몇 안 되는 누수입니다
+
+# 누수 확인
+#   Rc::strong_count / Arc::strong_count 를 로그로 찍기
+#   valgrind --leak-check=full  (리눅스)
+#   Miri 는 누수를 기본으로 잡아 줍니다 (🔬 d07)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>메모리 누수는 <code>unsafe</code> 가 아닙니다</b> — Rust 의 안전성 보장에
+        <b>“누수하지 않는다”는 포함되지 않습니다</b>. <code>Rc</code> 순환과 <code>mem::forget</code> 이
+        안전한 코드로 누수를 만들 수 있는 대표 사례입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>Box</code>=힙에 하나, <code>Rc</code>/<code>Arc</code>=주인이 여럿, <code>RefCell</code>/<code>Mutex</code>=안쪽 가변성</b>.
+    <code>Arc&lt;Mutex&lt;T&gt;&gt;</code> 를 쓰기 전에 <b>나누기 · 채널 · 읽기 전용 공유 · 원자 타입</b>을 먼저 검토하세요.
+    <code>RefCell</code> 은 <b>패닉이 운영에서 터지므로</b> 빌림 범위를 짧게 유지해야 합니다.</div>
+</section>
+
+
+<!-- ==================== o11 ==================== -->
+<section class="sec" id="o11">
+  <div class="sec-head rv">
+    <span class="no">OWN 11</span>
+    <h2>클로저 — <span class="t">Fn · FnMut · FnOnce</span> 세 종류</h2>
+    <p class="lead">
+      클로저는 <b>이름 없는 함수 + 바깥에서 가져온 값</b>입니다.
+      파이썬 <code>lambda</code> 와 같은 자리지만, <b>바깥 값을 “어떻게” 가져오는가</b>에 따라
+      세 종류로 나뉩니다. 이 구분이 콜백 API 설계의 전부입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 문법과 캡처</h4>
+      <pre class="code" data-lang="rust"><code>let add = |a: i32, b: i32| a + b;
+let add = |a, b| a + b;              // 타입 추론
+let square = |x| { let y = x * x; y };
+
+// 바깥 값을 자동으로 가져옵니다 (캡처)
+let factor = 3;
+let scale = |x| x * factor;          // factor 를 빌림
+println!("{}", scale(5));            // 15
+
+// move — 소유권을 가져가기 ★
+let name = String::from("현우");
+let greet = move || println!("안녕 {name}");
+// println!("{name}");               // ❌ name 은 클로저가 가져갔습니다
+greet();
+
+// 스레드에 넘길 때는 대개 move 가 필요합니다 (o03 · ⚡ e07)
+std::thread::spawn(move || { use_data(data) });
+
+// 이터레이터에서 가장 많이 씁니다 (o12)
+v.iter().map(|x| x * 2).filter(|x| *x &gt; 5).collect::&lt;Vec&lt;_&gt;&gt;();
+v.sort_by_key(|u| u.age);
+v.retain(|x| x.active);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 종류의 차이 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>트레이트</th><th>캡처 방식</th><th>호출</th></tr>
+        <tr><td><code>Fn</code></td><td><code>&amp;T</code> 빌림</td><td>여러 번</td></tr>
+        <tr><td><code>FnMut</code></td><td><code>&amp;mut T</code> 빌림</td><td>여러 번</td></tr>
+        <tr><td><code>FnOnce</code></td><td><code>T</code> 소유</td><td><b>한 번</b></td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>let s = String::from("안녕");
+
+let f_fn      = || println!("{s}");        // Fn      — 읽기만
+let mut n = 0;
+let f_fnmut   = || { n += 1; };            // FnMut   — 바깥을 고침
+let f_fnonce  = move || drop(s);           // FnOnce  — 소유권을 소모
+
+// 포함 관계: Fn ⊂ FnMut ⊂ FnOnce
+//   Fn 인 클로저는 FnMut 자리에도, FnOnce 자리에도 들어갑니다 ★
+
+// 인자로 받을 때 — '가장 느슨한 것'을 받으세요
+fn call_once(f: impl FnOnce()) { f(); }         // 가장 넓게 받힘
+fn call_many(f: impl Fn()) { f(); f(); }        // 여러 번 부를 때만
+fn accumulate(mut f: impl FnMut(i32)) { for i in 0..3 { f(i); } }
+
+// 함수 포인터도 받아집니다
+fn double(x: i32) -&gt; i32 { x * 2 }
+let v: Vec&lt;i32&gt; = (1..4).map(double).collect();      // ✅ fn 은 Fn 을 구현</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">클로저를 저장하고 반환하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">클로저는 각자 다른 타입입니다 ★</h4>
+      <pre class="code" data-lang="rust"><code>// 클로저마다 컴파일러가 익명 구조체를 만듭니다.
+// 그래서 두 클로저는 시그니처가 같아도 다른 타입입니다.
+// let v = vec![|x| x + 1, |x| x * 2];      // ❌ 타입 불일치
+
+// ① Box&lt;dyn Fn&gt; — 여러 개를 담을 때
+let ops: Vec&lt;Box&lt;dyn Fn(i32) -&gt; i32&gt;&gt; = vec![
+    Box::new(|x| x + 1),
+    Box::new(|x| x * 2),
+];
+
+// ② impl Fn — 반환할 때 (타입 이름이 없으므로)
+fn make_adder(n: i32) -&gt; impl Fn(i32) -&gt; i32 {
+    move |x| x + n
+}
+let add5 = make_adder(5);
+
+// ③ 구조체 필드로
+struct Handler&lt;F: Fn(&amp;Event)&gt; { f: F }         // 제네릭 — 빠름
+struct Handler2 { f: Box&lt;dyn Fn(&amp;Event) + Send + Sync&gt; }   // dyn — 유연
+
+// 콜백 등록 API 의 정석
+impl Bus {
+    pub fn on(&amp;mut self, f: impl Fn(&amp;Event) + Send + Sync + 'static) {
+        self.handlers.push(Box::new(f));
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">캡처가 만드는 흔한 에러</h4>
+      <pre class="code" data-lang="rust"><code>// ① 클로저가 self 를 통째로 빌려 다른 필드를 못 쓰는 문제
+// self.items.iter().for_each(|x| self.process(x));   // ❌ self 두 번 빌림
+let f = &amp;self.processor;                              // ✅ 필요한 것만 먼저
+self.items.iter().for_each(|x| f.process(x));
+
+// 2021 에디션은 필드 단위로 캡처합니다 (r01) — 상당수가 해결됐습니다
+let name = &amp;self.name;
+let cb = move || println!("{name}");   // self 전체가 아니라 name 만
+
+// ② FnMut 를 여러 곳에 넘기기
+let mut count = 0;
+let mut inc = || count += 1;
+inc();
+// println!("{count}");     // ❌ inc 가 아직 빌리고 있음
+drop(inc);                  // ✅ 또는 스코프를 끝내기
+println!("{count}");
+
+// ③ 반환값이 인자를 빌리는 클로저 (o03 의 HRTB)
+// fn f() -&gt; impl Fn(&amp;str) -&gt; &amp;str { |x| x }        // 대개 애매해집니다
+// ✅ 소유 값을 반환하도록 바꾸세요
+
+// ④ async 클로저 — 아직 제약이 있습니다 (⚡ e08)
+let fut = async move { work().await };            // async 블록을 쓰세요</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">콜백 API 를 설계한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어떤 형태로 받을 것인가</h4>
+      <pre class="code" data-lang="rust"><code>// ① 즉시 호출하고 버림 → impl FnOnce / impl FnMut (제네릭 · 빠름)
+pub fn with_lock&lt;R&gt;(&amp;self, f: impl FnOnce(&amp;mut State) -&gt; R) -&gt; R {
+    let mut g = self.state.lock().unwrap();
+    f(&amp;mut g)                       // ★ 락 범위를 API 가 강제합니다 (o10)
+}
+bus.with_lock(|s| s.count += 1);
+
+// ② 저장해 두고 나중에 여러 번 → Box&lt;dyn Fn&gt;
+pub fn subscribe(&amp;mut self, f: Box&lt;dyn Fn(&amp;Event) + Send + Sync&gt;) { }
+
+// ③ 진행률 보고 — 없어도 되게
+pub fn process(&amp;self, data: &amp;[u8], on_progress: Option&lt;&amp;dyn Fn(f32)&gt;) { }
+// 또는 기본값을 주는 두 함수로 나누기 (r03 · 기본 인자가 없으므로)
+
+// ④ FFI 로 넘길 콜백은 함수 포인터 + 사용자 데이터 (🔗 f07)
+pub type Callback = extern "C" fn(progress: f32, user: *mut std::ffi::c_void);
+
+// ★ 실무 기준
+//   내부용·성능 중요        → impl Fn (제네릭)
+//   저장·플러그인·경계 통과 → Box&lt;dyn Fn&gt;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Send · Sync · 'static 을 언제 요구하나</h4>
+      <pre class="code" data-lang="rust"><code>// 스레드로 넘어가면 필요합니다 (⚡ e06)
+fn spawn(f: impl FnOnce() + Send + 'static) { }
+
+// 여러 스레드가 동시에 부르면 Sync 도
+fn register(f: impl Fn(&amp;Event) + Send + Sync + 'static) { }
+
+// ★ 'static 은 "빌린 것이 없다"는 뜻입니다 (o03)
+//   클로저가 지역 변수를 빌리면 만족하지 못합니다 → move 로 해결
+
+// 요구를 최소화하는 것이 친절한 API 입니다
+// ❌ 항상 Send + Sync + 'static 을 요구
+// ✅ 실제로 스레드를 쓸 때만
+
+// 스코프 스레드를 쓰면 'static 이 필요 없습니다 (⚡ e07)
+std::thread::scope(|s| {
+    s.spawn(|| use_local(&amp;local));       // ✅ 빌려도 됩니다
+});
+
+// 파이썬 콜백을 받을 때 (🐍 y09)
+//   PyO3 의 Py&lt;PyAny&gt; 는 Send 지만 호출하려면 GIL 이 필요합니다
+//   → 다른 스레드로 넘길 때 규칙이 따로 있습니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">클로저는 무엇으로 컴파일되나</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">익명 구조체 + 트레이트 구현</h4>
+      <pre class="code" data-lang="rust"><code>let factor = 3;
+let scale = move |x: i32| x * factor;
+
+// 컴파일러가 대략 이렇게 만듭니다
+struct __Closure1 { factor: i32 }            // 캡처한 것이 필드가 됩니다
+impl Fn&lt;(i32,)&gt; for __Closure1 {
+    fn call(&amp;self, (x,): (i32,)) -&gt; i32 { x * self.factor }
+}
+
+// 크기는 '캡처한 것들의 합'입니다
+let a = || ();                       // 0바이트 (ZST) ★
+let b = move || factor;              // 4바이트
+let c = move || big_vec;             // 24바이트 (Vec 이동)
+println!("{}", std::mem::size_of_val(&amp;a));
+
+// ★ 성능 의미
+//   · 캡처가 없으면 크기 0 → 넘기는 비용도 0
+//   · impl Fn 으로 받으면 인라인됩니다 (⚡ e03)
+//   · Box&lt;dyn Fn&gt; 은 힙 할당 + 간접 호출 (o06 과 같은 트레이드오프)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">캡처 규칙의 세부</h4>
+      <pre class="code" data-lang="rust"><code>// 컴파일러는 '가장 약한 캡처'를 고릅니다
+let v = vec![1, 2, 3];
+let f = || println!("{}", v.len());   // &amp;v 로 충분 → Fn
+let g = || v.len();                    // 같음
+let h = move || v;                     // 값이 필요 → FnOnce
+
+// move 를 붙여도 Copy 타입은 복사됩니다
+let n = 5;
+let f = move || n;                     // n 은 여전히 쓸 수 있습니다 (i32 는 Copy)
+
+// 2021 에디션의 필드 단위 캡처 (r01)
+struct S { a: String, b: String }
+let s = S { .. };
+let f = move || println!("{}", s.a);   // ★ s.a 만 가져갑니다
+println!("{}", s.b);                   // ✅ 2021 부터 가능 (2018 은 에러)
+
+// 강제로 전체를 캡처하려면
+let f = move || { let _ = &amp;s; println!("{}", s.a); };
+
+// 클로저에서 재귀하기 — 직접은 안 됩니다
+fn fib(n: u64) -&gt; u64 { if n &lt; 2 { n } else { fib(n-1) + fib(n-2) } }
+// 클로저로 재귀하려면 Box&lt;dyn Fn&gt; + Rc 또는 별도 fn 을 쓰세요</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 클로저는 <b>익명 구조체 + <code>Fn</code> 계열 트레이트</b>입니다.
+    <b><code>Fn</code>(읽기) ⊂ <code>FnMut</code>(고침) ⊂ <code>FnOnce</code>(소모)</b> 순으로 느슨해지므로
+    <b>인자는 가장 느슨한 것으로 받으세요</b>. 스레드로 넘길 땐 <code>move</code> + <code>Send</code> + <code>'static</code>,
+    저장할 땐 <code>Box&lt;dyn Fn&gt;</code>, 즉시 쓰면 <code>impl Fn</code> 이 정석입니다.</div>
+</section>
+
+
+<!-- ==================== o12 ==================== -->
+<section class="sec" id="o12">
+  <div class="sec-head rv">
+    <span class="no">OWN 12</span>
+    <h2>이터레이터 — <span class="t">지연 평가</span>인데 for 만큼 빠릅니다</h2>
+    <p class="lead">
+      <code>.iter().map().filter()</code> 는 <b>부르는 순간 아무 일도 하지 않습니다</b>.
+      마지막에 <code>collect()</code>·<code>sum()</code> 같은 소비자를 만나야 비로소 돕니다.
+      그리고 컴파일러가 이 전부를 <b>손으로 쓴 <code>for</code> 문과 같은 기계어</b>로 만듭니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 가지 시작점 ★</h4>
+      <pre class="code" data-lang="rust"><code>let v = vec![1, 2, 3];
+
+v.iter()        // &amp;T      — 빌려 보기       (v 는 그대로)
+v.iter_mut()    // &amp;mut T  — 고치기
+v.into_iter()   // T       — 가져가기        (v 를 소모)
+
+// for 문은 사실 이 셋의 문법 설탕입니다
+for x in &amp;v { }          // v.iter()
+for x in &amp;mut v { }      // v.iter_mut()
+for x in v { }           // v.into_iter()   ★ v 를 못 쓰게 됩니다
+
+// 자주 쓰는 어댑터 (지연 — 아직 아무 일도 안 함)
+v.iter()
+ .map(|x| x * 2)              // 변환
+ .filter(|x| *x &gt; 2)          // 거르기
+ .filter_map(|x| f(x).ok())   // 변환 + 거르기 한 번에 ★
+ .enumerate()                 // (인덱스, 값)
+ .zip(other.iter())           // 두 개 동시에
+ .take(5)  .skip(2)  .step_by(2)
+ .rev()  .chain(other)  .flatten()
+ .take_while(|x| *x &lt; 10)
+ .peekable()                  // 다음 것을 미리 보기
+ .inspect(|x| println!("{x:?}"))   // 디버깅용 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">소비자 — 여기서 실제로 돕니다</h4>
+      <pre class="code" data-lang="rust"><code>let v = vec![1, 2, 3, 4];
+
+v.iter().sum::&lt;i32&gt;();               // 10
+v.iter().product::&lt;i32&gt;();
+v.iter().count();
+v.iter().min();  v.iter().max();
+v.iter().max_by_key(|x| x.abs());
+v.iter().fold(0, |acc, x| acc + x);  // 임의의 누적 ★
+v.iter().reduce(|a, b| a.max(b));
+
+v.iter().any(|x| *x &gt; 3);            // 하나라도 (조기 종료)
+v.iter().all(|x| *x &gt; 0);            // 전부 (조기 종료)
+v.iter().find(|x| **x &gt; 2);          // 첫 번째
+v.iter().position(|x| *x == 3);      // 인덱스
+v.iter().for_each(|x| println!("{x}"));
+
+// collect — 무엇으로 모을지 타입이 정합니다 (r02)
+let v2: Vec&lt;i32&gt; = it.collect();
+let s: String = chars.collect();
+let m: HashMap&lt;_, _&gt; = pairs.collect();
+let set: HashSet&lt;_&gt; = it.collect();
+let r: Result&lt;Vec&lt;_&gt;, _&gt; = results.collect();    // 하나라도 Err 면 Err ★
+
+// 정렬은 슬라이스 메서드입니다 (이터레이터가 아님)
+let mut v2: Vec&lt;_&gt; = it.collect();
+v2.sort_unstable();                  // 안정성이 필요 없으면 이쪽이 빠름
+v2.sort_by_key(|u| u.age);
+v2.sort_by(|a, b| b.score.partial_cmp(&amp;a.score).unwrap());</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">직접 만들고, 파이썬과 비교하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Iterator 를 구현하면 전부 딸려 옵니다</h4>
+      <pre class="code" data-lang="rust"><code>struct Fib { a: u64, b: u64 }
+
+impl Iterator for Fib {
+    type Item = u64;
+    fn next(&amp;mut self) -&gt; Option&lt;u64&gt; {     // ★ 이 하나만 구현하면 됩니다
+        let r = self.a;
+        self.a = self.b;
+        self.b = r + self.b;
+        Some(r)
+    }
+}
+
+// map · filter · take · sum … 전부 기본 구현으로 따라옵니다
+let v: Vec&lt;u64&gt; = Fib { a: 0, b: 1 }.take(10).collect();
+for x in Fib { a: 0, b: 1 }.take_while(|x| *x &lt; 100) { }
+
+// 내 타입을 for 문에 쓰이게 하기
+impl IntoIterator for MyCollection {
+    type Item = Item;
+    type IntoIter = std::vec::IntoIter&lt;Item&gt;;
+    fn into_iter(self) -&gt; Self::IntoIter { self.items.into_iter() }
+}
+// 관례: iter() · iter_mut() · into_iter() 세 개를 다 제공하세요
+
+// 무한 이터레이터
+std::iter::repeat(0).take(10);
+std::iter::successors(Some(1u64), |x| x.checked_mul(2));
+(1..).map(|x| x * x).take(5);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬 관용구 대조표 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:46%">파이썬</th><th>Rust</th></tr>
+        <tr><td><code>[f(x) for x in v]</code></td><td><code>.map(f).collect()</code></td></tr>
+        <tr><td><code>[x for x in v if c]</code></td><td><code>.filter(c).collect()</code></td></tr>
+        <tr><td><code>sum(v)</code></td><td><code>.sum()</code></td></tr>
+        <tr><td><code>any(...)</code></td><td><code>.any(...)</code></td></tr>
+        <tr><td><code>enumerate</code></td><td><code>.enumerate()</code></td></tr>
+        <tr><td><code>zip</code></td><td><code>.zip()</code></td></tr>
+        <tr><td><code>itertools.chain</code></td><td><code>.chain()</code></td></tr>
+        <tr><td><code>reduce</code></td><td><code>.fold()</code></td></tr>
+        <tr><td><code>sorted(v, key=f)</code></td><td><code>.sort_by_key(f)</code></td></tr>
+        <tr><td><code>set(v)</code></td><td><code>.collect::&lt;HashSet&gt;()</code></td></tr>
+        <tr><td><code>Counter</code></td><td><code>entry().or_insert(0)</code></td></tr>
+        <tr><td><code>groupby</code></td><td>itertools 크레이트</td></tr>
+        <tr><td>제너레이터</td><td><code>impl Iterator</code></td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// itertools — 표준에 없는 것들 (아주 자주 씁니다)
+use itertools::Itertools;
+v.iter().unique();
+v.iter().sorted();
+v.iter().chunks(3);
+v.iter().tuple_windows::&lt;(_, _)&gt;();
+v.iter().group_by(|x| x.kind);
+v.iter().join(", ");                    // 문자열 합치기 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">읽히는 체인과 성능</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">체인이 길어지면 나누세요</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 한 줄에 여덟 단계 — 디버깅이 지옥입니다
+let r: Vec&lt;_&gt; = data.iter().filter(|x| x.ok).map(|x| &amp;x.name)
+    .filter(|n| n.len() &gt; 3).map(|n| n.to_uppercase())
+    .filter(|n| !seen.contains(n)).take(10).collect();
+
+// ✅ 의미 단위로 이름을 붙입니다
+let valid = data.iter().filter(|x| x.ok);
+let names = valid.map(|x| x.name.to_uppercase());
+let fresh: Vec&lt;_&gt; = names.filter(|n| !seen.contains(n)).take(10).collect();
+// ★ 중간 변수를 만들어도 지연 평가라 성능 비용이 없습니다
+
+// 디버깅 — inspect 를 끼워 넣기
+let r: Vec&lt;_&gt; = data.iter()
+    .inspect(|x| eprintln!("입력: {x:?}"))
+    .filter(|x| x.ok)
+    .inspect(|x| eprintln!("통과: {x:?}"))
+    .collect();
+
+// 타입이 헷갈릴 때
+// let _: () = iter;        // 일부러 틀려 에러 메시지로 타입 확인 (r02)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">할당을 줄이는 요령 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ① collect 를 남발하지 마세요 — 매번 힙 할당입니다
+// ❌
+let a: Vec&lt;_&gt; = it.map(f).collect();
+let b: Vec&lt;_&gt; = a.iter().filter(g).collect();
+// ✅ 한 번에
+let b: Vec&lt;_&gt; = it.map(f).filter(g).collect();
+
+// ② 크기를 알면 미리 잡기
+let mut out = Vec::with_capacity(input.len());
+out.extend(input.iter().map(f));
+// collect 도 size_hint 를 보고 미리 잡습니다 (ExactSizeIterator 일 때) ★
+
+// ③ 문자열은 to_string 대신 참조로
+// ❌ .map(|u| u.name.clone())
+// ✅ .map(|u| u.name.as_str())        // 수명이 허락하면
+
+// ④ 기존 버퍼에 모으기
+out.clear();
+out.extend(it);                        // 할당 재사용 (o04)
+
+// ⑤ 병렬로 — rayon 은 이터레이터와 같은 모양입니다 ★
+use rayon::prelude::*;
+let sum: i64 = data.par_iter().map(heavy).sum();     // ⚡ e05
+
+// 측정 없이 최적화하지 마세요 (⚡ e01)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">왜 for 문만큼 빠른가</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">추상화가 사라지는 과정</h4>
+      <pre class="code" data-lang="rust"><code>let s: u64 = v.iter().map(|x| x * 2).filter(|x| x % 3 == 0).sum();
+
+// ① 각 어댑터는 next() 를 구현한 구조체입니다
+//    Sum&lt;Filter&lt;Map&lt;slice::Iter&gt;&gt;&gt;
+// ② sum() 이 next() 를 반복 호출합니다
+// ③ 컴파일러가 next() 를 전부 인라인합니다 (전부 제네릭 · 단형화 · r10)
+// ④ 남은 것은 루프 하나 — 손으로 쓴 for 문과 동일한 기계어 ★
+
+// 확인
+//   cargo asm --lib my_fn
+//   godbolt.org 에서 -O 로 비교
+
+// ★ 오히려 더 빠를 수 있는 이유
+//   · 슬라이스 이터레이터는 범위 검사가 없습니다 (v[i] 는 있음)
+//   · 길이를 알아 LLVM 이 벡터화하기 쉽습니다 (⚡ e09)
+
+// 벡터화가 걸렸는지 보려면 어셈블리에서 SIMD 명령을 찾으세요
+//   x86: vpaddd · vmulps    ARM: fadd v0.4s</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최적화가 깨지는 자리</h4>
+      <pre class="code" data-lang="rust"><code>// ① dyn 이 끼면 인라인이 안 됩니다
+let f: Box&lt;dyn Fn(&amp;i32) -&gt; i32&gt; = Box::new(|x| x * 2);
+v.iter().map(f)                        // 호출마다 간접 분기 (o06)
+
+// ② 부동소수점 합은 순서를 못 바꿔 벡터화가 막힙니다
+let s: f64 = v.iter().sum();           // 결합 법칙이 성립하지 않음 ★
+// → 정확도를 포기해도 되면 청크로 나눠 부분합을 만드세요
+
+// ③ 이터레이터를 컬렉션에 담으면 (Box&lt;dyn Iterator&gt;) 같은 문제
+
+// ④ size_hint 가 부정확하면 collect 가 재할당합니다
+//    filter 뒤에는 상한만 알 수 있습니다 (0..n)
+
+// ⑤ 조기 종료가 있는 어댑터의 순서
+v.iter().map(expensive).take(3);       // ✅ 3번만 계산 (지연 평가)
+v.iter().filter(cheap).map(expensive); // ✅ 거른 뒤에 비싼 연산
+v.iter().map(expensive).filter(cheap); // ❌ 전부 계산한 뒤 거름
+
+// ★ 순서 규칙: 싸고 많이 거르는 것을 앞으로 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>지연 평가의 실무 이점</b> — 파일 수백만 줄을 처리할 때
+        <code>lines().filter().take(10)</code> 은 <b>10개를 찾는 순간 멈춥니다</b>.
+        전부 읽어 리스트로 만든 뒤 자르는 파이썬 코드와 결정적으로 다른 지점입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 이터레이터는 <b>소비자를 만날 때까지 아무 일도 하지 않습니다</b>(지연 평가).
+    어댑터가 전부 인라인되어 <b>손으로 쓴 <code>for</code> 문과 같은 기계어</b>가 나옵니다.
+    <b>싸고 많이 거르는 어댑터를 앞에</b> 두고, <b><code>collect</code> 는 한 번만</b> 하세요.
+    <code>par_iter()</code> 로 바꾸면 그대로 병렬이 됩니다(⚡ e05). 다음은 <b>🐍 파이썬 모듈 탭</b>입니다.</div>
+</section>
+
+<!-- END pane-own -->
+</div>

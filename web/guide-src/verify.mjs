@@ -10,6 +10,8 @@
  *   · 탭 버튼 · pane · navset · TAB_ORDER · 단축키 숫자가 한 벌로 맞는가
  *   · 섹션마다 난이도(SEC_LV) · 한 줄 요약(EZ) · 도달점(CAP) 이 있는가
  *   · 섹션 id 중복 · section 태그 균형
+ *   · 한 번 고친 자리가 다시 무너지지 않았는가
+ *     (딥링크 · 검색 하이라이트 · 탭 ARIA — 아래 '회귀' 묶음)
  *
  * 섹션이나 탭을 추가한 뒤 여기서 통과하면 화면·검색·요약이 모두 맞는다.
  */
@@ -18,7 +20,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const GUIDES = ['python-web', 'java-web', 'js-ts-web', 'csharp-web', 'db-web', 'server-web']
+const GUIDES = ['python-web', 'java-web', 'js-ts-web', 'csharp-web', 'cpp-web', 'rust-web', 'db-web', 'server-web']
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'public')
 let bad = 0
 
@@ -79,6 +81,31 @@ for (const g of GUIDES) {
   const open = (html.match(/<section\b/g) || []).length
   const close = (html.match(/<\/section>/g) || []).length
   if (open !== close) err.push(`section 태그 불균형 ${open} vs ${close}`)
+
+  /* ── 한 번 고친 것이 다시 무너지지 않게 ──
+     아래는 전부 실제로 깨져 있던 자리다. 조각을 그대로 이어 붙이는
+     구조라 결과물에서 그 코드가 살아 있는지로 확인한다.
+     (고칠 때 모양이 바뀌면 여기 문구도 같이 고쳐야 한다) */
+
+  // 딥링크 — 숨은 탭(.pane{display:none}) 안의 섹션은 탭부터 열어야 갈 수 있다
+  if (!html.includes('const pane = el.closest(".pane")'))
+    err.push('goSec 이 탭을 열지 않음 → 다른 탭 섹션 링크가 맨 위로 튄다')
+  if (!html.includes('function hashId()') || !html.includes('function openHash()'))
+    err.push('첫 진입 #해시 처리 없음 → 공유 링크가 그 섹션을 못 연다')
+
+  // 검색 하이라이트 — 이스케이프한 뒤에 찾으면 엔티티·태그가 쪼개진다
+  if (html.includes('let out = fEsc(text);'))
+    err.push('fMark 가 이스케이프 뒤에 매칭 → 검색 결과 HTML 이 깨진다')
+
+  // 탭 ARIA — tablist 에는 탭만, 그리고 내용 쪽과 서로 가리켜야 한다
+  if (/class="tabbar" role="tablist"/.test(html))
+    err.push('tablist 가 탭바 전체에 걸림 → 그룹 버튼·현재탭 라벨까지 탭으로 읽힌다')
+  const tablists = (html.match(/role="tablist"/g) || []).length
+  if (tablists !== 2) err.push(`role="tablist" 가 ${tablists}개 (헤더 줄 · 시트 목록 2개여야)`)
+  if (!html.includes('function linkTabPanels()'))
+    err.push('탭 ↔ 내용 연결 없음 → 낭독기가 탭과 본문을 못 묶는다')
+  const selected = (html.match(/aria-selected="true"/g) || []).length
+  if (selected !== 2) err.push(`aria-selected="true" 가 ${selected}개 (탭 줄마다 하나씩 2개여야)`)
 
   console.log(`${err.length ? '✗' : '✓'} ${g}  섹션 ${secIds.size} · 탭 ${panes.size}`)
   err.slice(0, 40).forEach(e => console.log('   -', e))

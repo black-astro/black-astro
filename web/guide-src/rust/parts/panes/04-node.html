@@ -1,0 +1,2614 @@
+<!-- ============================================================
+     Node · WASM PANE
+     ============================================================ -->
+<div class="pane" id="pane-node">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> napi-rs · tokio · wasm-bindgen · wasm-pack · 번들 최적화</div>
+  <h1>서버면 애드온<br>브라우저면 WASM</h1>
+  <p class="tx">
+    JavaScript 쪽으로 나가는 길은 둘입니다 —
+    <b>Node 안에서 도는 네이티브 애드온</b>과 <b>브라우저·엣지에서 도는 WASM</b>.
+    목적이 완전히 다르므로 <b>그 판단부터</b> 하고 시작합니다.
+    둘 다 <b>Rust 코드는 거의 그대로</b> 쓸 수 있습니다.
+  </p>
+  <div class="stats">
+    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>2</b><span>배포 경로</span></div>
+    <div><b>N-API</b><span>버전 무관</span></div>
+    <div><b>4</b><span>깊이 층</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== j01 ==================== -->
+<section class="sec" id="j01">
+  <div class="sec-head rv">
+    <span class="no">NODE 01</span>
+    <h2>애드온 vs WASM — <span class="t">무엇을 고르나</span></h2>
+    <p class="lead">
+      둘 다 “Rust 코드를 JS 에서 부른다”지만 <b>돌아가는 곳이 다릅니다</b>.
+      애드온은 <b>OS 위에서 네이티브로</b>, WASM 은 <b>샌드박스 안에서</b> 돕니다.
+      이 차이가 성능·배포·할 수 있는 일 전부를 가릅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비교표 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th></th><th>네이티브 애드온</th><th>WASM</th></tr>
+        <tr><td>실행 환경</td><td>Node 전용</td><td><b>브라우저·Node·엣지</b></td></tr>
+        <tr><td>성능</td><td><b>네이티브 100%</b></td><td>70~95%</td></tr>
+        <tr><td>파일 접근</td><td><b>가능</b></td><td>불가(샌드박스)</td></tr>
+        <tr><td>스레드</td><td><b>자유</b></td><td>제한적</td></tr>
+        <tr><td>SIMD</td><td><b>전부</b></td><td>128비트만</td></tr>
+        <tr><td>배포</td><td>플랫폼별 바이너리</td><td><b>파일 하나</b></td></tr>
+        <tr><td>설치</td><td>prebuild 필요</td><td><b>npm 그대로</b></td></tr>
+        <tr><td>크래시 영향</td><td>프로세스 전체</td><td><b>격리됨</b></td></tr>
+        <tr><td>시작 비용</td><td>즉시</td><td>모듈 로드 필요</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ 한 줄 판단
+  브라우저에서 돌아야 한다        → WASM (선택지가 없습니다)
+  Node 서버에서 최고 성능이 필요   → 애드온
+  Node 인데 배포를 단순하게        → WASM 도 좋은 선택 ★
+  파일·네트워크·스레드를 써야 함   → 애드온
+  플러그인처럼 신뢰할 수 없는 코드 → WASM (샌드박스)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 번째 선택지도 있습니다</h4>
+      <pre class="code" data-lang="text"><code>③ 별도 프로세스 + IPC
+   Rust 로 CLI 나 서버를 만들고 JS 가 프로세스를 띄워 통신
+
+   장점
+     · 크래시가 Node 를 죽이지 않습니다 ★
+     · 언어 경계 문제가 없습니다 (표준 입출력 · HTTP · 유닉스 소켓)
+     · 배포가 단순합니다 (실행 파일 하나)
+     · 다른 언어에서도 그대로 씁니다
+   단점
+     · 왕복 지연 (수십 μs ~ 수 ms)
+     · 데이터 직렬화 비용
+     · 프로세스 관리가 필요합니다
+
+   ★ 이게 정답인 경우가 생각보다 많습니다
+     · 호출 빈도가 낮고 데이터가 큰 작업 (이미지 변환 · 빌드 도구)
+     · 오래 도는 작업 (인덱싱 · 컴파일)
+     · CLI 로도 쓸모가 있는 기능
+
+④ 그냥 JS 로 두기
+   Node 는 생각보다 빠릅니다. V8 의 JIT 는 뜨거운 루프를 잘 최적화합니다.
+   측정 없이 네이티브로 옮기지 마세요 (🐍 y01 과 같은 원칙 · ⚡ e01)</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>파이썬과 다른 점</b> — 파이썬은 인터프리터라 <b>루프 자체가 느립니다</b>.
+        JS 는 JIT 가 있어 <b>단순 수치 루프는 이미 빠릅니다</b>.
+        그래서 Node 에서 네이티브가 이기는 지점은 <b>SIMD · 병렬 · 특수 알고리즘 · 기존 Rust 크레이트 활용</b> 쪽입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">실제 사례로 보기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">널리 쓰이는 Rust 기반 npm 패키지</h4>
+      <pre class="code" data-lang="text"><code>네이티브 애드온 (napi-rs)
+  @swc/core        TypeScript 컴파일러 — babel 대비 수십배
+  @napi-rs/canvas  이미지 렌더링
+  lightningcss     CSS 파서·번들러
+  @parcel/*        번들러 일부
+
+WASM (wasm-bindgen)
+  esbuild-wasm     브라우저에서 도는 번들러
+  @swc/wasm-web    브라우저용 SWC
+  rustpython-wasm
+  각종 이미지·암호·압축 라이브러리
+
+별도 프로세스
+  rust-analyzer    LSP 서버 (에디터가 프로세스로 띄움)
+  ripgrep          VS Code 검색이 내부적으로 사용
+  turbo · biome    CLI 도구
+
+★ 관찰
+  '개발 도구' 영역에서 Rust 가 특히 많이 쓰입니다.
+  파싱·AST 순회처럼 JS 가 느린 작업이면서, 성능이 곧 개발 경험이라서입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WASM 이 애드온보다 나은 경우 ★</h4>
+      <pre class="code" data-lang="text"><code>① 배포 단순성이 성능보다 중요할 때
+   애드온: linux-x64 · linux-arm64 · musl · darwin-x64 · darwin-arm64 ·
+           win32-x64 … 6개 이상의 바이너리를 CI 로 만들어야 합니다 (j10)
+   WASM:   .wasm 파일 하나. 어디서나 돕니다. ★
+
+② 라이브러리를 npm 에 공개할 때
+   설치 실패 문의가 압도적으로 줄어듭니다.
+   (node-gyp 컴파일 실패는 npm 생태계의 오랜 골칫거리입니다)
+
+③ 서버리스·엣지 (Cloudflare Workers · Deno Deploy · Vercel Edge)
+   네이티브 애드온을 아예 못 씁니다. WASM 만 가능합니다. ★
+
+④ 신뢰할 수 없는 코드를 실행할 때
+   샌드박스가 기본입니다.
+
+★ 성능 차이는 생각보다 작습니다
+  순수 계산은 네이티브의 70~95% 정도 나옵니다 (직접 재 보세요 · ⚡ e10).
+  대신 큰 데이터를 주고받으면 복사 비용이 생깁니다 (j09).</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">경계를 설계한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호출 횟수를 먼저 봅니다 ★</h4>
+      <pre class="code" data-lang="javascript"><code>// ❌ 요소마다 경계를 넘음
+const results = rows.map(r =&gt; native.process(r));   // 100만 번
+
+// ✅ 배치
+const results = native.processBatch(rows);          // 1번
+
+// ✅✅ 이미 메모리에 있는 버퍼를 그대로 (j04)
+const out = native.processBuffer(inputBuffer);      // 복사도 없음</code></pre>
+      <pre class="code" data-lang="text"><code>경계 통과 비용 감각 (직접 재 보세요 · ⚡ e01)
+  napi-rs 빈 함수 호출     대략 수십~수백 ns
+  WASM 빈 함수 호출        더 쌉니다 (같은 프로세스·같은 VM)
+  숫자 전달                거의 공짜
+  문자열 전달              길이에 비례해 복사 (UTF-16 ↔ UTF-8 변환 ★)
+  Buffer 전달              제로카피 가능 (j04)
+
+★ 문자열이 의외의 함정입니다
+  JS 문자열은 UTF-16, Rust 는 UTF-8 이라 매번 변환됩니다.
+  대량 텍스트는 Buffer(바이트)로 주고받는 편이 훨씬 빠릅니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이벤트 루프를 막지 않기</h4>
+      <pre class="code" data-lang="text"><code>★ Node 에서 가장 중요한 제약
+
+  동기 함수가 100ms 걸리면
+  그동안 서버는 아무 요청도 처리하지 못합니다.
+
+  판단 기준
+    &lt; 1ms     동기로 두세요 (비동기 오버헤드가 더 큽니다)
+    1~10ms    상황에 따라 (요청당 한 번이면 동기도 가능)
+    &gt; 10ms    반드시 비동기로 (j05) ★
+
+  비동기로 만드는 방법
+    · napi-rs 의 AsyncTask — 스레드 풀에서 실행
+    · #[napi] async fn — tokio 런타임 사용
+    · 둘 다 Promise 를 반환합니다
+
+  WASM 은?
+    WASM 도 동기로 돌면 메인 스레드를 막습니다.
+    브라우저에서는 Web Worker 로, Node 에서는 worker_threads 로 옮기세요.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>파이썬과 가장 다른 점</b> — 파이썬은 GIL 을 놓으면 되지만(🐍 y07),
+        Node 는 <b>싱글 스레드 이벤트 루프</b>라 <b>막는 순간 서버 전체가 멈춥니다</b>.
+        네이티브 애드온을 만들 때 <b>비동기 설계가 성능보다 먼저</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">N-API 가 해결한 문제</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">예전에는 Node 버전마다 다시 빌드했습니다</h4>
+      <pre class="code" data-lang="text"><code>과거 (nan · V8 API 직접 사용)
+  · V8 의 C++ API 는 Node 마이너 버전마다 바뀌었습니다
+  · Node 12 용 애드온을 Node 14 에서 로드하면 크래시
+  · npm install 마다 재컴파일 (node-gyp) → 설치 실패의 주범
+
+현재 (N-API / Node-API)
+  · C ABI 기반의 안정 인터페이스 ★
+  · 한 번 빌드하면 Node 버전이 바뀌어도 그대로 동작
+  · Electron · Deno · Bun 도 지원
+
+  NAPI_VERSION 으로 최소 요구 버전을 정합니다
+    NAPI_VERSION=8  → Node 12.22+ 정도
+
+★ 파이썬의 abi3 와 같은 아이디어입니다 (🐍 y11)
+  "구조체를 직접 만지지 말고 함수로 호출하라"
+
+# 확인
+node -p "process.versions.napi"      # 이 Node 가 지원하는 N-API 버전</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">napi-rs 가 그 위에서 하는 일</h4>
+      <pre class="code" data-lang="text"><code>N-API 는 C 인터페이스라 그대로 쓰면 장황합니다.
+napi-rs 는 매크로로 그것을 감춥니다.
+
+  #[napi]
+  fn add(a: i32, b: i32) -&gt; i32 { a + b }
+
+  ↓ 매크로가 생성하는 것 (개념)
+
+  · napi_value 인자를 i32 로 변환하는 코드
+  · 타입이 안 맞으면 TypeError 를 던지는 코드
+  · 결과를 napi_value 로 변환
+  · 모듈 등록 코드
+  · TypeScript 타입 정의(.d.ts) 생성 ★  ← 이게 큰 이점입니다
+
+# 생성된 코드 보기
+cargo expand --lib
+
+★ .d.ts 자동 생성은 파이썬 쪽(.pyi 를 손으로 · 🐍 y10)보다 나은 점입니다.
+  타입이 코드와 어긋날 수 없습니다.</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>브라우저·엣지면 WASM, Node 서버에서 최고 성능이면 애드온</b>,
+    <b>크래시 격리·CLI 겸용이면 별도 프로세스</b>입니다.
+    애드온은 <b>N-API 덕분에 Node 버전이 바뀌어도 재빌드가 필요 없지만</b>,
+    <b>플랫폼별 바이너리를 CI 로 만들어야</b> 합니다(j10).
+    무엇을 고르든 <b>10ms 이상 걸리면 비동기</b>로 만드세요.</div>
+</section>
+
+
+<!-- ==================== j02 ==================== -->
+<section class="sec" id="j02">
+  <div class="sec-head rv">
+    <span class="no">NODE 02</span>
+    <h2>napi-rs 첫 모듈 — <span class="t">빌드까지 다 해 줍니다</span></h2>
+    <p class="lead">
+      <code>binding.gyp</code> 도, node-gyp 도 필요 없습니다.
+      <b><code>napi build</code> 한 줄</b>이면 <code>.node</code> 파일과 TypeScript 타입까지 나옵니다.
+      PyO3 + maturin 조합과 거의 같은 경험입니다(🐍 y03).
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">처음부터 끝까지</h4>
+      <pre class="code" data-lang="bash"><code># ① 프로젝트 생성 — 뼈대를 전부 만들어 줍니다
+npm create napi@latest fastmod
+# 또는
+npx @napi-rs/cli new fastmod
+cd fastmod
+
+# 만들어지는 것
+#   Cargo.toml       Rust 설정
+#   package.json     npm 설정 + 빌드 스크립트
+#   src/lib.rs       여기에 코드를 씁니다
+#   index.js         플랫폼별 .node 를 골라 로드하는 로더 (자동 생성)
+#   index.d.ts       TypeScript 타입 (자동 생성) ★
+
+# ② 빌드
+npm run build          # napi build --platform --release
+                       # → fastmod.linux-x64-gnu.node + index.d.ts
+
+# ③ 써 보기
+node -e "console.log(require('./index.js').sumSquares(1000))"</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드 두 곳</h4>
+      <pre class="code" data-lang="rust"><code>// src/lib.rs
+#![deny(clippy::all)]
+
+use napi_derive::napi;
+
+/// 1..n 의 제곱합
+#[napi]
+pub fn sum_squares(n: u32) -&gt; u32 {
+    (1..=n).map(|x| x * x).sum()
+}
+
+#[napi]
+pub fn count_words(text: String) -&gt; u32 {
+    text.split_whitespace().count() as u32
+}
+
+// ★ 함수 이름은 자동으로 camelCase 가 됩니다
+//   sum_squares → sumSquares
+//   그대로 두려면 #[napi(js_name = "sum_squares")]</code></pre>
+      <pre class="code" data-lang="toml"><code># Cargo.toml
+[package]
+name = "fastmod"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]        # ★ (🔗 f02)
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi4"] }
+napi-derive = "2"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+strip = "symbols"              # 바이너리 크기 (🛠️ b10)</code></pre>
+      <pre class="code" data-lang="rust"><code>// build.rs
+fn main() { napi_build::setup(); }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">TypeScript 타입이 자동으로</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">생성되는 index.d.ts ★</h4>
+      <pre class="code" data-lang="rust"><code>#[napi(object)]
+pub struct Options {
+    pub lowercase: bool,
+    pub min_len: u32,
+    pub separator: Option&lt;String&gt;,
+}
+
+#[napi]
+pub fn tokenize(text: String, options: Option&lt;Options&gt;) -&gt; Vec&lt;String&gt; { }</code></pre>
+      <pre class="code" data-lang="typescript"><code>// index.d.ts — 자동 생성됩니다 ★
+export interface Options {
+  lowercase: boolean
+  minLen: number
+  separator?: string | undefined | null
+}
+export declare function tokenize(
+  text: string,
+  options?: Options | undefined | null
+): Array&lt;string&gt;</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파이썬 쪽보다 편한 지점</b> — <code>.pyi</code> 는 손으로 쓰고 <code>stubtest</code> 로
+        검사해야 했지만(🐍 y10), 여기서는 <b>Rust 시그니처에서 타입이 생성</b>되므로
+        <b>어긋날 수가 없습니다</b>.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">타입 대응표</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>JS / TS</th><th>Rust</th></tr>
+        <tr><td><code>number</code></td><td><code>i32</code> <code>u32</code> <code>f64</code></td></tr>
+        <tr><td><code>bigint</code></td><td><code>i64</code> <code>BigInt</code></td></tr>
+        <tr><td><code>string</code></td><td><code>String</code></td></tr>
+        <tr><td><code>boolean</code></td><td><code>bool</code></td></tr>
+        <tr><td><code>T[]</code></td><td><code>Vec&lt;T&gt;</code></td></tr>
+        <tr><td><code>Buffer</code></td><td><code>Buffer</code> ★</td></tr>
+        <tr><td><code>Uint8Array</code></td><td><code>Uint8Array</code></td></tr>
+        <tr><td><code>object</code></td><td><code>#[napi(object)]</code></td></tr>
+        <tr><td><code>Map</code></td><td><code>HashMap</code></td></tr>
+        <tr><td><code>null</code></td><td><code>Option&lt;T&gt;</code></td></tr>
+        <tr><td><code>Promise&lt;T&gt;</code></td><td><code>AsyncTask</code> · <code>async fn</code></td></tr>
+        <tr><td><code>Error</code></td><td><code>napi::Error</code></td></tr>
+        <tr><td>클래스</td><td><code>#[napi]</code> struct</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// i64 는 JS number 로 정확히 표현 안 됩니다 (2^53 한계)
+#[napi] pub fn big(n: i64) -&gt; i64 { n }        // → bigint 로 매핑됩니다
+#[napi(ts_return_type = "number")]              // 강제로 number 로 (주의)
+pub fn small(n: i64) -&gt; i64 { n }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">패키지 구조와 스크립트</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">package.json 의 핵심</h4>
+      <pre class="code" data-lang="json"><code>{
+  "name": "fastmod",
+  "version": "0.1.0",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "fastmod",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "aarch64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "node --test",
+    "artifacts": "napi artifacts",
+    "prepublishOnly": "napi prepublish -t npm"
+  },
+  "devDependencies": { "@napi-rs/cli": "^2" },
+  "files": ["index.js", "index.d.ts"],
+  "engines": { "node": "&gt;= 12" }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>.node</code> 바이너리는 메인 패키지에 넣지 않습니다</b> —
+        플랫폼별 <b>서브 패키지</b>(<code>fastmod-linux-x64-gnu</code> 등)로 배포하고
+        <code>optionalDependencies</code> 로 연결합니다.
+        그래야 사용자가 <b>자기 플랫폼 것만 내려받습니다</b>(j10).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">개발 흐름</h4>
+      <pre class="code" data-lang="bash"><code># 반복 개발
+npm run build:debug &amp;&amp; node test.js
+
+# 파일이 바뀌면 자동
+cargo install cargo-watch
+cargo watch -s "npm run build:debug &amp;&amp; node --test"
+
+# Rust 쪽 단위 테스트 (napi 없이 도는 순수 로직만 · r11)
+cargo test
+
+# ★ 구조 권장: 로직과 바인딩을 분리하세요
+#   src/core.rs   순수 Rust 로직 — cargo test 가 그대로 돕니다
+#   src/lib.rs    #[napi] 바인딩만 — 얇게
+
+# 타입 정의만 다시 생성
+napi build --platform --release --dts index.d.ts
+
+# 여러 진입점 (ESM + CJS)
+#   package.json 의 exports 필드를 쓰세요
+#   "exports": { "require": "./index.js", "import": "./index.mjs" }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">index.js 로더가 하는 일</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">플랫폼 판별과 폴백</h4>
+      <pre class="code" data-lang="javascript"><code>// napi 가 생성하는 index.js 의 요약
+const { platform, arch } = process
+let nativeBinding = null
+
+switch (platform) {
+  case 'linux':
+    // glibc 인지 musl 인지 판별 ★
+    const isMusl = !process.report ||
+      !/glibc|GNU/.test(process.report.getReport().header.glibcVersionRuntime)
+    if (arch === 'x64') {
+      nativeBinding = isMusl
+        ? require('fastmod-linux-x64-musl')
+        : require('fastmod-linux-x64-gnu')
+    }
+    break
+  case 'darwin': /* … */
+  case 'win32':  /* … */
+}
+
+if (!nativeBinding) throw new Error(`지원하지 않는 플랫폼: ${platform}-${arch}`)
+module.exports = nativeBinding
+
+// ★ musl 판별을 빠뜨리면 Alpine 도커에서 로드가 실패합니다.
+//   가장 흔한 배포 사고 중 하나입니다 (j10)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">.node 파일의 정체</h4>
+      <pre class="code" data-lang="bash"><code># .node 는 그냥 공유 라이브러리입니다 (확장자만 다름)
+file fastmod.linux-x64-gnu.node
+#   ELF 64-bit LSB shared object, x86-64
+
+# 내보내는 심볼
+nm -D fastmod.linux-x64-gnu.node | grep napi_register
+#   napi_register_module_v1    ★ Node 가 이걸 찾습니다
+
+# 의존성 확인 — 순수 Rust 라면 아주 적습니다
+ldd fastmod.linux-x64-gnu.node
+#   libgcc_s.so.1 · libc.so.6 정도
+
+# 크기 확인 (🛠️ b10)
+ls -lh *.node
+#   보통 수백 KB ~ 수 MB
+#   strip = "symbols" · lto = true · opt-level = "z" 로 줄일 수 있습니다
+
+# Electron 에서 쓰려면
+#   같은 .node 가 그대로 동작합니다 (N-API 덕분 · j01)
+#   단, Electron 버전의 N-API 지원 범위를 확인하세요</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Deno·Bun 에서도</b> N-API 애드온을 로드할 수 있습니다.
+        다만 지원 범위가 Node 보다 좁을 수 있으니
+        <b>대상 런타임에서 실제로 테스트</b>하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>npm create napi@latest</code> → <code>#[napi]</code> 를 붙이고 → <code>napi build</code>.
+    <b><code>binding.gyp</code> 도 node-gyp 도 필요 없고</b>, <b>TypeScript 타입이 자동 생성</b>됩니다.
+    <b>순수 로직과 바인딩을 파일로 분리</b>해 두면 <code>cargo test</code> 가 그대로 돌아 개발이 훨씬 편합니다.</div>
+</section>
+
+
+<!-- ==================== j03 ==================== -->
+<section class="sec" id="j03">
+  <div class="sec-head rv">
+    <span class="no">NODE 03</span>
+    <h2>값 변환 — <span class="t">객체 · 배열 · 옵션</span></h2>
+    <p class="lead">
+      숫자와 문자열은 그냥 됩니다. 실무에서 걸리는 것은
+      <b>객체를 어떻게 주고받을지</b>와 <b>변환 비용이 어디서 나는지</b>입니다.
+      대부분 <b><code>#[napi(object)]</code> 하나로 해결</b>됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">객체 주고받기</h4>
+      <pre class="code" data-lang="rust"><code>use napi_derive::napi;
+
+// JS 평범한 객체 ↔ Rust 구조체 ★
+#[napi(object)]
+pub struct Point { pub x: f64, pub y: f64 }
+
+#[napi(object)]
+pub struct Result {
+    pub count: u32,
+    pub items: Vec&lt;String&gt;,
+    pub meta: Option&lt;Point&gt;,
+}
+
+#[napi]
+pub fn analyze(points: Vec&lt;Point&gt;) -&gt; Result {
+    Result {
+        count: points.len() as u32,
+        items: points.iter().map(|p| format!("{},{}", p.x, p.y)).collect(),
+        meta: points.first().cloned(),
+    }
+}
+
+// 필드 이름은 camelCase 로 변환됩니다
+#[napi(object)]
+pub struct Config {
+    pub max_size: u32,          // JS 에서는 maxSize
+    #[napi(js_name = "url")]
+    pub endpoint: String,       // 이름을 직접 지정
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>const r = native.analyze([{ x: 1, y: 2 }, { x: 3, y: 4 }])
+// { count: 2, items: ['1,2', '3,4'], meta: { x: 1, y: 2 } }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">변환 비용을 알기 ★</h4>
+      <pre class="code" data-lang="text"><code>#[napi(object)] 은 '복사' 입니다
+  JS 객체의 각 필드를 읽어 Rust 구조체를 만듭니다.
+  → 객체 100만 개를 넘기면 100만 번의 프로퍼티 조회가 일어납니다.
+
+★ 대안
+  ① 배열로 평탄화 — 프로퍼티 조회가 사라집니다
+       xs: Float64Array, ys: Float64Array
+  ② Buffer 로 직렬화 (j04)
+  ③ 객체 대신 개별 인자
+
+측정 감각 (직접 재 보세요 · ⚡ e01)
+  숫자 인자 하나          거의 공짜
+  문자열 (짧음)           UTF-16 → UTF-8 변환 (수백 ns)
+  문자열 (1MB)            복사 + 변환 (밀리초 단위)
+  객체 (필드 5개)         프로퍼티 조회 5회
+  Vec&lt;f64&gt; 100만          수십 ms ★
+  Float64Array 100만      제로카피 가능 (j04) ★</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>문자열이 파이썬보다 비쌉니다</b> — JS 는 UTF-16, Rust 는 UTF-8 이라
+        <b>주고받을 때마다 인코딩 변환</b>이 일어납니다.
+        대량 텍스트는 <b><code>Buffer</code> 로 주고받고 Rust 안에서 <code>str::from_utf8</code></b> 하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">임의의 JS 값 다루기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Env 와 JsObject</h4>
+      <pre class="code" data-lang="rust"><code>use napi::{Env, JsObject, JsUnknown, Result, bindgen_prelude::*};
+
+// 동적으로 객체 만들기
+#[napi]
+pub fn make(env: Env) -&gt; Result&lt;JsObject&gt; {
+    let mut obj = env.create_object()?;
+    obj.set("name", "현우")?;
+    obj.set("scores", vec![1, 2, 3])?;
+    Ok(obj)
+}
+
+// 임의 값 받기
+#[napi]
+pub fn describe(value: JsUnknown) -&gt; Result&lt;String&gt; {
+    Ok(match value.get_type()? {
+        ValueType::String =&gt; "문자열",
+        ValueType::Number =&gt; "숫자",
+        ValueType::Object =&gt; "객체",
+        _ =&gt; "기타",
+    }.to_string())
+}
+
+// Either — 여러 타입 중 하나 ★
+#[napi]
+pub fn flexible(input: Either&lt;String, Vec&lt;u8&gt;&gt;) -&gt; u32 {
+    match input {
+        Either::A(s) =&gt; s.len() as u32,
+        Either::B(b) =&gt; b.len() as u32,
+    }
+}
+// TypeScript: (input: string | Array&lt;number&gt;) =&gt; number
+
+// serde 로 통째로 (편하지만 복사가 큽니다)
+// features = ["serde-json"]
+#[napi]
+pub fn from_json(v: serde_json::Value) -&gt; String { v.to_string() }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러 던지기</h4>
+      <pre class="code" data-lang="rust"><code>use napi::{Error, Status, Result};
+
+#[napi]
+pub fn divide(a: f64, b: f64) -&gt; Result&lt;f64&gt; {
+    if b == 0.0 {
+        return Err(Error::new(Status::InvalidArg, "0 으로 나눌 수 없습니다"));
+    }
+    Ok(a / b)
+}
+
+// 내 에러 타입 연결 (🔐 o09 · 🐍 y08 과 같은 구조)
+impl From&lt;CoreError&gt; for napi::Error {
+    fn from(e: CoreError) -&gt; Self {
+        let status = match e {
+            CoreError::Empty =&gt; Status::InvalidArg,
+            CoreError::Io(_) =&gt; Status::GenericFailure,
+            _ =&gt; Status::GenericFailure,
+        };
+        Error::new(status, e.to_string())
+    }
+}
+
+#[napi]
+pub fn process(text: String) -&gt; Result&lt;String&gt; {
+    Ok(core_process(&amp;text)?)          // ? 로 자동 변환
+}
+
+// JS 쪽에서 커스텀 에러 클래스로 던지기
+#[napi]
+pub fn throw_custom(env: Env) -&gt; Result&lt;()&gt; {
+    let err = env.create_error(Error::from_reason("사용자 정의"))?;
+    // err 에 속성을 붙여 던질 수도 있습니다
+    Err(Error::from_reason("실패"))
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">API 를 JS 답게 만든다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">옵션 객체 · 기본값</h4>
+      <pre class="code" data-lang="rust"><code>#[napi(object)]
+pub struct TokenizeOptions {
+    pub lowercase: Option&lt;bool&gt;,
+    pub min_len: Option&lt;u32&gt;,
+}
+
+#[napi]
+pub fn tokenize(text: String, options: Option&lt;TokenizeOptions&gt;) -&gt; Vec&lt;String&gt; {
+    let o = options.unwrap_or(TokenizeOptions { lowercase: None, min_len: None });
+    let lowercase = o.lowercase.unwrap_or(true);      // ★ 기본값은 Rust 에서
+    let min_len = o.min_len.unwrap_or(1) as usize;
+    // …
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>native.tokenize("A B")                       // 기본값
+native.tokenize("A B", { lowercase: false }) // 일부만 ★ JS 관례</code></pre>
+      <pre class="code" data-lang="rust"><code>// 얇은 JS 래퍼를 두면 더 유연합니다 (🐍 y02 와 같은 원칙)
+// index.js 대신 wrapper.js 를 main 으로 두고
+//   const native = require('./index.js')
+//   exports.tokenize = (text, opts = {}) =&gt; {
+//     if (typeof text !== 'string') throw new TypeError('text must be string')
+//     return native.tokenize(text, opts)
+//   }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">숫자 타입 함정 ★</h4>
+      <pre class="code" data-lang="text"><code>JS 의 number 는 f64 입니다 — 정수는 2^53 까지만 정확합니다.
+
+  #[napi] fn f(n: i64) -&gt; i64      → TS 에서 bigint
+  #[napi] fn g(n: i32) -&gt; i32      → TS 에서 number ✅
+  #[napi] fn h(n: f64) -&gt; f64      → number ✅
+
+★ 실무 권장
+  · 카운트·인덱스는 u32/i32 로 (40억까지면 대부분 충분)
+  · 진짜 큰 수는 bigint 를 받아들이거나 문자열로
+  · 타임스탬프(ms)는 f64 로 두면 2^53ms ≈ 28만년까지 안전합니다
+
+오버플로 동작
+  u32 자리에 -1 을 주면?          → 변환 에러 (napi 가 검사)
+  u32 자리에 2^40 을 주면?        → 변환 에러
+  f64 자리에 NaN 을?              → NaN 그대로 들어옵니다 ★ 직접 검사하세요
+
+  if !x.is_finite() {
+      return Err(Error::new(Status::InvalidArg, "유한한 수여야 합니다"));
+  }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">V8 의 값 표현과 GC</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">napi_value 는 핸들입니다</h4>
+      <pre class="code" data-lang="text"><code>napi_value 는 V8 객체를 가리키는 '핸들' 입니다.
+GC 가 객체를 옮겨도 핸들은 유효합니다 (간접 참조).
+
+★ 중요한 제약
+  핸들은 '핸들 스코프' 안에서만 유효합니다.
+  함수가 반환되면 그 스코프가 닫히고 핸들이 무효가 됩니다.
+  → JS 값을 Rust 구조체에 저장하려면 Reference 를 만들어야 합니다.
+
+  use napi::bindgen_prelude::*;
+  let r: Ref&lt;JsObject&gt; = obj.create_ref()?;    // GC 로부터 보호
+  // 나중에
+  let obj = r.get_value(&amp;env)?;
+  r.unref(env)?;                                // ★ 반드시 해제
+
+  napi-rs 의 고수준 타입(String · Vec · #[napi(object)])은
+  전부 '값을 Rust 로 복사' 하므로 이 문제가 없습니다.
+  그래서 대부분의 코드에서는 신경 쓸 일이 없습니다. ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">성능을 재고 확인하기</h4>
+      <pre class="code" data-lang="javascript"><code>// 경계 통과 비용만 재기
+const { performance } = require('perf_hooks')
+const native = require('./index.js')
+
+function bench(name, fn, n = 1_000_000) {
+  fn()                                   // 워밍업 (JIT)
+  const t = performance.now()
+  for (let i = 0; i &lt; n; i++) fn()
+  console.log(name, ((performance.now() - t) * 1e6 / n).toFixed(1), 'ns/op')
+}
+
+bench('noop', () =&gt; native.noop())
+bench('add', () =&gt; native.add(1, 2))
+bench('string', () =&gt; native.echo('hello'))
+bench('object', () =&gt; native.point({ x: 1, y: 2 }))
+
+// ★ JS 로 같은 일을 하는 함수와 비교하세요
+bench('js add', () =&gt; 1 + 2)
+//   → 경계 통과가 계산보다 훨씬 비싸다는 것이 눈으로 보입니다
+
+// 정확한 벤치마크는 전용 도구로
+//   npm i -D mitata   또는  tinybench</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>V8 의 JIT 때문에</b> 워밍업 없이 잰 수치는 믿을 수 없습니다.
+        <b>같은 함수를 수만 번 돌린 뒤</b>부터 재세요.
+        Rust 쪽 벤치마크는 criterion 으로 따로 하는 것이 정확합니다(⚡ e01).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>#[napi(object)]</code> 로 구조체를 주고받으면</b> TypeScript 타입까지 자동입니다.
+    다만 <b>객체는 복사</b>이고, <b>문자열은 UTF-16↔UTF-8 변환</b>이 붙습니다.
+    대량 데이터는 <b><code>Buffer</code>·TypedArray</b> 로(j04), 정수는 <b><code>i32</code>/<code>u32</code></b> 를 기본으로 쓰세요.</div>
+</section>
+
+
+<!-- ==================== j04 ==================== -->
+<section class="sec" id="j04">
+  <div class="sec-head rv">
+    <span class="no">NODE 04</span>
+    <h2>Buffer · TypedArray — <span class="t">제로카피</span></h2>
+    <p class="lead">
+      이미지·오디오·대용량 파일을 다룬다면 여기가 성능의 전부입니다.
+      <b>Node 의 <code>Buffer</code> 는 연속된 바이트 덩어리</b>라 Rust 슬라이스로 <b>그대로 볼 수 있습니다</b>.
+      파이썬의 numpy 제로카피와 같은 자리입니다(🐍 y06).
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">읽기 · 쓰기</h4>
+      <pre class="code" data-lang="rust"><code>use napi::bindgen_prelude::*;
+use napi_derive::napi;
+
+// 읽기 — 복사 없음 ★
+#[napi]
+pub fn checksum(data: Buffer) -&gt; u32 {
+    let bytes: &amp;[u8] = &amp;data;            // Deref 로 슬라이스 (🔐 o07)
+    bytes.iter().fold(0u32, |a, b| a.wrapping_add(*b as u32))
+}
+
+// 제자리 수정 — 할당조차 없습니다
+#[napi]
+pub fn invert(mut data: Buffer) {
+    let bytes: &amp;mut [u8] = &amp;mut data;
+    for b in bytes.iter_mut() { *b = !*b; }
+}
+
+// 새 Buffer 반환 (Vec 을 그대로 넘김 — 복사 1회)
+#[napi]
+pub fn compress(data: Buffer) -&gt; Result&lt;Buffer&gt; {
+    let out: Vec&lt;u8&gt; = do_compress(&amp;data)?;
+    Ok(out.into())                        // ★ Vec&lt;u8&gt; → Buffer
+}
+
+// TypedArray
+#[napi]
+pub fn scale(mut a: Float64Array, k: f64) {
+    for x in a.iter_mut() { *x *= k; }
+}
+#[napi]
+pub fn sum_i32(a: Int32Array) -&gt; i64 {
+    a.iter().map(|x| *x as i64).sum()
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JS 쪽에서</h4>
+      <pre class="code" data-lang="javascript"><code>const fs = require('fs')
+const native = require('./index.js')
+
+// 파일을 읽어 그대로 넘기기 — 복사 없음 ★
+const buf = fs.readFileSync('image.png')
+const sum = native.checksum(buf)
+
+// 제자리 수정
+native.invert(buf)          // buf 가 직접 바뀝니다
+
+// TypedArray
+const arr = new Float64Array(1_000_000)
+native.scale(arr, 2.0)      // 제로카피
+
+// ArrayBuffer 공유 확인
+const view = new Uint8Array(buf.buffer, buf.byteOffset, buf.length)
+// ★ Buffer 는 ArrayBuffer 위의 뷰입니다. offset 을 잊지 마세요</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>Buffer.slice()</code> 는 뷰</b>입니다(복사가 아님).
+        <b><code>Buffer.subarray()</code> 도 뷰</b>이고, <code>Buffer.from(buf)</code> 는 복사입니다.
+        Rust 로 넘길 때 <b>어느 쪽인지 알고 넘기세요</b> — 제자리 수정이 원본에 반영됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">소유권과 수명</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Buffer 를 오래 들고 있을 때 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ❗ Buffer 슬라이스는 그 호출 동안만 유효합니다.
+//    JS 가 GC 하면 메모리가 사라집니다.
+
+// ❌ 위험
+#[napi]
+pub struct Holder { data: &amp;'static [u8] }     // 이렇게 못 씁니다
+
+// ✅ ① 복사해서 소유
+#[napi]
+pub struct Holder { data: Vec&lt;u8&gt; }
+#[napi]
+impl Holder {
+    #[napi(constructor)]
+    pub fn new(data: Buffer) -&gt; Self { Holder { data: data.to_vec() } }
+}
+
+// ✅ ② Buffer 를 Rust 가 소유하게 만들기 (복사 없이 넘겨받기)
+//    napi-rs 의 Buffer 는 내부적으로 참조를 유지합니다
+#[napi]
+pub struct Reader { buf: Buffer }             // ★ Buffer 자체를 보관
+#[napi]
+impl Reader {
+    #[napi(constructor)]
+    pub fn new(buf: Buffer) -&gt; Self { Reader { buf } }
+    #[napi]
+    pub fn byte_at(&amp;self, i: u32) -&gt; Option&lt;u8&gt; {
+        self.buf.get(i as usize).copied()
+    }
+}
+
+// ✅ ③ Rust 가 만든 메모리를 JS 에 넘기기 (복사 없이)
+#[napi]
+pub fn make_buffer(env: Env, n: u32) -&gt; Result&lt;Buffer&gt; {
+    let v = vec![0u8; n as usize];
+    Ok(Buffer::from(v))       // Vec 의 소유권이 JS 로 넘어갑니다 ★
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">외부 메모리와 finalizer</h4>
+      <pre class="code" data-lang="rust"><code>// C 라이브러리가 할당한 메모리를 복사 없이 JS 에 노출 (🔗 f08)
+use napi::bindgen_prelude::*;
+
+#[napi]
+pub fn decode(env: Env, input: Buffer) -&gt; Result&lt;Buffer&gt; {
+    let (ptr, len) = unsafe { ffi::decode(input.as_ptr(), input.len()) };
+    unsafe {
+        Ok(Buffer::from_external(
+            &amp;env,
+            ptr,
+            len,
+            (),                             // finalizer 에 넘길 값
+            |_env, _hint| { ffi::free(ptr) }, // ★ GC 될 때 해제
+        )?)
+    }
+}
+
+// ★ 이 패턴의 요점
+//   · JS 가 그 메모리를 다 쓰면 finalizer 가 불립니다
+//   · 그때까지 C 쪽이 해제하면 안 됩니다 (소유권 규약 · 🔗 f06)
+//   · finalizer 는 임의의 시점에 임의의 스레드에서 불릴 수 있습니다
+
+// 메모리 압력 알리기 — GC 가 더 적극적으로 돌게
+env.adjust_external_memory(len as i64)?;</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>V8 은 외부 메모리를 모릅니다</b> — 큰 버퍼를 많이 만들면
+        <b>힙은 여유로운데 RSS 는 폭증</b>합니다.
+        <code>adjust_external_memory</code> 로 알려 주면 GC 가 적절히 동작합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">이미지·스트림 파이프라인</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">출력 버퍼를 받는 설계 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 매번 새 Buffer — 초당 수천 프레임이면 GC 압력이 큽니다
+#[napi]
+pub fn process(input: Buffer) -&gt; Buffer { }
+
+// ✅ 호출자가 버퍼를 재사용
+#[napi]
+pub fn process_into(input: Buffer, mut output: Buffer) -&gt; Result&lt;u32&gt; {
+    let src: &amp;[u8] = &amp;input;
+    let dst: &amp;mut [u8] = &amp;mut output;
+    if dst.len() &lt; src.len() {
+        return Err(Error::new(Status::InvalidArg, "출력 버퍼가 작습니다"));
+    }
+    for (d, s) in dst.iter_mut().zip(src) { *d = s.wrapping_add(1); }
+    Ok(src.len() as u32)
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>// 버퍼를 한 번 만들어 재사용
+const out = Buffer.allocUnsafe(1920 * 1080 * 4)
+for await (const frame of frames) {
+  const n = native.processInto(frame, out)
+  await sink.write(out.subarray(0, n))
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스트림과 청크 처리</h4>
+      <pre class="code" data-lang="rust"><code>// 상태를 이어 가는 스트리밍 처리기
+#[napi]
+pub struct Hasher { inner: blake3::Hasher }
+
+#[napi]
+impl Hasher {
+    #[napi(constructor)]
+    pub fn new() -&gt; Self { Hasher { inner: blake3::Hasher::new() } }
+
+    #[napi]
+    pub fn update(&amp;mut self, chunk: Buffer) { self.inner.update(&amp;chunk); }
+
+    #[napi]
+    pub fn digest(&amp;self) -&gt; Buffer { self.inner.finalize().as_bytes().to_vec().into() }
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>const h = new native.Hasher()
+for await (const chunk of fs.createReadStream('big.bin')) {
+  h.update(chunk)                    // 청크마다 제로카피
+}
+console.log(h.digest().toString('hex'))
+
+// ★ 청크 크기는 64KB~1MB 정도가 무난합니다.
+//   너무 작으면 경계 통과 횟수가 늘고 (j01),
+//   너무 크면 이벤트 루프를 오래 막습니다 (j05)</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>스트리밍이 잘 맞는 이유</b> — Node 는 <b>스트림 문화가 강한 런타임</b>입니다.
+        전체를 메모리에 올리지 않고 <b>청크 단위로 넘기는 API</b>가
+        관용적이면서 성능도 좋습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">SharedArrayBuffer 와 워커</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스레드 간 진짜 공유</h4>
+      <pre class="code" data-lang="javascript"><code>// worker_threads 와 SharedArrayBuffer
+const { Worker } = require('worker_threads')
+const sab = new SharedArrayBuffer(1024 * 1024)
+const view = new Uint8Array(sab)
+
+const w = new Worker('./worker.js', { workerData: { sab } })
+// 워커와 메인이 같은 메모리를 봅니다 — 복사가 없습니다 ★</code></pre>
+      <pre class="code" data-lang="rust"><code>// Rust 쪽에서 받기
+#[napi]
+pub fn process_shared(mut data: Uint8Array) {
+    let bytes: &amp;mut [u8] = &amp;mut data;
+    // ❗ 다른 스레드가 동시에 이 메모리를 만질 수 있습니다
+    //    데이터 경쟁을 언어가 막아 주지 못하는 드문 자리입니다 (⚡ e06)
+    //    → 원자 연산을 쓰거나, 영역을 나눠 쓰기로 약속하세요
+}
+
+// 영역 분할이 가장 안전합니다 (🔐 o02 의 split_at_mut 과 같은 아이디어)
+#[napi]
+pub fn process_range(mut data: Uint8Array, start: u32, len: u32) {
+    let s = &amp;mut data[start as usize..(start + len) as usize];
+    // 워커마다 겹치지 않는 범위를 담당
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복사가 실제로 일어나는지 확인</h4>
+      <pre class="code" data-lang="javascript"><code>// ① 메모리 사용량으로 확인
+const before = process.memoryUsage()
+const buf = Buffer.allocUnsafe(100 * 1024 * 1024)   // 100MB
+native.checksum(buf)
+const after = process.memoryUsage()
+console.log('external', (after.external - before.external) / 1e6, 'MB')
+// 제로카피면 거의 늘지 않습니다 ★
+
+// ② 시간으로 확인 — 크기에 비례하면 복사입니다
+for (const n of [1e3, 1e5, 1e7]) {
+  const b = Buffer.allocUnsafe(n)
+  const t = performance.now()
+  native.noop(b)
+  console.log(n, performance.now() - t)
+}
+// 제로카피면 크기와 무관하게 일정합니다
+
+// ③ 제자리 수정으로 확인 (가장 확실)
+const b = Buffer.from([1, 2, 3])
+native.invert(b)
+console.log(b)     // 바뀌었으면 같은 메모리를 본 것입니다 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>③ 이 가장 확실한 검증</b>입니다 — 제자리 수정이 JS 쪽에 보이면
+        <b>같은 메모리를 공유하고 있다는 증거</b>입니다.
+        테스트에 이 검사를 하나 넣어 두면 리팩터링 중 복사가 끼어드는 것을 잡습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>Buffer</code>·TypedArray 는 <b>Rust 슬라이스로 복사 없이</b> 받습니다.
+    <b>제자리 수정이 JS 에 그대로 보이므로</b> 그게 제로카피의 증거입니다.
+    자주 호출된다면 <b>출력 버퍼를 받아 재사용</b>하게 만들고,
+    <b>Buffer 를 오래 보관하려면 <code>to_vec()</code> 으로 복사</b>하거나 <code>Buffer</code> 자체를 필드로 두세요.</div>
+</section>
+
+
+<!-- ==================== j05 ==================== -->
+<section class="sec" id="j05">
+  <div class="sec-head rv">
+    <span class="no">NODE 05</span>
+    <h2>비동기 — <span class="t">이벤트 루프를 막지 않기</span></h2>
+    <p class="lead">
+      Node 에서 가장 중요한 규칙입니다 —
+      <b>동기 함수가 100ms 걸리면 그동안 서버는 아무 요청도 못 받습니다</b>.
+      napi-rs 는 <b>Promise 를 반환하는 두 가지 방법</b>을 제공합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① AsyncTask — 스레드 풀에서</h4>
+      <pre class="code" data-lang="rust"><code>use napi::{Task, Env, JsNumber, Result};
+use napi_derive::napi;
+
+pub struct HeavyTask { data: Vec&lt;f64&gt; }
+
+impl Task for HeavyTask {
+    type Output = f64;
+    type JsValue = JsNumber;
+
+    // ★ 이 부분이 워커 스레드에서 돕니다 (JS 를 만질 수 없습니다)
+    fn compute(&amp;mut self) -&gt; Result&lt;f64&gt; {
+        Ok(self.data.iter().map(|x| expensive(*x)).sum())
+    }
+
+    // 결과를 JS 값으로 (메인 스레드에서 호출됨)
+    fn resolve(&amp;mut self, env: Env, out: f64) -&gt; Result&lt;JsNumber&gt; {
+        env.create_double(out)
+    }
+}
+
+#[napi(ts_return_type = "Promise&lt;number&gt;")]
+pub fn heavy_async(data: Vec&lt;f64&gt;) -&gt; AsyncTask&lt;HeavyTask&gt; {
+    AsyncTask::new(HeavyTask { data })
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>const result = await native.heavyAsync(data)   // 이벤트 루프가 안 막힙니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② async fn — tokio 런타임</h4>
+      <pre class="code" data-lang="toml"><code># Cargo.toml
+[dependencies]
+napi = { version = "2", features = ["napi4", "async", "tokio_rt"] }
+tokio = { version = "1", features = ["fs", "time", "rt-multi-thread"] }</code></pre>
+      <pre class="code" data-lang="rust"><code>#[napi]
+pub async fn read_file(path: String) -&gt; Result&lt;Buffer&gt; {
+    let data = tokio::fs::read(path).await
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    Ok(data.into())
+}
+
+#[napi]
+pub async fn fetch_and_parse(url: String) -&gt; Result&lt;String&gt; {
+    let body = reqwest::get(&amp;url).await?.text().await?;
+    Ok(parse(&amp;body))
+}
+
+// ★ CPU 작업을 async fn 안에서 직접 하면 안 됩니다
+//   tokio 워커를 막습니다 → spawn_blocking 으로
+#[napi]
+pub async fn mixed(data: Vec&lt;f64&gt;) -&gt; Result&lt;f64&gt; {
+    let n = tokio::task::spawn_blocking(move || heavy(&amp;data)).await
+        .map_err(|e| Error::from_reason(e.to_string()))?;
+    Ok(n)
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>고르는 기준</b> — <b>CPU 작업이면 <code>AsyncTask</code></b>(libuv 스레드 풀),
+        <b>I/O·네트워크면 <code>async fn</code></b>(tokio). 섞여 있으면 <code>async fn</code> 안에서
+        CPU 부분만 <code>spawn_blocking</code> 으로 빼세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">스레드 풀과 병렬</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">rayon 으로 안에서 병렬화 ★</h4>
+      <pre class="code" data-lang="rust"><code>use rayon::prelude::*;
+
+impl Task for BatchTask {
+    type Output = Vec&lt;f64&gt;;
+    type JsValue = Vec&lt;f64&gt;;
+
+    fn compute(&amp;mut self) -&gt; Result&lt;Vec&lt;f64&gt;&gt; {
+        // ★ 이미 워커 스레드이므로 여기서 rayon 을 써도 됩니다
+        Ok(self.rows.par_iter().map(|r| score(r)).collect())
+    }
+    fn resolve(&amp;mut self, _env: Env, out: Vec&lt;f64&gt;) -&gt; Result&lt;Vec&lt;f64&gt;&gt; { Ok(out) }
+}
+
+// ❗ 스레드 수 주의
+//   libuv 스레드 풀(기본 4) + rayon 스레드 풀(코어 수) 이 겹칩니다
+//   → 과다 구독이 되면 오히려 느려집니다 (⚡ e05)
+
+// libuv 풀 크기 조절 (JS 쪽 · 프로세스 시작 전에)
+//   UV_THREADPOOL_SIZE=8 node app.js
+
+// rayon 풀 크기 조절 (Rust 쪽)
+rayon::ThreadPoolBuilder::new().num_threads(4).build_global().ok();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">취소와 진행률</h4>
+      <pre class="code" data-lang="rust"><code>use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+pub struct CancellableTask {
+    data: Vec&lt;f64&gt;,
+    cancel: Arc&lt;AtomicBool&gt;,
+}
+
+impl Task for CancellableTask {
+    type Output = Option&lt;f64&gt;;
+    type JsValue = Option&lt;f64&gt;;
+
+    fn compute(&amp;mut self) -&gt; Result&lt;Option&lt;f64&gt;&gt; {
+        let mut sum = 0.0;
+        for (i, x) in self.data.iter().enumerate() {
+            if i % 10_000 == 0 &amp;&amp; self.cancel.load(Ordering::Relaxed) {
+                return Ok(None);                    // ★ 취소됨
+            }
+            sum += expensive(*x);
+        }
+        Ok(Some(sum))
+    }
+    fn resolve(&amp;mut self, _e: Env, o: Option&lt;f64&gt;) -&gt; Result&lt;Option&lt;f64&gt;&gt; { Ok(o) }
+}
+
+// AbortSignal 연동 (napi-rs 가 지원합니다)
+#[napi]
+pub fn heavy(data: Vec&lt;f64&gt;, signal: Option&lt;AbortSignal&gt;) -&gt; AsyncTask&lt;HeavyTask&gt; {
+    AsyncTask::with_optional_signal(HeavyTask { data }, signal)
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>const ac = new AbortController()
+setTimeout(() =&gt; ac.abort(), 1000)
+try { await native.heavy(data, ac.signal) }
+catch (e) { console.log('취소됨') }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">언제 동기로 둘 것인가</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비동기도 공짜가 아닙니다 ★</h4>
+      <pre class="code" data-lang="text"><code>AsyncTask 한 번의 추가 비용
+  · 스레드 풀에 작업 큐잉
+  · 컨텍스트 스위치
+  · 결과를 메인 스레드로 전달 (이벤트 루프 한 바퀴)
+  · Promise 생성·해결
+  → 보통 수십 μs 수준입니다 (직접 재 보세요 · ⚡ e01)
+
+★ 판단표
+  작업 시간     권장
+  &lt; 100 μs      동기 ★ (비동기 오버헤드가 작업보다 큽니다)
+  100μs ~ 1ms   동기 (요청당 몇 번이면)
+  1 ~ 10ms      상황에 따라 — 처리량 요구를 보세요
+  &gt; 10ms        비동기 필수
+
+★ 둘 다 제공하는 것이 좋은 API 입니다
+  #[napi] pub fn hash_sync(data: Buffer) -&gt; Buffer
+  #[napi] pub fn hash(data: Buffer) -&gt; AsyncTask&lt;HashTask&gt;
+  (Node 표준 라이브러리도 fs.readFileSync / fs.readFile 로 둘 다 줍니다)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이벤트 루프 지연 측정하기</h4>
+      <pre class="code" data-lang="javascript"><code>// 내 애드온이 루프를 막고 있는지 확인 ★
+const { monitorEventLoopDelay } = require('perf_hooks')
+const h = monitorEventLoopDelay({ resolution: 10 })
+h.enable()
+
+// 부하를 주고
+for (let i = 0; i &lt; 100; i++) native.heavySync(data)
+
+h.disable()
+console.log('평균', h.mean / 1e6, 'ms')
+console.log('최대', h.max / 1e6, 'ms')      // ★ 이 값이 크면 막고 있는 것
+
+// 운영에서는 지표로 내보내세요
+//   p99 이벤트 루프 지연이 급증하면 동기 네이티브 호출을 의심
+
+// 부하 테스트로 확인
+//   autocannon -c 100 -d 10 http://localhost:3000/api
+//   동기 버전과 비동기 버전의 p99 를 비교하면 차이가 명확합니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 운영 사고</b> — 개발 중에는 요청이 하나뿐이라 동기 함수도 빨라 보입니다.
+        <b>동시 요청 100개가 들어오면 전부 줄을 섭니다</b>.
+        <b>부하 테스트로 p99 를 확인</b>하기 전에는 “충분히 빠르다”고 판단하지 마세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">libuv 스레드 풀의 안쪽</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">풀을 누가 함께 쓰나</h4>
+      <pre class="code" data-lang="text"><code>libuv 스레드 풀(기본 4개)을 쓰는 것들
+  · fs.* 비동기 함수 (readFile 등)
+  · dns.lookup
+  · zlib · crypto 의 일부
+  · napi_create_async_work → AsyncTask ★
+
+→ 내 애드온이 풀을 오래 점유하면 fs 도 느려집니다.
+
+★ 대응
+  ① UV_THREADPOOL_SIZE 를 늘리기 (최대 1024, 보통 코어 수 × 2)
+     프로세스 시작 전에 설정해야 합니다 ★
+     process.env 로 런타임에 바꿔도 안 먹습니다
+
+  ② 긴 작업은 자체 스레드 풀로 (tokio · rayon)
+     libuv 풀을 건드리지 않습니다
+
+  ③ 아주 긴 작업은 worker_threads 나 별도 프로세스로 (j01)
+
+# 현재 값 확인
+node -e "console.log(process.env.UV_THREADPOOL_SIZE || 4)"</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">async fn 과 tokio 런타임의 관계</h4>
+      <pre class="code" data-lang="text"><code>napi-rs 의 tokio_rt feature 는
+프로세스당 tokio 멀티스레드 런타임을 하나 만듭니다.
+
+★ 주의할 점
+  · 그 런타임의 워커 스레드는 Node 이벤트 루프와 별개입니다
+  · async fn 안에서 블로킹 호출을 하면 tokio 워커가 막힙니다
+      std::fs::read()      ❌ 블로킹
+      tokio::fs::read()    ✅
+      무거운 계산          → spawn_blocking
+
+  · 런타임 종료 순서 문제 (🔐 o07 의 Drop 순서)
+      프로세스 종료 시 tokio 태스크가 남아 있으면 행이 걸릴 수 있습니다
+      → 종료 훅에서 정리하거나 타임아웃을 두세요
+
+  · Node 의 async_hooks · AsyncLocalStorage 컨텍스트는
+    네이티브 비동기 경계를 넘어가지 않습니다 ★
+    → 요청 컨텍스트(트레이싱 ID 등)를 인자로 명시적으로 넘기세요
+
+# tokio 런타임 스레드 확인
+#   리눅스: ls /proc/$(pgrep -n node)/task | wc -l</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>파이썬과 결정적으로 다른 점</b> — 파이썬은 GIL 만 놓으면 됐지만(🐍 y07),
+        Node 는 <b>이벤트 루프 · libuv 풀 · tokio 런타임 세 층</b>을 함께 고려해야 합니다.
+        <b>어느 스레드에서 도는 코드인지</b>를 항상 의식하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>10ms 이상 걸리면 반드시 비동기</b>로 만드세요.
+    <b>CPU 작업은 <code>AsyncTask</code>, I/O 는 <code>async fn</code></b>(tokio)이 기본이고,
+    섞이면 <code>spawn_blocking</code> 으로 나눕니다.
+    <b>비동기도 수십 μs 의 비용</b>이 있으니 아주 짧은 작업은 동기로 두고,
+    <b><code>monitorEventLoopDelay</code> 로 실제로 막고 있는지</b> 확인하세요.</div>
+</section>
+
+
+<!-- ==================== j06 ==================== -->
+<section class="sec" id="j06">
+  <div class="sec-head rv">
+    <span class="no">NODE 06</span>
+    <h2>Promise · <span class="t">스레드 안전 콜백</span></h2>
+    <p class="lead">
+      워커 스레드에서 JS 함수를 부르려면 <b>반드시 메인 스레드로 넘겨야</b> 합니다.
+      V8 은 스레드 안전하지 않기 때문입니다.
+      그 다리 역할을 하는 것이 <b>ThreadsafeFunction</b> 입니다 — 진행률·이벤트·스트림에 씁니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Promise 를 직접 만들기</h4>
+      <pre class="code" data-lang="rust"><code>use napi::bindgen_prelude::*;
+use napi::{Env, JsObject, Result};
+
+// ① async fn 이 가장 간단합니다 (j05)
+#[napi]
+pub async fn simple() -&gt; Result&lt;u32&gt; { Ok(42) }
+
+// ② 직접 deferred 로 (외부 이벤트를 기다릴 때)
+#[napi(ts_return_type = "Promise&lt;number&gt;")]
+pub fn manual(env: Env) -&gt; Result&lt;JsObject&gt; {
+    let (deferred, promise) = env.create_deferred()?;
+
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        match compute() {
+            Ok(v) =&gt; deferred.resolve(move |_env| Ok(v)),   // ★ 메인 스레드에서 실행
+            Err(e) =&gt; deferred.reject(Error::from_reason(e.to_string())),
+        }
+    });
+
+    Ok(promise)
+}
+
+// ★ deferred 는 Send 입니다 — 다른 스레드로 넘겨도 됩니다.
+//   resolve 클로저는 메인 스레드에서 실행되므로 JS 를 만질 수 있습니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ThreadsafeFunction — 콜백 ★</h4>
+      <pre class="code" data-lang="rust"><code>use napi::threadsafe_function::{
+    ThreadsafeFunction, ThreadsafeFunctionCallMode, ErrorStrategy,
+};
+
+#[napi]
+pub fn watch(
+    #[napi(ts_arg_type = "(progress: number) =&gt; void")]
+    callback: JsFunction,
+) -&gt; Result&lt;()&gt; {
+    let tsfn: ThreadsafeFunction&lt;f64, ErrorStrategy::Fatal&gt; =
+        callback.create_threadsafe_function(0, |ctx| {
+            ctx.env.create_double(ctx.value).map(|v| vec![v])
+        })?;
+
+    std::thread::spawn(move || {
+        for i in 0..=100 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            tsfn.call(i as f64 / 100.0, ThreadsafeFunctionCallMode::NonBlocking);
+        }
+        // 마지막에 반드시 해제 — 안 하면 프로세스가 안 끝납니다 ★
+        tsfn.abort().ok();
+    });
+
+    Ok(())
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>native.watch(p =&gt; console.log(`${(p * 100).toFixed(0)}%`))</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>tsfn 이 살아 있으면 프로세스가 종료되지 않습니다</b> —
+        이벤트 루프에 참조가 남기 때문입니다.
+        작업이 끝나면 <b><code>abort()</code> 또는 <code>unref()</code></b> 를 반드시 부르세요.
+        “Node 가 안 꺼진다”의 흔한 원인입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">호출 모드와 큐</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Blocking vs NonBlocking</h4>
+      <pre class="code" data-lang="rust"><code>// NonBlocking — 큐가 차면 버립니다 (진행률에 적합) ★
+tsfn.call(value, ThreadsafeFunctionCallMode::NonBlocking);
+
+// Blocking — 큐가 빌 때까지 기다립니다 (데이터 손실 불가일 때)
+tsfn.call(value, ThreadsafeFunctionCallMode::Blocking);
+
+// 큐 크기는 create 할 때 정합니다
+callback.create_threadsafe_function(
+    1024,        // 0 = 무제한 ★ 메모리 폭증 위험
+    |ctx| { }
+)?;
+
+// ★ 실무 선택
+//   진행률·로그        → NonBlocking + 작은 큐 (최신 값만 중요)
+//   이벤트·데이터      → Blocking 또는 충분한 큐
+//   무제한 큐(0)       → 생산이 소비보다 빠르면 메모리가 터집니다
+
+// 에러 전략
+//   ErrorStrategy::Fatal     — 콜백이 (value) 를 받음
+//   ErrorStrategy::CalleeHandled — 콜백이 (err, value) 를 받음 (Node 관례)
+let tsfn: ThreadsafeFunction&lt;f64, ErrorStrategy::CalleeHandled&gt; = ...;
+tsfn.call(Ok(value), mode);
+tsfn.call(Err(Error::from_reason("실패")), mode);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이벤트 스트림 만들기</h4>
+      <pre class="code" data-lang="rust"><code>#[napi]
+pub struct Watcher { tsfn: Option&lt;ThreadsafeFunction&lt;Event, ErrorStrategy::Fatal&gt;&gt; }
+
+#[napi(object)]
+pub struct Event { pub kind: String, pub path: String }
+
+#[napi]
+impl Watcher {
+    #[napi(constructor)]
+    pub fn new() -&gt; Self { Watcher { tsfn: None } }
+
+    #[napi]
+    pub fn on_change(&amp;mut self, callback: JsFunction) -&gt; Result&lt;()&gt; {
+        let tsfn = callback.create_threadsafe_function(64, |ctx| {
+            Ok(vec![ctx.value])
+        })?;
+        self.tsfn = Some(tsfn);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn close(&amp;mut self) -&gt; Result&lt;()&gt; {
+        if let Some(t) = self.tsfn.take() { t.abort()?; }    // ★ 정리
+        Ok(())
+    }
+}
+
+// ★ 더 JS 다운 대안: AsyncIterator 를 노출하기
+//   for await (const ev of watcher) { }
+//   napi-rs 의 generator 지원을 쓰거나, JS 래퍼에서 EventEmitter 로 감싸세요</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">콜백 비용과 설계</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">콜백은 비쌉니다 ★</h4>
+      <pre class="code" data-lang="text"><code>tsfn.call 한 번의 경로
+  워커 스레드 → 큐에 넣기 → 이벤트 루프 깨우기
+  → 메인 스레드에서 JS 값 생성 → JS 함수 호출
+
+  → 보통 수 μs 이상입니다 (직접 재 보세요 · ⚡ e01)
+
+★ 100만 번 부르면 콜백만으로 수 초입니다.
+  파이썬 콜백과 같은 문제입니다 (🐍 y09).
+
+설계 대안
+  ① 배치로 — n개마다 한 번, 또는 시간 간격으로
+       if last.elapsed() &gt; Duration::from_millis(100) { tsfn.call(..) }
+  ② 결과를 모아 한 번에 반환 (콜백 없이)
+  ③ 진행률은 '값'이 아니라 '공유 카운터'로
+       AtomicU64 를 두고 JS 가 주기적으로 폴링
+  ④ 정말 스트림이 필요하면 Node 스트림 API 로 감싸기
+
+★ 가장 흔한 좋은 선택: ①번 시간 기반 스로틀링
+  사람이 보는 진행률은 초당 10회면 충분합니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JS 래퍼로 다듬기</h4>
+      <pre class="code" data-lang="javascript"><code>// 네이티브의 콜백 API 를 JS 관용구로 감싸기
+const { EventEmitter } = require('events')
+const native = require('./index.js')
+
+class Watcher extends EventEmitter {
+  constructor(path) {
+    super()
+    this._inner = new native.Watcher()
+    this._inner.onChange(ev =&gt; this.emit(ev.kind, ev.path))
+  }
+  close() { this._inner.close() }
+}
+
+// 또는 AsyncIterator 로
+async function* watch(path) {
+  const queue = []
+  let notify
+  const w = new native.Watcher()
+  w.onChange(ev =&gt; { queue.push(ev); notify?.() })
+  try {
+    while (true) {
+      if (queue.length === 0) await new Promise(r =&gt; { notify = r })
+      yield queue.shift()
+    }
+  } finally { w.close() }         // ★ 정리를 보장
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>얇은 JS 래퍼를 두는 것이 정석</b>입니다 —
+        <code>EventEmitter</code>·<code>AsyncIterator</code>·<code>Readable</code> 같은 <b>Node 관용구</b>는
+        JS 로 감싸는 편이 훨씬 자연스럽고, <b>네이티브 쪽은 단순하게</b> 유지됩니다(🐍 y02 와 같은 원칙).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">참조 카운트와 종료</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ref / unref 의 의미</h4>
+      <pre class="code" data-lang="rust"><code>// tsfn 은 기본적으로 이벤트 루프를 '붙잡습니다' (ref)
+// → 살아 있는 동안 Node 가 종료되지 않습니다
+
+tsfn.unref(&amp;env)?;     // 붙잡지 않기 — 다른 일이 없으면 종료 허용 ★
+tsfn.refer(&amp;env)?;     // 다시 붙잡기
+tsfn.abort()?;         // 완전히 해제 (이후 call 은 실패)
+
+// ★ 언제 unref 하나
+//   · 백그라운드 감시자처럼 '있어도 종료를 막으면 안 되는' 것
+//   · setInterval 의 unref() 와 같은 개념입니다
+
+// 정리 순서 문제
+//   프로세스 종료 시 워커 스레드가 아직 tsfn.call 을 하면?
+//   → abort 이후의 call 은 조용히 실패합니다 (크래시는 아님)
+//   → 하지만 워커가 Rust 자원을 정리하지 못할 수 있습니다
+
+// 안전한 종료 패턴
+//   ① JS 쪽에서 close() 를 명시적으로 부르게 만들기 ★
+//   ② process.on('exit') 훅에서 정리
+//   ③ Rust 쪽에 종료 플래그를 두고 워커가 확인</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">디버깅 — 프로세스가 안 끝날 때</h4>
+      <pre class="code" data-lang="javascript"><code>// 무엇이 이벤트 루프를 붙잡고 있나
+const wtf = require('why-is-node-running')   // npm i -D why-is-node-running
+setTimeout(() =&gt; wtf(), 5000)
+
+// Node 내장으로
+process.on('beforeExit', () =&gt; console.log('종료 직전'))
+console.log(process._getActiveHandles().length)
+console.log(process._getActiveRequests().length)
+
+// ★ 네이티브 애드온이 원인이면 위 목록에 잘 안 잡힙니다.
+//   그럴 때는 tsfn 을 의심하세요.
+
+// 강제 종료 (최후의 수단 — Drop 이 안 불립니다 · 🔐 o07)
+process.exit(0)
+
+// 검증 테스트를 하나 두세요
+//   test('종료된다', async () =&gt; {
+//     const w = new native.Watcher(); w.close()
+//     // 이 테스트 파일이 타임아웃 없이 끝나면 OK ★
+//   })</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 워커 스레드에서 JS 를 부르려면 <b><code>ThreadsafeFunction</code></b> 을 거쳐야 합니다.
+    <b>작업이 끝나면 <code>abort()</code></b> 를 부르세요 — 안 하면 <b>Node 프로세스가 종료되지 않습니다</b>.
+    콜백은 <b>호출당 수 μs</b> 이므로 <b>시간 기반 스로틀링</b>으로 횟수를 줄이고,
+    <code>EventEmitter</code> 같은 Node 관용구는 <b>JS 래퍼로 감싸는 것</b>이 정석입니다.</div>
+</section>
+
+
+<!-- ==================== j07 ==================== -->
+<section class="sec" id="j07">
+  <div class="sec-head rv">
+    <span class="no">NODE 07</span>
+    <h2>클래스 노출 — <span class="t">#[napi] struct</span></h2>
+    <p class="lead">
+      상태를 들고 있어야 하거나 초기화가 비싸면 클래스로 노출합니다.
+      <code>#[napi]</code> 를 구조체와 <code>impl</code> 에 붙이면 <b>JS 에서 <code>new</code> 로 만드는 클래스</b>가 됩니다.
+      PyO3 의 <code>#[pyclass]</code> 와 같은 자리입니다(🐍 y05).
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 형태</h4>
+      <pre class="code" data-lang="rust"><code>use napi_derive::napi;
+use regex::Regex;
+
+#[napi]
+pub struct Matcher {
+    re: Regex,                       // 내부 필드 (JS 에 안 보임)
+    pub count: u32,                  // pub 이면 속성으로 노출 ★
+}
+
+#[napi]
+impl Matcher {
+    #[napi(constructor)]
+    pub fn new(pattern: String) -&gt; Result&lt;Self&gt; {
+        let re = Regex::new(&amp;pattern)
+            .map_err(|e| Error::new(Status::InvalidArg, e.to_string()))?;
+        Ok(Matcher { re, count: 0 })
+    }
+
+    #[napi]
+    pub fn find_all(&amp;mut self, text: String) -&gt; Vec&lt;String&gt; {
+        self.count += 1;
+        self.re.find_iter(&amp;text).map(|m| m.as_str().to_string()).collect()
+    }
+
+    #[napi(getter)]
+    pub fn pattern(&amp;self) -&gt; String { self.re.as_str().to_string() }
+
+    #[napi(setter)]
+    pub fn set_count(&amp;mut self, v: u32) { self.count = v; }
+
+    #[napi(factory)]                 // static 생성자
+    pub fn from_words(words: Vec&lt;String&gt;) -&gt; Result&lt;Self&gt; { }
+
+    #[napi]
+    pub fn to_string(&amp;self) -&gt; String { format!("Matcher({})", self.re) }
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>const m = new native.Matcher('\\d+')
+m.findAll('a1 b22')       // ['1', '22']
+m.count                   // 1
+m.pattern                 // '\\d+'  (getter)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">object vs class ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th></th><th><code>#[napi(object)]</code></th><th><code>#[napi]</code> struct</th></tr>
+        <tr><td>JS 표현</td><td>평범한 객체</td><td><b>클래스 인스턴스</b></td></tr>
+        <tr><td>전달</td><td>복사</td><td><b>참조 (핸들)</b></td></tr>
+        <tr><td>메서드</td><td>없음</td><td><b>있음</b></td></tr>
+        <tr><td>내부 필드</td><td>전부 pub</td><td>숨길 수 있음</td></tr>
+        <tr><td>수명</td><td>호출 동안</td><td>GC 까지</td></tr>
+        <tr><td>용도</td><td>데이터 전달</td><td>상태·자원</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ 고르는 기준 (🐍 y05 와 같습니다)
+  · 그냥 값 묶음이면          → object
+  · 초기화가 비싸면           → class
+  · 상태를 이어 가야 하면      → class
+  · 정리가 필요하면(파일·연결) → class + close()
+
+★ 성능
+  object 는 필드마다 프로퍼티 조회가 일어납니다 (j03).
+  class 는 핸들 하나만 오가므로 큰 상태를 여러 번 쓸 때 훨씬 쌉니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">참조 전달과 GC</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">클래스 인스턴스를 인자로 받기</h4>
+      <pre class="code" data-lang="rust"><code>use napi::bindgen_prelude::*;
+
+#[napi]
+pub struct Buffer2D { data: Vec&lt;u8&gt;, w: u32, h: u32 }
+
+#[napi]
+impl Buffer2D {
+    #[napi(constructor)]
+    pub fn new(w: u32, h: u32) -&gt; Self {
+        Buffer2D { data: vec![0; (w * h) as usize], w, h }
+    }
+
+    // 다른 인스턴스를 참조로 받기 ★
+    #[napi]
+    pub fn blit(&amp;mut self, src: &amp;Buffer2D, x: u32, y: u32) {
+        for row in 0..src.h {
+            let d = ((y + row) * self.w + x) as usize;
+            let s = (row * src.w) as usize;
+            self.data[d..d + src.w as usize]
+                .copy_from_slice(&amp;src.data[s..s + src.w as usize]);
+        }
+    }
+
+    // 새 인스턴스 반환
+    #[napi]
+    pub fn clone_region(&amp;self, x: u32, y: u32, w: u32, h: u32) -&gt; Buffer2D { }
+}
+
+// ❗ &amp;Buffer2D 와 &amp;mut self 를 동시에 — 같은 객체면?
+//   self.blit(self, 0, 0) 을 JS 에서 하면 napi-rs 가 막습니다
+//   (PyO3 의 Already borrowed 와 같은 상황 · 🐍 y05)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자원 정리 — Drop 과 close()</h4>
+      <pre class="code" data-lang="rust"><code>#[napi]
+pub struct Db { conn: Option&lt;Connection&gt; }
+
+#[napi]
+impl Db {
+    #[napi(constructor)]
+    pub fn new(path: String) -&gt; Result&lt;Self&gt; { }
+
+    #[napi]
+    pub fn close(&amp;mut self) -&gt; Result&lt;()&gt; {
+        if let Some(c) = self.conn.take() { c.close()?; }   // ★ 명시적 정리
+        Ok(())
+    }
+
+    #[napi]
+    pub fn query(&amp;self, sql: String) -&gt; Result&lt;Vec&lt;Row&gt;&gt; {
+        let c = self.conn.as_ref()
+            .ok_or_else(|| Error::from_reason("이미 닫혔습니다"))?;
+        c.query(&amp;sql)
+    }
+}
+
+impl Drop for Db {
+    fn drop(&amp;mut self) { let _ = self.conn.take(); }   // GC 될 때 안전망
+}
+
+// ★ GC 시점은 예측할 수 없습니다 (🔐 o07)
+//   파일 핸들·연결처럼 한정된 자원은 반드시 close() 를 제공하세요.
+//   JS 쪽에서 try/finally 나 using(TC39 명시적 자원 관리)으로 쓰게 합니다.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>파이썬의 <code>with</code> 같은 것이 JS 에는 오랫동안 없었습니다</b> —
+        최근 <code>using</code> 문법(<code>Symbol.dispose</code>)이 들어왔지만 아직 널리 쓰이지 않습니다.
+        <b><code>close()</code> 를 제공하고 문서에 명시</b>하는 것이 현실적입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">스레드와 클래스</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비동기 메서드 만들기</h4>
+      <pre class="code" data-lang="rust"><code>// 클래스 메서드도 Promise 를 반환할 수 있습니다 (j05)
+#[napi]
+impl Db {
+    #[napi]
+    pub async fn query_async(&amp;self, sql: String) -&gt; Result&lt;Vec&lt;Row&gt;&gt; {
+        // ❗ &amp;self 를 워커 스레드로 넘길 수 없습니다
+        //    → 필요한 것을 복제하거나 Arc 로 공유하세요 (🔐 o10)
+    }
+}
+
+// ✅ 내부 상태를 Arc 로
+#[napi]
+pub struct Db { inner: Arc&lt;Pool&gt; }
+
+#[napi]
+impl Db {
+    #[napi]
+    pub async fn query(&amp;self, sql: String) -&gt; Result&lt;Vec&lt;Row&gt;&gt; {
+        let pool = self.inner.clone();               // ★ Arc clone (쌈)
+        tokio::task::spawn_blocking(move || pool.query(&amp;sql))
+            .await
+            .map_err(|e| Error::from_reason(e.to_string()))?
+    }
+}
+
+// AsyncTask 를 쓸 때도 같은 원칙
+#[napi]
+pub fn process(&amp;self, data: Buffer) -&gt; AsyncTask&lt;ProcessTask&gt; {
+    AsyncTask::new(ProcessTask {
+        state: self.inner.clone(),         // 공유
+        data: data.to_vec(),               // 복사 (Buffer 는 워커로 못 넘김)
+    })
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">worker_threads 와의 관계</h4>
+      <pre class="code" data-lang="text"><code>★ 중요: 클래스 인스턴스는 워커 스레드로 전달되지 않습니다
+
+  const w = new Worker('./w.js', { workerData: { matcher } })
+  // ❌ DataCloneError — 네이티브 객체는 구조화 복제가 안 됩니다
+
+★ 대응
+  ① 워커 안에서 각자 만들기 (설정만 전달)
+       workerData: { pattern: '\\d+' }
+       워커 안에서: new native.Matcher(pattern)
+  ② 순수 데이터만 주고받기 (Buffer · SharedArrayBuffer · j04)
+  ③ 애초에 Rust 안에서 병렬화 (rayon · j05) ★ 대개 이게 낫습니다
+
+★ 각 워커가 애드온을 로드하면
+  · .node 는 프로세스당 한 번 로드되고 워커끼리 공유됩니다
+  · 하지만 Rust 의 전역 상태(static)도 공유됩니다 ★
+    → OnceLock · Mutex 로 보호해야 합니다 (r02 · ⚡ e06)
+  · napi-rs 는 워커별 Env 를 구분해 줍니다</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>실무 결론</b> — Node 에서 병렬 처리가 필요하면
+        <b>worker_threads 로 나누기보다 Rust 안에서 rayon 으로 처리</b>하는 편이
+        훨씬 간단하고 빠릅니다. 데이터 복제가 없기 때문입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">인스턴스가 실제로 어떻게 연결되나</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">wrap 과 finalizer</h4>
+      <pre class="code" data-lang="text"><code>#[napi] struct 가 만들어 내는 것
+
+  ① JS 클래스를 정의 (napi_define_class)
+  ② new 하면 JS 객체를 만들고
+  ③ Rust 구조체를 Box 로 힙에 올린 뒤
+  ④ napi_wrap 으로 JS 객체에 그 포인터를 붙입니다 ★
+  ⑤ finalizer 를 등록 — GC 될 때 Box 를 해제
+
+  JS 객체  ──wrap──▶  Box&lt;Matcher&gt; (Rust 힙)
+     │
+     └─ GC 되면 finalizer → drop(Box) → Drop::drop 호출
+
+★ 그래서
+  · 메서드 호출마다 napi_unwrap 으로 포인터를 꺼냅니다 (매우 쌈)
+  · Rust 구조체는 JS 객체와 수명이 묶입니다
+  · JS 가 참조를 놓으면 언젠가 해제됩니다 (시점은 GC 에 달림)
+
+# 생성된 코드 확인
+cargo expand --lib | grep -A 30 "impl.*Matcher"</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메모리 누수 진단</h4>
+      <pre class="code" data-lang="javascript"><code>// 인스턴스가 정말 해제되는지 확인
+const v8 = require('v8')
+
+function measure() {
+  global.gc?.()                       // node --expose-gc
+  return process.memoryUsage()
+}
+
+const before = measure()
+for (let i = 0; i &lt; 100_000; i++) {
+  const m = new native.Matcher('\\d+')
+  m.findAll('test')
+}
+const after = measure()
+console.log('rss 증가', (after.rss - before.rss) / 1e6, 'MB')
+// ★ 크게 늘면 Drop 이 안 불리거나 외부 메모리가 남는 것입니다
+
+// 힙 스냅샷으로 JS 쪽 누수 확인
+v8.writeHeapSnapshot('/tmp/heap.heapsnapshot')
+// Chrome DevTools 에서 열어 보세요
+
+// 네이티브 메모리 누수는
+//   리눅스: valgrind --leak-check=full node app.js  (느립니다)
+//   또는 jemalloc/tcmalloc 의 프로파일러
+//   가장 확실한 것: Rust 쪽 단위 테스트에서 Drop 카운트 검증 (🔐 o07)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Drop 카운트 테스트</b>를 Rust 쪽에 하나 두세요 —
+        <code>Arc&lt;AtomicUsize&gt;</code> 를 필드에 넣고 <code>Drop</code> 에서 증가시키면
+        <b>JS 없이도 해제를 검증</b>할 수 있습니다(r11).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>값 묶음이면 <code>#[napi(object)]</code>, 상태·자원이면 <code>#[napi]</code> struct</b> 입니다.
+    클래스는 <b>핸들만 오가므로 큰 상태를 여러 번 쓸 때 훨씬 쌉니다</b>.
+    <b>GC 시점은 예측할 수 없으니</b> 한정 자원에는 <code>close()</code> 를 제공하고,
+    비동기 메서드에서는 <b>내부 상태를 <code>Arc</code> 로 공유</b>하세요.</div>
+</section>
+
+
+<!-- ==================== j08 ==================== -->
+<section class="sec" id="j08">
+  <div class="sec-head rv">
+    <span class="no">NODE 08</span>
+    <h2>wasm-bindgen — <span class="t">브라우저에서 도는 Rust</span></h2>
+    <p class="lead">
+      같은 Rust 코드를 <b>브라우저에서 도는 WASM</b> 으로 뽑습니다.
+      명령 두 줄이면 되고, <b>TypeScript 타입도 함께</b> 나옵니다.
+      서버리스·엣지 런타임에서도 이 방식만 씁니다(j01).
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">처음부터 끝까지</h4>
+      <pre class="code" data-lang="bash"><code># ① 도구 설치 (한 번만)
+cargo install wasm-pack
+rustup target add wasm32-unknown-unknown
+
+# ② 프로젝트
+cargo new --lib fastwasm
+cd fastwasm
+
+# ③ 빌드 — 대상에 따라 --target 을 고릅니다 ★
+wasm-pack build --target web       # &lt;script type="module"&gt; 로 직접
+wasm-pack build --target bundler   # webpack · vite 등 번들러용
+wasm-pack build --target nodejs    # Node 에서 require
+wasm-pack build --release          # 최적화 ★ 크기가 크게 줄어듭니다
+
+# 결과: pkg/
+#   fastwasm_bg.wasm      실제 바이너리
+#   fastwasm.js           글루 코드
+#   fastwasm.d.ts         TypeScript 타입 ★
+#   package.json          npm 배포 준비 완료</code></pre>
+      <pre class="code" data-lang="toml"><code># Cargo.toml
+[lib]
+crate-type = ["cdylib", "rlib"]     # rlib 도 두면 cargo test 가 됩니다
+
+[dependencies]
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = "z"                     # 크기 우선 (j09)
+lto = true</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드와 사용</h4>
+      <pre class="code" data-lang="rust"><code>// src/lib.rs
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+pub fn sum_squares(n: u32) -&gt; u32 {
+    (1..=n).map(|x| x * x).sum()
+}
+
+#[wasm_bindgen]
+pub fn count_words(text: &amp;str) -&gt; usize {
+    text.split_whitespace().count()
+}
+
+// 구조체도 클래스로 나갑니다
+#[wasm_bindgen]
+pub struct Counter { total: u32 }
+
+#[wasm_bindgen]
+impl Counter {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -&gt; Counter { Counter { total: 0 } }
+    pub fn increment(&amp;mut self) -&gt; u32 { self.total += 1; self.total }
+    #[wasm_bindgen(getter)]
+    pub fn total(&amp;self) -&gt; u32 { self.total }
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>// 브라우저 (--target web)
+import init, { sum_squares, Counter } from './pkg/fastwasm.js'
+
+await init()                          // ★ WASM 로드 (한 번)
+console.log(sum_squares(1000))
+const c = new Counter()
+c.increment()</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">JS 와 주고받기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">타입 대응과 복사</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>JS</th><th>Rust</th><th>복사</th></tr>
+        <tr><td><code>number</code></td><td><code>i32</code> <code>f64</code></td><td>—</td></tr>
+        <tr><td><code>string</code></td><td><code>String</code> <code>&amp;str</code></td><td><b>있음</b> ★</td></tr>
+        <tr><td><code>Uint8Array</code></td><td><code>Vec&lt;u8&gt;</code></td><td>있음</td></tr>
+        <tr><td><code>Uint8Array</code></td><td><code>&amp;[u8]</code></td><td><b>있음</b></td></tr>
+        <tr><td>메모리 뷰</td><td>—</td><td><b>없음</b> ★</td></tr>
+        <tr><td><code>Array</code></td><td><code>Vec&lt;T&gt;</code></td><td>있음</td></tr>
+        <tr><td><code>object</code></td><td><code>JsValue</code>·serde</td><td>있음</td></tr>
+        <tr><td>클래스</td><td><code>#[wasm_bindgen]</code></td><td>핸들</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ WASM 은 애드온과 다릅니다
+  WASM 은 '자기만의 선형 메모리' 를 갖습니다.
+  JS 가 그 메모리를 직접 볼 수는 있지만, JS 힙의 객체를
+  WASM 이 직접 보지는 못합니다.
+  → 문자열·배열은 반드시 WASM 메모리로 복사됩니다.
+
+  대신 반대 방향은 제로카피가 가능합니다 ↓
+  WASM 메모리를 JS 의 Uint8Array 로 '뷰' 하기</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">제로카피 뷰 만들기 ★</h4>
+      <pre class="code" data-lang="rust"><code>use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+pub struct Image { data: Vec&lt;u8&gt;, w: u32, h: u32 }
+
+#[wasm_bindgen]
+impl Image {
+    #[wasm_bindgen(constructor)]
+    pub fn new(w: u32, h: u32) -&gt; Image {
+        Image { data: vec![0; (w * h * 4) as usize], w, h }
+    }
+
+    // ★ WASM 메모리 안의 주소를 알려 줍니다
+    pub fn data_ptr(&amp;self) -&gt; *const u8 { self.data.as_ptr() }
+    pub fn data_len(&amp;self) -&gt; usize { self.data.len() }
+
+    pub fn invert(&amp;mut self) { for b in &amp;mut self.data { *b = !*b; } }
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>import init, { Image } from './pkg/fastwasm.js'
+const wasm = await init()
+
+const img = new Image(640, 480)
+// WASM 메모리를 그대로 보는 뷰 — 복사 없음 ★
+const view = new Uint8ClampedArray(
+  wasm.memory.buffer, img.data_ptr(), img.data_len()
+)
+img.invert()                              // Rust 가 고치면
+ctx.putImageData(new ImageData(view, 640, 480), 0, 0)   // JS 가 바로 봅니다
+
+// ❗ 주의: WASM 메모리가 커지면(grow) buffer 가 교체됩니다
+//    → 뷰가 무효가 됩니다. 할당 후 뷰를 다시 만드세요 ★</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 WASM 버그</b> — 메모리를 새로 할당하면
+        <code>wasm.memory.buffer</code> 가 <b>다른 ArrayBuffer 로 교체</b>되어
+        이전에 만든 TypedArray 가 <b>detached</b> 됩니다.
+        <b>뷰는 쓰기 직전에 만드세요.</b>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">JS API 를 Rust 에서 부르기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">web-sys · js-sys</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "console", "Window", "Document", "HtmlCanvasElement",
+    "CanvasRenderingContext2d", "Performance",
+] }
+console_error_panic_hook = "0.1"     # 패닉을 콘솔에 보이게 ★</code></pre>
+      <pre class="code" data-lang="rust"><code>use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+#[wasm_bindgen(start)]
+pub fn main() {
+    console_error_panic_hook::set_once();     // ★ 반드시 넣으세요
+    console::log_1(&amp;"WASM 시작".into());
+}
+
+#[wasm_bindgen]
+pub fn draw(canvas_id: &amp;str) -&gt; Result&lt;(), JsValue&gt; {
+    let doc = web_sys::window().unwrap().document().unwrap();
+    let canvas = doc.get_element_by_id(canvas_id).unwrap()
+        .dyn_into::&lt;web_sys::HtmlCanvasElement&gt;()?;
+    let ctx = canvas.get_context("2d")?.unwrap()
+        .dyn_into::&lt;web_sys::CanvasRenderingContext2d&gt;()?;
+    ctx.fill_rect(10.0, 10.0, 100.0, 50.0);
+    Ok(())
+}
+
+// 임의의 JS 함수 부르기
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &amp;str);
+    fn alert(s: &amp;str);
+    type MyClass;
+    #[wasm_bindgen(method)]
+    fn my_method(this: &amp;MyClass, x: u32) -&gt; u32;
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비동기와 Promise</h4>
+      <pre class="code" data-lang="toml"><code>wasm-bindgen-futures = "0.4"</code></pre>
+      <pre class="code" data-lang="rust"><code>use wasm_bindgen_futures::JsFuture;
+
+#[wasm_bindgen]
+pub async fn fetch_json(url: String) -&gt; Result&lt;JsValue, JsValue&gt; {
+    let win = web_sys::window().unwrap();
+    let resp = JsFuture::from(win.fetch_with_str(&amp;url)).await?;
+    let resp: web_sys::Response = resp.dyn_into()?;
+    JsFuture::from(resp.json()?).await
+}
+// JS: const data = await fetch_json('/api')   ★ Promise 를 반환합니다</code></pre>
+      <pre class="code" data-lang="text"><code>★ WASM 의 스레드 제약
+  · 기본적으로 싱글 스레드입니다
+  · rayon 을 쓰려면 wasm-bindgen-rayon + SharedArrayBuffer 가 필요하고,
+    COOP/COEP 헤더를 서버에서 설정해야 합니다 (제약이 큽니다)
+  · 대개는 Web Worker 에서 WASM 인스턴스를 여러 개 띄우는 편이 현실적입니다
+
+★ 시간 측정
+  std::time::Instant 는 WASM 에서 패닉합니다 ★
+  → web_sys::window().performance().now() 를 쓰거나
+    instant 크레이트(wasm 대응)를 쓰세요</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>WASM 에서 안 되는 것들</b> — 파일 시스템, 스레드(기본), <code>Instant</code>,
+        일부 <code>std::net</code>. 크레이트가 이것들을 쓰면 <b>빌드는 되는데 런타임에 패닉</b>합니다.
+        <b><code>console_error_panic_hook</code> 을 켜 두는 것</b>이 디버깅의 시작입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">글루 코드가 하는 일</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WASM 은 숫자만 주고받습니다</h4>
+      <pre class="code" data-lang="text"><code>WebAssembly 명세상 함수 인자는 i32 · i64 · f32 · f64 뿐입니다.
+문자열도 객체도 없습니다.
+
+그래서 wasm-bindgen 이 하는 일
+  ① 문자열을 넘길 때
+     JS 가 UTF-8 로 인코딩 → WASM 메모리에 복사 → (ptr, len) 을 전달
+  ② 문자열을 받을 때
+     WASM 이 (ptr, len) 반환 → JS 가 그 메모리를 읽어 문자열 생성
+  ③ JS 객체를 넘길 때
+     '핸들 테이블' 에 넣고 인덱스(i32)를 전달 ★
+     Rust 의 JsValue 가 그 인덱스입니다
+
+  → 생성되는 fastwasm.js 가 이 변환을 전부 담고 있습니다
+
+# 글루 코드 읽어 보기
+cat pkg/fastwasm.js | head -60
+
+★ 성능 의미
+  · 숫자 전달은 사실상 공짜
+  · 문자열은 인코딩 + 복사 (짧아도 수백 ns)
+  · JsValue 는 핸들 테이블 조회
+  → 경계를 자주 넘지 말라는 원칙이 여기서도 같습니다 (j01)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WASM 바이너리 들여다보기</h4>
+      <pre class="code" data-lang="bash"><code># 도구
+cargo install wasm-tools
+npm i -g wasm-opt        # binaryen
+
+# 텍스트 형식으로
+wasm-tools print pkg/fastwasm_bg.wasm | head -50
+
+# 무엇을 내보내고 가져오나
+wasm-tools print pkg/fastwasm_bg.wasm | grep -E "^\s*\(export|\(import"
+
+# 섹션별 크기
+wasm-tools objdump pkg/fastwasm_bg.wasm
+
+# 검증
+wasm-tools validate pkg/fastwasm_bg.wasm
+
+# ★ 표준 명령 확인 — 어떤 WASM 기능을 쓰는지
+#   SIMD · bulk-memory · reference-types 등을 쓰면
+#   오래된 브라우저에서 로드가 실패합니다
+wasm-tools print *.wasm | grep -c "v128"       # SIMD 사용 여부
+
+# 타깃 기능 제한
+#   RUSTFLAGS="-C target-feature=-simd128" cargo build --target wasm32-unknown-unknown</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>wasm-pack build --target web --release</code> 한 줄이면
+    <b>.wasm + 글루 JS + TypeScript 타입</b>이 나옵니다.
+    <b>문자열·배열은 WASM 메모리로 복사</b>되지만,
+    <b>WASM 메모리를 JS 가 뷰로 보는 방향은 제로카피</b>입니다 —
+    다만 <b>메모리가 자라면 뷰가 무효</b>가 되니 쓰기 직전에 만드세요.</div>
+</section>
+
+
+<!-- ==================== j09 ==================== -->
+<section class="sec" id="j09">
+  <div class="sec-head rv">
+    <span class="no">NODE 09</span>
+    <h2>WASM 크기 줄이기 — <span class="t">로딩이 곧 성능</span></h2>
+    <p class="lead">
+      브라우저에서는 <b>파일을 받는 시간이 실행 시간보다 클 때가 많습니다</b>.
+      기본 설정으로 빌드하면 수 MB 가 나오기도 하는데,
+      <b>몇 가지 설정만으로 수십 KB 까지</b> 줄일 수 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">효과 순서대로 ★</h4>
+      <pre class="code" data-lang="toml"><code># ① 릴리즈 빌드 (기본 중의 기본)
+wasm-pack build --release
+
+# ② Cargo.toml 프로파일 (🛠️ b06 · b10)
+[profile.release]
+opt-level = "z"        # 크기 우선 ("s" 는 절충, 3 은 속도 우선)
+lto = true             # 링크 타임 최적화 ★ 효과가 큽니다
+codegen-units = 1      # 더 느린 빌드, 더 작은 결과
+panic = "abort"        # 패닉 언와인딩 코드 제거 ★
+strip = true           # 심볼 제거
+
+# ③ wasm-opt (binaryen) — wasm-pack 이 자동 실행합니다
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz", "--enable-bulk-memory"]
+
+# ④ 의존성 줄이기 — 가장 효과가 큰 경우가 많습니다
+#    default-features = false 로 안 쓰는 기능 끄기 (🛠️ b04)
+serde = { version = "1", default-features = false, features = ["derive"] }</code></pre>
+      <pre class="code" data-lang="bash"><code># 결과 확인
+ls -lh pkg/*.wasm
+gzip -c pkg/*.wasm | wc -c        # ★ 실제 전송 크기는 압축 후입니다
+brotli -c pkg/*.wasm | wc -c      # 브라우저는 보통 br 을 씁니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 큰지 찾기 ★</h4>
+      <pre class="code" data-lang="bash"><code># twiggy — 함수별 크기 분석
+cargo install twiggy
+
+twiggy top pkg/fastwasm_bg.wasm            # 큰 것부터
+twiggy top -n 20 pkg/fastwasm_bg.wasm
+twiggy dominators pkg/fastwasm_bg.wasm     # 무엇이 무엇을 끌고 오나 ★
+twiggy paths pkg/fastwasm_bg.wasm 함수이름  # 왜 포함됐나
+
+# 출력 예
+#  Shallow Bytes │ Shallow % │ Item
+# ───────────────┼───────────┼─────────────────────────
+#         38 210 │    18.2 % │ core::fmt::… (포매팅)
+#         21 044 │    10.0 % │ regex::…
+#         12 803 │     6.1 % │ std::panicking::…
+
+# ★ 자주 나오는 범인들
+#   · core::fmt (format! · Display) — println! 을 지우면 크게 줍니다
+#   · panic 메시지 문자열 — panic = "abort" + panic_immediate_abort
+#   · regex · chrono · serde_json 같은 큰 크레이트
+#   · 백트레이스 코드</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>가장 흔한 발견</b> — <code>format!</code>·<code>panic!</code> 메시지가
+        <b>바이너리의 절반</b>을 차지하는 경우가 많습니다.
+        WASM 빌드에서는 <b>에러 메시지를 코드로 바꾸는</b> 것만으로도 크게 줍니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">로딩 전략</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스트리밍 컴파일 ★</h4>
+      <pre class="code" data-lang="javascript"><code>// ❌ 전부 받고 나서 컴파일
+const bytes = await fetch('/f.wasm').then(r =&gt; r.arrayBuffer())
+const module = await WebAssembly.compile(bytes)
+
+// ✅ 받으면서 동시에 컴파일 — 체감이 크게 다릅니다 ★
+const { instance } = await WebAssembly.instantiateStreaming(
+  fetch('/f.wasm'), imports
+)
+
+// wasm-pack 의 init() 은 이미 이걸 씁니다
+import init from './pkg/fastwasm.js'
+await init()                       // 내부적으로 instantiateStreaming
+
+// ❗ 서버가 Content-Type: application/wasm 을 보내야 합니다
+//    아니면 조용히 느린 경로로 폴백합니다 ★</code></pre>
+      <pre class="code" data-lang="text"><code># 서버 설정 확인
+curl -I https://example.com/f.wasm | grep -i content-type
+#   content-type: application/wasm     ✅
+
+# nginx
+#   types { application/wasm wasm; }
+# Vercel/Netlify 는 기본 지원</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 로드할 것인가</h4>
+      <pre class="code" data-lang="javascript"><code>// ① 지연 로드 — 필요할 때만 ★
+let wasmPromise = null
+async function getWasm() {
+  wasmPromise ??= import('./pkg/fastwasm.js').then(m =&gt; m.default().then(() =&gt; m))
+  return wasmPromise
+}
+button.onclick = async () =&gt; {
+  const wasm = await getWasm()      // 클릭할 때 로드
+  wasm.process(data)
+}
+
+// ② 미리 받아 두기 (사용은 나중)
+&lt;link rel="preload" href="/pkg/fastwasm_bg.wasm" as="fetch" crossorigin&gt;
+
+// ③ 캐시 — 해시가 든 파일명 + 긴 max-age
+//    /pkg/fastwasm_bg.a3f2c1.wasm  →  Cache-Control: max-age=31536000, immutable
+
+// ④ Web Worker 에서 로드 — 메인 스레드를 막지 않습니다 ★
+const w = new Worker('./worker.js', { type: 'module' })
+// worker.js 안에서 init() 하고 postMessage 로 통신
+
+// ★ 판단
+//   핵심 기능이면 초기 로드, 부가 기능이면 지연 로드.
+//   50KB 미만이면 크게 고민하지 않아도 됩니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">번들러와 함께 쓰기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Vite · webpack 설정</h4>
+      <pre class="code" data-lang="bash"><code>wasm-pack build --target bundler       # 번들러용으로 빌드</code></pre>
+      <pre class="code" data-lang="javascript"><code>// vite.config.js
+import wasm from 'vite-plugin-wasm'
+import topLevelAwait from 'vite-plugin-top-level-await'
+
+export default {
+  plugins: [wasm(), topLevelAwait()],
+  optimizeDeps: { exclude: ['fastwasm'] },     // ★ 사전 번들 제외
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>// webpack 5 — 실험적 기능을 켜야 합니다
+module.exports = {
+  experiments: { asyncWebAssembly: true },
+}</code></pre>
+      <pre class="code" data-lang="text"><code>★ 자주 겪는 문제
+  · "Cannot use import statement outside a module"
+      → --target 을 잘못 고른 것입니다 (j08)
+  · WASM 이 base64 로 인라인돼 크기가 33% 커짐
+      → 번들러 설정에서 asset 으로 내보내게 하세요
+  · 개발 서버에서는 되는데 빌드하면 404
+      → publicPath / base 설정 확인
+  · Next.js
+      → next.config.js 에서 experiments.asyncWebAssembly 설정</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Node · 엣지에서 쓰기</h4>
+      <pre class="code" data-lang="javascript"><code>// Node (--target nodejs)
+const wasm = require('./pkg/fastwasm.js')
+console.log(wasm.sum_squares(1000))     // init 불필요 (동기 로드)
+
+// Cloudflare Workers
+import wasmModule from './fastwasm_bg.wasm'
+import * as bindings from './fastwasm_bg.js'
+const instance = await WebAssembly.instantiate(wasmModule, {
+  './fastwasm_bg.js': bindings
+})
+bindings.__wbg_set_wasm(instance.exports)
+
+// Deno
+import init, { sum_squares } from './pkg/fastwasm.js'
+await init()</code></pre>
+      <pre class="code" data-lang="text"><code>★ 엣지 런타임의 제약
+  · Cloudflare Workers: WASM 모듈 크기 제한 (플랜에 따라 다름)
+  · 시작 시간이 요금·지연에 직결됩니다 → 크기가 곧 비용 ★
+  · 파일 시스템·스레드 없음 (j08 과 동일)
+
+★ Node 에서 WASM vs 애드온 (j01)
+  · 배포 단순성: WASM 압승 (파일 하나)
+  · 성능: 애드온이 보통 우세하지만 격차는 작습니다
+  · 라이브러리로 공개할 거면 WASM 을 먼저 고려하세요</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">성능을 더 끌어올리기</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SIMD 와 타깃 기능</h4>
+      <pre class="code" data-lang="bash"><code># WASM SIMD (128비트) 켜기 — 수치 연산에서 효과가 큽니다
+RUSTFLAGS="-C target-feature=+simd128" wasm-pack build --release
+
+# 지원 확인 (브라우저)
+#   WebAssembly.validate(새 SIMD 명령이 든 모듈)
+#   또는 wasm-feature-detect 라이브러리
+
+# ★ 두 벌 빌드 + 런타임 분기가 안전한 방법입니다
+#   simd 버전과 기본 버전을 만들어 두고 감지해서 고릅니다
+
+# 다른 유용한 기능
+#   +bulk-memory      memcpy 가 빨라집니다 (기본 켜짐)
+#   +mutable-globals
+#   +reference-types
+
+# 메모리 초기 크기 지정 (grow 를 줄이면 뷰 무효화도 줄어듭니다 · j08)
+RUSTFLAGS="-C link-arg=--initial-memory=16777216" cargo build</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">할당자 교체와 no_std</h4>
+      <pre class="code" data-lang="toml"><code># 기본 할당자(dlmalloc)는 코드가 큽니다
+[dependencies]
+wee_alloc = "0.4"          # 아주 작지만 느립니다 (유지보수 주의)
+# 또는 talc · lol_alloc</code></pre>
+      <pre class="code" data-lang="rust"><code>#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
+// ★ 트레이드오프
+//   wee_alloc: 바이너리 ~10KB 절약, 할당 성능은 떨어집니다
+//   할당이 잦은 코드라면 기본 할당자가 낫습니다 — 측정하세요 (⚡ e01)
+
+// 진짜 작게 — 표준 라이브러리 없이
+#![no_std]
+extern crate alloc;
+// 수 KB 까지 줄지만, 쓸 수 있는 것이 크게 제한됩니다.
+// 대부분의 실무 코드에는 과합니다.</code></pre>
+      <pre class="code" data-lang="text"><code>★ 크기 목표 감각 (참고용 — 코드에 따라 크게 다릅니다)
+  hello world           ~ 수십 KB
+  간단한 파싱 로직       ~ 100 KB
+  regex 포함             ~ 300 KB+
+  serde_json 포함        ~ 200 KB+
+  이미지 처리(image 크레이트) ~ 1 MB+
+
+  → gzip/brotli 로 보통 1/3 로 줄어듭니다.
+    실제 전송 크기로 판단하세요.</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>opt-level = "z"</code> · <code>lto</code> · <code>panic = "abort"</code> · <code>wasm-opt -Oz</code> 네 가지가 기본이고,
+    <b><code>twiggy</code> 로 무엇이 큰지 찾는 것</b>이 실제 해결책입니다.
+    로딩은 <b><code>instantiateStreaming</code> + 올바른 Content-Type</b> 으로,
+    부가 기능이면 <b>지연 로드</b>하세요. <b>실제 크기는 gzip/brotli 후로 판단</b>합니다.</div>
+</section>
+
+
+<!-- ==================== j10 ==================== -->
+<section class="sec" id="j10">
+  <div class="sec-head rv">
+    <span class="no">NODE 10</span>
+    <h2>prebuild 배포 — <span class="t">플랫폼 매트릭스</span></h2>
+    <p class="lead">
+      네이티브 애드온의 마지막 관문입니다.
+      <b>사용자가 Rust 없이 <code>npm install</code> 만으로 쓸 수 있어야</b> 합니다.
+      플랫폼별로 미리 빌드해 <b>서브 패키지로 배포</b>하는 것이 요즘 표준입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 구조 ★</h4>
+      <pre class="code" data-lang="text"><code>npm 에 올라가는 패키지들
+
+  fastmod                        메인 (index.js + index.d.ts, 바이너리 없음)
+  ├─ fastmod-linux-x64-gnu       optionalDependencies
+  ├─ fastmod-linux-x64-musl
+  ├─ fastmod-linux-arm64-gnu
+  ├─ fastmod-darwin-x64
+  ├─ fastmod-darwin-arm64
+  └─ fastmod-win32-x64-msvc
+
+★ 동작
+  npm install fastmod
+    → npm 이 os/cpu 필드를 보고 '내 플랫폼 것만' 설치합니다
+    → index.js 가 그것을 require 합니다 (j02)
+    → 다른 플랫폼 패키지는 optional 이라 실패해도 무시됩니다</code></pre>
+      <pre class="code" data-lang="json"><code>// fastmod-linux-x64-gnu/package.json
+{
+  "name": "fastmod-linux-x64-gnu",
+  "version": "0.1.0",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "libc": ["glibc"],
+  "main": "fastmod.linux-x64-gnu.node",
+  "files": ["fastmod.linux-x64-gnu.node"]
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI 로 전부 만들기</h4>
+      <pre class="code" data-lang="bash"><code># napi-rs 가 워크플로를 생성해 줍니다
+npx @napi-rs/cli create-npm-dirs      # 서브 패키지 폴더 생성
+# .github/workflows/CI.yml 은 create napi 가 이미 만들어 뒀습니다
+
+# 흐름
+#   ① 플랫폼별 job 에서 napi build --platform --release
+#   ② 아티팩트 업로드
+#   ③ 마지막 job 에서 전부 내려받아
+#      napi artifacts     — .node 를 각 npm 폴더로 배치
+#      napi prepublish    — package.json 들을 갱신
+#      npm publish        — 서브 패키지 + 메인 패키지</code></pre>
+      <pre class="code" data-lang="text"><code>★ 빌드 방법 (플랫폼별)
+  linux x64 gnu       ubuntu 러너에서 그대로
+  linux x64 musl      alpine 컨테이너 또는 zig 링커 ★
+  linux arm64         cross · zigbuild · ARM 러너 (🛠️ b07)
+  darwin x64/arm64    macos 러너 (둘 다 빌드 가능)
+  win32 x64           windows 러너
+
+  → napi-rs 의 기본 워크플로가 이걸 전부 담고 있습니다.
+    처음에는 필요한 플랫폼만 남기고 줄이세요 (CI 시간 절약)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>musl(Alpine)을 빠뜨리지 마세요</b> — 도커 이미지의 상당수가 Alpine 기반이라
+        <b>“도커에서만 안 돼요” 문의가 가장 많이 옵니다</b>.
+        glibc 빌드를 musl 에서 로드하면 <code>Error loading shared library</code> 가 납니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">설치 실패를 줄이기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">폴백 경로 만들기 ★</h4>
+      <pre class="code" data-lang="javascript"><code>// index.js — 순서대로 시도
+function loadNative() {
+  // ① 플랫폼 서브 패키지
+  try { return require('fastmod-linux-x64-gnu') } catch {}
+  // ② 로컬 빌드 (개발 중 · 소스에서 설치)
+  try { return require('./fastmod.node') } catch {}
+  // ③ WASM 폴백 ★ 어떤 플랫폼에서도 동작
+  try { return require('./wasm/fastmod.js') } catch {}
+  // ④ 순수 JS 폴백
+  return require('./js-fallback.js')
+}
+module.exports = loadNative()</code></pre>
+      <pre class="code" data-lang="text"><code>★ WASM 폴백이 특히 좋은 전략입니다 (j01)
+  같은 Rust 코드를 WASM 으로도 빌드해 두면
+  지원하지 않는 플랫폼에서도 '느리지만 동작' 합니다.
+  napi-rs 는 wasm32-wasi 타깃도 지원합니다.
+
+★ 파이썬 쪽과 같은 원칙입니다 (🐍 y01 · y11)
+  "되돌릴 수 있게 · 없어도 동작하게"</code></pre>
+      <pre class="code" data-lang="json"><code>// package.json — 소스 빌드 폴백
+{
+  "scripts": {
+    "install": "napi-postinstall || node scripts/build-from-source.js"
+  }
+}
+// ❗ 다만 postinstall 빌드는 사용자에게 Rust 를 요구합니다.
+//    최후의 수단으로만 두고, README 에 명시하세요.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">사용자가 겪는 오류와 원인</h4>
+      <pre class="code" data-lang="text"><code>"Cannot find module 'fastmod-linux-x64-gnu'"
+  · 그 플랫폼 패키지를 배포 안 했거나
+  · npm i --no-optional 로 설치했거나
+  · lockfile 이 다른 플랫폼에서 만들어졌거나 ★
+      → npm 은 optionalDependencies 를 lock 에 기록합니다.
+        CI(linux)에서 만든 lock 을 맥에서 쓰면 문제가 됩니다.
+        npm 8.6+ 는 개선됐지만, yarn/pnpm 은 설정을 확인하세요.
+
+"Error relocating ...: symbol not found" (Alpine)
+  · musl 빌드가 없어 glibc 빌드를 로드한 것
+
+"was compiled against a different Node.js version"
+  · N-API 를 안 쓰고 V8 API 를 쓴 애드온 (j01)
+  · napi-rs 를 쓰면 이 오류는 나지 않습니다 ★
+
+"invalid ELF header"
+  · 아키텍처 불일치 (arm64 에서 x64 바이너리)
+  · 애플 실리콘 맥에서 Rosetta 로 도는 Node 를 쓸 때도
+
+★ 진단 명령
+  node -p "process.platform + '-' + process.arch"
+  node -p "process.report.getReport().header.glibcVersionRuntime"
+  ldd $(node -p "require.resolve('fastmod-linux-x64-gnu')")</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">배포 체크리스트</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 전 확인 ★</h4>
+      <pre class="code" data-lang="text"><code>□ 필요한 플랫폼을 전부 빌드했는가
+    최소: linux-x64-gnu · linux-x64-musl · darwin-arm64 · win32-x64
+□ 실제로 설치해 봤는가 (각 플랫폼에서)
+    docker run --rm -it node:20-alpine sh -c "npm i fastmod &amp;&amp; node -e '...'"
+□ index.d.ts 가 패키지에 들어갔는가
+    npm pack --dry-run 으로 파일 목록 확인 ★
+□ files 필드에 필요한 것만 있는가 (src/ · target/ 제외)
+□ 버전이 서브 패키지와 일치하는가
+□ engines.node 가 N-API 버전과 맞는가
+□ 바이너리 크기가 합리적인가 (🛠️ b10)
+    strip = "symbols" · lto = true
+□ 라이선스 파일이 포함됐는가
+□ 첫 배포는 npm publish --tag next 로 미리 검증 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설치 검증 스크립트</h4>
+      <pre class="code" data-lang="bash"><code>#!/usr/bin/env bash
+# scripts/verify-install.sh — 여러 환경에서 실제 설치 테스트
+set -e
+
+for img in node:20 node:20-alpine node:18; do
+  echo "=== $img ==="
+  docker run --rm "$img" sh -c "
+    npm i -g fastmod@latest &amp;&amp;
+    node -e \"const f=require('fastmod'); console.log(f.sumSquares(10))\"
+  "
+done
+
+# arm64 도 (도커 buildx / QEMU)
+docker run --rm --platform linux/arm64 node:20 sh -c "npm i fastmod &amp;&amp; ..."</code></pre>
+      <pre class="code" data-lang="text"><code>★ CI 에 넣으세요 (🛠️ b08)
+  배포 job 다음에 '설치 검증' job 을 두고,
+  실패하면 npm dist-tag 로 되돌립니다
+    npm dist-tag add fastmod@0.9.0 latest
+
+★ 되돌릴 수 있게
+  · npm unpublish 는 24시간 제한이 있고 권장되지 않습니다
+  · 대신 패치 버전을 올려 다시 배포하는 것이 정석입니다
+  · deprecate 로 경고를 남길 수 있습니다
+      npm deprecate fastmod@1.0.1 "설치 문제가 있습니다. 1.0.2 를 쓰세요"</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">바이너리 크기와 신뢰</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크기 줄이기 (🛠️ b10 과 같은 기법)</h4>
+      <pre class="code" data-lang="toml"><code>[profile.release]
+opt-level = 3          # 애드온은 보통 속도 우선 (WASM 과 다릅니다)
+lto = "fat"
+codegen-units = 1
+strip = "symbols"      # ★ 심볼 제거 — 크기가 크게 줍니다
+panic = "abort"        # 애드온에서도 대체로 안전합니다
+                       # (단, 패닉이 프로세스를 죽입니다 — j03 의 에러 처리를 철저히)</code></pre>
+      <pre class="code" data-lang="bash"><code># 확인
+ls -lh *.node
+cargo bloat --release --crates          # 어느 크레이트가 큰지 ★
+cargo bloat --release -n 20             # 어느 함수가 큰지
+
+# npm 패키지 크기
+npm pack --dry-run
+npx package-size fastmod
+
+# ★ 실무 감각
+#   .node 파일이 수 MB 면 사용자가 체감합니다.
+#   특히 CI 에서 매번 내려받는 경우 (수천 번/일) 비용이 됩니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">공급망 신뢰 ★</h4>
+      <pre class="code" data-lang="text"><code>네이티브 바이너리를 배포한다는 것은
+사용자 머신에서 임의 코드를 실행한다는 뜻입니다.
+그래서 신뢰 장치가 중요합니다.
+
+□ CI 에서만 배포 (로컬에서 npm publish 금지)
+    npm 의 Trusted Publishing / provenance 를 켜세요
+      npm publish --provenance
+    → npm 페이지에 '어느 워크플로에서 빌드됐는지' 가 표시됩니다 ★
+
+□ 2FA 를 켜기 (npm 계정 · 자동화 토큰은 최소 권한)
+
+□ 재현 가능한 빌드에 가깝게
+    rust-toolchain.toml 로 컴파일러 고정 (r01)
+    Cargo.lock 커밋 (🛠️ b03)
+
+□ 의존성 감사
+    cargo audit · cargo deny (🛠️ b09)
+    npm audit
+
+□ 서브 패키지도 같은 조직/계정에서 배포
+    이름 선점(typosquatting) 방지를 위해 미리 확보해 두세요
+
+★ 사용자 입장의 검증
+  npm 페이지의 provenance 배지 확인
+  또는 소스에서 직접 빌드 (cargo build --release)</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>파이썬 wheel 과 같은 문제</b>입니다(🐍 y11) —
+        <b>바이너리를 배포하는 순간 신뢰가 핵심</b>이 됩니다.
+        <b>CI 에서만 배포 + provenance</b> 두 가지는 반드시 갖추세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>플랫폼별 서브 패키지 + <code>optionalDependencies</code></b> 가 요즘 표준이고,
+    napi-rs 의 CI 템플릿이 이걸 전부 만들어 줍니다.
+    <b>musl(Alpine)을 빠뜨리지 마세요</b> — 문의의 대부분이 여기서 옵니다.
+    <b>WASM 폴백</b>을 두면 어떤 플랫폼에서도 동작하고,
+    <b>CI 에서만 배포 + provenance</b> 로 신뢰를 확보하세요. 다음은 <b>🔗 C ABI · FFI 탭</b>입니다.</div>
+</section>
+
+<!-- END pane-node -->
+</div>

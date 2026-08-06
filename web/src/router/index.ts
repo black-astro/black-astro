@@ -15,9 +15,10 @@ export const navRoutes = routes.filter((r) => r.meta?.label)
 /**
  * SPA 밖의 정적 페이지 주소.
  * public/ 아래 그대로 배포되는 단독 HTML이라 라우터가 아닌 <a>로 이동한다.
- * (import.meta.env.BASE_URL = vite.config 의 base = '/black-astro/')
  *
- * 진입점이 헤더·홈 히어로·홈 카드·푸터 네 군데라 주소는 여기 한 곳에서만 정의한다.
+ * 진입점은 홈의 '직접 만든 학습 자료' 카드 한 군데다.
+ * (헤더·히어로에 링크를 늘어놓지 않고, 푸터는 그 섹션으로 데려가는 링크 하나만 둔다)
+ * (import.meta.env.BASE_URL = vite.config 의 base = '/black-astro/')
  */
 export interface Guide {
   key: string
@@ -194,13 +195,65 @@ export const guides: Guide[] = [
       { value: '4', label: '서버 전용 탭' },
     ],
   },
+  {
+    key: 'cpp',
+    label: 'C++ Guide',
+    emoji: '🔵',
+    href: `${import.meta.env.BASE_URL}cpp-web/`,
+    title: 'C++ 네이티브 모듈 가이드 — 파이썬 · Node 에서 불러 쓰기 (별도 페이지)',
+    heading: 'C++ Native Module Guide',
+    desc:
+      'C++ 로 앱을 만드는 것이 아니라 파이썬·Node 가 느린 그 함수 하나를 대신할 ' +
+      '모듈을 만드는 가이드입니다. 왕기초 문법과 현대 C++(RAII·스마트 포인터·이동)부터 ' +
+      'pybind11 로 numpy 를 복사 없이 다루고 GIL 을 해제하는 법, N-API 애드온, ' +
+      'C ABI 로 여러 언어에서 함께 쓰기, wheel·prebuild 배포, 캐시·SIMD 최적화, ' +
+      'UB 와 ABI 호환성까지 한 페이지에 담았습니다.',
+    tags: [
+      'C++20',
+      'pybind11',
+      'numpy 제로카피',
+      'GIL 해제',
+      'N-API 애드온',
+      'C ABI · FFI',
+      'CMake · wheel',
+      'SIMD · 캐시',
+    ],
+    stats: [
+      { value: '8', label: '주제 탭' },
+      { value: '88', label: '섹션' },
+      { value: '3', label: '모듈 전용 탭' },
+    ],
+  },
+  {
+    key: 'rust',
+    label: 'Rust Guide',
+    emoji: '🦀',
+    href: `${import.meta.env.BASE_URL}rust-web/`,
+    title: 'Rust 네이티브 모듈 가이드 — 파이썬 · Node 에서 불러 쓰기 (별도 페이지)',
+    heading: 'Rust Native Module Guide',
+    desc:
+      'C++ 가이드와 같은 목적을 Rust 로 다시 씁니다. 왕기초 문법과 소유권·빌림· ' +
+      '트레이트부터 PyO3·maturin 으로 파이썬 모듈을 만들고 numpy 를 복사 없이 다루며 ' +
+      'GIL 을 해제해 rayon 으로 전 코어를 쓰는 법, napi-rs 애드온과 WASM, ' +
+      'C ABI 로 여러 언어에서 함께 쓰기, cargo 빌드와 크로스 컴파일, ' +
+      '그리고 unsafe·UB·Miri 까지 한 페이지에 담았습니다.',
+    tags: [
+      'Rust 2021',
+      '소유권 · 빌림',
+      'PyO3 · maturin',
+      'numpy 제로카피',
+      'GIL 해제 · rayon',
+      'napi-rs · WASM',
+      'C ABI · FFI',
+      'unsafe · Miri',
+    ],
+    stats: [
+      { value: '8', label: '주제 탭' },
+      { value: '88', label: '섹션' },
+      { value: '4', label: '깊이 층' },
+    ],
+  },
 ]
-
-export const externalNavLinks = guides.map((g) => ({
-  label: g.label,
-  href: g.href,
-  title: g.title,
-}))
 
 const router = createRouter({
   history: createWebHashHistory(),

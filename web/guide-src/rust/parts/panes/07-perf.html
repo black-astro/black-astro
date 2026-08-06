@@ -1,0 +1,2685 @@
+<!-- ============================================================
+     성능 · 동시성 PANE
+     ============================================================ -->
+<div class="pane" id="pane-perf">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> criterion · flamegraph · rayon · Send/Sync · SIMD</div>
+  <h1>측정하지 않으면<br>최적화가 아닙니다</h1>
+  <p class="tx">
+    이 탭의 첫 번째 규칙은 <b>“빨라진 것 같다”는 증거가 아니다</b>입니다.
+    제대로 재는 법부터 잡고, <b>Rust 에서 실제로 효과가 큰 순서</b>대로 봅니다 —
+    <b>불필요한 할당 제거 → 데이터 배치 → 병렬화</b>.
+    그리고 <b>데이터 경쟁을 컴파일러가 막아 주는</b> 지점을 확인합니다.
+  </p>
+  <div class="stats">
+    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>0</b><span>데이터 경쟁</span></div>
+    <div><b>6</b><span>글자로 병렬화</span></div>
+    <div><b>4</b><span>깊이 층</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== e01 ==================== -->
+<section class="sec" id="e01">
+  <div class="sec-head rv">
+    <span class="no">PERF 01</span>
+    <h2>측정 먼저 — <span class="t">criterion</span> 과 프로파일러</h2>
+    <p class="lead">
+      최적화에서 가장 흔한 실패는 <b>엉뚱한 곳을 고치는 것</b>입니다.
+      <code>--release</code> 로 빌드했는지, 워밍업을 했는지, 컴파일러가 코드를 지우지는 않았는지 —
+      <b>측정이 틀리면 그다음 판단이 전부 틀립니다.</b>
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">criterion 으로 재기 ★</h4>
+      <pre class="code" data-lang="toml"><code># Cargo.toml
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "my_bench"
+harness = false              # ★ 필수 (b02)</code></pre>
+      <pre class="code" data-lang="rust"><code>// benches/my_bench.rs
+use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+
+fn bench_sum(c: &amp;mut Criterion) {
+    let data: Vec&lt;f64&gt; = (0..10_000).map(|x| x as f64).collect();
+
+    c.bench_function("sum_iter", |b| {
+        b.iter(|| black_box(&amp;data).iter().sum::&lt;f64&gt;())
+        //     ^^^^^^^^^^ ★ 컴파일러가 계산을 지우지 못하게 막습니다
+    });
+
+    // 크기별 비교 — 손익분기점을 찾을 때 (⚡ e05)
+    let mut g = c.benchmark_group("sum");
+    for n in [100, 1_000, 100_000] {
+        let v: Vec&lt;f64&gt; = (0..n).map(|x| x as f64).collect();
+        g.bench_with_input(BenchmarkId::new("seq", n), &amp;v, |b, v| {
+            b.iter(|| v.iter().sum::&lt;f64&gt;())
+        });
+    }
+    g.finish();
+}
+
+criterion_group!(benches, bench_sum);
+criterion_main!(benches);</code></pre>
+      <pre class="code" data-lang="bash"><code>cargo bench
+#   target/criterion/report/index.html  ← 그래프 · 이전 실행과 비교 ★
+cargo bench -- sum_iter          # 이름으로 필터
+cargo bench -- --save-baseline before
+cargo bench -- --baseline before # 개선 전후 비교 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">측정이 틀리는 다섯 가지 ★</h4>
+      <pre class="code" data-lang="text"><code>① --release 를 안 씀
+     디버그 빌드는 10~100배 느립니다 (b06)
+     cargo bench 는 자동으로 릴리즈이지만,
+     직접 잰다면 반드시 --release ★
+
+② 컴파일러가 계산을 지움
+     결과를 안 쓰면 통째로 삭제됩니다 (⚡ e03)
+     → black_box() 로 막으세요
+
+③ 워밍업 없음
+     첫 실행은 캐시가 비어 있어 느립니다
+     criterion 이 자동으로 처리합니다
+
+④ 입력이 비현실적
+     정렬된 배열 · 전부 같은 값 · 너무 작은 데이터
+     → 실제 데이터를 쓰거나 비슷하게 생성하세요 ★
+
+⑤ 환경 노이즈
+     다른 프로세스 · CPU 주파수 변동 · 서멀 스로틀링
+     → 여러 번 재고 중앙값을 보세요 (criterion 이 통계를 냅니다)
+     → CI 에서 잰 절대값은 믿지 마세요 (b08)
+
+★ 상대 비교를 하세요
+  "2.3ms" 보다 "이전 대비 40% 빠름" 이 훨씬 신뢰할 수 있습니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">어디가 느린지 찾기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로파일러 ★</h4>
+      <pre class="code" data-lang="bash"><code># ① flamegraph — 가장 직관적입니다
+cargo install flamegraph
+# 심볼이 필요합니다 (b06)
+# [profile.release] debug = true
+cargo flamegraph --bench my_bench
+cargo flamegraph --bin mylib-cli -- 인자
+#   → flamegraph.svg (브라우저에서 열어 클릭하며 탐색) ★
+
+# ② perf (리눅스)
+perf record -g ./target/release/mylib-cli
+perf report
+
+# ③ samply — 크로스 플랫폼 · Firefox Profiler UI ★
+cargo install samply
+samply record ./target/release/mylib-cli
+
+# ④ 맥
+xcrun xctrace record --template 'Time Profiler' --launch ./target/release/app
+
+# ⑤ 파이썬에서 부를 때 (🐍 y12)
+py-spy record -o flame.svg --native -- python bench.py
+#   ★ --native 로 Rust 프레임까지 보입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>flamegraph 읽는 법</b> — <b>가로 폭이 시간</b>이고, 세로는 호출 깊이입니다.
+        <b>넓고 평평한 봉우리</b>를 찾으세요 — 거기가 시간을 먹는 곳입니다.
+        위쪽이 뾰족하면 그 함수 자체가, 아래가 넓으면 하위 호출이 원인입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">간단한 측정도 유용합니다</h4>
+      <pre class="code" data-lang="rust"><code>use std::time::Instant;
+
+let t = Instant::now();
+let result = heavy_work(&amp;data);
+eprintln!("heavy_work: {:?}", t.elapsed());
+
+// RAII 타이머 (🔐 o01)
+struct Timer(&amp;'static str, Instant);
+impl Drop for Timer {
+    fn drop(&amp;mut self) { eprintln!("{}: {:?}", self.0, self.1.elapsed()); }
+}
+let _t = Timer("파싱", Instant::now());
+
+// ❗ WASM 에서 Instant 는 패닉합니다 (🟨 j08)
+
+// 구조적 계측 — tracing 크레이트
+// #[tracing::instrument]
+// fn parse(input: &amp;str) -&gt; Result&lt;Ast&gt; { }
+//   → 스팬별 소요 시간이 자동으로 기록됩니다
+
+// 카운터로 호출 횟수 세기
+static CALLS: AtomicU64 = AtomicU64::new(0);
+CALLS.fetch_add(1, Ordering::Relaxed);</code></pre>
+      <pre class="code" data-lang="bash"><code># 전체 실행 시간 비교
+cargo install hyperfine
+hyperfine './target/release/old' './target/release/new'
+hyperfine --warmup 3 --runs 20 'cmd'</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">최적화 순서를 지킨다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">효과가 큰 순서 ★</h4>
+      <pre class="code" data-lang="text"><code>① 알고리즘 — O(n²) → O(n log n)
+     다른 모든 것을 합친 것보다 큽니다. 항상 먼저 보세요.
+
+② 불필요한 작업 제거
+     · 중복 계산 (캐싱)
+     · 필요 없는 데이터까지 처리
+     · 조기 종료 기회 (🔐 o12)
+
+③ 할당 줄이기 (e02) ★
+     Rust 코드가 느린 이유의 대부분이 여기 있습니다
+
+④ 데이터 배치 (e04)
+     캐시 친화적으로 — 수 배 차이가 납니다
+
+⑤ 병렬화 (e05)
+     코어 수만큼. 다만 ①~④ 를 먼저 하세요
+     (느린 코드를 8배 빠르게 하는 것보다 100배 빠르게 만드는 게 낫습니다)
+
+⑥ SIMD · 마이크로 최적화 (e09)
+     마지막입니다. 이식성과 가독성을 잃습니다.
+
+★ 각 단계마다 측정하세요.
+  ③ 이 효과 없으면 ④ 로 가지 말고 프로파일러를 다시 보세요.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">회귀를 막기</h4>
+      <pre class="code" data-lang="bash"><code># CI 에서 벤치마크 (절대값이 아니라 '회귀' 감지용)
+cargo bench -- --save-baseline main
+# PR 브랜치에서
+cargo bench -- --baseline main
+#   → 5% 이상 느려지면 알림
+
+# 도구
+#   criterion + bencher.dev
+#   codspeed (GitHub Actions 통합 · 노이즈에 강함) ★
+#   iai-callgrind — 명령어 수를 세므로 CI 노이즈가 없습니다 ★
+
+# ★ iai 방식이 CI 에 특히 적합합니다
+# [dev-dependencies]
+# iai-callgrind = "0.14"
+#   실행 시간 대신 '실행된 명령어 수'를 셉니다
+#   → 러너 성능과 무관하게 재현 가능
+
+# 성능 목표를 테스트로
+#[test]
+fn parse_is_fast_enough() {
+    let t = Instant::now();
+    for _ in 0..1000 { parse(&amp;input); }
+    assert!(t.elapsed() &lt; Duration::from_millis(500), "너무 느립니다");
+}
+// ❗ CI 노이즈에 취약하니 여유를 크게 잡으세요</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>CI 에서 잰 절대 시간은 믿지 마세요</b> —
+        공용 러너는 성능 편차가 큽니다.
+        <b>회귀 감지</b>에는 <code>iai-callgrind</code>(명령어 수) 나
+        전용 러너를 쓰는 것이 신뢰할 만합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">벤치마크가 거짓말하는 경우</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">black_box 가 필요한 이유</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 이 벤치마크는 0ns 가 나옵니다
+b.iter(|| {
+    let sum: u64 = (0..1000).sum();       // 결과를 안 씀 → 통째로 삭제 ★
+});
+
+// ✅
+b.iter(|| {
+    let sum: u64 = (0..1000).sum();
+    black_box(sum)                         // "이 값을 쓴다" 고 컴파일러를 속임
+});
+
+// 입력도 감춰야 합니다
+b.iter(|| process(black_box(&amp;data)));      // 상수 폴딩 방지
+
+// ❗ black_box 는 최적화 장벽이라 그 자체가 약간의 비용이 있습니다
+//   너무 안쪽 루프에 넣으면 측정이 왜곡됩니다
+
+// 확인 방법 — 어셈블리를 보세요 (e03)
+cargo asm --bench my_bench
+
+// 상태를 바꾸는 벤치마크
+b.iter_batched(
+    || data.clone(),                       // 매번 새 입력 (측정에서 제외)
+    |mut d| { d.sort(); d },
+    criterion::BatchSize::SmallInput,
+);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">현실과 다른 벤치마크</h4>
+      <pre class="code" data-lang="text"><code>★ 실제 워크로드와 벤치마크가 갈리는 지점
+
+① 캐시 상태
+   벤치마크는 같은 데이터를 반복해 L1/L2 에 다 들어가 있습니다.
+   실제로는 캐시 미스가 훨씬 많습니다 (e04)
+   → 데이터 크기를 캐시보다 크게 잡아 보세요
+
+② 분기 예측
+   같은 입력을 반복하면 분기가 100% 예측됩니다.
+   실제 데이터는 예측이 자주 빗나갑니다
+   → 무작위 입력도 함께 재세요
+
+③ 할당자 상태
+   반복하면 할당자가 워밍업되어 빨라집니다 (e02)
+
+④ 단일 스레드 가정
+   실제 서버는 여러 요청이 동시에 돕니다.
+   메모리 대역폭·캐시를 공유하므로 코어 수만큼 빨라지지 않습니다 (e05)
+
+⑤ 전체 시스템에서의 비중
+   함수를 100배 빠르게 해도 전체의 2% 면 전체는 2% 만 빨라집니다
+   → 엔드투엔드 측정을 반드시 함께 하세요 ★
+
+★ 결론: 마이크로 벤치마크로 '방향'을 잡고,
+  엔드투엔드 측정으로 '결정'하세요.</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>--release</code> · <code>black_box</code> · 현실적인 입력</b> 세 가지가 측정의 기본입니다.
+    <b>criterion</b> 으로 재고 <b>flamegraph</b> 로 어디가 느린지 찾으세요.
+    최적화는 <b>알고리즘 → 불필요한 작업 → 할당 → 배치 → 병렬 → SIMD</b> 순서로,
+    <b>각 단계마다 측정</b>하며 진행합니다.</div>
+</section>
+
+
+<!-- ==================== e02 ==================== -->
+<section class="sec" id="e02">
+  <div class="sec-head rv">
+    <span class="no">PERF 02</span>
+    <h2>할당 줄이기 — <span class="t">느린 Rust 의 90%</span></h2>
+    <p class="lead">
+      Rust 코드가 기대만큼 안 빠른 이유는 대부분 하나입니다 —
+      <b>불필요한 <code>.clone()</code> 과 <code>to_string()</code></b>.
+      소유권 에러를 <code>clone</code> 으로 넘긴 코드가 루프 안에 있으면
+      <b>C++ 보다 느려집니다</b>. 여기가 가장 먼저 볼 곳입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전형적인 패턴 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 루프 안의 clone
+for row in &amp;rows {
+    process(row.clone());              // 매번 힙 할당 + 복사
+}
+// ✅
+for row in &amp;rows {
+    process(row);                      // 빌려 주기 (🔐 o02)
+}
+
+// ❌ 문자열을 매번 만들기
+for u in &amp;users {
+    let key = format!("{}:{}", u.id, u.name);   // 할당 1회씩
+    map.insert(key, u);
+}
+// ✅ 버퍼 재사용
+let mut key = String::with_capacity(64);
+for u in &amp;users {
+    key.clear();                       // ★ 용량은 유지됩니다
+    use std::fmt::Write;
+    write!(key, "{}:{}", u.id, u.name).unwrap();
+    map.insert(key.clone(), u);        // 여기선 어쩔 수 없이 1회
+}
+
+// ❌ collect 를 중간마다
+let a: Vec&lt;_&gt; = it.map(f).collect();
+let b: Vec&lt;_&gt; = a.iter().filter(g).collect();
+// ✅ 한 번에 (🔐 o12)
+let b: Vec&lt;_&gt; = it.map(f).filter(g).collect();
+
+// ❌ 크기를 모르고 push
+let mut v = Vec::new();
+for x in 0..1_000_000 { v.push(x); }   // 재할당 ~20회 + 전체 복사
+// ✅
+let mut v = Vec::with_capacity(1_000_000);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">찾는 방법 ★</h4>
+      <pre class="code" data-lang="bash"><code># ① clippy 가 상당수를 잡아 줍니다 (b09)
+cargo clippy -- -W clippy::redundant_clone
+cargo clippy -- -W clippy::clone_on_copy
+cargo clippy -- -W clippy::unnecessary_to_owned
+
+# ② 눈으로 — 루프 안의 .clone() · .to_string() · format! · to_vec()
+grep -n "clone()\|to_string()\|to_vec()" src/**/*.rs
+
+# ③ 할당 횟수를 세기 ★ 가장 확실합니다
+#    커스텀 할당자로 카운트
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static ALLOCS: AtomicUsize = AtomicUsize::new(0);
+struct Counting;
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&amp;self, l: Layout) -&gt; *mut u8 {
+        ALLOCS.fetch_add(1, Ordering::Relaxed);
+        System.alloc(l)
+    }
+    unsafe fn dealloc(&amp;self, p: *mut u8, l: Layout) { System.dealloc(p, l) }
+}
+#[global_allocator] static A: Counting = Counting;
+
+// 측정
+let before = ALLOCS.load(Ordering::Relaxed);
+work();
+println!("할당 {}회", ALLOCS.load(Ordering::Relaxed) - before);
+
+# ④ 프로파일러에서 malloc/free 가 위에 보이면 확정입니다 (e01)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>할당 횟수를 세는 것</b>이 가장 확실한 진단입니다.
+        “100만 개를 처리하는데 할당이 300만 번”이면 <b>고칠 곳이 명확</b>합니다.
+        테스트에 이 검사를 넣어 회귀를 막는 팀도 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">복사를 없애는 도구들</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">타입 선택으로 해결하기</h4>
+      <pre class="code" data-lang="rust"><code>// ① 인자는 빌림으로 (r03 · 🔐 o02)
+fn f(s: &amp;str)         // String 대신
+fn g(v: &amp;[T])         // Vec&lt;T&gt; 대신
+
+// ② Cow — 고칠 때만 복사 (🔐 o03)
+use std::borrow::Cow;
+fn normalize(s: &amp;str) -&gt; Cow&lt;'_, str&gt; {
+    if s.contains(' ') { Cow::Owned(s.replace(' ', "_")) }
+    else { Cow::Borrowed(s) }              // ★ 대부분의 경우 할당 0
+}
+
+// ③ Arc 로 공유 (🔐 o10)
+let shared = Arc::new(big_data);
+let c = Arc::clone(&amp;shared);              // 카운터만 +1 — 쌉니다
+
+// ④ 슬라이스로 부분 참조 (🔐 o04)
+let head = &amp;text[..10];                   // 복사 없음
+
+// ⑤ 반환을 인덱스로
+fn find(&amp;self, pat: &amp;str) -&gt; Option&lt;Range&lt;usize&gt;&gt;   // &amp;str 대신
+
+// ⑥ SmallVec — 작으면 스택에 (별도 크레이트)
+use smallvec::SmallVec;
+let mut v: SmallVec&lt;[u32; 8]&gt; = SmallVec::new();   // 8개까지는 할당 0 ★
+
+// ⑦ 문자열 인터닝 — 반복되는 문자열
+//    string-interner · lasso 크레이트
+//    Arc&lt;str&gt; 로 공유 (🔐 o04)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버퍼 재사용 패턴 ★</h4>
+      <pre class="code" data-lang="rust"><code>// 출력 버퍼를 받는 API (🔐 o04 · 🟨 j04)
+pub fn process_into(input: &amp;[u8], out: &amp;mut Vec&lt;u8&gt;) {
+    out.clear();                     // ★ 용량 유지
+    out.extend(input.iter().map(|b| b ^ 0xFF));
+}
+
+// 호출부
+let mut buf = Vec::with_capacity(4096);
+for chunk in stream {
+    process_into(chunk, &amp;mut buf);   // 할당은 첫 회 한 번뿐
+    sink.write_all(&amp;buf)?;
+}
+
+// 객체 풀 — 큰 구조체를 재사용
+struct Pool { free: Vec&lt;Buffer&gt; }
+impl Pool {
+    fn get(&amp;mut self) -&gt; Buffer { self.free.pop().unwrap_or_default() }
+    fn put(&amp;mut self, mut b: Buffer) { b.clear(); self.free.push(b); }
+}
+
+// 아레나 — 한꺼번에 할당하고 한꺼번에 해제 (파서에 유용)
+// bumpalo 크레이트
+// let arena = bumpalo::Bump::new();
+// let node = arena.alloc(Node { .. });      // 개별 해제 없음 ★
+
+// ★ 주의: 풀·아레나는 복잡도를 더합니다.
+//   먼저 with_capacity 와 clear 로 해결되는지 보세요.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">경계에서의 할당</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">FFI 경계가 특히 중요합니다 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 파이썬에서 초당 수천 번 부르는 함수가 매번 할당
+#[pyfunction]
+fn process(data: Vec&lt;f64&gt;) -&gt; Vec&lt;f64&gt; {       // 입력 복사 + 출력 할당
+    data.iter().map(|x| x * 2.0).collect()
+}
+
+// ✅ numpy 제로카피 + 제자리 수정 (🐍 y06)
+#[pyfunction]
+fn process_inplace(mut a: PyReadwriteArray1&lt;f64&gt;) {
+    for x in a.as_slice_mut().unwrap() { *x *= 2.0; }
+}
+
+// ✅ 또는 출력 배열을 받기
+#[pyfunction]
+fn process_into(a: PyReadonlyArray1&lt;f64&gt;, mut out: PyReadwriteArray1&lt;f64&gt;) { }
+
+// Node 도 같습니다 (🟨 j04)
+#[napi]
+pub fn process_into(input: Buffer, mut output: Buffer) -&gt; Result&lt;u32&gt; { }
+
+// ★ 경계 통과 자체도 비용입니다 (🐍 y01 원칙 ①)
+//   할당 + 변환 + 호출 오버헤드가 계산보다 클 수 있습니다.
+//   배치로 묶어 호출 횟수를 줄이는 것이 먼저입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">할당자 교체 (b06)</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+mimalloc = { version = "0.1", default-features = false }</code></pre>
+      <pre class="code" data-lang="rust"><code>#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;</code></pre>
+      <pre class="code" data-lang="text"><code>★ 언제 효과가 있나
+  · 멀티스레드에서 할당이 잦을 때 ★ (e05)
+  · musl 로 빌드했을 때 (musl 의 malloc 이 느립니다 · b07)
+  · 작은 객체를 많이 만들 때
+
+★ 후보
+  mimalloc    범용적으로 좋습니다
+  jemalloc    오래 검증됨 (tikv-jemallocator)
+  snmalloc    멀티스레드 특화
+
+★ 주의
+  · 바이너리가 수백 KB 커집니다 (b10)
+  · 파이썬 확장에서는 신중하게 —
+    프로세스 전역 할당자를 바꾸면 파이썬 자체에도 영향을 줍니다 ★
+    (효과가 확인될 때만 쓰고, 반드시 측정하세요)
+
+★ 근본은 '할당을 줄이는 것' 입니다.
+  할당자 교체는 그다음입니다.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>파이썬 확장에서 <code>#[global_allocator]</code></b> 를 바꾸면
+        <b>파이썬 인터프리터의 할당까지 영향을 받습니다</b>.
+        효과와 부작용을 반드시 측정하고, 확신이 없으면 건드리지 마세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">할당 비용의 실체</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 비싼가</h4>
+      <pre class="code" data-lang="text"><code>malloc 한 번의 비용 (직접 재 보세요 · e01)
+  · 빠른 경로 (thread-local 캐시에 맞는 크기가 있음)  수~수십 ns
+  · 느린 경로 (새 페이지 요청 · mmap)                 수 μs ★
+  · 경합 (여러 스레드가 동시에)                       더 큼
+
+★ 진짜 비용은 '그 뒤' 에 있습니다
+  · 새 메모리는 캐시에 없습니다 → 첫 접근이 캐시 미스 (e04)
+  · 힙이 조각나 지역성이 나빠집니다
+  · free 도 비용이 있습니다
+
+★ 그래서
+  Vec::with_capacity 로 한 번 잡고 재사용하면
+  '할당 비용' 보다 '캐시 지역성' 에서 더 크게 이득을 봅니다.
+
+# 확인
+strace -c -e trace=mmap,munmap,brk ./target/release/app
+#   → 시스템 콜 횟수가 많으면 큰 할당이 반복되는 것</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">할당이 사라지는 경우</h4>
+      <pre class="code" data-lang="rust"><code>// ① 컴파일러가 스택으로 승격 (제한적)
+let v = vec![1, 2, 3];
+let sum: i32 = v.iter().sum();
+// → LLVM 이 이 vec 을 스택 배열로 바꿀 수 있습니다 (항상은 아님)
+
+// ② 인라인 + 상수 폴딩
+const fn kib(n: usize) -&gt; usize { n * 1024 }   // 컴파일 타임 (r03)
+
+// ③ 빈 Vec 은 할당하지 않습니다 (r06)
+let v: Vec&lt;u8&gt; = Vec::new();       // 힙 접근 0
+assert_eq!(v.capacity(), 0);
+
+// ④ ZST 는 절대 할당하지 않습니다 (r07)
+let v: Vec&lt;()&gt; = vec![(); 1_000_000];   // 힙 0바이트 ★
+
+// ⑤ 작은 문자열 최적화(SSO)는 Rust std 에 없습니다 ★
+//   String 은 항상 힙입니다 (C++ std::string 과 다름)
+//   → 짧은 문자열이 많으면 compact_str · smol_str 크레이트
+
+// 확인 — 어셈블리에서 __rust_alloc 호출 찾기 (e03)
+cargo asm --lib my_function | grep alloc</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>C++ 개발자가 놀라는 지점</b> — Rust <code>String</code> 에는
+        <b>작은 문자열 최적화(SSO)가 없습니다</b>.
+        짧은 문자열을 대량으로 다룬다면 <code>compact_str</code> 같은 크레이트가
+        <b>눈에 띄는 차이</b>를 만듭니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>루프 안의 <code>clone()</code>·<code>format!</code>·<code>collect()</code></b> 부터 찾으세요.
+    <b><code>with_capacity</code> + <code>clear()</code> 로 버퍼 재사용</b>이 가장 효과가 크고,
+    인자는 <code>&amp;str</code>/<code>&amp;[T]</code>, 조건부 복사는 <code>Cow</code> 를 쓰세요.
+    <b>할당 횟수를 세어 보는 것</b>이 가장 확실한 진단입니다.</div>
+</section>
+
+
+<!-- ==================== e03 ==================== -->
+<section class="sec" id="e03">
+  <div class="sec-head rv">
+    <span class="no">PERF 03</span>
+    <h2>이터레이터가 <span class="t">for 만큼 빠른 이유</span></h2>
+    <p class="lead">
+      <code>.iter().map().filter().sum()</code> 이 <b>손으로 쓴 <code>for</code> 문과 같은 기계어</b>가 됩니다.
+      “추상화에는 비용이 없다(zero-cost)”는 말의 실체를 <b>어셈블리로 직접 확인</b>하고,
+      <b>그 최적화가 깨지는 조건</b>도 함께 봅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어셈블리로 확인하기 ★</h4>
+      <pre class="code" data-lang="bash"><code>cargo install cargo-show-asm
+cargo asm --lib "mylib::sum_iter" --rust     # 소스와 함께 표시 ★
+cargo asm --lib --everything | head -50
+
+# 또는 godbolt.org 에 붙여 넣기 (-O 옵션)</code></pre>
+      <pre class="code" data-lang="rust"><code>#[no_mangle]
+pub fn sum_iter(v: &amp;[u64]) -&gt; u64 {
+    v.iter().sum()
+}
+
+#[no_mangle]
+pub fn sum_loop(v: &amp;[u64]) -&gt; u64 {
+    let mut s = 0;
+    for i in 0..v.len() { s += v[i]; }
+    s
+}
+// → 둘 다 거의 같은 어셈블리가 나옵니다.
+//   오히려 iter 쪽이 나은 경우도 있습니다 (범위 검사가 없어서) ★</code></pre>
+      <pre class="code" data-lang="text"><code># 결과에서 확인할 것
+  · 루프가 하나인가 (map · filter 마다 루프가 생기지 않음)
+  · 범위 검사(bounds check)가 있는가 — panic 호출이 보이면 있는 것
+  · SIMD 명령이 있는가 (vpaddq · paddd 등 · e09)
+  · 함수 호출이 남아 있는가 (인라인이 안 된 것)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 사라지나</h4>
+      <pre class="code" data-lang="text"><code>① 어댑터는 전부 구조체입니다
+     Map&lt;Filter&lt;slice::Iter&lt;u64&gt;&gt;&gt;
+     각자 next() 를 구현합니다
+
+② 전부 제네릭이라 단형화됩니다 (r10)
+     타입이 정확히 정해지므로 동적 호출이 없습니다
+
+③ next() 가 인라인됩니다
+     #[inline] 이 붙어 있고, 본체가 작습니다
+
+④ 인라인 후 LLVM 이 루프 하나로 합칩니다
+     중간 구조체는 레지스터로 사라집니다
+
+⑤ 범위 검사 제거
+     슬라이스 이터레이터는 포인터를 직접 전진시키므로
+     인덱싱과 달리 검사가 아예 없습니다 ★
+
+★ 그래서 오히려 이터레이터가 빠를 수 있습니다.
+  v[i] 는 매번 i &lt; len 을 확인해야 합니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">최적화가 깨지는 조건</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인라인이 막히는 자리 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ① dyn — 동적 호출은 인라인 불가 (🔐 o06)
+let f: Box&lt;dyn Fn(u64) -&gt; u64&gt; = Box::new(|x| x * 2);
+v.iter().map(|x| f(*x)).sum::&lt;u64&gt;();      // 호출마다 간접 분기
+
+// ✅ 제네릭으로
+fn apply&lt;F: Fn(u64) -&gt; u64&gt;(v: &amp;[u64], f: F) -&gt; u64 {
+    v.iter().map(|x| f(*x)).sum()
+}
+
+// ② 크레이트 경계 — LTO 가 꺼져 있으면 인라인이 제한됩니다 (b06)
+//    → lto = "thin" 이상을 켜세요
+//    → 작은 pub 함수에는 #[inline] (r03)
+
+// ③ 함수가 너무 커서 인라인 비용이 초과
+//    → 안쪽 루프만 작은 함수로 분리
+
+// ④ 부동소수점 합 — 순서를 못 바꿔 벡터화가 막힙니다 ★
+let s: f64 = v.iter().sum();     // 결합 법칙이 성립하지 않음
+// 정확도를 조금 포기해도 되면 청크로 부분합
+let s: f64 = v.chunks(8).map(|c| c.iter().sum::&lt;f64&gt;()).sum();
+
+// ⑤ 조기 종료가 있는 어댑터 뒤의 순서 (🔐 o12)
+v.iter().map(expensive).filter(cheap);   // ❌ 전부 계산
+v.iter().filter(cheap).map(expensive);   // ✅ 거른 뒤에</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">범위 검사 제거하기</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 검사가 매번 들어갑니다
+fn dot(a: &amp;[f64], b: &amp;[f64]) -&gt; f64 {
+    let mut s = 0.0;
+    for i in 0..a.len() { s += a[i] * b[i]; }   // b[i] 검사가 남습니다
+    s
+}
+
+// ✅ ① zip — 컴파일러가 길이를 압니다
+fn dot(a: &amp;[f64], b: &amp;[f64]) -&gt; f64 {
+    a.iter().zip(b).map(|(x, y)| x * y).sum()
+}
+
+// ✅ ② 길이를 먼저 맞추기 (힌트 주기)
+fn dot(a: &amp;[f64], b: &amp;[f64]) -&gt; f64 {
+    let n = a.len().min(b.len());
+    let (a, b) = (&amp;a[..n], &amp;b[..n]);        // ★ 이후 검사가 사라집니다
+    let mut s = 0.0;
+    for i in 0..n { s += a[i] * b[i]; }
+    s
+}
+
+// ✅ ③ 배열로 (길이가 타입에 있음 · r10)
+fn dot4(a: &amp;[f64; 4], b: &amp;[f64; 4]) -&gt; f64 { }
+
+// ❌ unsafe 는 마지막 수단 (🔬 d01)
+// unsafe { *a.get_unchecked(i) }
+//   → 이득이 측정으로 확인될 때만. 대개 ①②로 충분합니다 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>범위 검사 비용은 생각보다 작습니다</b> — 분기 예측이 거의 항상 맞기 때문입니다.
+        진짜 문제는 <b>검사 때문에 벡터화가 막히는 경우</b>입니다.
+        <b>어셈블리를 보고 확인</b>한 뒤에 판단하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">읽히면서 빠른 코드</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이터레이터를 믿으세요 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ★ 실무 지침
+//   1. 이터레이터로 자연스럽게 쓰세요
+//   2. 측정해서 느리면 어셈블리를 보세요
+//   3. 그때 for 문이나 unsafe 를 고려하세요
+//   → 대부분 1단계에서 끝납니다
+
+// 자주 쓰는 고성능 패턴
+let sum: u64 = v.iter().sum();
+let max = v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+let count = v.iter().filter(|x| **x &gt; 0).count();
+let (evens, odds): (Vec&lt;_&gt;, Vec&lt;_&gt;) = v.iter().partition(|x| *x % 2 == 0);
+
+// 청크 단위 — SIMD 가 잘 걸립니다 (e09)
+for chunk in v.chunks_exact(8) {              // ★ chunks 보다 exact 가 빠름
+    // 컴파일러가 길이 8을 알아 벡터화하기 쉽습니다
+}
+let rem = v.chunks_exact(8).remainder();
+
+// 제자리 변환 — 할당 없음 (e02)
+v.iter_mut().for_each(|x| *x *= 2.0);
+
+// 두 슬라이스 동시에
+a.iter().zip(b.iter()).for_each(|(x, y)| { });
+
+// 병렬로 바꾸기 — 여섯 글자 (e05)
+use rayon::prelude::*;
+let sum: u64 = v.par_iter().sum();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비교 실험 만들기</h4>
+      <pre class="code" data-lang="rust"><code>// benches/iter_vs_loop.rs — 직접 확인해 보세요 (e01)
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+fn variants(c: &amp;mut Criterion) {
+    let v: Vec&lt;u64&gt; = (0..1_000_000).collect();
+    let mut g = c.benchmark_group("sum");
+
+    g.bench_function("iter", |b| b.iter(|| black_box(&amp;v).iter().sum::&lt;u64&gt;()));
+
+    g.bench_function("index", |b| b.iter(|| {
+        let v = black_box(&amp;v);
+        let mut s = 0u64;
+        for i in 0..v.len() { s += v[i]; }
+        s
+    }));
+
+    g.bench_function("chunks", |b| b.iter(|| {
+        black_box(&amp;v).chunks_exact(8)
+            .map(|c| c.iter().sum::&lt;u64&gt;()).sum::&lt;u64&gt;()
+    }));
+
+    g.bench_function("par", |b| b.iter(|| {
+        use rayon::prelude::*;
+        black_box(&amp;v).par_iter().sum::&lt;u64&gt;()
+    }));
+
+    g.finish();
+}
+criterion_group!(b, variants);
+criterion_main!(b);
+
+// ★ 결과는 환경마다 다릅니다. 직접 재 보는 것이 이 섹션의 핵심입니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">컴파일러가 하는 변환</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">주요 최적화 패스</h4>
+      <pre class="code" data-lang="text"><code>인라인 확장 (inlining)
+  작은 함수 본체를 호출부에 펼칩니다. 다른 모든 최적화의 전제입니다.
+
+루프 융합 (loop fusion)
+  map 과 filter 가 각각 루프를 만들지 않고 하나로 합쳐집니다.
+
+스칼라 치환 (SROA)
+  구조체 필드를 레지스터로 흩어 놓습니다.
+  → 이터레이터 어댑터 구조체가 사라지는 이유 ★
+
+루프 언롤링 (unrolling)
+  반복을 몇 개씩 펼쳐 분기 비용을 줄입니다.
+
+벡터화 (SLP / loop vectorization)
+  여러 원소를 한 명령으로 (e09)
+
+죽은 코드 제거 (DCE)
+  결과를 안 쓰면 통째로 삭제 → 벤치마크가 0ns 가 되는 이유 (e01)
+
+# 어떤 최적화가 적용/실패했는지 보기
+RUSTFLAGS="-C remark=all" cargo build --release 2&gt;&amp;1 | grep -i vector
+cargo rustc --release -- -C llvm-args=-pass-remarks-analysis=loop-vectorize</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">MIR 수준에서 보기</h4>
+      <pre class="code" data-lang="bash"><code># Rust 자체 최적화 (LLVM 이전) · 🔬 d10
+cargo +nightly rustc --release -- -Zdump-mir=sum_iter
+ls mir_dump/
+
+# MIR 최적화 끄고 비교
+cargo +nightly rustc -- -Zmir-opt-level=0
+
+# LLVM IR 보기
+cargo rustc --release -- --emit llvm-ir
+grep -A 30 "define.*sum_iter" target/release/deps/*.ll
+
+# ★ 실무에서 여기까지 볼 일은 드뭅니다.
+#   cargo asm 으로 최종 결과를 보는 것으로 대부분 충분합니다.
+
+# 인라인이 됐는지 빠르게 확인
+cargo asm --lib my_fn | grep -c "call"
+#   call 이 없으면 전부 인라인된 것 ★</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>“zero-cost abstraction” 은 마케팅 문구가 아닙니다</b> —
+        <b>어셈블리로 확인할 수 있는 사실</b>입니다.
+        한 번 직접 확인해 보면 <b>이터레이터를 쓰는 데 주저가 없어집니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 이터레이터는 <b>인라인 + 루프 융합</b>으로 <code>for</code> 문과 같은 기계어가 되고,
+    <b>범위 검사가 없어 오히려 빠를 수</b> 있습니다.
+    깨지는 조건은 <b><code>dyn</code> · LTO 꺼짐 · 부동소수점 합 · 어댑터 순서</b>입니다.
+    의심되면 <b><code>cargo asm</code> 으로 직접 확인</b>하세요.</div>
+</section>
+
+
+<!-- ==================== e04 ==================== -->
+<section class="sec" id="e04">
+  <div class="sec-head rv">
+    <span class="no">PERF 04</span>
+    <h2>메모리 레이아웃과 <span class="t">캐시</span></h2>
+    <p class="lead">
+      같은 알고리즘도 <b>데이터가 메모리에 어떻게 놓여 있느냐</b>에 따라 수 배가 갈립니다.
+      CPU 는 이미 충분히 빠르고, <b>대부분의 시간을 메모리를 기다리며</b> 보냅니다.
+      네이티브 언어를 쓰는 진짜 이유가 여기 있습니다 — <b>배치를 내가 정할 수 있습니다.</b>
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비용의 크기 ★</h4>
+      <pre class="code" data-lang="text"><code>메모리 계층 (대략적인 지연 · CPU 마다 다릅니다)
+  레지스터        0 사이클
+  L1 캐시         ~4 사이클
+  L2 캐시         ~12 사이클
+  L3 캐시         ~40 사이클
+  RAM             ~200~300 사이클 ★ L1 의 50배 이상
+  SSD             ~수만 사이클
+
+★ 의미
+  덧셈 하나가 1 사이클인데 RAM 접근이 200 사이클입니다.
+  → "계산을 줄이는 것" 보다 "메모리 접근을 줄이는 것" 이 대개 큽니다.
+
+캐시 라인 = 64바이트 ★
+  메모리는 64바이트 단위로 읽힙니다.
+  u64 하나를 읽어도 그 주변 8개가 함께 옵니다.
+  → 연속으로 접근하면 공짜, 흩어져 접근하면 매번 비용
+
+# 내 CPU 확인
+lscpu | grep -i cache
+sysctl -a | grep cachesize          # 맥</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">연속 vs 흩어짐</h4>
+      <pre class="code" data-lang="rust"><code>// ✅ 연속 — 캐시 라인 하나에 8개가 들어옵니다
+let v: Vec&lt;u64&gt; = (0..1_000_000).collect();
+let sum: u64 = v.iter().sum();
+
+// ❌ 흩어짐 — 원소마다 캐시 미스
+let v: Vec&lt;Box&lt;u64&gt;&gt; = (0..1_000_000).map(Box::new).collect();
+let sum: u64 = v.iter().map(|b| **b).sum();      // ★ 수 배 느립니다
+
+// ❌ 트레이트 객체도 마찬가지 (🔐 o06)
+let shapes: Vec&lt;Box&lt;dyn Shape&gt;&gt; = ...;          // 힙에 흩어져 있음
+// ✅
+enum Shape { Circle(f64), Rect(f64, f64) }
+let shapes: Vec&lt;Shape&gt; = ...;                    // 연속 배치 ★
+
+// ❌ 연결 리스트 — 포인터를 따라가며 매번 미스
+// ✅ Vec 이 거의 항상 낫습니다 (r06)
+//    "삽입이 O(1)" 이라는 이론적 장점은
+//    캐시 미스 앞에서 대부분 무의미합니다 ★
+
+// 확인 — 캐시 미스 세기 (리눅스)
+perf stat -e cache-misses,cache-references,instructions ./target/release/app</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“<code>Vec</code> 을 쓰세요”가 반복되는 이유</b>가 이것입니다(r06).
+        원소 수천 개까지는 <b>선형 탐색이 <code>HashMap</code> 보다 빠른 경우</b>가 흔합니다 —
+        해시 계산과 캐시 미스가 없기 때문입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">AoS 와 SoA</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조체 배열 vs 배열 구조체 ★</h4>
+      <pre class="code" data-lang="rust"><code>// AoS (Array of Structs) — 자연스러운 형태
+struct Particle { x: f32, y: f32, z: f32, mass: f32, name: String }
+let ps: Vec&lt;Particle&gt;;
+
+// x 만 순회하면? — 캐시 라인마다 x 는 4바이트뿐,
+//   나머지 60바이트는 낭비입니다 ★
+for p in &amp;ps { total += p.x; }
+
+// SoA (Struct of Arrays) — 필드별로 나누기
+struct Particles {
+    x: Vec&lt;f32&gt;, y: Vec&lt;f32&gt;, z: Vec&lt;f32&gt;,
+    mass: Vec&lt;f32&gt;, name: Vec&lt;String&gt;,
+}
+// x 만 순회하면 캐시 라인이 100% 활용됩니다
+for x in &amp;ps.x { total += x; }       // ★ 수 배 빠를 수 있습니다
+// 게다가 벡터화도 잘 걸립니다 (e09)
+
+// ★ 판단 기준
+//   · 필드 일부만 자주 순회 → SoA
+//   · 객체 단위로 접근      → AoS
+//   · 게임 엔진 · 시뮬레이션 · 데이터프레임 → 대개 SoA
+//     (polars · arrow 가 컬럼 지향인 이유 · 🐍 y01)
+
+// 도구
+//   soa_derive 크레이트가 SoA 를 자동 생성해 줍니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조체 크기 줄이기</h4>
+      <pre class="code" data-lang="rust"><code>use std::mem::size_of;
+
+// ❌ 필드 배치로 낭비가 생깁니다
+struct Big { flag: bool, id: u64, kind: u8, value: f64 }
+// Rust 는 재배치하지만 (r07), 크기를 줄일 수 있는 여지가 있습니다
+
+// ✅ 작은 타입 쓰기
+struct Small { id: u32, value: f32, kind: u8, flag: bool }
+println!("{} {}", size_of::&lt;Big&gt;(), size_of::&lt;Small&gt;());
+
+// ✅ enum 배리언트 크기 맞추기 (r08)
+enum Msg { Small(u8), Big([u8; 256]) }        // 전체가 257바이트 ★
+enum Msg2 { Small(u8), Big(Box&lt;[u8; 256]&gt;) }  // 16바이트
+//   clippy::large_enum_variant 가 잡아 줍니다 (b09)
+
+// ✅ Option 을 공짜로 (r08)
+size_of::&lt;Option&lt;&amp;T&gt;&gt;() == size_of::&lt;&amp;T&gt;()
+size_of::&lt;Option&lt;NonZeroU32&gt;&gt;() == 4
+
+// ✅ 인덱스로 포인터 대체 (🔐 o01)
+struct Node { parent: Option&lt;u32&gt;, children: Vec&lt;u32&gt; }   // 8바이트 대신 4
+
+// 확인
+cargo +nightly rustc --release -- -Zprint-type-sizes | grep -A 8 "Particle"
+
+// ★ 효과: 구조체가 작아지면 캐시 라인에 더 많이 들어갑니다.
+//   100만 개 배열에서 64→32바이트면 메모리 접근이 절반입니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">접근 패턴을 고친다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">순차 접근으로 바꾸기 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 2차원 배열을 열 방향으로 순회
+for x in 0..w {
+    for y in 0..h { sum += grid[y * w + x]; }   // ★ 매번 캐시 미스
+}
+// ✅ 행 방향 (메모리 순서대로)
+for y in 0..h {
+    for x in 0..w { sum += grid[y * w + x]; }
+}
+// → 수 배 차이가 납니다. 반드시 재 보세요 (e01)
+
+// ✅ 행렬 전치는 블록 단위로 (타일링)
+const B: usize = 64;
+for by in (0..h).step_by(B) {
+    for bx in (0..w).step_by(B) {
+        for y in by..(by + B).min(h) {
+            for x in bx..(bx + B).min(w) { out[x * h + y] = a[y * w + x]; }
+        }
+    }
+}
+
+// ✅ 정렬해서 접근 (랜덤 인덱스 조회가 많을 때)
+indices.sort_unstable();                     // 순차 접근이 됩니다
+for &amp;i in &amp;indices { sum += data[i]; }
+
+// ✅ 프리페치 힌트 (드물게 필요 · nightly)
+// core::intrinsics::prefetch_read_data(ptr, 3);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">측정으로 확인하기</h4>
+      <pre class="code" data-lang="bash"><code># 캐시 미스율 (리눅스)
+perf stat -e cache-references,cache-misses,\
+L1-dcache-loads,L1-dcache-load-misses ./target/release/app
+
+# 출력 예
+#   1,234,567,890  cache-references
+#     456,789,012  cache-misses      # 37% ★ 높습니다
+#
+# ★ 해석
+#   미스율 &lt; 5%    좋음
+#   5~20%          개선 여지
+#   &gt; 20%          접근 패턴을 봐야 합니다
+
+# 어느 코드에서 미스가 나는지
+perf record -e cache-misses ./target/release/app
+perf report
+
+# 맥
+#   Instruments 의 Counters 템플릿
+
+# 캐시 시뮬레이션
+valgrind --tool=cachegrind ./target/release/app
+cg_annotate cachegrind.out.*      # 줄 단위로 미스를 보여 줍니다 ★</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>메모리 대역폭이 한계일 때는 병렬화가 안 먹힙니다</b> —
+        코어를 8개 써도 메모리가 못 따라오면 그대로입니다(e05).
+        <b>배치를 먼저 고치고 병렬화</b>하는 순서가 중요합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">정렬과 false sharing</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">false sharing — 스레드를 늘렸는데 느려질 때 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 두 카운터가 같은 캐시 라인에 있으면
+struct Counters { a: AtomicU64, b: AtomicU64 }   // 16바이트 — 같은 라인
+// 스레드 1이 a 를, 스레드 2가 b 를 갱신하면
+// 서로의 캐시 라인을 무효화합니다 (핑퐁) ★
+// → 독립적인 데이터인데도 성능이 급락합니다
+
+// ✅ 캐시 라인만큼 떨어뜨리기 (🔗 f03)
+#[repr(align(64))]
+struct Padded(AtomicU64);
+
+struct Counters { a: Padded, b: Padded }
+
+// ✅ 또는 crossbeam 의 CachePadded
+use crossbeam_utils::CachePadded;
+struct Counters { a: CachePadded&lt;AtomicU64&gt;, b: CachePadded&lt;AtomicU64&gt; }
+
+// ✅ 가장 좋은 방법: 스레드별 지역 변수로 모으고 마지막에 합치기
+let total: u64 = data.par_chunks(1024)
+    .map(|c| c.iter().sum::&lt;u64&gt;())     // ★ 각자 지역 합계
+    .sum();                              // 마지막에 한 번만
+
+// 확인
+perf stat -e cache-misses,LLC-load-misses ./app
+// 스레드를 늘렸는데 미스가 급증하면 false sharing 을 의심하세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">정렬과 페이지</h4>
+      <pre class="code" data-lang="rust"><code>use std::mem::align_of;
+
+align_of::&lt;u64&gt;();          // 8
+align_of::&lt;f64&gt;();          // 8
+// SIMD 타입은 16 · 32 · 64 (e09)
+
+// 정렬된 할당이 필요할 때
+#[repr(align(32))]
+struct Aligned32([f32; 8]);
+
+// 큰 배열은 페이지 정렬을 고려 (4KB)
+//   대용량 처리에서 huge page 를 쓰면 TLB 미스가 줍니다
+//   리눅스: madvise(MADV_HUGEPAGE) · transparent huge pages
+
+// ★ 실무에서 여기까지 볼 일
+//   · 수 GB 데이터를 다루는 처리
+//   · 실시간 오디오·영상
+//   · 고빈도 거래
+//   → 대부분의 네이티브 모듈에서는 e02(할당)·e04(배치)까지면 충분합니다
+
+// TLB 미스 확인
+perf stat -e dTLB-load-misses,dTLB-loads ./app
+
+// 메모리 대역폭이 한계인지 확인
+//   대역폭 포화 상태면 계산 최적화는 효과가 없습니다
+//   → 데이터 크기를 줄이거나(압축·작은 타입) 알고리즘을 바꾸세요 ★</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>“메모리 대역폭이 한계인가”</b>를 먼저 확인하세요 —
+        그렇다면 SIMD 도 병렬화도 효과가 없습니다.
+        <b>데이터를 작게 만드는 것</b>(<code>f64</code>→<code>f32</code>, 압축, SoA)만이 답입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>RAM 접근은 L1 의 50배</b>이고 캐시 라인은 64바이트입니다.
+    <b>연속 배치(<code>Vec</code>) · 순차 접근 · 작은 구조체</b> 세 가지가 기본이고,
+    필드 일부만 순회한다면 <b>SoA</b> 를 검토하세요.
+    스레드를 늘렸는데 느려지면 <b>false sharing</b> 을,
+    최적화가 안 먹히면 <b>메모리 대역폭 한계</b>를 의심하세요.</div>
+</section>
+
+
+<!-- ==================== e05 ==================== -->
+<section class="sec" id="e05">
+  <div class="sec-head rv">
+    <span class="no">PERF 05</span>
+    <h2>rayon — <span class="t">여섯 글자로 병렬화</span></h2>
+    <p class="lead">
+      <code>.iter()</code> 를 <code>.par_iter()</code> 로 바꾸면 전 코어를 씁니다.
+      <b>데이터 경쟁은 컴파일러가 막아 주므로</b>(e06) 안심하고 쓸 수 있습니다.
+      다만 <b>작은 데이터에는 오히려 손해</b>이고, <b>메모리 대역폭이 한계면 효과가 없습니다</b>.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 사용</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+rayon = "1"</code></pre>
+      <pre class="code" data-lang="rust"><code>use rayon::prelude::*;
+
+// 이터레이터를 그대로 병렬로 ★
+let sum: u64 = data.par_iter().map(heavy).sum();
+let out: Vec&lt;f64&gt; = data.par_iter().map(|x| f(*x)).collect();
+let count = data.par_iter().filter(|x| pred(x)).count();
+let max = data.par_iter().max();
+let any = data.par_iter().any(|x| *x &lt; 0);      // 조기 종료도 됩니다
+
+// 제자리 수정
+data.par_iter_mut().for_each(|x| *x *= 2.0);
+data.par_chunks_mut(1024).for_each(|c| process(c));
+
+// 정렬
+v.par_sort();
+v.par_sort_unstable_by_key(|u| u.score);
+
+// 두 작업을 동시에
+let (a, b) = rayon::join(|| compute_a(), || compute_b());
+
+// 재귀 분할 (퀵소트 · 트리 순회)
+fn quicksort&lt;T: Send + Ord&gt;(v: &amp;mut [T]) {
+    if v.len() &lt;= 1 { return; }
+    let mid = partition(v);
+    let (lo, hi) = v.split_at_mut(mid);
+    rayon::join(|| quicksort(lo), || quicksort(hi));   // ★
+}
+
+// 스레드 풀 설정
+rayon::ThreadPoolBuilder::new().num_threads(4).build_global().unwrap();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 이득인가 ★</h4>
+      <pre class="code" data-lang="text"><code>★ 이득이 큰 조건
+  · CPU 바운드 (계산이 많음)
+  · 작업 단위가 충분히 큼 (원소당 수 μs 이상 또는 원소가 아주 많음)
+  · 원소끼리 독립적
+  · 메모리 대역폭에 여유가 있음 (e04)
+
+★ 이득이 없거나 손해인 경우
+  · 데이터가 작음 (수천 개 미만) — 분배 비용이 더 큽니다
+  · 메모리 대역폭이 한계 — 코어를 늘려도 그대로 ★
+  · I/O 바운드 — async 를 쓰세요 (e08)
+  · 원소마다 락이 필요 — 경합으로 오히려 느려집니다
+  · 이미 프로세스가 여러 개 (과다 구독)
+
+★ 실측이 답입니다 (e01)
+  let mut g = c.benchmark_group("par");
+  for n in [1_000, 10_000, 100_000, 1_000_000] { ... }
+  → 교차점이 어디인지 그래프로 보입니다
+
+// 적응형 분기
+if data.len() &lt; THRESHOLD {
+    data.iter().map(f).sum()
+} else {
+    data.par_iter().map(f).sum()
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">분할 크기 조절</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">작업 훔치기(work stealing)</h4>
+      <pre class="code" data-lang="text"><code>rayon 은 작업을 재귀적으로 반으로 쪼개고,
+놀고 있는 스레드가 남의 작업을 훔쳐 갑니다.
+
+★ 그래서
+  · 원소마다 비용이 달라도 자동으로 균형이 맞습니다
+  · 스레드 수를 신경 쓸 필요가 없습니다
+  · 다만 쪼개는 것 자체에 비용이 있습니다
+
+# 분할 조절
+data.par_iter()
+    .with_min_len(1000)        // ★ 최소 이만큼은 한 스레드가
+    .with_max_len(10000)
+    .map(f).sum();
+
+# 청크로 직접
+data.par_chunks(4096).map(|c| process(c)).sum::&lt;f64&gt;();
+
+★ 튜닝 기준
+  · 원소당 작업이 아주 짧으면 → with_min_len 을 크게
+  · 원소마다 비용이 크게 다르면 → 작게 (훔치기가 잘 되도록)
+  · 기본값으로 시작하고 측정 후 조정하세요 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">결과를 모으는 방법</h4>
+      <pre class="code" data-lang="rust"><code>use rayon::prelude::*;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// ✅ ① 반환값으로 모으기 (가장 좋습니다)
+let sum: u64 = data.par_iter().map(f).sum();
+let v: Vec&lt;_&gt; = data.par_iter().map(f).collect();   // 순서가 유지됩니다 ★
+
+// ✅ ② fold + reduce — 스레드별로 모았다가 합치기
+let total = data.par_iter()
+    .fold(|| 0u64, |acc, x| acc + f(x))       // 스레드별 초기값
+    .reduce(|| 0u64, |a, b| a + b);           // 합치기
+
+// ✅ ③ 원자 카운터 (간단한 경우)
+let count = AtomicU64::new(0);
+data.par_iter().for_each(|x| {
+    if pred(x) { count.fetch_add(1, Ordering::Relaxed); }
+});
+// ❗ 경합이 심하면 느려집니다 (e04 의 false sharing)
+
+// ❌ Mutex 로 결과 모으기 — 병렬 이득이 사라집니다
+let out = Mutex::new(Vec::new());
+data.par_iter().for_each(|x| out.lock().unwrap().push(f(x)));   // ★ 나쁨
+
+// ✅ Result 도 collect 됩니다 (🔐 o08)
+let r: Result&lt;Vec&lt;_&gt;, E&gt; = data.par_iter().map(try_f).collect();
+
+// 에러가 나면 조기 종료
+let r: Result&lt;(), E&gt; = data.par_iter().try_for_each(|x| check(x));</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">다른 런타임과 함께 쓰기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">과다 구독을 피하세요 ★</h4>
+      <pre class="code" data-lang="text"><code>★ 문제 상황
+  · 파이썬 multiprocessing 4개 프로세스 × rayon 8스레드 = 32 스레드
+  · Node 워커 4개 × rayon 8 = 32
+  · 컨테이너에 CPU 2개 할당인데 호스트 코어 수(64)로 스레드 생성 ★
+
+  → 컨텍스트 스위치와 캐시 경합으로 오히려 느려집니다
+
+★ 대응
+  ① 스레드 수를 환경에 맞게
+     let n = std::thread::available_parallelism()
+         .map(|n| n.get()).unwrap_or(1);
+     rayon::ThreadPoolBuilder::new().num_threads(n).build_global()?;
+
+  ② 환경 변수로 조절 가능하게
+     RAYON_NUM_THREADS=4
+
+  ③ 컨테이너 CPU 제한을 읽기
+     available_parallelism 은 cgroup 을 고려합니다 (최신 Rust) ★
+     이전 버전이면 num_cpus 크레이트의 get_physical
+
+  ④ 라이브러리라면 전역 풀을 건드리지 마세요
+     사용자가 정하게 두거나, 전용 풀을 만드세요
+     let pool = rayon::ThreadPoolBuilder::new().num_threads(4).build()?;
+     pool.install(|| data.par_iter().map(f).sum::&lt;u64&gt;());</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬·Node 와 조합</h4>
+      <pre class="code" data-lang="rust"><code>// 🐍 파이썬 — GIL 을 놓고 병렬 (y07)
+#[pyfunction]
+fn process(py: Python&lt;'_&gt;, data: Vec&lt;f64&gt;) -&gt; Vec&lt;f64&gt; {
+    py.allow_threads(|| {                        // ★ GIL 해제
+        data.par_iter().map(|x| heavy(*x)).collect()
+    })
+}
+// ❗ allow_threads 안에서 파이썬 객체를 만지면 컴파일 에러 (안전합니다)
+
+// 🟨 Node — AsyncTask 안에서 (j05)
+impl Task for BatchTask {
+    fn compute(&amp;mut self) -&gt; Result&lt;Vec&lt;f64&gt;&gt; {
+        Ok(self.rows.par_iter().map(score).collect())   // 이미 워커 스레드
+    }
+}
+// ❗ libuv 풀(4) + rayon 풀(코어 수) 이 겹칩니다
+//    UV_THREADPOOL_SIZE 와 rayon 스레드 수를 함께 조절하세요
+
+// 🟨 WASM — rayon 을 쓰려면 별도 설정이 필요합니다 (j08)
+//    wasm-bindgen-rayon + SharedArrayBuffer + COOP/COEP 헤더
+//    대개는 Web Worker 여러 개가 현실적입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파이썬에서 이 조합이 특히 강력합니다</b> —
+        GIL 때문에 파이썬 스레드로는 불가능했던 <b>진짜 병렬 계산</b>을
+        <code>allow_threads</code> + <code>par_iter</code> 두 줄로 얻습니다(🐍 y07).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">스케일이 안 나올 때</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">원인 진단 ★</h4>
+      <pre class="code" data-lang="text"><code>스레드 8개인데 4배밖에 안 빨라졌다 — 왜?
+
+① 암달의 법칙
+   직렬 부분이 10% 면 최대 10배까지만 빨라집니다.
+   → 직렬 구간(입출력·수집)을 먼저 줄이세요
+
+② 메모리 대역폭 포화 ★ 가장 흔합니다
+   계산이 가벼우면 코어가 아니라 메모리가 병목입니다 (e04)
+   → perf stat 로 확인. 데이터를 작게 만드는 것이 답입니다
+
+③ false sharing (e04)
+   → CachePadded · 지역 누적
+
+④ 락 경합
+   → 락 범위 축소 · 원자 연산 · 샤딩 (e07)
+
+⑤ 할당자 경합 (e02)
+   → mimalloc · jemalloc 으로 교체
+
+⑥ 하이퍼스레딩
+   논리 코어 16개여도 물리 코어는 8개입니다.
+   계산 집약적이면 물리 코어 수가 상한입니다 ★
+
+⑦ 터보 부스트
+   전 코어 가동 시 클럭이 내려갑니다 (단일 스레드보다 낮음)
+
+# 측정
+perf stat -e task-clock,context-switches,cpu-migrations ./app
+htop     # 코어별 사용률 확인</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스케일 곡선 그리기</h4>
+      <pre class="code" data-lang="rust"><code>// 스레드 수를 바꿔 가며 재기
+for n in [1, 2, 4, 8, 16] {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(n).build().unwrap();
+    let t = std::time::Instant::now();
+    let r = pool.install(|| data.par_iter().map(f).sum::&lt;f64&gt;());
+    println!("{n} 스레드: {:?}", t.elapsed());
+}
+
+// ★ 해석
+//   선형에 가까움      → 좋습니다
+//   4개에서 평평해짐   → 메모리 대역폭 또는 물리 코어 수
+//   늘리니 느려짐      → 경합 또는 과다 구독
+
+// 효율 계산
+//   효율 = (1스레드 시간 / n스레드 시간) / n
+//   0.8 이상이면 양호합니다
+
+// 실제 워크로드로 확인
+//   마이크로 벤치는 캐시가 따뜻해 낙관적입니다 (e01)
+//   엔드투엔드로 재세요</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>병렬화 전에 e02(할당)와 e04(배치)를 먼저</b> 하세요.
+        느린 코드를 8배 빠르게 하는 것보다,
+        <b>먼저 100배 빠르게 만든 뒤 병렬화</b>하는 편이 훨씬 큽니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>.iter()</code> → <code>.par_iter()</code></b> 여섯 글자면 전 코어를 씁니다.
+    <b>작은 데이터에는 손해</b>이니 임계값을 측정으로 정하고,
+    결과는 <b><code>collect</code>/<code>sum</code>/<code>fold+reduce</code></b> 로 모으세요(<code>Mutex</code> 로 모으면 이득이 사라집니다).
+    <b>스케일이 안 나오면 메모리 대역폭</b>을 먼저 의심하세요.</div>
+</section>
+
+
+<!-- ==================== e06 ==================== -->
+<section class="sec" id="e06">
+  <div class="sec-head rv">
+    <span class="no">PERF 06</span>
+    <h2>Send · Sync — <span class="t">데이터 경쟁이 빌드 에러</span></h2>
+    <p class="lead">
+      다른 언어에서 동시성 버그는 <b>운영에서 가끔 터지는 재현 불가능한 문제</b>였습니다.
+      Rust 에서는 <b>컴파일 에러</b>입니다.
+      그 장치가 <code>Send</code> 와 <code>Sync</code> 두 트레이트입니다 —
+      <b>이 탭에서 가장 중요한 개념</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 트레이트의 뜻 ★</h4>
+      <pre class="code" data-lang="text"><code>Send  — "이 값을 다른 스레드로 '보내도' 안전하다"
+        소유권을 옮기는 것
+
+Sync  — "이 값을 여러 스레드가 '동시에 참조해도' 안전하다"
+        &amp;T 가 Send 인 것과 같습니다
+
+★ 대부분의 타입은 둘 다 자동으로 구현됩니다 (auto trait)
+  구성 요소가 전부 Send/Sync 면 자동으로 Send/Sync 입니다.
+
+★ 아닌 것들
+  Rc&lt;T&gt;        !Send, !Sync   카운터가 원자적이지 않음 (🔐 o10)
+  RefCell&lt;T&gt;   Send,  !Sync   빌림 검사가 원자적이지 않음
+  Cell&lt;T&gt;      Send,  !Sync
+  *const T     !Send, !Sync   원시 포인터 (🔬 d03)
+  MutexGuard   !Send          락을 잡은 스레드가 풀어야 함
+
+★ 조합
+  Arc&lt;T&gt;       T: Send+Sync 면 Send+Sync ★
+  Mutex&lt;T&gt;     T: Send 면 Send+Sync ★ (락이 보호하므로)
+  RwLock&lt;T&gt;    T: Send+Sync 면 Send+Sync</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">컴파일러가 막는 모습</h4>
+      <pre class="code" data-lang="rust"><code>use std::rc::Rc;
+use std::sync::Arc;
+
+let data = Rc::new(vec![1, 2, 3]);
+// std::thread::spawn(move || { println!("{:?}", data); });
+//   error[E0277]: `Rc&lt;Vec&lt;i32&gt;&gt;` cannot be sent between threads safely ★
+//   help: within this `{closure}`, the trait `Send` is not implemented
+
+// ✅ Arc 로 (🔐 o10)
+let data = Arc::new(vec![1, 2, 3]);
+let d = Arc::clone(&amp;data);
+std::thread::spawn(move || { println!("{:?}", d); });
+
+// 공유 가변 상태
+// let counter = Rc::new(RefCell::new(0));       // ❌ 스레드 불가
+let counter = Arc::new(Mutex::new(0));           // ✅
+let c = Arc::clone(&amp;counter);
+std::thread::spawn(move || { *c.lock().unwrap() += 1; });
+
+// ★ 핵심: "실수로 스레드 간 공유" 가 불가능합니다.
+//   C++ 에서는 그냥 컴파일되고, 가끔 값이 깨집니다.
+//   Rust 에서는 빌드가 안 됩니다.</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>이것이 “fearless concurrency”의 실체</b>입니다 —
+        용감해서가 아니라 <b>컴파일러가 검사해 주기 때문에</b> 겁내지 않아도 됩니다.
+        rayon 을 마음 놓고 쓸 수 있는 이유이기도 합니다(e05).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">에러를 읽고 푸는 법</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 만나는 에러와 처방 ★</h4>
+      <pre class="code" data-lang="text"><code>① `Rc&lt;T&gt;` cannot be sent between threads safely
+     → Arc 로 바꾸세요
+
+② `RefCell&lt;T&gt;` cannot be shared between threads safely
+     → Mutex 나 RwLock 으로
+
+③ `*mut T` cannot be sent between threads safely
+     → 래퍼 타입을 만들고 unsafe impl Send (🔗 f07 · 🔬 d08)
+       단, 정말 안전한지 스스로 증명해야 합니다 ★
+
+④ closure may outlive the current function
+     → move 를 붙이거나 thread::scope 를 쓰세요 (🔐 o03 · e07)
+
+⑤ borrowed value does not live long enough
+     → 'static 이 필요합니다 → 소유 값으로 넘기기
+
+⑥ `MutexGuard` cannot be sent between threads safely (async)
+     → await 를 넘어 락을 들고 있습니다 → 범위를 좁히세요 (e08)
+
+★ 대부분의 처방이 정해져 있습니다.
+  에러 메시지의 `help:` 를 읽으면 대개 답이 있습니다 (r01).</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">타입이 Send/Sync 인지 확인하기</h4>
+      <pre class="code" data-lang="rust"><code>// 컴파일 타임 검사 — 테스트로 두면 회귀를 막습니다 ★
+fn assert_send&lt;T: Send&gt;() {}
+fn assert_sync&lt;T: Sync&gt;() {}
+
+#[test]
+fn types_are_thread_safe() {
+    assert_send::&lt;MyHandle&gt;();
+    assert_sync::&lt;MyHandle&gt;();
+    assert_send::&lt;MyError&gt;();          // 에러도 Send 여야 유용합니다 (🔐 o09)
+}
+
+// 또는 상수로
+const _: () = {
+    fn check&lt;T: Send + Sync&gt;() {}
+    fn assert_all() { check::&lt;MyHandle&gt;(); }
+};
+
+// ★ 라이브러리를 만든다면 이 테스트를 반드시 두세요.
+//   나중에 필드에 Rc 를 하나 추가하면 조용히 !Send 가 되고,
+//   사용자의 멀티스레드 코드가 깨집니다.
+
+// 왜 Send 가 아닌지 알아내기
+// let _: &amp;dyn Send = &amp;my_value;
+//   → 에러 메시지가 어느 필드 때문인지 알려 줍니다 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">FFI 에서의 Send/Sync</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 붙여야 할 때 ★</h4>
+      <pre class="code" data-lang="rust"><code>// C 라이브러리 핸들을 감쌀 때 (🔗 f08)
+pub struct Decoder { raw: *mut ffi::Decoder }
+
+// 원시 포인터가 있어 자동으로 !Send, !Sync 입니다.
+// C 문서를 읽고 판단해 직접 붙입니다.
+
+// ★ 판단 기준
+//   "이 핸들을 다른 스레드로 옮겨도 되나?"        → Send
+//   "여러 스레드가 동시에 써도 되나?"             → Sync
+
+// 대부분의 C 라이브러리는
+unsafe impl Send for Decoder {}      // 컨텍스트별로는 안전한 경우가 많음
+// unsafe impl Sync for Decoder {}   // ❌ 동시 접근은 대개 불가
+
+// Sync 가 필요하면 락으로 감싸세요
+pub struct SharedDecoder(Mutex&lt;Decoder&gt;);
+// → Mutex&lt;T&gt; 는 T: Send 면 Sync 입니다 ★
+
+// ❗ unsafe impl 은 '컴파일러에게 하는 약속' 입니다.
+//   틀리면 데이터 경쟁이 나고, 그건 UB 입니다 (🔬 d02).
+//   반드시 근거를 주석으로 남기세요
+// SAFETY: libfoo 문서에 따르면 Decoder 는 한 번에 한 스레드에서만
+//         사용하면 안전하며, 스레드 간 이동은 허용됩니다.
+//         (docs: https://... section 3.2)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬·Node 바인딩에서</h4>
+      <pre class="code" data-lang="rust"><code>// 🐍 PyO3 (y05 · y07)
+//   Py&lt;T&gt; 는 Send 입니다 (GIL 로 보호되므로)
+//   Bound&lt;'py, T&gt; 는 !Send (GIL 에 묶여 있음)
+//   → allow_threads 클로저에 Bound 를 넣으면 컴파일 에러 ★ 안전합니다
+
+#[pyclass]
+struct Handle { inner: Mutex&lt;Decoder&gt; }   // frozen + Mutex 가 안전 (y05)
+
+// 🟨 napi-rs (j05·j07)
+//   AsyncTask 의 compute 는 워커 스레드에서 돕니다
+//   → Task 구조체가 Send 여야 합니다
+//   JsObject · Env 는 !Send — 워커로 못 넘깁니다 (설계상 안전)
+
+// 🔗 C ABI 콜백 (f07)
+//   *mut c_void user data 를 스레드로 넘기려면 래퍼가 필요합니다
+struct SendPtr(*mut c_void);
+unsafe impl Send for SendPtr {}
+// SAFETY: 호출자가 스레드 안전한 포인터를 준다고 문서에 명시함
+
+// ★ 공통 원칙
+//   각 바인딩 프레임워크가 !Send 로 막아 주는 것들은
+//   전부 '이유가 있어서' 막는 것입니다. 우회하기 전에 왜인지 이해하세요.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>unsafe impl Send/Sync</code> 는 신중하게</b> —
+        이것이 틀리면 <b>Rust 의 동시성 보장이 통째로 무너집니다</b>.
+        <b>SAFETY 주석에 근거(문서 링크·조건)를 반드시</b> 남기세요(🔬 d08).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">auto trait 의 동작</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자동 구현과 부정 구현</h4>
+      <pre class="code" data-lang="rust"><code>// Send/Sync 는 'auto trait' 입니다
+//   구성 요소가 전부 만족하면 자동으로 구현됩니다
+struct A { x: u32, y: String }        // 자동으로 Send + Sync
+struct B { x: u32, y: Rc&lt;u32&gt; }       // Rc 때문에 !Send, !Sync
+
+// 명시적으로 막기 (nightly 에서만 negative impl)
+// impl !Send for MyType {}
+
+// 안정 버전에서 !Send 로 만드는 방법 ★
+use std::marker::PhantomData;
+use std::rc::Rc;
+
+pub struct NotSend {
+    data: u32,
+    _marker: PhantomData&lt;Rc&lt;()&gt;&gt;,      // ★ Rc 를 담은 척 → !Send
+}
+
+// PhantomData 의 다른 용도
+//   PhantomData&lt;T&gt;           T 를 소유한 것처럼 (드롭 검사)
+//   PhantomData&lt;&amp;'a T&gt;       라이프타임을 붙들기 (🔐 o03 의 변성)
+//   PhantomData&lt;*const T&gt;    !Send + !Sync
+
+// 제네릭에서 전파
+struct Wrapper&lt;T&gt;(T);
+// Wrapper&lt;u32&gt; 는 Send, Wrapper&lt;Rc&lt;u32&gt;&gt; 는 !Send — 자동으로 따라갑니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Rust 가 막지 못하는 것</h4>
+      <pre class="code" data-lang="text"><code>★ Send/Sync 가 보장하는 것
+  · 데이터 경쟁 없음 (data race)
+    = 두 스레드가 동기화 없이 같은 메모리를 쓰는 일
+
+★ 보장하지 않는 것
+  · 데드락 ★
+      두 락을 다른 순서로 잡으면 여전히 멈춥니다 (🔐 o10)
+  · 경쟁 조건 (race condition)
+      논리적 순서 문제는 타입으로 못 막습니다
+      예: 잔액을 읽고 → 검사하고 → 쓰는 사이에 다른 스레드가 바꿈
+      → 트랜잭션이나 CAS 로 해결해야 합니다 (🔬 d06)
+  · 메모리 누수
+      Rc 순환은 안전한 코드로도 샙니다 (🔐 o10)
+  · 성능 문제
+      락 경합·false sharing 은 컴파일러가 모릅니다 (e04)
+
+★ 그래도 큰 차이입니다
+  데이터 경쟁은 '재현 불가능한 버그' 의 주범이었습니다.
+  그것 하나가 사라진 것만으로 디버깅 시간이 크게 줍니다.
+
+# 데드락 진단
+#   parking_lot 의 deadlock_detection feature
+#   gdb: thread apply all bt
+#   tokio-console (async · e08)</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>Send</code>=다른 스레드로 보내도 됨, <code>Sync</code>=동시에 참조해도 됨</b>입니다.
+    대부분 자동으로 구현되고, <b><code>Rc</code>·<code>RefCell</code>·원시 포인터</b>가 예외입니다.
+    <b>데이터 경쟁이 컴파일 에러</b>가 되지만 <b>데드락은 못 막습니다</b>.
+    FFI 핸들에 <code>unsafe impl Send</code> 를 붙일 때는 <b>SAFETY 주석에 근거를</b> 남기세요.</div>
+</section>
+
+
+<!-- ==================== e07 ==================== -->
+<section class="sec" id="e07">
+  <div class="sec-head rv">
+    <span class="no">PERF 07</span>
+    <h2>스레드 · 채널 · <span class="t">Mutex</span></h2>
+    <p class="lead">
+      rayon 이 대부분을 해결하지만(e05), <b>직접 스레드를 다뤄야 할 때</b>가 있습니다 —
+      백그라운드 작업, 생산자-소비자, 장시간 워커.
+      <b>세 가지 도구</b>와 각각을 언제 쓰는지 정리합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스레드 만들기</h4>
+      <pre class="code" data-lang="rust"><code>use std::thread;
+
+// 기본 — 'static 이 필요합니다 (🔐 o03)
+let h = thread::spawn(move || {
+    heavy_work(data)                        // 소유권을 넘김
+});
+let result = h.join().unwrap();             // 결과 받기 (패닉이면 Err)
+
+// ★ 스코프 스레드 — 지역 변수를 빌릴 수 있습니다 (1.63+)
+let data = vec![1, 2, 3];
+thread::scope(|s| {
+    s.spawn(|| println!("{:?}", &amp;data));    // ✅ 빌려도 됩니다
+    s.spawn(|| println!("{}", data.len()));
+});                                          // 여기서 전부 join
+// → 'static 이 필요 없어 훨씬 편합니다
+
+// 슬라이스를 나눠 각자 처리 (🔐 o02)
+let (a, b) = data.split_at_mut(mid);
+thread::scope(|s| {
+    s.spawn(|| process(a));
+    s.spawn(|| process(b));
+});
+
+// 이름·스택 크기 지정
+thread::Builder::new()
+    .name("worker".into())
+    .stack_size(4 * 1024 * 1024)
+    .spawn(|| { })?;
+
+// 코어 수
+let n = std::thread::available_parallelism()?.get();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 가지 도구 고르기 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>필요</th><th>도구</th></tr>
+        <tr><td>데이터 병렬 처리</td><td><b>rayon</b> (e05)</td></tr>
+        <tr><td>작업 전달</td><td>채널</td></tr>
+        <tr><td>공유 상태 수정</td><td><code>Mutex</code></td></tr>
+        <tr><td>읽기가 훨씬 많음</td><td><code>RwLock</code></td></tr>
+        <tr><td>숫자 카운터</td><td><code>Atomic*</code></td></tr>
+        <tr><td>한 번만 초기화</td><td><code>OnceLock</code></td></tr>
+        <tr><td>I/O 대기가 많음</td><td>async (e08)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ 순서대로 검토하세요 (🔐 o10)
+  ① 나눠 주기 (공유하지 않기) — 가장 좋습니다
+  ② 메시지로 주고받기 (채널)
+  ③ 읽기 전용 공유 (Arc&lt;T&gt;)
+  ④ 원자 타입으로 충분한가
+  ⑤ 그래도 필요하면 Mutex
+
+  "메모리를 공유해 소통하지 말고, 소통해서 메모리를 공유하라"</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">채널로 주고받기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">표준 채널과 crossbeam</h4>
+      <pre class="code" data-lang="rust"><code>use std::sync::mpsc;
+
+// 다중 생산자 · 단일 소비자
+let (tx, rx) = mpsc::channel();
+for i in 0..4 {
+    let tx = tx.clone();
+    thread::spawn(move || { tx.send(work(i)).unwrap(); });
+}
+drop(tx);                                // ★ 원본을 버려야 rx 가 끝납니다
+for result in rx { println!("{result:?}"); }
+
+// 크기 제한 (배압 · backpressure)
+let (tx, rx) = mpsc::sync_channel(100);  // 100개 차면 send 가 블록됩니다 ★
+
+// crossbeam — 더 빠르고 기능이 많습니다
+use crossbeam_channel as cc;
+let (tx, rx) = cc::bounded(100);
+let (tx, rx) = cc::unbounded();
+// 다중 소비자도 가능합니다 (rx.clone())
+
+// select — 여러 채널 중 준비된 것
+cc::select! {
+    recv(rx1) -&gt; msg =&gt; handle(msg),
+    recv(rx2) -&gt; msg =&gt; handle(msg),
+    default(Duration::from_millis(100)) =&gt; timeout(),
+}
+
+// 파이프라인 구성
+//   읽기 스레드 → 채널 → 처리 스레드 여러 개 → 채널 → 쓰기 스레드
+//   각 단계가 독립적이라 이해하기 쉽습니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Mutex 와 원자 타입</h4>
+      <pre class="code" data-lang="rust"><code>use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// Mutex — 배타적 접근
+let state = Arc::new(Mutex::new(State::new()));
+{
+    let mut g = state.lock().unwrap();
+    g.count += 1;
+}                                        // ★ 스코프로 락 범위를 좁히세요
+
+// RwLock — 읽기는 동시에
+let cache = Arc::new(RwLock::new(HashMap::new()));
+let v = cache.read().unwrap().get(&amp;key).cloned();     // 여러 스레드 동시
+cache.write().unwrap().insert(key, val);              // 배타적
+
+// 원자 타입 — 락 없이 (훨씬 쌉니다)
+let counter = Arc::new(AtomicU64::new(0));
+counter.fetch_add(1, Ordering::Relaxed);
+counter.load(Ordering::Relaxed);
+// Ordering 은 🔬 d06 에서 자세히. 카운터는 Relaxed 로 충분합니다.
+
+// 한 번만 초기화 (r02)
+use std::sync::OnceLock;
+static CONFIG: OnceLock&lt;Config&gt; = OnceLock::new();
+fn config() -&gt; &amp;'static Config { CONFIG.get_or_init(Config::load) }
+
+// parking_lot — 더 빠르고 단순합니다 (오염 개념 없음)
+// use parking_lot::Mutex;
+// let g = m.lock();                     // unwrap 이 필요 없습니다 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">락을 잘 쓰는 법</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">경합을 줄이는 기법 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ① 락 범위 최소화 (🔐 o10)
+// ❌
+let mut g = state.lock().unwrap();
+let result = expensive_io(&amp;g.config);        // 락을 잡은 채 I/O
+g.results.push(result);
+// ✅
+let cfg = { state.lock().unwrap().config.clone() };
+let result = expensive_io(&amp;cfg);
+state.lock().unwrap().results.push(result);
+
+// ② 샤딩 — 락을 여러 개로 나누기
+struct ShardedMap { shards: Vec&lt;Mutex&lt;HashMap&lt;K, V&gt;&gt;&gt; }
+impl ShardedMap {
+    fn get(&amp;self, k: &amp;K) -&gt; Option&lt;V&gt; {
+        let i = hash(k) as usize % self.shards.len();
+        self.shards[i].lock().unwrap().get(k).cloned()
+    }
+}
+// → dashmap 크레이트가 이걸 잘 만들어 둔 것입니다 ★
+
+// ③ 지역 누적 후 한 번에 합치기 (e05)
+let total: u64 = data.par_chunks(1024)
+    .map(|c| c.iter().sum::&lt;u64&gt;())          // 스레드별 지역 합
+    .sum();
+
+// ④ 읽기가 많으면 RwLock 또는 arc-swap
+use arc_swap::ArcSwap;
+static CONFIG: Lazy&lt;ArcSwap&lt;Config&gt;&gt; = ...;
+let cfg = CONFIG.load();                     // 락 없이 읽기 ★
+CONFIG.store(Arc::new(new_config));          // 통째로 교체
+
+// ⑤ 불변 데이터로 만들기 — 락 자체가 불필요해집니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">데드락을 피하는 규칙</h4>
+      <pre class="code" data-lang="text"><code>□ 락을 잡은 채 다른 락을 잡지 마세요
+    꼭 필요하면 '항상 같은 순서로' 잡으세요 (락 순서 규칙)
+    문서에 순서를 적어 두세요
+
+□ 락을 잡은 채 콜백을 부르지 마세요 (🔗 f07 · 🐍 y09)
+    남의 코드가 다시 내 락을 잡을 수 있습니다 (재진입)
+
+□ 락을 잡은 채 채널에 send 하지 마세요
+    상대가 락을 기다리고 있으면 멈춥니다
+
+□ 락을 잡은 채 await 하지 마세요 (e08)
+    std::sync::Mutex 는 async 에서 특히 위험합니다
+
+□ Mutex 안에 Mutex 를 두지 마세요
+
+★ 진단
+  · parking_lot 의 deadlock_detection feature
+  · gdb -p PID → thread apply all bt
+  · 스레드 이름을 붙여 두면 덤프가 읽힙니다
+      thread::Builder::new().name("indexer".into())
+  · 타임아웃 있는 락 (try_lock_for) 으로 조기 발견
+
+★ 락 오염 (poisoning)
+  락을 든 스레드가 패닉하면 이후 lock() 이 Err 를 냅니다
+  let g = m.lock().unwrap_or_else(|e| e.into_inner());   // 무시하고 진행
+  parking_lot 은 이 개념이 없어 더 단순합니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>let _ = mutex.lock()</code></b> 는 락을 <b>잡자마자 놓습니다</b>(🔐 o01).
+        <code>let _guard = mutex.lock()</code> 라야 유지됩니다 —
+        <b>이름 없는 <code>_</code> 와 <code>_이름</code> 의 차이</b>가 실제 버그가 되는 대표 사례입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">락의 비용과 대안</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">얼마나 비싼가</h4>
+      <pre class="code" data-lang="text"><code>★ 대략적인 비용 (직접 재 보세요 · e01)
+  경합 없는 Mutex lock/unlock    수십 ns (원자 연산 몇 번)
+  경합 있는 Mutex                 컨텍스트 스위치 → 수 μs 이상 ★
+  RwLock 읽기 (경합 없음)         Mutex 와 비슷하거나 약간 비쌈
+  Atomic fetch_add (Relaxed)      수 ns
+  Atomic (SeqCst)                 더 비쌈 (메모리 배리어 · 🔬 d06)
+  캐시 라인 핑퐁                  수백 ns ★ (e04 의 false sharing)
+
+★ 의미
+  · 경합이 없으면 락은 싸다 → 겁내지 마세요
+  · 경합이 생기면 급격히 비싸진다 → 범위를 좁히고 샤딩하세요
+  · 원자 연산도 경합하면 캐시 핑퐁이 납니다
+
+# 측정
+perf stat -e context-switches,cpu-migrations ./app
+#   컨텍스트 스위치가 많으면 락 경합을 의심
+
+# 락 경합 프로파일링
+#   리눅스: perf lock record / perf lock report
+#   또는 lock 획득 시간을 직접 계측</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">락 없는 자료구조</h4>
+      <pre class="code" data-lang="rust"><code>// 이미 잘 만들어진 것을 쓰세요 (직접 구현은 🔬 d06)
+// crossbeam
+use crossbeam::queue::{ArrayQueue, SegQueue};
+let q = ArrayQueue::new(1024);        // 고정 크기 락프리 큐
+q.push(item).ok();
+q.pop();
+
+// dashmap — 샤딩된 동시 해시맵 ★
+use dashmap::DashMap;
+let m: DashMap&lt;String, u64&gt; = DashMap::new();
+m.insert("a".into(), 1);
+*m.entry("a".into()).or_insert(0) += 1;
+
+// arc-swap — 읽기가 압도적으로 많은 설정
+use arc_swap::ArcSwap;
+
+// flume — 빠른 채널 (sync/async 양쪽)
+
+// ★ 직접 락프리를 구현하지 마세요
+//   ABA 문제 · 메모리 회수(epoch/hazard pointer) · 메모리 순서 —
+//   전부 정확히 해야 하고, 틀리면 재현 불가능한 버그가 됩니다 (🔬 d06)
+//   crossbeam 은 이것들을 검증된 형태로 제공합니다.
+
+// 성능 비교는 반드시 실제 워크로드로
+//   락프리가 항상 빠르지 않습니다. 경합이 낮으면 Mutex 가 더 빠릅니다 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“Mutex 는 느리다”는 오해</b>입니다 —
+        <b>경합이 없으면 수십 나노초</b>로 매우 쌉니다.
+        문제는 <b>경합</b>이므로, 락프리로 가기 전에
+        <b>범위 축소 · 샤딩 · 지역 누적</b>을 먼저 시도하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>데이터 병렬은 rayon</b>(e05), <b>작업 전달은 채널</b>,
+    <b>공유 상태는 <code>Mutex</code></b>, <b>카운터는 <code>Atomic</code></b> 입니다.
+    <b>스코프 스레드</b>를 쓰면 지역 변수를 빌릴 수 있어 훨씬 편하고,
+    <b>락 범위를 좁히고 샤딩</b>하는 것이 경합 해결의 기본입니다.
+    <b>데드락은 컴파일러가 못 막으니</b> 락 순서 규칙을 문서화하세요.</div>
+</section>
+
+
+<!-- ==================== e08 ==================== -->
+<section class="sec" id="e08">
+  <div class="sec-head rv">
+    <span class="no">PERF 08</span>
+    <h2>async — <span class="t">언제 쓰고 언제 쓰지 않나</span></h2>
+    <p class="lead">
+      async 는 <b>기다림이 많을 때</b>만 이득입니다.
+      계산이 많으면 오히려 손해이고, 코드도 복잡해집니다.
+      <b>네이티브 모듈에서는 대개 필요 없습니다</b> —
+      그럼에도 알아야 하는 이유와, 필요할 때 쓰는 법을 봅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">판단 기준 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>작업</th><th>선택</th></tr>
+        <tr><td>CPU 계산</td><td><b>rayon</b> (e05)</td></tr>
+        <tr><td>파일 몇 개 읽기</td><td>스레드 (e07)</td></tr>
+        <tr><td>동시 연결 수천 개</td><td><b>async</b></td></tr>
+        <tr><td>HTTP 요청 수백 개</td><td><b>async</b></td></tr>
+        <tr><td>DB 커넥션 풀</td><td>async 또는 스레드</td></tr>
+        <tr><td>파이썬 확장</td><td><b>대개 불필요</b> ★</td></tr>
+        <tr><td>Node 애드온</td><td>I/O 면 async (🟨 j05)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ async 의 이득
+  스레드 하나에 수천 개의 대기 작업을 얹을 수 있습니다.
+  스레드는 스택(기본 2MB)을 차지하지만
+  Future 는 수십~수백 바이트입니다 ★
+
+★ async 의 비용
+  · 문법·개념이 복잡해집니다 (Pin · 실행자 · 취소 · 🔬 d05)
+  · 런타임(tokio)이 의존성으로 들어옵니다 (b10)
+  · 에러 메시지가 어려워집니다
+  · 라이브러리가 async 로 물듭니다 (전염성) ★
+  · CPU 작업을 넣으면 전체가 막힙니다
+
+★ 결론
+  "동시 대기가 수백 개 이상" 이 아니면 스레드로 충분합니다.
+  네이티브 모듈은 대개 계산이 목적이므로 async 가 필요 없습니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 사용</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "time"] }</code></pre>
+      <pre class="code" data-lang="rust"><code>#[tokio::main]
+async fn main() -&gt; anyhow::Result&lt;()&gt; {
+    let data = tokio::fs::read("a.txt").await?;
+
+    // 동시에 여러 개
+    let (a, b) = tokio::join!(fetch("u1"), fetch("u2"));
+
+    // 여러 개를 한꺼번에
+    let results = futures::future::join_all(
+        urls.iter().map(|u| fetch(u))
+    ).await;
+
+    // 동시 개수 제한 ★ 중요합니다
+    use futures::stream::{self, StreamExt};
+    let results: Vec&lt;_&gt; = stream::iter(urls)
+        .map(|u| fetch(u))
+        .buffer_unordered(20)          // 최대 20개 동시
+        .collect().await;
+
+    // 타임아웃
+    tokio::time::timeout(Duration::from_secs(5), fetch(u)).await??;
+
+    // ★ CPU 작업은 반드시 분리
+    let r = tokio::task::spawn_blocking(move || heavy(data)).await?;
+    Ok(())
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">흔한 함정</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이벤트 루프를 막는 코드 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ async 안에서 블로킹 호출
+async fn bad() {
+    let data = std::fs::read("big.bin").unwrap();   // ★ 워커 스레드를 막습니다
+    std::thread::sleep(Duration::from_secs(1));     // ★ 최악
+    heavy_computation(&amp;data);                       // ★ CPU 작업
+}
+
+// ✅
+async fn good() -&gt; anyhow::Result&lt;()&gt; {
+    let data = tokio::fs::read("big.bin").await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let r = tokio::task::spawn_blocking(move || heavy_computation(&amp;data)).await?;
+    Ok(())
+}
+
+// ❌ 락을 await 너머로 들고 있기
+async fn bad2(m: &amp;std::sync::Mutex&lt;State&gt;) {
+    let g = m.lock().unwrap();
+    fetch().await;                  // ★ 컴파일 에러 (MutexGuard 는 !Send · e06)
+    //                                 또는 다른 태스크가 영원히 대기
+}
+// ✅ ① 락을 먼저 놓기
+let v = { m.lock().unwrap().value };
+fetch().await;
+// ✅ ② async 전용 락
+// let g = tokio::sync::Mutex::lock(&amp;m).await;
+
+// ❌ 진행률 표시를 위해 매번 await
+//   await 마다 스케줄러를 거칩니다. 루프 안에서 남발하지 마세요.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">취소와 정리</h4>
+      <pre class="code" data-lang="rust"><code>// ★ async 태스크는 언제든 취소될 수 있습니다 (drop 되면 멈춤)
+let h = tokio::spawn(async { work().await });
+h.abort();                              // 다음 await 지점에서 중단됩니다
+
+// 그래서 '중간 상태' 를 남기면 안 됩니다
+async fn transfer(&amp;self) {
+    self.withdraw().await;              // ★ 여기서 취소되면?
+    self.deposit().await;               // 돈이 사라집니다
+}
+// → 취소 안전(cancel-safety)을 고려한 설계가 필요합니다
+
+// select 에서 특히 주의
+tokio::select! {
+    _ = read_exact(&amp;mut buf) =&gt; {},     // ★ 중간에 취소되면 데이터 손실
+    _ = timeout =&gt; {},
+}
+// → 취소 안전한 API 인지 문서를 확인하세요
+
+// 정리 (🔐 o07)
+// Drop 안에서 await 를 할 수 없습니다 ★
+// → 명시적 shutdown() 메서드를 제공하세요
+async fn shutdown(&amp;self) -&gt; Result&lt;()&gt; { self.flush().await }
+
+// 우아한 종료
+let token = tokio_util::sync::CancellationToken::new();
+tokio::select! {
+    _ = token.cancelled() =&gt; cleanup().await,
+    r = work() =&gt; r,
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>취소 안전성</b>은 async 에서 가장 미묘한 주제입니다.
+        <code>select!</code> 로 감싼 작업은 <b>언제든 중간에 버려질 수 있습니다</b> —
+        <b>버려져도 괜찮은 작업인지</b> 반드시 확인하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">네이티브 모듈에서의 async</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬과 섞기</h4>
+      <pre class="code" data-lang="rust"><code>// 🐍 대부분의 경우 async 가 필요 없습니다 (y07)
+//   계산은 allow_threads + rayon 으로 충분합니다
+
+// 정말 필요한 경우 (HTTP 요청 수백 개 등)
+// ① 동기 인터페이스로 감싸기 — 가장 단순합니다 ★
+#[pyfunction]
+fn fetch_all(py: Python&lt;'_&gt;, urls: Vec&lt;String&gt;) -&gt; PyResult&lt;Vec&lt;String&gt;&gt; {
+    py.allow_threads(|| {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async { fetch_many(urls).await })
+    }).map_err(Into::into)
+}
+// ❗ 런타임을 매번 만들면 비쌉니다 → OnceLock 으로 재사용 (r02)
+
+// ② 파이썬 asyncio 와 연동
+//    pyo3-async-runtimes 크레이트
+//    → Rust Future 를 파이썬 awaitable 로 변환
+//    복잡도가 크게 올라가므로 정말 필요할 때만 ★
+
+// 🟨 Node — 이벤트 루프 때문에 async 가 자연스럽습니다 (j05)
+#[napi]
+pub async fn fetch(url: String) -&gt; Result&lt;String&gt; {
+    Ok(reqwest::get(&amp;url).await?.text().await?)
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">런타임 관리</h4>
+      <pre class="code" data-lang="rust"><code>use std::sync::OnceLock;
+use tokio::runtime::Runtime;
+
+static RT: OnceLock&lt;Runtime&gt; = OnceLock::new();
+
+fn runtime() -&gt; &amp;'static Runtime {
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)              // ★ 코어 수에 맞게 (e05)
+            .enable_all()
+            .build()
+            .expect("런타임 생성 실패")
+    })
+}
+
+#[pyfunction]
+fn call(py: Python&lt;'_&gt;, url: String) -&gt; PyResult&lt;String&gt; {
+    py.allow_threads(|| runtime().block_on(fetch(&amp;url)))
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
+// ★ 주의사항
+//   · 런타임 종료 순서 (🔐 o07 의 Drop 순서)
+//     프로세스 종료 시 태스크가 남아 있으면 행이 걸릴 수 있습니다
+//   · fork 후에는 런타임이 깨집니다 (multiprocessing 주의) ★
+//   · 단일 스레드 런타임(current_thread)이 더 단순한 경우도 많습니다</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>네이티브 모듈에 async 를 넣기 전에</b> 한 번 더 물어보세요 —
+        <b>“동시에 기다리는 것이 수백 개인가?”</b>
+        아니라면 <b>스레드 풀이 훨씬 단순하고 디버깅하기 쉽습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">Future 는 무엇인가</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">상태 기계로 컴파일됩니다</h4>
+      <pre class="code" data-lang="rust"><code>async fn f() -&gt; u32 {
+    let a = g().await;
+    let b = h().await;
+    a + b
+}
+
+// 컴파일러가 대략 이런 enum 을 만듭니다
+enum FState {
+    Start,
+    WaitingG { fut: GFuture },
+    WaitingH { a: u32, fut: HFuture },
+    Done,
+}
+impl Future for FState {
+    fn poll(self: Pin&lt;&amp;mut Self&gt;, cx: &amp;mut Context) -&gt; Poll&lt;u32&gt; { }
+}
+
+// ★ 그래서
+//   · await 지점의 지역 변수가 전부 상태에 저장됩니다
+//     → Future 크기가 커집니다 (큰 배열을 await 너머로 들지 마세요)
+//   · 자기 자신을 참조할 수 있어 Pin 이 필요합니다 (🔬 d05)
+//   · 힙 할당 없이 스택에서 조합됩니다 (zero-cost)
+
+// Future 크기 확인
+println!("{}", std::mem::size_of_val(&amp;f()));
+// 크면 Box::pin 으로 힙에 두세요 (재귀 async 에도 필요)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">진단과 관찰</h4>
+      <pre class="code" data-lang="bash"><code># tokio-console — 태스크 상태를 실시간으로 ★
+# Cargo.toml: console-subscriber = "0.4"
+# RUSTFLAGS="--cfg tokio_unstable" cargo run
+tokio-console
+#   · 어느 태스크가 오래 폴링되는가 (블로킹 의심) ★
+#   · 대기 중인 태스크 수
+#   · 깨어난 횟수
+
+# 블로킹 감지
+# tokio = { features = ["rt-multi-thread"] }
+# RUSTFLAGS="--cfg tokio_unstable"
+#   → 워커가 오래 블록되면 경고
+
+# 태스크 이름 붙이기
+tokio::task::Builder::new().name("indexer").spawn(async { })?;
+
+# 계측
+# tracing + tracing-subscriber
+#[tracing::instrument]
+async fn handle(req: Request) -&gt; Response { }
+
+# ★ async 디버깅은 동기 코드보다 어렵습니다.
+#   스택 트레이스가 논리적 호출 순서를 보여 주지 않습니다.
+#   → 계측(tracing)을 처음부터 넣어 두세요</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> async 는 <b>동시 대기가 수백 개 이상</b>일 때만 이득입니다.
+    <b>CPU 작업은 rayon</b>(e05), <b>파일 몇 개는 스레드</b>(e07)로 충분합니다.
+    쓴다면 <b>블로킹 호출 금지 · <code>spawn_blocking</code> 분리 · 락을 await 너머로 들지 않기</b> 세 가지를 지키고,
+    <b>취소 안전성</b>을 항상 의식하세요.</div>
+</section>
+
+
+<!-- ==================== e09 ==================== -->
+<section class="sec" id="e09">
+  <div class="sec-head rv">
+    <span class="no">PERF 09</span>
+    <h2>SIMD · <span class="t">자동 벡터화</span></h2>
+    <p class="lead">
+      CPU 는 <b>한 명령으로 여러 값을 동시에</b> 계산할 수 있습니다.
+      대부분은 <b>컴파일러가 알아서 해 줍니다</b> —
+      우리가 할 일은 <b>그렇게 되도록 코드를 정리</b>하는 것이고,
+      직접 쓰는 것은 <b>마지막 수단</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자동 벡터화를 유도하기 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ✅ 벡터화되기 쉬운 코드
+pub fn scale(v: &amp;mut [f32], k: f32) {
+    for x in v.iter_mut() { *x *= k; }      // ★ 단순 · 분기 없음 · 연속
+}
+
+pub fn dot(a: &amp;[f32], b: &amp;[f32]) -&gt; f32 {
+    let n = a.len().min(b.len());
+    a[..n].iter().zip(&amp;b[..n]).map(|(x, y)| x * y).sum()
+}
+
+// ❌ 벡터화를 막는 것들
+//   · 분기 (if 가 원소마다 다르게 갈림)
+//   · 조기 종료 (break · ?)
+//   · 함수 호출 (인라인 안 되면)
+//   · 원소 간 의존 (앞 결과를 다음에 씀)
+//   · 범위 검사 (e03)
+//   · f64 합의 순서 문제 (e03) ★
+
+// ✅ 분기를 산술로 바꾸기
+// for x in v { if *x &lt; 0.0 { *x = 0.0 } }        // 분기
+for x in v.iter_mut() { *x = x.max(0.0); }        // ★ 벡터화됩니다
+
+// ✅ 청크로 나누어 힌트 주기
+for c in v.chunks_exact_mut(8) {
+    for x in c.iter_mut() { *x *= k; }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">벡터화됐는지 확인하기</h4>
+      <pre class="code" data-lang="bash"><code># 어셈블리에서 SIMD 명령 찾기 (e03)
+cargo asm --lib "mylib::scale" | grep -E "mulps|vmulps|fmul.*v[0-9]"
+#   x86: xmm/ymm/zmm 레지스터 · vaddps · vmulps
+#   ARM: v0.4s · fmul v0.4s
+
+# 컴파일러에게 물어보기
+RUSTFLAGS="-C remark=all" cargo build --release 2&gt;&amp;1 | grep -i vector
+cargo rustc --release -- \
+  -C llvm-args=-pass-remarks-analysis=loop-vectorize
+#   "loop not vectorized: ..." 로 이유를 알려 줍니다 ★
+
+# CPU 기능 켜기 (b06 의 주의사항 확인)
+RUSTFLAGS="-C target-feature=+avx2,+fma" cargo build --release
+RUSTFLAGS="-C target-cpu=x86-64-v3" cargo build --release
+#   ❗ 배포용에는 native 를 쓰지 마세요
+
+# 내 CPU 가 지원하는 것
+rustc --print cfg -C target-cpu=native | grep target_feature
+lscpu | grep Flags</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>기본 빌드는 SSE2 만 씁니다</b>(x86-64 기준) —
+        AVX2 를 켜면 <b>4배 폭이 8배로</b> 늘어납니다.
+        배포용이라면 <b><code>x86-64-v2</code>/<code>v3</code> 기준선</b>이나
+        <b>런타임 감지</b>를 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">런타임 감지</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CPU 기능을 실행 중에 확인 ★</h4>
+      <pre class="code" data-lang="rust"><code>pub fn sum(v: &amp;[f32]) -&gt; f32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx2") {
+            return unsafe { sum_avx2(v) };        // ★ 안전합니다 (감지 후 호출)
+        }
+    }
+    sum_scalar(v)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn sum_avx2(v: &amp;[f32]) -&gt; f32 {
+    // 이 함수 안에서는 컴파일러가 AVX2 를 자유롭게 씁니다
+    // 자동 벡터화만으로도 충분한 경우가 많습니다 ★
+    v.iter().sum()
+}
+
+fn sum_scalar(v: &amp;[f32]) -&gt; f32 { v.iter().sum() }
+
+// ★ 이 패턴의 핵심
+//   #[target_feature] 함수는 자동 벡터화 폭이 넓어집니다.
+//   인트린식을 직접 쓰지 않아도 상당한 이득을 봅니다.
+
+// 감지 결과를 캐시 (매번 확인하지 않게)
+use std::sync::OnceLock;
+static HAS_AVX2: OnceLock&lt;bool&gt; = OnceLock::new();
+fn has_avx2() -&gt; bool {
+    *HAS_AVX2.get_or_init(|| is_x86_feature_detected!("avx2"))
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이식성 있는 SIMD</h4>
+      <pre class="code" data-lang="rust"><code>// ① wide · simba 크레이트 (안정 버전에서 쓸 수 있습니다)
+use wide::f32x8;
+pub fn scale(v: &amp;mut [f32], k: f32) {
+    let kv = f32x8::splat(k);
+    for c in v.chunks_exact_mut(8) {
+        let x = f32x8::from(&amp;c[..8]) * kv;
+        c.copy_from_slice(x.as_array_ref());
+    }
+    // 나머지 처리
+    let rem = v.len() % 8;
+    for x in &amp;mut v[v.len() - rem..] { *x *= k; }
+}
+
+// ② std::simd (nightly · 표준화 진행 중)
+#![feature(portable_simd)]
+use std::simd::{f32x8, num::SimdFloat};
+
+// ③ 인트린식 직접 (최후의 수단 · 🔬 d10)
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+unsafe { _mm256_mul_ps(a, b) }
+//   ★ 이식성이 사라지고, 유지보수가 어려워집니다
+
+// ④ WASM SIMD (🟨 j09)
+//   RUSTFLAGS="-C target-feature=+simd128"
+//   128비트만 지원됩니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">직접 쓰기 전에</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">먼저 확인할 것들 ★</h4>
+      <pre class="code" data-lang="text"><code>□ 이미 잘 만든 크레이트가 있는가
+    · ndarray + BLAS (행렬 연산)
+    · faer (선형대수)
+    · simdutf8 (UTF-8 검증 · 수 배 빠름)
+    · memchr (바이트 검색 · 아주 빠릅니다) ★
+    · bytecount · twox-hash · blake3
+    → 대부분 이미 SIMD 로 최적화돼 있습니다
+
+□ 메모리 대역폭이 한계는 아닌가 (e04)
+    SIMD 는 계산을 빠르게 할 뿐, 메모리는 그대로입니다
+    → 대역폭 포화 상태면 효과가 없습니다 ★
+
+□ 자동 벡터화가 이미 되고 있지 않은가
+    어셈블리를 먼저 보세요 (e03)
+
+□ 이 함수가 정말 병목인가 (e01)
+    전체의 5% 를 4배 빠르게 해도 전체는 4% 개선
+
+★ 실무 결론
+  직접 SIMD 를 쓸 일은 생각보다 드뭅니다.
+  · 라이브러리 사용 → 자동 벡터화 유도 → #[target_feature]
+  · 이 셋으로 대부분 해결됩니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쓴다면 지켜야 할 것</h4>
+      <pre class="code" data-lang="rust"><code>// ① 스칼라 버전을 반드시 남기세요
+//    · 폴백 경로 · 결과 대조 테스트 (r11) ★
+#[test]
+fn simd_matches_scalar() {
+    let v: Vec&lt;f32&gt; = (0..1000).map(|x| x as f32).collect();
+    let a = sum(&amp;v);
+    let b = sum_scalar(&amp;v);
+    assert!((a - b).abs() &lt; 1e-3);       // 부동소수점은 오차 허용
+}
+
+// ② 나머지(remainder) 처리를 잊지 마세요
+//    길이가 8의 배수가 아닐 때 마지막 원소들
+
+// ③ 정렬을 확인하세요 (e04)
+//    비정렬 로드(loadu)는 약간 느리지만 안전합니다
+
+// ④ 부동소수점 결과가 달라질 수 있습니다 ★
+//    합산 순서가 바뀌므로 마지막 자리가 다릅니다
+//    → 정확한 재현이 필요한 계산이면 주의
+
+// ⑤ unsafe 는 최소 범위로 (🔬 d08)
+//    #[target_feature] 함수 전체가 unsafe 가 되므로
+//    안전한 래퍼로 감싸세요
+
+// ⑥ 벤치마크로 이득을 증명하세요 (e01)
+//    SIMD 코드가 오히려 느린 경우도 있습니다
+//    (짧은 배열 · 대역폭 한계 · 다운클럭)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>AVX-512 는 다운클럭을 유발할 수 있습니다</b> —
+        일부 CPU 에서 AVX-512 명령을 쓰면 <b>전체 클럭이 내려가</b>
+        오히려 느려지는 경우가 보고됐습니다.
+        <b>반드시 실제 워크로드로 측정</b>하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">벡터화의 안쪽</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">LLVM 이 하는 두 가지</h4>
+      <pre class="code" data-lang="text"><code>① 루프 벡터화 (loop vectorization)
+   for i in 0..n { c[i] = a[i] + b[i] }
+   → 4개씩(또는 8개씩) 묶어 한 명령으로
+
+   조건
+   · 반복 횟수를 알거나 런타임에 확인 가능
+   · 메모리 접근이 겹치지 않음 (aliasing · 🔬 d03) ★
+     → Rust 의 &amp;mut 는 배타적이라 aliasing 정보가 정확합니다
+       C 의 restrict 를 항상 붙인 것과 같은 효과입니다 ★
+   · 원소 간 의존이 없음
+
+② SLP 벡터화 (superword level parallelism)
+   독립적인 연산 여러 개를 묶습니다
+   let (x, y, z) = (a.0 * k, a.1 * k, a.2 * k);   // 한 명령으로
+
+★ Rust 가 C 보다 유리한 지점
+  &amp;mut T 는 "이 참조로만 접근한다" 는 보장입니다 (🔐 o02).
+  LLVM 이 noalias 를 붙일 수 있어 더 공격적으로 최적화합니다.
+  → 같은 코드에서 Rust 가 C 보다 빠른 경우가 여기서 나옵니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실험해 보기</h4>
+      <pre class="code" data-lang="rust"><code>// godbolt.org 에 붙여 넣고 -O 로 비교해 보세요
+#[no_mangle]
+pub fn add_scalar(a: &amp;[f32], b: &amp;[f32], c: &amp;mut [f32]) {
+    for i in 0..c.len() { c[i] = a[i] + b[i]; }
+}
+
+#[no_mangle]
+pub fn add_zip(a: &amp;[f32], b: &amp;[f32], c: &amp;mut [f32]) {
+    for ((c, a), b) in c.iter_mut().zip(a).zip(b) { *c = a + b; }
+}
+// → zip 쪽이 범위 검사 없이 더 깔끔하게 벡터화됩니다 ★
+
+// 길이를 맞춰 힌트 주기
+pub fn add_hint(a: &amp;[f32], b: &amp;[f32], c: &amp;mut [f32]) {
+    let n = c.len().min(a.len()).min(b.len());
+    let (a, b, c) = (&amp;a[..n], &amp;b[..n], &amp;mut c[..n]);
+    for i in 0..n { c[i] = a[i] + b[i]; }
+}
+
+// 확인 명령
+//   cargo asm --lib add_zip
+//   RUSTFLAGS="-C target-feature=+avx2" 로도 비교</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>대부분은 자동 벡터화로 충분</b>합니다 —
+    <b>분기 없이 · 연속으로 · <code>zip</code>/<code>chunks_exact</code></b> 로 쓰면 됩니다.
+    <b>어셈블리로 확인</b>하고, 필요하면 <b><code>#[target_feature]</code> + 런타임 감지</b>를 쓰세요.
+    직접 인트린식은 <b>마지막 수단</b>이고, <b>이미 최적화된 크레이트</b>(memchr·simdutf8)를 먼저 찾아보세요.</div>
+</section>
+
+
+<!-- ==================== e10 ==================== -->
+<section class="sec" id="e10">
+  <div class="sec-head rv">
+    <span class="no">PERF 10</span>
+    <h2>파이썬 · C++ 대비 <span class="t">실제로 몇 배인가</span></h2>
+    <p class="lead">
+      “100배 빨라집니다”는 <b>과장일 때가 많습니다</b>.
+      실제 배수는 <b>무엇을 어떻게 옮겼느냐</b>에 따라 크게 다릅니다.
+      <b>정직하게 기대치를 세우고, 직접 재는 방법</b>을 정리합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬 대비 — 무엇이 다른가 ★</h4>
+      <pre class="code" data-lang="text"><code>★ 파이썬이 느린 이유
+  · 모든 값이 힙 객체 (int 하나가 28바이트 · 캐시에 불리 · e04)
+  · 동적 타입 검사가 매 연산마다
+  · 바이트코드 해석 오버헤드
+  · GIL 로 CPU 병렬 불가 (🐍 y07)
+
+★ 그래서 배수가 크게 갈립니다
+  순수 파이썬 루프 대비        보통 10~200배 ★
+  numpy 벡터화 대비            0.5~5배 (이미 C 입니다)
+  numpy + 임시 배열 많은 식    2~10배 (퓨전 이득 · 🐍 y06)
+  파이썬 문자열 파싱 대비      10~100배
+  I/O 대기가 대부분            1배 (차이 없음) ★
+
+★ 여기에 더해지는 것
+  · GIL 해제 + rayon → 코어 수만큼 (파이썬으로는 불가능) ★
+  · 경계 통과 비용은 빼야 합니다 (🐍 y01)
+
+★ 정직한 표현
+  "이 함수를 Rust 로 옮겨 우리 워크로드에서 32배 빨라졌습니다
+   (측정 환경: ... , 데이터: ...)"
+  이렇게 조건을 밝히세요.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 대비 — 거의 같습니다</h4>
+      <pre class="code" data-lang="text"><code>★ 같은 알고리즘·같은 자료구조라면 실질적으로 동등합니다
+  둘 다 LLVM 을 쓰고(clang), 같은 최적화를 받습니다.
+
+★ Rust 가 유리할 수 있는 지점
+  · &amp;mut 의 배타성 → noalias 정보가 정확 (e09) ★
+  · 이터레이터가 범위 검사 없이 최적화 (e03)
+  · 기본이 이동이라 불필요한 복사가 적음 (r05)
+  · 안전해서 최적화를 더 공격적으로 시도할 수 있음
+
+★ C++ 가 유리할 수 있는 지점
+  · 성숙한 라이브러리 (BLAS · Eigen · TBB · CUDA)
+  · 작은 문자열 최적화(SSO)가 std::string 에 있음 (e02)
+  · 컴파일러 확장·인라인 어셈블리 (🔬 d10)
+  · 특정 도메인의 오랜 튜닝 자산
+
+★ 실제로는 '누가 얼마나 튜닝했느냐' 가 언어 차이보다 큽니다.
+  벤치마크 게임의 수치는 참고만 하세요 —
+  대부분 특정 문제에 극단적으로 튜닝된 코드입니다.</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>Rust 를 고르는 실제 이유는 성능이 아닙니다</b>(🔬 d12) —
+        <b>같은 성능을 더 안전하게, 더 쉬운 빌드·배포로</b> 얻는 것입니다.
+        C++ 대비 성능 이득을 기대하고 옮기면 실망합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">직접 재는 절차</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">공정한 비교 만들기 ★</h4>
+      <pre class="code" data-lang="text"><code>□ 같은 알고리즘인가
+    Rust 쪽만 더 좋은 알고리즘을 쓰면 언어 비교가 아닙니다
+
+□ 같은 입력인가
+    같은 파일 · 같은 크기 · 같은 분포
+
+□ 릴리즈 빌드인가 (b06)
+    파이썬 쪽도 -O 나 PyPy 를 고려할지 결정
+
+□ 워밍업했는가
+    JIT(PyPy · V8)는 워밍업이 필수입니다 (🟨 j03)
+
+□ 경계 비용을 포함했는가 ★
+    "Rust 함수 자체" 가 아니라
+    "파이썬에서 호출해 결과를 받기까지" 를 재세요
+
+□ 여러 번 재고 중앙값을 봤는가
+
+□ 환경을 밝혔는가
+    CPU · 코어 수 · OS · 데이터 크기 · 버전</code></pre>
+      <pre class="code" data-lang="python"><code># 파이썬 쪽 측정
+import timeit, statistics
+ts = timeit.repeat(lambda: fastmod.process(data), number=100, repeat=10)
+print(f"{statistics.median(ts)/100*1000:.3f} ms/call")</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비교 실험 예시</h4>
+      <pre class="code" data-lang="python"><code># bench.py — 세 가지 구현을 나란히
+import numpy as np, timeit, fastmod
+
+N = 1_000_000
+data = np.random.random(N)
+
+def pure_python(a):
+    return sum(x * x for x in a if x &gt; 0.5)
+
+def numpy_way(a):
+    return float((a[a &gt; 0.5] ** 2).sum())
+
+def rust_way(a):
+    return fastmod.sum_squares_above(a, 0.5)     # 🐍 y06 제로카피
+
+for name, f in [("pure", pure_python), ("numpy", numpy_way), ("rust", rust_way)]:
+    t = min(timeit.repeat(lambda: f(data), number=10, repeat=5)) / 10
+    print(f"{name:8} {t*1000:8.3f} ms")
+
+# ★ 결과를 그대로 믿지 말고 여러 크기로 재세요
+#   N = 1_000 / 100_000 / 10_000_000
+#   작은 N 에서는 경계 비용이 지배합니다 (🐍 y01)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 실험을 저장소에 두세요</b> — README 에 수치를 적을 때
+        <b>재현 방법을 함께 제공</b>하면 신뢰가 다릅니다.
+        환경이 바뀌면 수치도 바뀐다는 것을 명시하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">기대치를 관리한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">보고할 때의 원칙 ★</h4>
+      <pre class="code" data-lang="text"><code>❌ "Rust 로 바꿔서 100배 빨라졌습니다"
+✅ "파싱 함수를 Rust 로 옮겨, 전체 배치 처리 시간이
+    42초 → 3.8초 (11배) 로 줄었습니다.
+    측정: 로그 파일 2.3GB · Ryzen 7 8코어 · Linux
+    (함수 자체는 60배지만 I/O 가 남아 전체는 11배입니다)"
+
+★ 엔드투엔드를 보고하세요
+  함수 배수는 개발자에게, 전체 배수는 의사결정자에게 의미가 있습니다.
+
+★ 함께 보고할 것
+  · 유지보수 비용 (팀에 Rust 를 아는 사람 수 · 🔬 d12)
+  · 빌드·배포 복잡도 증가 (🛠️ b08)
+  · 되돌릴 수 있는지 (폴백 · 🐍 y01)
+
+★ 성능이 아닌 이득도 함께
+  · 메모리 사용량 감소 (파이썬 객체 오버헤드가 사라짐)
+  · 지연 시간 안정성 (GC 스파이크 없음) ★
+  · 동시성 (GIL 해제)
+  → 평균보다 p99 가 좋아지는 경우가 많습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기대에 못 미칠 때 점검표</h4>
+      <pre class="code" data-lang="text"><code>□ --release 로 빌드했는가 (b06) ★ 1위 원인
+□ 경계를 너무 자주 넘는가 (🐍 y01 · 🟨 j01)
+    → 배치로 묶으세요
+□ 데이터 변환이 지배적인가 (🐍 y04)
+    → numpy 제로카피 / Buffer 로 (🐍 y06 · 🟨 j04)
+□ 루프 안에 clone 이 있는가 (e02)
+□ 캐시 친화적인가 (e04)
+□ 병목이 다른 곳인가 (e01)
+    → 프로파일러로 확인
+□ 원래도 numpy 로 충분히 빨랐는가 (🐍 y01)
+    → numpy 를 이기려면 퓨전·분기 있는 루프여야 합니다
+□ I/O 바운드인가
+    → 언어를 바꿔도 그대로입니다
+
+★ 대부분 위 여덟 개 중 하나입니다.
+  순서대로 확인하면 원인을 찾을 수 있습니다.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“기대만큼 안 빨라졌다”가 곧 실패는 아닙니다</b> —
+        <b>메모리 사용량 · p99 지연 · 병렬 확장성</b>에서 이득이 있는지 보세요.
+        그것도 없다면 <b>솔직하게 되돌리는 것</b>이 옳은 판단입니다(🔬 d12).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">수치를 해석하는 법</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">평균이 아니라 분포를 보세요</h4>
+      <pre class="code" data-lang="text"><code>★ 파이썬 → Rust 로 바꿀 때 자주 나타나는 패턴
+  평균: 10배 개선
+  p50 : 12배 개선
+  p99 : 40배 개선 ★  ← GC 스파이크가 사라져서
+
+  서비스 품질은 p99 가 결정합니다.
+  평균만 보고하면 이득을 과소평가하게 됩니다.
+
+★ 측정할 것
+  · 처리량 (초당 건수)
+  · 지연 시간 분포 (p50 · p95 · p99 · max)
+  · 메모리 (RSS 최대치 · 평균)
+  · CPU 사용률 (코어 활용도)
+
+# 지연 분포 측정
+#   hdrhistogram 크레이트
+#   또는 결과를 파일로 뽑아 파이썬으로 분석
+
+# 서버라면 부하 테스트
+#   oha · wrk · autocannon (🟨 j05)
+#   → p99 와 처리량을 함께 보세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">회귀를 추적하기</h4>
+      <pre class="code" data-lang="text"><code>★ 성능은 조용히 나빠집니다
+  · 의존성 업데이트 (b03)
+  · 기능 추가로 루프 안에 검사 하나 추가
+  · 데이터 크기 증가로 캐시를 벗어남 (e04)
+
+★ 추적 체계
+  ① 대표 벤치마크 3~5개를 정하세요 (e01)
+  ② CI 에서 매 커밋 측정 (iai-callgrind 로 노이즈 제거)
+  ③ 임계값을 넘으면 알림
+  ④ 운영 지표와 연결 (실제 워크로드가 진실입니다)
+
+★ 문서에 남길 것
+  · 측정 방법과 환경
+  · 기대 배수와 그 근거
+  · 되돌리는 방법 (🐍 y01 의 폴백)
+
+★ 마지막으로
+  성능 수치는 '지금 이 환경에서' 의 값입니다.
+  과장하지 않고 조건을 밝히는 것이
+  장기적으로 신뢰를 만듭니다.</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>이 가이드가 반복해 온 원칙</b>입니다 —
+        <b>측정하고 결정하라, 과장하지 마라, 되돌릴 수 있게 하라</b>.
+        성능 작업에서 이 셋을 지키면 <b>신뢰를 잃지 않습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 파이썬 순수 루프 대비 <b>10~200배</b>, numpy 대비 <b>0.5~5배</b>,
+    C++ 대비 <b>거의 동등</b>입니다 — <b>무엇과 비교하느냐</b>가 전부입니다.
+    <b>엔드투엔드로 재고 환경을 밝히세요</b>.
+    기대에 못 미치면 <b><code>--release</code> → 경계 횟수 → 변환 비용 → clone</b> 순으로 확인하고,
+    <b>p99 와 메모리</b>도 함께 보세요. 다음은 <b>🔬 전문가 · unsafe 탭</b>입니다.</div>
+</section>
+
+<!-- END pane-perf -->
+</div>

@@ -1,7 +1,21 @@
 <script setup lang="ts">
+import { nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { links, profile } from '@/data/profile'
-import { guides } from '@/router'
 import AppIcon from './AppIcon.vue'
+
+const route = useRoute()
+const router = useRouter()
+
+/**
+ * 가이드를 하나하나 나열하는 대신 '학습 가이드' 링크 하나만 둔다.
+ * 홈의 학습 자료 섹션(#guides)이 실제 목록이므로 그리로 데려간다.
+ */
+async function goGuides() {
+  if (route.path !== '/') await router.push('/')
+  await nextTick()
+  document.getElementById('guides')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 </script>
 
 <template>
@@ -11,10 +25,9 @@ import AppIcon from './AppIcon.vue'
         <span class="ft-name">{{ profile.name }} · {{ profile.role }}</span>
       </div>
       <div class="ft-links">
-        <a v-for="g in guides" :key="g.key" :href="g.href"
-           class="ft-link ft-guide" :title="g.title">
-          <span aria-hidden="true">{{ g.emoji }}</span>
-          <span>{{ g.label }}</span>
+        <a href="#/" class="ft-link ft-guide" title="직접 만든 학습 가이드 모음" @click.prevent="goGuides">
+          <span aria-hidden="true">📚</span>
+          <span>학습 가이드</span>
         </a>
         <a v-for="l in links" :key="l.label" :href="l.href" class="ft-link" target="_blank" rel="noopener">
           <AppIcon :name="l.icon" :size="15" />

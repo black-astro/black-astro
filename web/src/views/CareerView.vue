@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { timeline, projects, infra } from '@/data/career'
-import SectionHeader from '@/components/SectionHeader.vue'
-import AppIcon from '@/components/AppIcon.vue'
+import { ref } from "vue";
+import { timeline, projects, infra } from "@/data/career";
+import SectionHeader from "@/components/SectionHeader.vue";
+import AppIcon from "@/components/AppIcon.vue";
 
 const open = ref<Record<string, boolean>>(
   Object.fromEntries(projects.map((p) => [p.id, p.featured])),
-)
+);
 function toggle(id: string) {
-  open.value[id] = !open.value[id]
+  open.value[id] = !open.value[id];
 }
 </script>
 
@@ -22,7 +22,12 @@ function toggle(id: string) {
 
     <!-- 타임라인 -->
     <section class="timeline">
-      <div v-for="t in timeline" :key="t.title" class="tl-item" :class="{ hot: t.highlight }">
+      <div
+        v-for="t in timeline"
+        :key="t.title"
+        class="tl-item"
+        :class="{ hot: t.highlight }"
+      >
         <div class="tl-dot"></div>
         <div class="tl-period">{{ t.period }}</div>
         <div class="tl-body">
@@ -36,9 +41,18 @@ function toggle(id: string) {
     <section class="sub">
       <h3 class="sub-title">프로젝트 수행 경력</h3>
       <div class="proj-list">
-        <article v-for="p in projects" :key="p.id" class="proj card" :class="{ open: open[p.id] }">
-          <button class="proj-head" :aria-expanded="open[p.id]" @click="toggle(p.id)">
-            <span class="proj-no">{{ String(p.index).padStart(2, '0') }}</span>
+        <article
+          v-for="p in projects"
+          :key="p.id"
+          class="proj card"
+          :class="{ open: open[p.id] }"
+        >
+          <button
+            class="proj-head"
+            :aria-expanded="open[p.id]"
+            @click="toggle(p.id)"
+          >
+            <span class="proj-no">{{ String(p.index).padStart(2, "0") }}</span>
             <span class="proj-headmain">
               <span class="proj-titlerow">
                 <span class="proj-title">{{ p.title }}</span>
@@ -77,7 +91,10 @@ function toggle(id: string) {
     <!-- 인프라 -->
     <section class="sub">
       <h3 class="sub-title">사내 인프라 · 오픈소스 활동</h3>
-      <p class="sub-lead">CI/CD 단독 구축, 리버스 터널 재구현, 폐쇄망 설치 자동화 등 상시 병행 인프라 업무.</p>
+      <p class="sub-lead">
+        CI/CD 단독 구축, 리버스 터널 재구현, 폐쇄망 설치 자동화 등 상시 병행
+        인프라 업무.
+      </p>
       <div class="infra-grid">
         <article v-for="it in infra" :key="it.title" class="infra card">
           <h4 class="infra-title">{{ it.title }}</h4>
@@ -163,7 +180,9 @@ function toggle(id: string) {
   overflow: hidden;
   min-width: 0;
   max-width: 100%;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 .proj.open {
   border-color: var(--border-strong);
@@ -280,7 +299,7 @@ function toggle(id: string) {
   line-height: 1.62;
 }
 .psec-list li::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 0;
   top: 9px;
@@ -326,7 +345,7 @@ function toggle(id: string) {
   margin-bottom: 8px;
 }
 .infra-title::before {
-  content: '›';
+  content: "›";
   color: var(--accent);
   margin-right: 7px;
   font-weight: 800;

@@ -1,0 +1,3093 @@
+<!-- ============================================================
+     전문가 · unsafe PANE
+     ============================================================ -->
+<div class="pane" id="pane-deep">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> unsafe · UB · Pin · Ordering · Miri · 매크로 · ABI</div>
+  <h1>안전을 잠시<br>내려놓는 자리</h1>
+  <p class="tx">
+    <code>unsafe</code> 는 “아무거나 해도 된다”가 아니라 <b>다섯 가지를 추가로 허용</b>하는 것입니다.
+    대신 <b>컴파일러가 검사하던 불변식을 사람이 지켜야</b> 합니다.
+    이 탭은 <b>FFI 를 다루다 보면 반드시 만나는</b> 영역이고,
+    <b>안전한 껍데기로 감싸 남에게 내놓는 법</b>까지 봅니다.
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>5</b><span>unsafe 가 푸는 것</span></div>
+    <div><b>Miri</b><span>UB 검출</span></div>
+    <div><b>4</b><span>깊이 층</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== d01 ==================== -->
+<section class="sec" id="d01">
+  <div class="sec-head rv">
+    <span class="no">DEEP 01</span>
+    <h2>unsafe 가 <span class="t">실제로 푸는 것</span> — 다섯 가지</h2>
+    <p class="lead">
+      가장 큰 오해는 <b>“<code>unsafe</code> 를 쓰면 검사가 꺼진다”</b>는 것입니다.
+      타입 검사도, 빌림 검사도 그대로 돕니다.
+      <b>딱 다섯 가지 동작이 추가로 허용될 뿐</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">허용되는 다섯 가지 ★</h4>
+      <pre class="code" data-lang="rust"><code>unsafe {
+    // ① 원시 포인터 역참조
+    let x = *raw_ptr;                       // d03
+
+    // ② unsafe 함수 호출 (FFI 포함)
+    let n = ffi::c_function(arg);           // 🔗 f08
+
+    // ③ 가변 static 접근 (2024 에디션에서 금지 방향)
+    // COUNTER += 1;
+
+    // ④ union 필드 읽기
+    let v = my_union.as_int;                // 🔗 f03
+
+    // ⑤ unsafe 트레이트 구현
+    // unsafe impl Send for MyType {}       // ⚡ e06
+}
+
+// ★ 여전히 검사되는 것
+//   · 타입 검사        (i32 를 String 에 못 넣습니다)
+//   · 빌림 검사        (&amp;mut 두 개를 동시에 못 만듭니다)
+//   · 수명 검사
+//   · 소유권 · Drop
+//
+// unsafe 는 '검사 해제' 가 아니라 '추가 권한' 입니다.</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>그래서 <code>unsafe</code> 블록은 짧을 수 있습니다</b> —
+        위험한 연산 한 줄만 감싸면 되고, 나머지 코드는 여전히 안전합니다.
+        <b>블록을 최대한 좁게</b> 유지하는 것이 첫 번째 원칙입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 종류의 unsafe</h4>
+      <pre class="code" data-lang="rust"><code>// ① unsafe 블록 — "내가 규칙을 지켰다"
+fn safe_wrapper(v: &amp;[u8], i: usize) -&gt; u8 {
+    assert!(i &lt; v.len());
+    unsafe { *v.get_unchecked(i) }      // 검사를 했으므로 안전
+}
+
+// ② unsafe fn — "부르는 쪽이 규칙을 지켜야 한다"
+/// # Safety
+/// `p` 는 `len` 바이트만큼 읽을 수 있는 유효한 포인터여야 합니다.
+pub unsafe fn read_raw(p: *const u8, len: usize) -&gt; Vec&lt;u8&gt; {
+    std::slice::from_raw_parts(p, len).to_vec()
+}
+
+// ★ unsafe fn 에는 반드시 # Safety 문서를 쓰세요 (d08)
+//   clippy::missing_safety_doc 이 강제해 줍니다 (🛠️ b09)
+
+// 2024 에디션 — unsafe fn 안이 자동으로 unsafe 블록이 아닙니다
+pub unsafe fn f(p: *const u8) {
+    unsafe { *p };                      // ★ 명시적으로 감싸야 합니다
+}
+// → "이 함수의 어느 부분이 위험한지" 가 드러납니다
+
+// 어트리뷰트도 unsafe 표기 (2024)
+#[unsafe(no_mangle)]
+pub extern "C" fn exported() { }        // 🔗 f02</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">언제 정말 필요한가</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무에서 unsafe 가 나오는 자리 ★</h4>
+      <pre class="code" data-lang="text"><code>① FFI — 이 가이드의 주 무대입니다
+     · C 함수 호출 (🔗 f08)
+     · 포인터를 슬라이스로 (🔗 f02)
+     · Box::into_raw / from_raw (🔗 f06)
+     → 대부분의 네이티브 모듈에서 unsafe 는 여기뿐입니다
+
+② 성능 — 검사 제거
+     get_unchecked · from_utf8_unchecked
+     → 측정으로 이득이 확인될 때만 (⚡ e03) ★
+       대개 이터레이터로 해결됩니다
+
+③ 자료구조 구현
+     Vec · HashMap 같은 것을 직접 만들 때
+     → 표준 라이브러리나 크레이트를 먼저 찾으세요
+
+④ Send/Sync 를 손으로 붙일 때 (⚡ e06)
+
+⑤ 초기화되지 않은 메모리 (d04)
+     큰 버퍼를 0 으로 채우지 않고 쓰기
+
+★ 실무 감각
+  일반 애플리케이션 코드에서 unsafe 가 필요한 경우는 거의 없습니다.
+  필요하다고 느끼면 대개 설계를 다시 볼 신호입니다 (🔐 o01).</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쓰기 전에 확인할 것</h4>
+      <pre class="code" data-lang="text"><code>□ 안전한 대안이 정말 없는가
+    · get_unchecked → 슬라이싱으로 검사 제거 (⚡ e03)
+    · from_utf8_unchecked → 한 번만 검증하고 재사용
+    · transmute → bytemuck · zerocopy 크레이트 (🔗 f03)
+    · 자기 참조 → 인덱스 기반 (🔐 o01)
+
+□ 이득이 측정으로 확인됐는가 (⚡ e01) ★
+    "빠를 것 같아서" 는 이유가 아닙니다
+
+□ 불변식을 문서로 적을 수 있는가 (d08)
+    적을 수 없다면 아직 이해하지 못한 것입니다
+
+□ Miri 로 검증할 수 있는가 (d07)
+
+□ 안전한 API 로 감쌀 수 있는가 (d08)
+    사용자가 unsafe 를 쓰지 않게 하는 것이 목표입니다
+
+★ 크레이트 전체에서 금지하기 (🛠️ b09)
+  #![forbid(unsafe_code)]              // 아예 못 쓰게
+  #![deny(unsafe_code)]                // allow 로 예외 가능
+  → FFI 모듈만 예외로 두는 구성이 흔합니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">unsafe 를 관리한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한곳에 모으세요 ★</h4>
+      <pre class="code" data-lang="text"><code>src/
+├─ lib.rs          #![deny(unsafe_code)]        ← 대부분 안전
+├─ core/           순수 로직 (unsafe 없음)
+└─ ffi/
+   ├─ mod.rs       #![allow(unsafe_code)]       ← 여기만 예외 ★
+   └─ raw.rs       원시 포인터를 다루는 곳
+
+★ 이점
+  · 리뷰 대상이 명확해집니다
+  · Miri 를 그 모듈에 집중할 수 있습니다 (d07)
+  · "이 크레이트의 unsafe 는 300줄" 처럼 셀 수 있습니다
+
+# unsafe 를 세어 보기
+grep -rn "unsafe" src/ | wc -l
+cargo install cargo-geiger
+cargo geiger                 # 의존성의 unsafe 사용량까지 ★
+
+# 리뷰 규칙
+#   · unsafe 를 추가하는 PR 은 두 명이 리뷰
+#   · SAFETY 주석이 없으면 반려
+#   · Miri 테스트가 함께 오지 않으면 반려</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SAFETY 주석 쓰기</h4>
+      <pre class="code" data-lang="rust"><code>// 관례: unsafe 블록 바로 위에 SAFETY 주석 ★
+let s = unsafe {
+    // SAFETY: `ptr` 은 위에서 널을 검사했고, `len` 은 호출자가
+    //         보장하는 유효 길이입니다. 이 함수가 반환되기 전까지
+    //         해당 메모리는 해제되지 않습니다 (호출자 계약, f06 참조).
+    std::slice::from_raw_parts(ptr, len)
+};
+
+// unsafe fn 에는 # Safety 섹션
+/// 버퍼를 처리합니다.
+///
+/// # Safety
+///
+/// - `ptr` 은 `len` 바이트에 대해 유효하고 정렬돼 있어야 합니다.
+/// - `len == 0` 이면 `ptr` 은 널이어도 됩니다.
+/// - 호출 중 다른 스레드가 이 메모리를 수정하면 안 됩니다.
+pub unsafe fn process(ptr: *const u8, len: usize) -&gt; u32 { }
+
+// clippy 로 강제 (🛠️ b09)
+// #![warn(clippy::undocumented_unsafe_blocks)]
+// #![warn(clippy::missing_safety_doc)]
+
+// ★ 주석의 목적
+//   6개월 뒤의 내가, 그리고 리뷰어가
+//   "이게 왜 안전한가" 를 재확인할 수 있어야 합니다.
+//   "안전함" 한 줄은 주석이 아닙니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>SAFETY 주석을 쓸 수 없다면</b> 그 <code>unsafe</code> 는
+        <b>아직 안전하지 않은 것</b>입니다.
+        조건을 명확히 적을 수 있을 때까지 <b>안전한 대안을 찾으세요</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">안전성의 경계</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">건전성(soundness)이란</h4>
+      <pre class="code" data-lang="text"><code>★ 핵심 원칙
+  "안전한 코드만 써서는 UB 를 일으킬 수 없어야 한다"
+  이것을 만족하면 그 API 는 '건전(sound)' 합니다.
+
+★ 불건전한 API 의 예
+  pub fn get(&amp;self, i: usize) -&gt; &amp;T {
+      unsafe { self.data.get_unchecked(i) }     // ❌ 검사 없이 노출
+  }
+  → 사용자가 안전한 코드로 out-of-bounds 를 일으킬 수 있습니다
+  → 이 함수는 unsafe fn 이거나, 검사를 해야 합니다
+
+★ 유명한 사례
+  · 초기 std::mem::uninitialized (지금은 deprecated · d04)
+  · Rc 를 Send 로 만든 크레이트들 (RUSTSEC 권고가 나왔습니다)
+  · 라이프타임을 늘리는 transmute
+
+★ 건전성 버그는 보안 취약점입니다
+  RustSec 데이터베이스에 등록되고, cargo audit 가 잡습니다 (🛠️ b03)
+
+★ 판단 기준
+  "악의적인 사용자가 안전한 코드만으로 이 API 를 오용해
+   메모리 안전성을 깨뜨릴 수 있는가?"
+  → 그렇다면 설계를 고쳐야 합니다 (d08)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">unsafe 를 줄여 온 역사</h4>
+      <pre class="code" data-lang="text"><code>★ 표준 라이브러리와 생태계가 unsafe 를 대체해 온 것들
+
+  mem::uninitialized      → MaybeUninit (d04)
+  transmute (바이트 변환)  → bytemuck · zerocopy (🔗 f03)
+  수동 포인터 산술         → 슬라이스 메서드 (chunks · windows)
+  자기 참조 구조체         → 인덱스 · ouroboros · Pin (d05)
+  수동 락프리 구현         → crossbeam (⚡ e07)
+  C 문자열 처리            → CStr · CString (🔗 f06)
+  정렬 안 된 읽기          → read_unaligned · bytemuck
+
+★ 교훈
+  "unsafe 가 필요하다" 고 느끼면
+  먼저 crates.io 에서 검증된 대안을 찾아보세요.
+  누군가 이미 그 문제를 안전하게 풀어 두었을 가능성이 높습니다. ★
+
+# 검증된 크레이트인지 확인
+#   다운로드 수 · 최근 커밋 · unsafe 사용량 (cargo geiger)
+#   RustSec 권고 이력 (cargo audit)</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>unsafe</code> 는 <b>다섯 가지를 추가 허용</b>할 뿐, 검사를 끄지 않습니다.
+    실무에서는 <b>FFI 경계</b>에서만 만나는 것이 정상이고,
+    <b>블록을 좁게 · 한 모듈에 모아 · SAFETY 주석을 반드시</b> 남기세요.
+    <b>안전한 코드만으로 UB 를 만들 수 없어야</b> 그 API 가 건전합니다.</div>
+</section>
+
+
+<!-- ==================== d02 ==================== -->
+<section class="sec" id="d02">
+  <div class="sec-head rv">
+    <span class="no">DEEP 02</span>
+    <h2>UB 목록 — <span class="t">무엇이 금지인가</span></h2>
+    <p class="lead">
+      “정의되지 않은 동작(UB)”은 <b>틀린 값이 나오는 정도가 아닙니다</b> —
+      컴파일러가 <b>“일어날 리 없다”고 가정하고 코드를 지워 버립니다</b>.
+      다행히 Rust 는 <b>UB 조건이 목록으로 정리</b>돼 있습니다. 이 목록 밖은 안전합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">UB 목록 ★</h4>
+      <pre class="code" data-lang="text"><code>① 널·정렬 안 됨·해제된 포인터 역참조 (d03)
+② 데이터 경쟁 — 동기화 없이 동시 접근 (⚡ e06)
+③ 유효하지 않은 값 만들기
+     · bool 에 0/1 이 아닌 값
+     · char 에 유효하지 않은 코드포인트
+     · enum 에 없는 판별자 ★
+     · NonNull 에 0
+     · &amp;T 에 널이나 댕글링
+     · 초기화되지 않은 메모리를 값으로 읽기 (d04)
+④ 잘못된 aliasing
+     · &amp;mut T 가 살아 있는 동안 다른 경로로 접근
+     · &amp;T 가 살아 있는 동안 수정 ★
+⑤ 할당 범위를 벗어난 포인터 산술
+⑥ str 에 유효하지 않은 UTF-8
+⑦ 언와인딩이 extern "C" 경계를 넘음 (🔗 f09)
+⑧ 잘못된 인라인 어셈블리 (d10)
+⑨ 무한 루프에 부수 효과가 없음 (일부 조건)
+
+★ 이 목록에 없으면 UB 가 아닙니다
+  · 정수 오버플로 → UB 아님 (랩어라운드 · r02) ★ C++ 와 다릅니다
+  · 널 참조 생성 → 만들 수 없습니다 (Option 이 있으니)
+  · 메모리 누수 → UB 아님 (안전합니다 · 🔐 o10)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">UB 가 코드를 지우는 예</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 널일 수 있는 포인터를 먼저 역참조
+unsafe fn bad(p: *const i32) -&gt; i32 {
+    let x = *p;                   // ① 역참조 → "p 는 널이 아니다" 가정
+    if p.is_null() { return 0; }  // ② 그러므로 항상 거짓
+    x                             // ③ → 검사가 통째로 삭제됩니다 ★
+}
+// 결과: 널을 넘겨도 크래시가 아니라 '검사 없이 진행'
+//   → 디버그에서는 멀쩡하고 릴리즈에서만 터지는 대표 패턴
+
+// ✅ 검사를 먼저
+unsafe fn good(p: *const i32) -&gt; i32 {
+    if p.is_null() { return 0; }
+    *p
+}
+
+// ❌ 유효하지 않은 enum 값 만들기
+#[repr(u8)]
+enum Status { Ok = 0, Err = 1 }
+let s: Status = unsafe { std::mem::transmute(7u8) };   // ★ UB
+// match 가 어느 갈래도 안 타거나, 엉뚱하게 동작합니다
+// ✅ TryFrom 으로 검증 (r08)
+
+// ❌ 안전한 코드에서도 UB 를 부를 수 있는 unsafe API
+//    → 그것이 '불건전' 입니다 (d01)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>UB 는 “그 줄에서 터진다”가 아닙니다</b> —
+        <b>프로그램 전체에 대한 가정이 깨져</b> 전혀 다른 곳에서
+        이상하게 동작합니다. 디버깅이 극도로 어려운 이유입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">C++ 와 비교</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Rust 가 UB 를 줄인 지점 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>상황</th><th>C++</th><th>Rust</th></tr>
+        <tr><td>정수 오버플로</td><td><b>UB</b></td><td>랩(정의됨)</td></tr>
+        <tr><td>배열 범위 초과</td><td><b>UB</b></td><td>패닉</td></tr>
+        <tr><td>널 역참조</td><td><b>UB</b></td><td>불가능</td></tr>
+        <tr><td>해제 후 사용</td><td><b>UB</b></td><td>컴파일 에러</td></tr>
+        <tr><td>이터레이터 무효화</td><td><b>UB</b></td><td>컴파일 에러</td></tr>
+        <tr><td>데이터 경쟁</td><td><b>UB</b></td><td>컴파일 에러</td></tr>
+        <tr><td>초기화 안 된 변수</td><td><b>UB</b></td><td>컴파일 에러</td></tr>
+        <tr><td>strict aliasing</td><td><b>UB</b></td><td>안전 코드엔 없음</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ 핵심 차이
+  C++ 에서는 이 모든 것이 '평범한 코드' 에서 일어날 수 있습니다.
+  Rust 에서는 unsafe 블록 안에서만 가능합니다.
+
+  → "이 프로그램에 UB 가 있을 수 있는 곳" 이
+    수만 줄에서 수백 줄로 줄어듭니다 ★
+
+  그래서 리뷰와 검증(Miri · d07)을 집중할 수 있습니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">여전히 조심할 것</h4>
+      <pre class="code" data-lang="rust"><code>// ① 정수 오버플로는 UB 는 아니지만 버그입니다 (r02)
+let x: u8 = 255;
+let y = x + 1;      // 디버그: 패닉 / 릴리즈: 0
+// → checked_add · overflow-checks = true (🛠️ b06)
+
+// ② 부동소수점
+0.0 / 0.0           // NaN (UB 아님)
+f64::INFINITY       // 정의됨
+(1e308 * 10.0)      // inf
+let n = f64::NAN as i32;    // 0 (Rust 는 saturating cast · 정의됨) ★
+
+// ③ 패닉은 UB 가 아닙니다 — 정의된 동작입니다
+//    다만 FFI 경계를 넘으면 UB (🔗 f09)
+
+// ④ 무한 재귀 → 스택 오버플로 → abort (UB 아님, 프로세스 종료)
+
+// ⑤ 메모리 누수 → 안전합니다 (🔐 o10)
+std::mem::forget(value);        // 완전히 안전한 함수입니다
+
+// ★ 그러니 "Rust 는 안전하다" 는 정확히는
+//   "메모리 안전성과 데이터 경쟁 없음을 보장한다" 입니다.
+//   논리 버그 · 데드락 · 누수 · 패닉은 여전히 사람의 몫입니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">UB 를 예방하는 습관</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">FFI 에서 특히 조심할 것 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ① 널·길이 0 을 먼저 처리 (🔗 f02)
+unsafe fn to_slice&lt;'a&gt;(p: *const u8, len: usize) -&gt; Option&lt;&amp;'a [u8]&gt; {
+    if len == 0 { return Some(&amp;[]); }       // ★ from_raw_parts(null, 0) 은 UB
+    if p.is_null() { return None; }
+    Some(std::slice::from_raw_parts(p, len))
+}
+
+// ② 정렬 확인 (d03)
+assert_eq!(p as usize % std::mem::align_of::&lt;T&gt;(), 0);
+
+// ③ 수명 — 반환 참조의 수명을 함부로 늘리지 마세요
+unsafe fn bad&lt;'a&gt;(p: *const u8) -&gt; &amp;'a str { }   // ★ 'a 를 호출자가 정합니다
+// → 문서에 유효 범위를 명시하고, 가능하면 소유 값을 반환하세요 (🔗 f06)
+
+// ④ 값 검증
+let s = std::str::from_utf8(bytes)?;            // ✅ 검증
+// let s = unsafe { std::str::from_utf8_unchecked(bytes) };  // ❌ 검증 없이
+
+// ⑤ 패닉 차단 (🔗 f09)
+catch_unwind(AssertUnwindSafe(|| { }))
+
+// ⑥ 다른 언어가 메모리를 동시에 수정하지 않는다는 전제를
+//    문서에 명시 (🐍 y06 의 numpy 제로카피)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">검출 도구 ★</h4>
+      <pre class="code" data-lang="bash"><code># Miri — Rust 코드의 UB 를 검출합니다 (d07)
+cargo +nightly miri test
+#   ★ FFI 로 넘어간 부분은 못 봅니다
+
+# 주소 살균기 — C 코드까지 봅니다 (🔗 f08)
+RUSTFLAGS="-Zsanitizer=address" \
+  cargo +nightly test --target x86_64-unknown-linux-gnu
+
+# 스레드 살균기 — 데이터 경쟁
+RUSTFLAGS="-Zsanitizer=thread" cargo +nightly test --target ...
+
+# 메모리 살균기 — 초기화되지 않은 읽기
+RUSTFLAGS="-Zsanitizer=memory" cargo +nightly test --target ...
+
+# valgrind
+valgrind --leak-check=full ./target/debug/app
+
+# 디버그 빌드의 런타임 검사도 유용합니다
+#   debug_assertions 가 켜져 있으면 (🛠️ b06)
+#   · 정수 오버플로 패닉
+#   · 일부 unsafe 함수의 debug_assert
+
+# ★ CI 에 Miri 를 넣으세요 (unsafe 가 있다면)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Miri 와 살균기는 역할이 다릅니다</b> —
+        <b>Miri 는 Rust 규칙</b>(aliasing·정렬·초기화)을,
+        <b>ASan/TSan 은 실제 메모리 오류</b>(C 코드 포함)를 봅니다.
+        FFI 를 쓴다면 <b>둘 다</b> 필요합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">Rust 메모리 모델의 현재</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">아직 확정되지 않은 것들</h4>
+      <pre class="code" data-lang="text"><code>Rust 는 C++ 와 달리 아직 '공식 메모리 모델' 이 없습니다.
+UCG(Unsafe Code Guidelines) 작업이 진행 중입니다.
+
+★ 확정되지 않은 영역
+  · 정확한 aliasing 규칙 (Stacked Borrows vs Tree Borrows) ★
+    → Miri 가 두 모델을 모두 지원합니다 (d07)
+  · 포인터 프로버넌스의 세부 (d03)
+  · union 의 일부 동작
+  · 정렬되지 않은 참조의 경계
+
+★ 실무 지침
+  · 보수적으로 쓰세요 — 애매하면 안전한 대안을
+  · Miri 가 경고하면 (아직 UB 가 아니더라도) 고치세요
+  · 표준 라이브러리의 관용구를 따르세요
+  · 최신 문서를 확인하세요
+      https://doc.rust-lang.org/nomicon/
+      https://doc.rust-lang.org/reference/behavior-considered-undefined.html
+
+★ 그럼에도 안정적입니다
+  확정되지 않은 것은 '아주 미묘한 경계' 이고,
+  일반적인 FFI 코드는 명확히 정의된 영역 안에 있습니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">읽어 볼 것</h4>
+      <pre class="code" data-lang="text"><code>★ 공식 문서
+  · The Rustonomicon — unsafe Rust 의 교과서 ★
+      doc.rust-lang.org/nomicon/
+  · Reference: Behavior considered undefined
+      UB 목록의 공식 출처
+  · std 문서의 # Safety 섹션
+      각 unsafe 함수의 정확한 조건
+
+★ 실무 자료
+  · Unsafe Code Guidelines Reference (UCG)
+  · Miri 문서 — 무엇을 검출하고 무엇을 못 하는지
+  · RustSec 권고 목록 — 실제로 일어난 건전성 버그들 ★
+      실수 패턴을 배우기에 가장 좋습니다
+
+★ 학습 순서 권장
+  ① 이 탭의 d01 · d02 · d08 (원칙)
+  ② Rustonomicon 의 처음 세 장
+  ③ 실제 크레이트의 unsafe 코드 읽기
+      (Vec 의 구현 · crossbeam · bytemuck)
+  ④ Miri 로 자기 코드 검증 (d07)</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> UB 는 <b>목록으로 정리</b>돼 있고, 그 밖은 안전합니다.
+    <b>정수 오버플로는 UB 가 아니고</b>(C++ 와 다름), <b>메모리 누수도 안전</b>합니다.
+    FFI 에서는 <b>널·길이 0·정렬·수명·패닉</b> 다섯 가지를 항상 확인하고,
+    <b>Miri(Rust 규칙) + ASan(실제 메모리)</b> 둘 다 돌리세요.</div>
+</section>
+
+
+<!-- ==================== d03 ==================== -->
+<section class="sec" id="d03">
+  <div class="sec-head rv">
+    <span class="no">DEEP 03</span>
+    <h2>원시 포인터 — <span class="t">NonNull · 정렬 · 프로버넌스</span></h2>
+    <p class="lead">
+      참조(<code>&amp;T</code>)와 달리 원시 포인터(<code>*const T</code>)에는 <b>보장이 없습니다</b> —
+      널일 수도, 정렬이 안 됐을 수도, 이미 해제됐을 수도 있습니다.
+      FFI 에서 매일 만나는 타입이므로 <b>규칙을 정확히</b> 알아야 합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">종류와 기본</h4>
+      <pre class="code" data-lang="rust"><code>let x = 42i32;
+let p: *const i32 = &amp;x;            // 불변 원시 포인터
+let mut y = 42i32;
+let q: *mut i32 = &amp;mut y;          // 가변
+
+// 만드는 것은 안전, 역참조가 unsafe ★
+unsafe { println!("{}", *p); }
+
+// 널
+let n: *const i32 = std::ptr::null();
+p.is_null();
+
+// NonNull — 널이 아님을 타입으로 (r08 의 최적화도 받습니다)
+use std::ptr::NonNull;
+let nn: NonNull&lt;i32&gt; = NonNull::new(q).expect("널");
+unsafe { *nn.as_ptr() }
+// size_of::&lt;Option&lt;NonNull&lt;T&gt;&gt;&gt;() == size_of::&lt;*mut T&gt;()  ★
+
+// 산술
+unsafe {
+    let p2 = p.add(1);             // T 크기 단위로 이동
+    let p3 = p.offset(-1);
+    let d = p2.offset_from(p);     // 거리
+}
+// ★ 할당 범위를 벗어나면 '계산만 해도' UB 입니다 (d02)
+//   배열의 '마지막 다음 자리' 까지는 합법 (end 포인터)
+
+// 안전한 변환
+let s: &amp;[i32] = unsafe { std::slice::from_raw_parts(p, len) };
+let p = v.as_ptr();
+let p = v.as_mut_ptr();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">정렬이 중요한 이유 ★</h4>
+      <pre class="code" data-lang="rust"><code>use std::mem::{align_of, size_of};
+
+// u64 는 8바이트 정렬이 필요합니다
+let buf: [u8; 16] = [0; 16];
+let p = buf.as_ptr().wrapping_add(1) as *const u64;   // ★ 정렬 안 됨
+// unsafe { *p }                    // ❌ UB (일부 CPU 에서는 크래시)
+
+// ✅ 정렬 안 된 읽기 전용 함수
+let v = unsafe { p.read_unaligned() };
+unsafe { q.write_unaligned(v) };
+
+// ✅ memcpy 로 복사 (컴파일러가 최적화해 줍니다)
+let mut v = 0u64;
+unsafe {
+    std::ptr::copy_nonoverlapping(
+        buf.as_ptr().add(1), &amp;mut v as *mut u64 as *mut u8, 8);
+}
+
+// ✅ 가장 좋은 방법 — bytemuck / zerocopy (🔗 f03)
+// let v: u64 = u64::from_le_bytes(buf[1..9].try_into().unwrap());
+
+// 정렬 확인
+assert_eq!(p as usize % align_of::&lt;u64&gt;(), 0);
+p.is_aligned();                     // 1.79+
+
+// ★ 네트워크 버퍼·파일 데이터를 구조체로 캐스팅하는 코드가
+//   이 함정에 가장 자주 빠집니다. from_le_bytes 를 쓰세요.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>x86 은 정렬 안 된 접근을 허용</b>하지만 ARM 일부에서는 <b>크래시</b>합니다.
+        “내 PC 에서는 되는데 라즈베리파이·애플 실리콘에서 죽는다”의 원인이
+        <b>정렬 위반</b>인 경우가 많습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">참조와 포인터 사이</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">변환할 때의 규칙</h4>
+      <pre class="code" data-lang="rust"><code>// 참조 → 포인터: 항상 안전
+let p = &amp;x as *const i32;
+let p = std::ptr::addr_of!(s.field);       // ★ 참조를 만들지 않고 주소만
+let p = std::ptr::addr_of_mut!(s.field);
+// → packed 구조체나 초기화되지 않은 필드에 필요합니다 (🔗 f03 · d04)
+
+// 포인터 → 참조: unsafe (조건이 많습니다)
+unsafe {
+    let r: &amp;i32 = &amp;*p;                     // 다음을 전부 만족해야 합니다:
+    //   · 널이 아님
+    //   · 정렬됨
+    //   · 유효한 값이 들어 있음 (초기화됨)
+    //   · 'a 동안 해제되지 않음
+    //   · &amp;mut 라면 다른 접근이 없음 (aliasing)
+    let r = p.as_ref();                    // Option&lt;&amp;T&gt; — 널 검사 포함 ★
+    let r = q.as_mut();                    // Option&lt;&amp;mut T&gt;
+}
+
+// 읽기·쓰기 (참조를 만들지 않고)
+unsafe {
+    let v = p.read();                      // 복사해 옴 (Copy 아니어도 가능)
+    q.write(value);                        // 기존 값의 Drop 없이 덮어씀 ★
+    let old = q.replace(value);            // 기존 값을 돌려받음
+    std::ptr::drop_in_place(q);            // Drop 만 실행
+}
+// ★ write 는 Drop 을 부르지 않습니다 — 초기화되지 않은 자리에 쓸 때 씁니다 (d04)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">aliasing 규칙 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ &amp;mut 가 살아 있는 동안 다른 경로로 접근
+let mut x = 5;
+let r = &amp;mut x;
+let p = &amp;x as *const i32;      // ★ r 이 살아 있는데 다른 참조 생성
+unsafe { println!("{}", *p); } // → UB (Miri 가 잡습니다 · d07)
+
+// ✅ 포인터를 먼저 만들고 그것만 쓰기
+let mut x = 5;
+let p = &amp;mut x as *mut i32;
+unsafe { *p = 6; println!("{}", *p); }
+
+// ★ Rust 의 &amp;mut 는 "이 참조로만 접근한다" 는 강한 보장입니다.
+//   그래서 LLVM 에 noalias 를 붙일 수 있고, 최적화가 공격적입니다 (⚡ e09).
+//   이 보장을 깨면 컴파일러의 가정이 틀려 코드가 이상해집니다.
+
+// 두 개의 &amp;mut 가 필요한 경우 — 겹치지 않음을 증명하세요
+let (a, b) = v.split_at_mut(mid);         // ✅ 안전 API (🔐 o02)
+
+// 정말 필요하면 원시 포인터로 유지하고 참조를 만들지 마세요
+unsafe {
+    let p1 = v.as_mut_ptr();
+    let p2 = p1.add(mid);
+    // p1 과 p2 로만 접근 — 참조를 만들지 않음
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">FFI 포인터 다루기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">방어적인 헬퍼 만들기 ★</h4>
+      <pre class="code" data-lang="rust"><code>// FFI 진입점마다 반복하지 말고 헬퍼로 (🔗 f02)
+/// # Safety
+/// `p` 가 널이 아니면 `len` 원소만큼 유효해야 합니다.
+unsafe fn as_slice&lt;'a, T&gt;(p: *const T, len: usize) -&gt; Option&lt;&amp;'a [T]&gt; {
+    if len == 0 { return Some(&amp;[]); }
+    if p.is_null() { return None; }
+    debug_assert_eq!(p as usize % std::mem::align_of::&lt;T&gt;(), 0, "정렬 위반");
+    Some(std::slice::from_raw_parts(p, len))
+}
+
+/// C 문자열 → &amp;str
+unsafe fn as_str&lt;'a&gt;(p: *const c_char) -&gt; Option&lt;&amp;'a str&gt; {
+    if p.is_null() { return None; }
+    std::ffi::CStr::from_ptr(p).to_str().ok()
+}
+
+/// 핸들 → &amp;mut
+unsafe fn as_handle&lt;'a, T&gt;(p: *mut T) -&gt; Option&lt;&amp;'a mut T&gt; {
+    p.as_mut()
+}
+
+// 진입점은 이렇게 짧아집니다
+#[no_mangle]
+pub unsafe extern "C" fn mylib_process(p: *const u8, len: usize) -&gt; i32 {
+    let Some(data) = as_slice(p, len) else { return -1 };
+    core_process(data)                     // 여기부터는 안전한 Rust ★
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">테스트와 검증</h4>
+      <pre class="code" data-lang="rust"><code>#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn null_is_handled() {
+        assert_eq!(unsafe { mylib_process(std::ptr::null(), 10) }, -1);
+    }
+
+    #[test]
+    fn zero_len_is_ok() {
+        assert_eq!(unsafe { mylib_process(std::ptr::null(), 0) }, 0);
+    }
+
+    #[test]
+    fn roundtrip() {
+        let data = b"hello";
+        assert_eq!(unsafe { mylib_process(data.as_ptr(), data.len()) }, 0);
+    }
+}
+
+// Miri 로 검증 (d07)
+//   cargo +nightly miri test
+//   → aliasing · 정렬 · 범위를 전부 확인합니다 ★
+
+// 퍼징도 유용합니다
+//   cargo install cargo-fuzz
+//   cargo fuzz run parse
+//   → 임의 바이트열로 FFI 진입점을 두드립니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>FFI 진입점에 퍼징</b>을 붙이면 효과가 큽니다 —
+        잘못된 길이·널·깨진 UTF-8 같은 입력을 <b>자동으로 만들어 두드립니다</b>.
+        <code>cargo-fuzz</code> + Miri 조합이면 <b>대부분의 UB 를 배포 전에</b> 잡습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">프로버넌스</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">포인터는 주소만이 아닙니다</h4>
+      <pre class="code" data-lang="rust"><code>// ★ 포인터에는 '출처(provenance)' 가 함께 붙어 있습니다
+//   어느 할당에서 왔는지, 어느 범위에 접근할 수 있는지
+
+let a = [1u8, 2, 3];
+let b = [4u8, 5, 6];
+let pa = a.as_ptr();
+let pb = b.as_ptr();
+
+// 주소가 우연히 인접해도, pa 로 b 에 접근하면 UB 입니다 ★
+// unsafe { *pa.add(3) }        // ❌ a 의 범위를 벗어남
+
+// 정수로 갔다 오면 프로버넌스가 흐려집니다
+let addr = pa as usize;
+let p2 = addr as *const u8;     // ★ 어느 할당의 것인지 모호해집니다
+// → 되도록 피하고, 꼭 필요하면 with_addr 를 쓰세요 (1.84+ 안정화)
+
+let p3 = pa.with_addr(addr);    // ✅ pa 의 프로버넌스를 유지하며 주소만 바꿈
+let addr = pa.addr();           // ✅ 주소만 꺼내기 (프로버넌스 없이)
+let p4 = std::ptr::without_provenance(addr);   // 명시적으로 프로버넌스 없음
+
+// ★ 왜 중요한가
+//   컴파일러는 "이 포인터가 저 할당을 건드릴 리 없다" 고 가정합니다.
+//   정수 왕복으로 그 가정을 깨면 최적화가 코드를 망가뜨립니다.
+//   Miri 의 -Zmiri-strict-provenance 로 검사할 수 있습니다 (d07)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">태그드 포인터와 실무</h4>
+      <pre class="code" data-lang="rust"><code>// 포인터 하위 비트에 플래그를 넣는 기법 (정렬 덕분에 비어 있습니다)
+// u64 는 8바이트 정렬 → 하위 3비트가 항상 0
+
+let p: *mut u64 = ...;
+let tagged = p.map_addr(|a| a | 1);        // ★ 프로버넌스 유지
+let flag = tagged.addr() &amp; 1;
+let clean = tagged.map_addr(|a| a &amp; !1);
+
+// ★ 실무에서 쓰이는 곳
+//   · GC · 인터프리터의 값 표현
+//   · 락프리 자료구조의 버전 태그 (d06)
+//   · 인덱스와 플래그를 한 워드에
+
+// ❗ 주의
+//   · 이식성 (정렬 가정이 플랫폼마다 다를 수 있습니다)
+//   · 디버깅이 어려워집니다
+//   · Miri 로 반드시 검증하세요
+
+// 대안: 별도 필드나 enum 을 쓰는 것이 대개 낫습니다.
+//   메모리를 아끼는 이득이 정말 큰지 측정하세요 (⚡ e01)</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 원시 포인터는 <b>널·정렬·유효성·수명·aliasing</b> 다섯 가지를 사람이 책임집니다.
+    FFI 에서는 <b>널 검사 → 길이 0 처리 → 정렬 확인 → 안전한 슬라이스로</b> 넘기는
+    <b>헬퍼 함수를 만들어 재사용</b>하세요.
+    <b>정렬 위반은 ARM 에서 크래시</b>하고, <b>정수 왕복은 프로버넌스를 흐립니다</b>.</div>
+</section>
+
+
+<!-- ==================== d04 ==================== -->
+<section class="sec" id="d04">
+  <div class="sec-head rv">
+    <span class="no">DEEP 04</span>
+    <h2>MaybeUninit — <span class="t">초기화되지 않은 메모리</span></h2>
+    <p class="lead">
+      큰 버퍼를 0 으로 채우는 비용이 아까울 때가 있습니다.
+      하지만 <b>초기화되지 않은 메모리를 값으로 읽는 것은 UB</b>입니다(d02).
+      <code>MaybeUninit</code> 이 그것을 <b>합법적으로</b> 다루는 유일한 방법입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 필요한가</h4>
+      <pre class="code" data-lang="rust"><code>use std::mem::MaybeUninit;
+
+// ❌ 예전 방식 — deprecated, UB 입니다
+// let x: u32 = unsafe { std::mem::uninitialized() };
+
+// ★ 왜 UB 인가
+//   · bool 에 2 가 들어 있으면 match 가 이상해집니다 (d02)
+//   · 컴파일러가 "초기화됐다" 고 가정해 최적화합니다
+//   · Drop 이 쓰레기 값에 대해 실행될 수 있습니다
+
+// ✅ MaybeUninit — "아직 값이 없을 수 있다" 를 타입으로
+let mut x: MaybeUninit&lt;u32&gt; = MaybeUninit::uninit();
+x.write(42);
+let v = unsafe { x.assume_init() };     // ★ 쓴 뒤에만 호출
+
+// 0 으로 채우기 (안전)
+let z: MaybeUninit&lt;u32&gt; = MaybeUninit::zeroed();
+
+// 배열
+let mut arr: [MaybeUninit&lt;u8&gt;; 1024] = unsafe { MaybeUninit::uninit().assume_init() };
+//   ★ MaybeUninit 배열 자체는 초기화가 필요 없으므로 이 assume_init 은 합법
+for (i, slot) in arr.iter_mut().enumerate() { slot.write(i as u8); }
+let arr: [u8; 1024] = unsafe { std::mem::transmute(arr) };</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무에서는 대개 필요 없습니다 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ★ 먼저 안전한 대안을 확인하세요
+
+// ① vec![0; n] — 0 으로 채우기
+let mut buf = vec![0u8; 1024 * 1024];
+//   OS 가 0 페이지를 주므로 큰 할당에서는 사실상 공짜입니다 ★
+//   (calloc 이 페이지를 lazy 하게 매핑합니다)
+
+// ② Vec::with_capacity + extend (r06 · ⚡ e02)
+let mut v = Vec::with_capacity(n);
+v.extend(iter);
+
+// ③ 읽어서 채우기 — 표준 API 를 쓰세요
+let mut buf = vec![0u8; 8192];
+let n = reader.read(&amp;mut buf)?;
+buf.truncate(n);
+
+// ④ spare_capacity_mut — Vec 의 미사용 영역을 MaybeUninit 로
+let mut v: Vec&lt;u8&gt; = Vec::with_capacity(1024);
+let spare = v.spare_capacity_mut();          // &amp;mut [MaybeUninit&lt;u8&gt;]
+// … 채운 뒤 …
+unsafe { v.set_len(written); }               // ★ 실제로 쓴 만큼만
+
+// ★ 측정 없이 MaybeUninit 를 쓰지 마세요 (⚡ e01)
+//   memset 비용은 대개 무시할 수준이고,
+//   틀리면 재현 불가능한 버그가 됩니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>큰 버퍼의 <code>vec![0; n]</code></b> 은 생각보다 쌉니다 —
+        OS 가 <b>0 으로 채워진 페이지를 지연 할당</b>하기 때문입니다.
+        <b>실제로 memset 이 병목인지 프로파일러로 확인</b>한 뒤에 <code>MaybeUninit</code> 를 고려하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">부분 초기화 다루기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조체를 필드별로 채우기</h4>
+      <pre class="code" data-lang="rust"><code>use std::mem::MaybeUninit;
+use std::ptr::addr_of_mut;
+
+#[repr(C)]
+struct Header { magic: u32, len: u32, name: [u8; 32] }
+
+fn build() -&gt; Header {
+    let mut h: MaybeUninit&lt;Header&gt; = MaybeUninit::uninit();
+    let p = h.as_mut_ptr();
+    unsafe {
+        // ★ addr_of_mut! 로 참조를 만들지 않고 주소만 (d03)
+        addr_of_mut!((*p).magic).write(0x4D59_4C42);
+        addr_of_mut!((*p).len).write(0);
+        addr_of_mut!((*p).name).write([0; 32]);
+        h.assume_init()                       // 전부 채운 뒤에만 ★
+    }
+}
+
+// ❗ 하나라도 빠뜨리면 UB 입니다.
+//   그래서 실무에서는 그냥 이렇게 쓰는 것이 낫습니다
+fn build_safe() -&gt; Header {
+    Header { magic: 0x4D59_4C42, len: 0, name: [0; 32] }
+}
+// → 컴파일러가 최적화하면 결과가 거의 같습니다.
+//   측정으로 차이가 확인될 때만 위 방식을 쓰세요 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">FFI 에서 out 파라미터 받기 ★</h4>
+      <pre class="code" data-lang="rust"><code>// C 함수가 구조체를 채워 주는 흔한 패턴 (🔗 f08)
+// int foo_get_info(FooInfo *out);
+
+#[repr(C)]
+pub struct FooInfo { version: u32, flags: u32, name: *const c_char }
+
+pub fn get_info() -&gt; Result&lt;FooInfo, Error&gt; {
+    let mut info = MaybeUninit::&lt;FooInfo&gt;::uninit();
+    let rc = unsafe { ffi::foo_get_info(info.as_mut_ptr()) };
+    if rc != 0 { return Err(Error::from(rc)); }
+    // SAFETY: foo_get_info 가 0 을 반환하면 out 을 완전히 채웠다고
+    //         문서에 명시돼 있습니다 (libfoo docs §4.1)
+    Ok(unsafe { info.assume_init() })
+}
+
+// ★ 이것이 MaybeUninit 의 가장 정당한 용도입니다.
+//   C 가 채워 줄 자리를 미리 0 으로 채울 필요가 없습니다.
+
+// 배열도 마찬가지
+let mut buf: Vec&lt;MaybeUninit&lt;u8&gt;&gt; = Vec::with_capacity(n);
+unsafe {
+    let written = ffi::foo_read(buf.as_mut_ptr() as *mut u8, n);
+    buf.set_len(written);
+}
+// → 안전한 Vec&lt;u8&gt; 로 변환하려면 transmute 또는 재구성이 필요합니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">안전한 래퍼로 감싸기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">패턴 정리 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ★ 원칙: MaybeUninit 를 API 밖으로 내보내지 마세요
+//   내부에서만 쓰고, 밖에는 완성된 타입을 돌려줍니다 (d08)
+
+pub struct Decoder { /* … */ }
+
+impl Decoder {
+    /// 디코딩 결과를 반환합니다.
+    pub fn decode(&amp;mut self, input: &amp;[u8]) -&gt; Result&lt;Vec&lt;u8&gt;, Error&gt; {
+        let need = self.output_size(input);
+        let mut out = Vec::with_capacity(need);
+
+        // SAFETY: ffi::decode 는 반환값만큼의 바이트를 채웁니다.
+        //         capacity 는 need 이상이 보장됩니다.
+        let written = unsafe {
+            let n = ffi::decode(self.raw, input.as_ptr(), input.len(),
+                                out.as_mut_ptr(), need);
+            if n &lt; 0 { return Err(Error::from(n)); }
+            n as usize
+        };
+        unsafe { out.set_len(written) };       // ★ 실제로 쓴 만큼
+        Ok(out)
+    }
+}
+
+// ★ set_len 의 조건
+//   · len &lt;= capacity
+//   · 0..len 범위가 전부 초기화됐음
+//   → 이 둘을 보장하지 못하면 UB 입니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">검증하기</h4>
+      <pre class="code" data-lang="bash"><code># Miri 는 초기화되지 않은 읽기를 잡습니다 ★ (d07)
+cargo +nightly miri test
+
+# 출력 예
+#   error: Undefined Behavior: using uninitialized data,
+#          but this operation requires initialized memory
+
+# MemorySanitizer 도 (C 코드까지)
+RUSTFLAGS="-Zsanitizer=memory" cargo +nightly test \
+  --target x86_64-unknown-linux-gnu
+
+# ★ 테스트에서 확인할 것
+#   · 반환된 Vec 의 모든 바이트를 실제로 읽어 보기
+#   · 길이가 0 인 경우
+#   · C 함수가 실패했을 때 set_len 을 호출하지 않는지</code></pre>
+      <pre class="code" data-lang="rust"><code>#[test]
+fn decoded_bytes_are_initialized() {
+    let out = decoder.decode(input).unwrap();
+    // 전부 읽어 봅니다 — Miri 가 초기화 여부를 검사합니다 ★
+    let checksum: u64 = out.iter().map(|b| *b as u64).sum();
+    assert!(checksum &gt; 0 || out.is_empty());
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>set_len</code> 이 FFI 코드에서 가장 위험한 함수</b>입니다 —
+        C 함수가 실제로 몇 바이트를 채웠는지 <b>잘못 믿으면</b>
+        초기화되지 않은 메모리가 그대로 노출됩니다(정보 유출 취약점이 되기도 합니다).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">왜 이렇게까지 엄격한가</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">초기화되지 않은 값의 정체</h4>
+      <pre class="code" data-lang="text"><code>★ "쓰레기 값이 들어 있다" 가 아닙니다
+  LLVM 에서 초기화되지 않은 메모리는 'poison/undef' 값입니다.
+  이것은 '아직 정해지지 않은 값' 이고,
+  읽을 때마다 다른 값일 수 있습니다.
+
+  let x: u8 = uninit();
+  if x == x { }            // ★ 거짓일 수 있습니다
+  if x &lt; 128 &amp;&amp; x &gt;= 128 { }  // 둘 다 참일 수 있습니다
+
+★ 그래서 컴파일러가 이상한 최적화를 합니다
+  · 분기를 양쪽 다 지우거나
+  · 값을 임의로 고정하거나
+  · 그 코드 경로를 통째로 도달 불가로 판단
+
+★ MaybeUninit&lt;T&gt; 는
+  "이 메모리는 T 의 유효한 값이 아닐 수 있다" 를 타입으로 표현합니다.
+  컴파일러가 그 가정을 하지 않으므로 안전하게 다룰 수 있습니다.
+
+  size_of::&lt;MaybeUninit&lt;T&gt;&gt;() == size_of::&lt;T&gt;()    ★ 비용 0
+  align_of 도 같습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">관련 API 정리</h4>
+      <pre class="code" data-lang="rust"><code>use std::mem::MaybeUninit;
+
+MaybeUninit::uninit()            // 초기화 안 함
+MaybeUninit::zeroed()            // 0 으로 (u32 등에는 유효, &amp;T 에는 UB)
+MaybeUninit::new(v)              // 값으로 시작
+m.write(v)                       // 쓰기 (기존 값 Drop 안 함) ★
+m.as_ptr() / as_mut_ptr()
+unsafe { m.assume_init() }       // 값으로 꺼내기
+unsafe { m.assume_init_ref() }   // &amp;T 로
+unsafe { m.assume_init_drop() }  // Drop 실행
+
+// 슬라이스 API (일부는 nightly)
+MaybeUninit::write_slice(&amp;mut buf, src);
+unsafe { MaybeUninit::slice_assume_init_ref(&amp;buf) };
+
+// ★ 관련된 다른 함정
+//   · zeroed 는 타입에 따라 UB 입니다
+//     NonNull · &amp;T · bool(은 괜찮음) · enum(0 이 유효해야) ★
+//   · Drop 이 있는 타입을 write 로 덮어쓰면 이전 값이 새어 나갑니다
+//   · assume_init 을 두 번 하면 이중 Drop
+
+// 안전한 대안 크레이트
+//   zerocopy — FromZeros 트레이트로 "0 이 유효한 타입" 을 검증 ★</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 초기화되지 않은 메모리를 값으로 읽으면 <b>UB</b> 이고,
+    <code>MaybeUninit</code> 만이 합법적인 방법입니다.
+    다만 <b>실무에서 필요한 경우는 드뭅니다</b> — <code>vec![0; n]</code> 은 생각보다 싸고,
+    <b>정당한 용도는 FFI 의 out 파라미터</b> 정도입니다.
+    <b><code>set_len</code> 은 가장 위험한 함수</b>이니 조건을 반드시 확인하세요.</div>
+</section>
+
+
+<!-- ==================== d05 ==================== -->
+<section class="sec" id="d05">
+  <div class="sec-head rv">
+    <span class="no">DEEP 05</span>
+    <h2>Pin — <span class="t">움직이면 깨지는 것들</span></h2>
+    <p class="lead">
+      Rust 에서 값은 <b>언제든 메모리 안에서 옮겨질 수 있습니다</b>(이동은 memcpy · r05).
+      그런데 <b>자기 자신을 가리키는 구조체</b>는 옮겨지면 포인터가 무효가 됩니다.
+      <code>Pin</code> 은 그것을 <b>타입으로 막는 장치</b>입니다 — async 의 기반이기도 합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문제 상황</h4>
+      <pre class="code" data-lang="rust"><code>struct SelfRef {
+    data: String,
+    ptr: *const String,        // data 를 가리킴
+}
+
+let mut s = SelfRef { data: "안녕".into(), ptr: std::ptr::null() };
+s.ptr = &amp;s.data;
+
+let moved = s;                 // ★ 구조체가 이동하면
+// moved.ptr 은 '이전 위치의 data' 를 가리킵니다 → 댕글링
+
+// ★ Rust 는 이동이 자유롭기 때문에 이 문제가 생깁니다.
+//   C++ 는 이동 생성자에서 포인터를 고칠 수 있지만,
+//   Rust 의 이동은 memcpy 이고 후크가 없습니다.
+
+// 그래서 Pin 이 필요합니다
+use std::pin::Pin;
+let mut boxed = Box::pin(SelfRef { data: "안녕".into(), ptr: std::ptr::null() });
+// Pin&lt;Box&lt;T&gt;&gt; 는 T 를 밖으로 꺼낼 수 없게 합니다 (T: !Unpin 일 때)</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>실무에서 <code>Pin</code> 을 직접 쓸 일은 드뭅니다</b> —
+        <b>async 를 쓰면 뒤에서 자동으로</b> 쓰이고,
+        자기 참조가 필요하면 <b>인덱스 기반</b>(🔐 o01)이나
+        <code>ouroboros</code>·<code>self_cell</code> 크레이트가 더 실용적입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Unpin — 대부분의 타입은 상관없습니다 ★</h4>
+      <pre class="code" data-lang="rust"><code>// Unpin 은 "옮겨져도 괜찮다" 는 자동 트레이트 (⚡ e06 의 auto trait)
+// 거의 모든 타입이 Unpin 입니다: u32 · String · Vec&lt;T&gt; · &amp;T …
+
+fn f&lt;T: Unpin&gt;(p: Pin&lt;&amp;mut T&gt;) {
+    let r: &amp;mut T = p.get_mut();       // ★ Unpin 이면 그냥 꺼낼 수 있습니다
+}
+
+// !Unpin 인 것들
+//   · async 블록이 만든 Future ★
+//   · PhantomPinned 를 담은 구조체
+//   · 자기 참조 구조체
+
+use std::marker::PhantomPinned;
+struct Pinned { data: String, ptr: *const String, _pin: PhantomPinned }
+
+// ★ 그래서 실무 감각은
+//   "Pin 이 에러에 나타나면 async 관련일 가능성이 높다"
+//   → Box::pin 으로 감싸거나, tokio::pin! 매크로를 쓰면 대개 해결됩니다
+
+use std::pin::pin;
+let fut = pin!(async { work().await });    // 스택에 고정 (1.68+)
+tokio::pin!(fut);                           // tokio 매크로</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">async 에서 만나는 Pin</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 Future 가 !Unpin 인가</h4>
+      <pre class="code" data-lang="rust"><code>async fn f() {
+    let s = String::from("안녕");
+    let r = &amp;s;                     // ★ 지역 변수를 참조
+    other().await;                  // 여기서 상태가 저장됩니다
+    println!("{r}");                // await 이후에도 씁니다
+}
+
+// 컴파일러가 만드는 상태 기계는 (⚡ e08)
+//   struct FFuture { s: String, r: *const String, state: u8 }
+//   → r 이 s 를 가리킵니다 = 자기 참조 ★
+//   → 이 Future 가 이동하면 r 이 무효가 됩니다
+//   → 그래서 !Unpin 이고, poll 은 Pin&lt;&amp;mut Self&gt; 를 받습니다
+
+// 실무에서 만나는 에러
+//   error: `dyn Future` cannot be unpinned
+//   → Box::pin(fut) 으로 해결
+
+// 자주 쓰는 패턴
+let fut: Pin&lt;Box&lt;dyn Future&lt;Output = u32&gt; + Send&gt;&gt; = Box::pin(async { 42 });
+
+// 재귀 async 함수 — 크기를 정할 수 없으므로 Box 가 필요합니다
+fn recurse(n: u32) -&gt; Pin&lt;Box&lt;dyn Future&lt;Output = u32&gt; + Send&gt;&gt; {
+    Box::pin(async move {
+        if n == 0 { 0 } else { recurse(n - 1).await + 1 }
+    })
+}
+// 또는 async-recursion 크레이트</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Pin 을 쓰는 법</h4>
+      <pre class="code" data-lang="rust"><code>use std::pin::Pin;
+
+// 만들기
+let p = Box::pin(value);                    // 힙에 고정
+let p = std::pin::pin!(value);              // 스택에 고정 (1.68+) ★
+
+// 접근
+p.as_ref();                                 // Pin&lt;&amp;T&gt;
+p.as_mut();                                 // Pin&lt;&amp;mut T&gt;
+Pin::get_ref(p);                            // &amp;T (항상 안전)
+unsafe { Pin::get_unchecked_mut(p) };       // &amp;mut T (T: !Unpin 이면 unsafe)
+
+// 필드 투영(projection) — 손으로 하면 까다롭습니다
+// → pin-project-lite 크레이트를 쓰세요 ★
+use pin_project_lite::pin_project;
+pin_project! {
+    struct Wrapper&lt;F&gt; {
+        #[pin] inner: F,          // 고정이 필요한 필드
+        count: u32,               // 일반 필드
+    }
+}
+impl&lt;F: Future&gt; Future for Wrapper&lt;F&gt; {
+    type Output = F::Output;
+    fn poll(self: Pin&lt;&amp;mut Self&gt;, cx: &amp;mut Context) -&gt; Poll&lt;F::Output&gt; {
+        let this = self.project();
+        *this.count += 1;
+        this.inner.poll(cx)                 // ★ Pin&lt;&amp;mut F&gt; 로 전달됩니다
+    }
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">자기 참조를 피하는 법</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대안이 대개 낫습니다 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 자기 참조 구조체를 만들려는 시도
+// struct Parser { input: String, current: &amp;str }   // 불가능 (🔐 o01)
+
+// ✅ ① 인덱스·범위로 (가장 단순합니다)
+struct Parser { input: String, pos: usize }
+impl Parser {
+    fn rest(&amp;self) -&gt; &amp;str { &amp;self.input[self.pos..] }
+}
+
+// ✅ ② 소유와 참조를 분리 — 라이프타임 파라미터 (🔐 o03)
+struct Parser&lt;'a&gt; { input: &amp;'a str, pos: usize }
+let text = load()?;                       // 소유는 밖에서
+let p = Parser { input: &amp;text, pos: 0 };
+
+// ✅ ③ 크레이트를 쓰기
+//    ouroboros · self_cell · yoke
+//    → 자기 참조를 안전하게 감싸 줍니다
+use self_cell::self_cell;
+self_cell!(
+    struct Owner {
+        owner: String,
+        #[covariant] dependent: Parsed,
+    }
+);
+
+// ✅ ④ Arc 로 공유 (🔐 o10)
+struct Parser { input: Arc&lt;str&gt;, pos: usize }
+
+// ★ 실무 우선순위: ① → ② → ④ → ③ → Pin 직접
+//   Pin 을 직접 쓰는 것은 라이브러리 저자의 영역입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">FFI 에서의 고정</h4>
+      <pre class="code" data-lang="rust"><code>// C 라이브러리가 우리 구조체의 주소를 보관하는 경우 (🔗 f07)
+//   → 그 구조체가 이동하면 C 쪽 포인터가 무효가 됩니다
+
+// ✅ Box 로 힙에 고정하고 주소를 넘기기
+pub struct Callback { handler: Box&lt;dyn Fn(i32)&gt; }
+
+pub struct Registration {
+    inner: Box&lt;Callback&gt;,           // ★ Box 안의 주소는 이동해도 안 바뀝니다
+}
+
+impl Registration {
+    pub fn new(f: impl Fn(i32) + 'static) -&gt; Self {
+        let inner = Box::new(Callback { handler: Box::new(f) });
+        let ptr = &amp;*inner as *const Callback as *mut c_void;
+        unsafe { ffi::register(trampoline, ptr) };
+        Registration { inner }
+    }
+}
+impl Drop for Registration {
+    fn drop(&amp;mut self) { unsafe { ffi::unregister() } }   // ★ 반드시
+}
+
+// ★ Box&lt;T&gt; 를 이동해도 T 의 주소는 그대로입니다.
+//   그래서 대부분의 FFI 시나리오에서는 Pin 없이 Box 로 충분합니다.
+//   (Pin 이 필요한 것은 '스택에 있는 자기 참조' 같은 경우입니다)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>Box&lt;T&gt;</code> 안의 <code>T</code> 는 이동하지 않습니다</b> —
+        Box 자체(포인터)만 이동합니다.
+        그래서 <b>FFI 로 주소를 넘길 때는 Box 로 충분</b>하고,
+        <code>Pin</code> 까지 필요한 경우는 드뭅니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">Pin 의 계약</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">정확히 무엇을 보장하나</h4>
+      <pre class="code" data-lang="text"><code>Pin&lt;P&gt; 의 계약 (P 는 포인터 타입)
+
+  T: Unpin 이면    → 아무 보장도 없습니다 (그냥 P 처럼 동작)
+  T: !Unpin 이면   → "이 값은 drop 될 때까지 이 주소에 머문다" ★
+
+  더 정확히
+  · Pin&lt;&amp;mut T&gt; 를 만든 이후로 T 는 이동하지 않습니다
+  · T 의 메모리는 drop 이 호출될 때까지 무효화되지 않습니다
+  · drop 이 반드시 호출됩니다 (mem::forget 으로 건너뛰면 안 됨) ★
+
+★ 마지막 조건이 미묘합니다
+  Pin 된 값을 mem::forget 하면 메모리가 재사용될 수 있는데,
+  C 쪽이 그 주소를 여전히 보고 있으면 UB 입니다.
+  → 이것을 'Drop 보장(drop guarantee)' 이라고 합니다.
+
+★ 직접 구현할 때 지켜야 할 것
+  · Pin&lt;&amp;mut Self&gt; 를 받는 메서드에서 Self 를 이동하지 않기
+  · get_unchecked_mut 로 꺼낸 참조로 mem::swap · mem::replace 금지
+  · 필드 투영은 pin-project 를 쓰세요 (손으로 하면 실수하기 쉽습니다)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 !Unpin 을 만드나</h4>
+      <pre class="code" data-lang="rust"><code>use std::marker::PhantomPinned;
+
+// 자기 참조나 외부에 주소를 등록한 타입
+pub struct Registered {
+    data: [u8; 1024],
+    // C 쪽이 &amp;self.data 를 보관 중
+    _pin: PhantomPinned,           // ★ !Unpin 으로 만듭니다
+}
+
+impl Registered {
+    pub fn new() -&gt; Pin&lt;Box&lt;Self&gt;&gt; {
+        let mut b = Box::pin(Registered { data: [0; 1024], _pin: PhantomPinned });
+        let ptr = b.data.as_ptr();
+        unsafe { ffi::register_buffer(ptr, 1024) };
+        b
+    }
+}
+impl Drop for Registered {
+    fn drop(&amp;mut self) { unsafe { ffi::unregister_buffer() } }
+}
+
+// ★ 실무 판단
+//   이 정도 상황이면 대개 '핸들 + 명시적 close()' 로 설계하는 편이
+//   훨씬 단순하고 다른 언어에서 쓰기도 좋습니다 (🔗 f06 의 불투명 핸들).
+//   Pin 은 async 런타임·스트림 라이브러리를 만들 때 주로 필요합니다.</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> Rust 의 값은 <b>언제든 memcpy 로 이동</b>하므로 자기 참조가 깨집니다.
+    <code>Pin</code> 이 그것을 타입으로 막지만, <b>대부분의 타입은 <code>Unpin</code></b> 이라 상관없습니다.
+    <b>실무에서는 async 에서만 만나고</b>, <code>Box::pin</code>·<code>pin!</code>·<code>pin-project-lite</code> 로 해결됩니다.
+    자기 참조가 필요하면 <b>인덱스 · 라이프타임 분리 · <code>self_cell</code></b> 을 먼저 검토하세요.</div>
+</section>
+
+
+<!-- ==================== d06 ==================== -->
+<section class="sec" id="d06">
+  <div class="sec-head rv">
+    <span class="no">DEEP 06</span>
+    <h2>메모리 모델 · <span class="t">Ordering</span></h2>
+    <p class="lead">
+      멀티스레드에서 <b>“다른 CPU 가 이 값을 언제 보게 되는가”</b>를 정하는 규칙입니다.
+      CPU 와 컴파일러가 명령 순서를 바꾸기 때문에,
+      <b>필요한 순서를 명시</b>해야 합니다. 락 프리 자료구조의 기반입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다섯 가지 Ordering ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>Ordering</th><th>뜻</th></tr>
+        <tr><td><code>Relaxed</code></td><td>원자성만 · 순서 보장 없음</td></tr>
+        <tr><td><code>Acquire</code></td><td>읽기 — 이후 연산이 앞으로 못 감</td></tr>
+        <tr><td><code>Release</code></td><td>쓰기 — 이전 연산이 뒤로 못 감</td></tr>
+        <tr><td><code>AcqRel</code></td><td>읽고 쓰기 (fetch_* 에)</td></tr>
+        <tr><td><code>SeqCst</code></td><td>전역 순서 보장 · 가장 강함</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+// ★ 실무 지침
+//   · 단순 카운터 · 통계  → Relaxed (가장 쌉니다)
+//   · 플래그로 데이터 전달 → Release/Acquire 짝 ★
+//   · 헷갈리면            → SeqCst (느리지만 안전)
+
+// 카운터
+static COUNT: AtomicU64 = AtomicU64::new(0);
+COUNT.fetch_add(1, Ordering::Relaxed);
+COUNT.load(Ordering::Relaxed);
+
+// 데이터 전달 — 이 짝이 핵심입니다 ★
+static READY: AtomicBool = AtomicBool::new(false);
+static mut DATA: u64 = 0;
+
+// 생산자
+unsafe { DATA = 42; }
+READY.store(true, Ordering::Release);      // ★ 이전 쓰기가 먼저 보임을 보장
+
+// 소비자
+if READY.load(Ordering::Acquire) {         // ★ 이후 읽기가 뒤에 일어남을 보장
+    unsafe { println!("{}", DATA); }       // 42 가 보장됩니다
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 필요한가</h4>
+      <pre class="code" data-lang="text"><code>★ 순서가 바뀌는 두 가지 이유
+
+① 컴파일러 최적화
+   독립적인 명령을 재배치합니다.
+   단일 스레드에서는 결과가 같으므로 합법입니다.
+
+② CPU
+   · 저장 버퍼 (쓰기가 지연되어 다른 코어에 늦게 보임)
+   · 비순차 실행 (out-of-order)
+   · x86 은 비교적 강한 순서를 보장하지만
+     ARM · RISC-V 는 훨씬 약합니다 ★
+
+★ 그래서 x86 에서만 테스트하면 버그가 안 보입니다.
+  애플 실리콘·ARM 서버에서 처음 터지는 경우가 실제로 있습니다.
+
+★ Relaxed 로 충분한 경우
+  · 값 자체만 필요할 때 (카운터 · 통계 · ID 생성)
+  · 다른 데이터와의 순서가 상관없을 때
+
+★ Release/Acquire 가 필요한 경우
+  · "데이터를 다 썼다" 를 플래그로 알릴 때
+  · 락 · 큐 · 참조 카운터의 해제 시점 ★</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>x86 에서는 <code>Relaxed</code> 와 <code>Acquire</code> 가 같은 코드로 컴파일</b>되는 경우가 많습니다 —
+        <b>버그가 있어도 드러나지 않습니다</b>.
+        ARM 기기에서도 테스트하고, <b>Miri 와 loom 으로 검증</b>하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">실전 패턴</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CAS 와 fetch 연산</h4>
+      <pre class="code" data-lang="rust"><code>use std::sync::atomic::{AtomicU64, Ordering};
+
+let a = AtomicU64::new(0);
+
+// 산술
+a.fetch_add(1, Ordering::Relaxed);
+a.fetch_sub(1, Ordering::Relaxed);
+a.fetch_max(5, Ordering::Relaxed);
+a.fetch_or(0b1, Ordering::Relaxed);
+
+// 교환
+let old = a.swap(10, Ordering::AcqRel);
+
+// CAS — 조건부 교환 ★
+match a.compare_exchange(10, 20, Ordering::AcqRel, Ordering::Acquire) {
+    Ok(prev) =&gt; { /* 10 이었고 20 으로 바꿈 */ }
+    Err(actual) =&gt; { /* 10 이 아니었음, 실제 값은 actual */ }
+}
+// weak 버전 — 루프 안에서 (가짜 실패가 가능하지만 더 빠릅니다)
+let mut cur = a.load(Ordering::Relaxed);
+loop {
+    let new = cur * 2;
+    match a.compare_exchange_weak(cur, new, Ordering::AcqRel, Ordering::Relaxed) {
+        Ok(_) =&gt; break,
+        Err(v) =&gt; cur = v,          // 다른 스레드가 바꿨으므로 재시도
+    }
+}
+
+// fetch_update — 위 루프를 간단히
+a.fetch_update(Ordering::AcqRel, Ordering::Relaxed, |v| Some(v * 2)).ok();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Arc 가 쓰는 패턴 ★</h4>
+      <pre class="code" data-lang="rust"><code>// Arc 의 clone / drop 이 실제로 하는 일 (🔐 o10)
+
+// clone — 카운터만 올리면 됩니다
+self.count.fetch_add(1, Ordering::Relaxed);
+//   ★ Relaxed 로 충분합니다. 이미 참조를 갖고 있으니
+//     다른 데이터와의 순서가 필요 없습니다.
+
+// drop — 여기가 중요합니다
+if self.count.fetch_sub(1, Ordering::Release) != 1 { return; }
+//   ★ Release: 내가 이 데이터에 한 쓰기가
+//     마지막 스레드에게 보이도록 보장
+
+std::sync::atomic::fence(Ordering::Acquire);
+//   ★ Acquire 펜스: 다른 스레드의 쓰기를 전부 보고 나서 해제
+
+unsafe { drop_data() };
+
+// ★ 이 패턴이 Release/Acquire 의 교과서적 사용입니다.
+//   "마지막 사람이 뒷정리한다" 를 안전하게 구현합니다.
+
+// 펜스 (개별 원자 연산과 별개로 순서를 강제)
+use std::sync::atomic::fence;
+fence(Ordering::SeqCst);
+std::sync::atomic::compiler_fence(Ordering::SeqCst);   // 컴파일러만</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">직접 구현하지 마세요</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이미 만들어진 것을 쓰세요 ★</h4>
+      <pre class="code" data-lang="text"><code>★ 락 프리 자료구조를 직접 만들면 만나는 문제들
+  · ABA 문제 — 값이 A→B→A 로 바뀌면 CAS 가 속습니다
+  · 메모리 회수 — 다른 스레드가 아직 보고 있는 노드를 언제 해제하나
+      → epoch 기반 · hazard pointer 가 필요합니다
+  · 메모리 순서 — 이 섹션의 내용을 전부 정확히
+  · 검증이 어렵습니다 — 재현 불가능한 버그
+
+★ 검증된 크레이트 (⚡ e07)
+  crossbeam        큐 · 스택 · epoch 기반 회수 ★
+  dashmap          동시 해시맵
+  arc-swap         Arc 를 원자적으로 교체
+  flume            채널
+  parking_lot      더 빠른 Mutex/RwLock
+
+★ 직접 구현이 정당한 경우
+  · 표준·크레이트에 없는 특수한 자료구조
+  · 그것이 제품의 핵심 가치
+  · loom 으로 검증할 수 있고, 리뷰할 사람이 있음
+  → 그렇지 않다면 Mutex 로 시작하고 측정하세요 (⚡ e07)
+    경합이 없으면 Mutex 는 충분히 빠릅니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">검증 도구 — loom ★</h4>
+      <pre class="code" data-lang="toml"><code>[dev-dependencies]
+loom = "0.7"</code></pre>
+      <pre class="code" data-lang="rust"><code>// loom 은 가능한 모든 스레드 인터리빙을 시뮬레이션합니다 ★
+#[cfg(loom)]
+mod tests {
+    use loom::sync::atomic::{AtomicUsize, Ordering};
+    use loom::sync::Arc;
+    use loom::thread;
+
+    #[test]
+    fn concurrent_increment() {
+        loom::model(|| {
+            let c = Arc::new(AtomicUsize::new(0));
+            let c2 = c.clone();
+            let t = thread::spawn(move || { c2.fetch_add(1, Ordering::Relaxed); });
+            c.fetch_add(1, Ordering::Relaxed);
+            t.join().unwrap();
+            assert_eq!(c.load(Ordering::Relaxed), 2);
+        });
+    }
+}</code></pre>
+      <pre class="code" data-lang="bash"><code>RUSTFLAGS="--cfg loom" cargo test --release
+
+# Miri 도 일부 동시성 UB 를 잡습니다 (d07)
+cargo +nightly miri test
+
+# ThreadSanitizer
+RUSTFLAGS="-Zsanitizer=thread" cargo +nightly test --target ...</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>loom 은 모든 인터리빙을 시도</b>하므로
+        “가끔 터지는” 동시성 버그를 <b>결정적으로 재현</b>합니다.
+        락 프리 코드를 쓴다면 <b>loom 테스트 없이는 배포하지 마세요</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">하드웨어와의 관계</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어떤 명령으로 컴파일되나</h4>
+      <pre class="code" data-lang="text"><code>x86-64 (강한 메모리 모델 · TSO)
+  load(Relaxed/Acquire/SeqCst)   →  mov          (전부 같습니다) ★
+  store(Relaxed/Release)          →  mov
+  store(SeqCst)                   →  xchg (또는 mov + mfence)
+  fetch_add                       →  lock xadd
+  compare_exchange                →  lock cmpxchg
+
+AArch64 (약한 메모리 모델)
+  load(Relaxed)                   →  ldr
+  load(Acquire)                   →  ldar         ★ 다릅니다
+  store(Release)                  →  stlr
+  fetch_add                       →  ldaddal (또는 ldxr/stxr 루프)
+
+★ 그래서
+  · x86 에서는 Relaxed 와 Acquire 의 차이가 코드에 안 나타납니다
+    → 버그가 숨습니다
+  · ARM 에서는 실제로 다른 명령이 나옵니다
+    → 애플 실리콘·Graviton 에서 처음 터집니다 ★
+
+# 확인
+cargo asm --lib my_atomic_fn    (⚡ e03)
+# godbolt.org 에서 x86 과 aarch64 를 비교해 보세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SeqCst 를 기본으로 쓸까</h4>
+      <pre class="code" data-lang="text"><code>★ 찬성
+  · 가장 이해하기 쉽습니다 (전역 순서가 있는 것처럼)
+  · 틀릴 여지가 적습니다
+  · x86 에서는 load 비용이 거의 같습니다
+
+★ 반대
+  · store 와 RMW 에서 비용이 큽니다 (특히 ARM)
+  · "왜 SeqCst 인지" 생각하지 않게 됩니다
+  · 성능이 중요한 핫 패스에서는 손해
+
+★ 실무 권장
+  ① 먼저 SeqCst 로 정확하게 만드세요
+  ② 프로파일러가 그 지점을 가리키면 (⚡ e01)
+  ③ 무엇이 필요한지 분석해 Relaxed/Acquire/Release 로 낮추세요
+  ④ loom 으로 검증하세요
+
+  → "성능을 위해 처음부터 Relaxed" 는 대부분 잘못된 최적화입니다.
+    카운터처럼 명백한 경우만 예외입니다.
+
+★ 참고 자료
+  · Rust Atomics and Locks (Mara Bos) — 이 주제의 결정판 ★
+  · std::sync::atomic 문서
+  · C++ 메모리 모델 자료 (Rust 가 그것을 따릅니다)</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>카운터는 <code>Relaxed</code>, 데이터 전달은 <code>Release</code>/<code>Acquire</code> 짝</b>,
+    <b>헷갈리면 <code>SeqCst</code></b> 입니다.
+    <b>x86 에서는 버그가 안 보이므로</b> ARM 에서도 테스트하고 <b>loom 으로 검증</b>하세요.
+    <b>락 프리 자료구조는 직접 만들지 말고</b> crossbeam 을 쓰는 것이 실무적입니다.</div>
+</section>
+
+
+<!-- ==================== d07 ==================== -->
+<section class="sec" id="d07">
+  <div class="sec-head rv">
+    <span class="no">DEEP 07</span>
+    <h2>Miri — <span class="t">unsafe 를 검증하는 도구</span></h2>
+    <p class="lead">
+      <code>unsafe</code> 코드의 버그는 <b>대부분 테스트를 통과합니다</b> — 그러다 운영에서 터집니다.
+      Miri 는 Rust 코드를 <b>해석기로 실행하며 UB 를 검출</b>합니다.
+      <code>unsafe</code> 를 쓴다면 <b>CI 에 넣지 않을 이유가 없습니다</b>.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설치와 실행</h4>
+      <pre class="code" data-lang="bash"><code># 설치 (nightly 필요)
+rustup +nightly component add miri
+
+# 실행 — 기존 테스트를 그대로 돌립니다 ★
+cargo +nightly miri test
+cargo +nightly miri test -- my_unsafe_test      # 이름으로 필터
+cargo +nightly miri run                          # 바이너리 실행
+
+# 처음 실행 시 표준 라이브러리를 빌드하므로 몇 분 걸립니다
+cargo +nightly miri setup
+
+# 유용한 옵션
+MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly miri test   # 프로버넌스 (d03)
+MIRIFLAGS="-Zmiri-tree-borrows" cargo +nightly miri test        # 다른 aliasing 모델
+MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test   # 시간·파일 허용
+MIRIFLAGS="-Zmiri-seed=42" cargo +nightly miri test             # 스레드 순서 고정
+MIRIFLAGS="-Zmiri-ignore-leaks" cargo +nightly miri test        # 누수 무시</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>느립니다</b> — 해석 실행이라 보통 수십~수백 배 느립니다.
+        그래서 <b>작고 빠른 단위 테스트</b>를 따로 두고 그것만 Miri 로 돌리는 것이 실무적입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 잡나 ★</h4>
+      <pre class="code" data-lang="text"><code>✅ 검출하는 것
+  · 유효하지 않은 메모리 접근 (범위 밖 · 해제 후)
+  · 정렬 위반 (d03)
+  · 초기화되지 않은 메모리 읽기 (d04)
+  · aliasing 규칙 위반 (Stacked/Tree Borrows) ★
+  · 데이터 경쟁 (스레드 인터리빙을 시뮬레이션)
+  · 메모리 누수
+  · 잘못된 값 (bool 에 2 · 유효하지 않은 enum 등 · d02)
+  · 정수 → 포인터 캐스팅의 프로버넌스 문제
+
+❌ 못 잡는 것
+  · FFI 로 넘어간 C 코드 안 ★ (🔗 f08)
+      → 그 부분은 ASan/valgrind 로 (d02)
+  · 인라인 어셈블리 (d10)
+  · 실행되지 않은 코드 경로
+      → 테스트 커버리지가 곧 Miri 커버리지입니다 ★
+  · 논리 버그 · 데드락
+
+★ 그래서 unsafe 함수마다 '작은 테스트' 를 두는 것이 중요합니다 (d03).</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">에러 메시지 읽기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실제 출력 예 ★</h4>
+      <pre class="code" data-lang="text"><code>error: Undefined Behavior: attempting a read access using &lt;3521&gt; at
+       alloc1520[0x8], but that tag does not exist in the borrow stack
+  --&gt; src/lib.rs:42:18
+   |
+42 |     let v = unsafe { *p };
+   |                      ^^ this error occurs as part of an access at
+   |                         alloc1520[0x8..0xc]
+   |
+   = help: this indicates a potential bug in the program: it performed an
+           invalid operation, but the Stacked Borrows rules it violated are
+           still experimental
+help: &lt;3521&gt; was created by a SharedReadOnly retag at offsets [0x0..0x10]
+  --&gt; src/lib.rs:38:13
+help: &lt;3521&gt; was later invalidated at offsets [0x0..0x10] by a Unique retag
+  --&gt; src/lib.rs:40:9
+
+# 읽는 법
+#   ① 어디서 위반했나        → 42줄
+#   ② 그 태그가 언제 생겼나  → 38줄에서 &amp;T 를 만듦
+#   ③ 언제 무효가 됐나       → 40줄에서 &amp;mut 를 만들며 무효화 ★
+#
+# → "불변 참조를 만든 뒤 가변 참조를 만들고, 다시 불변 참조를 썼다" (d03)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 나오는 위반과 해법</h4>
+      <pre class="code" data-lang="rust"><code>// ① &amp;mut 와 원시 포인터를 섞어 쓰기 (d03)
+let r = &amp;mut v;
+let p = v.as_ptr();               // ★ r 이 살아 있는데 다른 경로
+// ✅ 포인터를 먼저 만들고 참조를 만들지 않기
+
+// ② 슬라이스를 만든 뒤 원본을 수정
+let s = std::slice::from_raw_parts(v.as_ptr(), v.len());
+v.push(1);                        // ★ s 가 무효화됨
+// ✅ 슬라이스 사용을 끝낸 뒤 수정
+
+// ③ Box::from_raw 를 두 번
+let b = Box::from_raw(p);
+let b2 = Box::from_raw(p);        // ★ 이중 해제 (🔗 f06)
+
+// ④ 정렬 위반
+let p = buf.as_ptr().add(1) as *const u64;
+unsafe { *p };                    // ★ 8바이트 정렬 아님
+// ✅ read_unaligned 또는 from_le_bytes
+
+// ⑤ 초기화되지 않은 읽기 (d04)
+
+// ⑥ 누수 (Miri 는 기본적으로 잡습니다)
+std::mem::forget(value);          // 의도적이면 -Zmiri-ignore-leaks</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">CI 에 넣기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">워크플로 (🛠️ b08)</h4>
+      <pre class="code" data-lang="yaml"><code>miri:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@nightly
+      with: { components: miri }
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo miri setup
+    - run: cargo miri test
+      env:
+        MIRIFLAGS: -Zmiri-strict-provenance</code></pre>
+      <pre class="code" data-lang="rust"><code>// 느린 테스트는 Miri 에서 건너뛰기 ★
+#[test]
+#[cfg_attr(miri, ignore)]
+fn huge_dataset() { /* 100만 건 처리 */ }
+
+// Miri 에서만 도는 테스트
+#[test]
+#[cfg(miri)]
+fn miri_only_check() { }
+
+// 코드에서 Miri 여부 확인
+if cfg!(miri) { /* 파일 I/O 를 건너뛰기 */ }
+
+// ★ 실무 구성
+//   · 일반 CI: cargo test (빠름 · 전부)
+//   · Miri job: unsafe 를 쓰는 크레이트만 · 작은 테스트만
+//   · 야간 빌드: 전체 Miri</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">테스트를 Miri 친화적으로 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ★ Miri 는 실행된 코드만 봅니다 — 커버리지가 곧 검증 범위입니다
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 작고 빠르게 — 각 unsafe 경로를 한 번씩 지나가게
+    #[test]
+    fn slice_roundtrip() {
+        let v = vec![1u8, 2, 3];
+        let s = unsafe { as_slice(v.as_ptr(), v.len()) }.unwrap();
+        assert_eq!(s, &amp;[1, 2, 3]);
+    }
+
+    #[test]
+    fn null_and_empty() {
+        assert!(unsafe { as_slice::&lt;u8&gt;(std::ptr::null(), 5) }.is_none());
+        assert!(unsafe { as_slice::&lt;u8&gt;(std::ptr::null(), 0) }.is_some());
+    }
+
+    #[test]
+    fn handle_lifecycle() {
+        let h = unsafe { mylib_new() };
+        assert!(!h.is_null());
+        unsafe { mylib_free(h) };        // ★ 누수·이중 해제를 Miri 가 검사
+    }
+}
+
+// 퍼징과 조합하면 더 좋습니다 (d03)
+//   cargo fuzz 로 찾은 입력을 회귀 테스트로 추가 → Miri 로 검증</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>Miri 는 “테스트가 지나간 길만” 봅니다</b> —
+        <code>unsafe</code> 함수마다 <b>정상 · 널 · 길이 0 · 해제</b> 네 가지 테스트를 두면
+        대부분의 UB 를 잡아냅니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">Stacked Borrows 와 Tree Borrows</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">aliasing 모델이란</h4>
+      <pre class="code" data-lang="text"><code>Rust 의 참조 규칙(🔐 o02)을 unsafe 코드까지 확장하려면
+'정확히 무엇이 허용되는가' 를 정의해야 합니다.
+그 후보가 두 가지입니다.
+
+Stacked Borrows (기본)
+  · 각 메모리 위치마다 '빌림 스택' 을 유지
+  · &amp;mut 를 만들면 그 위에 태그를 push
+  · 다른 경로로 접근하면 그 위의 태그를 pop (무효화) ★
+  · 엄격합니다 — 실제로는 안전한 코드도 거부하는 경우가 있습니다
+
+Tree Borrows (실험적)
+  · 스택 대신 트리로 관리
+  · 더 관대하면서도 필요한 최적화는 유지
+  · 실제 코드에서 오탐이 적습니다
+
+# 둘 다 돌려 보세요
+cargo +nightly miri test
+MIRIFLAGS="-Zmiri-tree-borrows" cargo +nightly miri test
+
+★ Stacked Borrows 가 거부하고 Tree Borrows 가 통과한다면
+  · 당장 UB 는 아닐 수 있지만
+  · 미래에 문제가 될 수 있는 코드입니다
+  → 가능하면 둘 다 통과하도록 고치세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Miri 로 잡히지 않는 것 대비</h4>
+      <pre class="code" data-lang="bash"><code># FFI 가 있으면 살균기도 함께 (d02 · 🔗 f08)
+RUSTFLAGS="-Zsanitizer=address" \
+  cargo +nightly test --target x86_64-unknown-linux-gnu
+
+RUSTFLAGS="-Zsanitizer=thread" \
+  cargo +nightly test --target x86_64-unknown-linux-gnu
+
+# 동시성 로직은 loom (d06)
+RUSTFLAGS="--cfg loom" cargo test --release
+
+# 임의 입력은 퍼징
+cargo fuzz run my_target -- -max_total_time=300
+
+# ★ 검증 도구 조합 (unsafe 가 있는 프로젝트의 권장 구성)
+#   cargo test           빠른 회귀
+#   cargo miri test      Rust UB
+#   ASan/TSan            C 연동 · 실제 메모리
+#   loom                 락 프리 동시성
+#   cargo fuzz           입력 공간 탐색
+#
+#   전부 돌릴 필요는 없습니다 — 코드에 해당하는 것만 고르세요.
+#   순수 Rust + 약간의 unsafe 면 Miri 하나로 충분합니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파이썬·Node 확장에서 특히 유용합니다</b> —
+        FFI 경계 자체는 Miri 가 못 보지만,
+        <b>포인터를 슬라이스로 바꾸는 헬퍼</b>(🔗 f02 · d03)는 순수 Rust 이므로
+        <b>Miri 로 완전히 검증</b>할 수 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>unsafe</code> 를 쓴다면 <b><code>cargo miri test</code></b> 를 CI 에 넣으세요.
+    <b>aliasing · 정렬 · 초기화 · 누수 · 데이터 경쟁</b>을 자동으로 잡아 줍니다.
+    <b>실행된 코드만 검사</b>하므로 <code>unsafe</code> 함수마다 작은 테스트를 두고,
+    <b>FFI 로 넘어간 C 코드는 ASan</b> 으로 따로 봐야 합니다.</div>
+</section>
+
+
+<!-- ==================== d08 ==================== -->
+<section class="sec" id="d08">
+  <div class="sec-head rv">
+    <span class="no">DEEP 08</span>
+    <h2>안전 추상화 설계 — <span class="t">불변식</span>을 문서로</h2>
+    <p class="lead">
+      이 탭에서 <b>가장 중요한 섹션</b>입니다.
+      <code>unsafe</code> 를 쓰는 목적은 <b>안전한 껍데기를 만들어 남에게 내놓는 것</b>이지,
+      <code>unsafe</code> 를 퍼뜨리는 것이 아닙니다.
+      <b>사용자가 <code>unsafe</code> 를 한 줄도 쓰지 않게</b> 만드는 것이 목표입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 형태 ★</h4>
+      <pre class="code" data-lang="rust"><code>use std::ptr::NonNull;
+
+/// C 디코더를 감싼 안전한 핸들.
+///
+/// # 불변식
+/// - `raw` 는 항상 유효한 디코더를 가리킵니다 (생성자가 널을 거부).
+/// - 이 타입이 살아 있는 동안 `raw` 는 해제되지 않습니다.
+/// - `raw` 는 이 인스턴스만 소유합니다 (Clone 을 구현하지 않음).
+pub struct Decoder {
+    raw: NonNull&lt;ffi::Decoder&gt;,
+}
+
+impl Decoder {
+    pub fn new() -&gt; Result&lt;Self, Error&gt; {
+        // SAFETY: decoder_create 는 실패 시 널을 반환합니다.
+        let raw = unsafe { ffi::decoder_create() };
+        NonNull::new(raw).map(|raw| Decoder { raw }).ok_or(Error::Alloc)
+    }
+
+    pub fn decode(&amp;mut self, input: &amp;[u8]) -&gt; Result&lt;Vec&lt;u8&gt;, Error&gt; {
+        // SAFETY: 불변식에 의해 raw 는 유효하고, input 은 Rust 슬라이스라
+        //         ptr/len 이 정확합니다. &amp;mut self 이므로 동시 호출이 없습니다.
+        let n = unsafe {
+            ffi::decode(self.raw.as_ptr(), input.as_ptr(), input.len())
+        };
+        if n &lt; 0 { return Err(Error::from(n)); }
+        Ok(self.take_output(n as usize))
+    }
+}
+
+impl Drop for Decoder {
+    fn drop(&amp;mut self) {
+        // SAFETY: 불변식에 의해 raw 는 유효하고, 여기서 한 번만 해제됩니다.
+        unsafe { ffi::decoder_destroy(self.raw.as_ptr()) }
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설계 체크리스트 ★</h4>
+      <pre class="code" data-lang="text"><code>□ 불변식을 문장으로 쓸 수 있는가
+    쓸 수 없으면 아직 설계가 안 된 것입니다
+
+□ 생성자가 불변식을 보장하는가
+    널 검사 · 범위 검사 · 초기화 (r07 의 Percent 패턴)
+
+□ 모든 공개 메서드가 불변식을 유지하는가
+    &amp;mut self 메서드가 중간 상태를 남기지 않는지
+
+□ 필드가 비공개인가
+    pub 필드가 있으면 사용자가 불변식을 깰 수 있습니다 ★
+
+□ Drop 이 정확히 한 번 해제하는가
+    Clone 을 구현했다면 이중 해제가 되지 않는지
+
+□ Send/Sync 가 올바른가 (⚡ e06)
+    자동으로 붙었다면 정말 맞는지 확인하세요
+
+□ 안전한 코드만으로 UB 를 만들 수 없는가 (d01 의 건전성)
+    "악의적인 사용자" 를 가정해 보세요
+
+□ 패닉 안전한가
+    중간에 패닉해도 불변식이 유지되는가 (🔐 o07)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">불건전해지기 쉬운 자리</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">흔한 실수 다섯 가지 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ① 필드를 pub 으로 열기
+pub struct Buffer { pub ptr: *mut u8, pub len: usize }   // ❌
+// → 사용자가 len 을 바꾸면 범위 밖 접근이 됩니다
+// ✅ 비공개로 두고 접근자 제공
+
+// ② Clone 을 무심코 derive
+#[derive(Clone)]                                          // ❌
+pub struct Handle { raw: *mut ffi::Thing }
+// → 두 인스턴스가 같은 포인터를 해제합니다 (이중 해제)
+// ✅ Clone 을 구현하지 않거나, C 쪽 참조 카운트를 올리기
+
+// ③ 라이프타임을 임의로 만들기
+pub fn get&lt;'a&gt;(&amp;self) -&gt; &amp;'a [u8] {                        // ❌
+    unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+}
+// → 'a 를 호출자가 정하므로 self 보다 오래 살 수 있습니다
+// ✅ pub fn get(&amp;self) -&gt; &amp;[u8]   (self 에 묶입니다 · 🔐 o03)
+
+// ④ Send/Sync 를 근거 없이 붙이기 (⚡ e06)
+unsafe impl Sync for Handle {}                            // ❌ 근거 없음
+
+// ⑤ 콜백 안에서 불변식이 깨질 수 있음
+pub fn for_each(&amp;mut self, f: impl FnMut(&amp;T)) {
+    // f 안에서 사용자가 self 를 만질 수 있다면? (🔗 f07)
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">타입으로 불변식 표현하기 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ① 뉴타입으로 검증된 값 (r07)
+pub struct Utf8Bytes(Vec&lt;u8&gt;);
+impl Utf8Bytes {
+    pub fn new(v: Vec&lt;u8&gt;) -&gt; Result&lt;Self, Error&gt; {
+        std::str::from_utf8(&amp;v)?;              // 한 번만 검증
+        Ok(Utf8Bytes(v))
+    }
+    pub fn as_str(&amp;self) -&gt; &amp;str {
+        // SAFETY: 생성자에서 검증했고, 내부를 바꿀 방법이 없습니다.
+        unsafe { std::str::from_utf8_unchecked(&amp;self.0) }
+    }
+}
+// → 이후 모든 사용처에서 검증 비용이 사라집니다 (⚡ e02)
+
+// ② 타입 상태 — 잘못된 순서를 컴파일 에러로
+pub struct Closed;
+pub struct Open;
+pub struct File&lt;S&gt; { raw: RawFd, _s: PhantomData&lt;S&gt; }
+impl File&lt;Closed&gt; { pub fn open(p: &amp;Path) -&gt; Result&lt;File&lt;Open&gt;&gt; { } }
+impl File&lt;Open&gt; {
+    pub fn read(&amp;mut self) -&gt; Result&lt;Vec&lt;u8&gt;&gt; { }
+    pub fn close(self) -&gt; File&lt;Closed&gt; { }
+}
+// → 닫힌 파일에서 read 를 부르면 컴파일이 안 됩니다 ★
+
+// ③ NonNull · NonZero 로 값의 범위를 타입에
+// ④ sealed 트레이트로 외부 구현 차단 (🔐 o05)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">FFI 래퍼 완성형</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전체 구조 ★</h4>
+      <pre class="code" data-lang="rust"><code>// crates/foo-sys — 생성된 바인딩 (🔗 f08)
+//   unsafe · 보장 없음
+
+// crates/foo — 안전한 래퍼
+#![deny(unsafe_op_in_unsafe_fn)]
+#![warn(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
+
+mod raw;          // unsafe 를 여기 모읍니다 (d01)
+mod error;
+pub use error::{Error, Result};
+
+/// 디코더. 스레드 간 이동은 가능하지만 공유는 불가합니다.
+pub struct Decoder { /* 비공개 */ }
+
+// SAFETY: libfoo 문서 §3.2 — 컨텍스트는 한 번에 한 스레드에서만
+//         사용하면 스레드 간 이동이 안전합니다.
+unsafe impl Send for Decoder {}
+// Sync 는 구현하지 않습니다 (동시 호출 불가)
+
+impl Decoder {
+    pub fn new() -&gt; Result&lt;Self&gt;;
+    pub fn decode(&amp;mut self, input: &amp;[u8]) -&gt; Result&lt;Vec&lt;u8&gt;&gt;;
+    pub fn decode_into(&amp;mut self, input: &amp;[u8], out: &amp;mut Vec&lt;u8&gt;) -&gt; Result&lt;()&gt;;
+    pub fn reset(&amp;mut self);
+}
+// → 사용자는 unsafe 를 한 줄도 쓰지 않습니다 ★
+
+// crates/foo-python — PyO3 바인딩 (🐍 y02)
+// crates/foo-node   — napi-rs 바인딩 (🟨 j02)
+//   둘 다 foo 의 안전한 API 만 씁니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">테스트와 문서</h4>
+      <pre class="code" data-lang="rust"><code>// ① 불변식이 유지되는지 테스트 (r11)
+#[test]
+fn drop_frees_once() {
+    let counter = Arc::new(AtomicUsize::new(0));
+    { let _d = Decoder::new().unwrap(); }
+    // C 쪽 카운터를 확인하거나, 테스트용 훅으로 검증
+}
+
+#[test]
+fn invalid_input_is_error_not_panic() {
+    let mut d = Decoder::new().unwrap();
+    assert!(d.decode(&amp;[0xFF; 3]).is_err());     // 패닉하지 않아야 합니다
+}
+
+// ② 컴파일되면 안 되는 코드를 테스트 (trybuild · r11)
+//   tests/ui/no_sync.rs
+//   fn assert_sync&lt;T: Sync&gt;() {}
+//   fn main() { assert_sync::&lt;Decoder&gt;(); }   // ★ 컴파일 실패해야 정상
+
+// ③ 문서에 계약을 적기
+/// # 스레드 안전성
+/// `Decoder` 는 `Send` 이지만 `Sync` 가 아닙니다.
+/// 여러 스레드에서 쓰려면 각자 인스턴스를 만들거나 `Mutex` 로 감싸세요.
+///
+/// # 패닉
+/// 이 타입의 메서드는 패닉하지 않습니다. 모든 실패는 `Result` 입니다.
+
+// ④ Miri 로 검증 (d07)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“이 타입은 패닉하지 않습니다”를 문서에 적을 수 있다면</b>
+        그 래퍼는 잘 설계된 것입니다 — FFI 경계(🔗 f09)와
+        파이썬·Node 바인딩(🐍 y08)에서 그대로 이득이 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">건전성을 증명하는 방법</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스스로에게 던질 질문</h4>
+      <pre class="code" data-lang="text"><code>① 이 unsafe 블록이 요구하는 조건은 정확히 무엇인가
+     std 문서의 # Safety 를 그대로 옮겨 적어 보세요
+
+② 그 조건을 무엇이 보장하는가
+     · 생성자의 검증
+     · 타입 시스템 (&amp;mut 의 배타성 · NonNull)
+     · 필드 비공개
+     · 외부 문서 (C 라이브러리의 계약)
+
+③ 사용자가 그 보장을 깰 수 있는가
+     · pub 필드 · Clone · Deref · 콜백 · 패닉
+
+④ 다른 스레드가 깰 수 있는가 (⚡ e06)
+
+⑤ 패닉이나 조기 반환 중간에 깨지는가
+     Drop 이 불릴 때 불변식이 유지되는가 (🔐 o07)
+
+★ ①~⑤ 를 SAFETY 주석에 답으로 적으세요.
+  적을 수 없는 항목이 있으면 아직 건전하지 않습니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">참고할 만한 사례</h4>
+      <pre class="code" data-lang="text"><code>★ 잘 설계된 안전 추상화를 읽어 보세요
+  · std::vec::Vec — 가장 교과서적입니다 (용량·길이 불변식)
+  · std::sync::Mutex — UnsafeCell 을 락으로 감쌈 (🔐 o10)
+  · bytemuck — 트레이트로 "변환해도 안전한 타입" 을 표현 (🔗 f03)
+  · crossbeam-epoch — 메모리 회수를 안전 API 로 (⚡ e07)
+  · rust-numpy — numpy 배열을 슬라이스로 (🐍 y06)
+
+★ 읽는 법
+  ① pub 인 것만 먼저 봅니다 (사용자 관점)
+  ② 불변식 주석을 찾습니다
+  ③ unsafe 블록의 SAFETY 주석과 대조합니다
+  ④ "내가 이걸 깰 수 있나" 를 생각해 봅니다
+
+★ 건전성 버그가 발견되면
+  · RustSec 에 보고 (보안 취약점으로 다룹니다)
+  · yank 하고 수정 버전 배포 (🛠️ b02)
+  · CHANGELOG 에 영향 범위를 명시
+
+★ 이 가이드의 원칙과 이어집니다
+  "되돌릴 수 있게" · "경계를 좁게" · "측정하고 결정"
+  안전 추상화는 그 원칙을 타입으로 구현한 것입니다.</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>unsafe</code> 의 목적은 <b>안전한 껍데기를 만들어 내놓는 것</b>입니다.
+    <b>불변식을 문장으로 적고</b>, 생성자에서 보장하고, <b>필드를 비공개로</b> 두세요.
+    <b>안전한 코드만으로 UB 를 만들 수 없어야</b> 건전한 API 이고,
+    <b>타입으로 표현할 수 있으면</b>(뉴타입 · 타입 상태) 문서보다 확실합니다.</div>
+</section>
+
+
+<!-- ==================== d09 ==================== -->
+<section class="sec" id="d09">
+  <div class="sec-head rv">
+    <span class="no">DEEP 09</span>
+    <h2>매크로 — <span class="t">코드를 만드는 코드</span></h2>
+    <p class="lead">
+      <code>println!</code> 의 <code>!</code>, <code>#[derive(Debug)]</code>, <code>#[pyfunction]</code>, <code>#[napi]</code> —
+      이 가이드에서 계속 써 온 것들이 전부 매크로입니다.
+      <b>어떻게 동작하는지 알면</b> 에러 메시지가 읽히고, 필요할 때 직접 만들 수 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 종류 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th></th><th>선언 매크로</th><th>절차 매크로</th></tr>
+        <tr><td>정의</td><td><code>macro_rules!</code></td><td>별도 크레이트</td></tr>
+        <tr><td>동작</td><td>패턴 치환</td><td><b>Rust 코드로 생성</b></td></tr>
+        <tr><td>빌드</td><td>가벼움</td><td>무거움 ★</td></tr>
+        <tr><td>예</td><td><code>vec!</code> <code>println!</code></td><td><code>#[derive]</code> <code>#[pyfunction]</code></td></tr>
+        <tr><td>난이도</td><td>중간</td><td>높음</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// 선언 매크로 — 반복되는 코드를 줄일 때
+macro_rules! hashmap {
+    ($($k:expr =&gt; $v:expr),* $(,)?) =&gt; {{
+        let mut m = std::collections::HashMap::new();
+        $( m.insert($k, $v); )*
+        m
+    }};
+}
+let m = hashmap!{ "a" =&gt; 1, "b" =&gt; 2 };
+
+// FFI 에서 유용한 예 (🔗 f09)
+macro_rules! ffi_guard {
+    ($body:expr) =&gt; {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $body)) {
+            Ok(v) =&gt; v,
+            Err(_) =&gt; { set_last_error("내부 패닉".into()); -99 }
+        }
+    };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_process(p: *const u8, n: usize) -&gt; i32 {
+    ffi_guard!({ /* 본문 */ })
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">패턴 조각 타입</h4>
+      <pre class="code" data-lang="rust"><code>// macro_rules! 에서 쓰는 지정자
+//   $x:expr     식        1 + 2
+//   $x:ident    식별자    my_var
+//   $x:ty       타입      Vec&lt;u8&gt;
+//   $x:literal  리터럴    "abc" · 42
+//   $x:pat      패턴      Some(x)
+//   $x:stmt     문장
+//   $x:block    { … }
+//   $x:item     항목      fn f() {}
+//   $x:tt       토큰 트리 (가장 유연)
+//   $x:path     경로      std::vec::Vec
+
+// 반복
+//   $( … ),*    쉼표로 구분해 0회 이상
+//   $( … );+    세미콜론으로 1회 이상
+//   $(,)?       마지막 쉼표 허용 ★
+
+// 위생(hygiene) — 매크로 안의 변수는 밖과 섞이지 않습니다
+macro_rules! bad {
+    () =&gt; { let x = 1; };        // ★ 이 x 는 호출부의 x 와 다릅니다
+}
+
+// 크레이트 밖으로 내보내기
+#[macro_export]
+macro_rules! my_macro { () =&gt; {}; }
+// 사용: use mycrate::my_macro;
+
+// 디버깅
+//   cargo expand           확장 결과 보기 ★
+//   trace_macros!(true)    (nightly)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">절차 매크로</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 가지 형태</h4>
+      <pre class="code" data-lang="toml"><code># 반드시 별도 크레이트여야 합니다 (b05)
+# mycrate-derive/Cargo.toml
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"</code></pre>
+      <pre class="code" data-lang="rust"><code>use proc_macro::TokenStream;
+use quote::quote;
+use syn::{parse_macro_input, DeriveInput};
+
+// ① derive 매크로 — #[derive(MyTrait)]
+#[proc_macro_derive(Summary, attributes(summary))]
+pub fn derive_summary(input: TokenStream) -&gt; TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+    let name = &amp;ast.ident;
+    quote! {
+        impl Summary for #name {
+            fn summary(&amp;self) -&gt; String { format!("{}", stringify!(#name)) }
+        }
+    }.into()
+}
+
+// ② 어트리뷰트 매크로 — #[my_attr]
+#[proc_macro_attribute]
+pub fn timed(_attr: TokenStream, item: TokenStream) -&gt; TokenStream { }
+
+// ③ 함수형 매크로 — my_macro!(…)
+#[proc_macro]
+pub fn sql(input: TokenStream) -&gt; TokenStream { }
+
+// ★ PyO3 의 #[pyfunction] · napi 의 #[napi] 가 ② 입니다 (🐍 y02 · 🟨 j02)
+//   무엇을 만들어 내는지 보려면
+//   cargo expand --lib</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비용과 판단 ★</h4>
+      <pre class="code" data-lang="text"><code>★ 절차 매크로의 비용
+  · syn · quote · proc-macro2 를 빌드해야 합니다
+      → 빌드 시간이 눈에 띄게 늘어납니다 (🛠️ b10)
+  · 매크로 확장 자체도 컴파일 시간
+  · 에러 메시지가 확장된 코드를 가리킵니다 (읽기 어려움)
+  · 디버깅이 어렵습니다
+  · IDE 지원이 제한적입니다
+
+★ 만들기 전에
+  □ 선언 매크로로 되는가 (훨씬 가볍습니다)
+  □ 제네릭·트레이트로 되는가 ★ 대부분 이쪽이 낫습니다
+  □ 코드 생성 스크립트(build.rs)로 되는가 (🛠️ b01)
+  □ 그냥 반복해서 쓰면 안 되는가 (10번 이하면 대개 그게 낫습니다)
+
+★ 정당한 경우
+  · derive 로 보일러플레이트 제거 (Serialize · Debug)
+  · FFI 바인딩 자동화 (#[pyfunction] · #[napi])
+  · 컴파일 타임 검증 (SQL 쿼리 · 정규식)
+
+★ 실무 결론
+  쓰는 것은 자주, 만드는 것은 드물게.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">매크로 에러 읽기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">확장 결과를 보세요 ★</h4>
+      <pre class="code" data-lang="bash"><code>cargo install cargo-expand
+cargo expand                          # 전체
+cargo expand --lib mymodule           # 모듈만
+cargo expand --bin mybin
+cargo expand --test my_test
+
+# ★ #[pyfunction] 이 무엇을 만드는지 (🐍 y02)
+cargo expand --lib | grep -A 40 "sum_squares"
+
+# 출력을 파일로 두고 읽으세요
+cargo expand &gt; /tmp/expanded.rs</code></pre>
+      <pre class="code" data-lang="text"><code>★ 이렇게 하면 이해되는 것들
+  · #[derive(Debug)] 가 만드는 impl 의 정확한 형태
+  · #[pyclass] 가 만드는 파이썬 타입 등록 코드 (🐍 y05)
+  · #[napi] 가 만드는 타입 변환 코드 (🟨 j03)
+  · async fn 이 만드는 상태 기계 (⚡ e08)
+  · println! 의 실제 호출
+
+★ 에러 메시지가 이상할 때
+  "this error originates in the derive macro `Serialize`"
+  → 확장 결과를 보면 어느 필드가 문제인지 보입니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">매크로를 만든다면</h4>
+      <pre class="code" data-lang="rust"><code>// ① 에러를 좋게 만드세요
+use syn::spanned::Spanned;
+return syn::Error::new(field.span(), "이 필드에는 #[summary] 를 쓸 수 없습니다")
+    .to_compile_error().into();
+// → 사용자 코드의 정확한 위치를 가리킵니다 ★
+
+// ② 컴파일 실패를 테스트 (trybuild)
+// tests/ui/bad_usage.rs  +  bad_usage.stderr
+#[test]
+fn ui() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/ui/*.rs");
+}
+
+// ③ 위생을 지키세요 — 사용자 코드의 이름과 충돌하지 않게
+//    proc_macro2::Span::call_site() vs mixed_site()
+
+// ④ 생성 코드에서 절대 경로를 쓰세요
+quote! { ::std::vec::Vec::new() }        // ★ std 가 가려져도 동작
+
+// ⑤ 문서를 쓰세요 — 무엇을 생성하는지 예제로
+
+// ⑥ 빌드 시간을 재세요 (🛠️ b10)
+cargo build --timings</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>매크로는 유지보수 비용이 큽니다</b> —
+        팀에서 그것을 고칠 수 있는 사람이 <b>한 명뿐이라면</b>
+        만들지 않는 편이 낫습니다. <b>반복되는 코드가 오히려 읽기 쉬울 때가 많습니다.</b>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">컴파일 파이프라인에서의 위치</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 확장되나</h4>
+      <pre class="code" data-lang="text"><code>소스 → 어휘 분석 → 파싱 → AST
+                              ↓
+                         매크로 확장 ★ (여기)
+                              ↓
+                    이름 해석 · 타입 검사 → HIR → MIR → LLVM (d10)
+
+★ 의미
+  · 매크로는 타입을 모릅니다
+      #[derive] 는 필드 '이름과 타입 이름' 만 봅니다.
+      그 타입이 Clone 인지 알 수 없습니다 ★
+      → 그래서 생성된 코드에 T: Clone 바운드를 붙여 둡니다
+  · 매크로는 다른 파일을 못 봅니다 (그 항목의 토큰만)
+  · 매크로 안에서 매크로를 부를 수 있습니다 (재귀 확장)
+      recursion_limit 에 걸리면 #![recursion_limit = "256"]
+
+# 확장 단계 관찰 (nightly)
+cargo +nightly rustc -- -Zunpretty=expanded
+cargo +nightly rustc -- -Zmacro-backtrace</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">알아 두면 좋은 매크로들</h4>
+      <pre class="code" data-lang="rust"><code>// 컴파일 타임 검사
+compile_error!("이 조합은 지원하지 않습니다");         // 🛠️ b04
+const _: () = assert!(size_of::&lt;Header&gt;() == 16);     // 🔗 f03
+
+// 환경·빌드 정보
+env!("CARGO_PKG_VERSION")
+option_env!("MY_VAR")
+include_str!("../README.md")
+include_bytes!("data.bin")
+include!(concat!(env!("OUT_DIR"), "/generated.rs"))    // 🛠️ b01
+
+// 위치 정보
+file!()  line!()  column!()  module_path!()
+std::panic::Location::caller()                         // #[track_caller]
+
+// 디버깅
+dbg!(&amp;value);                    // 값을 출력하고 그대로 반환 ★
+                                 // clippy::dbg_macro 로 커밋 방지 (🛠️ b09)
+todo!()  unimplemented!()  unreachable!()
+
+// 조건부
+cfg!(debug_assertions)
+matches!(x, Some(_))             // r08
+
+// #[track_caller] — 패닉 위치를 호출부로
+#[track_caller]
+pub fn expect_valid(v: Option&lt;T&gt;) -&gt; T { v.expect("유효하지 않음") }
+// → 라이브러리 내부가 아니라 사용자 코드 줄이 표시됩니다 ★</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>선언 매크로(<code>macro_rules!</code>)는 패턴 치환</b>, <b>절차 매크로는 Rust 코드로 생성</b>합니다.
+    이 가이드의 <code>#[pyfunction]</code>·<code>#[napi]</code>·<code>#[derive]</code> 가 전부 후자이고,
+    <b><code>cargo expand</code> 로 무엇을 만드는지 볼 수 있습니다</b>.
+    <b>만들기 전에 제네릭·트레이트로 되는지</b> 먼저 확인하세요 — 빌드 시간과 유지보수 비용이 큽니다.</div>
+</section>
+
+
+<!-- ==================== d10 ==================== -->
+<section class="sec" id="d10">
+  <div class="sec-head rv">
+    <span class="no">DEEP 10</span>
+    <h2>컴파일 과정 — <span class="t">MIR · 단형화 · LLVM</span></h2>
+    <p class="lead">
+      소스가 실행 파일이 되기까지 컴파일러 안에서 무슨 일이 일어나는지 봅니다.
+      <b>빌드가 왜 느린지</b>(🛠️ b10), <b>왜 이터레이터가 빠른지</b>(⚡ e03),
+      <b>왜 제네릭에 비용이 없는지</b>(r10)가 여기서 설명됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">단계 ★</h4>
+      <pre class="code" data-lang="text"><code>소스 (.rs)
+  │  어휘 분석 · 파싱
+  ▼
+AST
+  │  매크로 확장 (d09)
+  ▼
+AST (확장됨)
+  │  이름 해석 · 모듈 구성 (r09)
+  ▼
+HIR (High-level IR)
+  │  타입 검사 · 트레이트 해석 (🔐 o05·o06)
+  ▼
+THIR → MIR (Mid-level IR)          ★ Rust 고유의 표현
+  │  · 빌림 검사 (borrowck) ← 여기서 소유권 검사 (🔐 o02)
+  │  · MIR 최적화 (인라인 · 상수 전파)
+  │  · 단형화 (monomorphization) ← 제네릭을 타입별로 복제 (r10)
+  ▼
+LLVM IR
+  │  LLVM 최적화 (인라인 · 벡터화 · ⚡ e03·e09)
+  ▼
+오브젝트 파일 → 링크 → 실행 파일 / .so / .dll</code></pre>
+      <pre class="code" data-lang="bash"><code># 각 단계 보기 (nightly)
+cargo +nightly rustc -- -Zunpretty=hir
+cargo +nightly rustc -- -Zunpretty=mir
+cargo +nightly rustc -- -Zdump-mir=my_function
+cargo rustc --release -- --emit llvm-ir
+cargo rustc --release -- --emit asm</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">MIR 이 하는 일</h4>
+      <pre class="code" data-lang="text"><code>MIR 은 '제어 흐름 그래프' 형태의 단순한 표현입니다.
+
+  fn add(a: i32, b: i32) -&gt; i32 { a + b }
+
+  MIR (개념)
+    bb0: {
+        _3 = CheckedAdd(_1, _2);
+        assert(!move (_3.1: bool), "overflow") -&gt; bb1;   ★ 디버그 빌드만
+    }
+    bb1: { _0 = move (_3.0: i32); return; }
+
+★ MIR 에서 일어나는 중요한 일들
+  · 빌림 검사 — 소스가 아니라 MIR 위에서 (🔐 o02)
+      그래서 NLL 처럼 '마지막 사용까지' 를 정확히 계산합니다
+  · Drop 삽입 — 스코프 끝에 drop 호출을 끼워 넣습니다 (🔐 o01)
+      조건부 이동이 있으면 drop flag(숨은 bool)도
+  · 오버플로 검사 삽입 (debug_assertions · r02)
+  · MIR 최적화 — 간단한 인라인·상수 전파
+      -Zmir-opt-level 로 조절
+
+# 확인
+cargo +nightly rustc -- -Zdump-mir=add
+ls mir_dump/</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">단형화가 만드는 것</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드 복제 ★</h4>
+      <pre class="code" data-lang="rust"><code>fn process&lt;T: Display&gt;(v: &amp;[T]) { for x in v { println!("{x}"); } }
+
+process(&amp;[1i32]);
+process(&amp;[1.0f64]);
+process(&amp;["a"]);
+
+// 컴파일 후에는 세 벌이 됩니다
+//   process::&lt;i32&gt; · process::&lt;f64&gt; · process::&lt;&amp;str&gt;
+// → 각자 인라인·최적화되어 비용이 0 입니다 (r10)
+// → 대신 코드가 3배가 됩니다 (🛠️ b10)</code></pre>
+      <pre class="code" data-lang="bash"><code># 얼마나 생성됐나 보기
+cargo +nightly rustc --release -- -Zprint-mono-items=lazy 2&gt;&amp;1 | wc -l
+cargo +nightly rustc --release -- -Zprint-mono-items=lazy | grep process
+
+# 어느 크레이트가 코드를 많이 만드나 (🛠️ b10)
+cargo bloat --release --crates
+cargo llvm-lines --release | head -20    # ★ LLVM IR 줄 수로 순위
+#   cargo install cargo-llvm-lines
+
+# 출력 예
+#   Lines    Copies  Function
+#   28,451      312  core::ptr::drop_in_place
+#   19,203       89  serde::de::…
+#   → Copies 가 크면 단형화가 많이 일어난 것입니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">줄이는 방법 (🛠️ b10)</h4>
+      <pre class="code" data-lang="rust"><code>// ① 큰 본체를 비제네릭 함수로 빼기 ★ 가장 효과적
+pub fn read_all(path: impl AsRef&lt;Path&gt;) -&gt; io::Result&lt;String&gt; {
+    fn inner(p: &amp;Path) -&gt; io::Result&lt;String&gt; {
+        /* 큰 본체 — 한 벌만 생성됩니다 */
+    }
+    inner(path.as_ref())
+}
+// → 표준 라이브러리가 곳곳에서 쓰는 기법입니다
+
+// ② dyn 으로 바꾸기 (🔐 o06)
+fn render(items: &amp;[&amp;dyn Draw]) { }          // 한 벌만
+
+// ③ 제네릭 파라미터 수 줄이기
+//    파라미터 3개 × 타입 5개 = 125 조합이 될 수 있습니다
+
+// ④ 열거형으로 (🔐 o06)
+enum Input { Text(String), Bytes(Vec&lt;u8&gt;) }
+fn process(i: Input) { }                     // 한 벌
+
+// ⑤ 자주 쓰는 타입만 미리 인스턴스화
+//    (라이브러리에서 pub fn 으로 노출하면 사용자 쪽에서 안 만듭니다)
+
+// 측정하고 결정하세요 — 빌드 시간과 바이너리 크기를 재세요 (🛠️ b10)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">빌드 시간 진단</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어느 단계가 오래 걸리나</h4>
+      <pre class="code" data-lang="bash"><code># 크레이트별 (🛠️ b01)
+cargo build --timings
+
+# 컴파일 단계별
+cargo +nightly rustc --release -- -Ztime-passes 2&gt;&amp;1 | sort -k2 -rn | head
+#   time: 12.4  LLVM_module_optimize        ★ 최적화가 대부분
+#   time:  3.2  monomorphization_collector  ★ 제네릭이 많음
+#   time:  2.1  type_check_crate
+#   time:  1.8  link                        ★ 링커 교체를 검토 (b10)
+
+# 자세한 프로파일
+cargo +nightly rustc -- -Zself-profile
+# summarize summarize chunk-*.mm_profdata
+
+# ★ 해석과 처방
+#   LLVM 시간 ↑    → 단형화 줄이기 · codegen-units ↑ · opt-level ↓
+#   타입 검사 ↑    → 복잡한 트레이트 해석 · 제네릭 단순화
+#   매크로 확장 ↑  → 절차 매크로 사용 검토 (d09)
+#   링크 ↑         → mold/lld (🛠️ b10)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드 생성 단위</h4>
+      <pre class="code" data-lang="text"><code>rustc 는 크레이트를 여러 'codegen unit' 으로 나눠 병렬로 LLVM 에 넘깁니다.
+
+  codegen-units = 16 (릴리즈 기본)
+    · 병렬화되어 빌드가 빠릅니다
+    · 유닛 간 인라인이 제한되어 코드가 조금 느립니다
+
+  codegen-units = 1
+    · 전체를 한 번에 최적화 → 더 빠른 코드 · 작은 바이너리
+    · 빌드가 느립니다 (병렬화 없음)
+
+  lto = "thin" / "fat" (🛠️ b06)
+    · 크레이트 경계를 넘어 최적화
+    · thin 은 병렬 · fat 은 전체를 한 모듈로
+
+★ 네이티브 모듈 권장 (🛠️ b06)
+  개발: codegen-units 기본 · opt-level 0~1
+  배포: codegen-units = 1 · lto = "fat"
+  → 배포 빌드만 느리게 두고 개발은 빠르게
+
+# 실험
+hyperfine --prepare 'cargo clean' \
+  'cargo build --release' \
+  'CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 cargo build --release'</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">생성 코드 읽기</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어셈블리까지 (⚡ e03)</h4>
+      <pre class="code" data-lang="bash"><code>cargo install cargo-show-asm
+cargo asm --lib "mylib::hot_function" --rust     # 소스와 나란히 ★
+cargo asm --lib --everything | less
+cargo asm --lib --llvm "mylib::hot_function"     # LLVM IR
+
+# godbolt.org — 여러 컴파일러 버전·타깃을 비교
+#   #[no_mangle] pub extern "C" 로 만들면 찾기 쉽습니다
+
+# 확인할 것
+#   · 인라인됐나 (call 명령이 없는지)
+#   · 벡터화됐나 (vpaddd · fmul v0.4s · ⚡ e09)
+#   · 범위 검사가 남았나 (panic 호출)
+#   · 예상보다 코드가 긴가 (단형화 폭발)
+
+# 인라인 힌트 (r03)
+#[inline] #[inline(always)] #[inline(never)]
+#   → 대부분 필요 없습니다. 측정 후에만.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">알아 두면 좋은 것들</h4>
+      <pre class="code" data-lang="text"><code>★ Rust 가 LLVM 에 주는 추가 정보
+  · noalias — &amp;mut 는 배타적이므로 (🔐 o02 · ⚡ e09)
+      C 의 restrict 를 항상 붙인 것과 같은 효과입니다
+  · nonnull · dereferenceable — 참조는 널이 아니고 유효
+  · align — 정렬이 보장됨 (d03)
+  · range 메타데이터 — enum 판별자의 범위
+
+  → 같은 코드에서 Rust 가 C 보다 빠른 경우가 여기서 나옵니다 ★
+
+★ 반대로 최적화를 막는 것
+  · dyn 호출 (인라인 불가 · 🔐 o06)
+  · 부동소수점 순서 (⚡ e03)
+  · 원자 연산 (재배치 금지 · d06)
+  · unsafe 로 만든 aliasing (컴파일러 가정이 틀림 · d03)
+
+★ 다른 백엔드
+  · Cranelift — 디버그 빌드 전용, 훨씬 빠른 코드 생성 (🛠️ b10)
+  · GCC 백엔드 (rustc_codegen_gcc) — 더 많은 아키텍처 지원
+  · 둘 다 실험적입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무에서 여기까지 볼 일은 드뭅니다</b> —
+        <code>cargo build --timings</code> 와 <code>cargo asm</code> 두 개면
+        <b>빌드 시간과 성능 문제의 대부분</b>을 진단할 수 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>MIR 에서 빌림 검사와 Drop 삽입</b>이 일어나고,
+    <b>단형화로 제네릭이 타입별로 복제</b>된 뒤 LLVM 이 최적화합니다.
+    빌드가 느리면 <b><code>-Ztime-passes</code> 로 어느 단계인지</b> 확인하고,
+    <b>LLVM 시간이 크면 단형화를 줄이세요</b>(비제네릭 안쪽 함수 · <code>dyn</code>).
+    <b><code>&amp;mut</code> 의 배타성이 noalias 로 전달</b>되는 것이 Rust 성능의 숨은 이점입니다.</div>
+</section>
+
+
+<!-- ==================== d11 ==================== -->
+<section class="sec" id="d11">
+  <div class="sec-head rv">
+    <span class="no">DEEP 11</span>
+    <h2>ABI 안정성 — <span class="t">Rust 는 자기 자신과도 안 맞습니다</span></h2>
+    <p class="lead">
+      C++ 에서 “컴파일러 버전이 다르면 링크가 안 된다”가 문제였습니다.
+      Rust 는 한 발 더 나갑니다 — <b>공식적으로 ABI 를 보장하지 않습니다</b>.
+      그래서 <b>경계는 항상 C ABI</b>(🔗 f01)여야 하고, 이 제약이 배포 설계를 결정합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 보장되지 않나 ★</h4>
+      <pre class="code" data-lang="text"><code>★ 보장되지 않는 것 (repr(Rust) · 기본값)
+  · 구조체 필드 순서와 패딩 (r07 · 🔗 f03)
+  · enum 판별자의 크기와 값
+  · 함수 호출 규약 (extern "Rust")
+  · 이름 맹글링 형식 (🔗 f02)
+  · 트레이트 객체 vtable 배치 (🔐 o06)
+  · Vec · String 의 내부 표현
+
+★ 언제 달라지나
+  · 컴파일러 버전이 다르면
+  · 최적화 설정이 다르면 (이론상)
+  · 같은 코드라도 재컴파일하면 (이론상)
+
+★ 실제로는
+  같은 컴파일러 버전 · 같은 설정이면 잘 맞습니다.
+  하지만 '보장' 이 없으므로 의존하면 안 됩니다.
+
+★ 그래서 Rust 라이브러리는
+  · 소스로 배포합니다 (crates.io · 🛠️ b02)
+  · 매번 함께 컴파일됩니다 (정적 링크)
+  · 동적 링크한 Rust .so 를 다른 Rust 앱이 쓰는 방식은 쓰지 않습니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">보장되는 것</h4>
+      <pre class="code" data-lang="rust"><code>// ① #[repr(C)] — C 배치 규칙 (🔗 f03)
+#[repr(C)] pub struct Point { pub x: f64, pub y: f64 }
+
+// ② extern "C" — C 호출 규약 (🔗 f02)
+#[no_mangle] pub extern "C" fn f(a: i32) -&gt; i32 { a }
+
+// ③ #[repr(transparent)] — 필드 하나와 동일
+#[repr(transparent)] pub struct Handle(*mut c_void);
+
+// ④ 원시 포인터 · 정수 · 부동소수점 — 플랫폼 ABI 그대로
+
+// ⑤ 널 포인터 최적화 (r08) — 문서화된 보장 ★
+//    Option&lt;&amp;T&gt; · Option&lt;Box&lt;T&gt;&gt; · Option&lt;NonNull&lt;T&gt;&gt;
+//    Option&lt;extern "C" fn()&gt; 는 C 의 널 가능 포인터와 동일
+
+// ★ 이 다섯 가지만 경계에서 쓰면 안전합니다.
+//   그것이 🔗 C ABI 탭의 규칙이 그렇게 생긴 이유입니다.
+
+// 확인
+const _: () = assert!(std::mem::size_of::&lt;Point&gt;() == 16);
+const _: () = assert!(
+    std::mem::size_of::&lt;Option&lt;&amp;u8&gt;&gt;() == std::mem::size_of::&lt;*const u8&gt;()
+);</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">실무에서 부딪히는 지점</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬·Node 확장에서 ★</h4>
+      <pre class="code" data-lang="text"><code>★ 다행히 대부분 문제가 안 됩니다
+  · 확장 모듈은 하나의 .so/.pyd 로 통째로 빌드됩니다
+  · 안에서 쓰는 Rust 크레이트는 전부 정적 링크됩니다
+  · 밖으로 나가는 경계는 파이썬 C API / N-API (둘 다 C ABI) ★
+
+★ 그래도 조심할 것
+  ① 여러 확장이 같은 Rust 크레이트를 각자 정적 링크
+       → 각자 자기 사본을 갖습니다 (전역 상태가 공유되지 않음)
+       예: 두 확장이 rayon 을 쓰면 스레드 풀이 두 개 (⚡ e05)
+       예: log 크레이트의 전역 로거가 각자 따로 (r09 의 중복 문제)
+
+  ② 심볼 충돌 (🔗 f02)
+       두 확장이 같은 C 라이브러리를 정적 링크하면
+       심볼이 겹쳐 엉뚱한 버전이 불릴 수 있습니다
+       → 버전 스크립트로 심볼을 가리세요
+
+  ③ 파이썬 ABI (🐍 y11)
+       abi3 를 쓰면 파이썬 버전 축이 사라집니다
+
+  ④ Node ABI (🟨 j01)
+       N-API 덕분에 Node 버전 축이 사라집니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 와 비교</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th></th><th>C++</th><th>Rust</th></tr>
+        <tr><td>ABI 안정성</td><td>플랫폼별 표준</td><td><b>없음</b></td></tr>
+        <tr><td>동적 링크</td><td>가능</td><td>실질적으로 불가</td></tr>
+        <tr><td>배포 형태</td><td>헤더 + .so</td><td><b>소스</b></td></tr>
+        <tr><td>버전 충돌</td><td>런타임에 발견</td><td><b>빌드에서</b></td></tr>
+        <tr><td>바이너리 크기</td><td>작음(공유)</td><td>큼(정적)</td></tr>
+        <tr><td>배포 편의</td><td>의존성 필요</td><td><b>파일 하나</b></td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ 트레이드오프
+  Rust 의 선택: "ABI 를 포기하고 최적화·진화 자유를 얻는다"
+
+  잃은 것
+  · 시스템 라이브러리로 배포하기 어렵습니다
+  · 바이너리가 큽니다 (🛠️ b10)
+  · 보안 패치를 위해 재컴파일이 필요합니다
+
+  얻은 것
+  · 필드 재배치 등 최적화 (r07)
+  · 언어를 계속 개선할 수 있습니다
+  · "내 PC 에선 되는데" 가 거의 없습니다 ★
+  · 배포가 단순합니다 (의존 .so 가 없음)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">경계를 설계한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 C ABI 를 쓸까 ★</h4>
+      <pre class="code" data-lang="text"><code>✅ C ABI 가 필요한 경우
+  · 다른 언어에서 부를 때 (🔗 f01)
+  · 플러그인 시스템 (동적 로딩)
+  · 시스템 라이브러리로 배포
+  · 컴파일러 버전이 다른 코드와 링크
+
+❌ 필요 없는 경우
+  · 순수 Rust 프로젝트 (cargo 가 전부 함께 빌드)
+  · PyO3 · napi-rs 확장 (프레임워크가 경계를 처리)
+  · WASM (🟨 j08)
+
+★ 플러그인을 만든다면
+  · C ABI 로 인터페이스를 정의하고 (🔗 f01·f09)
+  · 버전 확인 함수를 두고 (🔗 f09)
+  · abi_stable 크레이트를 검토하세요
+      Rust 타입을 안정적으로 주고받게 해 주는 크레이트입니다
+      (제약이 많으므로 정말 필요할 때만)
+
+★ 가장 단순한 대안
+  플러그인을 '별도 프로세스' 로 두고 IPC (🟨 j01)
+  → ABI 문제가 통째로 사라집니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 시 확인할 것</h4>
+      <pre class="code" data-lang="bash"><code># 무엇에 동적 링크했나
+ldd target/release/libmylib.so
+otool -L target/release/libmylib.dylib      # 맥
+dumpbin /dependents target\release\mylib.dll
+
+# 순수 Rust 라면 이 정도만 나와야 합니다
+#   linux-vdso · libgcc_s · libc · libm · libpthread
+
+# 완전 정적 (🛠️ b07)
+cargo build --release --target x86_64-unknown-linux-musl
+ldd target/.../libmylib.so    # "not a dynamic executable"
+
+# 심볼 확인 (🔗 f02)
+nm -D libmylib.so | grep " T " | wc -l
+#   내보내려던 것보다 훨씬 많으면 정적 링크한 C 라이브러리가 새는 중
+
+# glibc 버전 요구사항 (🛠️ b07)
+objdump -T libmylib.so | grep GLIBC | sed 's/.*GLIBC_/GLIBC_/' | sort -uV | tail -3
+
+# ★ 이 네 가지를 CI 에서 확인하면 (🛠️ b08)
+#   "다른 환경에서 로드 실패" 를 배포 전에 잡습니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>정적 링크가 기본이라 배포가 오히려 쉽습니다</b> —
+        C++ 처럼 “런타임 재배포 패키지를 깔아 주세요”가 없습니다.
+        <b>파일 하나만 있으면 동작</b>하는 것이 Rust 배포의 큰 장점입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">앞으로의 변화</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">논의되고 있는 것들</h4>
+      <pre class="code" data-lang="text"><code>★ #[repr(crABI)] / extern "crabi" (제안 단계)
+  Rust 타입 일부(String · Vec · Option 등)를 안정적으로 주고받는
+  ABI 를 정의하려는 시도입니다. 아직 확정되지 않았습니다.
+
+★ v0 맹글링 (안정화 진행 중)
+  기존 legacy 맹글링보다 정보가 풍부하고 디맹글이 쉽습니다.
+  -Csymbol-mangling-version=v0
+
+★ 크레이트 간 동적 링크
+  -Cprefer-dynamic 옵션이 있지만 실험적이고,
+  정확히 같은 컴파일러·같은 플래그를 요구합니다.
+  실무에서 쓰지 마세요.
+
+★ 그래서 당분간
+  · 경계는 C ABI (🔗 f01)
+  · 나머지는 정적 링크
+  · 이 전제로 설계하세요
+
+# 현재 맹글링 확인
+nm target/release/libmylib.rlib | head
+rustfilt &lt; symbols.txt</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이 가이드 전체와의 연결 ★</h4>
+      <pre class="code" data-lang="text"><code>ABI 불안정이라는 하나의 제약이
+이 가이드의 여러 결정을 만들었습니다.
+
+  🔗 f01  경계는 C ABI — 다른 선택지가 없습니다
+  🔗 f02  #[no_mangle] extern "C" — 맹글링·규약을 고정
+  🔗 f03  #[repr(C)] — 배치를 고정
+  🔗 f06  소유권 규약 — Vec 을 그대로 못 넘기므로
+  🔗 f09  에러 코드 — Result 를 그대로 못 넘기므로
+  🐍 y11  abi3 — 파이썬 쪽 ABI 축을 없애기
+  🟨 j01  N-API — Node 쪽 ABI 축을 없애기
+  🛠️ b10  바이너리 크기 — 정적 링크의 대가
+
+★ 정리하면
+  "Rust 안에서는 마음껏, 경계에서는 C 로"
+  이 한 줄이 네이티브 모듈 설계의 핵심 원칙입니다.</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> Rust 는 <b>ABI 를 보장하지 않습니다</b> — 자기 자신과도.
+    그래서 <b>정적 링크가 기본</b>이고, <b>경계는 반드시 <code>#[repr(C)]</code> + <code>extern "C"</code></b> 입니다.
+    확장 모듈은 통째로 빌드되므로 대개 문제가 없지만,
+    <b>여러 확장이 같은 크레이트를 각자 링크하면 전역 상태가 공유되지 않는다</b>는 점은 기억하세요.</div>
+</section>
+
+
+<!-- ==================== d12 ==================== -->
+<section class="sec" id="d12">
+  <div class="sec-head rv">
+    <span class="no">DEEP 12</span>
+    <h2>Rust 를 <span class="t">쓰지 말아야 할 때</span></h2>
+    <p class="lead">
+      마지막 섹션입니다. <b>안 쓰는 판단도 실력</b>입니다.
+      Rust 가 좋은 언어라는 것과, <b>지금 이 프로젝트에 맞는다</b>는 것은 다른 이야기입니다.
+      <b>솔직한 기준</b>을 정리합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쓰지 말아야 할 신호 ★</h4>
+      <pre class="code" data-lang="text"><code>① 팀에 Rust 를 읽을 수 있는 사람이 나뿐이다 ★
+     · 내가 없으면 아무도 못 고칩니다
+     · 코드 리뷰가 형식적이 됩니다
+     · 가장 흔하고 가장 비싼 실패입니다
+
+② 병목이 I/O 나 네트워크다
+     언어를 바꿔도 그대로입니다 (⚡ e10)
+
+③ numpy · polars 로 이미 충분하다 (🐍 y01)
+     그것들도 이미 C · Rust 입니다
+
+④ 요구사항이 자주 바뀐다
+     Rust 는 리팩터링이 안전하지만 '처음 쓰기' 는 느립니다
+     프로토타입 단계라면 파이썬이 낫습니다
+
+⑤ 배포 대상 플랫폼이 다양한데 CI 를 갖출 여력이 없다 (🛠️ b08)
+
+⑥ 실행 시간이 이미 충분히 빠르다
+     "빨라서 나쁠 건 없다" 는 이유가 아닙니다
+
+⑦ 기존 C++ 자산이 크고 잘 관리되고 있다
+     경계를 새로 만드는 비용이 이득보다 클 수 있습니다 (🔵 C++ 가이드)
+
+⑧ 컴파일 시간이 개발 흐름의 병목이 될 규모다 (🛠️ b10)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대안 목록</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>상황</th><th>대안</th></tr>
+        <tr><td>파이썬 루프가 느림</td><td>numpy · polars (🐍 y01)</td></tr>
+        <tr><td>수치 계산</td><td>numba · JAX</td></tr>
+        <tr><td>파이썬 확장 소규모</td><td>Cython</td></tr>
+        <tr><td>기존 C++ 있음</td><td>pybind11 (🔵)</td></tr>
+        <tr><td>JS 가 느림</td><td>V8 최적화 · WASM (🟨 j01)</td></tr>
+        <tr><td>동시성</td><td>Go</td></tr>
+        <tr><td>JVM 생태계</td><td>Java · Kotlin (☕)</td></tr>
+        <tr><td>게임</td><td>C# · Unity (🟣)</td></tr>
+        <tr><td>단순 CLI</td><td>Go · 셸</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ 특히 Go 와 비교
+  · 배우기 쉽고 컴파일이 빠릅니다
+  · GC 가 있어 소유권 고민이 없습니다
+  · 동시성이 단순합니다
+  · 대신 지연 시간 편차(GC)와 표현력에서 밀립니다
+
+  → "팀 전체가 빠르게 익혀야 한다" 면 Go 가 현실적입니다.
+    "지연 시간이 제품의 가치" 라면 Rust 입니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">그럼에도 쓸 만한 경우</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Rust 가 확실히 유리한 자리 ★</h4>
+      <pre class="code" data-lang="text"><code>① 파이썬·Node 의 핫스팟 하나를 갈아 끼우기 ★
+     이 가이드의 주제입니다. 범위가 좁아 위험이 작습니다.
+     · 인터페이스가 몇 개뿐 (🐍 y01 원칙 ②)
+     · 폴백을 남길 수 있음 (되돌릴 수 있음)
+     · 팀의 나머지는 파이썬만 알아도 됩니다
+
+② 지연 시간 편차가 중요한 서비스
+     GC 스파이크가 없습니다 (⚡ e10 의 p99)
+
+③ GIL 때문에 막힌 CPU 병렬 (🐍 y07)
+     파이썬으로는 물리적으로 불가능합니다
+
+④ 메모리 안전이 곧 보안인 영역
+     파서 · 암호 · 네트워크 프로토콜
+
+⑤ 여러 언어에서 공유할 코어 (🔗 f10)
+     한 번 만들어 파이썬·Node·C#·자바에서
+
+⑥ 오래 유지될 인프라 코드
+     리팩터링이 안전해 수년 뒤에도 고칠 수 있습니다
+
+⑦ 팀이 배우기로 결정했고, 시간을 확보했을 때
+     보통 2~4주면 실무 코드를 씁니다 (r12)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">위험을 줄이며 도입하기</h4>
+      <pre class="code" data-lang="text"><code>★ 단계적 도입 (이 가이드의 원칙 그대로)
+
+  1단계 — 하나의 함수
+     · 프로파일러가 가리키는 함수 하나만 (🐍 y01)
+     · 순수 파이썬 폴백을 함께 (🐍 y01 · y12)
+     · parity 테스트로 결과 대조 (r11)
+     · 한 주면 끝납니다
+
+  2단계 — 측정하고 보고
+     · 엔드투엔드 배수 · p99 · 메모리 (⚡ e10)
+     · 빌드·배포 비용도 함께 (🛠️ b08)
+
+  3단계 — 팀에 공유
+     · 두 번째 사람이 읽고 고칠 수 있는지 확인 ★
+     · 안 되면 여기서 멈추는 것이 옳습니다
+
+  4단계 — 범위 확대
+     · 인접한 핫스팟으로
+     · 공통 크레이트로 정리 (🛠️ b05)
+
+★ 각 단계에서 되돌릴 수 있어야 합니다.
+  환경 변수 하나로 폴백되는 구조를 끝까지 유지하세요.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">의사결정을 문서로</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">결정 기록 템플릿 ★</h4>
+      <pre class="code" data-lang="markdown"><code># ADR-012: 로그 파서를 Rust 확장으로 교체
+
+## 배경
+일일 배치의 로그 파싱이 전체 42초 중 31초를 차지.
+py-spy 프로파일 결과 `parse_line` 이 74% (측정: 2026-08-01, 2.3GB 로그).
+
+## 검토한 대안
+| 방안 | 예상 개선 | 비용 | 판단 |
+|---|---|---|---|
+| 정규식 최적화 | 1.3배 | 낮음 | 시도함, 부족 |
+| numpy 벡터화 | 불가 | — | 문자열이라 부적합 |
+| Cython | 5~10배 | 중간 | 유지보수자 1명 |
+| **Rust + PyO3** | **20~60배** | 중간 | **채택** |
+
+## 결정
+`parse_line` 만 Rust 로 이전. 순수 파이썬 폴백 유지.
+`LOGPARSE_NATIVE=0` 으로 즉시 되돌릴 수 있음.
+
+## 결과 (2026-08-15 측정)
+전체 42초 → 6.1초 (6.9배). p99 지연 편차도 감소.
+CI 시간 +4분 (플랫폼 3종 빌드).
+
+## 위험과 대응
+- 유지보수자 2명 확보 (○○, □□) ← 조건이었음
+- parity 테스트 CI 필수
+- 6개월 뒤 재검토</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">되돌릴 때의 기준</h4>
+      <pre class="code" data-lang="text"><code>★ 이럴 때는 솔직하게 되돌리세요
+  · 기대한 성능이 안 나오고 원인도 못 찾는다 (⚡ e10 점검표를 다 봤는데)
+  · 유지보수자가 다시 한 명이 됐다
+  · 빌드·배포 비용이 성능 이득보다 크다
+  · 버그가 반복되는데 디버깅이 안 된다 (🐍 y12)
+
+★ 되돌리기가 쉬워야 이 판단을 할 수 있습니다
+  · 폴백 구현을 지우지 마세요
+  · 환경 변수 스위치를 유지하세요
+  · parity 테스트를 계속 돌리세요
+  → 이 세 가지가 있으면 '되돌림' 이 실패가 아니라 선택이 됩니다 ★
+
+★ 그리고 기록을 남기세요
+  왜 도입했고 왜 되돌렸는지가
+  다음 사람(또는 미래의 나)에게 가장 값진 자료입니다.</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>이 가이드가 처음부터 반복해 온 것</b>입니다 —
+        <b>측정하고 결정하라 · 경계를 좁게 · 되돌릴 수 있게 · 과장하지 마라 · 안 쓰는 판단도 실력</b>.
+        기술 선택에서 이 다섯 가지를 지키면 <b>틀려도 회복할 수 있습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">여기서 어디로 갈까</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">더 깊이 들어가려면</h4>
+      <pre class="code" data-lang="text"><code>★ 읽을 것
+  · The Rust Programming Language (공식 책) — 기초를 다시
+  · Rust for Rustaceans — 중급 이후의 공백을 메웁니다 ★
+  · Rust Atomics and Locks — 동시성 (d06)
+  · The Rustonomicon — unsafe (d01·d02)
+  · Rust Performance Book — 성능 (⚡ 탭)
+  · Rust API Guidelines — 라이브러리 설계 (🛠️ b02)
+
+★ 읽을 코드
+  · std 의 Vec · Option · Iterator 구현
+  · crossbeam · bytemuck · rayon
+  · PyO3 · napi-rs 의 매크로 구현 (d09)
+
+★ 만들어 볼 것
+  · 이 가이드의 예제를 실제로 빌드해 보기
+  · 자기 프로젝트의 핫스팟 하나를 옮겨 보기 (🐍 y01)
+  · 작은 크레이트를 crates.io 에 올려 보기 (🛠️ b02)
+
+★ 이 가이드의 다른 탭
+  · 🔵 C++ 가이드 — 같은 목적을 C++ 로 (비교해 보면 이해가 깊어집니다)
+  · 🐍 파이썬 · ☕ 자바 · 🟨 JS·TS — 부르는 쪽의 관점</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이 가이드의 요약 ★</h4>
+      <pre class="code" data-lang="text"><code>다섯 원칙 (모든 탭에서 반복된 것)
+
+  ① 경계를 넘는 횟수를 데이터 크기와 분리하라
+       배치로 묶고, 제로카피로 (🐍 y01·y06 · 🟨 j04)
+
+  ② 좁고 안정된 경계를 만들어라
+       C ABI · abi3 · N-API · 함수 몇 개 (🔗 f01 · 🐍 y11 · 🟨 j01)
+
+  ③ 측정하고 결정하라
+       --release · criterion · 엔드투엔드 (⚡ e01·e10)
+
+  ④ 되돌릴 수 있게 하라
+       폴백 + parity 테스트 + 환경 변수 (🐍 y01·y12)
+
+  ⑤ 안 쓰는 판단도 실력이다
+       대안을 먼저 세고, 팀 비용을 계산에 넣어라 (d12)
+
+★ 그리고 Rust 특유의 것
+  · 소유권은 규칙이 아니라 설계 도구입니다 (🔐 o01)
+  · 컴파일러 에러는 잔소리가 아니라 조언입니다 (r01)
+  · 안전한 껍데기를 만드는 것이 unsafe 의 목적입니다 (d08)</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>팀에 읽을 사람이 둘 이상인가</b>가 가장 중요한 질문입니다.
+    <b>범위를 좁게(함수 하나) 시작하고, 폴백을 남기고, 측정해서 보고</b>하세요.
+    기대만 못하면 <b>솔직하게 되돌리는 것</b>이 옳은 판단이고,
+    되돌릴 수 있게 만들어 두었다면 그것은 실패가 아니라 선택입니다.
+    <b>여기까지 읽으셨다면 이제 직접 만들어 볼 차례입니다.</b> 🦀</div>
+</section>
+
+<!-- END pane-deep -->
+</div>

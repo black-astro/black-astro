@@ -1,0 +1,2577 @@
+<!-- ============================================================
+     빌드 · 배포 PANE
+     ============================================================ -->
+<div class="pane" id="pane-build">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> cargo · Cargo.toml · feature · 워크스페이스 · 크로스 · CI</div>
+  <h1>도구 하나가<br>전부를 합니다</h1>
+  <p class="tx">
+    C++ 에서 CMake · vcpkg · 컴파일러 플래그 · CI 스크립트를 각각 배워야 했던 자리를
+    <b><code>cargo</code> 하나가 대신합니다</b>.
+    여기서는 <b>실무에 실제로 필요한 것만</b> — Cargo.toml 읽는 법, feature 설계,
+    크로스 컴파일, 그리고 <b>빌드가 느려졌을 때 무엇부터 손대야 하는지</b>를 봅니다.
+  </p>
+  <div class="stats">
+    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>1</b><span>도구로 전부</span></div>
+    <div><b>3</b><span>OS 자동 빌드</span></div>
+    <div><b>4</b><span>깊이 층</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== b01 ==================== -->
+<section class="sec" id="b01">
+  <div class="sec-head rv">
+    <span class="no">BUILD 01</span>
+    <h2>cargo 가 하는 일 — <span class="t">한 도구로 전부</span></h2>
+    <p class="lead">
+      cargo 는 빌드 도구이자 패키지 관리자이자 테스트 러너이자 문서 생성기입니다.
+      <b>이 하나가 C++ 의 도구 대여섯 개를 대신합니다</b> —
+      그리고 그것이 Rust 로 네이티브 모듈을 만들 때 가장 크게 체감되는 이점입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 와 나란히 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>하는 일</th><th>C++</th><th>Rust</th></tr>
+        <tr><td>빌드</td><td>CMake · Make</td><td rowspan="6" style="vertical-align:middle"><b><code>cargo</code></b></td></tr>
+        <tr><td>의존성</td><td>vcpkg · Conan</td></tr>
+        <tr><td>테스트</td><td>gtest · Catch2</td></tr>
+        <tr><td>벤치마크</td><td>google-benchmark</td></tr>
+        <tr><td>문서</td><td>Doxygen</td></tr>
+        <tr><td>포맷·린트</td><td>clang-format · tidy</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># 매일 쓰는 명령
+cargo new 이름 --lib     # 프로젝트 만들기
+cargo check              # 타입 검사만 ★ 가장 자주 (build 보다 3~5배 빠름)
+cargo build              # 디버그 빌드
+cargo build --release    # 최적화 빌드 ★ 성능 측정은 반드시 이것
+cargo run                # 빌드 + 실행
+cargo test               # 테스트 (문서 예제까지 · r11)
+cargo doc --open         # 문서 생성 + 브라우저
+cargo add rand           # 의존성 추가
+cargo clippy             # 린트 (b09)
+cargo fmt                # 포맷 (b09)
+cargo bench              # 벤치마크 (⚡ e01)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그 외 알아 두면 좋은 것</h4>
+      <pre class="code" data-lang="bash"><code>cargo tree               # 의존성 트리 ★
+cargo tree -d            # 중복된 크레이트 (r09)
+cargo tree -i syn        # 누가 syn 을 끌어왔나 (역추적)
+cargo update             # 의존성 갱신 (b03)
+cargo clean              # target/ 지우기
+cargo build --timings    # 무엇이 오래 걸리나 → HTML 리포트 ★
+cargo build -v           # 실제 rustc 명령 보기
+cargo metadata --format-version 1 | jq   # 프로젝트 정보를 JSON 으로
+
+# 유용한 서브커맨드 (cargo install 로 설치)
+cargo install cargo-edit cargo-outdated cargo-audit cargo-deny
+cargo install cargo-expand      # 매크로 확장 보기 (🔬 d09)
+cargo install cargo-bloat       # 바이너리에서 뭐가 큰지 (b10)
+cargo install cargo-nextest     # 더 빠른 테스트 러너 ★
+cargo install cargo-watch       # 파일 변경 감시</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>cargo check</code> 를 습관으로</b> — 코드를 생성하지 않고 타입만 보므로
+        훨씬 빠릅니다. 에디터의 rust-analyzer 가 <b>저장할 때마다 자동으로</b> 돌려 줍니다.
+        <b>빌드는 실제로 실행할 때만</b> 하면 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">빌드 결과물이 어디에 생기나</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">target 디렉터리</h4>
+      <pre class="code" data-lang="text"><code>target/
+├─ debug/                cargo build
+│  ├─ libmylib.so        cdylib 결과물
+│  ├─ libmylib.rlib      Rust 라이브러리
+│  ├─ deps/              의존 크레이트 + 테스트 바이너리
+│  ├─ build/             build.rs 실행 결과
+│  └─ incremental/       증분 컴파일 캐시 ★ 크기가 큽니다
+├─ release/              cargo build --release
+├─ doc/                  cargo doc
+└─ CACHEDIR.TAG          백업 도구가 건너뛰게 하는 표시
+
+# 크기 확인 — 수 GB 가 되는 것이 정상입니다
+du -sh target/*
+
+# 여러 프로젝트가 캐시를 공유하게 (b10)
+export CARGO_TARGET_DIR=~/.cargo-shared-target
+
+# 안 쓰는 결과물 정리
+cargo install cargo-sweep
+cargo sweep --time 30            # 30일 이상 안 쓴 것 삭제</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">환경 변수와 설정 파일</h4>
+      <pre class="code" data-lang="toml"><code># .cargo/config.toml — 프로젝트나 홈 디렉터리에
+[build]
+target-dir = "target"
+rustflags = ["-C", "target-cpu=native"]     # ❗ 배포용엔 쓰지 마세요 (b06)
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"] # 링커 교체 — 빌드가 빨라집니다 ★
+
+[alias]
+c = "check"
+t = "test"
+rr = "run --release"
+
+[net]
+git-fetch-with-cli = true                   # 사내 git 인증이 필요할 때</code></pre>
+      <pre class="code" data-lang="bash"><code># 자주 쓰는 환경 변수
+CARGO_TARGET_DIR=...        빌드 결과 위치
+RUSTFLAGS="-C ..."          컴파일 플래그 ★ 바꾸면 전체 재빌드
+RUST_BACKTRACE=1            패닉 시 스택 트레이스
+RUST_LOG=debug              log 크레이트 레벨
+RUSTC_WRAPPER=sccache       빌드 캐시 (b10)
+CARGO_NET_OFFLINE=true      오프라인 빌드</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">build.rs 로 빌드에 끼어들기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 쓰나</h4>
+      <pre class="code" data-lang="rust"><code>// build.rs — 크레이트 컴파일 '전에' 실행됩니다
+fn main() {
+    // ① C 코드 함께 컴파일 (🔗 f08)
+    cc::Build::new().file("src/fast.c").compile("fast");
+
+    // ② 바인딩 생성 (bindgen · cbindgen · 🔗 f04·f08)
+    // ③ 코드 생성 (프로토콜 정의 → Rust 소스)
+    let out = std::env::var("OUT_DIR").unwrap();
+    std::fs::write(format!("{out}/generated.rs"), gen_code()).unwrap();
+
+    // ④ 빌드 시각 · git 해시를 상수로 ★
+    let hash = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"]).output()
+        .map(|o| String::from_utf8_lossy(&amp;o.stdout).trim().to_string())
+        .unwrap_or_default();
+    println!("cargo:rustc-env=GIT_HASH={hash}");
+
+    // ⑤ 조건부 컴파일 플래그
+    if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
+        println!("cargo:rustc-cfg=feature=\"win\"");
+    }
+
+    // ★ 언제 다시 실행할지 반드시 지정하세요
+    println!("cargo:rerun-if-changed=src/fast.c");
+    println!("cargo:rerun-if-env-changed=MYLIB_PATH");
+}</code></pre>
+      <pre class="code" data-lang="rust"><code>// 생성된 코드 쓰기
+include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+const GIT_HASH: &amp;str = env!("GIT_HASH");</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">build.rs 의 주의점</h4>
+      <pre class="code" data-lang="text"><code>□ rerun-if 를 지정하지 않으면
+    소스가 하나라도 바뀔 때마다 build.rs 가 다시 돕니다 ★
+    → 빌드가 눈에 띄게 느려집니다
+
+□ 빌드 머신에 도구를 요구합니다
+    cc → C 컴파일러 · bindgen → libclang
+    → 사용자가 sdist 로 설치할 때 실패의 원인 (🐍 y12)
+    → 가능하면 생성물을 커밋하고 feature 로 선택 (🔗 f08)
+
+□ 크로스 컴파일에서 헷갈립니다 (b07)
+    build.rs 는 '호스트' 에서 컴파일·실행됩니다
+    HOST vs TARGET 환경 변수를 구분하세요
+
+□ 네트워크를 쓰지 마세요
+    빌드 재현성이 깨지고, 오프라인 빌드가 불가능해집니다
+
+□ 출력은 OUT_DIR 에만
+    소스 디렉터리에 쓰면 crates.io 게시가 실패합니다
+
+★ 대안을 먼저 검토하세요
+    · 상수 → 그냥 코드에 쓰기
+    · 코드 생성 → 절차 매크로 (🔬 d09)
+    · 플랫폼 분기 → #[cfg(target_os = "...")]</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>build.rs</code> 는 임의 코드를 실행합니다</b> —
+        의존성을 추가할 때 <b>그 크레이트의 <code>build.rs</code> 도 내 머신에서 돕니다</b>.
+        공급망 보안 관점에서 <code>cargo-deny</code> 로 감사하세요(b09).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">cargo 가 rustc 를 부르는 방식</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">지문(fingerprint)과 증분 빌드</h4>
+      <pre class="code" data-lang="text"><code>cargo 는 크레이트마다 '지문' 을 계산해 저장합니다
+  · 소스 파일 내용(mtime + 해시)
+  · 컴파일 플래그 · feature 조합
+  · 의존 크레이트의 지문
+  · rustc 버전 · 타깃
+
+하나라도 바뀌면 그 크레이트와 '그것에 의존하는 전부' 를 다시 빌드합니다.
+
+★ 그래서 이런 일이 생깁니다
+  · RUSTFLAGS 를 바꾸면 → 전체 재빌드
+  · feature 를 켜고 끄면 → 그 크레이트 이하 전부
+  · --release 와 debug 를 오가면 → 각각 별도 (둘 다 캐시됩니다)
+  · CI 에서 캐시가 안 먹으면 → 매번 전체 빌드 (b08)
+
+# 왜 다시 빌드하는지 보기
+CARGO_LOG=cargo::core::compiler::fingerprint=info cargo build 2&gt;&amp;1 | head -30
+
+# 무엇이 오래 걸리는지
+cargo build --timings
+#   → target/cargo-timings/cargo-timing.html ★ 병렬화 상태까지 보입니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 rustc 를 부를 때</h4>
+      <pre class="code" data-lang="bash"><code># cargo 없이 (의존성이 없다면)
+rustc --edition 2021 -O src/lib.rs --crate-type cdylib
+
+# cargo 가 넘기는 인자 보기
+cargo build -v 2&gt;&amp;1 | grep rustc | head -3
+
+# 특정 크레이트에만 플래그 주기
+cargo rustc --release -p mycrate -- -C target-cpu=native
+
+# 어셈블리·LLVM IR 보기 (⚡ e03 · 🔬 d10)
+cargo rustc --release -- --emit asm
+cargo rustc --release -- --emit llvm-ir
+cargo asm --lib my_function          # cargo-show-asm (더 편합니다)
+
+# 타입 크기 (r07 · 🔗 f03)
+cargo +nightly rustc -- -Zprint-type-sizes
+
+# 컴파일 단계별 시간 (🔬 d10)
+cargo +nightly rustc -- -Ztime-passes</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>cargo</code> 하나가 <b>빌드·의존성·테스트·문서·린트</b>를 전부 합니다.
+    편집 중엔 <b><code>cargo check</code></b>, 성능은 <b><code>--release</code></b>,
+    느려지면 <b><code>cargo build --timings</code></b> 로 원인을 보세요.
+    <code>build.rs</code> 는 강력하지만 <b><code>rerun-if-changed</code> 를 반드시</b> 지정하고,
+    <b>가능하면 안 쓰는 편</b>이 배포가 단순해집니다.</div>
+</section>
+
+
+<!-- ==================== b02 ==================== -->
+<section class="sec" id="b02">
+  <div class="sec-head rv">
+    <span class="no">BUILD 02</span>
+    <h2>Cargo.toml — <span class="t">읽는 법만 알면 됩니다</span></h2>
+    <p class="lead">
+      프로젝트가 무엇을 쓰는지 적어 두는 파일입니다.
+      CMakeLists 처럼 <b>로직이 들어가지 않고</b>, 선언만 있습니다.
+      <b>실무에서 실제로 만나는 항목</b>만 정리합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전체 구조</h4>
+      <pre class="code" data-lang="toml"><code>[package]
+name = "mylib"                # crates.io 에서의 이름 (하이픈 허용)
+version = "0.1.0"             # semver (b03)
+edition = "2021"              # 언어 에디션 (r01)
+rust-version = "1.75"         # 최소 컴파일러 버전 ★ 있으면 친절합니다
+description = "빠른 텍스트 처리"
+license = "MIT OR Apache-2.0" # Rust 생태계의 관례 ★
+repository = "https://github.com/me/mylib"
+keywords = ["text", "parser"] # 최대 5개
+categories = ["text-processing"]
+readme = "README.md"
+exclude = ["tests/fixtures/*", "benches/data/*"]   # 게시에서 제외
+
+[lib]
+name = "mylib"                # 라이브러리 이름 (언더스코어)
+crate-type = ["cdylib", "rlib"]   # 🔗 f02 · 🐍 y03
+
+[[bin]]                       # 실행 파일 (여러 개 가능)
+name = "mylib-cli"
+path = "src/bin/cli.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+rand = "0.8"
+
+[dev-dependencies]            # 테스트·벤치에서만 (배포물에 안 들어감) ★
+criterion = "0.5"
+
+[build-dependencies]          # build.rs 에서만 (b01)
+cc = "1"
+
+[features]                    # b04
+default = ["std"]
+std = []
+
+[profile.release]             # b06
+lto = true</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">의존성 표기 ★</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+# 버전 (자세한 규칙은 b03)
+serde = "1.0"                 # ^1.0 — 1.x 중 최신
+serde = "=1.0.195"            # 정확히 이 버전
+serde = { version = "1", default-features = false }   # 기본 feature 끄기 ★
+
+# 경로 (워크스페이스 · b05)
+mycore = { path = "../core" }
+
+# git
+mylib = { git = "https://github.com/me/mylib", tag = "v1.0" }
+mylib = { git = "...", branch = "main" }
+mylib = { git = "...", rev = "a1b2c3d" }      # ★ 재현성을 위해 rev 권장
+
+# 선택적 (feature 로 켜기 · b04)
+tokio = { version = "1", optional = true }
+
+# 플랫폼별 ★
+[target.'cfg(windows)'.dependencies]
+winapi = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+nix = "0.29"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+
+# 이름 바꿔 쓰기 (같은 크레이트의 두 버전을 함께 쓸 때)
+old-rand = { package = "rand", version = "0.7" }</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>default-features = false</code></b> 가 실무에서 가장 유용한 옵션입니다 —
+        안 쓰는 기능이 빠져 <b>빌드 시간과 바이너리 크기가 크게 줍니다</b>(b04·b10).
+        WASM 빌드에서는 거의 필수입니다(🟨 j09).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">라이브러리로 게시하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">crates.io 에 올리기</h4>
+      <pre class="code" data-lang="bash"><code># ① 계정 · 토큰
+cargo login                    # crates.io 에서 토큰 발급
+
+# ② 게시 전 확인 ★
+cargo package --list           # 어떤 파일이 들어가나
+cargo package                  # .crate 파일 만들기 (빌드까지 검증)
+cargo publish --dry-run
+
+# ③ 게시
+cargo publish
+
+# ❗ 되돌릴 수 없습니다
+#   yank 로 새 프로젝트가 못 쓰게만 할 수 있습니다 (기존은 계속 동작)
+cargo yank --version 0.1.1
+cargo yank --version 0.1.1 --undo
+
+# 게시 전 체크리스트
+#   □ license · description · repository 가 있는가 (없으면 게시 거부)
+#   □ README 가 있는가
+#   □ 문서 주석이 있는가 (docs.rs 가 자동 생성 · r11)
+#   □ 예제가 도는가 (cargo test --doc)
+#   □ 불필요한 파일이 빠졌는가 (exclude)
+#   □ 이름이 이미 있는지 확인 (선점 주의)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문서와 메타데이터</h4>
+      <pre class="code" data-lang="toml"><code>[package.metadata.docs.rs]
+all-features = true                  # docs.rs 에서 모든 feature 켜기 ★
+rustdoc-args = ["--cfg", "docsrs"]
+targets = ["x86_64-unknown-linux-gnu"]</code></pre>
+      <pre class="code" data-lang="rust"><code>// feature 가 필요한 항목에 배지 달기
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+#[cfg(feature = "tokio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
+pub mod async_api { }
+// → docs.rs 에서 "Available on crate feature tokio only" 배지가 붙습니다</code></pre>
+      <pre class="code" data-lang="toml"><code># 다른 도구를 위한 메타데이터
+[package.metadata.maturin]           # 🐍 y03
+python-source = "python"
+
+[package.metadata.wasm-pack.profile.release]   # 🟨 j09
+wasm-opt = ["-Oz"]
+
+[package.metadata.deb]               # 데비안 패키지
+maintainer = "김현우"</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>네이티브 모듈을 만든다면 crates.io 게시는 선택</b>입니다 —
+        PyPI·npm 으로만 배포해도 됩니다. 다만 <b>핵심 로직 크레이트를 따로 게시</b>해 두면
+        다른 사람이 Rust 에서도 쓸 수 있고, docs.rs 문서가 공짜로 생깁니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">공개 API 를 관리한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">semver 를 지키는 도구</h4>
+      <pre class="code" data-lang="bash"><code># 공개 API 가 깨졌는지 자동 검사 ★
+cargo install cargo-semver-checks
+cargo semver-checks check-release
+
+# 출력 예
+#   --- failure enum_variant_added: pub enum variant added ---
+#   Description: A publicly-visible enum has a new variant.
+#   → #[non_exhaustive] 가 없으면 major 를 올려야 합니다 (r08)
+
+# 공개 API 목록 뽑아 보기
+cargo install cargo-public-api
+cargo public-api
+cargo public-api diff v0.1.0        # 이전 버전과 비교 ★
+
+# CI 에 넣으면 실수로 API 를 깨는 것을 막습니다 (b08)</code></pre>
+      <pre class="code" data-lang="text"><code>★ API 를 깨는 변경 (major 올림)
+  · pub 함수·타입 제거·이름 변경
+  · 함수 시그니처 변경
+  · struct 에 pub 필드 추가 (non_exhaustive 없이)
+  · enum 에 배리언트 추가 (non_exhaustive 없이)
+  · trait 에 기본 구현 없는 메서드 추가 (🔐 o05)
+  · 공개 타입의 트레이트 구현 제거
+  · 최소 rust-version 올림 (논쟁적이지만 minor 로 보는 편)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">의존성을 API 에 노출하지 않기 ★</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ serde_json::Value 를 공개 API 에 두면
+pub fn parse(s: &amp;str) -&gt; serde_json::Value;
+// → serde_json 을 major 업데이트할 때 내 API 도 깨집니다
+//   사용자도 같은 버전을 써야 합니다 (r09 의 중복 크레이트 문제)
+
+// ✅ 내 타입으로 감싸기
+pub struct Value(serde_json::Value);
+pub fn parse(s: &amp;str) -&gt; Result&lt;Value, Error&gt;;
+
+// ✅ 또는 재수출해서 버전을 명확히
+pub use serde_json;                    // 사용자가 mylib::serde_json 으로 씁니다
+
+// ★ 예외: 사실상 표준인 타입은 노출해도 됩니다
+//   std 타입 · serde 트레이트 · http 크레이트의 타입 등
+//   다만 Cargo.toml 에 버전 범위를 넉넉히 잡으세요
+
+// 확인
+cargo public-api | grep -v "^pub fn mylib"     # 남의 타입이 보이는지</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">Cargo.toml 의 덜 알려진 항목</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드 대상 세부 설정</h4>
+      <pre class="code" data-lang="toml"><code>[lib]
+name = "mylib"
+path = "src/lib.rs"
+test = true                  # cargo test 대상에 포함
+doctest = true               # 문서 예제 실행 (r11)
+bench = true
+doc = true
+proc-macro = false           # 절차 매크로 크레이트면 true (🔬 d09)
+harness = true               # false 면 자체 main 을 씁니다 (criterion · ⚡ e01)
+required-features = []
+
+[[bench]]
+name = "my_bench"
+harness = false              # ★ criterion 을 쓸 때 필수
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+[[example]]
+name = "demo"
+required-features = ["tokio"]    # 이 feature 가 있을 때만 빌드
+
+# 자동 탐색 끄기 (파일이 많을 때 빌드가 빨라집니다)
+[package]
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">links 와 중복 방지</h4>
+      <pre class="code" data-lang="toml"><code># 같은 C 라이브러리를 두 크레이트가 링크하면 심볼 충돌이 납니다
+[package]
+links = "foo"                # ★ cargo 가 중복을 막아 줍니다 (🔗 f08)
+
+# build.rs 에서 다른 크레이트에 정보 전달
+# println!("cargo:include=/path/to/include");
+# → 의존하는 크레이트의 build.rs 에서
+#   env::var("DEP_FOO_INCLUDE") 로 읽을 수 있습니다
+
+# 패치 — 의존성을 임시로 교체 (버그 수정 대기 중일 때) ★
+[patch.crates-io]
+some-crate = { git = "https://github.com/me/some-crate", branch = "fix" }
+some-crate = { path = "../some-crate-fork" }
+
+# 워크스페이스 전체에 적용됩니다 (b05)
+# ❗ crates.io 에 게시할 때는 patch 가 무시됩니다 —
+#   게시 전에 정식 버전으로 되돌려야 합니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>[patch]</code> 는 개발 중에만</b> 쓰세요 —
+        게시된 크레이트에서는 무시되므로, 사용자는 <b>패치 없는 원본</b>을 받게 됩니다.
+        임시 수정이 필요하면 <b>포크를 게시</b>하거나 <b>버그가 고쳐질 때까지 버전을 고정</b>하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>Cargo.toml</code> 은 <b>선언만 있는 파일</b>이라 읽는 법만 알면 됩니다.
+    <b><code>default-features = false</code></b> 로 안 쓰는 기능을 끄면 빌드와 크기가 크게 줄고,
+    <b><code>[dev-dependencies]</code> 는 배포물에 안 들어갑니다</b>.
+    라이브러리를 게시한다면 <b><code>cargo semver-checks</code></b> 를 CI 에 넣고,
+    <b>남의 타입을 공개 API 에 노출하지 마세요</b>.</div>
+</section>
+
+
+<!-- ==================== b03 ==================== -->
+<section class="sec" id="b03">
+  <div class="sec-head rv">
+    <span class="no">BUILD 03</span>
+    <h2>의존성 · 버전 · <span class="t">Cargo.lock</span></h2>
+    <p class="lead">
+      <code>"1.0"</code> 이 정확히 무슨 뜻인지, <code>Cargo.lock</code> 을 커밋해야 하는지 —
+      이 둘만 알면 의존성 관리는 끝납니다.
+      <b>재현 가능한 빌드</b>가 목표입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버전 표기의 뜻 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>표기</th><th>허용 범위</th></tr>
+        <tr><td><code>"1.2.3"</code></td><td>&ge;1.2.3, &lt;2.0.0 ★ 기본</td></tr>
+        <tr><td><code>"^1.2.3"</code></td><td>위와 같음</td></tr>
+        <tr><td><code>"~1.2.3"</code></td><td>&ge;1.2.3, &lt;1.3.0</td></tr>
+        <tr><td><code>"=1.2.3"</code></td><td>정확히 이것만</td></tr>
+        <tr><td><code>"1.2"</code></td><td>&ge;1.2.0, &lt;2.0.0</td></tr>
+        <tr><td><code>"1"</code></td><td>&ge;1.0.0, &lt;2.0.0</td></tr>
+        <tr><td><code>"0.2.3"</code></td><td>&ge;0.2.3, &lt;0.3.0 ★</td></tr>
+        <tr><td><code>"*"</code></td><td>아무거나 (게시 금지)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ 0.x 는 특별합니다
+  semver 에서 0.x 는 "아직 안정되지 않음" 이라
+  0.2 → 0.3 이 호환을 깰 수 있는 변경으로 취급됩니다.
+  → Rust 생태계에는 0.x 크레이트가 아주 많습니다 (rand 0.8, pyo3 0.23)
+  → 그래서 마이너 업데이트가 실제로 코드를 깨뜨립니다 ★
+
+★ 실무 권장
+  · 라이브러리를 만든다   → 넓게 ("1", "0.23")
+  · 애플리케이션·서비스   → 넓게 쓰되 Cargo.lock 을 커밋 ★
+  · "=1.2.3" 고정은 피하세요 — 보안 패치도 못 받습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Cargo.lock 을 커밋할까 ★</h4>
+      <pre class="code" data-lang="text"><code>★ 공식 권장
+  · 실행 파일 · 서비스 · 네이티브 모듈  →  커밋 ★
+  · 라이브러리(crates.io 게시)          →  커밋해도 됩니다
+      (게시할 때는 무시되고, CI 재현성에는 도움이 됩니다)
+
+★ 커밋하면
+  · 팀·CI·내 노트북이 정확히 같은 버전을 씁니다
+  · "어제는 됐는데 오늘 CI 가 깨졌다" 가 사라집니다 ★
+  · 의존성 업데이트가 명시적인 커밋이 됩니다 (리뷰 가능)
+
+★ 커밋하지 않으면
+  · 매번 최신 호환 버전을 씁니다
+  · 새 버전의 버그를 바로 만납니다
+
+# 갱신 명령
+cargo update                    # 전부 (lock 범위 안에서)
+cargo update -p serde           # 하나만
+cargo update -p serde --precise 1.0.195
+cargo upgrade                   # cargo-edit — Cargo.toml 의 범위 자체를 올림
+
+# 무엇이 바뀌는지 미리 보기
+cargo update --dry-run</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파이썬·Node 와 같은 이야기</b>입니다 —
+        <code>Cargo.lock</code> 은 <code>package-lock.json</code>·<code>poetry.lock</code> 과 같은 역할입니다.
+        <b>네이티브 모듈은 반드시 커밋</b>하세요 — 빌드가 재현되지 않으면 디버깅이 불가능합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">의존성을 줄이고 감사하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">얼마나 들어왔는지 보기</h4>
+      <pre class="code" data-lang="bash"><code>cargo tree                     # 전체 트리
+cargo tree --depth 1           # 직접 의존만
+cargo tree -d                  # 중복 크레이트 ★ (r09)
+cargo tree -i syn              # syn 을 누가 끌어왔나
+cargo tree -e no-dev           # dev-dependencies 제외
+cargo tree --prefix none | sort -u | wc -l    # 전체 크레이트 수
+
+# 무엇이 무거운지
+cargo bloat --release --crates                # 바이너리 기여도 (b10)
+cargo build --timings                         # 빌드 시간 기여도
+
+# ★ 실무 감각
+#   작은 유틸 크레이트가 수백 개를 끌고 오는 경우가 있습니다.
+#   특히 절차 매크로(syn · quote · proc-macro2)는 빌드 시간에 큽니다.
+#   "이 기능을 위해 30초를 더 쓸 가치가 있나" 를 물어보세요.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">보안·라이선스 감사 ★</h4>
+      <pre class="code" data-lang="bash"><code># 알려진 취약점
+cargo install cargo-audit
+cargo audit
+#   Crate:     time
+#   Version:   0.1.44
+#   Warning:   RUSTSEC-2020-0071 — Potential segfault
+#   Solution:  Upgrade to &gt;=0.2.23
+
+# 종합 정책 검사 (라이선스 · 중복 · 금지 크레이트)
+cargo install cargo-deny
+cargo deny init                # deny.toml 생성
+cargo deny check</code></pre>
+      <pre class="code" data-lang="toml"><code># deny.toml
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "ISC"]
+# GPL 계열이 들어오면 실패합니다 ★ (배포 정책에 따라)
+
+[bans]
+multiple-versions = "warn"
+deny = [{ name = "openssl", reason = "rustls 를 쓰세요" }]
+
+[advisories]
+ignore = ["RUSTSEC-2021-0139"]   # 검토 후 무시하는 것만
+
+# ★ CI 에 넣으세요 (b08)
+#   새 의존성이 GPL 을 끌고 오는 것을 배포 전에 잡습니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">재현 가능한 빌드</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고정해야 할 것 네 가지 ★</h4>
+      <pre class="code" data-lang="text"><code>① 컴파일러 버전 — rust-toolchain.toml (r01)
+   [toolchain]
+   channel = "1.83.0"
+
+② 의존성 버전 — Cargo.lock 커밋
+
+③ 빌드 환경 — 컨테이너 이미지 태그를 고정
+   FROM rust:1.83.0-slim   ← latest 를 쓰지 마세요 ★
+
+④ 빌드 플래그 — .cargo/config.toml 에 명시
+   RUSTFLAGS 를 CI 스크립트에 흩어 두지 마세요
+
+★ 이 넷을 고정하면
+  · "왜 CI 에서만 깨지지" 가 거의 사라집니다
+  · 몇 달 뒤에도 같은 바이너리를 다시 만들 수 있습니다
+  · 보안 사고 시 정확히 무엇이 들어갔는지 추적할 수 있습니다
+
+# 오프라인 빌드 (에어갭 환경)
+cargo vendor &gt; .cargo/config.toml    # 의존성 소스를 vendor/ 에 복사
+cargo build --offline</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">업데이트 정책</h4>
+      <pre class="code" data-lang="text"><code>★ 권장 리듬
+  · 주 1회 cargo audit 를 CI 로 (자동)
+  · 월 1회 cargo update + 테스트 (사람이 리뷰)
+  · 분기 1회 cargo upgrade 로 major 검토
+  · 보안 권고가 나오면 즉시
+
+★ 자동화
+  · Dependabot / Renovate 가 Cargo 를 지원합니다
+  · PR 로 올라오고 CI 가 검증합니다
+  · minor/patch 는 자동 머지, major 는 사람이 검토 ★
+
+★ 업데이트가 깨졌을 때
+  cargo update -p 문제크레이트 --precise 이전버전   # 되돌리기
+  cargo tree -i 문제크레이트                        # 누가 요구하는지
+
+★ 의존성을 줄이는 것이 근본 해법입니다
+  · 표준 라이브러리로 되는 일인가
+  · 작은 코드를 직접 쓰는 게 나은가 (수십 줄이면 대개 그렇습니다)
+  · feature 를 꺼서 하위 의존성을 없앨 수 있나 (b04) ★</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>의존성 하나가 수십 개를 끌고 옵니다</b> —
+        추가하기 전에 <code>cargo tree</code> 로 <b>무엇이 딸려 오는지 먼저 보세요</b>.
+        네이티브 모듈은 <b>사용자 머신에서 빌드될 수도</b> 있어 이 비용이 그대로 전달됩니다(🐍 y12).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">버전 해석 알고리즘</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">cargo 는 어떻게 버전을 고르나</h4>
+      <pre class="code" data-lang="text"><code>① 각 의존성의 요구 범위를 모읍니다
+② 호환되는 것끼리 합칩니다
+     A 가 serde "1.0", B 가 serde "1.2" 를 요구 → 1.x 최신 하나로
+③ 호환되지 않으면 여러 벌을 넣습니다 ★
+     A 가 rand "0.7", B 가 rand "0.8" → 둘 다 빌드에 포함
+     (0.x 는 마이너가 다르면 비호환이므로)
+
+★ 그래서 생기는 문제 (r09)
+  · 타입이 달라 서로 못 주고받습니다
+  · 바이너리가 커지고 빌드가 느려집니다
+  · 전역 상태를 쓰는 크레이트는 두 벌이 각자 상태를 갖습니다 ★
+      (log · tracing · rayon 스레드 풀 등에서 미묘한 버그)
+
+# 확인
+cargo tree -d
+
+# 해결
+#   ① 상위 라이브러리를 업데이트
+#   ② cargo update -p 로 버전을 맞춤
+#   ③ [patch] 로 임시 통일 (b02)
+
+# 최소 버전으로 테스트 (라이브러리 저자용) ★
+cargo +nightly build -Z minimal-versions
+#   → "1.0" 이라고 적었는데 실제로는 1.5 기능을 쓰는 실수를 잡습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">feature 통합의 함정 ★</h4>
+      <pre class="code" data-lang="text"><code>같은 크레이트를 여러 곳이 쓰면 feature 가 '합쳐집니다'.
+
+  내 크레이트: serde = { version = "1", default-features = false }
+  의존성 X:    serde = { version = "1", features = ["std"] }
+  → 결과: std 가 켜집니다 ★ 내가 끈 것이 무시된 셈
+
+★ 이것이 no_std · WASM 빌드에서 자주 문제가 됩니다 (🟨 j09)
+
+# 어떤 feature 가 최종적으로 켜졌는지 확인
+cargo tree -f "{p} {f}"
+cargo tree -e features -i serde
+
+# resolver 2 (edition 2021 기본) 가 일부 개선했습니다
+#   · build-dependencies 와 일반 의존성의 feature 를 분리
+#   · 타깃별 의존성의 feature 를 분리
+[workspace]
+resolver = "2"
+
+# 그래도 통합은 일어납니다 — 근본 해결은
+#   ① 그 feature 를 켜는 의존성을 빼거나
+#   ② 그 크레이트를 안 쓰거나
+#   ③ 포크해서 feature 를 끄거나 ([patch])</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>"1.0"</code> 은 <b>1.x 중 최신</b>, <code>"0.2"</code> 는 <b>0.2.x 만</b> 입니다.
+    <b><code>Cargo.lock</code> 은 커밋</b>하세요 — 재현 가능한 빌드의 출발점입니다.
+    <b>컴파일러 · 의존성 · 컨테이너 이미지 · 빌드 플래그</b> 네 가지를 고정하고,
+    <b><code>cargo audit</code>·<code>cargo deny</code> 를 CI 에</b> 넣으세요.
+    <code>cargo tree -d</code> 로 <b>중복 크레이트</b>를 주기적으로 확인하는 습관도 유용합니다.</div>
+</section>
+
+
+<!-- ==================== b04 ==================== -->
+<section class="sec" id="b04">
+  <div class="sec-head rv">
+    <span class="no">BUILD 04</span>
+    <h2>feature 플래그 — <span class="t">안 쓰는 건 빌드에서 빼기</span></h2>
+    <p class="lead">
+      기능을 켜고 끌 수 있게 만드는 장치입니다.
+      끈 기능은 <b>코드도 의존성도 통째로 빠집니다</b> —
+      빌드 시간·바이너리 크기·공격 표면이 함께 줄어듭니다.
+      네이티브 모듈에서는 <b>파이썬용·Node용 바인딩을 나누는 데</b> 특히 유용합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">정의와 사용</h4>
+      <pre class="code" data-lang="toml"><code>[features]
+default = ["std", "compression"]      # 기본으로 켜지는 것 ★
+std = []                              # 기능 이름만 (조건부 컴파일용)
+compression = ["dep:zstd"]            # 선택적 의존성을 켬
+python = ["dep:pyo3"]
+node = ["dep:napi", "dep:napi-derive"]
+full = ["compression", "python"]      # 여러 개를 묶기
+
+[dependencies]
+zstd = { version = "0.13", optional = true }     # ★ optional 이면 dep: 로 켬
+pyo3 = { version = "0.23", optional = true }
+napi = { version = "2", optional = true }</code></pre>
+      <pre class="code" data-lang="rust"><code>// 코드에서 분기
+#[cfg(feature = "compression")]
+pub fn compress(data: &amp;[u8]) -&gt; Vec&lt;u8&gt; { zstd::encode_all(data, 3).unwrap() }
+
+#[cfg(not(feature = "compression"))]
+pub fn compress(data: &amp;[u8]) -&gt; Vec&lt;u8&gt; { data.to_vec() }
+
+#[cfg(feature = "python")]
+pub mod python_bindings;              // 🐍 y02 · r09
+
+// 조건 조합
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+#[cfg(any(feature = "a", feature = "b"))]
+
+// 컴파일 타임 검사
+#[cfg(all(feature = "python", feature = "node"))]
+compile_error!("python 과 node 를 함께 켤 수 없습니다");</code></pre>
+      <pre class="code" data-lang="bash"><code>cargo build --features compression
+cargo build --no-default-features
+cargo build --no-default-features --features std
+cargo build --all-features                # ★ CI 에서 전부 켜고 테스트</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">네이티브 모듈의 전형적 구성 ★</h4>
+      <pre class="code" data-lang="toml"><code># 하나의 크레이트로 Rust 라이브러리 · 파이썬 모듈 · C ABI 를 전부
+[features]
+default = []
+python = ["dep:pyo3"]                 # 🐍 PyO3 바인딩
+capi = []                             # 🔗 C ABI 내보내기
+extension-module = ["pyo3/extension-module"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]       # rlib 도 두면 cargo test 가 됩니다</code></pre>
+      <pre class="code" data-lang="text"><code>src/
+├─ lib.rs          pub 로직 (feature 무관) ★
+├─ core/           순수 Rust — 여기가 본체
+├─ python.rs       #[cfg(feature = "python")]
+└─ capi.rs         #[cfg(feature = "capi")]
+
+빌드 방법
+  cargo test                              # 순수 로직만 테스트 (빠름)
+  maturin develop --features python       # 파이썬 모듈 (🐍 y03)
+  cargo build --features capi --release   # C ABI (🔗 f02)
+
+★ 이 구성의 이점
+  · 핵심 로직을 한 번만 쓰고 여러 대상에 재사용
+  · cargo test 가 파이썬 없이 돕니다 (🐍 y12 의 링크 에러 회피)
+  · 각 바인딩은 얇은 변환 층만 담당</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">feature 설계 원칙</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">더하기만 되어야 합니다 (additive) ★</h4>
+      <pre class="code" data-lang="text"><code>★ 규칙: feature 를 켜면 '기능이 늘기만' 해야 합니다.
+
+  ❌ 나쁜 예 — 켜면 동작이 바뀜
+     [features]
+     use-fast-hash = []      # 켜면 해시 알고리즘이 바뀜 → 결과가 달라짐
+     no-std = []             # 켜면 기능이 줄어듦 ★ 이름부터 잘못
+
+  ✅ 좋은 예
+     [features]
+     default = ["std"]
+     std = []                # 켜면 기능이 늘어남
+     fast-hash = []          # 켜면 대안이 '추가' 되고 API 로 선택
+
+★ 왜 중요한가 (b03 의 feature 통합)
+  내 크레이트를 쓰는 A 가 no-std 를 켜면
+  같은 빌드 안의 B 도 no-std 로 동작하게 됩니다 —
+  B 는 그걸 원하지 않았는데도요.
+
+★ 그래서 관례
+  · no_std 지원은 default = ["std"] + --no-default-features 로
+  · 기능 제거가 아니라 기능 추가로 표현
+  · 상호 배타적 feature 는 compile_error! 로 막기</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">no_std 지원하기</h4>
+      <pre class="code" data-lang="rust"><code>// src/lib.rs
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(feature = "std")]
+extern crate std;
+
+extern crate alloc;                    // Vec · String 은 alloc 에 있습니다
+use alloc::{vec::Vec, string::String};
+
+// std 가 필요한 것만 분기
+#[cfg(feature = "std")]
+pub fn read_file(path: &amp;str) -&gt; std::io::Result&lt;Vec&lt;u8&gt;&gt; { }
+
+// ★ no_std 에서 안 되는 것들
+//   std::io · std::fs · std::net · std::thread
+//   println! (alloc::format! 은 됩니다)
+//   HashMap (hashbrown 크레이트로 대체)
+//   f64 의 일부 메서드 (sqrt · sin — libm 크레이트 필요) ★
+
+// 검증
+//   cargo build --no-default-features --target thumbv7em-none-eabihf
+//   → 진짜 no_std 타깃으로 빌드해 봐야 확실합니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>네이티브 모듈에 no_std 가 필요한 경우는 드뭅니다</b> —
+        임베디드나 커널이 아니면 <code>std</code> 를 쓰세요.
+        다만 <b>WASM 크기를 줄일 때</b>는 검토할 가치가 있습니다(🟨 j09).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">조합을 전부 테스트한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">feature 조합이 깨지는 것을 막기 ★</h4>
+      <pre class="code" data-lang="bash"><code># feature 가 5개면 조합이 32개입니다. 전부 빌드되나?
+cargo install cargo-hack
+
+cargo hack check --each-feature          # 각 feature 를 하나씩
+cargo hack check --feature-powerset      # 모든 조합 ★ (느립니다)
+cargo hack check --feature-powerset --depth 2   # 2개씩 조합까지만
+cargo hack test --each-feature
+
+# 자주 나는 실수
+#   · feature A 를 끄면 컴파일이 안 되는 코드
+#   · use 문이 cfg 밖에 있어 미사용 경고
+#   · 테스트가 특정 feature 를 전제
+
+# CI 에 최소한 이 세 가지는 넣으세요 (b08)
+cargo check --no-default-features
+cargo check --all-features
+cargo test --all-features</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문서에 표시하기</h4>
+      <pre class="code" data-lang="rust"><code>// docs.rs 에서 feature 배지 (b02)
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+#[cfg(feature = "compression")]
+#[cfg_attr(docsrs, doc(cfg(feature = "compression")))]
+pub fn compress(data: &amp;[u8]) -&gt; Vec&lt;u8&gt; { }</code></pre>
+      <pre class="code" data-lang="markdown"><code># README 에 표로 정리하세요
+
+## Features
+
+| feature | 기본 | 설명 |
+|---|---|---|
+| `std` | ✅ | 표준 라이브러리 (파일·네트워크) |
+| `compression` | ✅ | zstd 압축 지원 |
+| `python` | | PyO3 파이썬 바인딩 |
+| `capi` | | C ABI 내보내기 |
+
+```toml
+mylib = { version = "1", default-features = false, features = ["std"] }
+```</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>feature 를 늘리면 조합이 지수로 늘어납니다</b> —
+        <b>5개를 넘어가면</b> 유지보수가 어려워집니다.
+        정말 필요한 것만 두고, <b>나머지는 별도 크레이트</b>로 나누는 편이 낫습니다(b05).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">cfg 의 전체 목록</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쓸 수 있는 조건들</h4>
+      <pre class="code" data-lang="rust"><code>#[cfg(target_os = "linux")]        // windows · macos · android · ios · wasi
+#[cfg(target_family = "unix")]     // unix · windows · wasm
+#[cfg(target_arch = "x86_64")]     // aarch64 · wasm32 · arm
+#[cfg(target_pointer_width = "64")]
+#[cfg(target_endian = "little")>]
+#[cfg(target_env = "musl")]        // gnu · musl · msvc
+#[cfg(target_vendor = "apple")]
+#[cfg(target_feature = "avx2")]    // ⚡ e09
+#[cfg(debug_assertions)]           // 디버그 빌드 ★
+#[cfg(test)]                       // cargo test (r11)
+#[cfg(doc)]                        // 문서 생성 중
+#[cfg(feature = "x")]
+#[cfg(unix)]                       // 축약형
+#[cfg(windows)]
+
+// 런타임 확인
+if cfg!(debug_assertions) { }      // 매크로 형태 — 값으로 씁니다
+
+// 전체 목록 보기
+//   rustc --print cfg
+//   rustc --print cfg --target wasm32-unknown-unknown</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">커스텀 cfg 와 검사</h4>
+      <pre class="code" data-lang="rust"><code>// build.rs 에서 설정 (b01)
+println!("cargo:rustc-cfg=has_avx512");
+println!("cargo::rustc-check-cfg=cfg(has_avx512)");   // 1.80+ ★ 오타 검출
+
+// 코드에서
+#[cfg(has_avx512)]
+fn fast_path() { }
+
+// ★ 1.80 부터 cargo 가 '알 수 없는 cfg' 를 경고합니다
+//   warning: unexpected `cfg` condition name: `has_avx512`
+//   → build.rs 에서 check-cfg 를 선언하거나
+//     Cargo.toml 의 [lints.rust] 에 등록하세요
+
+// Cargo.toml
+// [lints.rust]
+// unexpected_cfgs = { level = "warn", check-cfg = ['cfg(has_avx512)'] }
+
+// ★ 이 경고가 유용한 이유
+//   #[cfg(feature = "phyton")]  ← 오타
+//   → 예전에는 조용히 코드가 사라졌습니다. 이제는 경고가 뜹니다.</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>가장 무서운 버그</b>는 <b>오타 난 <code>cfg</code></b> 였습니다 —
+        조건이 절대 참이 되지 않아 <b>코드가 통째로 사라지는데 아무 경고도 없었습니다</b>.
+        <code>check-cfg</code> 를 켜 두세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> feature 는 <b>기능을 더하기만</b> 해야 하고(additive),
+    끄면 <b>코드와 의존성이 통째로 빠집니다</b>.
+    네이티브 모듈은 <b>핵심 로직 + <code>python</code>/<code>capi</code> feature</b> 구성이 정석이고,
+    <b><code>cargo hack</code> 으로 조합을 CI 에서 검증</b>하세요.
+    <code>cfg</code> 오타를 잡으려면 <b><code>check-cfg</code></b> 를 켜 두면 됩니다.</div>
+</section>
+
+
+<!-- ==================== b05 ==================== -->
+<section class="sec" id="b05">
+  <div class="sec-head rv">
+    <span class="no">BUILD 05</span>
+    <h2>워크스페이스 — <span class="t">크레이트 여러 개를 한 저장소에</span></h2>
+    <p class="lead">
+      핵심 로직 · 파이썬 바인딩 · Node 바인딩 · CLI 를 <b>각각 크레이트로 나누되
+      한 저장소에서 함께 빌드</b>합니다.
+      <b>빌드 캐시를 공유</b>하므로 나누는 편이 오히려 빠릅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구성</h4>
+      <pre class="code" data-lang="text"><code>mylib/
+├─ Cargo.toml              워크스페이스 루트
+├─ Cargo.lock              ★ 하나만 (전체 공유)
+├─ target/                 ★ 하나만 (캐시 공유)
+├─ crates/
+│  ├─ core/                순수 로직
+│  │  ├─ Cargo.toml
+│  │  └─ src/lib.rs
+│  ├─ python/              PyO3 바인딩 (🐍 y02)
+│  ├─ node/                napi-rs 바인딩 (🟨 j02)
+│  ├─ capi/                C ABI (🔗 f02)
+│  └─ cli/                 명령줄 도구
+└─ xtask/                  빌드 자동화 스크립트 (아래)</code></pre>
+      <pre class="code" data-lang="toml"><code># 루트 Cargo.toml
+[workspace]
+resolver = "2"                     # ★ edition 2021 이면 반드시
+members = ["crates/*", "xtask"]
+exclude = ["examples/standalone"]
+
+# 공통 메타데이터 — 각 크레이트가 상속받습니다 ★
+[workspace.package]
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/me/mylib"
+rust-version = "1.75"
+
+# 공통 의존성 버전 — 한 곳에서 관리 ★
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+mylib-core = { path = "crates/core" }
+
+[profile.release]                  # 워크스페이스 전체에 적용 (b06)
+lto = true</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">멤버 크레이트</h4>
+      <pre class="code" data-lang="toml"><code># crates/core/Cargo.toml
+[package]
+name = "mylib-core"
+version.workspace = true           # ★ 루트에서 상속
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true             # ★ 버전을 여기 안 적습니다
+thiserror.workspace = true
+
+# crates/python/Cargo.toml
+[package]
+name = "mylib-python"
+version.workspace = true
+
+[lib]
+name = "mylib"
+crate-type = ["cdylib"]
+
+[dependencies]
+mylib-core.workspace = true
+pyo3 = { version = "0.23", features = ["extension-module"] }</code></pre>
+      <pre class="code" data-lang="bash"><code># 명령
+cargo build                        # 전부
+cargo build -p mylib-core          # 하나만 ★
+cargo test --workspace             # 전부 테스트
+cargo test -p mylib-core
+cargo run -p mylib-cli
+cargo clippy --workspace --all-targets</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>workspace = true</code> 상속</b>이 큰 편의입니다 —
+        의존성 버전을 <b>루트 한 곳에서만</b> 관리하므로
+        크레이트 간 버전이 어긋나는 일이 없습니다(b03 의 중복 문제 예방).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">언제 나눌 것인가</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">나누면 좋은 경우 ★</h4>
+      <pre class="code" data-lang="text"><code>✅ 나누세요
+  · 바인딩이 여러 개 (파이썬 · Node · C ABI)
+      → 각 바인딩의 무거운 의존성이 서로에게 안 옮습니다
+  · 일부만 crates.io 에 게시하고 싶을 때
+  · 빌드가 느린 부분을 분리해 캐시 효과를 볼 때 ★
+      (자주 바뀌는 코드와 안 바뀌는 코드를 나누면 재빌드가 줄어듭니다)
+  · 팀이 나뉘어 소유권이 다를 때
+  · 절차 매크로 (별도 크레이트여야 합니다 · 🔬 d09)
+
+❌ 나누지 마세요
+  · 파일 몇 개를 정리하려고 (모듈로 충분합니다 · r09)
+  · 순환 의존이 생길 것 같을 때 (크레이트 간 순환은 불가능합니다)
+  · 크레이트가 5개를 넘어가면 관리 비용이 커집니다
+
+★ 실무 감각
+  네이티브 모듈 프로젝트는 보통 2~4개면 충분합니다
+    core + python           (파이썬만)
+    core + python + node    (둘 다)
+    core + capi + bindings  (여러 언어 · 🔗 f10)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">xtask 패턴 — 빌드 스크립트를 Rust 로 ★</h4>
+      <pre class="code" data-lang="text"><code>Makefile · shell 스크립트 대신 Rust 로 빌드 작업을 씁니다.
+크로스 플랫폼이고, 타입 검사가 되고, 의존성을 쓸 수 있습니다.
+
+# .cargo/config.toml
+[alias]
+xtask = "run --package xtask --"
+
+# 사용
+cargo xtask build-all
+cargo xtask release
+cargo xtask bench-compare</code></pre>
+      <pre class="code" data-lang="rust"><code>// xtask/src/main.rs
+use std::process::Command;
+
+fn main() {
+    let task = std::env::args().nth(1).unwrap_or_default();
+    match task.as_str() {
+        "build-all" =&gt; {
+            sh("cargo build --release -p mylib-core");
+            sh("maturin build --release -m crates/python/Cargo.toml");
+            sh("napi build --release --cwd crates/node");
+        }
+        "release" =&gt; { /* 버전 올리기 · 태그 · 배포 */ }
+        _ =&gt; eprintln!("사용법: cargo xtask &lt;build-all|release&gt;"),
+    }
+}
+
+fn sh(cmd: &amp;str) {
+    let ok = Command::new("sh").arg("-c").arg(cmd).status().unwrap().success();
+    assert!(ok, "실패: {cmd}");
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">워크스페이스 운영</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버전과 배포</h4>
+      <pre class="code" data-lang="text"><code>★ 버전 정책 두 가지
+
+① 통합 버전 (권장) — 전부 같은 버전
+   version.workspace = true
+   · 관리가 단순합니다
+   · 릴리스 노트가 하나
+   · 안 바뀐 크레이트도 버전이 올라갑니다 (문제 없음)
+
+② 개별 버전 — 각자 관리
+   · crates.io 게시 크레이트가 많을 때
+   · cargo-release · release-plz 같은 도구가 필요합니다
+
+# 자동화 도구
+cargo install cargo-release
+cargo release patch --workspace --execute
+#   → 버전 올림 · CHANGELOG · 태그 · 게시를 한 번에
+
+# release-plz — PR 기반 자동 릴리스 (GitHub Actions)
+#   커밋 메시지(conventional commits)를 보고 버전을 정합니다
+
+★ 의존 순서 주의
+  core 를 먼저 게시해야 python 이 게시됩니다.
+  cargo release 가 순서를 계산해 줍니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드 시간 관리</h4>
+      <pre class="code" data-lang="bash"><code># 어느 크레이트가 오래 걸리나
+cargo build --timings
+#   → 워크스페이스 전체의 병렬화 상태가 한눈에 보입니다 ★
+
+# 자주 바뀌는 것을 잎(leaf)에 두세요
+#   core(안 바뀜) ← python(자주 바뀜)
+#   이렇게 두면 python 만 고칠 때 core 는 재빌드되지 않습니다
+
+# 개발 중에는 필요한 것만
+cargo check -p mylib-python
+
+# 테스트도 나눠서
+cargo test -p mylib-core            # 빠른 단위 테스트
+cargo test --workspace              # CI 에서 전부
+
+# nextest 로 더 빠르게 ★
+cargo install cargo-nextest
+cargo nextest run --workspace       # 병렬화가 더 좋습니다
+
+# 공통 의존성이 많으면 한 번만 빌드됩니다 (워크스페이스의 핵심 이점)
+#   개별 저장소로 나누면 각자 target/ 을 가져 캐시가 안 겹칩니다 ★</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>“나누면 느려진다”는 오해</b>가 있습니다 —
+        워크스페이스는 <b><code>target/</code> 과 <code>Cargo.lock</code> 을 공유</b>하므로
+        의존성이 한 번만 빌드됩니다. <b>나누는 편이 대개 빠릅니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">워크스페이스의 세부</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">알아 두면 좋은 규칙</h4>
+      <pre class="code" data-lang="text"><code>· Cargo.lock 은 루트에 하나뿐입니다
+    → 모든 멤버가 같은 의존성 버전을 씁니다 ★
+    → 한 멤버가 serde 1.0.100 을 요구하면 전부 그것을 씁니다
+
+· profile 설정은 루트에서만 유효합니다 (b06)
+    멤버의 [profile] 은 무시되고 경고가 납니다
+
+· feature 는 기본적으로 통합됩니다 (b03)
+    cargo build 로 전부 빌드하면 모든 feature 가 켜진 상태로 합쳐집니다
+    resolver = "2" 가 일부 개선했지만 완전하지는 않습니다
+    → 개별 검증은 -p 로 따로 하세요 ★
+
+· default-members 로 기본 빌드 대상을 줄일 수 있습니다
+    [workspace]
+    default-members = ["crates/core", "crates/cli"]
+    → cargo build 가 python/node 를 건너뜁니다 (개발 편의)
+
+· 워크스페이스 밖 크레이트를 path 로 참조하면
+    그 크레이트는 워크스페이스에 포함되지 않습니다 (별도 target)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">모노레포에서의 CI</h4>
+      <pre class="code" data-lang="yaml"><code># 바뀐 크레이트만 테스트하기 (큰 워크스페이스에서 유용)
+- name: 변경 감지
+  uses: dorny/paths-filter@v3
+  id: changes
+  with:
+    filters: |
+      core: ['crates/core/**']
+      python: ['crates/python/**', 'crates/core/**']
+
+- name: core 테스트
+  if: steps.changes.outputs.core == 'true'
+  run: cargo test -p mylib-core</code></pre>
+      <pre class="code" data-lang="bash"><code># 또는 cargo 가 판단하게
+cargo test --workspace           # 캐시가 있으면 안 바뀐 건 빨리 끝납니다
+
+# 캐시 설정이 핵심입니다 (b08)
+#   Swatinem/rust-cache@v2 가 target/ 과 ~/.cargo 를 캐시합니다
+#   워크스페이스는 캐시 하나로 전부 커버됩니다 ★
+
+# 게시 전 전체 검증
+cargo publish --dry-run -p mylib-core
+cargo package --workspace --no-verify    # 빠른 확인</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 워크스페이스는 <b><code>target/</code> 과 <code>Cargo.lock</code> 을 공유</b>하므로
+    나누는 편이 <b>대개 더 빠릅니다</b>.
+    <b>핵심 로직 + 바인딩별 크레이트</b> 구성이 네이티브 모듈의 정석이고,
+    <b><code>[workspace.dependencies]</code> 로 버전을 한 곳에서</b> 관리하세요.
+    빌드 자동화는 <b><code>xtask</code> 패턴</b>으로 Rust 에 두면 크로스 플랫폼이 됩니다.</div>
+</section>
+
+
+<!-- ==================== b06 ==================== -->
+<section class="sec" id="b06">
+  <div class="sec-head rv">
+    <span class="no">BUILD 06</span>
+    <h2>프로파일 — <span class="t">설정 몇 줄에 10배</span></h2>
+    <p class="lead">
+      디버그 빌드는 최적화가 꺼져 있어 <b>파이썬보다 느릴 수도</b> 있습니다.
+      “Rust 로 바꿨는데 안 빨라졌다”의 1위 원인이 <b><code>--release</code> 누락</b>입니다.
+      그리고 <b>릴리즈 안에서도 설정에 따라 몇 배가 갈립니다</b>.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 프로파일</h4>
+      <pre class="code" data-lang="toml"><code>[profile.dev]              # cargo build
+opt-level = 0              # 최적화 없음 ★ 느립니다
+debug = true               # 디버그 정보
+debug-assertions = true    # assert! · 오버플로 검사 (r02)
+overflow-checks = true
+incremental = true         # 증분 컴파일 (빠른 재빌드)
+codegen-units = 256        # 병렬 코드 생성 (빠른 빌드, 느린 결과)
+lto = false
+panic = "unwind"
+
+[profile.release]          # cargo build --release
+opt-level = 3              # 최대 최적화
+debug = false
+debug-assertions = false   # ★ 오버플로가 조용히 랩어라운드 (r02)
+overflow-checks = false
+incremental = false
+codegen-units = 16
+lto = false                # ★ 기본은 꺼져 있습니다 — 켜면 더 빨라집니다
+panic = "unwind"</code></pre>
+      <pre class="code" data-lang="bash"><code># 실측 감각 (직접 재 보세요 · ⚡ e01)
+#   같은 코드를 debug 와 release 로 빌드해 비교하면
+#   보통 10~100배 차이가 납니다.
+#   특히 이터레이터·제네릭이 많은 코드에서 격차가 큽니다 (🔐 o12)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무에서 쓰는 설정 ★</h4>
+      <pre class="code" data-lang="toml"><code># 성능 우선 (네이티브 모듈 권장)
+[profile.release]
+opt-level = 3
+lto = "fat"                # 크레이트 경계를 넘는 최적화 ★ 효과가 큽니다
+codegen-units = 1          # 최적화 기회 최대화 (빌드는 느려집니다)
+panic = "abort"            # ❗ PyO3 에서는 쓰지 마세요 (🐍 y03)
+strip = "symbols"          # 심볼 제거 (b10)
+
+# 개발 편의 — 디버그인데 너무 느릴 때 절충 ★
+[profile.dev]
+opt-level = 1              # 약간의 최적화 (빌드는 조금 느려짐)
+
+[profile.dev.package."*"]  # 의존성만 최적화 ★ 아주 유용합니다
+opt-level = 3
+#   → 내 코드는 디버그(빠른 빌드), 라이브러리는 릴리즈(빠른 실행)
+#     이미지 처리·암호 같은 무거운 크레이트를 쓸 때 체감이 큽니다
+
+# 벤치마크·프로파일링용 (⚡ e01)
+[profile.profiling]
+inherits = "release"
+debug = true               # 릴리즈 성능 + 심볼 (flamegraph 에 필요)
+strip = false</code></pre>
+      <pre class="code" data-lang="bash"><code>cargo build --profile profiling</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">옵션별 효과</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 무엇을 바꾸나 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>옵션</th><th>속도</th><th>크기</th><th>빌드</th></tr>
+        <tr><td><code>opt-level=3</code></td><td>★★★</td><td>+</td><td>느림</td></tr>
+        <tr><td><code>opt-level="s"</code></td><td>★★</td><td>−</td><td>보통</td></tr>
+        <tr><td><code>opt-level="z"</code></td><td>★</td><td>−−</td><td>보통</td></tr>
+        <tr><td><code>lto="thin"</code></td><td>★★</td><td>−</td><td>+30%</td></tr>
+        <tr><td><code>lto="fat"</code></td><td>★★★</td><td>−−</td><td>+100%</td></tr>
+        <tr><td><code>codegen-units=1</code></td><td>★★</td><td>−</td><td>느림</td></tr>
+        <tr><td><code>panic="abort"</code></td><td>+</td><td>−−</td><td>—</td></tr>
+        <tr><td><code>strip</code></td><td>—</td><td>−−−</td><td>—</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ 조합 권장
+  네이티브 모듈 (성능 우선)
+    opt-level = 3, lto = "fat", codegen-units = 1, strip = "symbols"
+
+  WASM (크기 우선 · 🟨 j09)
+    opt-level = "z", lto = true, panic = "abort", strip = true
+
+  CLI 도구 (균형)
+    opt-level = 3, lto = "thin", strip = "symbols"
+
+★ 반드시 측정하세요 (⚡ e01)
+  lto = "fat" 이 항상 빠른 것은 아닙니다.
+  코드가 커져 명령어 캐시가 밀리면 오히려 느려질 수 있습니다.
+  빌드 시간도 2배가 되므로 이득이 있는지 확인하고 켜세요.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">target-cpu 의 함정 ★</h4>
+      <pre class="code" data-lang="bash"><code># 내 CPU 에 맞춰 최적화 — 수치 연산에서 효과가 큽니다 (⚡ e09)
+RUSTFLAGS="-C target-cpu=native" cargo build --release
+
+# ❗ 배포용 바이너리에 쓰면 안 됩니다
+#   빌드 머신에만 있는 명령(AVX-512 등)을 쓰면
+#   사용자 CPU 에서 SIGILL 로 죽습니다 ★
+
+# ✅ 배포용 — 널리 지원되는 기준선
+RUSTFLAGS="-C target-cpu=x86-64-v2" cargo build --release
+#   v1: 기본 SSE2  ·  v2: SSE4.2 (2009+)  ·  v3: AVX2 (2013+)  ·  v4: AVX-512
+
+# ✅ 더 안전한 방법: 런타임 감지 (⚡ e09)
+if is_x86_feature_detected!("avx2") {
+    unsafe { fast_avx2(data) }
+} else {
+    fallback(data)
+}
+
+# 어떤 CPU 기능이 켜졌는지 확인
+rustc --print cfg -C target-cpu=native | grep target_feature
+
+# ★ 파이썬 wheel · npm 패키지로 배포한다면
+#   기본값(또는 v2)을 쓰고 런타임 감지로 가속하세요.
+#   "우리 서버에서만 돈다" 가 확실할 때만 native 를 쓰세요.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">빌드 시간과 성능의 균형</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">단계별 프로파일 운영</h4>
+      <pre class="code" data-lang="toml"><code># 개발 중 — 빠른 반복이 최우선
+[profile.dev]
+opt-level = 1
+debug = 1                  # 줄 정보만 (전체 디버그 정보는 무겁습니다)
+[profile.dev.package."*"]
+opt-level = 3
+
+# CI 테스트 — 빠른 빌드
+[profile.test]
+opt-level = 1
+
+# 릴리즈 — 최대 성능
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+
+# 프로파일링 — 릴리즈 + 심볼
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false</code></pre>
+      <pre class="code" data-lang="bash"><code># 개발 반복은 dev, 성능 확인은 release, 원인 분석은 profiling
+cargo run                              # dev
+cargo run --release                    # release
+cargo flamegraph --profile profiling   # ⚡ e01</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">디버그 심볼과 배포</h4>
+      <pre class="code" data-lang="text"><code>★ 딜레마
+  심볼이 있으면 → 크래시 분석이 가능하지만 바이너리가 큽니다
+  심볼이 없으면 → 작지만 스택 트레이스가 주소만 나옵니다
+
+★ 실무 해법: 심볼을 분리해 따로 보관 ★
+  # 리눅스
+  objcopy --only-keep-debug libmylib.so libmylib.so.debug
+  objcopy --strip-debug --add-gnu-debuglink=libmylib.so.debug libmylib.so
+  # → 배포는 stripped, 심볼 파일은 사내 저장소에
+
+  # 맥
+  dsymutil target/release/libmylib.dylib      # .dSYM 생성
+
+  # split-debuginfo 옵션 (rustc)
+  [profile.release]
+  split-debuginfo = "packed"       # 별도 파일로 (맥·리눅스)
+
+★ 크래시 리포트 시스템을 쓴다면 (Sentry 등)
+  빌드 시 심볼을 업로드하고 배포물은 strip 하는 것이 표준입니다.
+
+# 크기 비교
+ls -lh target/release/libmylib.so        # strip 전후를 비교해 보세요</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파이썬 wheel 은 크기가 중요합니다</b> — <code>strip = "symbols"</code> 로
+        수 MB 를 줄일 수 있습니다. 대신 <b>세그폴트 분석이 어려워지므로</b>(🐍 y12)
+        <b>심볼 파일을 따로 보관</b>하는 습관을 들이세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">PGO 와 BOLT</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로파일 기반 최적화 (PGO)</h4>
+      <pre class="code" data-lang="bash"><code># ① 계측 빌드로 실행 프로파일 수집
+RUSTFLAGS="-Cprofile-generate=/tmp/pgo" cargo build --release
+./target/release/mylib-cli 실제와_비슷한_작업
+
+# ② 프로파일 병합
+llvm-profdata merge -o /tmp/pgo/merged.profdata /tmp/pgo
+
+# ③ 그 프로파일로 다시 빌드
+RUSTFLAGS="-Cprofile-use=/tmp/pgo/merged.profdata" cargo build --release
+
+# ★ 효과 (직접 재 보세요 · ⚡ e01)
+#   분기가 많은 코드(파서·인터프리터)에서 수~십수 % 개선이 보고됩니다.
+#   수치 계산 위주라면 효과가 작습니다.
+#   rustc 자신도 PGO 로 빌드됩니다.
+
+# ★ 주의
+#   · 프로파일이 실제 워크로드와 달라야 의미가 없습니다
+#   · CI 파이프라인이 복잡해집니다
+#   · 재현 가능한 빌드가 어려워집니다 (b03)
+#   → 성능이 제품의 핵심 가치일 때만 도입하세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그 밖의 고급 옵션</h4>
+      <pre class="code" data-lang="bash"><code># BOLT — 링크 후 바이너리 재배치 (LLVM 도구)
+#   코드 레이아웃을 실행 프로파일에 맞춰 재배열
+#   i-cache 미스를 줄입니다 (큰 바이너리에서 효과)
+
+# 할당자 교체 — 멀티스레드에서 효과가 큽니다 (⚡ e05)
+# [dependencies]
+# mimalloc = "0.1"
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+#   jemalloc · mimalloc · snmalloc
+#   ★ 할당이 잦은 워크로드에서 수십 % 차이가 나기도 합니다
+
+# 정적 링크 (배포 단순화 · b07)
+RUSTFLAGS="-C target-feature=+crt-static" cargo build --release
+
+# 링커 교체 (빌드 속도 · b10)
+#   lld · mold — 링크 시간이 크게 줄어듭니다
+
+# 무엇이 실제로 효과 있었는지 반드시 측정하세요
+#   criterion 으로 before/after 비교 (⚡ e01)
+#   hyperfine 으로 전체 실행 시간 비교
+hyperfine './old' './new'</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>이 섹션의 옵션 대부분은 측정 없이 켜면 손해</b>입니다.
+        <b><code>lto</code> 와 <code>codegen-units=1</code> 정도가 대체로 안전한 기본값</b>이고,
+        그 이상은 <b>실제 워크로드로 재 보고</b> 결정하세요(⚡ e01).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>성능을 잴 때는 반드시 <code>--release</code></b> 입니다 (10~100배 차이).
+    네이티브 모듈은 <b><code>lto = "fat"</code> · <code>codegen-units = 1</code> · <code>strip</code></b> 이 무난한 기본이고,
+    <b><code>[profile.dev.package."*"] opt-level = 3</code></b> 은 개발 체감을 크게 개선합니다.
+    <b><code>target-cpu=native</code> 는 배포용에 쓰지 마세요</b> — 사용자 CPU 에서 죽습니다.</div>
+</section>
+
+
+<!-- ==================== b07 ==================== -->
+<section class="sec" id="b07">
+  <div class="sec-head rv">
+    <span class="no">BUILD 07</span>
+    <h2>크로스 컴파일 — <span class="t">내 PC 에서 다른 OS 용으로</span></h2>
+    <p class="lead">
+      파이썬 wheel 이든 npm 패키지든 <b>플랫폼별 바이너리</b>가 필요합니다.
+      Rust 는 <b>타깃 추가 한 줄</b>로 시작할 수 있지만,
+      <b>C 라이브러리를 링크하는 순간 난이도가 올라갑니다</b>.
+      실무에서 실제로 쓰이는 방법만 정리합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가장 간단한 경우 — 순수 Rust</h4>
+      <pre class="code" data-lang="bash"><code># ① 타깃 추가
+rustup target list | grep installed
+rustup target add x86_64-unknown-linux-musl
+rustup target add aarch64-unknown-linux-gnu
+rustup target add x86_64-pc-windows-gnu
+
+# ② 빌드
+cargo build --release --target x86_64-unknown-linux-musl
+#   → target/x86_64-unknown-linux-musl/release/
+
+# ★ 순수 Rust 라면 이것만으로 되는 경우가 많습니다.
+#   링커가 필요하면 아래 방법 중 하나를 씁니다.
+
+# 자주 쓰는 타깃 이름
+#   x86_64-unknown-linux-gnu       일반 리눅스
+#   x86_64-unknown-linux-musl      Alpine · 정적 링크 ★
+#   aarch64-unknown-linux-gnu      ARM 서버 · 라즈베리파이
+#   x86_64-apple-darwin            인텔 맥
+#   aarch64-apple-darwin           애플 실리콘 ★
+#   x86_64-pc-windows-msvc         윈도우 (MSVC)
+#   wasm32-unknown-unknown         WASM (🟨 j08)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">링커 문제를 푸는 세 가지 ★</h4>
+      <pre class="code" data-lang="bash"><code># ① cargo-zigbuild — zig 를 링커로 (가장 간편) ★
+pip install ziglang
+cargo install cargo-zigbuild
+cargo zigbuild --release --target aarch64-unknown-linux-gnu
+cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.17  # glibc 버전 지정!
+#   ★ glibc 버전을 지정할 수 있는 것이 큰 장점입니다 (manylinux · 🐍 y11)
+
+# ② cross — 도커 컨테이너에서 빌드
+cargo install cross
+cross build --release --target aarch64-unknown-linux-gnu
+#   ★ 도커가 필요하지만 설정이 거의 없습니다
+
+# ③ 직접 툴체인 설치
+sudo apt install gcc-aarch64-linux-gnu
+# .cargo/config.toml
+# [target.aarch64-unknown-linux-gnu]
+# linker = "aarch64-linux-gnu-gcc"
+
+# ★ 맥용 크로스는 특히 어렵습니다
+#   애플 SDK 라이선스 문제로 리눅스에서 맥 바이너리를 만들기 까다롭습니다
+#   → CI 의 macOS 러너를 쓰는 것이 정답입니다 (b08)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>maturin 은 <code>--zig</code> 옵션을 내장</b>하고 있습니다(🐍 y03) —
+        <code>maturin build --release --target aarch64-unknown-linux-gnu --zig</code>
+        한 줄로 ARM용 wheel 이 나옵니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">musl 과 정적 링크</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">glibc vs musl ★</h4>
+      <pre class="code" data-lang="text"><code>★ 왜 두 가지가 있나
+  glibc  대부분의 리눅스 배포판 (Ubuntu · Debian · RHEL)
+  musl   Alpine 리눅스 · 정적 링크에 적합
+
+★ 문제
+  glibc 는 '하위 호환' 만 됩니다.
+  glibc 2.35 에서 빌드하면 2.31 시스템에서 로드가 실패합니다 ★
+    error: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found
+
+★ 대응
+  ① manylinux 컨테이너에서 빌드 (오래된 glibc 기준)
+     maturin 의 maturin-action 이 자동으로 처리합니다 (🐍 y03)
+  ② cargo-zigbuild 로 glibc 버전 지정
+     --target x86_64-unknown-linux-gnu.2.17
+  ③ musl 로 정적 링크 — glibc 의존이 사라집니다 ★
+
+# musl 정적 빌드
+rustup target add x86_64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl
+ldd target/.../mylib
+#   "not a dynamic executable" ← 완전 정적 ★
+
+# 확인 — 어떤 glibc 심볼을 요구하나
+objdump -T libmylib.so | grep GLIBC | sort -u -t_ -k2 -V | tail -5</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">musl 의 대가</h4>
+      <pre class="code" data-lang="text"><code>★ musl 의 malloc 이 느립니다
+  멀티스레드 할당이 많은 코드에서 눈에 띄게 느려집니다.
+  → mimalloc · jemalloc 으로 교체하면 대부분 해결됩니다 (b06)
+
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+★ 그 외 차이
+  · DNS 해석 동작이 다릅니다 (musl 은 /etc/nsswitch.conf 를 안 봅니다)
+  · 일부 로케일 기능이 없습니다
+  · 동적 로딩(dlopen)에 제약이 있습니다 ★
+      → 파이썬 확장은 dlopen 으로 로드되므로 주의가 필요합니다
+        (musllinux wheel 은 별도로 만듭니다 · 🐍 y11)
+
+★ 판단
+  · CLI 도구 · 컨테이너 이미지  → musl 정적이 아주 편합니다
+  · 파이썬 확장 · Node 애드온   → 각 플랫폼용을 따로 만드세요
+      manylinux(glibc) + musllinux(musl) 둘 다 (🐍 y11 · 🟨 j10)
+
+# 도커에서 확인
+docker run --rm -v $PWD:/w -w /w alpine:latest ./target/.../mylib</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">플랫폼 매트릭스 정하기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최소 세트 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>타깃</th><th>왜 필요한가</th></tr>
+        <tr><td>linux x86_64 gnu</td><td>서버·CI 대부분</td></tr>
+        <tr><td>linux x86_64 musl</td><td><b>Alpine 도커</b> ★</td></tr>
+        <tr><td>linux aarch64</td><td>ARM 서버·Graviton</td></tr>
+        <tr><td>macos aarch64</td><td><b>애플 실리콘</b> ★</td></tr>
+        <tr><td>macos x86_64</td><td>인텔 맥 (줄어드는 중)</td></tr>
+        <tr><td>windows x86_64</td><td>데스크탑 개발자</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ 우선순위
+  ① linux x86_64 gnu     — 없으면 아무도 못 씁니다
+  ② macos aarch64        — 개발자 대부분이 여기서 개발합니다
+  ③ windows x86_64
+  ④ linux x86_64 musl    — 도커 사용자 (문의가 가장 많습니다) ★
+  ⑤ linux aarch64
+  ⑥ macos x86_64
+
+★ 빼도 되는 것
+  · 32비트 (i686) — 거의 필요 없습니다
+  · linux armv7 — 라즈베리파이 32비트 (필요하면 요청받고 추가)
+
+★ sdist / 소스 배포는 반드시 함께
+  목록에 없는 플랫폼 사용자가 직접 빌드할 수 있게 (🐍 y11)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로컬에서 검증하기</h4>
+      <pre class="code" data-lang="bash"><code># QEMU 로 다른 아키텍처 실행 (리눅스)
+docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+docker run --rm --platform linux/arm64 -v $PWD:/w -w /w \
+  debian:bookworm ./target/aarch64-unknown-linux-gnu/release/mylib-cli
+
+# Alpine 확인
+docker run --rm -v $PWD:/w -w /w python:3.12-alpine \
+  sh -c "pip install /w/target/wheels/*musllinux*.whl &amp;&amp; python -c 'import mylib'"
+
+# 윈도우 (wine · 제한적)
+wine target/x86_64-pc-windows-gnu/release/mylib-cli.exe
+
+# ★ 가장 확실한 검증은 CI 의 실제 러너입니다 (b08)
+#   로컬 크로스 빌드는 '빌드가 되는지' 만 확인하고,
+#   '실제로 도는지' 는 CI 나 실기기에서 확인하세요
+
+# 타깃별 테스트 실행 (같은 아키텍처면 가능)
+cargo test --target x86_64-unknown-linux-musl</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“빌드가 됐다”가 “동작한다”는 아닙니다</b> —
+        크로스 컴파일한 바이너리는 <b>반드시 그 플랫폼에서 실행 테스트</b>하세요.
+        런타임 의존성(<code>glibc</code> 버전 · DLL)은 빌드 시점에 드러나지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">타깃 트리플과 sysroot</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이름 읽는 법</h4>
+      <pre class="code" data-lang="text"><code>x86_64 - unknown - linux - gnu
+  │        │         │       └ 환경 (gnu · musl · msvc · gnueabihf)
+  │        │         └ OS (linux · windows · darwin · wasi · none)
+  │        └ 벤더 (unknown · pc · apple)
+  └ 아키텍처 (x86_64 · aarch64 · wasm32 · riscv64)
+
+# 지원 타깃 전부 보기 (Tier 별로 나뉩니다)
+rustc --print target-list | wc -l         # 200개 이상
+rustup target list
+
+# Tier 1: 자동 테스트 · 보장됨 (x86_64 리눅스·맥·윈도우)
+# Tier 2: 빌드는 보장, 테스트는 일부 (aarch64 · musl · wasm)
+# Tier 3: 커뮤니티 (직접 빌드해야 하는 경우도)
+
+# 타깃 상세 정보
+rustc --print target-spec-json -Z unstable-options \
+  --target aarch64-unknown-linux-gnu</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C 의존성이 있을 때</h4>
+      <pre class="code" data-lang="bash"><code># ★ 여기서 크로스 컴파일이 어려워집니다 (🔗 f08)
+#   C 라이브러리도 타깃용으로 빌드되거나 준비돼 있어야 합니다
+
+# ① vendored feature 로 소스에서 함께 빌드 (권장) ★
+#    openssl = { version = "0.10", features = ["vendored"] }
+#    → cc 크레이트가 타깃용으로 컴파일합니다
+
+# ② cross 의 도커 이미지에 라이브러리 설치
+# Cross.toml
+# [target.aarch64-unknown-linux-gnu]
+# pre-build = ["dpkg --add-architecture arm64",
+#              "apt-get update &amp;&amp; apt-get install -y libssl-dev:arm64"]
+
+# ③ sysroot 를 직접 지정
+# CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+# PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu \
+# cargo build --target aarch64-unknown-linux-gnu
+
+# build.rs 에서 타깃 확인 (b01)
+let target = std::env::var("TARGET").unwrap();       // 크로스 대상
+let host = std::env::var("HOST").unwrap();           // 빌드 머신
+if target != host { /* 크로스 빌드 중 */ }
+
+# ★ 실무 결론
+#   C 의존성이 있으면 vendored 를 쓰거나,
+#   각 플랫폼의 CI 러너에서 네이티브 빌드하는 편이 훨씬 단순합니다 (b08)</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 순수 Rust 는 <b><code>rustup target add</code> + <code>--target</code></b> 로 끝나고,
+    링커가 필요하면 <b><code>cargo-zigbuild</code> 나 <code>cross</code></b> 를 쓰세요.
+    <b>glibc 버전 문제</b>는 manylinux 컨테이너나 zigbuild 의 버전 지정으로 풀고,
+    <b>Alpine 용 musl 빌드를 빠뜨리지 마세요</b>.
+    <b>C 의존성이 있으면 vendored 또는 네이티브 CI 러너</b>가 훨씬 단순합니다.</div>
+</section>
+
+
+<!-- ==================== b08 ==================== -->
+<section class="sec" id="b08">
+  <div class="sec-head rv">
+    <span class="no">BUILD 08</span>
+    <h2>CI — <span class="t">태그를 붙이면 자동으로</span></h2>
+    <p class="lead">
+      플랫폼 여섯 개를 손으로 빌드할 수는 없습니다.
+      <b>태그를 푸시하면 세 OS 에서 빌드해 PyPI·npm 에 올라가는</b> 파이프라인을 만듭니다.
+      maturin·napi-rs 는 <b>워크플로 템플릿을 생성해 줍니다</b> — 거기서 시작하세요.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 CI — 검사와 테스트</h4>
+      <pre class="code" data-lang="yaml"><code># .github/workflows/ci.yml
+name: CI
+on: [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"          # ★ 경고를 에러로
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: rustfmt, clippy }
+      - uses: Swatinem/rust-cache@v2        # ★ 캐시 — 이게 없으면 매번 전체 빌드
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --all-features
+      - run: cargo test --all-features
+      - run: cargo doc --no-deps
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable, "1.75"]              # MSRV 도 검증 (b02)
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with: { toolchain: "${{ matrix.rust }}" }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-features</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬 wheel 배포 ★</h4>
+      <pre class="code" data-lang="bash"><code># maturin 이 워크플로를 생성해 줍니다 (🐍 y03)
+maturin generate-ci github &gt; .github/workflows/release.yml</code></pre>
+      <pre class="code" data-lang="yaml"><code># 생성물의 핵심 부분
+jobs:
+  linux:
+    strategy:
+      matrix:
+        target: [x86_64, aarch64, x86_64-unknown-linux-musl]
+    steps:
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          manylinux: auto              # ★ 오래된 glibc 로 빌드 (b07)
+          sccache: true                # 빌드 캐시
+      - uses: actions/upload-artifact@v4
+        with: { name: wheels-${{ matrix.target }}, path: dist }
+
+  macos:
+    strategy: { matrix: { target: [x86_64, aarch64] } }
+    runs-on: macos-latest
+    # …
+
+  release:
+    needs: [linux, macos, windows, sdist]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: upload
+          args: --non-interactive --skip-existing wheels-*/*
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">캐시로 CI 시간 줄이기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 캐시하나 ★</h4>
+      <pre class="code" data-lang="yaml"><code># Swatinem/rust-cache 가 자동으로 처리합니다
+- uses: Swatinem/rust-cache@v2
+  with:
+    key: ${{ matrix.target }}          # 타깃별로 분리 ★
+    cache-on-failure: true
+    workspaces: ". -&gt; target"
+
+# 캐시되는 것
+#   ~/.cargo/registry     의존성 소스
+#   ~/.cargo/git
+#   target/debug/deps     빌드된 의존성 ★ 가장 큽니다
+#   target/release/deps
+
+# 캐시되지 않는 것 (일부러)
+#   내 크레이트의 결과물 — 어차피 매번 바뀝니다
+
+# ★ 효과
+#   첫 빌드 5분 → 이후 30초 같은 개선이 흔합니다.
+#   캐시가 안 먹는지 확인: 로그에서 "Compiling serde ..." 가 매번 나오면 실패</code></pre>
+      <pre class="code" data-lang="yaml"><code># sccache — 더 강력한 컴파일 캐시 (b10)
+- uses: mozilla-actions/sccache-action@v0.0.6
+- run: cargo build --release
+  env:
+    RUSTC_WRAPPER: sccache
+    SCCACHE_GHA_ENABLED: "true"</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">캐시가 안 먹는 흔한 원인</h4>
+      <pre class="code" data-lang="text"><code>□ RUSTFLAGS 가 job 마다 다름
+    → 캐시 키가 달라집니다. 한 곳에 정의하세요 (env:)
+
+□ 툴체인 버전이 계속 바뀜
+    → rust-toolchain.toml 로 고정 (r01 · b03)
+
+□ Cargo.lock 이 없거나 매번 갱신됨
+    → 커밋하세요 (b03)
+
+□ 매트릭스마다 같은 키를 씀
+    → key 에 os/target 을 넣으세요
+
+□ 캐시 크기 한도 초과 (GitHub 는 저장소당 10GB)
+    → target/ 이 너무 크면 일부만 캐시하거나 정리
+    → cargo sweep 로 오래된 것 삭제
+
+★ 측정
+  워크플로 실행 시간을 비교해 보세요.
+  캐시 적중 시 "Cache restored from key: ..." 로그가 나옵니다.
+
+★ CI 비용 감각
+  플랫폼 6개 × 파이썬 5버전 = 30 job (abi3 없이 · 🐍 y11)
+  abi3 를 켜면 6 job 으로 줄어듭니다 ★ 이것만으로도 켤 가치가 있습니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">릴리스 파이프라인 전체</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">릴리스 흐름 ★</h4>
+      <pre class="code" data-lang="text"><code>① 버전 올림 (Cargo.toml · package.json · pyproject.toml)
+     cargo release patch --workspace  또는 수동
+② CHANGELOG 갱신
+③ PR → 리뷰 → 머지
+④ 태그 푸시
+     git tag v0.3.1 &amp;&amp; git push origin v0.3.1
+⑤ CI 가 자동으로
+     · 전 플랫폼 빌드
+     · 테스트
+     · 아티팩트 수집
+     · PyPI / npm / crates.io 배포
+     · GitHub Release 생성 (바이너리 첨부)
+⑥ 설치 검증 job (🟨 j10)
+     실제로 pip install / npm install 해서 import 되는지
+
+★ 중요한 것: ⑥ 을 반드시 두세요
+  배포는 성공했는데 설치가 안 되는 경우가 실제로 자주 있습니다.
+  (플랫폼 태그 불일치 · 파일 누락 · musl 빠뜨림)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">시크릿과 신뢰</h4>
+      <pre class="code" data-lang="yaml"><code># ★ Trusted Publishing (권장) — 토큰 없이 배포
+#   PyPI · npm 이 GitHub Actions 를 신뢰하도록 설정
+jobs:
+  release:
+    permissions:
+      id-token: write            # OIDC 토큰 ★
+      contents: read
+    steps:
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        # 토큰 불필요 — PyPI 에서 저장소를 등록해 두면 됩니다
+
+# npm provenance (🟨 j10)
+- run: npm publish --provenance --access public
+  env:
+    NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}</code></pre>
+      <pre class="code" data-lang="text"><code>★ 보안 체크리스트
+  □ 배포는 CI 에서만 (로컬 publish 금지)
+  □ 토큰은 최소 권한 · 만료 설정
+  □ 태그 푸시 권한을 제한 (보호된 태그)
+  □ 릴리스 job 은 환경(environment) 승인을 거치게 ★
+      environment: production   → 사람이 승인해야 실행
+  □ 의존성 감사를 릴리스 전에 (cargo audit · b09)
+  □ 서드파티 액션은 커밋 SHA 로 고정
+      uses: actions/checkout@8f4b7f8  ← 태그 대신 SHA</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>네이티브 바이너리를 배포한다는 것</b>은 사용자 머신에서 코드를 실행한다는 뜻입니다.
+        <b>CI 에서만 배포 + provenance</b> 두 가지는 반드시 갖추세요(🟨 j10).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">CI 를 빠르고 안정적으로</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">시간을 줄이는 기법</h4>
+      <pre class="code" data-lang="text"><code>① 단계를 나누세요
+     빠른 검사(fmt · clippy · check)를 먼저 → 실패하면 즉시 중단
+     느린 빌드는 그 다음 job 으로
+
+② cargo nextest — 테스트 실행이 더 빠릅니다
+     cargo install cargo-nextest
+     cargo nextest run --all-features
+
+③ 릴리스 빌드는 태그일 때만
+     if: startsWith(github.ref, 'refs/tags/')
+
+④ 매트릭스를 줄이세요
+     PR 에서는 linux 만, 태그에서만 전 플랫폼 ★
+
+⑤ concurrency 로 중복 실행 취소
+     concurrency:
+       group: ${{ github.workflow }}-${{ github.ref }}
+       cancel-in-progress: true
+
+⑥ 도커 이미지에 툴체인을 미리 넣기 (self-hosted 러너)
+
+⑦ sccache + 원격 캐시 (S3 · GHA)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">불안정한 CI 다루기</h4>
+      <pre class="code" data-lang="text"><code>★ 자주 겪는 불안정 원인
+  · 테스트가 병렬로 돌며 같은 자원을 씀 (r11)
+      → 임시 디렉터리 · 포트 0 으로 자동 할당
+  · 시간 의존 테스트 (타임아웃 · sleep)
+      → 시계를 추상화 (🔐 o05)
+  · 네트워크 의존 (crates.io · 외부 API)
+      → 캐시 · 목 서버
+  · 러너 성능 편차 (벤치마크를 CI 에서 돌리면 노이즈가 큽니다 ★)
+      → 벤치마크는 CI 에서 '회귀 감지' 용으로만, 절대값은 믿지 마세요 (⚡ e01)
+
+★ 진단
+  · 실패한 job 의 로그를 아티팩트로 남기기
+  · RUST_BACKTRACE=1 을 항상 켜기
+  · tmate 액션으로 러너에 SSH 접속 (디버깅용)
+
+★ 플랫폼별 함정
+  · 윈도우: 경로 구분자 · 줄바꿈(CRLF) · 파일 잠금
+      git config core.autocrlf false
+  · 맥: 파일 시스템이 대소문자를 구분하지 않습니다 ★
+  · Alpine: /bin/sh 가 bash 가 아닙니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>CI 는 “어제까지 되던 것이 오늘 안 되는” 것을 잡는 장치</b>입니다.
+        불안정한 테스트를 방치하면 <b>모두가 실패를 무시하기 시작</b>합니다 —
+        <b>불안정한 테스트는 고치거나 지우세요</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>maturin generate-ci github</code></b>(🐍) 나
+    <b>napi-rs 템플릿</b>(🟨)에서 시작하는 것이 가장 빠릅니다.
+    <b><code>Swatinem/rust-cache</code></b> 를 반드시 넣고(없으면 매번 전체 빌드),
+    <b>태그 푸시 → 전 플랫폼 빌드 → 배포 → 설치 검증</b>까지 자동화하세요.
+    <b>abi3 를 켜면 CI job 이 5분의 1</b>로 줄어듭니다(🐍 y11).</div>
+</section>
+
+
+<!-- ==================== b09 ==================== -->
+<section class="sec" id="b09">
+  <div class="sec-head rv">
+    <span class="no">BUILD 09</span>
+    <h2>clippy · fmt · <span class="t">문서</span> — 품질을 자동으로</h2>
+    <p class="lead">
+      <code>clippy</code> 는 <b>“이렇게 쓰는 게 낫다”를 알려 주는 선배</b>입니다.
+      잔소리가 아니라 <b>대부분 진짜 개선</b>이고, 초심자에게는 가장 좋은 학습 도구입니다.
+      <b>프로젝트 초기에 켜 두세요</b> — 나중에 켜면 경고 수백 개를 한꺼번에 마주합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">clippy 기본</h4>
+      <pre class="code" data-lang="bash"><code>rustup component add clippy
+cargo clippy                              # 기본 린트
+cargo clippy --all-targets --all-features # 테스트·예제까지 ★
+cargo clippy -- -D warnings               # 경고를 에러로 (CI 용)
+cargo clippy --fix                        # 자동 수정 가능한 것 적용 ★</code></pre>
+      <pre class="code" data-lang="text"><code># 실제로 자주 나오는 지적들
+  · needless_range_loop
+      for i in 0..v.len() { v[i] }  →  for x in &amp;v { }        (r04)
+  · redundant_clone
+      불필요한 .clone() ★                                      (⚡ e02)
+  · single_char_pattern
+      s.split("a")  →  s.split('a')
+  · manual_map / option_if_let_else
+      match 를 .map() 으로                                     (r08)
+  · large_enum_variant
+      배리언트 하나가 너무 큼 → Box 로                          (r08)
+  · too_many_arguments
+      인자 8개 이상 → 구조체로                                  (r07)
+  · missing_safety_doc
+      unsafe fn 에 # Safety 주석이 없음 ★                      (🔬 d08)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>초심자에게 가장 좋은 학습 도구</b>입니다 —
+        clippy 가 지적하는 것을 <b>이유까지 읽으면</b>
+        “Rust 답게 쓰는 법”이 자연스럽게 익혀집니다.
+        <code>cargo clippy --fix</code> 로 자동 수정된 diff 를 읽어 보세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">린트 설정 ★</h4>
+      <pre class="code" data-lang="toml"><code># Cargo.toml (1.74+) — 워크스페이스 전체에 적용 가능
+[lints.rust]
+unsafe_code = "forbid"              # unsafe 금지 (FFI 크레이트는 제외)
+missing_docs = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)'] }   # b04
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }   # 더 엄격 (호불호가 있습니다)
+unwrap_used = "warn"                # 🔗 f09 · 🐍 y08
+expect_used = "warn"
+panic = "warn"
+indexing_slicing = "warn"           # v[i] 대신 v.get(i)
+todo = "deny"
+dbg_macro = "deny"                  # dbg! 를 커밋하지 않게 ★
+
+# 워크스페이스 상속 (b05)
+# [lints]
+# workspace = true</code></pre>
+      <pre class="code" data-lang="rust"><code>// 코드에서 예외 두기
+#[allow(clippy::too_many_arguments)]
+fn complex(a: u32, b: u32, /* … */) { }
+
+// 이유를 적으세요 (1.81+ 는 expect 로 '더 이상 필요 없으면 경고')
+#[expect(clippy::unwrap_used, reason = "위에서 is_some() 을 확인함")]
+let v = opt.unwrap();
+
+// 파일·크레이트 전체
+#![allow(clippy::module_name_repetitions)]</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">포맷과 문서</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">rustfmt</h4>
+      <pre class="code" data-lang="bash"><code>rustup component add rustfmt
+cargo fmt                    # 전부 정렬
+cargo fmt --check            # 검사만 (CI 용) ★
+cargo fmt -- --emit files</code></pre>
+      <pre class="code" data-lang="toml"><code># rustfmt.toml (안정 옵션만)
+edition = "2021"
+max_width = 100
+use_small_heuristics = "Default"
+newline_style = "Unix"            # ★ 윈도우 팀원과의 CRLF 문제 방지
+
+# nightly 전용 (많이 씁니다만 rustup toolchain 이 필요)
+# group_imports = "StdExternalCrate"
+# imports_granularity = "Crate"
+# wrap_comments = true</code></pre>
+      <pre class="code" data-lang="text"><code>★ 포맷 논쟁이 사라집니다
+  Rust 커뮤니티는 rustfmt 기본값을 거의 그대로 씁니다.
+  설정을 많이 바꾸면 오히려 남의 코드를 읽기 어려워집니다.
+  → max_width 정도만 조정하고 나머지는 두세요.
+
+★ 에디터 설정
+  VS Code: "editor.formatOnSave": true
+  IntelliJ: Rust 플러그인의 Run rustfmt on Save
+
+★ pre-commit 훅
+  #!/bin/sh
+  cargo fmt --check || { echo "cargo fmt 를 실행하세요"; exit 1; }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문서 (rustdoc)</h4>
+      <pre class="code" data-lang="bash"><code>cargo doc --open              # 내 코드 + 의존성 문서
+cargo doc --no-deps --open    # 내 것만 (빠릅니다)
+cargo test --doc              # 문서 예제 실행 (r11) ★</code></pre>
+      <pre class="code" data-lang="rust"><code>#![warn(missing_docs)]        // 공개 항목에 문서가 없으면 경고
+
+//! # mylib
+//!
+//! 빠른 텍스트 처리 라이브러리.
+//!
+//! ## 빠른 시작
+//! ```
+//! let n = mylib::count_words("안녕 세상");
+//! assert_eq!(n, 2);
+//! ```
+
+/// 단어 수를 셉니다.
+///
+/// # 예제
+/// ```
+/// assert_eq!(mylib::count_words("a b"), 2);
+/// ```
+///
+/// # 패닉
+/// 패닉하지 않습니다.
+///
+/// # 안전성            ← unsafe fn 이면 필수 (🔬 d08)
+pub fn count_words(s: &amp;str) -&gt; usize { s.split_whitespace().count() }
+
+// 문서 안 링크 (intra-doc links) ★
+/// [`count_words`] 와 함께 쓰세요. [`std::str::split_whitespace`] 기반입니다.
+
+// 깨진 링크 검사
+// #![deny(rustdoc::broken_intra_doc_links)]</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>문서 예제가 테스트로 실행된다는 것</b>이 Rust 문서 문화의 핵심입니다(r11).
+        <b>API 를 바꾸면 문서가 깨지고 CI 가 막습니다</b> —
+        “문서가 낡았다”는 문제가 구조적으로 사라집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">팀에 도입하는 순서</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">단계적으로 켜기 ★</h4>
+      <pre class="code" data-lang="text"><code>1주차 — 기본만
+  cargo fmt --check
+  cargo clippy -- -D warnings          (clippy::all 만)
+
+2주차 — 안전 관련
+  [lints.clippy]
+  unwrap_used = "warn"
+  expect_used = "warn"
+  → FFI · 라이브러리 코드부터 적용 (🔗 f09)
+
+3주차 — 문서
+  #![warn(missing_docs)]
+  공개 API 부터 채우기
+
+이후 — 필요에 따라
+  pedantic · nursery 는 선택적으로
+  (호불호가 갈리고 오탐도 있습니다)
+
+★ 하지 말아야 할 것
+  · 처음부터 pedantic 전부 켜기 → 경고 수백 개에 팀이 지칩니다
+  · #![allow(clippy::all)] 로 통째로 끄기 → 도구를 버리는 것
+  · 이유 없이 #[allow] 붙이기 → reason 을 적으세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그 밖의 품질 도구</h4>
+      <pre class="code" data-lang="bash"><code># 커버리지
+cargo install cargo-llvm-cov
+cargo llvm-cov --all-features --html
+cargo llvm-cov --lcov --output-path lcov.info    # CI 업로드용
+
+# 죽은 코드 찾기
+cargo install cargo-udeps
+cargo +nightly udeps                   # 안 쓰는 의존성 ★
+cargo install cargo-machete            # 더 빠른 대안
+
+# 문서 커버리지
+cargo +nightly rustdoc -- -Z unstable-options --show-coverage
+
+# 의존성 감사 (b03)
+cargo audit
+cargo deny check
+
+# 공개 API 변경 감지 (b02)
+cargo semver-checks check-release
+
+# 전부 한 번에 (Makefile 이나 xtask 로 · b05)
+#   cargo xtask lint</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>cargo udeps</code>/<code>cargo machete</code></b> 로
+        <b>안 쓰는 의존성</b>을 주기적으로 정리하세요 —
+        빌드 시간·바이너리 크기·공급망 위험이 함께 줄어듭니다(b03·b10).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">커스텀 린트</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로젝트 규칙을 강제하기</h4>
+      <pre class="code" data-lang="toml"><code># clippy.toml — clippy 동작 조정
+disallowed-methods = [
+    { path = "std::env::var", reason = "설정은 Config 를 통해 읽으세요" },
+    { path = "std::process::exit", reason = "Drop 이 안 불립니다 (o07)" },
+]
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "FxHashMap 을 쓰세요" },
+]
+too-many-arguments-threshold = 6
+type-complexity-threshold = 250
+msrv = "1.75"                      # 이 버전에 없는 API 제안을 막습니다 ★</code></pre>
+      <pre class="code" data-lang="text"><code>★ 더 강한 규칙이 필요하면
+  · dylint — 커스텀 린트를 Rust 로 작성
+      cargo install cargo-dylint dylint-link
+  · semgrep · ast-grep — 패턴 기반 검사 (언어 무관)
+  · 단순한 것은 grep + CI 스크립트로도 충분합니다
+      ! grep -rn "unwrap()" src/ffi/ || exit 1
+
+★ 실무 감각
+  커스텀 린트를 만들 정도의 규칙이라면
+  대개 '타입으로 표현할 수 있는지' 를 먼저 검토하세요 (🔬 d08).
+  타입으로 막을 수 있으면 린트보다 확실합니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">MSRV 관리</h4>
+      <pre class="code" data-lang="toml"><code># Cargo.toml
+[package]
+rust-version = "1.75"              # 최소 지원 버전 ★</code></pre>
+      <pre class="code" data-lang="bash"><code># CI 에서 MSRV 검증 (b08)
+- uses: dtolnay/rust-toolchain@1.75.0
+- run: cargo check --all-features
+
+# 의존성이 MSRV 를 올려 버리는 경우
+cargo install cargo-msrv
+cargo msrv find                    # 실제 최소 버전 찾기
+cargo msrv verify
+
+# 새 버전을 쓰려면 rust-version 을 올리세요
+#   → semver 상 minor 올림으로 보는 것이 관례입니다 (b02)
+
+★ MSRV 를 얼마나 낮게 유지할까
+  · 라이브러리      최근 6개월~1년 (사용자층에 따라)
+  · 애플리케이션    최신을 써도 됩니다
+  · 기업 내부       배포 환경의 툴체인에 맞추세요
+
+★ 너무 낮으면 새 기능을 못 씁니다
+  let-else(1.65) · GAT(1.65) · async fn in trait(1.75) 등
+  실무 편의가 큰 기능들이 최근에 들어왔습니다.</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>cargo fmt --check</code> + <code>cargo clippy -D warnings</code></b> 를
+    <b>프로젝트 초기에</b> CI 에 넣으세요.
+    clippy 는 잔소리가 아니라 <b>가장 좋은 학습 도구</b>이고, <code>--fix</code> 로 자동 수정도 됩니다.
+    <b>문서 예제가 테스트로 실행</b>되므로 문서가 낡을 수 없고,
+    <b>FFI 코드에는 <code>unwrap_used</code> 를 금지</b>해 두면 안전합니다(🔗 f09).</div>
+</section>
+
+
+<!-- ==================== b10 ==================== -->
+<section class="sec" id="b10">
+  <div class="sec-head rv">
+    <span class="no">BUILD 10</span>
+    <h2>바이너리 크기 · <span class="t">빌드 시간</span> 줄이기</h2>
+    <p class="lead">
+      Rust 의 두 가지 실무 불만입니다 — <b>빌드가 느리고 바이너리가 큽니다</b>.
+      둘 다 <b>원인을 측정하면 대부분 해결</b>됩니다.
+      효과가 큰 순서대로 정리합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드 시간 — 효과 순서 ★</h4>
+      <pre class="code" data-lang="bash"><code># ① 먼저 측정
+cargo build --timings
+#   → target/cargo-timings/*.html
+#     어느 크레이트가 오래 걸리고, 병렬화가 어디서 막히는지 보입니다
+
+# ② 링커 교체 — 가장 쉽고 효과가 큽니다 ★
+#   리눅스: mold (가장 빠름) 또는 lld
+sudo apt install mold
+# .cargo/config.toml
+# [target.x86_64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+#   맥: 최신 ld64 가 이미 빠릅니다 (또는 zld)
+#   윈도우: rust-lld (기본값이 되어 가는 중)
+
+# ③ sccache — 컴파일 결과 캐시
+cargo install sccache
+export RUSTC_WRAPPER=sccache
+sccache --show-stats
+
+# ④ 의존성 줄이기 (b03 · b04)
+cargo udeps                    # 안 쓰는 것
+cargo tree -d                  # 중복
+default-features = false       # 안 쓰는 기능
+
+# ⑤ 워크스페이스로 나누기 (b05)
+#   자주 바뀌는 코드를 잎에 두면 재빌드 범위가 줍니다
+
+# ⑥ 프로파일 조정 (b06)
+# [profile.dev]
+# debug = 1                    # 전체 디버그 정보는 무겁습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">바이너리 크기 — 효과 순서 ★</h4>
+      <pre class="code" data-lang="toml"><code># ① 프로파일 (b06)
+[profile.release]
+opt-level = "z"          # 크기 우선 (속도가 중요하면 3 유지)
+lto = "fat"              # ★ 효과가 큽니다
+codegen-units = 1
+panic = "abort"          # ★ 언와인딩 코드 제거 (PyO3 는 제외 · 🐍 y03)
+strip = "symbols"        # ★ 심볼 제거 — 가장 큰 효과</code></pre>
+      <pre class="code" data-lang="bash"><code># ② 무엇이 큰지 측정
+cargo install cargo-bloat
+cargo bloat --release --crates          # 크레이트별 ★
+cargo bloat --release -n 20             # 함수별
+
+# 출력 예
+#   File  .text     Size Crate
+#   12.1%  38.4%   1.2MiB regex
+#    8.3%  26.4%  845KiB  serde_json
+#    3.1%   9.9%  316KiB  std
+#    2.0%   6.4%  204KiB  mylib          ← 내 코드는 의외로 작습니다 ★
+
+# ③ 의존성 줄이기 — 실제로 가장 큰 효과
+#   regex → 간단한 파싱이면 직접 (수백 KB 절약)
+#   serde_json → 필요한 것만 (또는 더 작은 대안)
+#   chrono → time 크레이트
+
+# ④ 제네릭 단형화 줄이기 (r10)
+#   큰 제네릭 함수를 비제네릭 안쪽 함수로 나누기
+#   dyn 으로 바꾸기 (🔐 o06)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">측정하고 추적하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드 시간 상세 분석</h4>
+      <pre class="code" data-lang="bash"><code># 컴파일 단계별 시간 (nightly)
+cargo +nightly rustc -- -Ztime-passes 2&gt;&amp;1 | sort -k2 -rn | head -20
+#   time: 3.421; rss: 512MB  LLVM_module_optimize     ← 최적화가 대부분
+#   time: 1.203; rss: 380MB  type_check
+#   time: 0.891; rss: 290MB  monomorphization         ★ 제네릭이 많으면 큽니다
+
+# 어떤 함수가 코드를 많이 만드나
+cargo +nightly rustc --release -- -Zprint-mono-items=lazy | head -30
+
+# self-profile (자세한 프로파일)
+cargo +nightly rustc -- -Zself-profile
+# → summarize 도구로 분석
+
+# ★ 해석
+#   LLVM 시간이 크면      → opt-level · codegen-units · 제네릭 줄이기
+#   type_check 가 크면    → 복잡한 타입·트레이트 해석 (🔐 o06)
+#   링크가 크면           → 링커 교체 (mold)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">회귀를 막기 ★</h4>
+      <pre class="code" data-lang="bash"><code># CI 에서 바이너리 크기를 추적
+- run: |
+    SIZE=$(stat -c%s target/release/libmylib.so)
+    echo "size=$SIZE" &gt;&gt; $GITHUB_OUTPUT
+    if [ $SIZE -gt 5000000 ]; then
+      echo "::error::바이너리가 5MB 를 넘었습니다 ($SIZE)"
+      exit 1
+    fi
+
+# 빌드 시간도
+- run: |
+    START=$(date +%s)
+    cargo build --release
+    echo "빌드 $(($(date +%s) - START))초"
+
+# ★ 임계값을 두면 '어느 PR 이 늘렸는지' 가 드러납니다
+#   의존성 하나가 1MB 를 더하는 일이 흔합니다 (b03)
+
+# 로컬에서 비교
+cargo bloat --release --crates &gt; before.txt
+# … 변경 …
+cargo bloat --release --crates &gt; after.txt
+diff before.txt after.txt</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">배포 대상별 목표</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대상마다 기준이 다릅니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>대상</th><th>우선순위</th></tr>
+        <tr><td>파이썬 wheel</td><td>속도 &gt; 크기</td></tr>
+        <tr><td>npm 애드온</td><td>속도 ≈ 크기</td></tr>
+        <tr><td><b>WASM</b></td><td><b>크기 ≫ 속도</b> ★</td></tr>
+        <tr><td>CLI 도구</td><td>속도 &gt; 크기</td></tr>
+        <tr><td>컨테이너</td><td>크기 (레이어)</td></tr>
+        <tr><td>임베디드</td><td>크기 ≫≫</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ 크기가 실제로 문제가 되는 순간
+  · WASM — 로딩 시간이 곧 사용자 경험 (🟨 j09)
+  · npm — CI 가 하루에 수천 번 내려받습니다 (🟨 j10)
+  · 컨테이너 — 이미지 크기가 배포 속도에 직결
+  · 파이썬 wheel — 보통 수 MB 는 문제되지 않습니다
+
+★ 속도가 실제로 문제가 되는 순간
+  · 네이티브 모듈의 존재 이유 자체 ★
+  · opt-level 을 "z" 로 낮추면 수십 % 느려질 수 있습니다
+  → 크기를 줄이려다 성능을 잃으면 본말전도입니다. 측정하세요 (⚡ e01)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">개발 경험을 지키기</h4>
+      <pre class="code" data-lang="text"><code>★ 빌드가 느려지면 사람이 코드를 덜 고칩니다
+  이것이 진짜 비용입니다.
+
+체감을 지키는 방법
+  ① cargo check 를 기본 습관으로 (b01)
+  ② 에디터의 rust-analyzer 설정 확인
+       "rust-analyzer.cargo.buildScripts.enable": true
+       "rust-analyzer.check.command": "clippy"
+  ③ 테스트를 나누기 — 빠른 단위 테스트를 자주, 느린 통합 테스트는 CI 에서
+  ④ cargo nextest 로 테스트 실행 시간 단축
+  ⑤ 무거운 의존성은 feature 뒤로 (b04)
+  ⑥ 개발용 프로파일 조정 (b06)
+
+★ 목표 감각
+  cargo check   1~5초    ← 이게 느리면 작업이 답답해집니다
+  cargo test    10~30초
+  cargo build --release  1~5분 (CI 에서만)
+
+★ 이 목표를 넘어가면 위 목록을 순서대로 적용하세요.</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>C++ 와 비교하면</b> Rust 빌드가 느린 것은 사실이지만,
+        <b>증분 빌드와 <code>cargo check</code></b> 덕분에 실제 작업 흐름은 대체로 낫습니다.
+        <b>느려졌다고 느끼면 반드시 측정</b>하세요 — 대개 특정 의존성 하나가 원인입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">왜 느리고 왜 큰가</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">근본 원인</h4>
+      <pre class="code" data-lang="text"><code>빌드가 느린 이유
+  ① 단형화 — 제네릭을 타입마다 복제합니다 (r10 · 🔬 d10)
+     타입 10개 × 함수 20개 = 코드 200벌을 LLVM 이 최적화
+  ② 크레이트가 컴파일 단위 — 크레이트 하나가 통째로 다시 빌드됩니다
+     (C++ 는 .cpp 파일 단위라 더 잘게 나뉩니다)
+  ③ 절차 매크로 — syn/quote 를 빌드해야 하고, 확장 비용도 큽니다 (🔬 d09)
+  ④ LLVM 최적화 — opt-level 3 · LTO 는 본질적으로 느립니다
+  ⑤ 링크 — 큰 바이너리 하나를 만드는 데 시간이 듭니다
+
+바이너리가 큰 이유
+  ① 정적 링크가 기본 — 의존성이 전부 들어갑니다 ★
+     (C 는 libc 를 동적 링크하므로 hello world 가 수십 KB)
+  ② 단형화로 코드가 복제됩니다
+  ③ 패닉 메시지·포맷 코드 (core::fmt 가 수십 KB · 🟨 j09)
+  ④ 디버그 정보 (strip 하면 사라집니다)
+  ⑤ 백트레이스 지원 코드
+
+★ 그래서 근본 대책은
+  · 의존성 줄이기
+  · 제네릭 사용을 절제하기 (🔐 o06 의 dyn 전환)
+  · 안 쓰는 feature 끄기 (b04)
+  이 셋이 대부분입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실험해 볼 만한 것들</h4>
+      <pre class="code" data-lang="bash"><code># 병렬 프론트엔드 (nightly · 실험적)
+RUSTFLAGS="-Z threads=8" cargo +nightly build
+
+# Cranelift 백엔드 — 디버그 빌드가 훨씬 빠릅니다 (실험적) ★
+rustup component add rustc-codegen-cranelift-preview --toolchain nightly
+# .cargo/config.toml
+# [unstable]
+# codegen-backend = true
+# [profile.dev]
+# codegen-backend = "cranelift"
+
+# 공유 target 디렉터리 (여러 프로젝트가 캐시 공유)
+export CARGO_TARGET_DIR=~/.cargo-target
+# ❗ 주의: 동시에 여러 빌드를 돌리면 락 경합이 생깁니다
+
+# 램디스크에 target 두기 (SSD 수명 · 속도)
+# CARGO_TARGET_DIR=/dev/shm/target cargo build
+
+# 원격 빌드 캐시 (팀 단위)
+#   sccache + S3/Redis 백엔드
+export SCCACHE_BUCKET=my-cache
+export SCCACHE_REGION=ap-northeast-2
+
+# ★ 측정 없이 적용하지 마세요
+#   hyperfine 으로 before/after 를 비교하세요
+hyperfine --prepare 'cargo clean' 'cargo build --release'</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>먼저 측정</b>하세요 — <code>cargo build --timings</code> 와 <code>cargo bloat</code>.
+    빌드 시간은 <b>링커 교체(mold) → sccache → 의존성 줄이기</b> 순으로 효과가 크고,
+    크기는 <b><code>strip</code> · <code>lto</code> · <code>panic="abort"</code> → 의존성 줄이기</b> 순입니다.
+    <b>내 코드보다 의존성이 대부분을 차지</b>하는 경우가 많으니 <code>cargo bloat --crates</code> 부터 보세요.
+    다음은 <b>⚡ 성능 · 동시성 탭</b>입니다.</div>
+</section>
+
+<!-- END pane-build -->
+</div>

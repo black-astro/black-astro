@@ -1,0 +1,2588 @@
+<!-- ============================================================
+     빌드 · 배포 PANE
+     ============================================================ -->
+<div class="pane" id="pane-build">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> CMake · vcpkg · wheel · CI · Sanitizer</div>
+  <h1>내 PC 에서만<br>되는 코드는<br>없는 것과 같습니다</h1>
+  <p class="tx">
+    C++ 에서 가장 많은 시간을 잡아먹는 것은 문법이 아니라 <b>빌드와 배포</b>입니다.
+    <b>세 OS 에서 도는 CMake 하나</b>, <b>사용자가 컴파일하지 않는 배포</b>,
+    <b>버그를 자동으로 잡아 주는 Sanitizer</b> — 이 셋이면 대부분 해결됩니다.
+  </p>
+  <div class="stats">
+    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>3</b><span>OS 동시</span></div>
+    <div><b>0</b><span>사용자 컴파일</span></div>
+    <div><b>4</b><span>깊이 층</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== b01 ==================== -->
+<section class="sec" id="b01">
+  <div class="sec-head rv">
+    <span class="no">BUILD 01</span>
+    <h2>컴파일과 링크 — <span class="t">실제로 무슨 일이</span></h2>
+    <p class="lead">
+      에러 메시지를 읽으려면 <b>어느 단계에서 났는지</b>부터 알아야 합니다.
+      네 단계만 이해하면 대부분의 빌드 문제가 풀립니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">네 단계</h4>
+      <pre class="code" data-lang="bash"><code># ① 전처리 — #include 를 붙여넣고 매크로를 펼칩니다
+g++ -E main.cpp -o main.i
+wc -l main.i          # 50줄 파일이 &lt;iostream&gt; 하나로 3만 줄이 됩니다
+
+# ② 컴파일 — 어셈블리로
+g++ -S main.i -o main.s
+
+# ③ 어셈블 — 오브젝트 파일(.o)로. 아직 실행 못 합니다
+g++ -c main.cpp -o main.o
+nm -C main.o
+#   T main            ← 내가 제공 (Text = 코드)
+#   U std::printf     ← 내가 필요로 함 (Undefined) ★
+
+# ④ 링크 — 여러 .o 와 라이브러리를 이어 붙여 실행 파일로
+g++ main.o util.o -lpthread -o app
+ldd app               # 실행할 때 필요한 공유 라이브러리</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>왜 나눠서 컴파일하나</b> — 파일 하나를 고쳤을 때 <b>그 파일만</b> 다시 번역하면 됩니다.
+        파일이 수백 개인 프로젝트에서 이 차이가 <b>빌드 30초 vs 20분</b>이 됩니다.
+        빌드 시스템(CMake·Ninja)이 이 의존 관계를 관리해 줍니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러를 단계로 구분하기 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:40%">메시지</th><th>단계 · 원인</th></tr>
+        <tr><td><code>No such file or directory</code></td><td><b>전처리</b> — include 경로(<code>-I</code>)</td></tr>
+        <tr><td><code>'x' was not declared</code></td><td><b>컴파일</b> — 선언 누락·오타</td></tr>
+        <tr><td><code>invalid conversion</code></td><td><b>컴파일</b> — 타입 불일치</td></tr>
+        <tr><td><code>undefined reference to 'f()'</code></td><td><b>링크</b> — 정의가 없음 ★</td></tr>
+        <tr><td><code>multiple definition of 'f()'</code></td><td><b>링크</b> — 헤더에 정의를 둠</td></tr>
+        <tr><td><code>cannot find -lfoo</code></td><td><b>링크</b> — 라이브러리 경로(<code>-L</code>)</td></tr>
+        <tr><td><code>version GLIBC_2.38 not found</code></td><td><b>실행</b> — 빌드 환경이 더 최신</td></tr>
+        <tr><td><code>error while loading shared libraries</code></td><td><b>실행</b> — <code>.so</code> 를 못 찾음</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>구분법 한 줄</b> — <b>파일명과 줄 번호가 있으면 컴파일</b>,
+        <b>없으면 링크</b>입니다. 링크 에러는 <b>코드가 아니라 빌드 구성</b>의 문제라
+        고쳐야 할 곳이 완전히 다릅니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">링크 에러를 심볼로 추적</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>undefined reference</code> 진단 순서</h4>
+      <pre class="code" data-lang="bash"><code># ① 그 심볼을 '제공하는' 오브젝트가 있는가
+nm -C --defined-only build/*.o | grep "함수이름"
+
+# ② 있는데도 안 되면 → 링크 순서 문제 (정적 라이브러리는 순서가 중요) ★
+g++ main.o -lfoo -lbar     # foo 가 bar 를 쓰면 이 순서
+g++ main.o -lbar -lfoo     # ❌ 실패할 수 있습니다
+#   해결: --start-group 으로 감싸기
+g++ main.o -Wl,--start-group -lfoo -lbar -Wl,--end-group
+
+# ③ 없으면 → 그 .cpp 를 빌드에 안 넣었거나
+#            extern "C" 불일치(🔗 f02)이거나
+#            선언과 정의의 시그니처가 미묘하게 다름 (const 유무 등)
+
+# ④ 맹글링된 이름 확인
+c++filt _Z3fooi           # → foo(int)
+nm -C app | grep foo      # -C 는 복원해서 보여 줍니다
+
+# ⑤ 어떤 라이브러리가 그 심볼을 갖고 있나 (시스템 전체 검색)
+for f in /usr/lib/x86_64-linux-gnu/*.so; do
+  nm -D "$f" 2&gt;/dev/null | grep -q " T 심볼" &amp;&amp; echo "$f"
+done</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">헤더와 라이브러리 찾기</h4>
+      <pre class="code" data-lang="bash"><code># 컴파일러가 어디를 뒤지는지
+g++ -E -x c++ - -v &lt; /dev/null       # include 검색 경로
+g++ -print-search-dirs                # 라이브러리 경로
+
+# 어떤 헤더를 실제로 집었는지 (중첩 깊이가 점으로 표시됩니다)
+g++ -H -fsyntax-only main.cpp 2&gt;&amp;1 | head -30
+
+# pkg-config — 설치된 라이브러리의 플래그를 알려 줍니다
+pkg-config --cflags --libs opencv4
+g++ main.cpp $(pkg-config --cflags --libs opencv4)
+
+# 실행 시 .so 를 어디서 찾는지
+ldd app
+LD_DEBUG=libs ./app 2&gt;&amp;1 | head -20
+readelf -d app | grep -E "RPATH|RUNPATH|NEEDED"
+
+# 윈도우
+dumpbin /dependents app.exe
+dumpbin /exports mylib.dll</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 명령들을 알면 달라지는 것</b> — 링크 에러 앞에서
+        <b>추측으로 CMake 를 만지는 사람</b>과 <code>nm</code> 한 번으로
+        <b>“이 심볼은 어디에도 없다”를 확인하고 원인으로 직행하는 사람</b>의 차이가 여기서 납니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">빌드 시간을 줄입니다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">효과가 큰 순서대로</h4>
+      <pre class="code" data-lang="bash"><code># ① ccache — 같은 입력이면 캐시된 결과를 재사용 (재빌드가 몇 배 빨라집니다) ★
+sudo apt install ccache
+cmake -B build -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+ccache -s                        # 적중률 확인
+
+# ② Ninja — make 보다 빠르고 병렬화가 좋습니다
+cmake -B build -G Ninja
+cmake --build build              # 자동으로 모든 코어 사용
+
+# ③ 빠른 링커 (링크가 병목인 경우가 많습니다)
+cmake -B build -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold"
+#   mold &gt; lld &gt; gold &gt; bfd(기본)  순으로 빠릅니다
+
+# ④ 미리 컴파일된 헤더 (CMake 3.16+)
+target_precompile_headers(app PRIVATE &lt;vector&gt; &lt;string&gt; &lt;memory&gt;)
+
+# ⑤ Unity 빌드 — 여러 .cpp 를 합쳐 컴파일
+set(CMAKE_UNITY_BUILD ON)
+#   ⚠ 익명 namespace 충돌·매크로 누출이 생길 수 있습니다
+
+# ⑥ 헤더 의존성 줄이기 (근본 해결) ★
+#    전방 선언 · Pimpl · 무거운 include 를 .cpp 로 (탭 1 x09)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 느린지 측정</h4>
+      <pre class="code" data-lang="bash"><code># 파일별 컴파일 시간
+clang++ -ftime-trace -c big.cpp
+#   big.json 을 ui.perfetto.dev 에 넣으면 어느 헤더·템플릿이 오래 걸리는지 그림으로
+
+# 전체 빌드에서 느린 파일 찾기
+cmake -B build -DCMAKE_CXX_FLAGS="-ftime-report"
+# 또는 ninja 의 빌드 로그 분석
+ninja -C build -t commands | wc -l
+python3 -m ninjatracing build/.ninja_log &gt; trace.json
+
+# 전처리 결과 크기로 대략 감 잡기
+for f in src/*.cpp; do
+  echo "$(g++ -E -Iinclude $f 2&gt;/dev/null | wc -l) $f"
+done | sort -rn | head
+
+# 포함 관계 정리 도구
+include-what-you-use -Xiwyu --no_fwd_decls src/core.cpp</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>빌드 시간은 팀 전체의 생산성입니다</b> — 5분 걸리는 빌드를 하루 20번 돌리면
+        <b>한 사람당 100분</b>입니다. <code>ccache</code> + <code>Ninja</code> + <code>mold</code>
+        세 줄만 넣어도 대개 절반 이하로 줄어듭니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">링커가 실제로 하는 일</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">심볼 해석과 재배치</h4>
+      <pre class="code" data-lang="text"><code>링커의 작업
+  ① 각 오브젝트의 심볼 테이블을 읽습니다 (제공 T · 필요 U)
+  ② 필요한 심볼을 제공하는 오브젝트를 찾아 연결합니다
+  ③ 섹션(.text · .data · .rodata · .bss)을 합칩니다
+  ④ 주소를 확정하고 참조를 고쳐 씁니다 (relocation)
+  ⑤ 실행 파일 헤더를 만듭니다
+
+정적 라이브러리(.a)는 '오브젝트 묶음'일 뿐입니다
+  · 링커는 필요한 오브젝트만 꺼내 씁니다
+  · 그래서 순서가 중요합니다 (왼쪽에서 오른쪽으로 훑음)
+
+약한 심볼(W)
+  · inline 함수 · 템플릿 인스턴스는 여러 오브젝트에 중복 생성됩니다
+  · 링커가 하나만 남기고 나머지를 버립니다 (중복 정의 에러가 안 나는 이유)
+  · ★ 단, 모든 정의가 동일해야 합니다 (ODR — 🔬 d01)
+
+확인
+  nm -C app | awk '{print $2}' | sort | uniq -c | sort -rn
+  size -A app                    # 섹션별 크기
+  readelf -S app                 # 섹션 헤더</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">LTO 와 바이너리 크기</h4>
+      <pre class="code" data-lang="cmake"><code># 링크 시점 최적화 — 번역 단위를 넘어 인라인·제거가 가능해집니다
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+#   또는 -flto=thin (clang, 훨씬 빠름)
+
+# 효과: 5~20% 성능 향상 · 바이너리 축소
+# 대가: 링크 시간이 크게 늘어납니다 → 릴리즈 빌드에만</code></pre>
+      <pre class="code" data-lang="bash"><code># 안 쓰는 코드 제거
+g++ -ffunction-sections -fdata-sections -c main.cpp
+g++ -Wl,--gc-sections main.o -o app
+#   함수 단위로 섹션을 나누고, 참조되지 않은 것을 버립니다
+
+# 무엇이 크기를 차지하나
+bloaty app -d compileunits,symbols | head -20
+nm -C --size-sort -S app | tail -20
+
+# 디버그 심볼 분리 (배포는 작게, 분석은 가능하게) ★
+objcopy --only-keep-debug app app.debug
+objcopy --strip-debug --add-gnu-debuglink=app.debug app
+#   운영에는 app 만 배포하고 app.debug 는 보관 → 크래시 분석 때 사용(🔬 d11)
+
+# 심볼 가시성 (라이브러리에서 특히 중요 — 🔗 f02)
+-fvisibility=hidden -fvisibility-inlines-hidden</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>배포 바이너리의 기본 조합</b> —
+        <code>-O2 -DNDEBUG -fvisibility=hidden</code> + <b>LTO</b> +
+        <b>심볼 분리</b>. 이렇게 하면 크기는 작고 성능은 최대이면서
+        <b>크래시 분석 능력은 유지</b>됩니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 빌드는 <b>전처리 → 컴파일 → 어셈블 → 링크</b> 네 단계입니다.
+    에러가 나면 <b>줄 번호가 있으면 컴파일, 없으면 링크</b>로 먼저 구분하고,
+    링크 에러는 <b><code>nm -C</code> 로 심볼을 직접 확인</b>하세요.
+    빌드가 느리면 <b><code>ccache</code> · Ninja · mold</b> 세 줄부터.</div>
+</section>
+
+
+<!-- ==================== b02 ==================== -->
+<section class="sec" id="b02">
+  <div class="sec-head rv">
+    <span class="no">BUILD 02</span>
+    <h2><span class="t">CMake</span> — 실무에 필요한 만큼만</h2>
+    <p class="lead">
+      CMake 는 거대하지만, <b>실제로 쓰는 것은 20줄</b> 남짓입니다.
+      현대적인 방식(<b>타깃 중심</b>)만 익히면 나머지는 검색으로 충분합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 골격</h4>
+      <pre class="code" data-lang="cmake"><code>cmake_minimum_required(VERSION 3.20)
+project(myproj VERSION 1.0.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)          # ★ -std=c++20 (gnu++20 아님)
+
+# 라이브러리
+add_library(core src/core.cpp src/algo.cpp)
+target_include_directories(core
+    PUBLIC  $&lt;BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include&gt;
+            $&lt;INSTALL_INTERFACE:include&gt;
+    PRIVATE src)                        # src 는 나만 볼 수 있습니다
+target_compile_features(core PUBLIC cxx_std_20)
+
+# 실행 파일
+add_executable(app src/main.cpp)
+target_link_libraries(app PRIVATE core)  # ★ include 경로가 자동으로 따라옵니다
+
+# 경고 켜기 (컴파일러별로)
+target_compile_options(core PRIVATE
+    $&lt;$&lt;CXX_COMPILER_ID:MSVC&gt;:/W4&gt;
+    $&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall -Wextra -Wpedantic&gt;)
+
+# 테스트
+enable_testing()
+add_executable(test_core tests/test_core.cpp)
+target_link_libraries(test_core PRIVATE core)
+add_test(NAME core COMMAND test_core)</code></pre>
+      <pre class="code" data-lang="bash"><code>cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">PUBLIC · PRIVATE · INTERFACE ★</h4>
+      <pre class="code" data-lang="text"><code>이 세 키워드가 현대 CMake 의 핵심입니다
+
+  PRIVATE   : 나만 씁니다 (쓰는 쪽에 전파되지 않음)
+  PUBLIC    : 나도 쓰고, 나를 링크하는 쪽에도 전파됩니다
+  INTERFACE : 나는 안 쓰고, 링크하는 쪽에만 전파됩니다
+              (헤더 전용 라이브러리)
+
+예시
+  target_link_libraries(core
+      PUBLIC  fmt::fmt        # core 의 '헤더'가 fmt 를 쓴다 → 전파 필요
+      PRIVATE zlib)           # core 의 '.cpp' 만 zlib 을 쓴다 → 감춤
+
+  → app 은 fmt 를 자동으로 쓸 수 있지만 zlib 은 모릅니다 ★
+
+★ 옛 방식은 쓰지 마세요 (전역 변수처럼 동작해 관리가 안 됩니다)
+  include_directories()      → target_include_directories()
+  link_libraries()           → target_link_libraries()
+  add_definitions()          → target_compile_definitions()
+  set(CMAKE_CXX_FLAGS ...)   → target_compile_options()</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“타깃이 모든 것을 안다”</b>가 현대 CMake 의 철학입니다.
+        타깃에 붙여 두면 <b>링크하는 쪽이 아무것도 몰라도</b>
+        include 경로·컴파일 옵션·의존성이 전부 따라옵니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">자주 쓰는 조각들</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">조건 분기와 옵션</h4>
+      <pre class="code" data-lang="cmake"><code># 플랫폼별
+if(WIN32)
+    target_link_libraries(core PRIVATE ws2_32)
+elseif(APPLE)
+    target_link_libraries(core PRIVATE "-framework CoreFoundation")
+else()
+    target_link_libraries(core PRIVATE pthread dl)
+endif()
+
+# 제너레이터 표현식 — 빌드 타입별 (설정 시점이 아니라 빌드 시점에 평가)
+target_compile_definitions(core PRIVATE
+    $&lt;$&lt;CONFIG:Debug&gt;:MYLIB_DEBUG&gt;
+    $&lt;$&lt;CONFIG:Release&gt;:NDEBUG&gt;)
+
+# 사용자 옵션
+option(MYLIB_BUILD_TESTS "테스트 빌드" ON)
+option(MYLIB_USE_SIMD    "SIMD 사용"  ON)
+if(MYLIB_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
+
+# 버전 정보를 코드에 주입 ★
+target_compile_definitions(core PRIVATE
+    MYLIB_VERSION="${PROJECT_VERSION}"
+    MYLIB_COMMIT="$ENV{GIT_COMMIT}")
+
+# 설정 파일 생성 (더 깔끔한 방법)
+configure_file(config.h.in config.h @ONLY)
+target_include_directories(core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CMakePresets — 명령을 짧게 ★</h4>
+      <pre class="code" data-lang="json"><code>// CMakePresets.json  (CMake 3.19+)
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "dev",
+      "generator": "Ninja",
+      "binaryDir": "build/dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "dev",
+      "binaryDir": "build/release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "asan",
+      "inherits": "dev",
+      "binaryDir": "build/asan",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -g"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "release", "configurePreset": "release" }
+  ]
+}</code></pre>
+      <pre class="code" data-lang="bash"><code>cmake --preset dev &amp;&amp; cmake --build --preset dev
+cmake --preset asan &amp;&amp; cmake --build --preset asan
+#   IDE(VSCode·CLion)도 이 프리셋을 자동으로 읽습니다 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">설치와 패키지 제공</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">남이 <code>find_package</code> 로 쓰게 하기</h4>
+      <pre class="code" data-lang="cmake"><code>include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+install(TARGETS core
+    EXPORT myprojTargets
+    LIBRARY  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(EXPORT myprojTargets
+    FILE myprojTargets.cmake
+    NAMESPACE myproj::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/myproj)
+
+write_basic_package_version_file(
+    myprojConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion)
+
+configure_package_config_file(
+    cmake/myprojConfig.cmake.in myprojConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/myproj)
+
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/myprojConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/myprojConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/myproj)</code></pre>
+      <pre class="code" data-lang="cmake"><code># 쓰는 쪽은 이 두 줄이면 끝입니다 ★
+find_package(myproj 1.0 REQUIRED)
+target_link_libraries(app PRIVATE myproj::core)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">피해야 할 습관</h4>
+      <pre class="code" data-lang="cmake"><code># ❌ 소스 파일을 GLOB 로 모으기
+file(GLOB SRC "src/*.cpp")
+#   파일을 추가해도 CMake 가 모르므로 재설정이 필요합니다
+#   (CONFIGURE_DEPENDS 를 붙이면 낫지만 여전히 명시가 권장됩니다)
+add_library(core src/core.cpp src/algo.cpp)     # ✅ 명시
+
+# ❌ 소스 폴더에 빌드하기
+cmake .                          # 산출물이 소스와 섞입니다
+cmake -B build                   # ✅ 항상 별도 폴더
+
+# ❌ 전역 플래그 조작
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+target_compile_options(core PRIVATE -O3)        # ✅ 타깃에
+
+# ❌ -march=native 를 배포 빌드에
+#   내 CPU 전용 명령이 들어가 다른 기계에서 즉사합니다 ★
+
+# ❌ 절대 경로 하드코딩
+include_directories(/home/me/libs/include)
+find_package(...)  또는  FetchContent               # ✅
+
+# ⚠ 빌드 타입을 안 정하면 최적화가 안 됩니다 (기본값이 빈 문자열)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
+endif()</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 실수</b> — <code>CMAKE_BUILD_TYPE</code> 을 지정하지 않아
+        <b>최적화 없이 빌드</b>하고 “C++ 인데 왜 느리지?”라고 하는 경우입니다.
+        <b>단일 설정 제너레이터(Ninja·Make)에서는 반드시 지정</b>해야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">CMake 디버깅</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무슨 일이 벌어지는지 보기</h4>
+      <pre class="code" data-lang="bash"><code># 실제 컴파일 명령 확인 ★
+cmake --build build --verbose
+# 또는
+cat build/compile_commands.json | jq '.[0]'
+
+# 타깃의 속성 들여다보기
+cmake --build build --target help
+cmake -B build --graphviz=deps.dot &amp;&amp; dot -Tpng deps.dot -o deps.png
+
+# 변수 추적
+cmake -B build --trace-expand 2&gt;&amp;1 | grep "MY_VAR"
+message(STATUS "flags=${CMAKE_CXX_FLAGS}")
+
+# 타깃 속성 출력
+get_target_property(inc core INTERFACE_INCLUDE_DIRECTORIES)
+message(STATUS "core include: ${inc}")
+
+# 캐시 확인·수정
+cmake -B build -LAH | less           # 모든 옵션과 설명
+ccmake build                          # 대화형 편집
+
+# 설정을 처음부터 다시 (캐시가 꼬였을 때)
+rm -rf build &amp;&amp; cmake --preset dev</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">재현 가능한 빌드</h4>
+      <pre class="code" data-lang="cmake"><code># ① 컴파일러를 고정
+set(CMAKE_CXX_COMPILER "/usr/bin/g++-13" CACHE FILEPATH "")
+
+# ② 의존성 버전 고정 (b03)
+FetchContent_Declare(fmt GIT_TAG 11.0.2)    # 해시나 태그로
+
+# ③ 빌드 정보를 바이너리에 기록 ★
+execute_process(COMMAND git rev-parse --short HEAD
+    OUTPUT_VARIABLE GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+target_compile_definitions(core PRIVATE
+    BUILD_COMMIT="${GIT_COMMIT}"
+    BUILD_COMPILER="${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+
+# ④ 타임스탬프 제거 (바이너리가 매번 달라지지 않게)
+#    __DATE__ · __TIME__ 을 쓰지 마세요
+target_compile_options(core PRIVATE -Wdate-time)   # 경고로 잡기
+
+# ⑤ 경로 정규화 (디버그 정보에 절대 경로가 박히는 것 방지)
+target_compile_options(core PRIVATE
+    -ffile-prefix-map=${CMAKE_SOURCE_DIR}=.)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>왜 재현성이 중요한가</b> — “어제 빌드한 것과 오늘 것이 다르다”는
+        <b>버그 추적을 불가능하게</b> 만듭니다.
+        특히 <b>배포한 바이너리와 같은 것을 다시 만들 수 있어야</b>
+        크래시 덤프를 분석할 수 있습니다(🔬 d11).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> CMake 는 <b>타깃 중심</b>으로 쓰세요 —
+    <code>target_link_libraries</code>·<code>target_include_directories</code> 에
+    <b><code>PUBLIC</code>/<code>PRIVATE</code></b> 만 정확히 붙이면 나머지는 자동입니다.
+    <b>빌드 타입 지정</b>과 <b><code>compile_commands.json</code> 생성</b>을 잊지 마세요.</div>
+</section>
+
+<!-- ==================== b03 ==================== -->
+<section class="sec" id="b03">
+  <div class="sec-head rv">
+    <span class="no">BUILD 03</span>
+    <h2>의존성 — <span class="t">vcpkg · FetchContent</span></h2>
+    <p class="lead">
+      C++ 에는 npm·pip 같은 <b>공식 패키지 관리자가 없습니다</b>.
+      대신 몇 가지 방식이 있고, <b>프로젝트 성격에 따라</b> 고릅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">FetchContent — 소스를 받아 함께 빌드</h4>
+      <pre class="code" data-lang="cmake"><code>include(FetchContent)
+
+FetchContent_Declare(fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG        11.0.2          # ★ 반드시 고정 (main 금지)
+    GIT_SHALLOW    TRUE)           # 전체 이력을 안 받아 빠릅니다
+
+FetchContent_Declare(googletest
+    URL https://github.com/google/googletest/archive/v1.15.2.tar.gz
+    URL_HASH SHA256=7b42b4d6ed48810c5362c265a17faebe90dc2373c885e5216439d37927f02926)
+    # ★ 해시까지 넣으면 공급망 공격에 안전합니다
+
+FetchContent_MakeAvailable(fmt googletest)
+
+target_link_libraries(core PUBLIC fmt::fmt)
+target_link_libraries(test_core PRIVATE GTest::gtest_main)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>장점</b> — 별도 도구가 필요 없고, <code>git clone</code> 후
+        <code>cmake -B build</code> 만으로 끝납니다.
+        <b>단점</b> — 의존성이 많아지면 <b>빌드 시간이 크게 늘어납니다</b>
+        (전부 소스에서 컴파일하므로). 소규모 프로젝트에 적합합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">vcpkg — 미리 빌드된 패키지</h4>
+      <pre class="code" data-lang="json"><code>// vcpkg.json — 매니페스트 모드 (권장) ★
+{
+  "name": "myproj",
+  "version": "1.0.0",
+  "dependencies": [
+    "fmt",
+    { "name": "opencv4", "features": ["contrib"] },
+    { "name": "boost-asio", "version&gt;=": "1.85.0" }
+  ],
+  "builtin-baseline": "a1b2c3d4...",   // ★ 저장소 커밋 = 버전 잠금
+  "overrides": [ { "name": "fmt", "version": "11.0.2" } ]
+}</code></pre>
+      <pre class="code" data-lang="bash"><code>git clone https://github.com/microsoft/vcpkg
+./vcpkg/bootstrap-vcpkg.sh
+
+cmake -B build \
+  -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
+#   → vcpkg.json 을 읽고 자동으로 설치·빌드합니다
+
+# 캐시로 재빌드 시간 없애기 (CI 에서 특히) ★
+export VCPKG_BINARY_SOURCES="clear;files,/path/to/cache,readwrite"</code></pre>
+      <pre class="code" data-lang="cmake"><code>find_package(fmt CONFIG REQUIRED)
+find_package(OpenCV CONFIG REQUIRED)
+target_link_libraries(core PRIVATE fmt::fmt ${OpenCV_LIBS})</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">방식 비교와 선택</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다섯 가지 방식</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">방식</th><th>언제</th></tr>
+        <tr><td><b>FetchContent</b></td><td>의존성 3~5개 이하 · 도구 설치를 강요하고 싶지 않을 때 ★</td></tr>
+        <tr><td><b>vcpkg</b></td><td>큰 라이브러리(OpenCV·Qt·Boost) · 윈도우 중심 팀</td></tr>
+        <tr><td><b>Conan</b></td><td>사내 아티팩트 서버 · 세밀한 버전 정책이 필요할 때</td></tr>
+        <tr><td><b>시스템 패키지</b><br><code>apt</code>·<code>brew</code></td><td>리눅스 배포용 · 버전을 배포판에 맡길 수 있을 때</td></tr>
+        <tr><td><b>서브모듈·벤더링</b></td><td>소스를 직접 관리해야 할 때 · 헤더 전용 라이브러리</td></tr>
+      </table></div>
+      <pre class="code" data-lang="cmake"><code># 하이브리드 — 있으면 시스템 것을, 없으면 받아서 (가장 유연) ★
+find_package(fmt 11 QUIET)
+if(NOT fmt_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(fmt GIT_REPOSITORY ... GIT_TAG 11.0.2)
+    FetchContent_MakeAvailable(fmt)
+endif()
+target_link_libraries(core PUBLIC fmt::fmt)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">헤더 전용 라이브러리는 그냥</h4>
+      <pre class="code" data-lang="cmake"><code># 파일 하나짜리는 벤더링이 가장 단순합니다
+# third_party/nlohmann/json.hpp 를 저장소에 넣고
+target_include_directories(core PRIVATE third_party)
+
+# 또는 INTERFACE 라이브러리로 정리
+add_library(json INTERFACE)
+target_include_directories(json INTERFACE third_party/nlohmann)
+target_link_libraries(core PRIVATE json)</code></pre>
+      <pre class="code" data-lang="text"><code>자주 쓰는 헤더 전용 라이브러리
+  nlohmann/json      JSON
+  fmt                포맷 (std::format 대체)
+  spdlog             로깅
+  doctest · catch2   테스트
+  cxxopts · CLI11    명령행 인자
+  xxhash · robin_hood  해시
+  Eigen              선형대수
+  stb_image          이미지 로딩 (단일 헤더)
+
+★ 이런 것들은 vcpkg 를 쓸 이유가 없습니다.
+  파일을 복사해 넣거나 FetchContent 로 충분합니다.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>의존성은 부채입니다</b> — 라이브러리 하나가
+        <b>빌드 시간 · 배포 크기 · 보안 패치 추적 · 라이선스 검토</b>를 함께 가져옵니다.
+        <b>표준 라이브러리로 되는 일인지</b> 먼저 확인하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">버전 고정과 공급망</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">재현 가능하게 고정하기</h4>
+      <pre class="code" data-lang="cmake"><code># ❌ 절대 하면 안 되는 것
+GIT_TAG main                    # 언제 빌드하느냐에 따라 결과가 다릅니다
+GIT_TAG master
+FetchContent_Declare(x URL "https://.../latest.tar.gz")
+
+# ✅ 태그 + 해시
+FetchContent_Declare(fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG 0c9fce2ffefecfdce794e1859584e25877b7b592)   # 커밋 해시 ★
+
+# ✅ tarball + SHA256
+FetchContent_Declare(zlib
+    URL https://zlib.net/zlib-1.3.1.tar.gz
+    URL_HASH SHA256=9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23)
+
+# vcpkg 는 baseline 커밋으로 전체를 잠급니다
+"builtin-baseline": "a1b2c3..."</code></pre>
+      <pre class="code" data-lang="bash"><code># 의존성 목록과 라이선스 뽑기 (감사용) ★
+vcpkg list --x-full-desc
+find _deps -name "LICENSE*" -o -name "COPYING*" | xargs -I{} sh -c 'echo "== {}"; head -3 {}'
+
+# 취약점 확인
+grype dir:.                     # 또는 trivy fs .
+# SBOM 생성
+syft dir:. -o spdx-json &gt; sbom.json</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI 캐시로 시간 줄이기</h4>
+      <pre class="code" data-lang="yaml"><code># vcpkg 바이너리 캐시 — 두 번째부터 빌드가 거의 즉시 ★
+- name: vcpkg 캐시
+  uses: actions/cache@v4
+  with:
+    path: ~/.cache/vcpkg/archives
+    key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+
+# FetchContent 소스 캐시
+- uses: actions/cache@v4
+  with:
+    path: build/_deps
+    key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+
+# ccache (컴파일 결과)
+- uses: hendrikmuhs/ccache-action@v1
+  with: { key: '${{ runner.os }}' }</code></pre>
+      <pre class="code" data-lang="bash"><code># 사내 캐시 서버 (여러 사람이 공유)
+export VCPKG_BINARY_SOURCES="clear;nuget,https://내사내피드,readwrite"
+
+# 오프라인 빌드 준비 (폐쇄망)
+vcpkg export fmt opencv4 --raw --output-dir=/deps
+#   → 이 폴더를 통째로 옮기면 인터넷 없이 빌드됩니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>사내 폐쇄망 대응</b> — C++ 프로젝트는 <b>인터넷이 없는 환경</b>에서
+        빌드해야 하는 경우가 많습니다.
+        <code>vcpkg export</code> 나 <b>의존성 벤더링</b>을 미리 준비해 두면
+        급할 때 고생하지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">의존성이 만드는 문제들</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다이아몬드 의존과 ODR 위반</h4>
+      <pre class="code" data-lang="text"><code>내 앱 → A → fmt 10.0
+      → B → fmt 11.0
+
+★ C++ 에는 npm 처럼 '버전별로 따로 담기'가 없습니다.
+  하나만 링크되고, 둘 다 그것을 씁니다.
+  → 헤더가 다른데 구현이 하나면 ODR 위반 → 조용한 메모리 손상 (🔬 d01)
+
+대책
+  ① 버전을 하나로 통일 (vcpkg overrides · FetchContent 명시)
+  ② 의존성을 정적으로 링크하고 심볼을 숨기기 (-fvisibility=hidden)
+  ③ 내부 네임스페이스로 격리 (일부 라이브러리가 제공: FMT_BEGIN_NAMESPACE)
+  ④ 애초에 의존성을 줄이기 ★
+
+진단
+  # 같은 심볼이 여러 라이브러리에 있는지
+  nm -DC libA.so libB.so | grep " T " | awk '{print $3}' | sort | uniq -d
+  # 실행 시 어느 것이 선택됐는지
+  LD_DEBUG=bindings ./app 2&gt;&amp;1 | grep fmt</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전이 의존성 통제</h4>
+      <pre class="code" data-lang="cmake"><code># 의존성이 밖으로 새지 않게 — PRIVATE 로 감추기 ★
+target_link_libraries(core
+    PRIVATE zlib::zlib)        # core 를 쓰는 쪽은 zlib 을 모릅니다
+#   ⚠ 단, core 의 '공개 헤더'가 zlib 타입을 노출하면 PUBLIC 이어야 합니다
+#     → 공개 헤더에서 서드파티 타입을 쓰지 않는 것이 좋은 설계입니다
+
+# 정적 라이브러리를 만들 때 의존성을 안에 포함시키기
+add_library(core STATIC ...)
+#   ⚠ 정적 라이브러리는 의존성을 '포함하지 않습니다' (링크 정보만 전달)
+#     완전히 포함하려면 별도 작업이 필요합니다
+#     (libtool · CMake 의 OBJECT 라이브러리 조합 등)
+
+# 의존성 트리 확인
+cmake -B build --graphviz=deps.dot
+dot -Tsvg deps.dot -o deps.svg
+
+# 실제로 링크된 것 확인
+ldd -v build/app | head -30
+readelf -d build/libcore.so | grep NEEDED</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>공개 헤더에 서드파티 타입을 노출하지 마세요</b> —
+        <code>void f(nlohmann::json&amp;)</code> 같은 API 는
+        <b>쓰는 쪽도 그 라이브러리를 같은 버전으로</b> 써야 합니다.
+        경계에서는 <b>표준 타입이나 내 타입</b>만 쓰는 것이 원칙입니다(🔗 f03).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 의존성이 <b>적으면 FetchContent</b>,
+    <b>크고 무거우면 vcpkg</b> 입니다.
+    무엇을 쓰든 <b>버전을 커밋 해시나 태그로 고정</b>하고,
+    <b>CI 캐시</b>를 붙이세요. 그리고 <b>공개 헤더에 서드파티 타입을 노출하지 않는 것</b>이
+    나중에 가장 큰 차이를 만듭니다.</div>
+</section>
+
+
+<!-- ==================== b04 ==================== -->
+<section class="sec" id="b04">
+  <div class="sec-head rv">
+    <span class="no">BUILD 04</span>
+    <h2>디버그 vs 릴리즈 — <span class="t">플래그 하나에 10배</span></h2>
+    <p class="lead">
+      최적화를 켜지 않은 C++ 는 <b>파이썬보다 느릴 수도</b> 있습니다.
+      성능을 이야기하기 전에 <b>어떤 빌드로 쟀는지</b>부터 확인해야 합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드 타입</h4>
+      <pre class="code" data-lang="bash"><code>cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+# CMake 기본 빌드 타입이 주는 플래그
+#   Debug          -g              최적화 없음 · 디버깅 최적
+#   Release        -O3 -DNDEBUG    최적화 최대 · 디버그 정보 없음
+#   RelWithDebInfo -O2 -g -DNDEBUG 최적화 + 디버그 정보 ★ 운영 권장
+#   MinSizeRel     -Os -DNDEBUG    크기 우선
+
+# ⚠ 단일 설정 제너레이터(Ninja·Make)는 반드시 지정해야 합니다
+#   안 하면 빈 문자열 = 최적화 없음 ★
+# ⚠ 다중 설정(Visual Studio·Xcode)은 빌드할 때 지정합니다
+cmake --build build --config Release</code></pre>
+      <pre class="code" data-lang="text"><code>실제 차이 (같은 코드 · 경향)
+
+  -O0 (Debug)     1.0×   기준
+  -O1             2~4×
+  -O2             3~10×  ★ 실무 기본
+  -O3             -O2 와 비슷하거나 조금 나음 (때로 더 느림)
+  -O2 + LTO       -O2 대비 5~20% 추가
+  -Ofast          부동소수 규칙을 깨므로 결과가 달라질 수 있습니다 ⚠
+
+★ "C++ 로 옮겼는데 안 빨라졌다"의 1순위 원인이 Debug 빌드입니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>NDEBUG</code> 가 하는 일</h4>
+      <pre class="code" data-lang="cpp"><code>// NDEBUG 가 정의되면 assert 가 통째로 사라집니다
+#include &lt;cassert&gt;
+assert(index &lt; size);        // Release 에서는 없는 코드
+
+// ⚠ 그래서 이런 코드는 위험합니다
+assert(pop() == 3);          // Release 에서 pop() 자체가 안 불립니다 ★
+
+// ✅ 부작용은 밖으로
+int v = pop();
+assert(v == 3);
+
+// ✅ 릴리즈에서도 살아야 하는 검사는 직접 만드세요
+#define ENSURE(cond, msg) \
+    do { if (!(cond)) throw std::logic_error(msg); } while (0)
+
+// 표준 라이브러리의 디버그 검사
+//   MSVC : Debug 빌드에서 반복자 검사가 기본으로 켜집니다 (느립니다)
+//   libstdc++ : -D_GLIBCXX_DEBUG 로 켜기 ★ 개발 중에 유용
+//   libc++    : -D_LIBCPP_ENABLE_ASSERTIONS=1
+//   → v[100] 같은 범위 초과를 UB 대신 명확한 에러로 잡아 줍니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>파이썬 모듈에서 특히 중요합니다</b> — <code>assert</code> 로만 막아 둔
+        인덱스 검사는 Release 에서 사라져, 잘못된 입력이
+        <b>예외가 아니라 세그폴트로 인터프리터를 죽입니다</b>(🐍 y12).
+        <b>외부 입력 검증은 항상 진짜 검사</b>로.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">알아 둘 만한 플래그</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">경고와 안전</h4>
+      <pre class="code" data-lang="bash"><code># 경고 — C++ 에서는 대부분 진짜 버그입니다 ★
+-Wall -Wextra -Wpedantic
+-Wshadow              # 변수 가리기
+-Wconversion          # 암묵 형변환으로 값이 바뀔 수 있음
+-Wsign-conversion     # 부호 변환
+-Wnon-virtual-dtor    # 가상 소멸자 누락 ★
+-Wold-style-cast      # C 스타일 캐스트
+-Wcast-align          # 정렬이 안 맞는 캐스트
+-Werror               # 경고를 에러로 (CI 에서)
+
+# MSVC
+/W4 /permissive- /Zc:__cplusplus /utf-8
+
+# 런타임 보호 (배포 빌드에 권장) ★
+-D_FORTIFY_SOURCE=3           # 버퍼 오버플로 검사 (최적화 필요)
+-fstack-protector-strong      # 스택 스매싱 탐지
+-fstack-clash-protection
+-D_GLIBCXX_ASSERTIONS         # 표준 컨테이너 경계 검사 (가벼움)
+-fPIE -pie                    # 주소 랜덤화
+-Wl,-z,relro,-z,now           # GOT 보호
+#   ⚠ 약간의 성능 비용이 있지만 대부분 1% 미만입니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">플래그를 CMake 에 담기</h4>
+      <pre class="code" data-lang="cmake"><code># 공통 옵션을 INTERFACE 라이브러리로 모으기 ★
+add_library(project_options INTERFACE)
+target_compile_features(project_options INTERFACE cxx_std_20)
+
+target_compile_options(project_options INTERFACE
+    $&lt;$&lt;CXX_COMPILER_ID:MSVC&gt;:/W4 /permissive- /utf-8&gt;
+    $&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall -Wextra -Wshadow -Wnon-virtual-dtor&gt;)
+
+# 릴리즈에만 보호 옵션
+target_compile_options(project_options INTERFACE
+    $&lt;$&lt;AND:$&lt;CONFIG:Release&gt;,$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;&gt;:
+        -D_FORTIFY_SOURCE=3 -fstack-protector-strong&gt;)
+
+# 모든 타깃에 붙이기
+target_link_libraries(core PRIVATE project_options)
+target_link_libraries(app  PRIVATE project_options)
+
+# Sanitizer 도 같은 방식으로 (b10)
+add_library(project_asan INTERFACE)
+target_compile_options(project_asan INTERFACE -fsanitize=address,undefined -g)
+target_link_options(project_asan INTERFACE -fsanitize=address,undefined)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 패턴을 쓰면</b> 새 타깃을 추가할 때
+        <code>target_link_libraries(new_target PRIVATE project_options)</code>
+        한 줄이면 <b>모든 규칙이 자동으로 적용</b>됩니다.
+        플래그를 여러 곳에 복사하다 어긋나는 문제가 사라집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">빌드 타입 전략</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">네 가지를 준비합니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">용도</th><th>설정</th></tr>
+        <tr><td><b>개발</b></td><td><code>Debug</code> + <code>_GLIBCXX_DEBUG</code> + <code>ccache</code></td></tr>
+        <tr><td><b>CI 검증</b></td><td><code>Debug</code> + <b>ASan·UBSan·TSan</b> (b10) ★</td></tr>
+        <tr><td><b>성능 측정</b></td><td><code>RelWithDebInfo</code> — 프로파일러가 함수명을 보려면 <code>-g</code> 필요</td></tr>
+        <tr><td><b>배포</b></td><td><code>Release</code> + LTO + 보호 옵션 + <b>심볼 분리</b></td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># 성능 측정은 반드시 최적화 빌드로 ★
+cmake --preset release &amp;&amp; cmake --build --preset release
+perf record -g ./build/release/bench
+
+# ⚠ Debug 빌드로 벤치마크를 돌리고 "느리다"고 하는 실수가 정말 많습니다
+#   벤치마크 코드에 빌드 타입을 출력하게 해 두세요
+#ifdef NDEBUG
+    std::puts("Release 빌드");
+#else
+    std::puts("⚠ Debug 빌드 — 성능 수치가 의미 없습니다");
+#endif</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최적화가 코드를 바꿉니다</h4>
+      <pre class="code" data-lang="cpp"><code>// Debug 에서만 되고 Release 에서 깨진다면 → 거의 항상 UB 입니다 ★
+//   (🔬 d02 에서 자세히)
+
+// ① 초기화하지 않은 변수 — Debug 는 0 이 들어가기도 합니다
+int n;                    // Release 에서는 쓰레기 값
+
+// ② 부호 있는 오버플로
+if (n + 1 < n) { }        // Release 에서 이 검사가 삭제됩니다
+
+// ③ 널 체크 순서
+int x = *p; if (!p) return;   // Release 에서 널 검사가 사라집니다
+
+// ④ strict aliasing 위반
+float f = 1.0f; int i = *(int*)&amp;f;      // -O2 에서 결과가 달라집니다
+
+// 진단
+//   -fsanitize=undefined 로 빌드해 실행하면 그 자리에서 알려 줍니다 ★
+//   -fno-strict-aliasing 로 증상이 사라지면 ④번이 원인입니다
+//   -O0 에서만 되면 UB 를 의심하고 Sanitizer 를 돌리세요</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“릴리즈에서만 터진다”는 컴파일러 버그가 아닙니다</b> —
+        99% 는 <b>내 코드의 UB</b> 입니다.
+        최적화는 “UB 가 없다”는 가정 위에서 코드를 변형하므로,
+        UB 가 있으면 <b>Debug 에서 우연히 동작하던 것이 드러날 뿐</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">프로파일 기반 최적화</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">PGO — 실제 실행 패턴으로 최적화</h4>
+      <pre class="code" data-lang="bash"><code># ① 계측 빌드로 실행 데이터를 수집
+g++ -O2 -fprofile-generate -o app_prof main.cpp
+./app_prof &lt; typical_workload.txt        # ★ 실제와 비슷한 입력으로
+
+# ② 그 데이터를 써서 다시 빌드
+g++ -O2 -fprofile-use -o app main.cpp
+#   분기 예측 · 인라인 · 코드 배치가 실제 패턴에 맞춰집니다
+#   → 대개 5~15% 추가 향상 (분기가 많은 코드에서 특히)
+
+# clang 은 두 단계
+clang++ -fprofile-instr-generate -O2 main.cpp -o app_prof
+LLVM_PROFILE_FILE=app.profraw ./app_prof
+llvm-profdata merge -output=app.profdata app.profraw
+clang++ -fprofile-instr-use=app.profdata -O2 main.cpp -o app</code></pre>
+      <pre class="code" data-lang="cmake"><code># CMake 에 넣기
+option(ENABLE_PGO_GEN "PGO 데이터 생성" OFF)
+option(ENABLE_PGO_USE "PGO 데이터 사용" OFF)
+if(ENABLE_PGO_GEN)
+    target_compile_options(app PRIVATE -fprofile-generate)
+    target_link_options(app PRIVATE -fprofile-generate)
+elseif(ENABLE_PGO_USE)
+    target_compile_options(app PRIVATE -fprofile-use -fprofile-correction)
+endif()</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최적화 결과 확인하기</h4>
+      <pre class="code" data-lang="bash"><code># 최적화 리포트 — 무엇이 적용되고 무엇이 안 됐는지
+g++ -O3 -fopt-info-vec-optimized -fopt-info-vec-missed main.cpp
+clang++ -O3 -Rpass=loop-vectorize -Rpass-missed=loop-vectorize main.cpp
+#   "loop not vectorized: ..." 이유까지 알려 줍니다 ★
+
+# 인라인 여부
+g++ -O2 -Winline main.cpp
+clang++ -O2 -Rpass=inline main.cpp
+
+# 어셈블리 직접 확인 (⚡ e09)
+g++ -O2 -S -masm=intel -o - main.cpp | grep -A30 "hot_function"
+#   또는 godbolt.org
+
+# 빌드 타입이 실제로 뭔지 확인
+strings app | grep -i "GCC:"          # 컴파일러 정보
+readelf -p .comment app
+nm app | grep -c " T "                # 심볼 수 (strip 여부)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>PGO 는 마지막 카드입니다</b> — 빌드 파이프라인이 복잡해지고
+        <b>대표적인 워크로드를 정하는 것</b>이 어렵습니다.
+        알고리즘·메모리·I/O 를 다 손본 뒤,
+        <b>여전히 몇 %가 아쉬울 때</b>만 꺼내세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>-DCMAKE_BUILD_TYPE=Release</code></b> 를 빠뜨리면
+    최적화가 안 됩니다 — 성능 이야기의 출발점입니다.
+    운영 배포는 <b><code>RelWithDebInfo</code> + 심볼 분리</b>가 좋고,
+    <b>경고는 전부 켜서 에러로</b> 만드세요.
+    <b>Debug 에서만 되는 코드는 UB</b> 를 의심하고 Sanitizer 를 돌리세요.</div>
+</section>
+
+
+<!-- ==================== b05 ==================== -->
+<section class="sec" id="b05">
+  <div class="sec-head rv">
+    <span class="no">BUILD 05</span>
+    <h2>윈도우 · 리눅스 · 맥 — <span class="t">실제로 다른 것들</span></h2>
+    <p class="lead">
+      “크로스 플랫폼”이라고 해도 <b>부딪히는 지점은 정해져 있습니다</b>.
+      그 목록만 알면 대부분 피할 수 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">차이 목록</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%"></th><th>Windows</th><th>Linux</th><th>macOS</th></tr>
+        <tr><td>컴파일러</td><td>MSVC</td><td>GCC</td><td>Clang</td></tr>
+        <tr><td>공유 라이브러리</td><td><code>.dll</code>+<code>.lib</code></td><td><code>.so</code></td><td><code>.dylib</code></td></tr>
+        <tr><td>기호 내보내기</td><td><b>명시 필요</b> ★</td><td>기본 전부</td><td>기본 전부</td></tr>
+        <tr><td>경로 구분</td><td><code>\</code> (그러나 <code>/</code>도 됨)</td><td><code>/</code></td><td><code>/</code></td></tr>
+        <tr><td>파일명 대소문자</td><td>구분 안 함 ★</td><td>구분</td><td>기본 구분 안 함</td></tr>
+        <tr><td><code>long</code> 크기</td><td>4바이트 ★</td><td>8바이트</td><td>8바이트</td></tr>
+        <tr><td>라이브러리 경로</td><td>같은 폴더·PATH</td><td>RPATH·<code>ld.so</code></td><td><code>@rpath</code></td></tr>
+        <tr><td>런타임</td><td>MSVCRT 재배포</td><td>glibc·musl</td><td>시스템</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 자주 물리는 셋</b> — ① 윈도우에서 <b>심볼을 안 내보내</b> 링크 실패,
+        ② <b>파일명 대소문자</b>(윈도우에서 되던 <code>#include "Utils.h"</code> 가 리눅스에서 실패),
+        ③ <b><code>long</code> 크기</b>가 달라 바이너리 포맷이 깨짐.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드로 흡수하기</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 경로 — std::filesystem 으로 통일 ★
+#include &lt;filesystem&gt;
+namespace fs = std::filesystem;
+fs::path p = fs::path("data") / "input.csv";     // 구분자 자동
+p.string();          // 플랫폼 기본 형식
+p.generic_string();  // 항상 '/' (설정 파일에 저장할 때)
+
+// ⚠ 윈도우에서 한글 경로 — u8path 나 wstring 필요
+std::ifstream f(p);   // fs::path 를 넘기면 MSVC 가 알아서 처리합니다 ★
+
+// ② 정수 크기 — 고정폭만 쓰기
+#include &lt;cstdint&gt;
+int64_t n;           // long 대신 (탭 1 x02)
+
+// ③ 줄바꿈 — 텍스트 모드가 다릅니다
+std::ofstream f(p, std::ios::binary);   // ★ 바이너리로 열면 변환 없음
+
+// ④ 시간 — 표준으로
+#include &lt;chrono&gt;
+auto now = std::chrono::system_clock::now();
+
+// ⑤ 스레드·동기화 — 표준으로 (pthread·Win32 직접 호출 금지)
+#include &lt;thread&gt;  &lt;mutex&gt;
+
+// ⑥ 정말 다른 부분만 얇은 계층으로 (탭 1 x10)
+namespace plat { void set_thread_name(const char*); }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">CMake 로 흡수하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">플랫폼별 설정</h4>
+      <pre class="code" data-lang="cmake"><code># 소스 파일 자체를 나누기 (#ifdef 산재보다 낫습니다) ★
+add_library(core src/core.cpp)
+if(WIN32)
+    target_sources(core PRIVATE src/platform_win.cpp)
+    target_link_libraries(core PRIVATE ws2_32 shlwapi)
+    target_compile_definitions(core PRIVATE
+        NOMINMAX                      # ★ min/max 매크로 방지
+        WIN32_LEAN_AND_MEAN           # windows.h 를 가볍게
+        _CRT_SECURE_NO_WARNINGS)
+elseif(APPLE)
+    target_sources(core PRIVATE src/platform_mac.cpp)
+    target_link_libraries(core PRIVATE "-framework CoreFoundation")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0")     # ★ 지원할 최소 버전
+else()
+    target_sources(core PRIVATE src/platform_posix.cpp)
+    target_link_libraries(core PRIVATE pthread dl)
+endif()
+
+# 공유 라이브러리 심볼 (🔗 f02)
+set_target_properties(core PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    WINDOWS_EXPORT_ALL_SYMBOLS OFF)   # 명시적으로 표시한 것만
+
+# 출력 위치 통일 (윈도우는 Release/ 하위 폴더가 생깁니다)
+set_target_properties(app PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">런타임 라이브러리 찾기</h4>
+      <pre class="code" data-lang="cmake"><code># 리눅스·맥 — 자기 옆의 .so 를 찾게
+set_target_properties(app PROPERTIES
+    BUILD_RPATH_USE_ORIGIN TRUE
+    INSTALL_RPATH "$ORIGIN/../lib")
+if(APPLE)
+    set_target_properties(app PROPERTIES INSTALL_RPATH "@loader_path/../lib")
+endif()
+
+# 윈도우 — RPATH 가 없습니다. DLL 을 실행 파일 옆에 복사
+if(WIN32)
+    add_custom_command(TARGET app POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $&lt;TARGET_RUNTIME_DLLS:app&gt; $&lt;TARGET_FILE_DIR:app&gt;
+        COMMAND_EXPAND_LISTS)         # ★ CMake 3.21+
+endif()
+
+# MSVC 런타임 정적 링크 (재배포 패키지 없이 배포)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$&lt;$&lt;CONFIG:Debug&gt;:Debug&gt;")
+#   → /MT · /MTd. 파일이 커지지만 의존성이 없어집니다 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>윈도우 배포에서 가장 흔한 문제</b> — “DLL 을 찾을 수 없습니다”.
+        <code>$&lt;TARGET_RUNTIME_DLLS:app&gt;</code> 로 <b>필요한 DLL 을 자동 복사</b>하거나,
+        <b>정적 런타임</b>으로 빌드하면 사라집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">차이를 CI 가 잡게</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 OS 를 항상 돌립니다</h4>
+      <pre class="code" data-lang="yaml"><code># 개발은 한 OS 에서 하더라도 CI 는 셋 다 ★
+jobs:
+  build:
+    strategy:
+      fail-fast: false                # ★ 하나 실패해도 나머지는 계속
+      matrix:
+        include:
+          - { os: ubuntu-latest,  cc: gcc,   cxx: g++ }
+          - { os: ubuntu-latest,  cc: clang, cxx: clang++ }
+          - { os: macos-14,       cc: clang, cxx: clang++ }
+          - { os: windows-latest, cc: cl,    cxx: cl }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - name: 설정 · 빌드 · 테스트
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>컴파일러를 두 개 이상 돌리세요</b> — GCC 와 Clang 은
+        <b>경고와 에러가 서로 다릅니다</b>. 한쪽에서만 잡히는 문제가 많아
+        <b>사실상 무료로 정적 분석을 하나 더 얻는</b> 셈입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 겪는 증상과 해결</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">증상</th><th>원인 · 해결</th></tr>
+        <tr><td>리눅스에서만 <code>No such file</code></td><td>파일명 대소문자 ★</td></tr>
+        <tr><td>MSVC 만 <code>min/max</code> 에러</td><td><code>NOMINMAX</code> 정의</td></tr>
+        <tr><td>MSVC 만 한글 깨짐·C4819</td><td><code>/utf-8</code> 옵션</td></tr>
+        <tr><td>맥에서 <code>library not loaded</code></td><td><code>@rpath</code>·<code>install_name_tool</code></td></tr>
+        <tr><td>리눅스만 <code>undefined reference to pthread</code></td><td><code>Threads::Threads</code> 링크</td></tr>
+        <tr><td>윈도우만 링크 실패</td><td><code>__declspec(dllexport)</code> 누락</td></tr>
+        <tr><td>맥 arm64 에서 실패</td><td>x86 전용 인트린식·라이브러리</td></tr>
+        <tr><td>Release 에서만 크래시</td><td>UB (b04·🔬 d02)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="cmake"><code># pthread 는 이렇게 (플랫폼 무관)
+find_package(Threads REQUIRED)
+target_link_libraries(core PRIVATE Threads::Threads)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">크로스 컴파일</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한 기계에서 여러 대상 빌드</h4>
+      <pre class="code" data-lang="bash"><code># zig 를 크로스 컴파일러로 쓰기 (설치가 간단하고 잘 됩니다) ★
+cmake -B build-arm \
+  -DCMAKE_C_COMPILER="zig;cc;-target;aarch64-linux-gnu.2.28" \
+  -DCMAKE_CXX_COMPILER="zig;c++;-target;aarch64-linux-gnu.2.28" \
+  -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64
+
+# ★ glibc 버전까지 지정할 수 있어 호환성 문제가 해결됩니다(b08)
+
+# 맥 유니버설 바이너리 (x64 + arm64)
+cmake -B build -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+lipo -info build/libcore.dylib
+
+# 도커로 옛 배포판 타깃
+docker run --rm -v $PWD:/src -w /src quay.io/pypa/manylinux_2_28_x86_64 \
+    sh -c "cmake -B build &amp;&amp; cmake --build build"
+
+# 툴체인 파일 방식 (정석)
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/arm64.cmake</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">툴체인 파일 예시</h4>
+      <pre class="code" data-lang="cmake"><code># cmake/arm64.cmake
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR aarch64)
+
+set(CMAKE_C_COMPILER   aarch64-linux-gnu-gcc)
+set(CMAKE_CXX_COMPILER aarch64-linux-gnu-g++)
+set(CMAKE_SYSROOT /usr/aarch64-linux-gnu)
+
+# ★ 타깃용 라이브러리만 찾고, 호스트 프로그램은 호스트에서
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)</code></pre>
+      <pre class="code" data-lang="bash"><code># 결과 확인
+file build/libcore.so
+#   ELF 64-bit LSB shared object, ARM aarch64 ★
+readelf -h build/libcore.so | grep Machine
+
+# 크로스 빌드에서 테스트는 어떻게?
+#   · QEMU 로 에뮬레이션: qemu-aarch64 -L /usr/aarch64-linux-gnu ./test
+#   · 또는 실제 기기·CI 러너(GitHub 의 ubuntu-24.04-arm)
+#   ⚠ 크로스 빌드는 '컴파일만' 검증합니다. 반드시 실행 테스트를 따로 하세요</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>크로스 빌드의 함정</b> — 빌드는 되는데 <b>실행하면 다른 결과</b>가 나올 수 있습니다.
+        엔디언·정렬·부동소수 처리가 아키텍처마다 미묘하게 다릅니다.
+        <b>실제 기기나 에뮬레이터에서 테스트를 돌리는 CI</b>가 반드시 필요합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 플랫폼 차이는 <b>목록이 정해져 있습니다</b> —
+    <b>심볼 내보내기(윈도우)</b>, <b>파일명 대소문자(리눅스)</b>,
+    <b><code>long</code> 크기</b>, <b>라이브러리 경로</b>.
+    코드에서는 <b><code>std::filesystem</code>·고정폭 정수·표준 스레드</b>로 흡수하고,
+    나머지는 <b>CMake 조건 분기와 파일 분리</b>로 처리하세요.</div>
+</section>
+
+
+<!-- ==================== b06 ==================== -->
+<section class="sec" id="b06">
+  <div class="sec-head rv">
+    <span class="no">BUILD 06</span>
+    <h2>파이썬 <span class="t">wheel</span> 만들기</h2>
+    <p class="lead">
+      <code>pip install</code> 이 컴파일을 요구하면 <b>절반의 사용자가 실패</b>합니다.
+      <code>cibuildwheel</code> 이 세 OS × 여러 파이썬 버전을 <b>자동으로</b> 만들어 줍니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">wheel 이름이 말해 주는 것</h4>
+      <pre class="code" data-lang="text"><code>fastmod-0.1.0-cp312-cp312-manylinux_2_28_x86_64.whl
+        ─────  ─────  ─────  ────────────────────────
+        버전   파이썬  ABI    플랫폼
+
+  cp312       : CPython 3.12 전용
+  cp39-abi3   : 3.9 이상 전부에서 동작 ★ (안정 ABI)
+  py3-none-any: 순수 파이썬 (컴파일 없음)
+
+  manylinux_2_28 : glibc 2.28 이상 리눅스
+  musllinux_1_2  : 알파인
+  macosx_11_0_arm64 · macosx_10_15_x86_64
+  win_amd64
+
+★ 조합 수
+  일반 : 파이썬 5버전 × 3 OS × 2 아키 = 30개
+  abi3 : 3 OS × 2 아키 = 6개  ← 5분의 1 (🐍 y03)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">cibuildwheel 설정</h4>
+      <pre class="code" data-lang="toml"><code># pyproject.toml
+[build-system]
+requires = ["scikit-build-core&gt;=0.10", "pybind11&gt;=2.12"]
+build-backend = "scikit_build_core.build"
+
+[tool.cibuildwheel]
+build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
+skip  = "*-musllinux_i686 pp* *_i686"
+test-requires = "pytest numpy"
+test-command = "pytest {project}/tests"
+build-verbosity = 1
+
+[tool.cibuildwheel.linux]
+before-all = "yum install -y zlib-devel || apk add zlib-dev"
+archs = ["x86_64", "aarch64"]
+
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]</code></pre>
+      <pre class="code" data-lang="bash"><code>pipx run cibuildwheel --platform linux     # 로컬에서도 (도커 필요)
+ls wheelhouse/</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">cibuildwheel 이 해 주는 일</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 하면 며칠 걸리는 것들</h4>
+      <ul class="tx">
+        <li><b>manylinux 컨테이너에서 빌드</b> — 오래된 glibc 로 빌드해
+            대부분의 배포판에서 동작하게 만듭니다</li>
+        <li><b><code>auditwheel</code>·<code>delocate</code></b> —
+            의존하는 <code>.so</code>·<code>.dylib</code> 를 <b>wheel 안에 넣고</b>
+            RPATH 를 고쳐 줍니다 ★</li>
+        <li><b>파이썬 버전마다 격리된 환경</b>에서 빌드</li>
+        <li><b>빌드 직후 테스트</b> — 격리된 환경에 설치해 실행</li>
+        <li><b>ARM 크로스 빌드</b> — QEMU 로 aarch64 도</li>
+        <li><b>태그 정규화</b> — 올바른 플랫폼 태그를 붙여 줍니다</li>
+      </ul>
+      <pre class="code" data-lang="bash"><code># 결과 확인
+auditwheel show wheelhouse/*.whl
+#   fastmod-0.1.0-cp312-...whl is consistent with manylinux_2_28_x86_64
+#   The wheel references external versioned symbols: GLIBC_2.17 ...
+
+unzip -l wheelhouse/*.whl | grep "\.so"
+#   fastmod/_core.so
+#   fastmod.libs/libzlib-abc123.so   ★ 함께 포장된 의존성</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">GitHub Actions 전체 흐름</h4>
+      <pre class="code" data-lang="yaml"><code>name: wheels
+on: { push: { tags: ['v*'] }, workflow_dispatch: {} }
+
+jobs:
+  wheels:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pypa/cibuildwheel@v2.21
+      - uses: actions/upload-artifact@v4
+        with: { name: 'wheels-${{ matrix.os }}', path: wheelhouse/*.whl }
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run build --sdist
+      - uses: actions/upload-artifact@v4
+        with: { name: sdist, path: dist/*.tar.gz }
+
+  publish:
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions: { id-token: write }        # ★ 신뢰 발행 (토큰 불필요)
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - uses: pypa/gh-action-pypi-publish@release/v1</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>sdist 도 함께 올리세요</b> — wheel 이 없는 환경(새 아키텍처·특이한 OS)에서
+        <b>소스에서 빌드할 수 있는 경로</b>가 됩니다.
+        <code>pip</code> 는 맞는 wheel 이 없으면 자동으로 sdist 를 시도합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">배포 전 검증</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">깨끗한 환경에서 설치 테스트</h4>
+      <pre class="code" data-lang="bash"><code># ★ 컴파일러가 없는 이미지에서 되는지 확인
+docker run --rm -v $PWD/wheelhouse:/w python:3.12-slim sh -c "
+  pip install /w/*cp312*manylinux*.whl &amp;&amp;
+  python -c 'import fastmod, numpy as np;
+             print(fastmod.__version__);
+             print(fastmod.smooth(np.arange(5.0), 3))'"
+
+# 알파인
+docker run --rm -v $PWD/wheelhouse:/w python:3.12-alpine sh -c "
+  pip install /w/*musllinux*.whl &amp;&amp; python -c 'import fastmod'"
+
+# 의존성이 wheel 안에 다 들어갔는지
+unzip -p wheelhouse/*.whl fastmod/_core*.so &gt; /tmp/c.so &amp;&amp; ldd /tmp/c.so
+
+# 테스트 PyPI 로 먼저
+twine upload --repository testpypi dist/*
+pip install -i https://test.pypi.org/simple/ fastmod
+
+# 메타데이터 검사
+twine check dist/*</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버전과 릴리스 관리</h4>
+      <pre class="code" data-lang="toml"><code># 버전을 git 태그에서 자동으로 ★
+[build-system]
+requires = ["scikit-build-core", "pybind11", "setuptools-scm"]
+
+[tool.scikit-build]
+metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
+
+[tool.setuptools_scm]
+# v1.2.3 태그 → 버전 1.2.3
+# 태그 이후 커밋이 있으면 1.2.4.dev5+g1a2b3c</code></pre>
+      <pre class="code" data-lang="python"><code># 런타임에 버전·빌드 정보 노출 (🐍 y03)
+&gt;&gt;&gt; fastmod.__version__
+'1.2.3'
+&gt;&gt;&gt; fastmod.__build_info__
+{'compiler': 'GNU 13.2.0', 'flags': '-O3', 'commit': 'a1b2c3d',
+ 'pybind11': '2.13.6', 'built': '2026-08-06'}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>PyPI 는 같은 버전을 다시 올릴 수 없습니다</b> —
+        잘못 올리면 <b>버전을 올려서 다시</b> 올려야 합니다.
+        반드시 <b>TestPyPI 에서 먼저</b> 검증하세요.
+        그리고 <b>신뢰 발행(Trusted Publishing)</b>을 쓰면 토큰을 저장할 필요가 없습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">wheel 안을 들여다보기</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">auditwheel 이 하는 일</h4>
+      <pre class="code" data-lang="bash"><code># ① 외부 의존성을 찾아
+auditwheel show dist/fastmod-0.1.0-cp312-linux_x86_64.whl
+
+# ② wheel 안으로 복사하고 이름을 바꾸고 RPATH 를 고칩니다
+auditwheel repair dist/*.whl -w wheelhouse/
+#   fastmod.libs/libzlib-a1b2c3.so   ← 해시가 붙은 이름 ★
+#   (다른 패키지의 같은 라이브러리와 충돌하지 않게)
+
+# ③ 결과 확인
+unzip -l wheelhouse/*.whl
+patchelf --print-rpath /tmp/extracted/fastmod/_core.so
+#   $ORIGIN/../fastmod.libs
+
+# 맥은 delocate
+delocate-listdeps dist/*.whl
+delocate-wheel -w wheelhouse/ dist/*.whl
+
+# 윈도우는 자동 도구가 없습니다 — DLL 을 직접 패키지에 넣고
+# os.add_dll_directory() 로 경로를 알려 줍니다(🔗 f02)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크기와 로딩 시간</h4>
+      <pre class="code" data-lang="bash"><code># wheel 크기 확인
+ls -lh wheelhouse/*.whl
+unzip -l wheelhouse/*.whl | sort -k1 -rn | head
+
+# 큰 이유 대부분은 ① 디버그 심볼 ② 정적 링크한 라이브러리 ③ 템플릿
+# 심볼 제거는 cibuildwheel 이 기본으로 하지 않습니다 ★
+[tool.cibuildwheel]
+environment = { CFLAGS = "-g0", CXXFLAGS = "-g0" }
+# 또는 CMake 에서
+target_link_options(_core PRIVATE $&lt;$&lt;CONFIG:Release&gt;:-s&gt;)
+
+# 임포트 시간
+python -X importtime -c "import fastmod" 2&gt;&amp;1 | tail -3
+
+# 여러 wheel 의 크기를 한눈에
+for w in wheelhouse/*.whl; do printf "%8s %s\n" "$(du -h "$w" | cut -f1)" "$(basename $w)"; done</code></pre>
+      <pre class="code" data-lang="text"><code>전형적인 크기
+  단순 확장 (pybind11)      200KB ~ 1MB
+  numpy 연동                +수백 KB
+  OpenCV 정적 링크          30~80MB   ★ 사용자가 싫어합니다
+  ONNX Runtime             100MB+
+
+  → 큰 의존성은 별도 패키지로 분리하거나
+    시스템 설치를 요구하는 편이 나을 수 있습니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>abi3 를 진지하게 검토하세요</b> — wheel 수가 <b>5분의 1</b>로 줄고,
+        새 파이썬이 나와도 <b>재빌드가 필요 없습니다</b>(🐍 y03).
+        nanobind 는 3.12+ 에서 abi3 지원이 특히 좋습니다(🐍 y11).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>cibuildwheel</code></b> 설정 몇 줄이면
+    세 OS × 여러 파이썬 버전 wheel 이 자동으로 만들어집니다.
+    <code>auditwheel</code> 이 <b>의존 라이브러리를 wheel 안에 포장</b>해 주므로
+    사용자는 아무것도 설치할 필요가 없습니다.
+    배포 전에 <b>컴파일러 없는 도커 이미지에서 설치 테스트</b>를 반드시 하세요.</div>
+</section>
+
+<!-- ==================== b07 ==================== -->
+<section class="sec" id="b07">
+  <div class="sec-head rv">
+    <span class="no">BUILD 07</span>
+    <h2>CI — <span class="t">태그를 붙이면 배포까지</span></h2>
+    <p class="lead">
+      C++ 프로젝트에서 CI 는 선택이 아닙니다.
+      <b>세 OS · 두 컴파일러 · Sanitizer</b> 를 사람이 매번 돌릴 수는 없습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI 가 해야 할 다섯 가지</h4>
+      <pre class="code" data-lang="text"><code>① 빌드 — 세 OS × GCC·Clang·MSVC
+   컴파일러마다 잡아 주는 경고가 다릅니다 (무료 정적 분석)
+
+② 테스트 — ctest · 파이썬·Node 바인딩 테스트까지
+
+③ Sanitizer — ASan·UBSan·TSan (b10) ★
+   메모리·경쟁 버그를 배포 전에 잡는 유일하게 확실한 방법
+
+④ 정적 분석 — clang-tidy · cppcheck · 포맷 검사
+
+⑤ 배포 — 태그가 붙으면 wheel·npm·릴리스 아티팩트 생성
+
+★ 실행 시간이 걱정된다면
+   PR 에서는 ①②(리눅스만) → 빠른 피드백
+   main 병합 시 전체 매트릭스
+   태그에서 ⑤ 배포
+   야간에 ③④ 전체</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 워크플로</h4>
+      <pre class="code" data-lang="yaml"><code>name: ci
+on:
+  push: { branches: [main], tags: ['v*'] }
+  pull_request:
+
+jobs:
+  quick:                                  # PR 은 빠르게
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hendrikmuhs/ccache-action@v1
+      - run: |
+          cmake --preset dev -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build --preset dev
+          ctest --preset dev --output-on-failure
+
+  full:                                   # main 은 전체
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  cxx: g++-13 }
+          - { os: ubuntu-latest,  cxx: clang++-17 }
+          - { os: macos-14,       cxx: clang++ }
+          - { os: windows-latest, cxx: cl }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        env: { CXX: '${{ matrix.cxx }}' }
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">품질 검사 붙이기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">포맷과 정적 분석</h4>
+      <pre class="code" data-lang="yaml"><code>  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 포맷 검사 (파이썬의 ruff format 자리)
+      - run: |
+          sudo apt install -y clang-format-17
+          find src include -name '*.cpp' -o -name '*.hpp' \
+            | xargs clang-format-17 --dry-run --Werror
+
+      # 정적 분석
+      - run: |
+          cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          run-clang-tidy -p build -quiet src/
+
+      # 헤더 정리
+      - run: include-what-you-use -p build src/core.cpp</code></pre>
+      <pre class="code" data-lang="yaml"><code># .clang-format — 팀 규칙을 파일 하나로
+BasedOnStyle: Google
+IndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+PointerAlignment: Left      # int* p (int *p 아님)</code></pre>
+      <pre class="code" data-lang="yaml"><code># .clang-tidy — 실무에서 효과가 큰 규칙들 ★
+Checks: &gt;
+  bugprone-*,
+  performance-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-make-unique,
+  cppcoreguidelines-owning-memory,
+  cppcoreguidelines-pro-type-member-init,
+  -bugprone-easily-swappable-parameters
+WarningsAsErrors: 'bugprone-use-after-move,performance-for-range-copy'</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">pre-commit 으로 앞당기기</h4>
+      <pre class="code" data-lang="yaml"><code># .pre-commit-config.yaml — 커밋 순간에 검사 ★
+repos:
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v17.0.6
+    hooks:
+      - id: clang-format
+        types_or: [c++, c]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]          # ★ 윈도우·리눅스 혼용 방지
+
+  - repo: local
+    hooks:
+      - id: cmake-format
+        name: cmake-format
+        entry: cmake-format -i
+        language: python
+        files: CMakeLists.txt|\.cmake$</code></pre>
+      <pre class="code" data-lang="bash"><code>pip install pre-commit &amp;&amp; pre-commit install
+pre-commit run --all-files          # 처음 도입할 때 전체 적용
+
+# ★ 전체 포맷 커밋은 git blame 을 망가뜨립니다 (파이썬 탭 p01 과 같은 문제)
+git config blame.ignoreRevsFile .git-blame-ignore-revs</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>CI 보다 pre-commit 이 먼저입니다</b> — 포맷 문제로 CI 가 실패하면
+        <b>5분을 기다렸다 다시 푸시</b>해야 합니다.
+        커밋 시점에 잡으면 <b>즉시</b> 해결됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">릴리스 자동화</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">태그 하나로 전부</h4>
+      <pre class="code" data-lang="yaml"><code>  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [full]
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      # 파이썬 wheel (b06)
+      - uses: pypa/cibuildwheel@v2.21
+      # Node prebuilds (🟨 j09)
+      - run: npx prebuildify --napi --strip
+      # C++ 라이브러리 아카이브
+      - run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX=install
+          cmake --build build --target install
+          tar czf mylib-${{ matrix.os }}.tar.gz -C install .
+      - uses: actions/upload-artifact@v4
+        with: { path: 'wheelhouse/*.whl
+                      prebuilds/**
+                      mylib-*.tar.gz' }
+
+  publish:
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions: { id-token: write, contents: write }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: softprops/action-gh-release@v2
+        with: { files: 'dist/*' }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI 시간 관리</h4>
+      <pre class="code" data-lang="yaml"><code># ① 캐시 — 가장 효과가 큽니다
+- uses: hendrikmuhs/ccache-action@v1
+  with: { key: '${{ matrix.os }}-${{ matrix.cxx }}', max-size: 500M }
+
+# ② 변경된 것만 검사
+- uses: dorny/paths-filter@v3
+  id: changes
+  with:
+    filters: |
+      cpp: ['src/**', 'include/**', 'CMakeLists.txt']
+- if: steps.changes.outputs.cpp == 'true'
+  run: cmake --build build
+
+# ③ 중복 실행 취소 (연속 푸시 시)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ④ 타임아웃 (무한 대기 방지)
+timeout-minutes: 30</code></pre>
+      <pre class="code" data-lang="text"><code>전형적인 시간 (중간 규모 프로젝트)
+  캐시 없음     : 8~15분
+  ccache 적중   : 1~3분   ★
+  Sanitizer 빌드: 별도 5~10분 (실행이 느립니다)
+  wheel 전체    : 20~40분  (플랫폼 병렬)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>CI 시간은 개발 속도입니다</b> — PR 검증이 15분이면
+        <b>하루에 몇 번밖에 못 돌립니다</b>.
+        <b>PR 은 3분 안에</b> 끝나게 만들고, 무거운 검사는 <b>main·야간</b>으로 미루세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">공급망 보안</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드 출처 증명</h4>
+      <pre class="code" data-lang="yaml"><code># ① 신뢰 발행 — 토큰 없이 PyPI·npm 에 배포 ★
+permissions: { id-token: write }
+- uses: pypa/gh-action-pypi-publish@release/v1     # OIDC 로 인증
+- run: npm publish --provenance                    # npm provenance
+
+# ② 액션을 커밋 해시로 고정 (태그는 옮겨질 수 있습니다)
+- uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+# ③ SBOM 생성
+- uses: anchore/sbom-action@v0
+  with: { path: ., format: spdx-json }
+
+# ④ 취약점 스캔
+- uses: anchore/scan-action@v3
+  with: { path: ., fail-build: true, severity-cutoff: high }
+
+# ⑤ 아티팩트 서명
+- uses: sigstore/gh-action-sigstore-python@v3
+  with: { inputs: 'dist/*.whl' }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 특유의 위험</h4>
+      <pre class="code" data-lang="text"><code>① 의존성 소스를 그대로 컴파일합니다
+   FetchContent 는 임의의 코드를 받아 빌드에 포함시킵니다.
+   → GIT_TAG 를 커밋 해시로, URL_HASH 를 반드시 (b03) ★
+
+② CMake 스크립트 자체가 코드입니다
+   execute_process 로 무엇이든 실행할 수 있습니다.
+   → 서드파티 CMake 모듈을 검토 없이 include 하지 마세요
+
+③ 빌드 시점 코드 생성
+   protoc · moc · 코드 제너레이터가 실행됩니다.
+   → 도구 버전도 고정하세요
+
+④ 정적 링크된 취약점
+   zlib·openssl 을 정적 링크하면 패치가 나와도
+   '내가 다시 빌드해야' 반영됩니다.
+   → SBOM 으로 무엇이 들어갔는지 추적 가능하게 ★
+
+⑤ 재현 가능한 빌드
+   같은 소스 → 같은 바이너리여야 검증할 수 있습니다 (b02)
+   __DATE__ · 절대 경로 · 타임스탬프를 제거하세요</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>네이티브 확장은 공급망 관점에서 특히 민감합니다</b> —
+        <b>바이너리를 받아 실행</b>하는 것이라 소스보다 검증이 어렵습니다.
+        <b>신뢰 발행 + 서명 + SBOM</b> 세 가지를 갖추면
+        사용자가 <b>“이 wheel 이 정말 그 저장소에서 나왔는지”</b> 확인할 수 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> CI 는 <b>세 OS × 두 컴파일러</b>가 기본이고,
+    <b>Sanitizer 잡을 따로</b> 두는 것이 핵심입니다.
+    PR 은 <b>3분 안에</b> 끝나게 하고 무거운 검사는 main·야간으로 미루세요.
+    포맷은 <b>pre-commit 으로 앞당겨</b> CI 실패를 줄이고,
+    배포는 <b>태그 하나로</b> 자동화하세요.</div>
+</section>
+
+
+<!-- ==================== b08 ==================== -->
+<section class="sec" id="b08">
+  <div class="sec-head rv">
+    <span class="no">BUILD 08</span>
+    <h2>동적 · 정적 링크와 <span class="t">배포 의존성</span></h2>
+    <p class="lead">
+      “내 PC 에선 되는데 배포하면 <code>.so</code> 를 못 찾습니다” —
+      C++ 배포에서 가장 흔한 문제이고, <b>원인은 몇 가지뿐</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">정적 vs 동적</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%"></th><th>정적 (.a · .lib)</th><th>동적 (.so · .dll)</th></tr>
+        <tr><td>배포</td><td><b>파일 하나</b> ★</td><td>함께 배포 필요</td></tr>
+        <tr><td>크기</td><td>큼</td><td>작음(공유)</td></tr>
+        <tr><td>시작 시간</td><td><b>빠름</b></td><td>로딩·재배치 비용</td></tr>
+        <tr><td>보안 패치</td><td><b>재빌드 필요</b> ★</td><td>파일만 교체</td></tr>
+        <tr><td>메모리</td><td>프로세스마다</td><td>여러 프로세스 공유</td></tr>
+        <tr><td>최적화</td><td>LTO 가능</td><td>제한적</td></tr>
+        <tr><td>심볼 충돌</td><td>적음</td><td>가능(🔗 f02)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="cmake"><code>add_library(core STATIC ...)     # .a / .lib
+add_library(core SHARED ...)     # .so / .dll / .dylib
+add_library(core ...)            # BUILD_SHARED_LIBS 를 따름
+
+# 부분적으로 정적 — C++ 런타임만 (호환성 문제 해결) ★
+target_link_options(app PRIVATE -static-libstdc++ -static-libgcc)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>확장 모듈·배포용 도구는 정적 링크가 대개 낫습니다</b> —
+        파일 하나로 완결되어 <b>“의존성이 없다”는 상태</b>가 만들어집니다.
+        시스템 라이브러리로 배포할 때만 동적이 유리합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">런타임에 라이브러리를 찾는 순서</h4>
+      <pre class="code" data-lang="text"><code>리눅스
+  ① DT_RPATH (구식)
+  ② LD_LIBRARY_PATH 환경변수
+  ③ DT_RUNPATH        ★ 현대적 방식
+  ④ /etc/ld.so.cache  (ldconfig 로 갱신)
+  ⑤ /lib · /usr/lib
+
+맥
+  ① @executable_path · @loader_path · @rpath
+  ② DYLD_LIBRARY_PATH
+  ③ 시스템 경로
+  ※ 라이브러리 안에 '설치 이름'이 박혀 있습니다 (install_name)
+
+윈도우
+  ① 실행 파일과 같은 폴더 ★ 가장 단순한 해결
+  ② 시스템 폴더
+  ③ PATH
+  ※ RPATH 가 없습니다. 파이썬 3.8+ 는 PATH 도 안 봅니다(🔗 f02)</code></pre>
+      <pre class="code" data-lang="bash"><code># 진단
+ldd app                      # 리눅스 — not found 가 있는지
+otool -L app                 # 맥
+dumpbin /dependents app.exe  # 윈도우
+
+LD_DEBUG=libs ./app 2&gt;&amp;1 | head -30      # 어디를 뒤졌는지
+readelf -d app | grep -E "RPATH|RUNPATH|NEEDED"</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">배포 형태 만들기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자기 완결형 폴더</h4>
+      <pre class="code" data-lang="cmake"><code># 실행 파일이 자기 옆·아래의 lib 를 찾게 ★
+set_target_properties(app PROPERTIES
+    INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib"
+    BUILD_WITH_INSTALL_RPATH TRUE)
+if(APPLE)
+    set_target_properties(app PROPERTIES
+        INSTALL_RPATH "@loader_path;@loader_path/../lib")
+endif()
+
+install(TARGETS app RUNTIME DESTINATION bin)
+install(TARGETS core LIBRARY DESTINATION lib)
+
+# 의존 라이브러리까지 함께 설치 (CMake 3.21+)
+install(RUNTIME_DEPENDENCY_SET deps
+    PRE_EXCLUDE_REGEXES "api-ms-" "ext-ms-"
+    POST_EXCLUDE_REGEXES ".*system32/.*\\.dll" "^/lib" "^/usr/lib"
+    DESTINATION lib)</code></pre>
+      <pre class="code" data-lang="bash"><code># 결과 구조
+myapp/
+  bin/app
+  lib/libcore.so
+  lib/libfmt.so.11
+
+# 검증 — 다른 환경에서 진짜 도는지 ★
+docker run --rm -v $PWD/install:/app debian:12-slim /app/bin/app
+#   개발 환경의 라이브러리에 의존하지 않는지 확인됩니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">단일 파일로 배포하기</h4>
+      <pre class="code" data-lang="bash"><code># ① 완전 정적 링크 (리눅스)
+g++ -static -o app main.cpp
+#   ⚠ glibc 정적 링크는 getaddrinfo·NSS 에서 문제가 생깁니다
+#   → musl 툴체인을 쓰는 편이 안전합니다
+zig cc -target x86_64-linux-musl -static ...
+
+# ② AppImage — 의존성을 통째로 포장 (리눅스 GUI 앱)
+linuxdeploy --appdir AppDir -e app --output appimage
+
+# ③ 맥 — 앱 번들 안에 dylib 포함
+macdeployqt MyApp.app        # Qt 앱
+install_name_tool -change /usr/local/lib/libfoo.dylib \
+    @executable_path/../Frameworks/libfoo.dylib MyApp.app/Contents/MacOS/MyApp
+
+# ④ 윈도우 — 정적 CRT + DLL 동봉
+cmake -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ...
+
+# ⑤ 도커 — 가장 확실한 방법 (환경째 배포)
+FROM gcc:13 AS build
+...
+FROM debian:12-slim
+COPY --from=build /app/install /app
+#   멀티스테이지로 빌드 도구 없이 결과만</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>정적 링크의 라이선스 주의</b> — LGPL 라이브러리를 정적 링크하면
+        <b>내 코드도 공개해야 할 수</b> 있습니다.
+        LGPL 은 <b>동적 링크로 쓰면</b> 대개 문제가 없습니다.
+        의존성 라이선스를 <b>SBOM 으로 추적</b>하세요(b07).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">glibc 버전 문제</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가장 자주 겪는 배포 장애</h4>
+      <pre class="code" data-lang="bash"><code># 증상
+./app
+#   /lib/x86_64-linux-gnu/libm.so.6: version `GLIBC_2.38' not found
+
+# 원인 — 최신 배포판에서 빌드했고, 실행 환경이 더 오래됐습니다
+#   glibc 는 '앞으로만' 호환됩니다 (하위 호환 O, 상위 호환 X) ★
+
+# 무엇을 요구하는지 확인
+objdump -T app | grep GLIBC_ | sed 's/.*GLIBC_\([0-9.]*\).*/\1/' | sort -uV | tail -1
+#   2.38   ← 이 버전 이상이 필요합니다
+
+# 어떤 심볼이 그 버전을 요구하는지
+objdump -T app | grep GLIBC_2.38
+
+# 해결 ① 오래된 환경에서 빌드 (가장 확실) ★
+docker run --rm -v $PWD:/src -w /src quay.io/pypa/manylinux_2_28_x86_64 \
+    sh -c "cmake -B build &amp;&amp; cmake --build build"
+
+# 해결 ② zig 로 glibc 버전 지정
+CC="zig cc -target x86_64-linux-gnu.2.17" cmake ...
+
+# 해결 ③ musl 로 정적 링크 (glibc 의존 자체를 없앰)
+zig cc -target x86_64-linux-musl -static ...
+
+# 해결 ④ C++ 런타임만이라도 정적으로
+-static-libstdc++ -static-libgcc</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ ABI 호환성</h4>
+      <pre class="code" data-lang="text"><code>같은 문제의 다른 형태 — libstdc++ 버전
+
+  GCC 5 에서 std::string 의 ABI 가 바뀌었습니다 (_GLIBCXX_USE_CXX11_ABI)
+  → 옛 ABI 로 빌드된 라이브러리와 새 ABI 코드를 링크하면
+    undefined reference to std::__cxx11::basic_string...  ★
+
+확인
+  nm -DC libfoo.so | grep __cxx11 | head
+  strings libfoo.so | grep GLIBCXX
+
+해결
+  · 모든 것을 같은 컴파일러·같은 표준 라이브러리로 빌드
+  · 또는 -D_GLIBCXX_USE_CXX11_ABI=0 으로 맞추기 (옛 라이브러리에 맞춤)
+  · 근본 해결: 경계를 C ABI 로 (🔗 f01) ★
+    → C++ 타입을 인터페이스에 노출하지 않으면 이 문제가 사라집니다
+
+★ 그래서 배포용 라이브러리는 C API 로 만드는 것이 정석입니다.
+  파이썬·Node 확장도 각 런타임의 안정 ABI(abi3 · N-API)를 쓰는 이유가 같습니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 절의 결론</b> — <b>배포 대상보다 오래된 환경에서 빌드</b>하고,
+        <b>C++ 런타임은 정적으로</b>, <b>공개 인터페이스는 C ABI 로</b>.
+        이 셋이면 리눅스 배포 문제의 대부분이 사라집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">로딩 과정과 최적화</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동적 링크의 실행 비용</h4>
+      <pre class="code" data-lang="bash"><code># 프로그램 시작 시 동적 링커가 하는 일
+#   ① 필요한 .so 를 찾아 매핑
+#   ② 심볼 재배치 (relocation) — 심볼이 많으면 오래 걸립니다 ★
+#   ③ 초기화 함수 실행 (C++ 전역 생성자)
+
+# 측정
+LD_DEBUG=statistics ./app 2&gt;&amp;1 | head -20
+#   total startup time in dynamic loader: ...
+
+# 즉시 바인딩 vs 지연 바인딩
+LD_BIND_NOW=1 ./app          # 시작 시 전부 해석 (보안 ↑, 시작 ↓)
+# 기본은 지연 — 처음 호출될 때 해석
+
+# 심볼 수 줄이기 = 로딩 빨라짐 (🔗 f02)
+-fvisibility=hidden
+nm -D libcore.so | wc -l     # 내보내는 심볼 수
+
+# prelink · 정적 링크로 아예 없애기
+# 시작 시간이 중요한 CLI 도구는 정적 링크가 유리합니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">플러그인 구조</h4>
+      <pre class="code" data-lang="cpp"><code>// 런타임에 .so 를 골라 로드하기
+#include &lt;dlfcn.h&gt;
+
+void* h = dlopen("./plugins/fast.so", RTLD_NOW | RTLD_LOCAL);
+//   RTLD_LOCAL ★ 심볼을 전역에 노출하지 않음 (충돌 방지)
+if (!h) { std::fprintf(stderr, "%s\n", dlerror()); return; }
+
+using CreateFn = Plugin* (*)();
+auto create = reinterpret_cast&lt;CreateFn&gt;(dlsym(h, "create_plugin"));
+if (!create) { ... }
+
+Plugin* p = create();
+...
+destroy(p);
+dlclose(h);      // ⚠ 그 .so 의 코드를 아직 쓰고 있으면 크래시
+
+// ★ 플러그인 인터페이스는 반드시 C ABI 로 (🔗 f03)
+//   C++ 클래스를 노출하면 컴파일러·표준 라이브러리 버전이 같아야 합니다
+extern "C" {
+    int  plugin_abi_version(void);       // 버전 확인 먼저
+    void* plugin_create(void);
+    void  plugin_destroy(void*);
+}
+
+// 윈도우
+HMODULE h = LoadLibraryW(L"plugin.dll");
+auto f = (CreateFn)GetProcAddress(h, "plugin_create");
+FreeLibrary(h);</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>dlclose</code> 는 생각보다 위험합니다</b> — 그 라이브러리의
+        전역 객체·스레드·콜백이 아직 살아 있으면 <b>즉시 크래시</b>합니다.
+        많은 프로젝트가 <b>일부러 <code>dlclose</code> 를 하지 않습니다</b>
+        (프로세스 종료 시 어차피 정리되므로).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 배포에서 막히면 <b><code>ldd</code>·<code>otool -L</code>·<code>dumpbin</code></b> 부터.
+    <b>확장 모듈과 도구는 정적 링크</b>가 대개 편하고,
+    리눅스는 <b>배포 대상보다 오래된 환경에서 빌드</b>하는 것이 핵심입니다.
+    <b>C++ 런타임은 정적으로</b>, <b>공개 인터페이스는 C ABI 로</b>.</div>
+</section>
+
+
+<!-- ==================== b09 ==================== -->
+<section class="sec" id="b09">
+  <div class="sec-head rv">
+    <span class="no">BUILD 09</span>
+    <h2>디버거로 <span class="t">붙기</span></h2>
+    <p class="lead">
+      <code>printf</code> 도 좋지만, <b>크래시한 지점의 변수 값</b>을 보는 것만큼
+      빠른 방법은 없습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">gdb · lldb 최소 명령</h4>
+      <pre class="code" data-lang="bash"><code># 디버그 정보를 포함해 빌드
+cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+gdb ./build/app                # lldb ./build/app
+(gdb) run arg1 arg2
+(gdb) bt                       # 백트레이스 ★ 가장 먼저
+(gdb) bt full                  # 지역 변수까지
+(gdb) frame 2                  # 그 프레임으로 이동
+(gdb) info locals
+(gdb) print v                  # 값 출력 (STL 컨테이너도 예쁘게)
+(gdb) print *ptr@10            # 배열 앞 10개 ★
+(gdb) print obj.member
+
+(gdb) break main.cpp:42        # 중단점
+(gdb) break Engine::run
+(gdb) break main.cpp:42 if i == 100    # 조건부 ★
+(gdb) watch counter            # 값이 바뀌면 멈춤 ★★
+(gdb) catch throw              # 예외가 던져지는 순간
+
+(gdb) next / step / finish / continue
+(gdb) info threads             # 스레드 목록
+(gdb) thread apply all bt      # 모든 스레드 스택 ★ 교착 진단</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>watch</code> 를 알아 두세요</b> — “이 값이 언제 바뀌는지 모르겠다”를
+        <b>한 번에 해결</b>합니다. 메모리 손상 추적에도 유용합니다.
+        <code>watch -l *(int*)0x7fff...</code> 처럼 주소로도 걸 수 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">붙는 여러 방법</h4>
+      <pre class="code" data-lang="bash"><code># ① 이미 도는 프로세스에
+gdb -p $(pgrep -f myapp)
+#   ⚠ 리눅스는 권한이 필요할 수 있습니다
+#     sudo sysctl kernel.yama.ptrace_scope=0
+
+# ② 코어 덤프 분석 (🔬 d11)
+ulimit -c unlimited
+./app                        # 크래시
+gdb ./app core.12345
+(gdb) bt full
+
+# ③ 파이썬 확장 디버깅 (🐍 y12)
+gdb --args python repro.py
+(gdb) run
+(gdb) bt                     # C++ 스택
+(gdb) py-bt                  # 파이썬 스택 ★
+
+# ④ Node 애드온
+gdb --args node test.js
+
+# ⑤ 배치 모드 (CI 에서 자동 수집)
+gdb -batch -ex run -ex "bt full" -ex "thread apply all bt" \
+    --args ./app 2&gt;&amp;1 | tee crash.log
+
+# ⑥ 윈도우 — Visual Studio 에서 프로세스에 연결
+#    Debug &gt; Attach to Process &gt; python.exe / node.exe
+#    "Native code" 를 반드시 선택 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">더 편하게 보기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">STL 예쁘게 출력하기</h4>
+      <pre class="code" data-lang="bash"><code># GCC 는 기본으로 되지만, 안 되면
+# ~/.gdbinit
+python
+import sys
+sys.path.insert(0, '/usr/share/gcc/python')
+from libstdcxx.v6.printers import register_libstdcxx_printers
+register_libstdcxx_printers(None)
+end
+set print pretty on
+set print object on
+
+# 결과
+(gdb) p vec
+#   $1 = std::vector of length 3, capacity 4 = {1, 2, 3}   ★
+(gdb) p m
+#   $2 = std::map with 2 elements = {["a"] = 1, ["b"] = 2}
+
+# lldb 는 기본 지원 (clang 과 함께)
+(lldb) frame variable
+(lldb) v vec</code></pre>
+      <pre class="code" data-lang="bash"><code># 자주 쓰는 gdb 설정 (~/.gdbinit)
+set history save on
+set confirm off
+set disassembly-flavor intel
+set print elements 200        # 컨테이너를 몇 개까지 출력할지
+
+# 사용자 명령 정의
+define bta
+  thread apply all bt full
+end</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">GUI 와 IDE</h4>
+      <pre class="code" data-lang="json"><code>// VSCode — .vscode/launch.json
+{
+  "version": "0.2.0",
+  "configurations": [{
+    "name": "디버그",
+    "type": "cppdbg",
+    "request": "launch",
+    "program": "${workspaceFolder}/build/dev/app",
+    "args": [],
+    "cwd": "${workspaceFolder}",
+    "MIMode": "gdb",
+    "setupCommands": [
+      { "text": "-enable-pretty-printing", "ignoreFailures": true }
+    ],
+    "preLaunchTask": "cmake-build"
+  },
+  {
+    "name": "파이썬 확장에 붙기",
+    "type": "cppdbg",
+    "request": "attach",
+    "program": "/usr/bin/python3",
+    "processId": "${command:pickProcess}",
+    "MIMode": "gdb"
+  }]
+}</code></pre>
+      <pre class="code" data-lang="text"><code>도구
+  · gdb TUI      : gdb -tui  (Ctrl+X A 로 전환)
+  · gef · pwndbg : gdb 확장 (메모리 시각화)
+  · rr           : 실행을 녹화하고 '되감기' 가능 ★★
+                   rr record ./app  →  rr replay  →  reverse-continue
+                   재현이 어려운 버그에 압도적으로 유용합니다
+  · CLion · VS   : 통합 환경</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>rr</code> 을 꼭 한 번 써 보세요</b> — 실행을 녹화해
+        <b>시간을 거꾸로 되감으며</b> 디버깅할 수 있습니다.
+        “이 값이 언제 망가졌지?”를 <b>거꾸로 추적</b>하는 것이 가능해집니다.
+        (리눅스 x86 전용)
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">디버거보다 먼저 할 것</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">순서를 지키면 빠릅니다</h4>
+      <ul class="tx">
+        <li><b>① Sanitizer 로 돌려 보기</b>(b10) — 메모리 버그면
+            <b>정확한 줄과 스택</b>이 즉시 나옵니다. 디버거보다 빠릅니다 ★</li>
+        <li><b>② 최소 재현 케이스 만들기</b> — 입력을 줄여 가며.
+            대개 이 과정에서 원인이 보입니다</li>
+        <li><b>③ 로그·assert 추가</b> — 어느 구간까지 정상인지 좁히기</li>
+        <li><b>④ 디버거</b> — 위에서 안 잡히는 논리 오류일 때</li>
+        <li><b>⑤ <code>rr</code>·코어 덤프</b> — 재현이 어려울 때</li>
+      </ul>
+      <pre class="code" data-lang="cpp"><code>// 임시 진단 매크로 — 릴리즈에서 사라지게
+#ifndef NDEBUG
+  #define TRACE(...) std::fprintf(stderr, "[%s:%d] " __VA_ARGS__, \
+                                  __FILE__, __LINE__)
+#else
+  #define TRACE(...) ((void)0)
+#endif
+TRACE("n=%zu window=%d\n", n, window);
+
+// 값이 예상 범위인지 계속 확인
+assert(idx &lt; size &amp;&amp; "인덱스 범위 초과");</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최적화 빌드 디버깅</h4>
+      <pre class="code" data-lang="text"><code>Release 빌드에서 디버거를 붙이면
+
+  · 변수가 &lt;optimized out&gt; 으로 나옵니다
+  · 실행 순서가 소스와 다릅니다 (재배치)
+  · 함수가 인라인되어 스택에 안 보입니다
+
+대책
+  ① RelWithDebInfo (-O2 -g) 로 빌드 ★
+     최적화는 유지하면서 심볼과 줄 정보는 남습니다
+  ② 문제 파일만 최적화 끄기
+     set_source_files_properties(bad.cpp PROPERTIES COMPILE_OPTIONS "-O0")
+  ③ 인라인만 막기
+     -fno-inline  또는  __attribute__((noinline))
+  ④ 프레임 포인터 유지 (프로파일러·백트레이스 정확도 ↑)
+     -fno-omit-frame-pointer   ★ 성능 손실은 대개 1% 미만
+
+★ "Debug 에서는 안 나는 버그" 는 대개 UB 입니다(b04).
+  디버거로 쫓기 전에 UBSan 을 먼저 돌리세요.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>운영 바이너리도 심볼을 남기세요</b> — <code>strip</code> 한 바이너리는
+        크래시 덤프에서 <b>주소만 보입니다</b>.
+        <b>분리 보관(<code>objcopy --only-keep-debug</code>)</b>하면
+        배포는 작게 유지하면서 분석은 가능합니다(b01·🔬 d11).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">디버그 정보의 구조</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">DWARF 와 심볼</h4>
+      <pre class="code" data-lang="bash"><code># 디버그 정보는 별도 섹션에 들어갑니다
+readelf -S app | grep debug
+#   .debug_info  .debug_line  .debug_str  .debug_abbrev ...
+
+size -A app | grep debug          # 크기 (보통 바이너리의 절반 이상)
+
+# 주소 → 소스 위치
+addr2line -e app -f -C 0x401234
+#   Engine::run(int)
+#   /src/core.cpp:42               ★ 크래시 로그 분석의 기본
+
+# 디버그 정보 압축 (크기 절감)
+-gz=zlib                          # 또는 -Wl,--compress-debug-sections=zlib
+
+# 분리 보관 (b01)
+objcopy --only-keep-debug app app.debug
+objcopy --strip-debug --add-gnu-debuglink=app.debug app
+gdb app                           # .debug 파일을 자동으로 찾습니다
+
+# 심볼 서버 방식 (build-id 로 조회)
+readelf -n app | grep "Build ID"
+#   /usr/lib/debug/.build-id/ab/cdef...debug</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스크립트로 자동화</h4>
+      <pre class="code" data-lang="python"><code># gdb 는 파이썬으로 확장할 수 있습니다
+# mypretty.py
+import gdb
+
+class EnginePrinter:
+    def __init__(self, val): self.val = val
+    def to_string(self):
+        return f"Engine(window={self.val['window_']}, n={self.val['n_']})"
+
+def build_pp():
+    pp = gdb.printing.RegexpCollectionPrettyPrinter("mylib")
+    pp.add_printer('Engine', '^Engine$', EnginePrinter)
+    return pp
+
+gdb.printing.register_pretty_printer(gdb.current_objfile(), build_pp())</code></pre>
+      <pre class="code" data-lang="bash"><code># 자동 로드 — 바이너리 옆에 &lt;binary&gt;-gdb.py 를 두면 됩니다
+# 또는 ~/.gdbinit 에서 source mypretty.py
+
+# CI 에서 크래시 정보 자동 수집
+gdb -batch \
+  -ex "set pagination off" \
+  -ex "run" \
+  -ex "thread apply all bt full" \
+  -ex "info registers" \
+  -ex "quit" \
+  --args ./build/test_all 2&gt;&amp;1 | tee crash-report.txt
+
+# 코어 덤프를 아티팩트로 업로드해 나중에 분석
+- uses: actions/upload-artifact@v4
+  if: failure()
+  with: { name: cores, path: '/tmp/core.*' }</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>커스텀 프린터의 값어치</b> — 복잡한 자료구조를
+        <b>사람이 읽을 수 있는 한 줄</b>로 만들면 디버깅 속도가 크게 달라집니다.
+        팀 공용 타입 몇 개에만 붙여도 효과가 큽니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 크래시가 나면 <b><code>bt full</code></b> 부터,
+    값이 언제 바뀌는지 모르면 <b><code>watch</code></b>,
+    교착이면 <b><code>thread apply all bt</code></b>.
+    다만 <b>메모리 버그는 디버거보다 Sanitizer 가 빠릅니다</b> — 다음 섹션입니다.</div>
+</section>
+
+
+<!-- ==================== b10 ==================== -->
+<section class="sec" id="b10">
+  <div class="sec-head rv">
+    <span class="no">BUILD 10</span>
+    <h2><span class="t">Sanitizer</span> — 버그를 자동으로 잡습니다</h2>
+    <p class="lead">
+      플래그 하나면 <b>메모리 오류·미정의 동작·데이터 경쟁</b>을
+      <b>정확한 줄 번호와 함께</b> 잡아 줍니다.
+      C++ 를 안전하게 쓰는 가장 실용적인 방법입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 가지 Sanitizer</h4>
+      <pre class="code" data-lang="bash"><code># ① AddressSanitizer — 메모리 오류 ★ 가장 중요
+g++ -fsanitize=address -g -O1 main.cpp -o app
+#   잡는 것: 버퍼 오버런 · 해제 후 사용 · 이중 해제 · 누수 · 스택 오버플로
+#   비용: 실행 2배 느림 · 메모리 3배
+
+# ② UndefinedBehaviorSanitizer — UB
+g++ -fsanitize=undefined -g main.cpp -o app
+#   잡는 것: 정수 오버플로 · 널 역참조 · 정렬 위반 · 잘못된 형변환
+#   비용: 거의 없음 (20% 내외) ★ 항상 켜도 됩니다
+
+# ③ ThreadSanitizer — 데이터 경쟁
+g++ -fsanitize=thread -g -O1 main.cpp -o app
+#   잡는 것: 락 없는 동시 접근 · 교착 가능성
+#   비용: 5~15배 느림 · 메모리 5~10배
+#   ⚠ ASan 과 동시에 못 씁니다 (별도 빌드)
+
+# 조합 (실무 권장)
+-fsanitize=address,undefined -fno-omit-frame-pointer -g -O1</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>UBSan 은 비용이 거의 없습니다</b> — 개발 빌드에는
+        <b>항상 켜 두는 것</b>을 권합니다.
+        정수 오버플로처럼 <b>조용히 잘못된 결과</b>를 내는 문제를 바로 알려 줍니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">출력이 이렇게 나옵니다</h4>
+      <pre class="code" data-lang="text"><code>==12345==ERROR: AddressSanitizer: heap-buffer-overflow
+  on address 0x602000000078 at pc 0x00000040123a
+WRITE of size 4 at 0x602000000078 thread T0
+    #0 0x401239 in fill(int*, int) /src/core.cpp:12    ★ 정확한 위치
+    #1 0x4012f8 in main /src/main.cpp:8
+
+0x602000000078 is located 0 bytes to the right of
+  8-byte region [0x602000000070,0x602000000078)
+allocated by thread T0 here:                          ★ 어디서 할당됐는지
+    #0 0x7f...  in operator new(unsigned long)
+    #1 0x4011d5 in main /src/main.cpp:6
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/core.cpp:12 in fill</code></pre>
+      <pre class="code" data-lang="text"><code>UBSan
+  core.cpp:42:15: runtime error: signed integer overflow:
+    2147483647 + 1 cannot be represented in type 'int'
+
+TSan
+  WARNING: ThreadSanitizer: data race
+    Write of size 8 by thread T2 at core.cpp:88
+    Previous read of size 8 by thread T1 at core.cpp:71
+    Location: global 'g_cache' of size 24</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">설정과 옵션</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CMake 에 넣기</h4>
+      <pre class="code" data-lang="cmake"><code>add_library(sanitizers INTERFACE)
+
+option(ENABLE_ASAN "AddressSanitizer" OFF)
+option(ENABLE_UBSAN "UndefinedBehaviorSanitizer" OFF)
+option(ENABLE_TSAN "ThreadSanitizer" OFF)
+
+if(ENABLE_ASAN)
+    target_compile_options(sanitizers INTERFACE
+        -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(sanitizers INTERFACE -fsanitize=address)
+endif()
+if(ENABLE_UBSAN)
+    target_compile_options(sanitizers INTERFACE
+        -fsanitize=undefined -fno-sanitize-recover=all)  # ★ 즉시 중단
+    target_link_options(sanitizers INTERFACE -fsanitize=undefined)
+endif()
+if(ENABLE_TSAN)
+    target_compile_options(sanitizers INTERFACE -fsanitize=thread)
+    target_link_options(sanitizers INTERFACE -fsanitize=thread)
+endif()
+
+target_link_libraries(core PRIVATE sanitizers)
+target_link_libraries(test_all PRIVATE sanitizers)</code></pre>
+      <pre class="code" data-lang="bash"><code>cmake --preset asan &amp;&amp; cmake --build --preset asan
+ctest --preset asan --output-on-failure
+
+# MSVC 도 ASan 을 지원합니다 (VS 2019 16.9+)
+cl /fsanitize=address /Zi main.cpp</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">런타임 옵션</h4>
+      <pre class="code" data-lang="bash"><code># ASan
+export ASAN_OPTIONS="detect_leaks=1:abort_on_error=1:\
+  strict_string_checks=1:detect_stack_use_after_return=1:\
+  check_initialization_order=1:log_path=/tmp/asan"
+
+# UBSan — 기본은 경고만 하고 계속 실행합니다
+export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
+
+# TSan
+export TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1"
+
+# 심볼이 안 보이면
+export ASAN_SYMBOLIZER_PATH=$(which llvm-symbolizer)
+
+# 특정 함수·파일을 검사에서 제외 (서드파티 코드 등)
+# suppressions.txt
+#   leak:libthirdparty.so
+#   race:known_benign_function
+export LSAN_OPTIONS="suppressions=$PWD/lsan.supp"
+
+# 소스 수준에서 제외
+__attribute__((no_sanitize("address"))) void raw_access() { ... }</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>-fno-sanitize-recover=all</code> 을 쓰세요</b> — UBSan 은 기본적으로
+        <b>경고만 출력하고 계속 실행</b>합니다. CI 에서는 <b>즉시 실패</b>해야
+        문제를 놓치지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">CI 에 붙이기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">별도 잡으로 운영</h4>
+      <pre class="code" data-lang="yaml"><code>  sanitize:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        san: [address, undefined, thread]
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.san }} -g -O1 \
+                               -fno-omit-frame-pointer -fno-sanitize-recover=all"
+          cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          TSAN_OPTIONS: halt_on_error=1</code></pre>
+      <pre class="code" data-lang="bash"><code># 파이썬 확장 검사 (🐍 y12)
+CFLAGS="-fsanitize=address -g" pip install -e . --no-build-isolation
+PYTHONMALLOC=malloc \
+  LD_PRELOAD=$(gcc -print-file-name=libasan.so) \
+  ASAN_OPTIONS=detect_leaks=0 \
+  python -m pytest
+#   ★ PYTHONMALLOC=malloc 이 없으면 파이썬 힙을 감시하지 못합니다
+#   ★ 파이썬 자체의 '누수'가 많이 잡히므로 detect_leaks=0 으로 끄는 편이 실용적</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">더 있는 도구들</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:32%">도구</th><th>잡는 것</th></tr>
+        <tr><td><b>ASan</b></td><td>버퍼 오버런 · UAF · 누수 ★</td></tr>
+        <tr><td><b>UBSan</b></td><td>정수 오버플로 · 널 · 정렬</td></tr>
+        <tr><td><b>TSan</b></td><td>데이터 경쟁 · 교착</td></tr>
+        <tr><td><b>MSan</b></td><td>초기화 안 된 메모리 읽기<br><span style="color:var(--dim)">(모든 의존성을 MSan 으로 빌드해야 함)</span></td></tr>
+        <tr><td><b>Valgrind</b></td><td>재빌드 없이 검사 · 훨씬 느림(20~50배)</td></tr>
+        <tr><td><b>퍼징(libFuzzer)</b></td><td>입력을 자동 생성해 크래시 탐색 ★</td></tr>
+      </table></div>
+      <pre class="code" data-lang="cpp"><code>// 퍼징 — 파서·디코더가 있다면 반드시 해 보세요
+// fuzz.cpp
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+    if (size &lt; 4) return 0;
+    core::parse({reinterpret_cast&lt;const char*&gt;(data), size});   // 크래시하면 발견
+    return 0;
+}</code></pre>
+      <pre class="code" data-lang="bash"><code>clang++ -fsanitize=fuzzer,address -g fuzz.cpp core.cpp -o fuzz
+./fuzz corpus/ -max_total_time=300
+#   ★ 몇 분만 돌려도 사람이 생각 못 한 입력을 찾아냅니다
+#   OSS-Fuzz 는 오픈소스 프로젝트에 무료로 이걸 상시 돌려 줍니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">Sanitizer 는 어떻게 잡아내나</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ASan 의 원리 — 그림자 메모리</h4>
+      <pre class="code" data-lang="text"><code>① 컴파일러가 모든 메모리 접근 앞에 검사 코드를 넣습니다
+② 실행 시 '그림자 메모리'를 유지합니다
+   실제 메모리 8바이트 → 그림자 1바이트로 상태를 기록
+   (접근 가능 / 레드존 / 해제됨 …)
+③ 할당된 영역 주위에 '레드존'을 둡니다
+   → 조금만 벗어나도 즉시 감지 ★
+④ 해제된 메모리는 '격리 구역'에 일정 시간 보관
+   → 해제 후 사용을 잡을 수 있습니다
+
+그래서
+  · 메모리 3배 사용 (그림자 + 레드존 + 격리)
+  · 실행 2배 느림 (검사 코드)
+  · 정확한 위치와 할당 스택까지 알려 줍니다
+
+한계
+  · 검사 코드가 들어간 부분만 감지합니다
+    → 서드파티 .so 안의 버그는 못 잡습니다 (같이 빌드해야 함)
+  · 레드존을 크게 넘어가는 접근은 놓칠 수 있습니다
+  · 논리 오류는 대상이 아닙니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영에서 쓸 수 있는 것들</h4>
+      <pre class="code" data-lang="bash"><code># Sanitizer 는 운영에 쓰기엔 무겁습니다. 대안:
+
+# ① 하드웨어 지원 (ARM64)
+-fsanitize=hwaddress          # HWASan — 메모리 2배 정도로 훨씬 가벼움
+# ARM MTE(Memory Tagging) 지원 기기에서는 거의 무비용 ★
+
+# ② GWP-ASan — 확률적 샘플링 방식
+#    할당의 일부만 감시해 운영 환경에서도 켤 수 있습니다
+#    (Chrome·Android 가 실제로 씁니다)
+
+# ③ 가벼운 강화 옵션 (b04)
+-D_FORTIFY_SOURCE=3 -fstack-protector-strong -D_GLIBCXX_ASSERTIONS
+#    비용 1% 미만으로 상당수의 오버런을 잡습니다 ★
+
+# ④ Control Flow Integrity
+-fsanitize=cfi -flto -fvisibility=hidden
+
+# ⑤ 스택 카나리·ASLR·RELRO (기본으로 켜 두세요)
+-fPIE -pie -Wl,-z,relro,-z,now
+
+# 확인
+checksec --file=./app         # 어떤 보호가 켜졌는지</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>현실적인 전략</b> — <b>CI 에서 ASan·UBSan·TSan 전부</b>,
+        <b>운영에는 가벼운 강화 옵션</b>.
+        여기에 <b>퍼징</b>을 더하면 C++ 로 할 수 있는 <b>자동 검증은 거의 다</b> 한 것입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>-fsanitize=address,undefined</code></b> 한 줄이면
+    메모리 버그의 대부분이 <b>정확한 줄 번호와 함께</b> 잡힙니다.
+    <b>UBSan 은 비용이 거의 없으니 개발 빌드에 항상</b>,
+    <b>ASan·TSan 은 CI 별도 잡</b>으로 돌리세요.
+    파서가 있다면 <b>퍼징</b>도 몇 분만 돌려 보세요 — 반드시 뭔가 나옵니다.</div>
+</section>
+
+</div><!-- /pane-build -->

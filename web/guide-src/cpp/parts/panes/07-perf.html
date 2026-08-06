@@ -1,0 +1,2589 @@
+<!-- ============================================================
+     성능 최적화 PANE
+     ============================================================ -->
+<div class="pane" id="pane-perf">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> 측정 · 캐시 · 할당 · SIMD · 병렬</div>
+  <h1>C++ 가 빠른 게<br>아니라<br>내가 빠르게 씁니다</h1>
+  <p class="tx">
+    생각 없이 쓴 C++ 는 numpy 보다 느립니다.
+    C++ 가 빠른 이유는 <b>메모리 배치와 복사를 내가 정할 수 있기</b> 때문이고,
+    그걸 안 하면 이점이 없습니다.
+    <b>이 탭은 "왜 안 빨라지나"에 답합니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>①</b><span>측정이 먼저</span></div>
+    <div><b>5</b><span>최적화 순서</span></div>
+    <div><b>4</b><span>깊이 층</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== e01 ==================== -->
+<section class="sec" id="e01">
+  <div class="sec-head rv">
+    <span class="no">PERF 01</span>
+    <h2>측정 먼저 — <span class="t">벤치마크</span>를 신뢰할 수 있게</h2>
+    <p class="lead">
+      “빨라진 것 같다”는 증거가 아닙니다.
+      <b>제대로 재는 법</b>부터 잡지 않으면 나머지 아홉 섹션은 의미가 없습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최적화의 순서 ★</h4>
+      <pre class="code" data-lang="text"><code>이 순서를 지키면 대부분 ①②에서 끝납니다
+
+  ① 알고리즘 · 자료구조     O(n²) → O(n)        수십~수백 배
+  ② I/O · 쿼리 횟수         N+1 제거 · 배치      수십 배
+  ③ 메모리 접근 패턴        캐시 친화적 배치     2~10배   ★ C++ 의 영역
+  ④ 복사 · 할당 제거        이동 · reserve       1.5~3배
+  ⑤ 벡터화 · 병렬           SIMD · 멀티스레드    2~수십 배
+  ⑥ 마이크로 최적화         분기 · 인라인        수 %
+
+★ ③부터가 C++ 를 쓰는 진짜 이유입니다.
+  ①②는 파이썬에서도 할 수 있고, 거기서 못 얻은 이득을
+  C++ 로 옮긴다고 얻어지지 않습니다.
+
+⚠ 순서를 건너뛰면
+  · O(n²) 알고리즘을 SIMD 로 최적화 → 여전히 O(n²)
+  · 쿼리가 1만 번인데 루프를 튜닝 → 아무 변화 없음</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">제대로 재기</h4>
+      <pre class="code" data-lang="cpp"><code>#include &lt;chrono&gt;
+
+// ★ 최소한의 규칙
+//   ① Release 빌드로 (b04)
+//   ② steady_clock 이나 perf_counter 를 쓸 것 (system_clock ❌)
+//   ③ 여러 번 재고 '최솟값'을 볼 것 (평균은 노이즈에 흔들립니다)
+//   ④ 결과를 실제로 쓸 것 (안 쓰면 컴파일러가 통째로 지웁니다) ★
+
+template&lt;class F&gt;
+double bench_ms(F&amp;&amp; f, int reps = 10) {
+    double best = 1e300;
+    for (int i = 0; i &lt; reps; ++i) {
+        auto t0 = std::chrono::steady_clock::now();
+        f();
+        auto t1 = std::chrono::steady_clock::now();
+        best = std::min(best,
+            std::chrono::duration&lt;double, std::milli&gt;(t1 - t0).count());
+    }
+    return best;
+}
+
+// 컴파일러가 코드를 지우지 못하게 (최적화 방지 장벽)
+template&lt;class T&gt;
+inline void do_not_optimize(T const&amp; v) {
+    asm volatile("" : : "r,m"(v) : "memory");
+}
+//   또는 benchmark::DoNotOptimize (Google Benchmark)
+
+// 사용
+auto t = bench_ms([&amp;]{ auto r = compute(data); do_not_optimize(r); });</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 벤치마크 실수</b> — 결과를 안 써서
+        <b>컴파일러가 계산 자체를 삭제</b>한 것을 “0.001ms 로 빨라졌다”고 보고하는 것입니다.
+        <b>결과가 비현실적으로 빠르면</b> 먼저 이것을 의심하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">Google Benchmark</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">제대로 된 벤치마크 프레임워크</h4>
+      <pre class="code" data-lang="cpp"><code>#include &lt;benchmark/benchmark.h&gt;
+
+static void BM_Smooth(benchmark::State&amp; state) {
+    const std::size_t n = state.range(0);
+    std::vector&lt;double&gt; in(n, 1.0), out(n);
+
+    for (auto _ : state) {                    // ★ 이 루프가 자동 반복
+        core::smooth(in.data(), n, out.data(), 3);
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * n);
+    state.SetBytesProcessed(state.iterations() * n * sizeof(double));
+}
+BENCHMARK(BM_Smooth)-&gt;Range(1&lt;&lt;10, 1&lt;&lt;22);    // 1K ~ 4M 까지 자동으로
+
+BENCHMARK_MAIN();</code></pre>
+      <pre class="code" data-lang="text"><code>--------------------------------------------------------------------
+Benchmark            Time     CPU   Iterations  items/s   bytes/s
+--------------------------------------------------------------------
+BM_Smooth/1024     1.2 us  1.2 us      580000   853M/s    6.8GB/s
+BM_Smooth/1048576  1.8 ms  1.8 ms         389   582M/s    4.6GB/s  ★
+BM_Smooth/4194304  9.1 ms  9.1 ms          77   461M/s    3.7GB/s
+
+★ bytes/s 가 크기에 따라 떨어지면 → 캐시를 벗어났다는 신호 (e02)
+  메모리 대역폭 한계(보통 10~50GB/s)에 가까우면 → 계산이 아니라 전송이 병목</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">노이즈 줄이기</h4>
+      <pre class="code" data-lang="bash"><code># ① CPU 주파수 고정 (터보·절전으로 결과가 흔들립니다) ★
+sudo cpupower frequency-set --governor performance
+
+# ② 특정 코어에 고정
+taskset -c 2 ./bench
+# 또는 코어를 격리 (커널 파라미터 isolcpus=2,3)
+
+# ③ 다른 부하 제거 · 여러 번 반복
+./bench --benchmark_repetitions=10 --benchmark_report_aggregates_only=true
+
+# ④ Google Benchmark 가 경고해 줍니다
+#   ***WARNING*** CPU scaling is enabled
+
+# ⑤ 결과 비교 도구
+./bench --benchmark_format=json &gt; before.json
+# ... 최적화 ...
+./bench --benchmark_format=json &gt; after.json
+compare.py benchmarks before.json after.json     # 통계적 유의성까지 ★
+
+# ⑥ 하드웨어 카운터로 원인 파악
+perf stat -e cycles,instructions,cache-misses,branch-misses ./bench</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>5% 차이는 노이즈일 수 있습니다</b> — 같은 코드를 두 번 재도
+        <b>3~5% 는 흔들립니다</b>.
+        “최적화했더니 7% 빨라졌다”를 주장하려면
+        <b>반복 측정과 통계</b>가 필요합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">프로파일링으로 병목 찾기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">추측하지 말고 프로파일러를</h4>
+      <pre class="code" data-lang="bash"><code># ★ perf — 리눅스 표준. 가장 먼저 쓰는 도구
+perf record -g --call-graph=dwarf ./app
+perf report                       # 대화형
+perf report --stdio | head -30
+
+#   ⚠ 정확한 스택을 위해 빌드 옵션이 필요합니다
+#     -g -fno-omit-frame-pointer
+
+# 플레임 그래프 (한눈에 보입니다) ★
+perf record -F 999 -g ./app
+perf script | stackcollapse-perf.pl | flamegraph.pl &gt; flame.svg
+
+# 무엇이 문제인지 요약
+perf stat -d ./app
+#   cycles · instructions · IPC · cache-misses · branch-misses
+
+# 맥
+xctrace record --template 'Time Profiler' --launch ./app
+# 윈도우
+#   Visual Studio 성능 프로파일러 · Intel VTune
+
+# 파이썬 확장이라면 (🐍 y12)
+py-spy record --native -o flame.svg -- python bench.py</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">숫자를 해석하기</h4>
+      <pre class="code" data-lang="text"><code>perf stat 결과 읽는 법
+
+  IPC (instructions per cycle)
+    &gt; 2.0  : 좋음 — CPU 를 잘 쓰고 있습니다
+    &lt; 1.0  : 뭔가 기다리고 있습니다 (메모리·분기) ★
+    &lt; 0.5  : 심각 — 캐시 미스나 의존성 사슬을 의심
+
+  cache-misses / cache-references
+    &gt; 10%  : 메모리 레이아웃 문제 (e02)
+
+  branch-misses / branches
+    &gt; 5%   : 예측 불가능한 분기 (e05)
+
+  page-faults 가 많다
+    → 할당이 잦거나 메모리가 부족
+
+★ 프로파일 1위가 memcpy · operator new 면 → e03·e04
+  1위가 read · recv · execute 면 → I/O 문제 (C++ 최적화 무의미)
+  1위가 내 계산 함수인데 IPC 가 낮으면 → e02 (캐시)
+  IPC 도 높은데 느리면 → 알고리즘 자체 (①로 돌아가기)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>프로파일 결과의 맨 위가 대개 내 코드가 아닙니다</b> —
+        <code>memcpy</code>·<code>operator new</code>·<code>__memmove_avx</code> 같은 것이 1위라면
+        <b>복사와 할당</b>이 진짜 문제입니다(e03·e04).
+        그 자리를 “라이브러리가 느리다”고 해석하면 안 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">측정을 코드에 심기</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영에서도 재기</h4>
+      <pre class="code" data-lang="cpp"><code>// 개발 벤치마크는 실제 부하를 재현하지 못합니다.
+// 운영에서 계속 측정하는 것이 훨씬 정확합니다 ★
+
+class Timer {
+    std::chrono::steady_clock::time_point t0_;
+    const char* name_;
+public:
+    explicit Timer(const char* n)
+        : t0_(std::chrono::steady_clock::now()), name_(n) {}
+    ~Timer() {
+        auto us = std::chrono::duration_cast&lt;std::chrono::microseconds&gt;(
+            std::chrono::steady_clock::now() - t0_).count();
+        metrics::record(name_, us);        // 히스토그램에 누적
+    }
+};
+#define SCOPED_TIMER(n) Timer _t##__LINE__{n}
+
+void process() {
+    SCOPED_TIMER("process");
+    ...
+}
+
+// ★ 평균이 아니라 백분위를 보세요
+//   평균 2ms 인데 p99 가 200ms 인 경우가 실제로 많습니다
+//   원인: 할당 스파이크 · 캐시 미스 · GC 없는 C++ 에서도 페이지 폴트
+
+// 샘플링으로 비용 줄이기
+if ((counter++ &amp; 0x3F) == 0) { SCOPED_TIMER("process"); ... }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI 에서 성능 회귀 잡기</h4>
+      <pre class="code" data-lang="yaml"><code># 벤치마크를 CI 에 넣고 이전 결과와 비교 ★
+- name: 벤치마크
+  run: |
+    ./build/bench --benchmark_format=json &gt; current.json
+- name: 회귀 검사
+  run: |
+    python tools/compare_bench.py baseline.json current.json --threshold 1.10
+    # 10% 이상 느려지면 실패</code></pre>
+      <pre class="code" data-lang="python"><code># tools/compare_bench.py — 핵심 로직
+import json, sys
+base = {b["name"]: b["real_time"] for b in json.load(open(sys.argv[1]))["benchmarks"]}
+cur  = {b["name"]: b["real_time"] for b in json.load(open(sys.argv[2]))["benchmarks"]}
+bad = []
+for name, t in cur.items():
+    if name in base and t &gt; base[name] * 1.10:
+        bad.append(f"{name}: {base[name]:.1f} → {t:.1f} ({t/base[name]:.2f}×)")
+if bad:
+    print("성능 회귀:\n  " + "\n  ".join(bad)); sys.exit(1)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>CI 벤치마크의 한계</b> — 공용 러너는 <b>노이즈가 심합니다</b>(같은 코드가 20% 흔들림).
+        <b>임계값을 넉넉히</b>(10~20%) 잡거나,
+        <b>전용 러너</b>를 두거나, <b>instruction count</b>(<code>cachegrind</code>)처럼
+        결정적인 지표를 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 최적화는 <b>알고리즘 → I/O → 메모리 → 복사 → 병렬</b> 순서입니다.
+    측정은 <b>Release 빌드</b>로, <b>최솟값</b>을 보고, <b>결과를 실제로 써야</b> 합니다.
+    <b><code>perf stat</code> 의 IPC 와 cache-miss</b> 만 봐도
+    “계산이 문제인지 메모리가 문제인지”가 갈립니다.</div>
+</section>
+
+
+<!-- ==================== e02 ==================== -->
+<section class="sec" id="e02">
+  <div class="sec-head rv">
+    <span class="no">PERF 02</span>
+    <h2>메모리 레이아웃과 <span class="t">캐시</span></h2>
+    <p class="lead">
+      같은 알고리즘도 <b>데이터가 어떻게 놓여 있느냐</b>에 따라 수 배가 갈립니다.
+      <b>C++ 를 쓰는 진짜 이유</b>가 여기 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메모리는 계층입니다</h4>
+      <pre class="code" data-lang="text"><code>대략적인 지연 시간 (현대 x86 · 사이클)
+
+  레지스터        0
+  L1 캐시         ~4      (32~48KB)
+  L2 캐시         ~14     (512KB~2MB)
+  L3 캐시         ~40     (8~32MB, 코어 공유)
+  메인 메모리     ~200    ★ L1 의 50배
+  SSD             ~100,000
+  네트워크        ~수백만
+
+핵심
+  · CPU 는 메모리에서 '64바이트 단위(캐시 라인)'로 가져옵니다
+  · double 하나(8바이트)를 읽어도 64바이트가 올라옵니다
+  · 그래서 '연속으로 붙어 있으면' 공짜로 따라옵니다 ★
+  · 흩어져 있으면 매번 200 사이클을 기다립니다
+
+→ 200 사이클이면 덧셈 수십 개를 할 수 있습니다.
+  즉 대부분의 프로그램은 '계산이 느린' 게 아니라 '기다리는' 중입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">눈으로 보이는 차이</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 순차 접근 vs 무작위 접근
+std::vector&lt;int&gt; v(64 * 1024 * 1024);      // 256MB
+
+for (std::size_t i = 0; i &lt; v.size(); ++i) sum += v[i];        // 순차
+for (std::size_t i : random_indices)        sum += v[i];        // 무작위
+//   같은 횟수인데 무작위가 5~20배 느립니다 ★
+
+// ② 2차원 배열 순회 순서
+double m[N][N];
+for (int i = 0; i &lt; N; ++i)
+    for (int j = 0; j &lt; N; ++j) sum += m[i][j];   // ✅ 행 우선 (연속)
+for (int j = 0; j &lt; N; ++j)
+    for (int i = 0; i &lt; N; ++i) sum += m[i][j];   // ❌ 열 우선 (건너뜀)
+//   N=2048 이면 5~10배 차이 — 코드는 두 글자만 다릅니다 ★
+
+// ③ 포인터 추적 (연결 리스트가 느린 이유)
+for (Node* p = head; p; p = p-&gt;next) sum += p-&gt;value;
+//   매 노드마다 캐시 미스 가능 → vector 대비 10배 이상 느릴 수 있습니다
+//   (탭 2 m05 에서 "list 는 거의 답이 아니다"라고 한 이유)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>numpy 가 빠른 이유도 같습니다</b> — 파이썬 <code>list</code> 는
+        <b>포인터 배열</b>이라 값이 흩어져 있고,
+        numpy 배열은 <b>연속된 숫자 블록</b>입니다.
+        C++ 로 옮겨도 <code>vector&lt;shared_ptr&lt;T&gt;&gt;</code> 를 쓰면 같은 문제가 생깁니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">AoS 와 SoA</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조체 배열 vs 배열 구조체 ★</h4>
+      <pre class="code" data-lang="cpp"><code>// AoS (Array of Structs) — 직관적이지만 일부 필드만 쓸 때 손해
+struct Particle { float x, y, z, vx, vy, vz; float mass; bool alive; };
+std::vector&lt;Particle&gt; ps(1'000'000);        // 32바이트 × 100만
+
+for (auto&amp; p : ps) p.x += p.vx;             // x, vx 만 쓰는데
+//   캐시 라인 64바이트에 Particle 2개 → 필요한 건 8바이트, 나머지는 낭비 ★
+
+// SoA (Struct of Arrays) — 쓰는 것만 연속으로
+struct Particles {
+    std::vector&lt;float&gt; x, y, z, vx, vy, vz, mass;
+    std::vector&lt;uint8_t&gt; alive;
+};
+Particles ps;
+
+for (std::size_t i = 0; i &lt; n; ++i) ps.x[i] += ps.vx[i];
+//   ✅ x 와 vx 만 캐시에 올라옵니다 → 미스가 크게 줄고
+//   ✅ 벡터화도 훨씬 잘 됩니다 (e06)
+//   보통 2~5배, 많으면 10배까지 차이 납니다
+
+// ⚠ 대신 '한 입자의 모든 필드'를 쓰는 코드는 AoS 가 낫습니다
+//   → 접근 패턴을 보고 정하세요</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파이썬 모듈을 만들 때 자연스럽게 SoA 가 됩니다</b> —
+        numpy 배열을 <b>열 단위로</b> 받으면(<code>xs</code>, <code>ys</code>, <code>zs</code>)
+        그것이 곧 SoA 입니다(🐍 y01 · 🟨 j04).
+        JS 객체 배열을 그대로 넘기는 것보다 훨씬 빠른 이유이기도 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조체를 작게 만들기</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 필드 순서로 패딩 줄이기 (탭 1 x02)
+struct Bad  { char a; double b; char c; };      // 24바이트
+struct Good { double b; char a; char c; };      // 16바이트 ★
+static_assert(sizeof(Good) == 16);
+
+// ② 타입 줄이기
+struct Node {
+    int64_t id;        // 정말 64비트가 필요한가?
+    double  score;     // float 로 충분한가?
+    bool    flags[8];  // 비트필드로 1바이트에?
+};
+struct Compact {
+    int32_t id;
+    float   score;
+    uint8_t flags;     // 비트 8개
+};                     // 24바이트 → 12바이트 → 캐시에 2배 담김 ★
+
+// ③ 인덱스로 포인터 대체 (8바이트 → 4바이트, 게다가 재할당에 안전)
+struct Edge { uint32_t from, to; };     // Node* 대신
+
+// ④ 뜨거운 필드와 차가운 필드 분리 ★
+struct Hot  { float x, y; };            // 매 프레임 쓰는 것
+struct Cold { std::string name; Meta m; };  // 가끔 쓰는 것
+std::vector&lt;Hot&gt; hot; std::vector&lt;Cold&gt; cold;   // 인덱스로 연결
+
+// 확인
+pahole -C Node build/libcore.so       # 패딩을 표로 보여 줍니다 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">접근 패턴 설계</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">블로킹 — 캐시에 맞게 쪼개기</h4>
+      <pre class="code" data-lang="cpp"><code>// 행렬 곱 — 고전적인 예
+// ❌ 단순 구현 — B 를 열 방향으로 읽어 캐시 미스가 많습니다
+for (int i = 0; i &lt; N; ++i)
+  for (int j = 0; j &lt; N; ++j) {
+    double s = 0;
+    for (int k = 0; k &lt; N; ++k) s += A[i][k] * B[k][j];
+    C[i][j] = s;
+  }
+
+// ✅ 타일링 — 캐시에 들어가는 블록 단위로
+constexpr int T = 64;                       // L1 에 맞게 조정
+for (int ii = 0; ii &lt; N; ii += T)
+ for (int jj = 0; jj &lt; N; jj += T)
+  for (int kk = 0; kk &lt; N; kk += T)
+   for (int i = ii; i &lt; std::min(ii+T, N); ++i)
+    for (int j = jj; j &lt; std::min(jj+T, N); ++j) {
+      double s = C[i][j];
+      for (int k = kk; k &lt; std::min(kk+T, N); ++k) s += A[i][k] * B[k][j];
+      C[i][j] = s;
+    }
+//   N=1024 에서 3~5배 빨라집니다 ★
+
+// ⚠ 실무에서는 직접 짜지 말고 BLAS 를 쓰세요
+//   OpenBLAS · MKL 은 이걸 극한까지 최적화해 두었습니다 (10배 이상)
+//   → "라이브러리를 쓸 수 있는지" 를 항상 먼저 확인</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">캐시 미스를 실제로 재기</h4>
+      <pre class="code" data-lang="bash"><code># 전체 요약
+perf stat -e cache-references,cache-misses,\
+LLC-load-misses,L1-dcache-load-misses ./app
+
+#   cache-misses / cache-references &gt; 10%  → 레이아웃 문제 ★
+
+# 어느 줄에서 미스가 나는지
+perf record -e cache-misses -g ./app
+perf report
+
+# 더 자세히 (메모리 접근 프로파일)
+perf mem record ./app &amp;&amp; perf mem report
+
+# 캐시 시뮬레이션 (결정적 — CI 에 적합)
+valgrind --tool=cachegrind ./app
+cg_annotate cachegrind.out.*        # 소스 줄별 미스 수 ★
+
+# 내 CPU 의 캐시 크기
+lscpu | grep -i cache
+getconf -a | grep CACHE</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“캐시 미스가 많다”만으로는 부족합니다</b> —
+        데이터가 크면 미스는 <b>불가피</b>합니다.
+        중요한 것은 <b>“같은 데이터를 여러 번 읽는데 매번 미스가 나는가”</b> 입니다.
+        그때가 블로킹·레이아웃 개선이 효과를 내는 자리입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">프리페치와 TLB</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">하드웨어가 알아서 하는 것</h4>
+      <pre class="code" data-lang="cpp"><code>// CPU 는 접근 패턴을 감지해 '미리 가져옵니다'(하드웨어 프리페처)
+//   · 순차 접근 → 완벽하게 예측
+//   · 일정 간격(stride) → 대개 예측
+//   · 무작위·포인터 추적 → 예측 불가 ★
+
+// 소프트웨어 프리페치 — 정말 필요할 때만
+for (std::size_t i = 0; i &lt; n; ++i) {
+    __builtin_prefetch(&amp;data[indices[i + 16]], 0, 1);   // 16개 앞을 미리
+    sum += data[indices[i]];
+}
+//   무작위 접근인데 인덱스를 미리 알 때 효과가 있습니다
+//   ⚠ 잘못 쓰면 오히려 느려집니다. 반드시 측정하세요
+
+// 더 나은 접근 — 무작위성을 없애기
+std::ranges::sort(indices);          // 정렬하면 순차에 가까워집니다 ★
+//   해시 조인·그래프 탐색에서 실제로 쓰는 기법입니다
+
+// 의존성 사슬 끊기 — 프리페처가 일할 시간을 주기
+// ❌ 다음 주소가 이전 결과에 의존 (포인터 추적)
+while (p) { sum += p-&gt;v; p = p-&gt;next; }
+// ✅ 여러 사슬을 동시에 (배치 처리)
+while (p1 &amp;&amp; p2) { s1 += p1-&gt;v; s2 += p2-&gt;v; p1 = p1-&gt;next; p2 = p2-&gt;next; }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">TLB 와 huge page</h4>
+      <pre class="code" data-lang="text"><code>가상 주소 → 물리 주소 변환도 캐시됩니다 (TLB)
+
+  · 기본 페이지 4KB · TLB 엔트리 수백~수천 개
+  · 즉 TLB 로 커버되는 메모리는 수 MB 수준 ★
+  · 그보다 큰 데이터를 무작위로 접근하면 TLB 미스가 추가로 발생
+    (캐시 미스와 별개로 페이지 테이블을 걸어야 함)
+
+huge page (2MB) 를 쓰면 커버 범위가 512배로 늘어납니다</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 리눅스 — 투명 huge page 힌트
+#include &lt;sys/mman.h&gt;
+void* p = std::aligned_alloc(2*1024*1024, size);
+madvise(p, size, MADV_HUGEPAGE);        // ★ 큰 배열에 효과적
+
+// 정렬된 할당 (SIMD 에도 필요 — e06)
+alignas(64) double buf[1024];           // 캐시 라인 정렬
+auto* p = static_cast&lt;double*&gt;(std::aligned_alloc(64, n * sizeof(double)));
+std::free(p);                            // ★ aligned_alloc 은 free 로 해제
+
+// C++17 표준 방법
+auto* q = new (std::align_val_t{64}) double[n];
+operator delete[](q, std::align_val_t{64});</code></pre>
+      <pre class="code" data-lang="bash"><code># TLB 미스 측정
+perf stat -e dTLB-load-misses,iTLB-load-misses ./app
+# huge page 상태
+cat /sys/kernel/mm/transparent_hugepage/enabled
+grep AnonHugePages /proc/meminfo</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>언제 여기까지 가나</b> — <b>수 GB 데이터를 무작위 접근</b>하는
+        데이터베이스·그래프 처리·대규모 시뮬레이션에서 의미가 있습니다.
+        일반적인 배열 처리에서는 <b>e02 앞부분(연속 배치·SoA)</b>만으로 충분합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 메모리는 <b>64바이트 캐시 라인 단위</b>로 움직입니다.
+    <b>연속으로 붙여 두고 순차로 읽는 것</b>이 성능의 8할입니다.
+    일부 필드만 쓴다면 <b>SoA</b>, 구조체는 <b>큰 것부터 배치해 작게</b>,
+    같은 데이터를 반복해서 쓴다면 <b>블록으로 쪼개서</b>.</div>
+</section>
+
+<!-- ==================== e03 ==================== -->
+<section class="sec" id="e03">
+  <div class="sec-head rv">
+    <span class="no">PERF 03</span>
+    <h2>할당 줄이기 — <span class="t">reserve · 재사용 · 풀</span></h2>
+    <p class="lead">
+      메모리를 새로 얻는 일은 비쌉니다. 게다가 <b>시간이 일정하지 않아</b>
+      p99 지연을 망칩니다. <b>미리 잡아 두고 재사용</b>하는 것이 답입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">할당 비용은 얼마나</h4>
+      <pre class="code" data-lang="text"><code>대략적인 감각 (glibc malloc 기준)
+
+  스택 할당            ~0 사이클   (포인터만 이동)
+  작은 힙 할당 (캐시됨) ~20~50 사이클
+  큰 힙 할당           ~100~수천 사이클
+  새 페이지가 필요할 때  수 μs      ★ 커널 진입 (mmap)
+
+★ 문제는 평균이 아니라 '가끔 아주 느린 것' 입니다
+  · 페이지 폴트 · 아레나 확장 · 락 경합(멀티스레드)
+  · p50 은 1μs 인데 p99 가 500μs 인 경우가 흔합니다
+
+그리고 할당은 캐시도 망칩니다
+  · 새 메모리는 캐시에 없습니다 (콜드)
+  · 해제·재할당을 반복하면 메모리가 조각납니다</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 할당 횟수를 세는 도구 — 프로젝트에 하나 두세요 ★
+static std::atomic&lt;std::size_t&gt; g_allocs{0}, g_bytes{0};
+void* operator new(std::size_t n) {
+    g_allocs.fetch_add(1, std::memory_order_relaxed);
+    g_bytes.fetch_add(n, std::memory_order_relaxed);
+    return std::malloc(n);
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+
+// 벤치마크 전후로 비교하면 어디서 할당하는지 바로 보입니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 대책 세 가지</h4>
+      <pre class="code" data-lang="cpp"><code>// ① reserve — 크기를 알면 미리 (탭 2 m05)
+std::vector&lt;Row&gt; rows;
+rows.reserve(expected);          // 재할당 0회 ★
+
+// ② 버퍼 재사용 — 루프 밖에 두고 clear
+std::vector&lt;double&gt; tmp;
+tmp.reserve(max_size);
+for (const auto&amp; chunk : chunks) {
+    tmp.clear();                 // size 만 0, 용량은 유지 ★
+    process(chunk, tmp);
+}
+
+// ③ 스택에 잡기 — 작고 크기를 알면
+std::array&lt;double, 256&gt; buf;     // 할당 0
+
+// 크기가 대개 작지만 가끔 클 때 — small buffer optimization
+#include &lt;boost/container/small_vector.hpp&gt;
+boost::container::small_vector&lt;int, 16&gt; v;   // 16개까지는 스택 ★
+//   std::string 의 SSO 와 같은 원리 (탭 2 m11)
+
+// 객체를 멤버로 들고 재사용 (파이썬·Node 모듈에서 특히 중요)
+class Engine {
+    std::vector&lt;double&gt; scratch_;    // 호출마다 새로 만들지 않음 ★
+public:
+    void run(std::span&lt;const double&gt; in, std::span&lt;double&gt; out) {
+        scratch_.resize(in.size());   // 이미 크면 할당 없음
+        ...
+    }
+};</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">아레나와 메모리 리소스</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++17 다형적 메모리 자원(PMR)</h4>
+      <pre class="code" data-lang="cpp"><code>#include &lt;memory_resource&gt;
+
+void handle_request() {
+    // 스택 버퍼에서 할당 — 힙을 아예 안 씁니다 ★
+    std::array&lt;std::byte, 64 * 1024&gt; buf;
+    std::pmr::monotonic_buffer_resource pool{buf.data(), buf.size()};
+
+    std::pmr::vector&lt;int&gt;               v{&amp;pool};
+    std::pmr::string                    s{&amp;pool};
+    std::pmr::unordered_map&lt;int, int&gt;   m{&amp;pool};
+
+    v.reserve(1000);        // pool 에서 가져옵니다
+    ...
+}   // ★ 해제는 pool 이 통째로 — 개별 free 가 없어 매우 빠릅니다
+
+// 버퍼가 부족하면 상위 자원에서 더 받아 옵니다
+std::pmr::monotonic_buffer_resource pool{
+    buf.data(), buf.size(), std::pmr::new_delete_resource()};
+
+// 크기가 다양한 객체를 반복 할당·해제한다면
+std::pmr::unsynchronized_pool_resource pool;    // 크기별 풀 (단일 스레드)
+std::pmr::synchronized_pool_resource   spool;   // 스레드 안전
+
+// 디버깅 — 할당을 추적하는 자원
+class TracingResource : public std::pmr::memory_resource {
+    void* do_allocate(std::size_t n, std::size_t a) override {
+        std::printf("alloc %zu\n", n);
+        return std::pmr::new_delete_resource()-&gt;allocate(n, a);
+    }
+    ...
+};</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>monotonic 이 가장 유용합니다</b> — <b>“요청 하나를 처리하고 통째로 버리는”</b>
+        패턴에 완벽히 맞습니다. 해제가 사실상 공짜이고,
+        메모리가 연속이라 캐시에도 좋습니다(e02).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">객체 풀</h4>
+      <pre class="code" data-lang="cpp"><code>// 같은 타입을 자주 만들고 버린다면 — 재사용 풀
+template&lt;class T&gt;
+class Pool {
+    std::vector&lt;std::unique_ptr&lt;T&gt;&gt; free_;
+public:
+    struct Deleter {
+        Pool* p;
+        void operator()(T* t) const {
+            t-&gt;reset();                       // 상태 초기화
+            p-&gt;free_.emplace_back(t);         // 풀로 반납 ★
+        }
+    };
+    using Handle = std::unique_ptr&lt;T, Deleter&gt;;
+
+    Handle acquire() {
+        if (free_.empty()) return Handle{new T{}, Deleter{this}};
+        auto* t = free_.back().release();
+        free_.pop_back();
+        return Handle{t, Deleter{this}};
+    }
+};
+
+Pool&lt;Buffer&gt; pool;
+{
+    auto b = pool.acquire();      // 할당 없이 재사용
+    use(*b);
+}                                  // 자동으로 반납 (RAII)
+
+// ⚠ 주의
+//   · 풀이 무한히 자라지 않게 상한을 두세요
+//   · 멀티스레드면 스레드별 풀(thread_local)이 락보다 빠릅니다 ★
+//   · 재사용 전에 상태를 확실히 초기화 (이전 데이터 누출 방지)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">지연 시간을 일정하게</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">p99 를 망치는 것들</h4>
+      <pre class="code" data-lang="text"><code>평균은 1ms 인데 p99 가 100ms 인 전형적 원인
+
+  ① vector 재할당 — 100만 개를 통째로 복사
+     → reserve 로 예방 ★
+  ② 페이지 폴트 — 처음 만지는 메모리
+     → 미리 터치(memset)하거나 mlock
+  ③ malloc 아레나 락 경합 (멀티스레드)
+     → tcmalloc·jemalloc·mimalloc 로 교체 ★
+  ④ 메모리 조각화 — 오래 돌수록 심해짐
+     → 풀·아레나로 패턴 고정
+  ⑤ 캐시 콜드 스타트
+     → 워밍업 후 측정
+
+측정
+  · 히스토그램으로 (평균 말고) — HdrHistogram
+  · perf stat -e page-faults,minor-faults
+  · /proc/&lt;pid&gt;/status 의 VmRSS 추이</code></pre>
+      <pre class="code" data-lang="bash"><code># 할당자 교체만으로 개선되는 경우가 많습니다 ★
+LD_PRELOAD=/usr/lib/libtcmalloc_minimal.so ./app
+LD_PRELOAD=/usr/lib/libjemalloc.so ./app
+#   멀티스레드 할당이 잦으면 2~3배 차이가 나기도 합니다
+
+# CMake 로 링크
+find_library(MIMALLOC mimalloc)
+target_link_libraries(app PRIVATE ${MIMALLOC})</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">모듈에서 특히 중요합니다</h4>
+      <pre class="code" data-lang="cpp"><code>// 파이썬·Node 확장은 '짧은 호출이 반복'되는 구조입니다.
+// 호출마다 할당하면 그것이 지배적 비용이 됩니다 ★
+
+// ❌ 호출마다 벡터 생성
+py::array_t&lt;double&gt; smooth(py::array_t&lt;double&gt; a, int w) {
+    std::vector&lt;double&gt; tmp(a.size());        // 매번 할당
+    ...
+}
+
+// ✅ ① 출력 버퍼를 받기 (호출자가 재사용)
+void smooth_into(py::array_t&lt;double&gt; a, py::array_t&lt;double&gt; out, int w);
+//   파이썬: out = np.empty_like(arr); for ...: smooth_into(chunk, out, 3)
+
+// ✅ ② 엔진 객체에 버퍼를 두기 (🐍 y05)
+class Engine {
+    std::vector&lt;double&gt; scratch_;
+public:
+    void run(...) { scratch_.resize(n); /* 두 번째부터 할당 없음 */ }
+};
+
+// ✅ ③ thread_local 스크래치 (스레드 안전 + 재사용)
+static thread_local std::vector&lt;double&gt; tls_buf;
+void run(std::size_t n) {
+    tls_buf.resize(n);
+    ...
+}
+//   ⚠ 스레드가 많으면 메모리를 그만큼 쓰고, 반환 시점이 불명확합니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>측정 방법</b> — 위의 <code>operator new</code> 카운터를 켜고
+        <b>“호출 한 번에 할당이 몇 번인가”</b>를 세어 보세요.
+        <b>0에 가깝게 만드는 것</b>이 목표이고,
+        대개 그것만으로 2~3배가 나옵니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">할당자의 내부</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">malloc 은 무엇을 하나</h4>
+      <pre class="code" data-lang="text"><code>glibc malloc (ptmalloc2) 개요
+
+  · 크기별 빈(bin) 목록을 유지합니다
+      tcache   : 스레드 로컬 캐시 (가장 빠름, 락 없음) ★
+      fastbin  : 작은 크기 (~128B)
+      smallbin · largebin · unsorted
+  · 큰 요청(기본 128KB 이상)은 mmap 으로 직접 (해제 시 munmap)
+  · 아레나: 스레드마다 별도 힙 영역 (경합 감소)
+      기본 최대 = 코어 수 × 8
+
+그래서
+  · 작은 할당의 반복은 tcache 덕에 꽤 빠릅니다
+  · 128KB 근처를 오가면 mmap/munmap 이 반복돼 매우 느립니다 ★
+      → M_MMAP_THRESHOLD 를 조정하거나 크기를 고정
+  · 스레드가 많으면 아레나가 늘어 메모리 사용량이 커집니다
+
+튜닝
+  mallopt(M_MMAP_THRESHOLD, 1&lt;&lt;20);
+  MALLOC_ARENA_MAX=2 ./app          # 메모리 사용량 억제
+  malloc_stats();                    # 현재 상태 출력</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">할당 프로파일링</h4>
+      <pre class="code" data-lang="bash"><code># heaptrack — 어디서 얼마나 할당하는지 ★
+heaptrack ./app
+heaptrack_gui heaptrack.app.12345.gz
+#   · 할당 횟수 · 피크 메모리 · 누수 · 임시 할당까지
+
+# massif (valgrind)
+valgrind --tool=massif ./app
+ms_print massif.out.*
+
+# 파이썬 확장이라면 (🐍 y12)
+memray run --native bench.py &amp;&amp; memray flamegraph memray-*.bin
+
+# perf 로 간단히
+perf record -e page-faults -g ./app
+
+# jemalloc 프로파일링
+MALLOC_CONF=prof:true,prof_prefix:jeprof ./app
+jeprof --show_bytes ./app jeprof.*.heap</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 커스텀 할당자를 컨테이너에 (탭 2 m05 · 🔬 d09)
+template&lt;class T&gt;
+struct CountingAlloc {
+    using value_type = T;
+    T* allocate(std::size_t n) {
+        counter += n * sizeof(T);
+        return static_cast&lt;T*&gt;(::operator new(n * sizeof(T)));
+    }
+    void deallocate(T* p, std::size_t) noexcept { ::operator delete(p); }
+    static inline std::size_t counter = 0;
+};
+std::vector&lt;int, CountingAlloc&lt;int&gt;&gt; v;</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>heaptrack 을 한 번 돌려 보세요</b> — “임시 할당(만들자마자 버리는 것)”이
+        <b>전체의 절반 이상</b>인 경우가 정말 흔합니다.
+        그것만 없애도 체감이 크게 달라집니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 할당은 <b>느린 것보다 “일정하지 않은 것”</b>이 문제입니다.
+    <b><code>reserve</code></b> · <b>버퍼 재사용</b> · <b>아레나(PMR)</b> 세 가지면 대부분 해결됩니다.
+    모듈을 만든다면 <b>호출당 할당 횟수를 0에 가깝게</b> 만드는 것이 목표입니다.</div>
+</section>
+
+
+<!-- ==================== e04 ==================== -->
+<section class="sec" id="e04">
+  <div class="sec-head rv">
+    <span class="no">PERF 04</span>
+    <h2>복사 제거 — <span class="t">값 vs 참조</span></h2>
+    <p class="lead">
+      자기도 모르게 큰 객체를 복사하고 있는 자리를 찾아 없앱니다.
+      <b>코드는 그대로인데 수 배가 빨라지는</b> 경우가 흔합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복사가 숨어 있는 다섯 자리 ★</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 범위 for 에서 &amp; 누락 — 가장 흔합니다
+for (auto s : names)          // ❌ 문자열마다 복사
+for (const auto&amp; s : names)   // ✅
+
+// ② 함수 인자를 값으로
+void f(std::vector&lt;int&gt; v);        // ❌ 통째로 복사
+void f(const std::vector&lt;int&gt;&amp; v); // ✅ (탭 1 x03)
+
+// ③ map 순회에서 타입을 잘못 적기
+std::map&lt;std::string, Big&gt; m;
+for (const std::pair&lt;std::string, Big&gt;&amp; p : m)   // ❌ 실제 타입은
+                                                  //   pair&lt;const string, Big&gt;
+                                                  //   → 변환 복사 발생
+for (const auto&amp; p : m)                           // ✅
+
+// ④ auto 가 참조를 떼어 버림 (탭 1 x02)
+auto v = obj.data();          // ❌ 복사
+const auto&amp; v = obj.data();   // ✅
+
+// ⑤ 반환값을 참조에 안 받기 · 임시를 여러 번 만들기
+std::string s = a + "-" + b + "-" + c;   // 중간 임시 여러 개
+std::string s = std::format("{}-{}-{}", a, b, c);   // ✅ (탭 2 m11)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 다섯 개가 실무 복사 문제의 90%</b> 입니다.
+        <code>clang-tidy</code> 의 <code>performance-*</code> 규칙이
+        <b>전부 자동으로 잡아 줍니다</b>(🛠️ b07).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복사를 찾아내기</h4>
+      <pre class="code" data-lang="cpp"><code>// 진단 구조체 — 어디서 복사되는지 출력으로 확인
+struct Trace {
+    Trace() { std::puts("생성"); }
+    Trace(const Trace&amp;) { std::puts("★복사★"); }
+    Trace(Trace&amp;&amp;) noexcept { std::puts("이동"); }
+    ~Trace() { std::puts("소멸"); }
+};
+
+// 복사 생성자를 아예 막아 컴파일 시점에 찾기 ★
+struct Big {
+    Big(const Big&amp;) = delete;      // 임시로 막아 두면
+    Big(Big&amp;&amp;) = default;          // 복사하는 곳이 전부 에러로 드러납니다
+};</code></pre>
+      <pre class="code" data-lang="bash"><code># clang-tidy — 자동 검출
+run-clang-tidy -p build -checks='performance-*' src/
+#   performance-for-range-copy            ← ① 잡습니다 ★
+#   performance-unnecessary-value-param   ← ②
+#   performance-implicit-conversion-in-loop ← ③
+#   performance-move-const-arg
+#   performance-unnecessary-copy-initialization ← ④
+
+# 컴파일러 경고
+g++ -Wall -Wextra -Wpessimizing-move -Wredundant-move
+
+# 프로파일러에서
+perf record -g ./app &amp;&amp; perf report
+#   memcpy · operator new · basic_string 생성자가 상위면 복사 문제 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">이동과 뷰</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복사 대신 옮기기 (탭 2 m03)</h4>
+      <pre class="code" data-lang="cpp"><code>// 보관할 것은 값으로 받고 move
+class Logger {
+    std::string name_;
+public:
+    explicit Logger(std::string n) : name_(std::move(n)) {}   // ★
+};
+
+// 컨테이너에 넣을 때
+v.push_back(std::move(w));         // 이동
+v.emplace_back(args...);           // 그 자리에서 생성 (임시 없음) ★
+m.try_emplace(key, args...);       // 이미 있으면 값을 만들지도 않음
+
+// 반환 — RVO 를 믿으세요
+std::vector&lt;int&gt; make() {
+    std::vector&lt;int&gt; v(1000);
+    return v;                      // ✅ 복사도 이동도 없습니다
+    // return std::move(v);        // ❌ RVO 를 막습니다
+}
+
+// 이동 생성자에 noexcept 를 반드시 (없으면 vector 가 복사로 후퇴) ★
+static_assert(std::is_nothrow_move_constructible_v&lt;MyType&gt;);
+
+// 컨테이너 통째로 옮기기
+other = std::move(v);              // 포인터 세 개만 이동
+v.swap(other);                     // 같은 효과, 예외 없음</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">뷰로 복사 자체를 없애기</h4>
+      <pre class="code" data-lang="cpp"><code>// ① std::span — 배열 구간을 복사 없이 (탭 1 x05)
+void process(std::span&lt;const double&gt; data);
+process(vec);                      // vector
+process(arr);                      // 배열
+process({ptr, n});                 // 원시 포인터
+process(std::span(vec).subspan(10, 100));   // 부분도 복사 없음 ★
+
+// ② std::string_view — 문자열 (탭 2 m11)
+void log(std::string_view msg);
+log("리터럴");                      // 할당 0
+
+// ③ ranges::view — 변환도 지연 평가 (탭 2 m06)
+auto evens = data | std::views::filter(is_even);
+//   중간 벡터를 만들지 않습니다
+
+// ④ 참조 래퍼 — 컨테이너에 참조를 담기
+std::vector&lt;std::reference_wrapper&lt;Big&gt;&gt; refs;
+refs.push_back(std::ref(big));
+
+// ⑤ 인덱스로 간접 참조 — 정렬 시 큰 객체를 안 옮기기 ★
+std::vector&lt;std::uint32_t&gt; idx(n);
+std::iota(idx.begin(), idx.end(), 0);
+std::ranges::sort(idx, {}, [&amp;](auto i){ return items[i].key; });
+//   items 는 그대로 두고 순서만 정합니다 (Big 이 클수록 유리)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>뷰는 수명에 주의</b> — 원본이 사라지거나 재할당되면
+        <b>댕글링</b>이 됩니다(탭 2 m11).
+        <b>인자로만 쓰고 보관하지 않는다</b>는 규칙을 지키면 안전합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">데이터가 흘러가는 경로 설계</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">경계에서 몇 번 복사되는지 세기</h4>
+      <pre class="code" data-lang="text"><code>파이썬 모듈의 전형적인 데이터 경로
+
+  ❌ 나쁜 경로 (복사 4회)
+    파이썬 list
+      → std::vector 변환 (복사 1)
+      → 내부 함수에 값으로 전달 (복사 2)
+      → 결과 vector 생성 (복사 3)
+      → 파이썬 list 로 변환 (복사 4)
+
+  ✅ 좋은 경로 (복사 0)
+    numpy 배열
+      → py::array_t 로 포인터만 (복사 0) 🐍 y06
+      → std::span 으로 전달 (복사 0)
+      → 미리 받은 출력 버퍼에 직접 쓰기 (복사 0)
+      → 그대로 반환 (복사 0)
+
+★ 100MB 데이터라면 400MB 복사 vs 0 — 이것이 설계의 차이입니다</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 인터페이스를 이렇게 설계하세요
+void transform(std::span&lt;const double&gt; in,     // 입력: 읽기 전용 뷰
+               std::span&lt;double&gt; out);          // 출력: 미리 받은 버퍼
+//   호출자가 메모리를 소유 → 재사용 가능 · 복사 없음 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복사가 필요한 경우도 있습니다</h4>
+      <pre class="code" data-lang="cpp"><code>// ⚠ 복사 제거가 항상 옳지는 않습니다
+
+// ① 작은 객체는 값이 더 빠릅니다
+void f(int x);                 // ✅
+void f(const int&amp; x);          // ❌ 간접 접근이 추가됨
+//   기준: 포인터 두 개(16바이트) 이하면 값으로
+
+// ② 참조는 aliasing 가정을 만들어 최적화를 막습니다 (탭 1 x04)
+void add(std::span&lt;double&gt; out, std::span&lt;const double&gt; a);
+//   컴파일러는 out 과 a 가 겹칠 수 있다고 가정 → 벡터화 실패 가능
+//   → __restrict 로 알려 주거나, 값 복사가 오히려 나을 수도
+
+// ③ 캐시 지역성 — 참조를 따라가면 흩어진 메모리를 만집니다
+for (const auto&amp; item : ptr_vector) use(*item);   // 포인터 추적 (느림)
+for (const auto&amp; item : value_vector) use(item);  // 연속 (빠름) ★
+
+// ④ 스레드 간 공유 — 복사가 락보다 쌀 수 있습니다
+//   각 스레드가 자기 사본을 갖는 편이 경합보다 나은 경우가 많습니다
+
+// ★ 결론: 측정하세요. "복사 = 나쁨" 은 규칙이 아니라 경향입니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>판단 기준</b> — <b>큰 객체(수백 바이트 이상)를 자주 복사</b>하면 문제이고,
+        <b>작은 값</b>이나 <b>한 번뿐인 복사</b>는 신경 쓸 가치가 없습니다.
+        프로파일러가 <code>memcpy</code> 를 가리킬 때만 손대세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">복사 생략과 ABI</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">RVO 는 언제 보장되나</h4>
+      <pre class="code" data-lang="cpp"><code>// C++17 부터 '보장된 복사 생략'이 있습니다
+std::vector&lt;int&gt; make() { return std::vector&lt;int&gt;(1000); }   // prvalue
+auto v = make();     // ★ 복사·이동 생성자가 없어도 컴파일됩니다 (의무 생략)
+
+// 이름 있는 지역 변수(NRVO)는 '허용'이지 '의무'가 아닙니다
+std::vector&lt;int&gt; make2() {
+    std::vector&lt;int&gt; v(1000);
+    return v;        // 대개 생략되지만 표준이 강제하지 않습니다
+}
+
+// NRVO 가 안 되는 경우
+std::vector&lt;int&gt; f(bool c) {
+    std::vector&lt;int&gt; a, b;
+    return c ? a : b;      // ❌ 어느 것을 생략할지 정할 수 없음 → 이동
+}
+std::vector&lt;int&gt; g(std::vector&lt;int&gt; param) {
+    return param;          // ❌ 매개변수는 NRVO 대상이 아님 → 이동
+}
+
+// 확인 — 복사·이동 생성자에 로그를 심고 -fno-elide-constructors 와 비교
+g++ -fno-elide-constructors test.cpp    // 생략을 끄고 실제 호출 확인</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">반환값이 실제로 어떻게 전달되나</h4>
+      <pre class="code" data-lang="text"><code>ABI 규칙 (x86-64 System V)
+
+  · 작고 trivially copyable 한 타입 → 레지스터로 반환 (공짜)
+      struct P { double x, y; };        // XMM0, XMM1
+  · 크거나 non-trivial 한 타입 → 호출자가 공간을 잡고
+    그 주소를 숨은 첫 인자로 전달 (RVO 의 실체) ★
+      std::vector&lt;int&gt;                   // 호출자 스택에 직접 구성
+
+  → 그래서 "큰 객체 반환은 느리다"는 옛말입니다.
+    C++17 이후로는 반환이 대개 공짜입니다.
+
+trivially copyable 여부가 갈림길
+  static_assert(std::is_trivially_copyable_v&lt;P&gt;);
+  · memcpy 로 옮길 수 있는 타입 → 레지스터·memcpy 최적화 가능
+  · 소멸자나 복사 생성자를 직접 쓰면 이 성질이 깨집니다 ★
+
+확인
+  g++ -O2 -S -masm=intel -o - test.cpp | grep -A20 "make"
+  godbolt.org 에서 반환 방식 비교</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무 함의</b> — <b>값으로 반환하는 것을 두려워하지 마세요</b>.
+        C++17 이후로는 대개 <b>비용이 없습니다</b>.
+        오히려 출력 인자(<code>void f(T&amp; out)</code>)가
+        <b>코드를 읽기 어렵게</b> 만드는 대가만 치르는 경우가 많습니다
+        (버퍼 재사용이 목적일 때는 예외 — e03).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 복사는 <b>다섯 자리</b>에 숨어 있습니다 —
+    <b>범위 for 의 <code>&amp;</code> 누락</b>, 값 인자, map 순회 타입,
+    <code>auto</code>, 문자열 조립.
+    <code>clang-tidy performance-*</code> 가 <b>전부 자동으로</b> 잡아 줍니다.
+    그리고 <b>값 반환은 이제 공짜</b>이니 두려워하지 마세요.</div>
+</section>
+
+
+<!-- ==================== e05 ==================== -->
+<section class="sec" id="e05">
+  <div class="sec-head rv">
+    <span class="no">PERF 05</span>
+    <h2>분기 예측과 <span class="t">브랜치리스</span></h2>
+    <p class="lead">
+      <code>if</code> 하나가 예측을 빗나가면 <b>15~20 사이클</b>이 날아갑니다.
+      예측 불가능한 분기가 루프 안에 있으면 그것이 병목이 됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 비싼가</h4>
+      <pre class="code" data-lang="text"><code>현대 CPU 는 파이프라인이 깊습니다 (15~20 단계)
+
+  · 분기를 만나면 결과를 기다리지 않고 '예측'해서 계속 실행합니다
+  · 맞으면 손해 없음 (예측 정확도는 보통 95% 이상)
+  · 틀리면 파이프라인을 비우고 다시 시작 → 15~20 사이클 손실 ★
+
+예측이 잘 되는 것
+  · 항상 참/거짓인 조건
+  · 규칙적인 패턴 (참참거참참거…)
+  · 루프 종료 조건 (마지막 한 번만 틀림)
+
+예측이 안 되는 것
+  · 무작위 데이터에 의존하는 조건 ★
+  · 가상 함수 호출 대상이 매번 바뀔 때
+
+유명한 실험
+  정렬된 배열에 if (v[i] &gt; 128) 를 도는 것이
+  정렬 안 된 배열보다 3~6배 빠릅니다.
+  같은 코드, 같은 데이터 개수인데 '순서'만 다릅니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">확인하고 줄이기</h4>
+      <pre class="code" data-lang="bash"><code>perf stat -e branches,branch-misses ./app
+#   branch-misses / branches &gt; 5%  → 분기가 문제일 수 있습니다 ★
+
+perf record -e branch-misses -g ./app &amp;&amp; perf report
+#   어느 함수·어느 줄인지</code></pre>
+      <pre class="code" data-lang="cpp"><code>// ① 데이터를 정렬해 예측 가능하게 (가능하다면 가장 효과적) ★
+std::ranges::sort(data);
+for (auto x : data) if (x &gt; threshold) sum += x;
+
+// ② 분기를 산술로 바꾸기 (브랜치리스)
+sum += (x &gt; t) ? x : 0;          // 컴파일러가 cmov 로 바꿔 주기도 합니다
+sum += x * (x &gt; t);              // 명시적으로 분기 제거
+count += (x &gt; t);                // bool → 0/1
+
+// ③ 조건을 루프 밖으로
+if (mode == A) { for (...) doA(); }
+else           { for (...) doB(); }
+//   ❌ for (...) { if (mode == A) doA(); else doB(); }
+
+// ④ 힌트 (C++20)
+if (rare_condition) [[unlikely]] { handle(); }
+if (common) [[likely]] { fast_path(); }
+//   ⚠ 잘못 주면 오히려 느려집니다. PGO 가 더 정확합니다(🛠️ b04)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">분기 없는 패턴</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 쓰는 브랜치리스 기법</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 최대·최소 — 컴파일러가 대개 cmov 로 처리합니다
+int m = std::max(a, b);          // 분기 없음
+
+// ② 클램프
+x = std::clamp(x, lo, hi);
+
+// ③ 조건부 누적
+sum += cond * value;             // cond 가 0/1
+
+// ④ 조건부 복사 (분기 대신 마스크)
+out[k] = v;
+k += (v &gt; t);                    // ★ 조건을 만족할 때만 인덱스 증가
+//   → std::copy_if 를 브랜치리스로 구현하는 관용구
+
+// ⑤ 룩업 테이블로 분기 대체
+static constexpr std::array&lt;int, 256&gt; kTable = make_table();
+result = kTable[byte];           // if-else 사슬 대신 ★
+//   ⚠ 테이블이 캐시를 벗어나면 오히려 손해입니다 (e02)
+
+// ⑥ 비트 연산
+int abs_v = (x ^ (x &gt;&gt; 31)) - (x &gt;&gt; 31);    // 분기 없는 절댓값
+//   요즘은 std::abs 도 브랜치리스로 컴파일됩니다 — 직접 쓸 필요 없음
+
+// ★ 대부분의 경우 컴파일러가 알아서 합니다.
+//   godbolt 에서 cmov·setcc 가 나오는지 확인하고,
+//   안 나올 때만 손으로 바꾸세요.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가상 호출도 분기입니다</h4>
+      <pre class="code" data-lang="cpp"><code>// 간접 호출은 '분기 대상 예측'을 씁니다.
+// 대상이 매번 바뀌면 예측이 실패합니다 (탭 1 x08)
+
+// ❌ 섞여 있는 다형적 컨테이너
+for (auto&amp; s : shapes) total += s-&gt;area();   // 매번 다른 타입 → 예측 실패
+
+// ✅ 타입별로 묶어서 처리
+for (auto&amp; c : circles) total += c.area();   // 예측 성공 · 인라인 · 벡터화
+for (auto&amp; r : rects)   total += r.area();
+
+// ✅ 정렬로 같은 타입을 모으기
+std::ranges::sort(shapes, {}, [](auto&amp; s){ return s-&gt;type_id(); });
+
+// ✅ variant + visit (탭 2 m10)
+for (const auto&amp; s : shapes) total += std::visit(AreaOf{}, s);
+//   점프 테이블 · 인라인 가능
+
+// 측정
+perf stat -e branch-misses,iTLB-load-misses ./app</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“분기를 없애라”가 아니라 “예측 가능하게 만들라”</b>가 정확한 표현입니다.
+        <b>데이터를 정렬하거나 타입별로 묶는 것</b>이
+        브랜치리스 트릭보다 효과가 크고 코드도 읽기 좋습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">언제 손대나</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">우선순위는 낮습니다</h4>
+      <pre class="code" data-lang="text"><code>분기 최적화가 의미 있는 조건 (셋이 다 맞아야 합니다)
+
+  ① 아주 자주 실행되는 루프 (수백만 회 이상)
+  ② branch-misses 비율이 실제로 높음 (&gt; 5%)
+  ③ 루프 본문이 짧음 (분기 비용이 상대적으로 큼)
+
+그렇지 않다면
+  · 알고리즘(①) · 메모리(e02) · 할당(e03) 이 먼저입니다
+  · 브랜치리스 코드는 읽기 어렵고 유지보수 비용이 있습니다
+  · 컴파일러가 이미 최적화했을 가능성이 높습니다
+
+★ 실무에서 실제로 효과를 본 경우
+  · 파서·디코더의 바이트 단위 루프
+  · 정렬·필터링의 비교 함수
+  · 이미지 픽셀 처리
+  · 게임의 충돌 판정
+  공통점: 데이터 의존 분기가 원소마다 있는 코드</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">측정 없이 하지 마세요</h4>
+      <pre class="code" data-lang="cpp"><code>// 실험 — 정렬 여부로 분기 예측 효과 재기
+std::vector&lt;int&gt; data(1'000'000);
+std::generate(data.begin(), data.end(), []{ return rand() % 256; });
+
+auto run = [&amp;]{
+    long sum = 0;
+    for (int x : data) if (x &gt; 128) sum += x;
+    return sum;
+};
+
+auto t1 = bench_ms(run);              // 정렬 안 됨
+std::ranges::sort(data);
+auto t2 = bench_ms(run);              // 정렬됨
+std::printf("무작위 %.2fms · 정렬 %.2fms · %.1f배\n", t1, t2, t1/t2);
+//   ★ 대개 2~6배 차이가 납니다 (컴파일러가 cmov 로 바꾸면 차이가 작아집니다)
+
+// 브랜치리스 버전과도 비교
+auto run2 = [&amp;]{
+    long sum = 0;
+    for (int x : data) sum += x * (x &gt; 128);
+    return sum;
+};</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>컴파일러가 이미 했을 수 있습니다</b> — <code>-O2</code> 에서
+        <b>조건부 이동(cmov)</b> 으로 바꾸는 경우가 많아,
+        손으로 브랜치리스를 써도 <b>차이가 없거나 오히려 느려질</b> 수 있습니다.
+        <b>godbolt 로 어셈블리를 확인</b>하고 판단하세요(e09).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">분기 예측기의 동작</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어떻게 예측하나</h4>
+      <pre class="code" data-lang="text"><code>현대 예측기는 여러 층으로 되어 있습니다
+
+  · 2비트 포화 카운터 — 최근 결과를 기억 (강한참·약한참·약한거짓·강한거짓)
+  · 전역 이력 레지스터 — 최근 N개 분기의 패턴
+  · TAGE 등 하이브리드 — 여러 길이의 이력을 조합해 예측
+  · 간접 분기 예측기 (BTB) — 가상 호출·함수 포인터 대상
+
+그래서
+  · 규칙적인 패턴(ABABAB)은 잘 예측합니다 ★
+  · 무작위는 원리상 50% 밖에 못 맞춥니다
+  · 분기가 아주 많으면 예측기 자원이 부족해집니다 (aliasing)
+  · 함수가 커지면 명령 캐시(L1i)와 BTB 압박이 생깁니다
+    → 인라인을 무조건 늘리는 것이 답이 아닌 이유 ★
+
+Spectre 이후
+  · 투기 실행 완화 옵션이 간접 분기 비용을 크게 올렸습니다
+    (retpoline 등) → 가상 호출이 예전보다 비싸졌습니다
+  · -mindirect-branch=thunk 같은 옵션의 영향을 재 보세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드 배치도 성능입니다</h4>
+      <pre class="code" data-lang="cpp"><code>// 드물게 실행되는 코드를 핫 경로에서 밀어내기
+if (error) [[unlikely]] {
+    log_and_recover();               // 컴파일러가 멀리 배치합니다 ★
+}
+
+// 함수 단위 힌트
+__attribute__((hot))  void fast_path();
+__attribute__((cold)) void error_handler();
+//   → .text.hot · .text.unlikely 섹션으로 분리되어
+//     핫 코드가 명령 캐시에 밀집합니다
+
+// 인라인 통제
+__attribute__((always_inline)) inline int small();
+__attribute__((noinline))      void big();   // 코드 팽창 방지
+
+// PGO 가 이것을 자동으로 해 줍니다 (🛠️ b04) ★
+//   실제 실행 빈도로 분기 힌트·코드 배치·인라인을 결정
+
+// BOLT — 링크 후 바이너리 재배치 (대형 서버에서 5~15% 향상)
+llvm-bolt app -o app.bolt -data=perf.fdata -reorder-blocks=ext-tsp
+
+// 측정
+perf stat -e L1-icache-load-misses,iTLB-load-misses ./app</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>대규모 서버에서 실제로 쓰는 기법</b> — 코드가 수십 MB 인 서비스는
+        <b>명령 캐시 미스가 주요 병목</b>이 됩니다.
+        PGO·BOLT 로 <b>핫 코드를 모으는 것만으로</b> 두 자릿수 % 가 나오기도 합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 분기는 <b>예측이 빗나갈 때만</b> 비쌉니다.
+    <code>perf stat</code> 의 <b>branch-misses 가 5% 를 넘을 때</b>만 손대세요.
+    최선의 해법은 브랜치리스 트릭이 아니라
+    <b>데이터를 정렬하거나 타입별로 묶어 예측 가능하게</b> 만드는 것입니다.</div>
+</section>
+
+
+<!-- ==================== e06 ==================== -->
+<section class="sec" id="e06">
+  <div class="sec-head rv">
+    <span class="no">PERF 06</span>
+    <h2><span class="t">SIMD</span> — 한 번에 여러 개</h2>
+    <p class="lead">
+      CPU 는 <code>double</code> 4~8개를 <b>한 명령으로</b> 계산할 수 있습니다.
+      먼저 <b>컴파일러가 자동으로 하게</b> 유도하고, 그래도 안 되면 직접 씁니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자동 벡터화가 먼저입니다</h4>
+      <pre class="code" data-lang="cpp"><code>// 이런 루프는 컴파일러가 알아서 벡터화합니다
+void add(double* __restrict out,
+         const double* __restrict a,
+         const double* __restrict b, std::size_t n) {
+    for (std::size_t i = 0; i &lt; n; ++i)
+        out[i] = a[i] + b[i];
+}
+//   -O3 로 컴파일하면 addpd(SSE) · vaddpd(AVX) 명령이 나옵니다
+//   → 한 번에 2~8개씩 처리 ★
+
+// ★ __restrict 가 핵심입니다
+//   없으면 out 과 a 가 겹칠 수 있다고 가정해 벡터화를 포기합니다 (탭 1 x04)
+//   표준은 아니지만 gcc·clang·msvc 모두 지원합니다
+
+// 확인
+// g++ -O3 -fopt-info-vec-optimized add.cpp
+//   add.cpp:5:24: optimized: loop vectorized using 32 byte vectors ★
+// clang++ -O3 -Rpass=loop-vectorize add.cpp</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>순서를 지키세요</b> — ① 자동 벡터화가 되게 코드를 정리,
+        ② 컴파일러 리포트로 확인, ③ 그래도 안 되면 인트린식.
+        <b>바로 인트린식으로 가면</b> 이식성과 유지보수를 잃고
+        컴파일러가 더 잘하는 경우도 많습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">벡터화를 막는 것들 ★</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 포인터가 겹칠 가능성 (aliasing)
+void f(double* out, const double* in, int n);   // ❌
+void f(double* __restrict out, const double* __restrict in, int n);  // ✅
+
+// ② 루프 안의 함수 호출 (인라인이 안 되면)
+for (int i = 0; i &lt; n; ++i) out[i] = slow_call(a[i]);   // ❌
+
+// ③ 데이터 의존성
+for (int i = 1; i &lt; n; ++i) v[i] += v[i-1];             // ❌ 순차 필수
+
+// ④ 조건 분기 (마스크로 처리되기도 하지만 대개 손해)
+for (...) if (cond(a[i])) out[i] = ...;                 // ⚠
+
+// ⑤ float 연산 순서 — 결합법칙이 성립하지 않아 재배치 금지
+double sum = 0;
+for (...) sum += a[i];      // ❌ 기본적으로 벡터화 안 됨
+#pragma omp simd reduction(+:sum)                        // ✅ 명시적 허용
+for (...) sum += a[i];
+//   또는 -ffast-math (정확도 포기 — 신중하게)
+
+// ⑥ 정렬되지 않은 접근 · 불규칙한 stride
+for (...) out[i] = a[idx[i]];                            // ❌ gather 필요
+
+// ⑦ 반복 횟수를 모름 (런타임 결정) → 대개 처리됩니다 (꼬리 루프 생성)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">직접 쓰기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인트린식</h4>
+      <pre class="code" data-lang="cpp"><code>#include &lt;immintrin.h&gt;
+
+// AVX2 — double 4개씩
+void add_avx2(double* out, const double* a, const double* b, std::size_t n) {
+    std::size_t i = 0;
+    for (; i + 4 &lt;= n; i += 4) {
+        __m256d va = _mm256_loadu_pd(a + i);      // 4개 로드
+        __m256d vb = _mm256_loadu_pd(b + i);
+        __m256d vs = _mm256_add_pd(va, vb);       // 4개 동시 덧셈 ★
+        _mm256_storeu_pd(out + i, vs);
+    }
+    for (; i &lt; n; ++i) out[i] = a[i] + b[i];      // 꼬리 처리
+}
+
+// 수평 합 (reduction)
+double sum_avx2(const double* a, std::size_t n) {
+    __m256d acc = _mm256_setzero_pd();
+    std::size_t i = 0;
+    for (; i + 4 &lt;= n; i += 4)
+        acc = _mm256_add_pd(acc, _mm256_loadu_pd(a + i));
+    alignas(32) double tmp[4];
+    _mm256_store_pd(tmp, acc);
+    double s = tmp[0] + tmp[1] + tmp[2] + tmp[3];
+    for (; i &lt; n; ++i) s += a[i];
+    return s;
+}
+//   ⚠ 합산 순서가 달라져 결과가 미세하게 다를 수 있습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이식성 있는 방법 ★</h4>
+      <pre class="code" data-lang="cpp"><code>// ① std::experimental::simd (C++26 표준화 예정)
+#include &lt;experimental/simd&gt;
+namespace stdx = std::experimental;
+
+void add(double* out, const double* a, const double* b, std::size_t n) {
+    using V = stdx::native_simd&lt;double&gt;;       // 플랫폼에 맞는 폭
+    std::size_t i = 0;
+    for (; i + V::size() &lt;= n; i += V::size()) {
+        V va(a + i, stdx::element_aligned);
+        V vb(b + i, stdx::element_aligned);
+        (va + vb).copy_to(out + i, stdx::element_aligned);
+    }
+    for (; i &lt; n; ++i) out[i] = a[i] + b[i];
+}
+//   x86 · ARM 어디서나 같은 코드 ★
+
+// ② 라이브러리 — 더 실용적입니다
+//    xsimd · highway(google) · Eigen · std::simd 백포트
+#include &lt;hwy/highway.h&gt;
+//   highway 는 '런타임 CPU 감지 + 여러 버전 컴파일'까지 해 줍니다
+
+// ③ OpenMP SIMD 지시문 — 가장 간단
+#pragma omp simd
+for (std::size_t i = 0; i &lt; n; ++i) out[i] = a[i] * b[i] + c[i];</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>인트린식은 마지막 수단입니다</b> — x86 전용 코드가 되고,
+        ARM(애플 실리콘·서버)에서 <b>다시 써야</b> 합니다.
+        <code>highway</code> 나 <code>std::simd</code> 를 쓰면
+        <b>한 번 써서 양쪽에서</b> 돕니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">배포와 CPU 감지</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>-march=native</code> 는 배포에 쓰면 안 됩니다 ★</h4>
+      <pre class="code" data-lang="bash"><code># ❌ 내 CPU 전용 명령이 들어가 다른 기계에서 즉사합니다
+g++ -O3 -march=native      # Illegal instruction (core dumped)
+
+# ✅ 보수적인 기준선
+g++ -O3 -march=x86-64-v2   # SSE4.2 · POPCNT (2009년 이후 CPU)
+g++ -O3 -march=x86-64-v3   # AVX2 · FMA (2013년 이후) ★ 요즘 무난
+g++ -O3 -march=x86-64-v4   # AVX-512 (서버 위주)
+
+# ✅ 더 나은 방법 — 함수별 다중 버전 + 런타임 선택
+__attribute__((target_clones("default,avx2,avx512f")))
+void process(double* out, const double* in, std::size_t n) { ... }
+//   컴파일러가 여러 버전을 만들고 CPU 에 맞는 것을 자동 선택 ★ (GCC)
+
+# 수동 디스패치
+__builtin_cpu_supports("avx2") ? process_avx2(...) : process_sse(...);</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 함수 단위 타깃 지정 (파일 전체 옵션 대신)
+__attribute__((target("avx2,fma")))
+void process_avx2(...) { ... }
+
+// 실행 시 확인
+#include &lt;cpuid.h&gt;
+bool has_avx2() { return __builtin_cpu_supports("avx2"); }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기대 성능과 한계</h4>
+      <pre class="code" data-lang="text"><code>이론적 배수
+  SSE  (128비트) : double 2개 · float 4개
+  AVX2 (256비트) : double 4개 · float 8개
+  AVX-512        : double 8개 · float 16개
+  ARM NEON       : double 2개 · float 4개
+  SVE            : 가변 폭
+
+★ 실제로는 이론치가 안 나옵니다
+  · 메모리 대역폭이 먼저 한계에 걸립니다 (e02)
+      단순 add 는 계산보다 로드·스토어가 많아
+      2~3배에서 평평해집니다
+  · AVX-512 는 클럭을 낮추는 CPU 가 있어 오히려 느려질 수 있습니다
+  · 정렬되지 않은 접근·꼬리 처리 오버헤드
+
+효과가 큰 경우
+  · 원소당 연산이 많은 계산 (다항식·필터·변환) ★
+  · 데이터가 캐시에 들어가는 크기
+  · float 로 충분한 경우 (double 대비 2배 폭)
+
+측정
+  perf stat -e fp_arith_inst_retired.256b_packed_double ./app</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>먼저 확인할 것</b> — <b>메모리 대역폭에 이미 걸려 있다면</b>
+        SIMD 를 써도 소용없습니다(e02).
+        <code>perf stat</code> 의 <b>bytes/s 가 하드웨어 한계에 근접</b>하면
+        레이아웃·알고리즘을 먼저 손봐야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">라이브러리를 쓰는 것이 정답일 때</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이미 극한까지 최적화된 것들</h4>
+      <pre class="code" data-lang="text"><code>직접 SIMD 를 짜기 전에 확인하세요
+
+  선형대수    BLAS(OpenBLAS·MKL·Accelerate) · Eigen
+              → 행렬 곱은 직접 짜서 이기기 거의 불가능합니다 ★
+  FFT         FFTW · pocketfft · MKL
+  이미지      libvips · OpenCV(이미 SIMD) · stb
+  압축        zstd · lz4 (SIMD 최적화됨)
+  문자열·파싱 simdjson · fast_float · ryu
+              → JSON 파싱이 GB/s 수준입니다
+  해시        xxHash · wyhash
+  정렬        pdqsort · vqsort(highway) · ips4o
+
+★ "내가 SIMD 로 짜면 3배 빨라지겠다" 싶은 것은
+  대개 누군가 이미 10배 빠르게 만들어 두었습니다.
+  검색이 코딩보다 먼저입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 써야 한다면</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 정확성 검증을 반드시 — 스칼라 버전과 대조 ★
+TEST(simd, matches_scalar) {
+    std::vector&lt;double&gt; a(1000), b(1000), r1(1000), r2(1000);
+    fill_random(a); fill_random(b);
+    add_scalar(r1.data(), a.data(), b.data(), 1000);
+    add_avx2  (r2.data(), a.data(), b.data(), 1000);
+    for (std::size_t i = 0; i &lt; 1000; ++i)
+        EXPECT_NEAR(r1[i], r2[i], 1e-12);
+}
+//   ★ 꼬리 처리(n 이 4의 배수가 아닐 때)를 반드시 테스트하세요
+//     n = 0, 1, 3, 4, 5, 7, 8 … 로 파라미터화
+
+// ② 정렬 요구 확인 — loadu(비정렬) vs load(정렬)
+//   최신 CPU 는 차이가 작지만, 정렬된 메모리가 여전히 유리합니다
+auto* p = static_cast&lt;double*&gt;(std::aligned_alloc(32, n * sizeof(double)));
+
+// ③ Sanitizer 와 함께 돌리기 — 범위 초과가 나기 쉽습니다(🛠️ b10)
+
+// ④ 어셈블리 확인 (e09)
+g++ -O3 -mavx2 -S -masm=intel -o - simd.cpp | grep vaddpd</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>SIMD 코드의 버그는 찾기 어렵습니다</b> — 꼬리 처리 실수로
+        <b>마지막 몇 개만 틀리는</b> 경우가 전형적입니다.
+        <b>스칼라 구현을 남겨 두고 항상 대조</b>하는 테스트가 필수입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> SIMD 는 <b>컴파일러가 자동으로 하게</b> 만드는 것이 먼저입니다 —
+    <code>__restrict</code> 와 단순한 루프 구조.
+    <code>-fopt-info-vec</code> 로 <b>실제로 벡터화됐는지 확인</b>하고,
+    직접 쓸 때는 <b><code>highway</code>·<code>std::simd</code></b> 로 이식성을 지키세요.
+    그리고 <b>이미 있는 라이브러리를 먼저 찾아보세요</b>.</div>
+</section>
+
+<!-- ==================== e07 ==================== -->
+<section class="sec" id="e07">
+  <div class="sec-head rv">
+    <span class="no">PERF 07</span>
+    <h2>병렬 — <span class="t">여러 코어를 실제로</span></h2>
+    <p class="lead">
+      파이썬 혼자서는 불가능한 지점입니다.
+      다만 <b>코어를 8개 써도 8배가 되지는 않습니다</b> — 왜 그런지가 이 섹션의 핵심입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가장 쉬운 방법부터</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 표준 병렬 알고리즘 (탭 2 m06) — 스레드를 직접 안 만듭니다 ★
+#include &lt;execution&gt;
+std::sort(std::execution::par, v.begin(), v.end());
+std::transform(std::execution::par_unseq,
+               a.begin(), a.end(), out.begin(), f);
+double s = std::reduce(std::execution::par, v.begin(), v.end());
+//   GCC 는 TBB 링크 필요: target_link_libraries(app PRIVATE TBB::tbb)
+
+// ② OpenMP — 지시문 한 줄
+#pragma omp parallel for schedule(static) reduction(+:total)
+for (std::ptrdiff_t i = 0; i &lt; n; ++i)
+    total += heavy(data[i]);
+
+// 작업량이 불균등하면
+#pragma omp parallel for schedule(dynamic, 64)
+
+// ③ 직접 청크 나누기 — 의존성이 없을 때 가장 단순합니다
+const unsigned T = std::thread::hardware_concurrency();
+std::vector&lt;std::jthread&gt; ths;
+for (unsigned k = 0; k &lt; T; ++k)
+    ths.emplace_back([&amp;, k] {
+        const std::size_t lo = n * k / T, hi = n * (k+1) / T;
+        for (std::size_t i = lo; i &lt; hi; ++i) out[i] = f(in[i]);
+    });
+//   jthread 는 소멸자에서 join 합니다 (C++20)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 코어 수만큼 안 빨라지나 ★</h4>
+      <pre class="code" data-lang="text"><code>8스레드인데 3배밖에 안 나오는 흔한 이유
+
+  ① 메모리 대역폭 한계 ★ 가장 흔함
+     단순 배열 연산은 CPU 가 아니라 '메모리에서 읽는 속도'가 한계입니다.
+     코어를 늘려도 대역폭은 그대로라 4~5코어에서 평평해집니다.
+     → 원소당 계산량을 늘리거나 캐시에 맞게 쪼개세요 (e02)
+
+  ② false sharing — 다음 섹션(e08)
+
+  ③ 작업 분배 불균등
+     원소마다 계산량이 다르면 한 스레드만 오래 돕니다.
+     → schedule(dynamic) · 작업 큐
+
+  ④ 하이퍼스레딩
+     논리 16코어여도 물리는 8개인 경우가 많습니다.
+
+  ⑤ 동기화·할당 경합
+     공유 뮤텍스 · malloc 아레나 락 (e03)
+
+  ⑥ 암달의 법칙
+     10%가 순차라면 아무리 코어를 늘려도 최대 10배입니다.
+
+측정
+  htop 으로 코어 사용률 확인 (전부 100% 인지)
+  perf stat -e cache-misses,LLC-load-misses ./app</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">잘 나누는 법</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">공유를 없애는 것이 최선</h4>
+      <pre class="code" data-lang="cpp"><code>// ❌ 공유 결과 + 락 — 스레드를 늘려도 안 빨라집니다
+std::mutex m; std::vector&lt;double&gt; results;
+parallel_for(n, [&amp;](std::size_t i) {
+    auto r = compute(i);
+    std::lock_guard lk(m);
+    results.push_back(r);        // ★ 전부 여기서 줄을 섭니다
+});
+
+// ✅ ① 자리를 미리 잡고 각자 자기 칸에
+std::vector&lt;double&gt; results(n);
+parallel_for(n, [&amp;](std::size_t i) { results[i] = compute(i); });
+
+// ✅ ② 스레드별로 모았다가 마지막에 합치기 ★
+std::vector&lt;std::vector&lt;double&gt;&gt; per_thread(T);
+parallel_chunks(T, [&amp;](unsigned t, std::size_t lo, std::size_t hi) {
+    auto&amp; local = per_thread[t];
+    local.reserve(hi - lo);
+    for (std::size_t i = lo; i &lt; hi; ++i)
+        if (keep(i)) local.push_back(compute(i));
+});
+for (auto&amp; v : per_thread)
+    results.insert(results.end(), v.begin(), v.end());
+
+// ✅ ③ 부분 합을 지역 변수에 누적 (원자 연산 대신)
+double total = 0;
+#pragma omp parallel
+{
+    double local = 0;                       // ★ 스레드 지역
+    #pragma omp for nowait
+    for (std::ptrdiff_t i = 0; i &lt; n; ++i) local += f(data[i]);
+    #pragma omp atomic
+    total += local;                          // 마지막에 한 번만
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">청크 크기 정하기</h4>
+      <pre class="code" data-lang="cpp"><code>// 너무 작으면 오버헤드, 너무 크면 불균형
+//   경험칙: 청크 하나가 최소 수십 μs 는 되게
+
+const std::size_t min_chunk = 4096;          // 원소 수 기준
+if (n &lt; min_chunk * 2) {
+    // 작으면 그냥 순차로 ★ 스레드 생성 비용이 더 큽니다
+    for (std::size_t i = 0; i &lt; n; ++i) out[i] = f(in[i]);
+    return;
+}
+
+// 캐시 라인 경계에 맞춰 나누기 (false sharing 방지 — e08)
+const std::size_t grain = ((n / T) + 7) &amp; ~std::size_t{7};   // 8의 배수
+
+// 작업 훔치기(work stealing) — 불균등할 때
+//   TBB · OpenMP taskloop 이 알아서 해 줍니다
+#pragma omp parallel
+#pragma omp single
+#pragma omp taskloop grainsize(1024)
+for (std::size_t i = 0; i &lt; n; ++i) heavy(i);
+
+// 중첩 병렬 주의 — 스레드가 폭발합니다
+omp_set_max_active_levels(1);
+//   라이브러리 안에서 병렬화했는데 호출자도 병렬이면 T² 개가 됩니다 ★</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>작은 데이터에는 병렬화가 손해입니다</b> — 스레드 생성·동기화에
+        <b>수십 μs</b>가 듭니다. 전체 작업이 그보다 짧으면
+        <b>순차가 빠릅니다</b>. 임계값을 두고 분기하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">모듈에서의 병렬화</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스레드 수를 사용자가 정하게 ★</h4>
+      <pre class="code" data-lang="cpp"><code>// ⚠ 라이브러리가 마음대로 모든 코어를 쓰면
+//   이미 멀티프로세싱으로 도는 환경에서 경합이 일어나 오히려 느려집니다
+
+class Engine {
+    int threads_ = 1;                        // ★ 기본값은 1
+public:
+    void set_threads(int t) {
+        threads_ = t &gt; 0 ? t : static_cast&lt;int&gt;(
+            std::thread::hardware_concurrency());
+    }
+};
+
+// 환경변수 관례를 따르기
+int default_threads() {
+    if (const char* s = std::getenv("MYLIB_NUM_THREADS")) return std::atoi(s);
+    if (const char* s = std::getenv("OMP_NUM_THREADS"))   return std::atoi(s);
+    return 1;
+}
+
+// 파이썬·Node 에 노출 (🐍 y07 · 🟨 j06)
+m.def("set_threads", &amp;set_threads, "n"_a);
+m.def("run", &amp;run, py::call_guard&lt;py::gil_scoped_release&gt;());
+//   ★ GIL 을 놓아야 파이썬 스레드도 병렬로 돕니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>numpy·scipy 도 같은 문제를 겪었습니다</b> — BLAS 가 모든 코어를 잡아
+        <code>multiprocessing</code> 과 충돌하는 일이 흔했습니다.
+        그래서 <code>OMP_NUM_THREADS=1</code> 을 설정하는 관행이 생겼습니다.
+        <b>내 라이브러리도 같은 배려</b>를 해야 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로세스 vs 스레드</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%"></th><th>스레드(C++)</th><th>프로세스(파이썬)</th></tr>
+        <tr><td>메모리 공유</td><td><b>가능</b> ★</td><td>복사·직렬화</td></tr>
+        <tr><td>큰 배열 전달</td><td>공짜</td><td>pickle 비용</td></tr>
+        <tr><td>시작 비용</td><td>수십 μs</td><td>수십 ms</td></tr>
+        <tr><td>크래시 격리</td><td>없음</td><td><b>있음</b></td></tr>
+        <tr><td>GIL</td><td>해제하면 무관 ★</td><td>애초에 별개</td></tr>
+      </table></div>
+      <pre class="code" data-lang="python"><code># ★ C++ 확장 + GIL 해제 = 파이썬 스레드로 진짜 병렬 (🐍 y07)
+from concurrent.futures import ThreadPoolExecutor
+with ThreadPoolExecutor(8) as ex:
+    results = list(ex.map(fastmod.heavy, chunks))
+#   · multiprocessing 과 달리 큰 배열을 복사하지 않습니다
+#   · 프로세스 시작 비용도 없습니다
+#   → 확장 모듈을 만드는 큰 이유 중 하나입니다
+
+# 이중 병렬화 주의 ★
+#   프로세스 8개 × 내부 스레드 8개 = 64 → 코어 경합
+fastmod.set_threads(1)      # 프로세스 풀을 쓴다면 내부는 1로</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">확장성 분석</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스케일링 곡선을 그려 보기</h4>
+      <pre class="code" data-lang="cpp"><code>// 스레드 수를 바꿔 가며 측정하면 병목이 드러납니다 ★
+for (int t = 1; t &lt;= max_threads; t *= 2) {
+    engine.set_threads(t);
+    auto ms = bench_ms([&amp;]{ engine.run(data); });
+    std::printf("%2d 스레드  %8.2fms  %5.2f배  효율 %.0f%%\n",
+                t, ms, base/ms, 100.0 * (base/ms) / t);
+}</code></pre>
+      <pre class="code" data-lang="text"><code>전형적인 결과와 해석
+
+  스레드  시간     배수   효율
+   1     100ms   1.00×  100%
+   2      52ms   1.92×   96%   ✅ 좋음
+   4      28ms   3.57×   89%   ✅
+   8      21ms   4.76×   60%   ⚠ 여기서 꺾임
+  16      20ms   5.00×   31%   ❌ 늘려도 소용없음
+
+★ 8에서 꺾이는 이유를 찾아야 합니다
+  · 물리 코어가 8개인가? (하이퍼스레딩)
+  · 메모리 대역폭 한계인가? → bytes/s 를 계산해 하드웨어 사양과 비교
+  · false sharing 인가? → e08
+  · 순차 구간이 있나? → 암달의 법칙으로 상한 계산
+
+암달의 법칙
+  최대 배수 = 1 / (순차비율 + 병렬비율/코어수)
+  순차 10% → 코어 무한대라도 최대 10배</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">NUMA 와 스레드 배치</h4>
+      <pre class="code" data-lang="bash"><code># 서버는 CPU 소켓마다 별도 메모리를 가집니다 (NUMA)
+#   다른 소켓의 메모리에 접근하면 2배 이상 느립니다 ★
+numactl --hardware
+lscpu | grep NUMA
+
+# 메모리와 스레드를 같은 노드에
+numactl --cpunodebind=0 --membind=0 ./app
+
+# first-touch 정책 — '처음 만진 스레드'의 노드에 할당됩니다
+#   → 초기화도 병렬로 해야 합니다 ★
+#pragma omp parallel for
+for (std::size_t i = 0; i &lt; n; ++i) data[i] = 0;   // 각 스레드가 자기 몫을 터치
+
+# 스레드 고정 (마이그레이션 방지)
+OMP_PROC_BIND=close OMP_PLACES=cores ./app
+
+# C++ 에서
+#include &lt;pthread.h&gt;
+cpu_set_t set; CPU_ZERO(&amp;set); CPU_SET(core_id, &amp;set);
+pthread_setaffinity_np(pthread_self(), sizeof(set), &amp;set);
+
+# 측정
+perf stat -e node-loads,node-load-misses ./app</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>NUMA 는 서버에서만 문제입니다</b> — 데스크탑·노트북은 단일 노드라
+        신경 쓸 필요가 없습니다. 다만 <b>클라우드 대형 인스턴스</b>는
+        대개 여러 노드라, 거기서 <b>확장이 안 되는 이유</b>가 되곤 합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 병렬화는 <b>표준 병렬 알고리즘·OpenMP</b> 부터 시작하세요.
+    핵심은 <b>공유하지 않는 것</b> — 각자 자기 칸에 쓰고 마지막에 합칩니다.
+    <b>8스레드에 3배</b>가 나왔다면 실패가 아니라
+    <b>메모리 대역폭이라는 물리적 상한</b>일 수 있습니다 — 그것을 근거로 설명할 수 있어야 합니다.</div>
+</section>
+
+
+<!-- ==================== e08 ==================== -->
+<section class="sec" id="e08">
+  <div class="sec-head rv">
+    <span class="no">PERF 08</span>
+    <h2><span class="t">false sharing</span> 과 원자 연산 비용</h2>
+    <p class="lead">
+      스레드를 늘렸는데 <b>오히려 느려지는</b> 대표적 원인입니다.
+      서로 다른 변수를 쓰는데도 <b>같은 캐시 라인</b>에 있으면 충돌합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무슨 일이 일어나나</h4>
+      <pre class="code" data-lang="cpp"><code>// ❌ 스레드마다 다른 인덱스에 쓰는데도 느립니다
+struct Counters { std::int64_t c[8]; };      // 64바이트 = 캐시 라인 하나 ★
+Counters counters;
+
+// 스레드 k 가 counters.c[k] 만 건드립니다 — 겹치지 않는데도
+for (...) counters.c[k]++;
+//   ★ 8개가 전부 같은 캐시 라인에 있어
+//     한 스레드가 쓸 때마다 다른 코어의 캐시가 무효화됩니다
+//     → 매번 캐시 라인을 주고받으며 수십~수백 사이클 낭비
+//     8스레드가 1스레드보다 느려지기도 합니다
+
+// ✅ 방법 ① 캐시 라인만큼 떼어 놓기
+struct alignas(64) PaddedCounter {
+    std::int64_t v = 0;
+};
+std::vector&lt;PaddedCounter&gt; counters(T);      // 각자 다른 라인 ★
+
+// C++17 표준 상수
+#include &lt;new&gt;
+alignas(std::hardware_destructive_interference_size) std::int64_t v;
+
+// ✅ 방법 ② 지역 변수에 누적하고 마지막에 한 번만 (더 좋습니다) ★
+std::int64_t local = 0;
+for (...) local++;                           // 레지스터에서 돕니다
+counters[k].v = local;                       // 끝나고 한 번</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">확인하는 법</h4>
+      <pre class="code" data-lang="bash"><code># 증상: 스레드를 늘렸는데 느려지거나 전혀 안 빨라짐
+
+perf stat -e cache-misses,LLC-store-misses ./app
+#   스레드를 늘릴수록 store-miss 가 급증하면 의심 ★
+
+perf c2c record ./app &amp;&amp; perf c2c report
+#   ★ false sharing 전용 도구 — 어느 캐시 라인이 경합하는지 정확히
+
+# 간단한 실험 — 패딩 유무로 비교
+struct NoPad  { std::int64_t v; };
+struct Padded { alignas(64) std::int64_t v; };
+//   같은 코드로 두 버전을 재 보면 차이가 바로 보입니다
+//   (대개 2~10배)</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 캐시 라인 크기 확인
+#include &lt;new&gt;
+std::hardware_destructive_interference_size;   // 보통 64 (x86) · 128 (일부 ARM)
+std::hardware_constructive_interference_size;
+
+// 런타임 확인 (리눅스)
+// cat /sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>구조체 배열에서 특히 자주 납니다</b> —
+        스레드별 통계·카운터·결과를 <code>vector</code> 에 담고
+        각자 자기 인덱스에 쓰는 패턴이 <b>정확히 이 문제</b>를 만듭니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">원자 연산의 실제 비용</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">얼마나 비싼가</h4>
+      <pre class="code" data-lang="text"><code>대략적인 비용 (경합 정도에 따라 크게 달라집니다)
+
+  일반 변수 증가              ~1 사이클
+  atomic (relaxed, 무경합)     ~5~20 사이클
+  atomic (seq_cst, 무경합)     ~20~40 사이클
+  atomic (경합 있음)           ~100~500 사이클 ★
+  뮤텍스 (무경합)              ~20~50 사이클
+  뮤텍스 (경합 → 커널 대기)    ~수 μs
+
+★ 핵심: 원자 연산 자체보다 '캐시 라인을 주고받는 것'이 비쌉니다
+  여러 코어가 같은 원자 변수를 두드리면 그 라인이 코어 사이를 오갑니다
+
+그래서
+  · 루프 안에서 공유 카운터를 증가시키면 병렬화가 무의미해집니다
+  · 지역 변수에 누적하고 마지막에 한 번 합치세요 ★
+  · shared_ptr 복사도 원자 연산입니다 (탭 2 m02)</code></pre>
+      <pre class="code" data-lang="cpp"><code>// ❌ 매 원소마다 원자 증가
+std::atomic&lt;std::int64_t&gt; total{0};
+parallel_for(n, [&amp;](std::size_t i) { total += data[i]; });
+
+// ✅ 지역 누적 + 최종 합산
+parallel_chunks(T, [&amp;](unsigned t, auto lo, auto hi) {
+    std::int64_t local = 0;
+    for (auto i = lo; i &lt; hi; ++i) local += data[i];
+    total.fetch_add(local, std::memory_order_relaxed);   // 스레드당 1회 ★
+});</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">memory_order 고르기 (탭 2 m12)</h4>
+      <pre class="code" data-lang="cpp"><code>// 카운터처럼 '값만 정확하면 될 때' — relaxed
+counter.fetch_add(1, std::memory_order_relaxed);     // 가장 저렴 ★
+
+// 생산자-소비자 — acquire/release
+data = compute();                                     // 먼저 쓰고
+ready.store(true, std::memory_order_release);         // 공개
+if (ready.load(std::memory_order_acquire))            // 관찰
+    use(data);                                        // 안전
+
+// 기본값(seq_cst)은 가장 안전하지만 가장 비쌉니다
+flag = true;                                          // seq_cst 암묵 적용
+
+// ★ 확신이 없으면 seq_cst 를 쓰세요.
+//   대부분의 프로그램에서 차이는 무시할 만하고,
+//   잘못된 relaxed 는 재현 불가능한 버그를 만듭니다.
+
+// x86 은 강한 메모리 모델이라 acquire/release 가 사실상 공짜입니다
+//   ARM 은 약한 모델이라 실제로 장벽 명령이 생깁니다 ★
+//   → 애플 실리콘·ARM 서버에서 성능 차이가 더 큽니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>원자 연산을 줄이는 것이 memory_order 튜닝보다 효과적입니다</b> —
+        <code>relaxed</code> 로 바꿔 몇 %를 얻기보다,
+        <b>호출 횟수를 1/1000 로</b> 줄이는 설계가 답입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">락 없는 구조로 가기 전에</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">순서를 지키세요</h4>
+      <ul class="tx">
+        <li><b>① 공유하지 않기</b> — 스레드별 데이터. 대부분 여기서 끝납니다 ★</li>
+        <li><b>② 읽기 위주면 불변 데이터</b> — 만들고 안 바꾸면 동기화가 필요 없습니다</li>
+        <li><b>③ <code>shared_mutex</code></b> — 읽기는 동시에, 쓰기만 배타적</li>
+        <li><b>④ 세밀한 락</b> — 락 하나를 여러 개로 쪼개기(샤딩)</li>
+        <li><b>⑤ 원자 연산</b> — 단순한 카운터·플래그</li>
+        <li><b>⑥ 락 프리 자료구조</b> — <b>정말 마지막</b>.
+            직접 구현하지 말고 검증된 라이브러리를 쓰세요</li>
+      </ul>
+      <pre class="code" data-lang="cpp"><code>// 샤딩 예 — 락 하나를 16개로
+struct ShardedMap {
+    static constexpr int N = 16;
+    struct alignas(64) Shard {            // ★ 패딩 필수
+        std::mutex m;
+        std::unordered_map&lt;Key, Val&gt; data;
+    };
+    std::array&lt;Shard, N&gt; shards;
+
+    Val get(const Key&amp; k) {
+        auto&amp; s = shards[std::hash&lt;Key&gt;{}(k) % N];
+        std::lock_guard lk(s.m);
+        return s.data.at(k);
+    }
+};
+//   경합이 1/16 로 줄어듭니다 — 대개 이것으로 충분합니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">검증된 라이브러리를 쓰세요</h4>
+      <pre class="code" data-lang="text"><code>락 프리 자료구조를 직접 만들면
+  · ABA 문제 · 메모리 회수(reclamation) · 메모리 순서
+  세 가지에서 반드시 버그가 납니다.
+  게다가 TSan 으로도 잡히지 않는 경우가 있습니다.
+
+검증된 것들
+  · moodycamel::ConcurrentQueue   — MPMC 큐 (헤더 하나)
+  · boost::lockfree::queue/stack
+  · folly::MPMCQueue · AtomicHashMap
+  · Intel TBB 의 concurrent_* 컨테이너
+  · libcds (다양한 락프리 컨테이너)
+
+★ 그리고 대부분의 경우
+  '샤딩된 뮤텍스'가 락 프리만큼 빠르고 훨씬 안전합니다.
+
+검증
+  · TSan 으로 데이터 경쟁 확인 (🛠️ b10)
+  · 스트레스 테스트 — 스레드 수를 바꿔 가며 장시간
+  · relacy · CDSChecker 같은 모델 체커 (연구 수준)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>락 프리는 "빠르다"가 아니라 "블로킹되지 않는다"입니다</b> —
+        실시간성이 필요한 경우(오디오 콜백 등)에 의미가 있고,
+        <b>처리량만 놓고 보면 뮤텍스가 더 빠른 경우도 많습니다</b>.
+        목적을 분명히 하고 선택하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">캐시 일관성 프로토콜</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">MESI — 왜 그렇게 비싼가</h4>
+      <pre class="code" data-lang="text"><code>각 캐시 라인은 상태를 가집니다 (MESI)
+
+  M (Modified)  : 내가 수정했고 나만 가짐
+  E (Exclusive) : 나만 가짐 (수정 안 함)
+  S (Shared)    : 여럿이 가짐 (읽기 전용)
+  I (Invalid)   : 무효
+
+쓰기가 일어나면
+  ① 다른 코어에 "무효화(invalidate)" 메시지를 보냅니다
+  ② 그 코어들이 응답할 때까지 기다립니다
+  ③ 내 캐시를 M 으로 바꾸고 씁니다
+
+★ 두 코어가 번갈아 같은 라인에 쓰면
+  라인이 코어 사이를 계속 오갑니다 (cache line ping-pong)
+  → 각 쓰기가 100~300 사이클로 늘어납니다
+
+false sharing 이 치명적인 이유가 이것입니다.
+논리적으로 무관한 변수인데 물리적으로 같은 라인이면
+하드웨어는 구분하지 못합니다.
+
+측정
+  perf c2c report      # HITM (Hit Modified) 이벤트를 보여 줍니다 ★
+  perf stat -e mem_load_l3_hit_retired.xsnp_hitm ./app</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실전 대응 정리</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 쓰기 공유를 없애기 (최선)
+//    스레드별 지역 데이터 → 마지막에 합치기
+
+// ② 어쩔 수 없으면 패딩
+struct alignas(64) ThreadState {
+    std::int64_t count = 0;
+    double sum = 0;
+    // 나머지는 패딩으로 채워짐
+};
+static_assert(sizeof(ThreadState) == 64);
+
+// ③ 읽기 전용으로 만들기 — S 상태는 여럿이 가져도 무료 ★
+const std::vector&lt;double&gt; table = build();     // 만들고 안 바꿈
+//   여러 스레드가 동시에 읽어도 아무 비용이 없습니다
+
+// ④ 인접한 인덱스를 다른 스레드에 주지 않기
+//    ❌ 스레드 k 가 i % T == k 인 원소를 처리 (인터리브)
+//    ✅ 스레드 k 가 [n*k/T, n*(k+1)/T) 를 처리 (블록) ★
+
+// ⑤ 원자 변수를 배열로 둘 때
+std::vector&lt;std::atomic&lt;int&gt;&gt; counters(T);      // ❌ 붙어 있음
+struct alignas(64) AtomicCounter { std::atomic&lt;int&gt; v{0}; };
+std::vector&lt;AtomicCounter&gt; counters(T);          // ✅</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>읽기 전용 데이터는 공유해도 공짜입니다</b> —
+        여러 코어가 <b>S 상태로 각자 캐시에</b> 갖고 있으면 됩니다.
+        <b>“쓰기만 분리하면 된다”</b>는 것이 이 섹션의 결론입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 스레드를 늘렸는데 느려지면 <b>false sharing</b> 을 의심하세요.
+    서로 다른 변수라도 <b>같은 64바이트 라인</b>에 있으면 충돌합니다.
+    해법은 <b>지역 변수에 누적하고 마지막에 한 번만 합치기</b>,
+    그래도 공유해야 하면 <b><code>alignas(64)</code> 패딩</b>입니다.</div>
+</section>
+
+
+<!-- ==================== e09 ==================== -->
+<section class="sec" id="e09">
+  <div class="sec-head rv">
+    <span class="no">PERF 09</span>
+    <h2>컴파일러가 만든 <span class="t">코드 읽기</span></h2>
+    <p class="lead">
+      “최적화가 됐겠지”를 <b>확인으로 바꾸는</b> 방법입니다.
+      어셈블리를 다 읽을 필요는 없고, <b>몇 가지 신호만</b> 볼 줄 알면 됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">보는 방법</h4>
+      <pre class="code" data-lang="bash"><code># ① godbolt.org — 가장 편합니다 ★
+#   코드를 붙여넣고 컴파일러·플래그를 고르면 어셈블리가 나란히 나옵니다
+#   소스 줄과 어셈블리가 색으로 연결됩니다
+
+# ② 로컬에서
+g++ -O2 -S -masm=intel -o - main.cpp | c++filt | less
+clang++ -O2 -S -o - main.cpp
+
+# ③ 이미 빌드된 것에서
+objdump -dC --no-show-raw-insn build/app | less
+objdump -dC build/app | grep -A40 "&lt;hot_function&gt;:"
+
+# ④ 최적화 리포트 (어셈블리를 안 읽고도) ★
+g++ -O3 -fopt-info-vec-optimized -fopt-info-vec-missed main.cpp
+clang++ -O3 -Rpass=loop-vectorize -Rpass-missed=loop-vectorize \
+        -Rpass-analysis=loop-vectorize main.cpp
+#   "loop not vectorized: cannot identify array bounds" 처럼
+#   왜 안 됐는지까지 알려 줍니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 보나 — 신호 목록 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">찾을 것</th><th>의미</th></tr>
+        <tr><td><code>vaddpd</code> · <code>vmulps</code><br><code>xmm</code>·<code>ymm</code>·<code>zmm</code></td><td><b>벡터화됨</b> ★ (e06)</td></tr>
+        <tr><td><code>call</code> 이 루프 안에</td><td>인라인 실패 — 벡터화도 막힘</td></tr>
+        <tr><td><code>cmov</code>·<code>setcc</code></td><td>분기가 제거됨 (e05)</td></tr>
+        <tr><td><code>jmp</code>·<code>je</code> 가 많음</td><td>분기가 남아 있음</td></tr>
+        <tr><td><code>memcpy</code>·<code>memmove</code></td><td><b>복사 발생</b> (e04)</td></tr>
+        <tr><td><code>operator new</code></td><td><b>할당 발생</b> (e03)</td></tr>
+        <tr><td>루프가 여러 번 펼쳐짐</td><td>언롤링됨</td></tr>
+        <tr><td>함수가 통째로 사라짐</td><td>인라인 또는 <b>UB 로 삭제</b> ⚠</td></tr>
+      </table></div>
+      <pre class="code" data-lang="cpp"><code>// 벤치마크에서 코드가 사라지지 않게 (e01)
+template&lt;class T&gt; void keep(T const&amp; v) {
+    asm volatile("" : : "r,m"(v) : "memory");
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">확인해 볼 만한 것들</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">추상화가 정말 공짜인지</h4>
+      <pre class="code" data-lang="cpp"><code>// C++ 의 "제로 오버헤드 추상화"를 직접 확인해 보세요
+
+// ① 범위 for vs 인덱스 루프 → 동일한 어셈블리 ★
+for (int x : v) sum += x;
+for (std::size_t i = 0; i &lt; v.size(); ++i) sum += v[i];
+
+// ② 람다 + 템플릿 → 완전히 인라인 (탭 2 m07)
+template&lt;class F&gt; void each(std::span&lt;int&gt; v, F f) { for (int&amp; x : v) f(x); }
+each(v, [](int&amp; x){ x *= 2; });
+//   → 손으로 쓴 루프와 동일한 코드
+
+// ③ std::function → 간접 호출이 남습니다 (인라인 불가)
+void each(std::span&lt;int&gt; v, std::function&lt;void(int&amp;)&gt; f);
+//   → call 명령이 루프 안에 보입니다
+
+// ④ unique_ptr → 원시 포인터와 동일
+// ⑤ optional&lt;int&gt; → 태그 검사만 추가
+// ⑥ span → 포인터 + 길이, 오버헤드 없음
+
+// ★ godbolt 에서 두 버전을 나란히 두고 비교하면
+//   "추상화 비용"에 대한 감이 정확해집니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최적화가 안 된 이유 찾기</h4>
+      <pre class="code" data-lang="bash"><code># 벡터화 실패 이유
+clang++ -O3 -Rpass-missed=loop-vectorize -Rpass-analysis=loop-vectorize f.cpp
+#   remark: loop not vectorized: cannot prove pointers do not alias ★
+#   → __restrict 를 붙이세요 (e06)
+
+#   remark: loop not vectorized: value that could not be identified as
+#           reduction is used outside the loop
+#   → 누적 변수 사용 방식을 바꾸세요
+
+# 인라인 실패 이유
+clang++ -O2 -Rpass-missed=inline f.cpp
+#   remark: 'foo' not inlined into 'bar' because too costly
+#   → 함수가 크거나 재귀. always_inline 이나 구조 변경
+
+# 어느 함수가 큰지
+nm -C --size-sort -S build/app | tail -20
+
+# 최적화 통계 (clang)
+clang++ -O2 -mllvm -stats f.cpp 2&gt;&amp;1 | grep -i vector</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>리포트가 어셈블리보다 실용적입니다</b> —
+        <code>-Rpass-missed</code> 는 <b>“왜 안 됐는지”</b>를 문장으로 알려 줍니다.
+        어셈블리는 <b>그 결과를 확인</b>할 때 보면 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">어셈블리를 읽는 최소 지식</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">x86-64 최소 문법 (Intel 문법)</h4>
+      <pre class="code" data-lang="text"><code>mov  dst, src        dst = src
+add  dst, src        dst += src
+lea  dst, [a+b*4]    주소 계산 (곱셈·덧셈에도 씁니다)
+cmp  a, b            비교 (플래그 설정)
+je / jne / jl        조건 점프
+call / ret           함수 호출·반환
+push / pop           스택
+
+레지스터
+  rdi rsi rdx rcx r8 r9   정수 인자 1~6번 (System V)
+  xmm0~xmm7               실수 인자
+  rax                     반환값
+  rsp rbp                 스택 포인터·프레임
+
+메모리 접근
+  [rdi]           rdi 가 가리키는 곳
+  [rdi + 8]       오프셋
+  [rdi + rax*8]   배열 인덱싱 ★
+
+SIMD (e06)
+  xmm (128비트) · ymm (256) · zmm (512)
+  vaddpd ymm0, ymm1, ymm2    → double 4개 동시 덧셈 ★
+  vmovupd                     → 비정렬 로드/스토어</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">읽는 요령</h4>
+      <pre class="code" data-lang="text"><code>① 전부 읽지 마세요
+   루프 본문만 봅니다. 대개 점프로 돌아오는 구간을 찾으면 됩니다.
+
+② 명령 개수를 세어 보세요
+   원소 하나당 몇 개의 명령이 나오는지.
+   단순 덧셈인데 20개가 나오면 뭔가 잘못된 것입니다.
+
+③ 특정 명령을 grep 하세요
+   objdump -dC app | grep -c vaddpd       # 벡터화됐나
+   objdump -dC app | grep -c "call.*new"  # 할당하나 ★
+
+④ 두 버전을 비교하세요
+   최적화 전후를 나란히 두면 차이가 바로 보입니다.
+   godbolt 의 "diff" 기능이 유용합니다.
+
+⑤ 소스 매핑을 켜세요
+   g++ -O2 -g -S  → 어셈블리에 .loc 지시자가 들어갑니다
+   godbolt 는 색으로 연결해 줍니다
+
+★ 목표는 '어셈블리를 쓰는 것'이 아니라
+  '내 가정이 맞는지 확인하는 것' 입니다.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>어셈블리로 최적화하려 하지 마세요</b> — 현대 컴파일러는
+        <b>사람보다 잘합니다</b>. 손으로 어셈블리를 쓰는 것이 이득인 경우는
+        <b>인트린식으로도 안 되는 특수 명령</b>이 필요할 때뿐입니다(e06).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">CPU 파이프라인 분석</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">명령 수만으로는 부족합니다</h4>
+      <pre class="code" data-lang="bash"><code># llvm-mca — 어셈블리를 CPU 모델로 시뮬레이션 ★
+llvm-mca -mcpu=skylake -timeline &lt; loop.s
+#   · 처리량(throughput) · 지연(latency)
+#   · 어느 포트가 병목인지
+#   · 명령 간 의존성 사슬
+
+# 출력 예
+#   Iterations:        100
+#   Total Cycles:      315
+#   IPC:               2.54
+#   Block RThroughput: 2.0        ★ 반복당 최소 사이클
+#
+#   Resource pressure by instruction:
+#   [0] [1] [2] ...
+#   0.5 0.5  -   vaddpd
+#   ...
+
+# godbolt 에도 내장돼 있습니다 (Analysis 탭)
+
+# uiCA · OSACA 도 비슷한 도구입니다</code></pre>
+      <pre class="code" data-lang="text"><code>알아 둘 개념
+
+  지연(latency)   : 결과가 나오기까지의 사이클
+  처리량(throughput): 연속으로 넣을 때 몇 사이클마다 하나
+  포트            : 실행 유닛. 같은 포트를 쓰는 명령은 경쟁합니다
+  의존성 사슬     : 앞 결과를 기다려야 하는 연쇄 ★
+
+★ 곱셈 지연이 4사이클이어도 처리량이 0.5면
+  독립적인 곱셈 2개를 매 사이클 넣을 수 있습니다.
+  → 의존성을 끊으면 훨씬 빨라집니다 (누적 변수를 여러 개로)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">의존성 사슬 끊기</h4>
+      <pre class="code" data-lang="cpp"><code>// ❌ 누적 변수 하나 — 매 덧셈이 앞 결과를 기다립니다
+double sum = 0;
+for (std::size_t i = 0; i &lt; n; ++i) sum += a[i];
+//   float 덧셈 지연이 4사이클이면 원소당 4사이클 ★
+
+// ✅ 누적 변수 여러 개 — 독립적으로 진행됩니다
+double s0=0, s1=0, s2=0, s3=0;
+std::size_t i = 0;
+for (; i + 4 &lt;= n; i += 4) {
+    s0 += a[i];   s1 += a[i+1];
+    s2 += a[i+2]; s3 += a[i+3];
+}
+double sum = s0 + s1 + s2 + s3;
+for (; i &lt; n; ++i) sum += a[i];
+//   → 처리량 한계까지 채웁니다 (2~4배 향상)
+//   ⚠ 부동소수 합산 순서가 달라져 결과가 미세하게 다를 수 있습니다
+
+// 컴파일러는 float 재배치를 기본적으로 못 합니다 (결합법칙 불성립)
+//   -ffast-math 를 켜면 알아서 해 주지만 정확도를 포기합니다
+//   → 직접 쓰는 편이 통제 가능합니다
+
+// 정수는 결합법칙이 성립하므로 컴파일러가 알아서 합니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 기법이 실제로 쓰이는 곳</b> — 내적·놈 계산·해시·체크섬처럼
+        <b>누적이 핵심인 루프</b>입니다.
+        BLAS·해시 라이브러리의 소스를 보면 <b>대부분 이렇게 되어 있습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>godbolt</b> 에 붙여넣고 <b>루프 본문만</b> 보세요.
+    <b><code>vaddpd</code>·<code>ymm</code></b> 이 있으면 벡터화, <b><code>call</code></b> 이 있으면 인라인 실패,
+    <b><code>memcpy</code>·<code>new</code></b> 가 있으면 복사·할당입니다.
+    <b><code>-Rpass-missed</code></b> 리포트가 "왜 안 됐는지"를 문장으로 알려 줍니다.</div>
+</section>
+
+
+<!-- ==================== e10 ==================== -->
+<section class="sec" id="e10">
+  <div class="sec-head rv">
+    <span class="no">PERF 10</span>
+    <h2>파이썬 대비 <span class="t">실제로 몇 배인가</span></h2>
+    <p class="lead">
+      과장 없이 정리합니다.
+      <b>어떤 경우에 몇 배가 나오고, 어떤 경우에 안 나오는지</b> —
+      이걸 알아야 도입 판단을 할 수 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">경우별 기대 배수</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">작업</th><th>순수 파이썬 대비</th></tr>
+        <tr><td>원소마다 분기·상태가 있는 루프</td><td><b>30~100배</b> ★</td></tr>
+        <tr><td>문자열·바이트 파싱</td><td><b>20~100배</b></td></tr>
+        <tr><td>재귀·트리 탐색</td><td><b>20~50배</b></td></tr>
+        <tr><td>단순 배열 연산</td><td>50~200배 <b>(단, numpy 대비 1~3배)</b></td></tr>
+        <tr><td>이미 numpy 로 벡터화된 것</td><td><b>1~3배</b> ⚠</td></tr>
+        <tr><td>pandas 그룹 연산</td><td>3~20배 (polars 와 비슷)</td></tr>
+        <tr><td>I/O 대기가 대부분</td><td><b>1배</b> — 의미 없음 ❌</td></tr>
+        <tr><td>멀티코어 활용</td><td>× 코어 수 <b>(GIL 해제 시)</b> ★</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 실망</b> — “numpy 로 짠 코드를 C++ 로 옮겼는데 2배밖에 안 빨라졌다”.
+        당연합니다. <b>numpy 는 이미 최적화된 C 코드</b>입니다.
+        C++ 가 이기려면 <b>numpy 가 못 하는 것</b>(원소별 분기·상태·메모리 재사용)을 해야 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 그렇게 차이가 나나</h4>
+      <pre class="code" data-lang="text"><code>파이썬 루프 한 바퀴에 일어나는 일
+  · 바이트코드 디스패치
+  · 객체 참조 카운트 증감
+  · 정수·실수도 힙 객체 (PyLongObject · PyFloatObject)
+  · 타입 검사 · 메서드 조회
+  → 원소당 수십~수백 나노초
+
+C++ 루프 한 바퀴
+  · 레지스터 연산 몇 개
+  · 값이 연속 메모리에 (e02)
+  → 원소당 수 나노초, 벡터화되면 1 미만
+
+★ 즉 차이는 '언어가 빨라서'가 아니라
+  '객체 오버헤드와 메모리 배치'에서 옵니다.
+  numpy 가 빠른 이유도 정확히 같습니다 —
+  파이썬 객체를 벗기고 연속 배열로 만들었기 때문입니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">직접 재 보기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">공정하게 비교하는 법</h4>
+      <pre class="code" data-lang="python"><code>import numpy as np, timeit, fastmod
+
+def compare(n):
+    a = np.random.rand(n)
+    L = a.tolist()
+
+    # ① 순수 파이썬
+    def py():
+        out = [0.0] * len(L)
+        for i in range(1, len(L)-1):
+            out[i] = (L[i-1] + L[i] + L[i+1]) / 3
+        return out
+
+    # ② numpy 벡터화
+    def np_():
+        return np.convolve(a, np.ones(3)/3, mode="same")
+
+    # ③ C++ 확장
+    def cpp():
+        return fastmod.smooth(a, 3)
+
+    for name, f in (("python", py), ("numpy", np_), ("cpp", cpp)):
+        t = min(timeit.repeat(f, number=1, repeat=5))
+        print(f"{name:8} {t*1e3:9.3f}ms")
+
+for n in (1_000, 100_000, 10_000_000):
+    print(f"\n=== n={n:,}")
+    compare(n)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>세 가지를 다 재세요</b> — 순수 파이썬만 비교하면
+        <b>부풀려진 배수</b>가 나옵니다.
+        의사결정에 필요한 것은 <b>“지금 쓰는 방법(대개 numpy) 대비 몇 배인가”</b> 입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크기별로 재야 하는 이유</h4>
+      <pre class="code" data-lang="text"><code>전형적인 결과 형태
+
+  n=1,000
+    python   0.180ms
+    numpy    0.021ms
+    cpp      0.008ms      ← 2.6배 (경계 비용이 큰 비중)
+
+  n=100,000
+    python  18.500ms
+    numpy    0.850ms
+    cpp      0.210ms      ← 4.0배
+
+  n=10,000,000
+    python   1900ms
+    numpy      92ms
+    cpp        31ms       ← 3.0배 (메모리 대역폭 한계)
+
+★ 배수가 크기에 따라 변합니다
+  · 작으면 경계 비용이 지배 (🐍 y01)
+  · 중간에서 최대
+  · 아주 크면 메모리 대역폭 한계 (e02)
+
+→ '내 실제 데이터 크기'에서 재야 의미가 있습니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">도입 판단과 보고</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">숫자를 정직하게 제시하기</h4>
+      <pre class="code" data-lang="markdown"><code>## 성능 비교
+
+측정 환경: AMD Ryzen 9 7900X · 32GB · Ubuntu 24.04 · GCC 13.2 -O3
+재현: `python bench/run.py` (저장소 포함)
+
+| n          | 현행(numpy) | C++ 확장 | 배수 |
+|------------|------------:|---------:|-----:|
+| 1,000      |     0.021ms |  0.008ms | 2.6× |
+| 100,000    |     0.850ms |  0.210ms | 4.0× |
+| 10,000,000 |       92 ms |    31 ms | 3.0× |
+
+스레드 4개 사용 시 (GIL 해제):
+| 10,000,000 |       92 ms |   9.5 ms | 9.7× |
+
+### 주의
+- 데이터가 1만 개 미만이면 이득이 크지 않습니다(경계 비용)
+- 메모리 대역폭이 한계라 스레드는 4개 이상에서 효과가 줄어듭니다
+- 결과는 numpy 와 1e-12 이내로 일치함을 테스트로 검증합니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>환경과 재현 방법을 반드시 밝히세요</b> — 환경 없는 배수는
+        <b>신뢰를 잃습니다</b>. 그리고 <b>한계와 주의점을 함께 적으면</b>
+        오히려 설득력이 올라갑니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비용도 함께 계산하기</h4>
+      <pre class="code" data-lang="text"><code>도입 판단에 필요한 것은 배수만이 아닙니다
+
+  얻는 것
+    · 처리 시간 92ms → 9.5ms (요청당 82ms 절감)
+    · 하루 100만 요청이면 22시간 상당의 CPU 시간
+    · 서버 대수나 응답 지연으로 환산하면?
+
+  치르는 것
+    · 개발 2주 + 유지보수
+    · 빌드 파이프라인 (3 OS × wheel) — 🛠️ b06
+    · 팀에서 고칠 수 있는 사람 수
+    · 크래시 시 프로세스 전체 종료 위험 — 🐍 y12
+    · 디버깅 난이도 상승
+
+  ★ 판단 기준
+    · 그 함수가 전체 시간의 몇 %인가? (암달의 법칙)
+      10% 를 100배 빠르게 해도 전체는 1.11배입니다
+    · 대안은 없는가? (polars · numba · 알고리즘 개선)
+    · 되돌릴 수 있는가? (순수 파이썬 폴백 — 🐍 y02)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>전체에서 차지하는 비중을 먼저 보세요</b> —
+        프로파일에서 <b>30% 이상</b>을 차지하는 함수가 아니라면
+        C++ 로 옮겨도 <b>체감이 거의 없습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">한계와 대안</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 로도 안 되는 것</h4>
+      <pre class="code" data-lang="text"><code>① 메모리 대역폭 한계
+   단순 배열 연산은 DRAM 속도(수십 GB/s)가 상한입니다.
+   → 알고리즘을 바꿔 데이터를 덜 읽거나, 캐시에 맞게 쪼개기 (e02)
+
+② I/O 한계
+   디스크·네트워크가 병목이면 계산 언어는 무관합니다.
+   → 비동기 I/O · 배치 · 압축
+
+③ 알고리즘 한계
+   O(n²) 는 어떤 언어로도 O(n²) 입니다.
+
+④ 분기가 지배적인 코드
+   벡터화도 병렬화도 안 되는 경우가 있습니다.
+
+그때의 대안
+  · GPU (CUDA · SYCL) — 대규모 병렬 · 대역폭이 훨씬 큼
+  · 분산 처리 (Ray · Dask · Spark)
+  · 근사 알고리즘 · 샘플링
+  · 사전 계산 · 캐싱 ★ 종종 가장 효과적
+  · 문제 자체를 다시 정의하기</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 말고도 선택지가 있습니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">선택지</th><th>언제</th></tr>
+        <tr><td><b>numba</b> <code>@njit</code></td><td>파이썬 코드를 거의 그대로 · 수치 루프 ★</td></tr>
+        <tr><td><b>Cython</b></td><td>파이썬 문법 + 타입 · 기존 코드 점진 전환</td></tr>
+        <tr><td><b>polars · DuckDB</b></td><td>표 형태 데이터 — 직접 짜는 것보다 대개 빠릅니다</td></tr>
+        <tr><td><b>Rust + PyO3</b></td><td>메모리 안전 · 빌드가 편함 <b>(🦀 가이드)</b></td></tr>
+        <tr><td><b>C++</b></td><td>기존 C/C++ 자산 · 최고 성능 · 세밀한 제어</td></tr>
+        <tr><td><b>GPU</b></td><td>대규모 병렬 · 행렬·이미지·딥러닝</td></tr>
+      </table></div>
+      <pre class="code" data-lang="python"><code># numba 로 먼저 시도해 보는 것을 권합니다 ★
+from numba import njit
+@njit(cache=True, fastmath=True)
+def smooth(a, w):
+    out = np.empty_like(a)
+    for i in range(len(a)):
+        ...
+    return out
+#   · 파이썬 문법 그대로 · 빌드 파이프라인 불필요
+#   · 대개 C++ 의 70~90% 성능
+#   · 여기서 충분하면 C++ 로 갈 이유가 없습니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>정직한 결론</b> — C++ 확장은 <b>강력하지만 비쌉니다</b>.
+        <code>numba</code>·<code>polars</code> 로 충분한 경우가 생각보다 많고,
+        <b>그것을 먼저 시도해 보는 것</b>이 프로다운 판단입니다(🐍 y01).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 순수 파이썬 대비 <b>30~100배</b>지만,
+    <b>numpy 대비는 1~3배</b>인 경우가 흔합니다.
+    <b>멀티코어를 쓰면(GIL 해제) 거기에 코어 수만큼</b> 곱해집니다.
+    도입 판단은 <b>배수가 아니라 “전체에서 차지하는 비중 × 치르는 비용”</b>으로 하세요.</div>
+</section>
+
+</div><!-- /pane-perf -->

@@ -1,0 +1,2698 @@
+<!-- ============================================================
+     C ABI · FFI PANE
+     ============================================================ -->
+<div class="pane" id="pane-ffi">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> #[no_mangle] · repr(C) · cbindgen · bindgen · catch_unwind</div>
+  <h1>한 번 만들어<br>모든 언어에서</h1>
+  <p class="tx">
+    PyO3 는 파이썬 전용이고 napi-rs 는 Node 전용입니다.
+    <b>C ABI 로 내보내면 파이썬·Node·C#·자바·Go·C++ 어디서나</b> 같은 라이브러리를 부릅니다.
+    대신 <b>안전장치가 전부 사라지므로</b> 규약을 스스로 지켜야 합니다 —
+    그 규약이 이 탭의 내용입니다.
+  </p>
+  <div class="stats">
+    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>1</b><span>공용어 (C ABI)</span></div>
+    <div><b>∞</b><span>부를 수 있는 언어</span></div>
+    <div><b>4</b><span>깊이 층</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== f01 ==================== -->
+<section class="sec" id="f01">
+  <div class="sec-head rv">
+    <span class="no">FFI 01</span>
+    <h2>C ABI 가 <span class="t">공용어</span>인 이유</h2>
+    <p class="lead">
+      언어마다 문법도 런타임도 다르지만 <b>“C 함수를 부르는 법”은 모두 압니다</b>.
+      그래서 언어 간 연동은 대부분 <b>C 인터페이스를 경유</b>합니다.
+      Rust 는 <b>런타임이 없어</b> 이 역할에 특히 잘 맞습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ABI 란 무엇인가</h4>
+      <pre class="code" data-lang="text"><code>API — 소스 코드 수준의 약속 (함수 이름 · 인자 타입)
+ABI — 기계어 수준의 약속 ★
+        · 인자를 어느 레지스터·스택에 놓는가
+        · 반환값은 어디로 오는가
+        · 구조체 필드가 메모리에 어떻게 배치되는가
+        · 함수 이름이 심볼로 어떻게 적히는가
+        · 누가 스택을 정리하는가
+
+C ABI 는 이것들이 '플랫폼마다 고정' 돼 있습니다.
+  x86-64 SysV (리눅스·맥)  ·  Win64 (윈도우)  ·  AAPCS64 (ARM)
+
+★ 그래서 C 로 컴파일된 라이브러리는
+  어떤 언어에서도 부를 수 있습니다.
+  Rust 는 "C 처럼 보이는 함수"를 만들 수 있습니다.</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>Rust ABI 는 불안정합니다</b> — 컴파일러 버전이 다르면
+        <b>같은 Rust 끼리도 안 맞을 수 있습니다</b>(🔬 d11).
+        그래서 <b>경계는 반드시 C ABI</b> 여야 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 C ABI 를 고르나 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>상황</th><th>권장</th></tr>
+        <tr><td>파이썬만</td><td>PyO3 (🐍 y02)</td></tr>
+        <tr><td>Node 만</td><td>napi-rs (🟨 j02)</td></tr>
+        <tr><td><b>여러 언어</b></td><td><b>C ABI</b></td></tr>
+        <tr><td>C/C++ 앱에 넣기</td><td><b>C ABI</b></td></tr>
+        <tr><td>C# · 자바 · Go</td><td><b>C ABI</b></td></tr>
+        <tr><td>게임 엔진 플러그인</td><td><b>C ABI</b></td></tr>
+        <tr><td>기존 C 라이브러리 쓰기</td><td>bindgen (f08)</td></tr>
+        <tr><td>브라우저</td><td>WASM (🟨 j08)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ C ABI 의 대가
+  · Option · Result · String · Vec 을 못 씁니다 (f03 · f06)
+  · 메모리 해제 책임을 문서로 정해야 합니다 (f06)
+  · 패닉이 경계를 넘으면 안 됩니다 (f09)
+  · 제네릭·트레이트가 사라집니다 (구체 함수만)
+  · 컴파일러가 지켜 주던 것을 사람이 지켜야 합니다 ★
+
+★ 그럼에도 얻는 것
+  · 하나의 .so/.dll/.dylib 로 모든 언어 지원
+  · 언어별 바인딩 코드를 각 언어에서 얇게 작성
+  · 버전을 오래 유지할 수 있습니다 (안정된 인터페이스)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">전체 그림 그리기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">계층 구조 ★</h4>
+      <div class="diag rv">
+        <svg viewBox="0 0 660 220" role="img" aria-label="Rust 핵심 로직 위에 C ABI 층을 두고, 그 위에서 파이썬·Node·C#·자바가 각자의 바인딩으로 같은 라이브러리를 부르는 구조">
+          <rect class="bx" x="230" y="10" width="200" height="42"/>
+          <text x="330" y="30" text-anchor="middle" font-size="13">Rust 핵심 로직</text>
+          <text x="330" y="45" text-anchor="middle" class="lbl">순수 Rust · 테스트 가능</text>
+
+          <path class="ln" d="M330 52 L330 78"/>
+          <rect class="bx bx-fw" x="230" y="78" width="200" height="42"/>
+          <text x="330" y="98" text-anchor="middle" font-size="13">C ABI 층</text>
+          <text x="330" y="113" text-anchor="middle" class="lbl">extern "C" · repr(C) · 에러 코드</text>
+
+          <path class="fl" d="M330 120 L100 165"/>
+          <path class="fl" d="M330 120 L255 165"/>
+          <path class="fl" d="M330 120 L405 165"/>
+          <path class="fl" d="M330 120 L560 165"/>
+
+          <rect class="bx" x="40" y="165" width="120" height="40"/>
+          <text x="100" y="190" text-anchor="middle" font-size="12">🐍 ctypes</text>
+          <rect class="bx" x="195" y="165" width="120" height="40"/>
+          <text x="255" y="190" text-anchor="middle" font-size="12">🟨 koffi</text>
+          <rect class="bx" x="345" y="165" width="120" height="40"/>
+          <text x="405" y="190" text-anchor="middle" font-size="12">🟣 DllImport</text>
+          <rect class="bx" x="500" y="165" width="120" height="40"/>
+          <text x="560" y="190" text-anchor="middle" font-size="12">☕ JNA · Go</text>
+        </svg>
+        <div class="cap"><b>핵심 로직은 한 벌</b>, C ABI 층만 얇게 두면 네 언어가 같은 <code>.so</code>/<code>.dll</code> 을 부릅니다</div>
+      </div>
+      <pre class="code" data-lang="text"><code>★ 파일 구조 권장
+  src/
+    lib.rs        pub 로직 (순수 Rust · cargo test 가 그대로 됨)
+    ffi.rs        #[no_mangle] extern "C" 함수만 — 얇게 ★
+  include/
+    mylib.h       cbindgen 이 생성 (f04)
+  bindings/
+    python/  node/  csharp/    각 언어의 얇은 래퍼</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인터페이스 설계 5원칙 ★</h4>
+      <pre class="code" data-lang="text"><code>① 좁게 — 함수 10개 이하를 목표로
+   내부 타입을 노출하지 말고 '핸들 + 동작' 으로 (f03 의 불투명 포인터)
+
+② 안정되게 — 한 번 배포한 시그니처는 바꾸지 않는다
+   기능 추가는 새 함수로. 구조체는 버전 필드나 크기 필드를 넣어 확장 (f09)
+
+③ 소유권을 명시 — 누가 할당하고 누가 해제하는가 (f06)
+   이름으로 드러내세요: mylib_string_free · mylib_buffer_free
+
+④ 실패를 코드로 — 예외도 Result 도 없습니다 (f09)
+   0 = 성공, 음수 = 실패. 마지막 에러 메시지를 얻는 함수를 따로 제공
+
+⑤ 패닉을 가두어라 — 경계 밖으로 나가면 UB (f09)
+   모든 extern "C" 함수를 catch_unwind 로 감싸세요
+
+★ 이 다섯 가지가 이 탭 전체의 목차이기도 합니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">무엇을 내보낼지 정한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">API 를 좁히는 방법</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ Rust 내부 구조를 그대로 노출
+#[no_mangle] pub extern "C" fn get_config() -&gt; *const Config;
+#[no_mangle] pub extern "C" fn config_get_host(c: *const Config) -&gt; *const c_char;
+#[no_mangle] pub extern "C" fn config_get_port(c: *const Config) -&gt; u16;
+// … 필드가 늘 때마다 함수가 늘어납니다
+
+// ✅ '하려는 일' 단위로
+#[no_mangle] pub extern "C" fn mylib_open(path: *const c_char) -&gt; *mut Handle;
+#[no_mangle] pub extern "C" fn mylib_process(h: *mut Handle,
+                                             input: *const u8, in_len: usize,
+                                             out: *mut u8, out_cap: usize,
+                                             out_len: *mut usize) -&gt; i32;
+#[no_mangle] pub extern "C" fn mylib_close(h: *mut Handle);
+#[no_mangle] pub extern "C" fn mylib_last_error(buf: *mut c_char, cap: usize) -&gt; usize;
+#[no_mangle] pub extern "C" fn mylib_version() -&gt; u32;
+
+// ★ 다섯 개면 충분한 경우가 많습니다.
+//   설정은 JSON 문자열 하나로 받으면 구조체 ABI 문제도 사라집니다 ★
+#[no_mangle] pub extern "C" fn mylib_configure(json: *const c_char) -&gt; i32;</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>설정을 JSON 으로 받는 트릭</b> — 구조체를 주고받으면 필드가 늘 때마다
+        모든 언어의 바인딩을 고쳐야 합니다. <b>JSON 문자열 하나</b>면
+        <b>추가·삭제가 자유롭고 하위 호환도 쉽습니다</b>. 성능이 중요한 경로가 아니라면 좋은 선택입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크레이트 설정</h4>
+      <pre class="code" data-lang="toml"><code>[lib]
+name = "mylib"
+crate-type = ["cdylib", "staticlib", "rlib"]
+#              ^^^^^^   ^^^^^^^^^^   ^^^^
+#   cdylib    .so/.dll/.dylib — 동적 링크 (대부분 이것) ★
+#   staticlib .a/.lib — C/C++ 앱에 정적으로 넣을 때
+#   rlib      Rust 크레이트로도 쓰기 (cargo test 를 위해 두면 편합니다)
+
+[dependencies]
+libc = "0.2"                  # c_char · c_void 등
+
+[build-dependencies]
+cbindgen = "0.27"             # 헤더 자동 생성 (f04)
+
+[profile.release]
+lto = true
+strip = "symbols"             # ★ 내부 심볼 감추기 (🛠️ b10)</code></pre>
+      <pre class="code" data-lang="bash"><code>cargo build --release
+ls target/release/
+#   libmylib.so     (리눅스)
+#   libmylib.dylib  (맥)
+#   mylib.dll       (윈도우) + mylib.dll.lib
+#   libmylib.a      (staticlib)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">호출 규약의 실제</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">extern "C" 가 지정하는 것</h4>
+      <pre class="code" data-lang="rust"><code>extern "C" fn f(a: i32, b: i32) -&gt; i32 { a + b }
+
+// x86-64 SysV (리눅스·맥) 에서
+//   a → edi,  b → esi,  반환 → eax
+//   호출자가 스택을 정리
+//
+// Win64 에서
+//   a → ecx,  b → edx,  반환 → eax
+//   섀도 스페이스 32바이트 필요
+//
+// → extern "C" 는 "그 플랫폼의 C 규약을 따르라" 는 뜻입니다.
+//   플랫폼별 차이는 컴파일러가 처리합니다. ★
+
+// 다른 규약들 (특수한 경우)
+extern "system" fn g();     // 윈도우 API (Win32 에서는 stdcall)
+extern "stdcall" fn h();    // 32비트 윈도우 레거시
+extern "Rust" fn i();       // 기본값 (불안정 · 🔬 d11)
+
+// 확인
+//   objdump -d target/release/libmylib.so | grep -A 20 "&lt;mylib_process&gt;:"</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">런타임이 없다는 이점</h4>
+      <pre class="code" data-lang="text"><code>Rust 가 C ABI 라이브러리로 특히 좋은 이유
+
+  · GC 가 없습니다 — 초기화·정지 시간이 없습니다
+  · 런타임 초기화가 필요 없습니다 (Go 는 런타임을 띄워야 합니다)
+  · 예외 테이블 외에는 숨은 비용이 없습니다
+  · 정적 링크가 자연스럽습니다 (musl 로 완전 정적도 가능 · 🛠️ b07)
+
+★ 비교
+  C/C++   같은 수준. 대신 메모리 안전은 사람이 책임
+  Go      cgo 경계 비용이 크고 런타임이 따라옵니다
+  C#/자바 런타임(CLR/JVM)을 임베드해야 합니다
+  Rust    C 와 같은 비용 + 안전한 내부 ★
+
+★ 남는 의존성 확인
+  ldd target/release/libmylib.so
+    linux-vdso · libgcc_s · libc · libm 정도
+
+  완전 정적으로 (musl)
+    rustup target add x86_64-unknown-linux-musl
+    cargo build --release --target x86_64-unknown-linux-musl</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>C ABI 는 언어 간 공용어</b>이고, Rust 는 런타임이 없어 이 역할에 잘 맞습니다.
+    대신 <b>Option·Result·String 을 못 쓰고, 안전장치가 사라집니다</b>.
+    <b>좁게 · 안정되게 · 소유권 명시 · 에러는 코드로 · 패닉은 가두기</b> —
+    이 다섯 원칙이 이 탭의 전부입니다.</div>
+</section>
+
+
+<!-- ==================== f02 ==================== -->
+<section class="sec" id="f02">
+  <div class="sec-head rv">
+    <span class="no">FFI 02</span>
+    <h2><span class="t">#[no_mangle]</span> · extern "C" — 내보내기</h2>
+    <p class="lead">
+      Rust 함수를 C 가 부를 수 있게 만드는 데 필요한 것은 <b>두 줄</b>입니다.
+      <code>extern "C"</code> 로 호출 규약을, <code>#[no_mangle]</code> 로 이름을 지정합니다.
+      나머지는 <b>어떤 타입을 주고받을 수 있는가</b>의 문제입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최소 예제</h4>
+      <pre class="code" data-lang="rust"><code>// src/lib.rs
+#[no_mangle]
+pub extern "C" fn mylib_add(a: i32, b: i32) -&gt; i32 {
+    a + b
+}
+
+// #[no_mangle]  이름을 그대로 심볼로 (안 붙이면 _ZN5mylib3add17h... 가 됩니다)
+// extern "C"    C 호출 규약
+// pub           크레이트 밖으로
+
+// 2024 에디션부터는 unsafe 표기를 씁니다
+// #[unsafe(no_mangle)]
+// pub unsafe extern "C" fn mylib_add(a: i32, b: i32) -&gt; i32 { a + b }</code></pre>
+      <pre class="code" data-lang="bash"><code>cargo build --release
+
+# 심볼 확인 ★ 문제가 생기면 항상 여기부터
+nm -D target/release/libmylib.so | grep mylib
+#   0000000000007a10 T mylib_add        ← T = 텍스트(코드), 전역
+
+# 윈도우
+dumpbin /exports target\release\mylib.dll
+
+# 맥
+nm -gU target/release/libmylib.dylib | grep mylib</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>#[no_mangle]</code> 이름은 전역입니다</b> — 다른 라이브러리와 겹치면
+        <b>어느 것이 불릴지 알 수 없습니다</b>.
+        반드시 <b><code>mylib_</code> 같은 접두사</b>를 붙이세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쓸 수 있는 타입 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>C</th><th>Rust</th></tr>
+        <tr><td><code>int32_t</code></td><td><code>i32</code></td></tr>
+        <tr><td><code>uint64_t</code></td><td><code>u64</code></td></tr>
+        <tr><td><code>size_t</code></td><td><code>usize</code></td></tr>
+        <tr><td><code>double</code></td><td><code>f64</code></td></tr>
+        <tr><td><code>bool</code></td><td><code>bool</code> ★</td></tr>
+        <tr><td><code>char*</code></td><td><code>*const c_char</code></td></tr>
+        <tr><td><code>void*</code></td><td><code>*mut c_void</code></td></tr>
+        <tr><td><code>T*</code></td><td><code>*mut T</code></td></tr>
+        <tr><td>구조체</td><td><code>#[repr(C)]</code> (f03)</td></tr>
+        <tr><td>함수 포인터</td><td><code>extern "C" fn</code></td></tr>
+        <tr><td>널 가능 포인터</td><td><code>Option&lt;&amp;T&gt;</code> ★</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// ❌ 절대 쓰면 안 되는 것들 (ABI 가 정의되지 않음)
+// pub extern "C" fn bad() -&gt; String;          // Rust 전용 레이아웃
+// pub extern "C" fn bad2() -&gt; Vec&lt;u8&gt;;
+// pub extern "C" fn bad3() -&gt; Result&lt;i32, E&gt;;
+// pub extern "C" fn bad4(s: &amp;str);            // 팻 포인터 (🔐 o04)
+// pub extern "C" fn bad5&lt;T&gt;(x: T);            // 제네릭
+
+// ✅ 대신
+//   String  → *mut c_char + 해제 함수 (f06)
+//   Vec&lt;u8&gt; → *mut u8 + len 또는 출력 버퍼
+//   Result  → 에러 코드 i32 (f09)
+//   &amp;str    → *const u8 + usize
+//   bool 은 Rust 와 C99 모두 1바이트라 안전합니다 ★
+
+// clippy 가 잡아 줍니다
+//   cargo clippy -- -W clippy::not_unsafe_ptr_arg_deref</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">포인터를 안전하게 다루기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">슬라이스와 문자열 받기</h4>
+      <pre class="code" data-lang="rust"><code>use std::ffi::{c_char, CStr};
+use std::slice;
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_checksum(data: *const u8, len: usize) -&gt; u32 {
+    if data.is_null() || len == 0 { return 0; }          // ★ 널 검사 먼저
+    let bytes = slice::from_raw_parts(data, len);        // unsafe (🔬 d03)
+    bytes.iter().fold(0u32, |a, b| a.wrapping_add(*b as u32))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_count_words(s: *const c_char) -&gt; usize {
+    if s.is_null() { return 0; }
+    match CStr::from_ptr(s).to_str() {                   // UTF-8 검증
+        Ok(text) =&gt; text.split_whitespace().count(),
+        Err(_) =&gt; 0,                                     // 잘못된 UTF-8
+    }
+}
+
+// ★ 안전한 래퍼로 감싸는 습관 (🔬 d08)
+#[no_mangle]
+pub unsafe extern "C" fn mylib_process(data: *const u8, len: usize) -&gt; i32 {
+    let Some(bytes) = to_slice(data, len) else { return -1 };
+    core_process(bytes)                                   // 여기부터는 안전한 Rust
+}
+unsafe fn to_slice&lt;'a&gt;(p: *const u8, len: usize) -&gt; Option&lt;&amp;'a [u8]&gt; {
+    if p.is_null() { return None; }
+    if len == 0 { return Some(&amp;[]); }
+    Some(slice::from_raw_parts(p, len))
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>len == 0</code> 일 때 널 포인터가 올 수 있습니다</b> —
+        <code>slice::from_raw_parts(null, 0)</code> 은 <b>UB 입니다</b>(정렬된 비널 포인터를 요구).
+        <b>길이 0 을 먼저 처리</b>하는 습관을 들이세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">출력을 돌려주는 방법 세 가지</h4>
+      <pre class="code" data-lang="rust"><code>// ① 호출자가 버퍼를 준다 ★ 가장 안전하고 흔합니다
+#[no_mangle]
+pub unsafe extern "C" fn mylib_encode(
+    input: *const u8, in_len: usize,
+    out: *mut u8, out_cap: usize, out_len: *mut usize,
+) -&gt; i32 {
+    let Some(src) = to_slice(input, in_len) else { return -1 };
+    let result = encode(src);
+    if out.is_null() || out_cap &lt; result.len() {
+        *out_len = result.len();     // ★ 필요한 크기를 알려 줍니다
+        return -2;                   // 버퍼 부족
+    }
+    std::ptr::copy_nonoverlapping(result.as_ptr(), out, result.len());
+    *out_len = result.len();
+    0
+}
+// 호출 패턴: 크기를 먼저 물어보고(out=NULL) → 할당 → 다시 호출
+
+// ② 라이브러리가 할당하고 해제 함수를 제공 (f06)
+#[no_mangle]
+pub extern "C" fn mylib_encode_alloc(input: *const u8, len: usize,
+                                     out_len: *mut usize) -&gt; *mut u8;
+#[no_mangle]
+pub extern "C" fn mylib_free(ptr: *mut u8, len: usize);
+
+// ③ 콜백으로 흘려보내기 (f07)
+#[no_mangle]
+pub extern "C" fn mylib_encode_stream(input: *const u8, len: usize,
+    cb: extern "C" fn(*const u8, usize, *mut c_void), user: *mut c_void) -&gt; i32;</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">심볼 문제를 진단한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">"symbol not found" 진단 순서 ★</h4>
+      <pre class="code" data-lang="bash"><code># ① 심볼이 정말 있나
+nm -D libmylib.so | grep mylib_add
+#   비어 있으면 → #[no_mangle] 을 빠뜨렸거나 pub 이 아님
+
+# ② 이름이 정확한가 (오타 · 접두사)
+nm -D libmylib.so | grep -i add
+
+# ③ 맥/윈도우의 언더스코어
+#   맥: C 심볼 앞에 _ 가 붙습니다 (nm 출력에는 보이지만 dlsym 은 그대로)
+#   윈도우 32비트 stdcall: _name@8 형태
+
+# ④ 라이브러리를 정말 로드했나
+LD_DEBUG=libs python -c "import ctypes; ctypes.CDLL('./libmylib.so')"
+
+# ⑤ 아키텍처가 맞나
+file libmylib.so
+#   ELF 64-bit ... x86-64        ← 32비트 파이썬이면 로드 실패
+
+# ⑥ 의존 라이브러리가 있나
+ldd libmylib.so | grep "not found"
+
+# ⑦ 최적화로 지워졌나 — 안 쓰이는 함수를 링커가 제거할 수 있습니다
+#    #[no_mangle] pub 이면 보통 남지만, LTO 설정에 따라 다릅니다
+#    확실히 하려면 #[used] 나 링커 스크립트를 쓰세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">심볼 가시성 제어</h4>
+      <pre class="code" data-lang="text"><code>기본적으로 cdylib 은 #[no_mangle] pub 함수만 내보냅니다.
+하지만 정적 링크한 C 라이브러리의 심볼이 함께 새어 나갈 수 있습니다 (f08).
+
+★ 왜 문제인가
+  같은 프로세스에 다른 버전의 같은 라이브러리가 있으면
+  심볼이 충돌해 엉뚱한 함수가 불릴 수 있습니다.
+  (파이썬에서 여러 확장이 각자 libz 를 정적 링크한 경우 등)
+
+★ 대응
+  # 리눅스 — 버전 스크립트로 내보낼 심볼을 지정
+  # mylib.map
+  { global: mylib_*; local: *; };
+  # .cargo/config.toml
+  # rustflags = ["-C", "link-arg=-Wl,--version-script=mylib.map"]
+
+  # 맥 — 내보내기 목록
+  # -Wl,-exported_symbols_list,exported.txt
+
+  # 확인
+  nm -D libmylib.so | grep " T " | wc -l      # 내보내는 심볼 개수 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>심볼 개수를 세어 보세요</b> — 함수 5개를 내보내려는데 수천 개가 보인다면
+        <b>정적 링크한 C 라이브러리가 새고 있는 것</b>입니다.
+        <code>strip</code> 과 버전 스크립트로 정리하면 <b>크기도 줄고 충돌도 사라집니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">맹글링과 링크의 안쪽</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이름이 어떻게 바뀌나</h4>
+      <pre class="code" data-lang="bash"><code># Rust 는 이름에 크레이트·모듈·타입 해시를 넣습니다 (같은 이름 허용을 위해)
+nm target/release/libmylib.rlib | grep add
+#   _ZN5mylib5inner3add17h8f3a2c1b9e4d5f6aE
+
+# 디맹글
+rustfilt &lt;&lt;&lt; "_ZN5mylib5inner3add17h8f3a2c1b9e4d5f6aE"
+#   mylib::inner::add::h8f3a2c1b9e4d5f6a
+
+# C++ 도 맹글합니다 (오버로딩 때문)
+c++filt &lt;&lt;&lt; "_Z3addii"
+#   add(int, int)
+
+# ★ #[no_mangle] 은 "그냥 mylib_add 로 적어라" 는 지시입니다.
+#   그래서 오버로딩이 불가능하고, 이름 충돌도 직접 피해야 합니다.
+
+# 부분적 대안 — export_name 으로 이름 지정
+#[export_name = "mylib_v2_add"]
+pub extern "C" fn add_v2(a: i32, b: i32) -&gt; i32 { a + b }
+# 버전을 이름에 넣는 기법입니다 (f09)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동적 링크가 실제로 하는 일</h4>
+      <pre class="code" data-lang="text"><code>dlopen("libmylib.so") 이 하는 일
+  ① 파일을 메모리에 매핑
+  ② 의존 라이브러리를 재귀적으로 로드 (ldd 로 보이는 것들)
+  ③ 재배치(relocation) — 절대 주소를 채움
+  ④ 초기화 함수 실행 (.init_array)
+
+dlsym("mylib_add")
+  ⑤ 심볼 테이블에서 찾아 함수 주소를 반환
+
+★ 실무에서 만나는 것들
+  · RTLD_GLOBAL vs RTLD_LOCAL — 심볼을 전역에 공개할지
+    파이썬은 기본 LOCAL 이라 확장끼리 심볼이 안 섞입니다 ★
+  · LD_LIBRARY_PATH / DYLD_LIBRARY_PATH / PATH(윈도우)
+  · rpath — 라이브러리 안에 검색 경로를 박아 둠
+      cargo: rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN"]
+  · 지연 바인딩 — 처음 호출할 때 주소를 해결 (LD_BIND_NOW 로 끄기)
+
+# 로드 과정 추적
+LD_DEBUG=all ./app 2&gt;&amp;1 | head -50
+strace -e trace=openat ./app</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>#[no_mangle] pub extern "C"</code></b> 세 가지면 내보내기가 끝납니다.
+    <b>이름은 전역이니 접두사를 반드시</b> 붙이고, <b><code>String</code>·<code>Vec</code>·<code>&amp;str</code> 은 절대 넘기지 마세요</b>.
+    포인터를 받으면 <b>널 검사 → 길이 0 처리 → 안전한 래퍼로</b> 넘기는 순서를 지키고,
+    문제가 생기면 <b><code>nm -D</code> 로 심볼부터</b> 확인하세요.</div>
+</section>
+
+
+<!-- ==================== f03 ==================== -->
+<section class="sec" id="f03">
+  <div class="sec-head rv">
+    <span class="no">FFI 03</span>
+    <h2><span class="t">#[repr(C)]</span> — Rust 는 필드 순서를 바꿉니다</h2>
+    <p class="lead">
+      Rust 는 메모리를 아끼려고 <b>구조체 필드를 마음대로 재배치</b>합니다.
+      그래서 C 와 구조체를 주고받으려면 <b><code>#[repr(C)]</code> 로 “건드리지 마”</b>라고 해야 합니다.
+      이걸 빠뜨리면 <b>값이 조용히 깨집니다</b> — 크래시도 안 나서 더 위험합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무슨 일이 일어나나</h4>
+      <pre class="code" data-lang="rust"><code>struct Bad { a: u8, b: u64, c: u8 }
+#[repr(C)]
+struct Good { a: u8, b: u64, c: u8 }
+
+println!("{} {}", size_of::&lt;Bad&gt;(), size_of::&lt;Good&gt;());   // 16  24
+
+// Bad 의 실제 배치 (컴파일러가 재배치)
+//   [b: 8바이트][a: 1][c: 1][패딩 6]  = 16
+// Good 의 배치 (C 규칙 그대로)
+//   [a: 1][패딩 7][b: 8][c: 1][패딩 7] = 24
+
+// ★ C 쪽에서 Bad 를 { uint8_t a; uint64_t b; uint8_t c; } 로 선언하면
+//   a 를 읽었는데 b 의 하위 바이트가 나옵니다 — 크래시 없이 값만 틀립니다
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct Point { pub x: f64, pub y: f64 }
+
+#[no_mangle]
+pub extern "C" fn mylib_distance(a: Point, b: Point) -&gt; f64 {
+    ((a.x - b.x).powi(2) + (a.y - b.y).powi(2)).sqrt()
+}</code></pre>
+      <pre class="code" data-lang="c"><code>/* C 쪽 */
+typedef struct { double x, y; } Point;
+double mylib_distance(Point a, Point b);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">repr 의 종류 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>표기</th><th>뜻</th></tr>
+        <tr><td><code>#[repr(C)]</code></td><td>C 배치 규칙 ★ FFI 기본</td></tr>
+        <tr><td><code>#[repr(transparent)]</code></td><td>필드 하나와 동일 배치</td></tr>
+        <tr><td><code>#[repr(u8)]</code></td><td>enum 판별자 크기 지정</td></tr>
+        <tr><td><code>#[repr(C, packed)]</code></td><td>패딩 없음 ★ 위험</td></tr>
+        <tr><td><code>#[repr(align(64))]</code></td><td>정렬 강제 (캐시라인)</td></tr>
+        <tr><td>(없음)</td><td>Rust 마음대로</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// transparent — 뉴타입을 C 에 그대로 (r07)
+#[repr(transparent)]
+pub struct Handle(*mut c_void);      // C 에서는 그냥 void*
+
+// C 스타일 enum
+#[repr(i32)]
+pub enum Status { Ok = 0, NotFound = 1, Error = 2 }
+
+// packed — 네트워크 프로토콜 등
+#[repr(C, packed)]
+struct Header { kind: u8, len: u32 }   // 5바이트 (패딩 없음)
+// ❗ packed 필드의 참조를 만들면 UB 입니다 (정렬 위반 · 🔬 d03)
+//    let r = &amp;h.len;                  // ❌ 컴파일러가 막습니다
+let len = h.len;                        // ✅ 복사해서 쓰기
+let len = std::ptr::addr_of!(h.len);    // ✅ 주소만 필요하면
+
+// 정렬 강제 — false sharing 방지 (⚡ e06)
+#[repr(align(64))]
+struct CacheAligned(AtomicU64);</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">enum 과 널 가능 포인터</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Option 이 그대로 통하는 경우 ★</h4>
+      <pre class="code" data-lang="rust"><code>// 널 포인터 최적화 덕분에 이것들은 C 와 배치가 같습니다 (r08)
+Option&lt;&amp;T&gt;                  →  T*        (None = NULL)
+Option&lt;&amp;mut T&gt;              →  T*
+Option&lt;Box&lt;T&gt;&gt;              →  T*
+Option&lt;NonNull&lt;T&gt;&gt;          →  T*
+Option&lt;extern "C" fn(i32)&gt;  →  void(*)(int)   ★ 널 가능 콜백
+
+// 그래서 이렇게 쓸 수 있습니다
+#[no_mangle]
+pub extern "C" fn mylib_set_callback(cb: Option&lt;extern "C" fn(i32)&gt;) {
+    match cb {
+        Some(f) =&gt; register(f),
+        None =&gt; unregister(),          // C 에서 NULL 을 넘긴 경우 ★
+    }
+}
+
+// 검증 — 크기가 같아야 합니다
+const _: () = assert!(
+    std::mem::size_of::&lt;Option&lt;&amp;u8&gt;&gt;() == std::mem::size_of::&lt;*const u8&gt;()
+);
+
+// ★ 이것이 Rust FFI 의 작지만 큰 편의입니다.
+//   C 의 "널일 수도 있는 포인터" 를 타입으로 표현하면서 비용이 0 입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">태그 있는 유니온 표현하기</h4>
+      <pre class="code" data-lang="rust"><code>// Rust enum 은 데이터를 담을 수 있지만 C 에는 그 개념이 없습니다.
+// C 스타일로 풀어 써야 합니다.
+
+#[repr(C)]
+pub struct Value {
+    pub kind: ValueKind,      // 태그
+    pub data: ValueData,      // 유니온
+}
+
+#[repr(i32)]
+pub enum ValueKind { Int = 0, Float = 1, Str = 2 }
+
+#[repr(C)]
+pub union ValueData {
+    pub i: i64,
+    pub f: f64,
+    pub s: *const c_char,
+}
+// 읽을 때는 unsafe — 어느 필드가 유효한지 태그로 판단 (🔬 d01)
+
+// ★ 더 간단한 대안들
+//   ① 종류마다 다른 함수를 제공 (mylib_set_int · mylib_set_str)
+//   ② JSON 문자열로 주고받기 (f01)
+//   ③ 태그 + 고정 크기 배열
+//
+// 실무에서는 ① 이나 ② 가 대부분 낫습니다.
+// 유니온은 언어별 바인딩을 전부 복잡하게 만듭니다.
+
+// Rust 1.82+ 는 enum with payload 의 repr(C) 도 정의돼 있지만,
+// 다른 언어에서 그걸 정확히 표현하기 어렵습니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">배치를 테스트로 고정한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크기·오프셋을 검증하세요 ★</h4>
+      <pre class="code" data-lang="rust"><code>use std::mem::{size_of, align_of, offset_of};
+
+// 컴파일 타임 검증 — 배치가 바뀌면 빌드가 실패합니다 ★
+const _: () = {
+    assert!(size_of::&lt;Header&gt;() == 16);
+    assert!(align_of::&lt;Header&gt;() == 8);
+    assert!(offset_of!(Header, kind) == 0);
+    assert!(offset_of!(Header, len) == 8);
+};
+
+#[test]
+fn layout_is_stable() {
+    assert_eq!(size_of::&lt;Point&gt;(), 16);
+    assert_eq!(size_of::&lt;Status&gt;(), 4);
+    assert_eq!(size_of::&lt;Handle&gt;(), size_of::&lt;*mut c_void&gt;());
+}
+
+// ★ 왜 중요한가
+//   필드를 하나 추가하면 크기가 바뀌고, 이미 배포된 다른 언어의
+//   바인딩이 전부 깨집니다. 그것도 조용히 (f09)
+//   이 테스트가 있으면 '의도한 변경'인지 리뷰에서 드러납니다.
+
+// C 헤더와 대조하려면 (f04 의 cbindgen 이 대개 해결)
+//   빌드에서 헤더를 생성하고, C 컴파일러로 static_assert 를 돌리는
+//   테스트를 두는 팀도 있습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">플랫폼별 차이 주의</h4>
+      <pre class="code" data-lang="text"><code>★ 플랫폼마다 다른 것들
+  · usize / size_t         64비트: 8, 32비트·wasm32: 4 ★
+  · long                   리눅스 64: 8, 윈도우 64: 4 ★★ 가장 흔한 함정
+  · c_char                 x86: signed, ARM: unsigned
+  · 구조체 정렬            대체로 같지만 ARM32 등에서 다를 수 있음
+  · 엔디안                 대부분 리틀엔디안이지만 명시하는 것이 안전
+
+★ 대응
+  · 고정 크기 타입만 쓰세요: i32 · u64 · f64 ★
+    long · int 를 인터페이스에 두지 마세요
+  · 크기가 필요하면 u64 로 통일 (usize 대신)
+  · 바이트 순서는 문서에 명시하고, 필요하면 to_le_bytes (🔐 o04)
+
+// C 타입이 필요하면 libc 를 쓰세요 (플랫폼별로 올바르게 정의됨)
+use libc::{c_int, c_long, c_char, size_t};
+
+// 검증
+#[test]
+fn no_platform_dependent_types() {
+    // 인터페이스 구조체에 usize 가 없는지 리뷰 항목으로 두세요
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>윈도우의 <code>long</code> 은 4바이트</b>입니다(LLP64). 리눅스는 8바이트(LP64).
+        C 헤더에서 <code>long</code> 을 보면 <b>어느 플랫폼용인지 반드시 확인</b>하세요 —
+        Rust 쪽에서 <code>i64</code> 로 매핑하면 윈도우에서 깨집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">배치를 눈으로 확인하기</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">도구</h4>
+      <pre class="code" data-lang="bash"><code># Rust 쪽 — 타입 크기 전부 출력
+cargo +nightly rustc --release -- -Zprint-type-sizes | grep -A 5 "Header"
+
+# C 쪽 — 헤더의 배치 확인
+cat &gt; t.c &lt;&lt;'EOF'
+#include &lt;stdio.h&gt;
+#include &lt;stddef.h&gt;
+#include "mylib.h"
+int main(void) {
+    printf("size=%zu align=%zu\n", sizeof(Header), _Alignof(Header));
+    printf("kind@%zu len@%zu\n", offsetof(Header, kind), offsetof(Header, len));
+    return 0;
+}
+EOF
+gcc t.c -o t &amp;&amp; ./t
+
+# 파이썬 ctypes 쪽 (f05)
+python -c "
+import ctypes
+class Header(ctypes.Structure):
+    _fields_ = [('kind', ctypes.c_uint8), ('len', ctypes.c_uint32)]
+print(ctypes.sizeof(Header))
+print(Header.len.offset)"
+
+# ★ 세 곳의 숫자가 같아야 합니다. 다르면 그 자리가 버그입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">바이트를 직접 들여다보기</h4>
+      <pre class="code" data-lang="rust"><code>// 구조체의 실제 바이트를 덤프해 보기 (디버깅용)
+fn dump&lt;T&gt;(v: &amp;T) {
+    let p = v as *const T as *const u8;
+    let bytes = unsafe { std::slice::from_raw_parts(p, size_of::&lt;T&gt;()) };
+    for (i, b) in bytes.iter().enumerate() {
+        if i % 8 == 0 { print!("\n{i:04x}: "); }
+        print!("{b:02x} ");
+    }
+    println!();
+}
+
+let h = Header { kind: 1, len: 0x1234 };
+dump(&amp;h);
+// 0000: 01 00 00 00 34 12 00 00     ← 패딩과 리틀엔디안이 보입니다 ★
+
+// 안전한 대안 — bytemuck 크레이트
+// #[derive(bytemuck::Pod, bytemuck::Zeroable)]
+// #[repr(C)]
+// struct Header { kind: u32, len: u32 }
+// let bytes: &amp;[u8] = bytemuck::bytes_of(&amp;h);     // ✅ unsafe 없이
+
+// zerocopy 크레이트도 같은 목적입니다
+//   바이트 ↔ 구조체 변환을 컴파일 타임에 검증합니다 (🔬 d08)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>바이너리 프로토콜을 다룬다면 <code>bytemuck</code> 이나 <code>zerocopy</code></b> 를 쓰세요.
+        <code>unsafe</code> 캐스팅을 직접 쓰지 않고도
+        <b>정렬·크기·패딩 안전성을 컴파일 타임에 검증</b>해 줍니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> FFI 로 나가는 구조체에는 <b>반드시 <code>#[repr(C)]</code></b>.
+    빠뜨리면 <b>크래시 없이 값만 조용히 깨집니다</b>.
+    <b>고정 크기 타입(<code>i32</code>·<code>u64</code>·<code>f64</code>)만</b> 쓰고 <code>long</code>·<code>usize</code> 는 피하세요.
+    <b>크기·오프셋을 <code>const</code> assert 로 고정</b>해 두면 실수로 바뀌는 것을 빌드가 막아 줍니다.</div>
+</section>
+
+
+<!-- ==================== f04 ==================== -->
+<section class="sec" id="f04">
+  <div class="sec-head rv">
+    <span class="no">FFI 04</span>
+    <h2>cbindgen — <span class="t">헤더를 손으로 쓰지 마세요</span></h2>
+    <p class="lead">
+      <code>.h</code> 헤더를 손으로 쓰면 <b>반드시 코드와 어긋납니다</b>.
+      필드 하나 추가했는데 헤더를 안 고치면 <b>조용히 값이 깨집니다</b>(f03).
+      <b>cbindgen 을 빌드에 붙여</b> 헤더가 항상 코드에서 생성되게 하세요.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">붙이는 방법</h4>
+      <pre class="code" data-lang="toml"><code># Cargo.toml
+[build-dependencies]
+cbindgen = "0.27"</code></pre>
+      <pre class="code" data-lang="rust"><code>// build.rs
+fn main() {
+    let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let out = std::path::Path::new(&amp;crate_dir).join("include/mylib.h");
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+
+    cbindgen::generate(&amp;crate_dir)
+        .expect("cbindgen 실패")
+        .write_to_file(&amp;out);
+
+    println!("cargo:rerun-if-changed=src/ffi.rs");   // ★ 바뀔 때만 재생성
+}</code></pre>
+      <pre class="code" data-lang="toml"><code># cbindgen.toml
+language = "C"                 # 또는 "C++"
+include_guard = "MYLIB_H"
+autogen_warning = "/* 자동 생성 파일입니다. 고치지 마세요. */"
+header = "/* mylib - MIT License */"
+cpp_compat = true              # C++ 에서도 쓰이게 extern "C" 를 감쌉니다 ★
+
+[export]
+prefix = ""
+include = ["Point", "Status", "Handle"]    # 내보낼 타입을 명시
+exclude = ["Internal"]
+
+[enum]
+prefix_with_name = true        # Status_Ok 형태로 (C 이름 충돌 방지)
+
+[parse]
+parse_deps = false</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">생성 결과</h4>
+      <pre class="code" data-lang="rust"><code>// src/ffi.rs
+#[repr(C)]
+pub struct Point { pub x: f64, pub y: f64 }
+
+#[repr(i32)]
+pub enum Status { Ok = 0, NotFound = 1 }
+
+/// 두 점 사이의 거리를 구합니다.
+#[no_mangle]
+pub extern "C" fn mylib_distance(a: Point, b: Point) -&gt; f64 { }
+
+/// 핸들을 엽니다. 실패하면 NULL 을 반환합니다.
+#[no_mangle]
+pub extern "C" fn mylib_open(path: *const c_char) -&gt; *mut Handle { }</code></pre>
+      <pre class="code" data-lang="c"><code>/* include/mylib.h — 자동 생성 */
+#ifndef MYLIB_H
+#define MYLIB_H
+
+#include &lt;stdarg.h&gt;
+#include &lt;stdbool.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdlib.h&gt;
+
+typedef enum Status { Status_Ok = 0, Status_NotFound = 1 } Status;
+typedef struct Handle Handle;          /* 불투명 타입 ★ */
+typedef struct Point { double x; double y; } Point;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* 두 점 사이의 거리를 구합니다. */
+double mylib_distance(Point a, Point b);
+
+/* 핸들을 엽니다. 실패하면 NULL 을 반환합니다. */
+struct Handle *mylib_open(const char *path);
+
+#ifdef __cplusplus
+}
+#endif
+#endif /* MYLIB_H */</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>///</code> 문서 주석이 그대로 헤더 주석이 됩니다</b> —
+        Rust 쪽에 한 번 쓰면 <b>C 헤더 · <code>cargo doc</code> 두 곳에서</b> 쓰입니다(r11).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">다른 언어의 바인딩도 생성</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언어별 생성 도구 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>대상</th><th>도구</th></tr>
+        <tr><td>C / C++</td><td><b>cbindgen</b></td></tr>
+        <tr><td>C#</td><td>csbindgen</td></tr>
+        <tr><td>파이썬·Kotlin·Swift</td><td><b>UniFFI</b> ★</td></tr>
+        <tr><td>Dart / Flutter</td><td>flutter_rust_bridge</td></tr>
+        <tr><td>Go</td><td>cgo + cbindgen 헤더</td></tr>
+        <tr><td>자바</td><td>JNA + cbindgen 헤더</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ UniFFI (Mozilla) — 한 정의에서 여러 언어 바인딩
+  · .udl 파일이나 매크로로 인터페이스를 정의
+  · 파이썬 · Kotlin · Swift · Ruby 바인딩을 자동 생성
+  · 에러 · Option · 컬렉션까지 알아서 매핑합니다 ★
+  · 모바일(Android/iOS) 앱에서 Rust 코어를 쓸 때 사실상 표준
+
+  단점
+  · 생성된 코드가 두껍고 오버헤드가 있습니다
+  · 성능이 극한으로 중요한 경로에는 부적합
+
+★ 판단
+  · 언어 2~3개 · 함수 몇 개        → 직접 C ABI (이 탭)
+  · 언어 4개+ · 타입이 풍부        → UniFFI
+  · 모바일 크로스 플랫폼           → UniFFI</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">헤더가 코드와 맞는지 검사</h4>
+      <pre class="code" data-lang="bash"><code># ① 헤더를 커밋하고, CI 에서 재생성 후 diff ★
+cargo build
+git diff --exit-code include/mylib.h
+#   차이가 있으면 CI 실패 → 헤더를 커밋하지 않은 것
+
+# ② C 컴파일러로 헤더 자체를 검증
+gcc -fsyntax-only -x c include/mylib.h
+g++ -fsyntax-only -x c++ include/mylib.h     # cpp_compat 확인
+
+# ③ 실제로 링크해 보기 (통합 테스트) ★
+cat &gt; tests/smoke.c &lt;&lt;'EOF'
+#include "mylib.h"
+#include &lt;assert.h&gt;
+int main(void) {
+    Point a = {0,0}, b = {3,4};
+    assert(mylib_distance(a, b) == 5.0);
+    return 0;
+}
+EOF
+gcc tests/smoke.c -Iinclude -Ltarget/release -lmylib -o smoke
+LD_LIBRARY_PATH=target/release ./smoke
+
+# ★ 이 C 스모크 테스트를 CI 에 넣으면
+#   "Rust 에서는 되는데 C 에서 안 되는" 문제를 배포 전에 잡습니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">패키징까지</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포에 담을 것</h4>
+      <pre class="code" data-lang="text"><code>배포 아티팩트 (플랫폼별)
+  include/mylib.h              헤더 (플랫폼 무관)
+  lib/libmylib.so              리눅스 동적
+  lib/libmylib.a               리눅스 정적
+  lib/mylib.dll + mylib.lib    윈도우
+  lib/libmylib.dylib           맥
+  mylib.pc                     pkg-config 파일 ★
+  LICENSE · README
+
+# pkg-config 파일 예 (C 개발자가 편해집니다)
+prefix=/usr/local
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: mylib
+Description: 빠른 텍스트 처리
+Version: 1.2.0
+Libs: -L${libdir} -lmylib
+Cflags: -I${includedir}
+
+# 쓰는 쪽
+gcc app.c $(pkg-config --cflags --libs mylib) -o app</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버전 정보를 헤더에 넣기</h4>
+      <pre class="code" data-lang="rust"><code>// 컴파일 타임 상수는 cbindgen 이 #define 으로 내보냅니다
+pub const MYLIB_VERSION_MAJOR: u32 = 1;
+pub const MYLIB_VERSION_MINOR: u32 = 2;
+
+// 런타임 확인 함수도 함께 (f09)
+#[no_mangle]
+pub extern "C" fn mylib_version() -&gt; u32 {
+    (MYLIB_VERSION_MAJOR &lt;&lt; 16) | MYLIB_VERSION_MINOR
+}
+
+#[no_mangle]
+pub extern "C" fn mylib_version_string() -&gt; *const c_char {
+    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr() as *const c_char
+}
+// ★ 문자열 리터럴에 \0 을 붙이면 해제가 필요 없는 정적 C 문자열이 됩니다 (f06)</code></pre>
+      <pre class="code" data-lang="c"><code>/* 쓰는 쪽에서 헤더와 라이브러리 버전이 맞는지 확인 */
+if ((mylib_version() &gt;&gt; 16) != MYLIB_VERSION_MAJOR) {
+    fprintf(stderr, "헤더와 라이브러리 버전 불일치\n");
+    return 1;
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>헤더와 <code>.so</code> 버전이 어긋나는 사고</b>는 흔합니다 —
+        시스템에 옛 버전이 깔려 있는데 새 헤더로 컴파일하는 경우입니다.
+        <b>런타임 버전 확인 함수</b>를 넣어 두면 <b>즉시 드러납니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">cbindgen 의 한계와 대응</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">표현 못 하는 것들</h4>
+      <pre class="code" data-lang="rust"><code>// ① 제네릭 — 구체화한 타입만 내보낼 수 있습니다
+// pub struct Wrapper&lt;T&gt;(T);                  // ❌ 헤더에 안 나옴
+#[repr(C)] pub struct WrapperU32 { inner: u32 }  // ✅ 구체 타입으로
+
+// ② 트레이트 객체 · 클로저 — 불가능
+//    → 함수 포인터 + user data 로 (f07)
+
+// ③ 라이프타임이 있는 타입 — 무시됩니다
+//    → 소유권 규약을 문서로 (f06)
+
+// ④ 매크로로 생성한 항목 — parse 설정에 따라 놓칠 수 있습니다
+//    → [parse] expand = ["mycrate"] 로 매크로 확장 후 파싱 (느립니다)
+
+// ⑤ 의존 크레이트의 타입
+//    [parse] parse_deps = true, include = ["othercrate"]
+
+// 수동 보완 — 헤더에 직접 넣을 코드
+// cbindgen.toml
+//   after_includes = """
+//   #define MYLIB_MAX_SIZE 4096
+//   typedef void (*MylibLogFn)(const char *msg);
+//   """</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 를 위한 배려</h4>
+      <pre class="code" data-lang="toml"><code># cbindgen.toml
+language = "C++"               # C++ 헤더로 생성
+namespace = "mylib"            # 네임스페이스로 감싸기
+[enum]
+enum_class = true              # enum class 로 (타입 안전)</code></pre>
+      <pre class="code" data-lang="cpp"><code>// C++ 사용자를 위한 RAII 래퍼를 함께 제공하면 친절합니다
+namespace mylib {
+class Handle {
+public:
+    explicit Handle(const char* path) : h_(mylib_open(path)) {
+        if (!h_) throw std::runtime_error(last_error());
+    }
+    ~Handle() { if (h_) mylib_close(h_); }
+    Handle(Handle&amp;&amp; o) noexcept : h_(o.h_) { o.h_ = nullptr; }
+    Handle(const Handle&amp;) = delete;
+
+    std::vector&lt;uint8_t&gt; process(std::span&lt;const uint8_t&gt; in);
+private:
+    ::Handle* h_;
+};
+}
+// ★ C ABI 는 최소 공통분모이고, 각 언어에서 그 언어다운 래퍼를 씌우는 것이
+//   이 방식의 정석입니다 (🐍 y02 · 🟨 j06 과 같은 원칙)</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 헤더는 <b><code>build.rs</code> + cbindgen 으로 자동 생성</b>하고,
+    <b>CI 에서 재생성 후 <code>git diff --exit-code</code></b> 로 어긋남을 막으세요.
+    <b>C 스모크 테스트</b>를 하나 두면 링크 문제를 배포 전에 잡습니다.
+    언어가 여럿이면 <b>UniFFI</b> 도 검토하세요.</div>
+</section>
+
+
+<!-- ==================== f05 ==================== -->
+<section class="sec" id="f05">
+  <div class="sec-head rv">
+    <span class="no">FFI 05</span>
+    <h2>파이썬 <span class="t">ctypes</span> 로 부르기 — 설치도 빌드도 없이</h2>
+    <p class="lead">
+      만든 <code>.so</code>/<code>.dll</code> 을 <b>파이썬 표준 라이브러리만으로</b> 바로 부를 수 있습니다.
+      PyO3 처럼 빌드할 필요도, 패키징할 필요도 없습니다.
+      <b>프로토타입과 검증에 특히 유용</b>합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가장 짧은 예제</h4>
+      <pre class="code" data-lang="rust"><code>// src/lib.rs
+#[no_mangle]
+pub extern "C" fn mylib_add(a: i32, b: i32) -&gt; i32 { a + b }
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_sum(p: *const f64, n: usize) -&gt; f64 {
+    if p.is_null() || n == 0 { return 0.0; }
+    std::slice::from_raw_parts(p, n).iter().sum()
+}</code></pre>
+      <pre class="code" data-lang="python"><code>import ctypes, sys, pathlib
+
+# 플랫폼별 파일 이름
+name = {"linux": "libmylib.so", "darwin": "libmylib.dylib",
+        "win32": "mylib.dll"}[sys.platform]
+lib = ctypes.CDLL(str(pathlib.Path("target/release") / name))
+
+# ★ 반드시 시그니처를 지정하세요 (안 하면 int 로 가정합니다)
+lib.mylib_add.argtypes = [ctypes.c_int32, ctypes.c_int32]
+lib.mylib_add.restype  = ctypes.c_int32
+
+lib.mylib_sum.argtypes = [ctypes.POINTER(ctypes.c_double), ctypes.c_size_t]
+lib.mylib_sum.restype  = ctypes.c_double
+
+print(lib.mylib_add(1, 2))          # 3
+
+# numpy 배열을 그대로 넘기기 — 복사 없음 ★
+import numpy as np
+a = np.random.random(1_000_000)
+ptr = a.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+print(lib.mylib_sum(ptr, a.size))</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>argtypes</code>·<code>restype</code> 을 빠뜨리면</b> ctypes 가 인자를 <code>int</code> 로 가정합니다.
+        <code>f64</code> 를 넘기면 <b>값이 깨지거나 크래시</b>합니다.
+        <b>모든 함수에 반드시 지정</b>하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">타입 대응표 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>Rust</th><th>ctypes</th></tr>
+        <tr><td><code>i32</code></td><td><code>c_int32</code></td></tr>
+        <tr><td><code>u64</code></td><td><code>c_uint64</code></td></tr>
+        <tr><td><code>usize</code></td><td><code>c_size_t</code></td></tr>
+        <tr><td><code>f64</code></td><td><code>c_double</code></td></tr>
+        <tr><td><code>bool</code></td><td><code>c_bool</code></td></tr>
+        <tr><td><code>*const c_char</code></td><td><code>c_char_p</code></td></tr>
+        <tr><td><code>*mut u8</code></td><td><code>POINTER(c_ubyte)</code></td></tr>
+        <tr><td><code>*mut c_void</code></td><td><code>c_void_p</code></td></tr>
+        <tr><td><code>#[repr(C)]</code> struct</td><td><code>Structure</code></td></tr>
+        <tr><td>함수 포인터</td><td><code>CFUNCTYPE</code></td></tr>
+      </table></div>
+      <pre class="code" data-lang="python"><code># 구조체 (f03 과 배치가 일치해야 합니다)
+class Point(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
+
+lib.mylib_distance.argtypes = [Point, Point]
+lib.mylib_distance.restype  = ctypes.c_double
+print(lib.mylib_distance(Point(0, 0), Point(3, 4)))    # 5.0
+
+# ★ 검증 습관
+assert ctypes.sizeof(Point) == 16      # Rust 쪽 assert 와 대조 (f03)
+
+# 문자열
+lib.mylib_count_words.argtypes = [ctypes.c_char_p]
+lib.mylib_count_words.restype  = ctypes.c_size_t
+lib.mylib_count_words("안녕 세상".encode("utf-8"))    # bytes 로 넘깁니다 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">출력 버퍼와 에러 처리</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 번 호출 패턴 (f02 의 ①)</h4>
+      <pre class="code" data-lang="python"><code>lib.mylib_encode.argtypes = [
+    ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,   # 입력
+    ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,   # 출력 버퍼
+    ctypes.POINTER(ctypes.c_size_t),                   # 실제 길이
+]
+lib.mylib_encode.restype = ctypes.c_int32
+
+def encode(data: bytes) -&gt; bytes:
+    src = (ctypes.c_ubyte * len(data)).from_buffer_copy(data)
+    need = ctypes.c_size_t(0)
+
+    # ① 필요한 크기 물어보기 (out=NULL)
+    rc = lib.mylib_encode(src, len(data), None, 0, ctypes.byref(need))
+    if rc not in (0, -2):
+        raise RuntimeError(last_error())
+
+    # ② 버퍼를 만들어 다시 호출
+    out = (ctypes.c_ubyte * need.value)()
+    rc = lib.mylib_encode(src, len(data), out, need.value, ctypes.byref(need))
+    if rc != 0:
+        raise RuntimeError(last_error())
+    return bytes(out[:need.value])</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러 메시지 받기 (f09)</h4>
+      <pre class="code" data-lang="python"><code>lib.mylib_last_error.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+lib.mylib_last_error.restype  = ctypes.c_size_t
+
+def last_error() -&gt; str:
+    buf = ctypes.create_string_buffer(512)
+    n = lib.mylib_last_error(buf, len(buf))
+    return buf.value[:n].decode("utf-8", errors="replace")
+
+# 얇은 파이썬 래퍼로 감싸 예외로 바꾸기 ★
+class MylibError(Exception): pass
+
+def check(rc: int) -&gt; None:
+    if rc != 0:
+        raise MylibError(f"[{rc}] {last_error()}")
+
+def process(data: bytes) -&gt; bytes:
+    ...
+    check(lib.mylib_process(...))
+
+# ★ 이 래퍼 층이 있으면 쓰는 사람은 C ABI 를 전혀 모릅니다
+#   (PyO3 쪽의 파이썬 래퍼와 같은 역할 · 🐍 y02)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">ctypes vs PyO3 vs cffi</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고르는 기준 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th></th><th>ctypes</th><th>PyO3</th></tr>
+        <tr><td>빌드</td><td><b>불필요</b></td><td>maturin</td></tr>
+        <tr><td>호출 비용</td><td>높음 ★</td><td><b>낮음</b></td></tr>
+        <tr><td>타입 안전</td><td>없음</td><td><b>있음</b></td></tr>
+        <tr><td>파이썬다움</td><td>낮음</td><td><b>높음</b></td></tr>
+        <tr><td>GIL 해제</td><td>자동 ★</td><td>명시</td></tr>
+        <tr><td>배포</td><td>직접</td><td><b>wheel</b></td></tr>
+        <tr><td>다른 언어 공유</td><td><b>가능</b></td><td>불가</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>★ 판단
+  · 파이썬만 쓰고 성능이 중요        → PyO3 (🐍 y02)
+  · 여러 언어에서 공유해야 함        → C ABI + ctypes
+  · 이미 있는 .so 를 잠깐 써 보기    → ctypes ★
+  · 호출이 잦고 데이터가 작음        → PyO3 (ctypes 는 호출 비용이 큽니다)
+  · C 라이브러리 래핑                → cffi 또는 bindgen (f08)
+
+★ ctypes 호출 비용
+  파이썬에서 인자를 변환하고 FFI 를 거치므로
+  PyO3 보다 눈에 띄게 비쌉니다 (보통 수 배 · 직접 재 보세요 · ⚡ e01)
+  → 루프에서 수백만 번 부르면 차이가 큽니다. 배치로 묶으세요 (🐍 y01)
+
+★ ctypes 의 숨은 이점
+  ctypes 는 호출 중 GIL 을 자동으로 놓습니다 ★
+  → 긴 계산이라면 다른 파이썬 스레드가 그동안 돕니다 (🐍 y07)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">라이브러리를 찾는 방법</h4>
+      <pre class="code" data-lang="python"><code>import ctypes, ctypes.util, sys, pathlib
+
+# ① 패키지 안에 함께 배포 (권장) ★
+here = pathlib.Path(__file__).parent
+name = {"linux": "libmylib.so", "darwin": "libmylib.dylib",
+        "win32": "mylib.dll"}[sys.platform]
+lib = ctypes.CDLL(str(here / name))
+
+# ② 시스템에서 찾기
+path = ctypes.util.find_library("mylib")
+lib = ctypes.CDLL(path)
+
+# ③ 환경 변수로 재정의 가능하게
+import os
+lib = ctypes.CDLL(os.getenv("MYLIB_PATH", str(here / name)))
+
+# 윈도우 주의 ★
+#   · CDLL 은 cdecl, WinDLL 은 stdcall — extern "C" 면 CDLL
+#   · 파이썬 3.8+ 는 DLL 검색 경로가 제한됩니다
+os.add_dll_directory(str(here))          # 의존 DLL 이 있을 때 필요
+
+# 진단
+#   리눅스: LD_DEBUG=libs python app.py
+#   맥: DYLD_PRINT_LIBRARIES=1
+#   윈도우: Dependencies.exe 또는 Process Monitor</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">콜백과 수명 함정</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬 함수를 콜백으로 넘기기 (f07)</h4>
+      <pre class="code" data-lang="python"><code>CALLBACK = ctypes.CFUNCTYPE(None, ctypes.c_float, ctypes.c_void_p)
+#                           반환    인자1          인자2
+
+lib.mylib_process.argtypes = [ctypes.c_char_p, CALLBACK, ctypes.c_void_p]
+
+def on_progress(p, user):
+    print(f"{p*100:.0f}%")
+
+cb = CALLBACK(on_progress)        # ★ 반드시 변수에 보관하세요
+lib.mylib_process(b"data", cb, None)
+
+# ❗ 가장 흔한 크래시 원인
+#   lib.mylib_process(b"data", CALLBACK(on_progress), None)
+#   → 임시 객체가 즉시 GC 되어 함수 포인터가 무효가 됩니다 ★
+#   반드시 파이썬 쪽에서 참조를 살려 두세요 (전역이나 인스턴스 필드에)
+
+# 콜백 안에서 예외가 나면?
+#   ctypes 가 stderr 에 출력하고 무시합니다 (C 로 전파되지 않습니다)
+#   → 콜백 안을 try/except 로 감싸고 플래그로 알리세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메모리 수명 주의 ★</h4>
+      <pre class="code" data-lang="python"><code># ❌ 임시 객체의 포인터를 넘기기
+lib.process(bytes(data))            # 호출 중에는 안전하지만
+p = ctypes.cast(bytes(data), ctypes.c_char_p)   # ← 이후엔 무효 ★
+
+# ✅ 버퍼를 변수로 유지
+buf = (ctypes.c_ubyte * len(data)).from_buffer_copy(data)
+lib.process(buf, len(data))         # buf 가 살아 있는 동안 유효
+
+# ✅ 제자리 수정이 필요하면 from_buffer (복사 없음)
+arr = bytearray(data)
+buf = (ctypes.c_ubyte * len(arr)).from_buffer(arr)   # ★ arr 를 직접 봅니다
+lib.invert(buf, len(arr))
+print(arr)                          # 바뀌어 있습니다
+
+# numpy 는 .ctypes 로 (앞의 예제)
+#   단, 배열이 GC 되지 않도록 참조를 유지해야 합니다
+
+# ★ Rust 쪽이 포인터를 보관한다면 (콜백 등록 등)
+#   파이썬 쪽 객체의 수명을 명시적으로 관리해야 합니다.
+#   이 경계에서 나는 크래시는 재현이 어렵습니다 — 문서에 규약을 적으세요 (f06)</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>ctypes 는 안전망이 없습니다</b> — 시그니처를 틀리게 적으면
+        <b>조용히 값이 깨지거나 세그폴트</b>가 납니다.
+        그래서 <b>얇은 파이썬 래퍼 모듈</b>을 만들어
+        <b>시그니처를 한 곳에서만 관리</b>하는 것이 정석입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>ctypes.CDLL</code> 로 로드하고 <b><code>argtypes</code>·<code>restype</code> 을 반드시 지정</b>하세요.
+    numpy 배열은 <code>.ctypes.data_as()</code> 로 <b>복사 없이</b> 넘어갑니다.
+    <b>콜백 객체는 변수에 보관</b>해야 하고(GC 주의), <b>얇은 파이썬 래퍼</b>로 감싸
+    시그니처와 에러 변환을 한 곳에 모으세요.</div>
+</section>
+
+
+<!-- ==================== f06 ==================== -->
+<section class="sec" id="f06">
+  <div class="sec-head rv">
+    <span class="no">FFI 06</span>
+    <h2>문자열 · <span class="t">메모리 소유권 규약</span></h2>
+    <p class="lead">
+      FFI 에서 <b>가장 사고가 잦은 자리</b>입니다.
+      “이 메모리는 누가 해제하나”를 정하지 않으면 <b>반드시 새거나 두 번 해제</b>됩니다.
+      규칙은 단순합니다 — <b>할당한 쪽이 해제한다</b>.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문자열을 돌려주는 정석 ★</h4>
+      <pre class="code" data-lang="rust"><code>use std::ffi::{CString, CStr, c_char};
+
+#[no_mangle]
+pub extern "C" fn mylib_greet(name: *const c_char) -&gt; *mut c_char {
+    let name = unsafe {
+        if name.is_null() { return std::ptr::null_mut(); }
+        match CStr::from_ptr(name).to_str() {
+            Ok(s) =&gt; s,
+            Err(_) =&gt; return std::ptr::null_mut(),
+        }
+    };
+    let msg = format!("안녕 {name}");
+    match CString::new(msg) {                    // 내부 널이 있으면 실패
+        Ok(c) =&gt; c.into_raw(),                   // ★ 소유권을 C 로 넘김
+        Err(_) =&gt; std::ptr::null_mut(),
+    }
+}
+
+// ★ 반드시 짝이 되는 해제 함수를 제공하세요
+#[no_mangle]
+pub unsafe extern "C" fn mylib_string_free(s: *mut c_char) {
+    if s.is_null() { return; }
+    drop(CString::from_raw(s));                  // 다시 받아 해제
+}</code></pre>
+      <pre class="code" data-lang="c"><code>char *msg = mylib_greet("현우");
+if (msg) { printf("%s\n", msg); mylib_string_free(msg); }   /* ★ 반드시 */</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>free()</code> 로 해제하면 안 됩니다</b> — Rust 의 할당자와 C 의 <code>malloc</code> 은
+        다를 수 있습니다. <b>반드시 라이브러리가 제공한 해제 함수</b>를 쓰게 하고,
+        헤더 주석에 명시하세요(f04).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규약을 이름으로 드러내기 ★</h4>
+      <pre class="code" data-lang="text"><code>★ 네 가지 패턴과 이름 규칙
+
+① 호출자가 버퍼를 준다 — 해제 불필요 (가장 안전) ★
+   int32_t mylib_encode(const uint8_t *in, size_t in_len,
+                        uint8_t *out, size_t out_cap, size_t *out_len);
+
+② 라이브러리가 할당 — 짝이 되는 free 를 제공
+   char *mylib_greet(const char *name);
+   void  mylib_string_free(char *s);          ← 이름에 free 를 넣으세요
+
+③ 정적 문자열 반환 — 해제 금지
+   const char *mylib_version_string(void);    ← const 로 표시 + 문서에 명시
+
+④ 콜백으로 흘려보냄 — 콜백 안에서만 유효
+   void mylib_stream(..., void (*cb)(const uint8_t*, size_t, void*), void*);
+
+★ 문서에 반드시 적을 것 (헤더 주석으로 · f04)
+   · 반환된 포인터를 누가 해제하는가
+   · 해제 함수 이름
+   · NULL 반환이 가능한가
+   · 인자 포인터를 라이브러리가 보관하는가 (수명!)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">버퍼와 Box 넘기기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Vec 을 넘기고 되받기</h4>
+      <pre class="code" data-lang="rust"><code>#[repr(C)]
+pub struct Buf { pub ptr: *mut u8, pub len: usize, pub cap: usize }
+
+#[no_mangle]
+pub extern "C" fn mylib_encode_alloc(input: *const u8, len: usize) -&gt; Buf {
+    let Some(src) = (unsafe { to_slice(input, len) }) else {
+        return Buf { ptr: std::ptr::null_mut(), len: 0, cap: 0 };
+    };
+    let mut v = encode(src);
+    let b = Buf { ptr: v.as_mut_ptr(), len: v.len(), cap: v.capacity() };
+    std::mem::forget(v);            // ★ Rust 가 해제하지 않게 (🔐 o01)
+    b
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_buf_free(b: Buf) {
+    if b.ptr.is_null() { return; }
+    drop(Vec::from_raw_parts(b.ptr, b.len, b.cap));   // ★ cap 이 반드시 필요
+}
+
+// ❗ cap 을 안 돌려주면 Vec 을 복원할 수 없습니다.
+//   len 만 알고 from_raw_parts(ptr, len, len) 하면
+//   할당 크기가 달라 UB 입니다 ★
+
+// 더 안전한 대안 — into_boxed_slice 로 cap == len 을 보장 (🔐 o04)
+let boxed: Box&lt;[u8]&gt; = v.into_boxed_slice();
+let ptr = Box::into_raw(boxed) as *mut u8;      // len 만 있으면 복원 가능</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">불투명 핸들 — 가장 흔한 패턴 ★</h4>
+      <pre class="code" data-lang="rust"><code>pub struct Session { /* 내부는 감춥니다 */ }
+
+#[no_mangle]
+pub extern "C" fn mylib_session_new(cfg: *const c_char) -&gt; *mut Session {
+    match Session::new(cfg) {
+        Ok(s) =&gt; Box::into_raw(Box::new(s)),      // ★ 힙에 두고 포인터만
+        Err(_) =&gt; std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_session_free(s: *mut Session) {
+    if s.is_null() { return; }
+    drop(Box::from_raw(s));                       // Drop 도 여기서 돕니다
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_session_run(s: *mut Session, x: i32) -&gt; i32 {
+    let Some(sess) = s.as_mut() else { return -1 };   // ★ 널 검사
+    sess.run(x)
+}</code></pre>
+      <pre class="code" data-lang="c"><code>/* 헤더에는 내용 없는 타입만 나옵니다 (cbindgen 이 생성 · f04) */
+typedef struct Session Session;
+Session *mylib_session_new(const char *cfg);
+void     mylib_session_free(Session *s);
+int32_t  mylib_session_run(Session *s, int32_t x);</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>불투명 핸들이 정석인 이유</b> — 내부 구조가 헤더에 안 나오므로
+        <b>필드를 자유롭게 바꿔도 사용자 코드가 안 깨집니다</b>.
+        C 라이브러리(<code>FILE*</code>, <code>sqlite3*</code>)가 전부 이 방식입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">누수와 이중 해제를 잡는다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">검사 방법 ★</h4>
+      <pre class="code" data-lang="bash"><code># ① 반복 호출하며 메모리 관찰 (가장 실용적)
+python -c "
+import ctypes, os, psutil
+lib = ctypes.CDLL('./libmylib.so')
+p = psutil.Process()
+for i in range(1_000_000):
+    s = lib.mylib_greet(b'test')
+    lib.mylib_string_free(s)
+    if i % 100_000 == 0: print(i, p.memory_info().rss // 1024, 'KB')"
+#   ★ RSS 가 계속 늘면 누수입니다
+
+# ② valgrind (리눅스 · 느립니다)
+valgrind --leak-check=full --show-leak-kinds=all ./smoke
+
+# ③ ASan (더 빠르고 정확합니다)
+RUSTFLAGS="-Zsanitizer=address" cargo +nightly build \
+  --target x86_64-unknown-linux-gnu
+#   이중 해제 · use-after-free 를 즉시 잡습니다 ★
+
+# ④ Miri — unsafe 로직 검증 (FFI 경계 자체는 못 봅니다 · 🔬 d07)
+cargo +nightly miri test</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">방어적으로 설계하기</h4>
+      <pre class="code" data-lang="rust"><code>// ① 해제 후 널로 만들게 유도 — 포인터의 포인터를 받기
+#[no_mangle]
+pub unsafe extern "C" fn mylib_session_free(s: *mut *mut Session) {
+    if s.is_null() || (*s).is_null() { return; }
+    drop(Box::from_raw(*s));
+    *s = std::ptr::null_mut();          // ★ 호출자의 포인터도 널로
+}
+// C: mylib_session_free(&amp;sess);   → 이중 해제가 구조적으로 막힙니다
+
+// ② 매직 넘버로 유효성 검사 (디버그 빌드에서만)
+#[repr(C)]
+pub struct Session { magic: u32, /* … */ }
+const MAGIC: u32 = 0x4D59_4C42;
+
+unsafe fn as_session&lt;'a&gt;(p: *mut Session) -&gt; Option&lt;&amp;'a mut Session&gt; {
+    let s = p.as_mut()?;
+    debug_assert_eq!(s.magic, MAGIC, "무효한 핸들 (이미 해제됐거나 잘못된 포인터)");
+    Some(s)
+}
+
+// ③ 해제 카운터로 테스트 (r11)
+#[cfg(test)]
+static ALIVE: AtomicUsize = AtomicUsize::new(0);
+// new 에서 +1, Drop 에서 -1 → 테스트 끝에 0 인지 확인 ★</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>이중 해제는 즉시 크래시하지 않습니다</b> — 힙이 망가진 뒤
+        <b>한참 뒤 엉뚱한 곳에서 터집니다</b>. 그래서 재현이 어렵습니다.
+        <b>ASan 을 CI 에 붙이는 것</b>이 가장 확실한 대응입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">할당자와 경계</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 free() 로 못 푸나</h4>
+      <pre class="code" data-lang="text"><code>Rust 의 기본 할당자는 시스템 malloc 을 씁니다.
+그래서 대부분의 플랫폼에서 free() 로도 '우연히' 동작합니다.
+
+★ 하지만 의존하면 안 되는 이유
+  · #[global_allocator] 를 바꾸면 즉시 깨집니다 (jemalloc · mimalloc)
+  · 윈도우에서 MSVC CRT 가 다르면 힙이 다릅니다 ★
+    (라이브러리는 /MD, 앱은 /MT 로 빌드된 경우 등)
+  · Vec 은 크기·정렬 정보를 요구합니다 (dealloc(ptr, layout))
+  · 미래에 Rust 가 할당 전략을 바꿀 수 있습니다
+
+★ 결론
+  반드시 짝이 되는 해제 함수를 제공하고,
+  헤더 주석과 문서에 "free() 를 쓰지 마세요" 를 명시하세요.
+
+// 할당자를 노출하는 방법도 있습니다 (C 쪽이 크기를 알 때)
+#[no_mangle]
+pub extern "C" fn mylib_alloc(size: usize) -&gt; *mut u8;
+#[no_mangle]
+pub extern "C" fn mylib_dealloc(p: *mut u8, size: usize);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">수명 규약을 문서로 고정하기</h4>
+      <pre class="code" data-lang="rust"><code>/// 입력 데이터를 처리합니다.
+///
+/// # 안전성
+///
+/// - `data` 는 `len` 바이트만큼 읽을 수 있는 유효한 포인터여야 합니다.
+///   `len == 0` 이면 `data` 는 NULL 이어도 됩니다.
+/// - 이 함수는 `data` 를 **보관하지 않습니다**. 반환 후 해제해도 됩니다.
+/// - 반환된 포인터는 `mylib_buf_free` 로만 해제해야 합니다.
+/// - NULL 이 반환되면 `mylib_last_error` 로 원인을 확인하세요.
+/// - 스레드 안전: 여러 스레드에서 동시에 호출해도 됩니다.
+#[no_mangle]
+pub unsafe extern "C" fn mylib_process(data: *const u8, len: usize) -&gt; Buf { }
+
+// ★ 이 다섯 항목을 모든 함수에 적으세요
+//   ① 포인터의 유효 범위
+//   ② 라이브러리가 보관하는가 (수명)
+//   ③ 반환값의 해제 책임
+//   ④ 실패 표현
+//   ⑤ 스레드 안전성
+//
+// cbindgen 이 이 주석을 헤더에 그대로 옮깁니다 (f04) —
+// 그래서 C 사용자가 헤더만 보고도 규약을 알 수 있습니다 ★</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>할당한 쪽이 해제한다</b>가 유일한 규칙입니다.
+    라이브러리가 할당했다면 <b>반드시 짝이 되는 <code>*_free</code> 함수</b>를 제공하고,
+    <b><code>free()</code> 를 쓰지 말라고 문서에 명시</b>하세요.
+    가장 안전한 것은 <b>호출자가 버퍼를 주는 방식</b>이고,
+    상태가 필요하면 <b>불투명 핸들 + <code>Box::into_raw</code></b> 가 정석입니다.</div>
+</section>
+
+
+<!-- ==================== f07 ==================== -->
+<section class="sec" id="f07">
+  <div class="sec-head rv">
+    <span class="no">FFI 07</span>
+    <h2>콜백 — <span class="t">거꾸로 부르기</span></h2>
+    <p class="lead">
+      진행률 보고, 이벤트 알림, 스트리밍 출력 — <b>Rust 가 다른 언어의 함수를 부르는</b> 자리입니다.
+      C ABI 에는 클로저가 없으므로 <b>함수 포인터 + 사용자 데이터</b> 두 개를 함께 넘기는 것이
+      전 세계 공통 관용구입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">함수 포인터 + user data ★</h4>
+      <pre class="code" data-lang="rust"><code>use std::ffi::c_void;
+
+pub type ProgressFn = extern "C" fn(progress: f32, user: *mut c_void);
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_process(
+    data: *const u8, len: usize,
+    cb: Option&lt;ProgressFn&gt;,        // ★ Option 으로 널 가능 (f03)
+    user: *mut c_void,             // 호출자의 컨텍스트를 그대로 돌려줌
+) -&gt; i32 {
+    let Some(src) = to_slice(data, len) else { return -1 };
+
+    for (i, chunk) in src.chunks(4096).enumerate() {
+        process_chunk(chunk);
+        if let Some(f) = cb {
+            f(i as f32 / (src.len() / 4096) as f32, user);    // ★ 호출
+        }
+    }
+    0
+}
+
+// ★ user 포인터가 왜 필요한가
+//   C 함수 포인터는 상태를 담을 수 없습니다 (클로저가 아님).
+//   그래서 호출자가 자기 객체 주소를 user 로 주고,
+//   콜백 안에서 그것을 다시 캐스팅해 씁니다.</code></pre>
+      <pre class="code" data-lang="c"><code>typedef struct { int count; FILE *log; } Ctx;
+
+static void on_progress(float p, void *user) {
+    Ctx *c = (Ctx *)user;                    /* ★ 되돌리기 */
+    c-&gt;count++;
+    fprintf(c-&gt;log, "%.0f%%\n", p * 100);
+}
+
+Ctx ctx = { 0, stdout };
+mylib_process(data, len, on_progress, &amp;ctx);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Rust 안에서 클로저를 넘기려면</h4>
+      <pre class="code" data-lang="rust"><code>// Rust 클로저를 C 콜백으로 변환하는 관용구 (🔐 o11)
+extern "C" fn trampoline&lt;F: FnMut(f32)&gt;(p: f32, user: *mut c_void) {
+    let f = unsafe { &amp;mut *(user as *mut F) };    // ★ 되돌리기
+    f(p);
+}
+
+pub fn process_with&lt;F: FnMut(f32)&gt;(data: &amp;[u8], mut f: F) -&gt; i32 {
+    unsafe {
+        mylib_process(
+            data.as_ptr(), data.len(),
+            Some(trampoline::&lt;F&gt;),
+            &amp;mut f as *mut F as *mut c_void,      // 클로저 주소를 user 로
+        )
+    }
+}
+
+// 쓰는 쪽 — 안전한 Rust API 가 됩니다 ★
+process_with(&amp;data, |p| println!("{:.0}%", p * 100.0));
+
+// ❗ 주의
+//   · 클로저가 콜백보다 오래 살아야 합니다 (여기선 함수 스코프 동안 유효)
+//   · 콜백을 등록해 두고 나중에 부르는 방식이면
+//     클로저를 Box 로 힙에 올려 소유권을 넘겨야 합니다 (아래)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">등록해 두고 나중에 부르기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">수명이 길어질 때</h4>
+      <pre class="code" data-lang="rust"><code>// 콜백을 저장해 두는 경우 — 소유권을 명확히 해야 합니다
+pub struct Watcher {
+    cb: Option&lt;ProgressFn&gt;,
+    user: *mut c_void,
+}
+unsafe impl Send for Watcher {}      // ★ user 포인터의 스레드 안전은 호출자 책임
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_watcher_set_callback(
+    w: *mut Watcher, cb: Option&lt;ProgressFn&gt;, user: *mut c_void,
+) -&gt; i32 {
+    let Some(w) = w.as_mut() else { return -1 };
+    w.cb = cb;
+    w.user = user;
+    0
+}
+
+// ❗ 문서에 반드시 적을 것 (f06)
+//   · user 가 가리키는 객체는 watcher 가 해제될 때까지 살아 있어야 합니다
+//   · 콜백은 어느 스레드에서 불릴 수 있습니다
+//   · 콜백 안에서 mylib_* 함수를 다시 부르면 데드락일 수 있습니다 ★
+
+// 해제 콜백도 함께 받는 것이 더 안전합니다
+pub type FreeFn = extern "C" fn(user: *mut c_void);
+// watcher 가 해제될 때 free_user(user) 를 불러 줍니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언어별 콜백 만들기</h4>
+      <pre class="code" data-lang="python"><code># 파이썬 (f05)
+CB = ctypes.CFUNCTYPE(None, ctypes.c_float, ctypes.c_void_p)
+cb = CB(lambda p, u: print(f"{p*100:.0f}%"))    # ★ 변수로 보관 (GC 주의)
+lib.mylib_process(data, len(data), cb, None)</code></pre>
+      <pre class="code" data-lang="javascript"><code>// Node (koffi)
+const koffi = require('koffi')
+const ProgressFn = koffi.proto('void ProgressFn(float, void *)')
+const cb = koffi.register(p =&gt; console.log(p), koffi.pointer(ProgressFn))
+lib.mylib_process(data, data.length, cb, null)
+koffi.unregister(cb)                            // ★ 반드시 해제</code></pre>
+      <pre class="code" data-lang="csharp"><code>// C#
+delegate void ProgressFn(float p, IntPtr user);
+[DllImport("mylib")]
+static extern int mylib_process(byte[] d, nuint len, ProgressFn cb, IntPtr user);
+
+var cb = new ProgressFn((p, u) =&gt; Console.WriteLine(p));
+GC.KeepAlive(cb);           // ★ GC 가 델리게이트를 수거하지 않게
+mylib_process(data, (nuint)data.Length, cb, IntPtr.Zero);</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>세 언어 모두 같은 함정</b>이 있습니다 — <b>콜백 객체가 GC 되면
+        함수 포인터가 무효</b>가 됩니다. 파이썬은 변수 보관, C# 은 <code>GC.KeepAlive</code>,
+        Node 는 <code>unregister</code> 전까지 유지. <b>문서에 반드시 경고</b>하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">콜백 대신 쓰는 설계</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">폴링이 더 나은 경우가 많습니다 ★</h4>
+      <pre class="code" data-lang="rust"><code>// 콜백 대신 상태를 조회하게 하기
+use std::sync::atomic::{AtomicU64, Ordering};
+
+pub struct Job { done: AtomicU64, total: u64 }
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_job_progress(j: *const Job) -&gt; f32 {
+    let Some(j) = j.as_ref() else { return 0.0 };
+    j.done.load(Ordering::Relaxed) as f32 / j.total as f32
+}
+
+// ★ 장점
+//   · 콜백 수명·GC 문제가 없습니다
+//   · 스레드 안전을 원자 연산 하나로 해결
+//   · 호출자가 원하는 주기로 확인 (UI 프레임에 맞춰서)
+//   · 모든 언어에서 바인딩이 단순합니다
+
+// ★ 콜백이 꼭 필요한 경우
+//   · 데이터를 스트리밍으로 흘려보낼 때 (전체를 메모리에 못 올림)
+//   · 이벤트 발생 시점이 중요할 때
+//   · 호출자가 흐름을 제어해야 할 때 (중단·필터)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">콜백에서 지켜야 할 규칙</h4>
+      <pre class="code" data-lang="text"><code>□ 콜백 안에서 패닉이 나면? (f09)
+    Rust → 다른 언어 → Rust 로 되감기면 UB 입니다.
+    → 콜백을 부르는 쪽(Rust)에서 catch_unwind 로 감쌀 수는 없습니다
+      (콜백은 남의 코드입니다)
+    → 각 언어 바인딩에서 예외를 잡아 에러 코드로 바꾸도록 문서화 ★
+
+□ 콜백이 오래 걸리면?
+    Rust 쪽 락을 잡은 채 콜백을 부르지 마세요 (데드락 · 🔐 o10)
+    반드시 락을 놓고 부르세요
+
+□ 콜백이 다시 라이브러리를 부르면? (재진입)
+    허용할지 문서에 명시하세요. 대개 금지하는 편이 안전합니다.
+
+□ 콜백이 반환값으로 중단을 표현할 수 있게
+    typedef int (*ProgressFn)(float, void*);   /* 0 = 계속, 그 외 = 중단 */
+    → 사용자가 취소할 수 있습니다 ★
+
+□ 어느 스레드에서 불리는가
+    메인 스레드 보장인지, 워커에서도 불리는지 명시하세요
+    (UI 프레임워크는 대개 메인 스레드에서만 UI 를 만질 수 있습니다)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>중단 신호를 반환값으로</b> 두는 것은 <b>비용이 0 이면서 매우 유용</b>합니다.
+        <code>void</code> 대신 <code>int</code> 를 반환하게 설계해 두면
+        나중에 취소 기능을 넣을 때 <b>ABI 를 안 깨고</b> 추가할 수 있습니다(f09).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">스레드와 콜백</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">워커 스레드에서 콜백 부르기</h4>
+      <pre class="code" data-lang="rust"><code>// Rust 가 스레드를 만들어 콜백을 부르는 경우
+#[no_mangle]
+pub unsafe extern "C" fn mylib_start_async(
+    cb: ProgressFn, user: *mut c_void,
+) -&gt; i32 {
+    // ❗ 원시 포인터는 Send 가 아닙니다 — 래퍼가 필요합니다
+    struct SendPtr(*mut c_void);
+    unsafe impl Send for SendPtr {}          // ★ 안전성은 호출자와의 규약에 의존
+
+    let u = SendPtr(user);
+    std::thread::spawn(move || {
+        let u = u;                            // 이동
+        for i in 0..100 {
+            cb(i as f32 / 100.0, u.0);        // 워커 스레드에서 호출 ★
+        }
+    });
+    0
+}
+
+// ★ 문서에 반드시
+//   "콜백은 임의의 스레드에서 호출됩니다. 스레드 안전하게 작성하세요."
+//
+// ★ 언어별 함정
+//   파이썬: GIL 이 필요합니다 — ctypes 콜백은 자동으로 잡아 줍니다
+//   C#: UI 스레드가 아니면 Invoke 가 필요합니다
+//   Node: 이벤트 루프 밖이라 JS 를 직접 못 부릅니다 (tsfn 필요 · 🟨 j06)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">더 안전한 대안 — 큐</h4>
+      <pre class="code" data-lang="rust"><code>// 콜백 대신 이벤트를 큐에 쌓고, 호출자가 꺼내 가게 하기
+#[repr(C)]
+pub struct Event { pub kind: i32, pub value: f64 }
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_poll_event(
+    h: *mut Session, out: *mut Event,
+) -&gt; i32 {
+    let Some(s) = h.as_mut() else { return -1 };
+    match s.queue.pop() {                     // 논블로킹
+        Some(ev) =&gt; { *out = ev; 1 }          // 1 = 이벤트 있음
+        None =&gt; 0,                            // 0 = 없음
+    }
+}
+
+// 호출자 (어느 언어든)
+//   while (mylib_poll_event(h, &amp;ev) &gt; 0) { handle(ev); }
+//
+// ★ 장점
+//   · 콜백 수명·GC·스레드 문제가 전부 사라집니다
+//   · 호출자가 자기 이벤트 루프에 자연스럽게 통합합니다
+//   · 게임 엔진·UI 프레임워크와 궁합이 좋습니다 ★
+//   · 언어별 바인딩이 훨씬 단순해집니다
+//
+// ★ 단점
+//   · 폴링 주기만큼 지연이 생깁니다
+//   · 큐가 넘칠 때의 정책이 필요합니다 (드롭 · 블로킹 · 확장)</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>여러 언어를 지원할수록 큐 방식이 유리합니다</b> —
+        콜백은 언어마다 다른 함정(GC · GIL · UI 스레드)이 있지만,
+        <b>폴링은 어디서나 똑같이 동작</b>합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> C ABI 콜백은 <b>함수 포인터 + <code>void*</code> user data</b> 가 공통 관용구입니다.
+    <b>콜백 객체의 수명은 호출자 책임</b>이고 GC 함정이 언어마다 있으니 문서에 경고하세요.
+    <b>중단 신호를 반환값으로</b> 두면 나중에 취소 기능을 ABI 를 깨지 않고 추가할 수 있고,
+    여러 언어를 지원한다면 <b>폴링·큐 방식이 훨씬 단순</b>합니다.</div>
+</section>
+
+
+<!-- ==================== f08 ==================== -->
+<section class="sec" id="f08">
+  <div class="sec-head rv">
+    <span class="no">FFI 08</span>
+    <h2>bindgen — <span class="t">기존 C 라이브러리를 Rust 에서</span></h2>
+    <p class="lead">
+      지금까지는 Rust 를 내보내는 방향이었습니다. 이번엔 반대입니다 —
+      <b>이미 있는 C 라이브러리를 Rust 에서 쓰는</b> 방법입니다.
+      헤더만 주면 <b>바인딩이 자동 생성</b>되고, 그 위에 <b>안전한 래퍼</b>를 씌우는 것이 정석입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">-sys 크레이트 관례 ★</h4>
+      <pre class="code" data-lang="text"><code>Rust 생태계의 관례 — 두 층으로 나눕니다
+
+  foo-sys      C 헤더를 그대로 옮긴 unsafe 바인딩 (bindgen 이 생성)
+               · 빌드에서 라이브러리를 찾고 링크
+               · 안전성 보장 없음
+
+  foo          그 위의 안전한 래퍼 (사람이 작성) ★
+               · RAII · Result · 슬라이스
+               · 사용자는 unsafe 를 한 줄도 안 씁니다
+
+예: libgit2-sys / git2 · openssl-sys / openssl · zstd-sys / zstd
+
+★ 왜 나누나
+  · -sys 는 기계적으로 생성되므로 버전 업데이트가 쉽습니다
+  · 안전 래퍼는 설계가 필요하므로 사람이 관리합니다
+  · 다른 사람이 자기만의 래퍼를 만들 수 있습니다</code></pre>
+      <pre class="code" data-lang="toml"><code># foo-sys/Cargo.toml
+[package]
+name = "foo-sys"
+links = "foo"              # ★ 같은 C 라이브러리를 두 번 링크하는 것을 막습니다
+
+[build-dependencies]
+bindgen = "0.70"
+pkg-config = "0.3"</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">build.rs 로 생성</h4>
+      <pre class="code" data-lang="rust"><code>// build.rs
+fn main() {
+    // ① 시스템에서 라이브러리 찾기
+    let lib = pkg_config::Config::new()
+        .atleast_version("1.2")
+        .probe("libfoo")
+        .expect("libfoo 를 찾을 수 없습니다");
+    // → cargo:rustc-link-lib · link-search 를 자동으로 출력합니다
+
+    // ② 헤더에서 바인딩 생성
+    let bindings = bindgen::Builder::default()
+        .header("wrapper.h")
+        .clang_args(lib.include_paths.iter()
+            .map(|p| format!("-I{}", p.display())))
+        .allowlist_function("foo_.*")          // ★ 필요한 것만
+        .allowlist_type("Foo.*")
+        .derive_debug(true)
+        .derive_default(true)
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .generate()
+        .expect("bindgen 실패");
+
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    bindings.write_to_file(out.join("bindings.rs")).unwrap();
+}</code></pre>
+      <pre class="code" data-lang="rust"><code>// src/lib.rs (foo-sys)
+#![allow(non_upper_case_globals, non_camel_case_types, non_snake_case)]
+include!(concat!(env!("OUT_DIR"), "/bindings.rs"));</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">안전한 래퍼 씌우기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">RAII 로 감싸기 ★</h4>
+      <pre class="code" data-lang="rust"><code>use foo_sys as ffi;
+use std::ptr::NonNull;
+
+pub struct Context {
+    raw: NonNull&lt;ffi::FooContext&gt;,      // ★ 널이 아님을 타입으로 (r08)
+}
+
+impl Context {
+    pub fn new() -&gt; Result&lt;Self, Error&gt; {
+        let raw = unsafe { ffi::foo_create() };
+        NonNull::new(raw)
+            .map(|raw| Context { raw })
+            .ok_or(Error::AllocFailed)
+    }
+
+    pub fn process(&amp;mut self, input: &amp;[u8]) -&gt; Result&lt;Vec&lt;u8&gt;, Error&gt; {
+        let mut out_len: usize = 0;
+        let rc = unsafe {
+            ffi::foo_process(self.raw.as_ptr(),
+                             input.as_ptr(), input.len(),
+                             std::ptr::null_mut(), 0, &amp;mut out_len)
+        };
+        if rc != 0 &amp;&amp; rc != ffi::FOO_BUFFER_TOO_SMALL { return Err(Error::from(rc)); }
+
+        let mut buf = vec![0u8; out_len];
+        let rc = unsafe {
+            ffi::foo_process(self.raw.as_ptr(),
+                             input.as_ptr(), input.len(),
+                             buf.as_mut_ptr(), buf.len(), &amp;mut out_len)
+        };
+        if rc != 0 { return Err(Error::from(rc)); }
+        buf.truncate(out_len);
+        Ok(buf)
+    }
+}
+
+impl Drop for Context {
+    fn drop(&amp;mut self) { unsafe { ffi::foo_destroy(self.raw.as_ptr()) } }
+}
+
+// 스레드 안전성은 C 라이브러리 문서를 읽고 판단하세요 (⚡ e06 · 🔬 d08)
+unsafe impl Send for Context {}
+// unsafe impl Sync for Context {}     ← 정말 스레드 안전한 경우에만 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">링크 방식 고르기</h4>
+      <pre class="code" data-lang="rust"><code>// build.rs 에서 출력하는 지시들
+println!("cargo:rustc-link-lib=foo");           // 동적 링크 (-lfoo)
+println!("cargo:rustc-link-lib=static=foo");    // 정적 링크 ★
+println!("cargo:rustc-link-search=native=/usr/local/lib");
+println!("cargo:rustc-link-lib=framework=CoreFoundation");   // 맥
+
+// C 소스를 함께 컴파일 (cc 크레이트) — 의존성이 사라집니다 ★
+// [build-dependencies] cc = "1"
+cc::Build::new()
+    .file("vendor/foo.c")
+    .include("vendor/include")
+    .opt_level(3)
+    .compile("foo");</code></pre>
+      <pre class="code" data-lang="text"><code>★ 판단
+  동적 링크
+    · 시스템에 이미 있는 라이브러리 (openssl · zlib)
+    · 배포 시 그 라이브러리가 반드시 있어야 합니다 ★
+    · 보안 패치가 시스템 업데이트로 적용됩니다
+
+  정적 링크 / 소스 동봉 (vendored)
+    · 배포가 단순합니다 (파일 하나)
+    · 파이썬 wheel · npm 패키지로 낼 때 사실상 필수 ★
+    · 라이선스를 확인하세요 (LGPL 은 정적 링크에 제약이 있습니다)
+    · 대개 vendored feature 로 선택 가능하게 만듭니다 (🛠️ b04)
+
+# 확인
+ldd target/release/libmylib.so     # 동적 의존성이 뭔지</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">빌드 재현성 확보</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">bindgen 의 현실적 문제들 ★</h4>
+      <pre class="code" data-lang="text"><code>① libclang 이 필요합니다
+   빌드 머신마다 설치돼 있어야 합니다.
+   → CI 에서 apt install libclang-dev 등
+   → 또는 생성된 bindings.rs 를 커밋하고 feature 로 선택 ★
+
+② 헤더 버전에 따라 결과가 달라집니다
+   시스템 헤더가 다르면 다른 바인딩이 나옵니다.
+   → vendored 소스를 쓰면 고정됩니다
+
+③ 생성물이 큽니다 (수천 줄)
+   → allowlist 로 필요한 것만 (위 예제)
+
+④ 크로스 컴파일이 까다롭습니다 (🛠️ b07)
+   타깃 헤더를 clang 에 알려 줘야 합니다
+   → --sysroot · --target 인자
+
+★ 실무 권장 구성
+   [features]
+   default = ["vendored"]
+   vendored = []              # 소스를 함께 빌드 (재현 가능)
+   system = []                # 시스템 라이브러리 사용
+   bindgen = ["dep:bindgen"]  # 바인딩 재생성 (개발자용)
+   → 기본은 커밋된 bindings.rs + vendored 소스 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파이썬·Node 로 다시 내보내기</h4>
+      <pre class="code" data-lang="text"><code>★ 이 조합이 실제로 유용한 자리
+
+  기존 C 라이브러리 (libfoo)
+      ↓ bindgen
+  foo-sys (unsafe)
+      ↓ 사람이 작성
+  foo (안전한 Rust API)
+      ↓ PyO3 / napi-rs
+  파이썬 · Node 모듈 ★
+
+  왜 Rust 를 중간에 두나
+    · C API 를 직접 파이썬에 노출하면 안전성 검증을 파이썬에서 못 합니다
+    · Rust 층에서 RAII · 에러 변환 · 슬라이스 검증을 한 번만 하면
+      파이썬·Node 양쪽이 그 혜택을 받습니다
+    · 테스트도 Rust 쪽에서 한 번만 (r11)
+
+  배포 주의
+    · 동적 링크한 C 라이브러리가 있으면 wheel/npm 에 동봉해야 합니다
+      auditwheel repair (파이썬 · 🐍 y11)
+    · 정적 링크가 배포를 훨씬 단순하게 만듭니다 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>기존 C 라이브러리를 파이썬에 노출하는 일</b>이라면
+        <b>Rust 를 중간층으로 두는 것</b>이 <code>ctypes</code> 로 직접 부르는 것보다
+        훨씬 안전하고, 나중에 Node·C# 지원을 추가하기도 쉽습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">C 라이브러리의 함정</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문서를 읽고 확인할 것 ★</h4>
+      <pre class="code" data-lang="text"><code>□ 스레드 안전한가
+    · 전역 상태를 쓰는가 (errno 같은 것)
+    · 초기화 함수가 한 번만 불려야 하는가 → OnceLock (r02)
+    · 컨텍스트별로는 안전한가 → Send 만 붙이고 Sync 는 금지
+
+□ 재진입 가능한가 (콜백 안에서 다시 부를 수 있나)
+
+□ 반환된 포인터의 수명은
+    · 정적인가 (해제 금지)
+    · 다음 호출까지만 유효한가 ★ (strtok 같은 것)
+    · 호출자가 해제하는가 → Drop 으로
+
+□ 에러를 어떻게 알리나
+    · 반환값 · errno · 별도 함수 (f09)
+    · errno 는 스레드 로컬입니다 — 호출 직후에 읽어야 합니다
+
+□ 시그널·longjmp 를 쓰는가 ★
+    · setjmp/longjmp 가 Rust 스택을 건너뛰면 Drop 이 안 불립니다
+    · libpng · libjpeg 이 이 방식을 씁니다 — 주의가 필요합니다
+
+□ 할당자를 교체할 수 있나
+    · 그렇다면 Rust 할당자와 맞춰 둘 수 있습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">검증 도구</h4>
+      <pre class="code" data-lang="bash"><code># ① 생성된 바인딩 확인
+cargo expand --lib | head -100
+find target -name bindings.rs -exec head -50 {} \;
+
+# ② 타입 크기가 C 와 맞는지 (bindgen 이 테스트를 생성합니다)
+cargo test --package foo-sys
+#   bindgen 은 layout test 를 자동 생성합니다 ★
+#   const _: () = assert!(size_of::&lt;FooContext&gt;() == 64);
+
+# ③ ASan 으로 메모리 오류 (Miri 는 C 코드를 못 봅니다 · 🔬 d07)
+RUSTFLAGS="-Zsanitizer=address" cargo +nightly test \
+  --target x86_64-unknown-linux-gnu
+
+# ④ valgrind
+valgrind --leak-check=full ./target/debug/deps/foo_test-*
+
+# ⑤ 실제 라이브러리 버전 확인
+pkg-config --modversion libfoo
+ldd target/release/libmylib.so | grep foo
+
+# ★ C 라이브러리를 링크하는 순간
+#   Rust 의 안전성 보장이 그 경계에서 끝납니다.
+#   래퍼 층에 테스트를 두텁게 쓰는 것이 유일한 방어입니다 (r11)</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 기존 C 라이브러리는 <b><code>-sys</code>(bindgen 생성) + 안전 래퍼</b> 두 층으로 감쌉니다.
+    <b>RAII(<code>Drop</code>) · <code>Result</code> · 슬라이스</b>로 감싸면 사용자는 <code>unsafe</code> 를 안 씁니다.
+    배포를 단순하게 하려면 <b>정적 링크 또는 vendored 소스</b>를 쓰고,
+    <b>스레드 안전성은 C 문서를 읽고</b> <code>Send</code>/<code>Sync</code> 를 결정하세요.</div>
+</section>
+
+
+<!-- ==================== f09 ==================== -->
+<section class="sec" id="f09">
+  <div class="sec-head rv">
+    <span class="no">FFI 09</span>
+    <h2>패닉이 <span class="t">경계를 넘으면</span> — 그리고 에러 코드</h2>
+    <p class="lead">
+      Rust 패닉이 C 코드를 가로질러 되감기면 <b>정의되지 않은 동작</b>입니다.
+      그래서 모든 <code>extern "C"</code> 함수는 <b>패닉을 가두고 에러 코드로 바꿔야</b> 합니다.
+      이 섹션은 <b>FFI 에서 가장 중요한 안전 규칙</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">catch_unwind 로 가두기 ★</h4>
+      <pre class="code" data-lang="rust"><code>use std::panic::{catch_unwind, AssertUnwindSafe};
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_process(data: *const u8, len: usize) -&gt; i32 {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let Some(src) = to_slice(data, len) else { return -1 };
+        match core_process(src) {
+            Ok(_) =&gt; 0,
+            Err(e) =&gt; { set_last_error(e.to_string()); code_of(&amp;e) }
+        }
+    }));
+
+    match result {
+        Ok(code) =&gt; code,
+        Err(_) =&gt; {                                  // ★ 패닉을 잡았습니다
+            set_last_error("내부 오류 (패닉)".into());
+            -99
+        }
+    }
+}
+
+// 매크로로 반복을 줄이기
+macro_rules! ffi_guard {
+    ($body:expr) =&gt; {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $body)) {
+            Ok(v) =&gt; v,
+            Err(_) =&gt; { set_last_error("내부 오류 (패닉)".into()); -99 }
+        }
+    };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_encode(...) -&gt; i32 {
+    ffi_guard!({ /* 본문 */ })
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Rust 2024 에디션부터</b> <code>extern "C"</code> 함수는 패닉 시 기본적으로 <b>abort</b> 합니다.
+        UB 는 피하지만 <b>프로세스가 죽습니다</b> —
+        파이썬 인터프리터나 Node 서버가 통째로 종료되는 것은 여전히 최악이므로,
+        <b>잡아서 에러 코드로 바꾸는 것이 정답</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러 코드 설계 ★</h4>
+      <pre class="code" data-lang="rust"><code>// 안정된 숫자 — 한 번 배포하면 절대 바꾸지 마세요 ★
+#[repr(i32)]
+pub enum Code {
+    Ok            = 0,
+    InvalidArg    = -1,
+    BufferTooSmall= -2,
+    NotFound      = -3,
+    IoError       = -4,
+    Unsupported   = -5,
+    // 새 실패는 새 번호를 추가 (기존 번호 재사용 금지)
+    Internal      = -99,
+}
+
+// 스레드 로컬 마지막 에러 (errno 와 같은 방식)
+use std::cell::RefCell;
+thread_local! {
+    static LAST_ERROR: RefCell&lt;String&gt; = RefCell::new(String::new());
+}
+
+fn set_last_error(msg: String) {
+    LAST_ERROR.with(|e| *e.borrow_mut() = msg);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_last_error(buf: *mut c_char, cap: usize) -&gt; usize {
+    LAST_ERROR.with(|e| {
+        let s = e.borrow();
+        let bytes = s.as_bytes();
+        let n = bytes.len().min(cap.saturating_sub(1));
+        if !buf.is_null() &amp;&amp; cap &gt; 0 {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, n);
+            *buf.add(n) = 0;                      // 널 종단 ★
+        }
+        bytes.len()                                // 전체 길이를 반환 (버퍼 크기 판단용)
+    })
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">호환을 유지하며 확장하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">깨지 않고 기능을 추가하는 법 ★</h4>
+      <pre class="code" data-lang="text"><code>★ 절대 하면 안 되는 것 (배포 후)
+  · 함수 시그니처 변경 (인자 추가·타입 변경)
+  · 구조체에 필드 추가·순서 변경 (f03)
+  · enum 값 변경
+  · 함수 제거
+
+★ 해도 되는 것
+  · 새 함수 추가
+  · 새 enum 값 추가 (기존 값은 유지)
+  · 동작 개선 (같은 입력 → 같은 출력이면)
+
+★ 확장 가능하게 미리 설계하기
+  ① 버전이 든 구조체
+     typedef struct { uint32_t size; uint32_t flags; ... } Options;
+     mylib_init(const Options *o);
+     → 함수가 o-&gt;size 를 보고 어느 버전인지 판단합니다 ★
+       (윈도우 API 가 전부 이 방식입니다)
+
+  ② 예약 필드
+     typedef struct { int32_t a; int32_t _reserved[4]; } Config;
+
+  ③ 이름에 버전
+     mylib_process_v2(...)   ← 기존 mylib_process 는 유지
+     (f02 의 #[export_name] 으로)
+
+  ④ 설정을 JSON 문자열로 (f01) — 가장 유연합니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버전이 든 구조체 구현</h4>
+      <pre class="code" data-lang="rust"><code>#[repr(C)]
+pub struct Options {
+    pub size: u32,              // ★ 반드시 첫 필드
+    pub threads: u32,
+    pub timeout_ms: u64,
+    // v2 에서 추가
+    pub retries: u32,
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mylib_init(opts: *const Options) -&gt; i32 {
+    let size = if opts.is_null() { 0 } else { (*opts).size as usize };
+
+    let threads = if size &gt;= offset_of!(Options, threads) + 4 {
+        (*opts).threads
+    } else { 0 };
+
+    let retries = if size &gt;= offset_of!(Options, retries) + 4 {
+        (*opts).retries                          // ★ v2 이상만
+    } else { 3 };                                // v1 이면 기본값
+
+    // …
+    0
+}
+
+// 호출자 (C)
+//   Options o = {0};
+//   o.size = sizeof(o);       ← 자기가 아는 크기를 알려 줍니다
+//   o.threads = 4;
+//   mylib_init(&amp;o);
+//
+// → 옛 헤더로 컴파일된 앱도, 새 헤더로 컴파일된 앱도 모두 동작합니다 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">버전 정책과 SONAME</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">런타임 버전 확인</h4>
+      <pre class="code" data-lang="rust"><code>// 호출자가 기능 지원 여부를 물어볼 수 있게 하기
+#[no_mangle]
+pub extern "C" fn mylib_version() -&gt; u32 {
+    (1 &lt;&lt; 16) | 2            // 1.2
+}
+
+#[no_mangle]
+pub extern "C" fn mylib_has_feature(name: *const c_char) -&gt; bool {
+    let Some(n) = cstr_to_str(name) else { return false };
+    matches!(n, "simd" | "threads" | "compression")
+}
+
+// ABI 버전을 따로 두는 것도 좋습니다
+#[no_mangle]
+pub extern "C" fn mylib_abi_version() -&gt; u32 { 1 }
+// → ABI 가 깨지면 이 숫자를 올리고, 호출자가 확인해 거부하게 합니다 ★</code></pre>
+      <pre class="code" data-lang="c"><code>if (mylib_abi_version() != MYLIB_EXPECTED_ABI) {
+    fprintf(stderr, "호환되지 않는 라이브러리 버전\n");
+    return 1;
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SONAME 과 심볼 버저닝</h4>
+      <pre class="code" data-lang="bash"><code># 리눅스의 관례 — 파일 이름에 메이저 버전
+#   libmylib.so.1.2.0      실제 파일
+#   libmylib.so.1     →    심링크 (SONAME)
+#   libmylib.so       →    심링크 (개발용)
+
+# SONAME 설정 (build.rs 또는 .cargo/config.toml)
+# rustflags = ["-C", "link-arg=-Wl,-soname,libmylib.so.1"]
+
+# 확인
+objdump -p libmylib.so | grep SONAME
+readelf -d libmylib.so | grep SONAME
+
+# ★ 왜 필요한가
+#   ABI 를 깨는 변경을 하면 SONAME 의 숫자를 올립니다.
+#   그러면 옛 버전과 새 버전이 시스템에 공존할 수 있고,
+#   옛 앱은 옛 것을, 새 앱은 새 것을 로드합니다.
+
+# 맥
+#   install_name 을 씁니다 (-install_name @rpath/libmylib.1.dylib)
+# 윈도우
+#   파일 이름에 버전을 넣는 것이 관례 (mylib-1.dll)
+
+# ★ 파이썬 wheel · npm 패키지로만 배포한다면
+#   각 패키지가 자기 바이너리를 갖고 있으므로 SONAME 이 덜 중요합니다.
+#   시스템 라이브러리로 배포할 때 필요합니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">언와인딩의 실제</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 UB 인가</h4>
+      <pre class="code" data-lang="text"><code>Rust 패닉은 기본적으로 '스택 되감기(unwinding)' 입니다.
+C++ 예외와 같은 메커니즘(DWARF/SEH)을 씁니다.
+
+  Rust 함수 → C 함수 → Rust 콜백에서 패닉
+                ↑
+            여기를 되감으려면 C 프레임의 정리 정보가 필요한데,
+            C 는 그런 정보를 갖고 있지 않습니다.
+            → 정의되지 않은 동작 (대개 abort 또는 힙 손상) ★
+
+★ 대응
+  ① 모든 extern "C" 함수를 catch_unwind 로 감싸기 (이 섹션)
+  ② panic = "abort" 프로파일 — 되감기 자체가 없어집니다
+     · 바이너리가 작아지고 약간 빨라집니다 (🛠️ b10)
+     · 하지만 패닉 = 프로세스 종료입니다
+     · PyO3 에서는 쓰지 마세요 (예외로 못 바꿈 · 🐍 y03)
+  ③ extern "C-unwind" — 되감기를 명시적으로 허용하는 ABI
+     C++ 예외와 상호 운용해야 할 때만 (Rust 1.71+)
+
+# 확인
+cargo rustc --release -- --print cfg | grep panic
+RUST_BACKTRACE=1 ./app</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">패닉을 아예 줄이기 ★</h4>
+      <pre class="code" data-lang="rust"><code>// catch_unwind 는 안전망이지, 설계가 아닙니다.
+// FFI 층에서는 패닉이 날 일 자체를 없애세요.
+
+// ❌ 패닉하는 코드
+v[i]                        // 범위 초과 → panic
+s.unwrap()                  // None → panic
+a / b                       // b == 0 → panic (정수)
+x as usize                  // 음수 → 릴리즈에선 거대한 수 (r02)
+
+// ✅
+v.get(i).ok_or(Code::InvalidArg)?
+s.ok_or(Code::NotFound)?
+a.checked_div(b).ok_or(Code::InvalidArg)?
+usize::try_from(x).map_err(|_| Code::InvalidArg)?
+
+// clippy 로 강제하기
+//   #![deny(clippy::unwrap_used, clippy::expect_used,
+//           clippy::indexing_slicing, clippy::panic)]
+//   FFI 모듈에만 붙이면 실용적입니다 ★
+
+// 할당 실패는 잡을 수 없습니다
+//   Rust 는 OOM 시 abort 합니다 (catch_unwind 로 못 잡습니다)
+//   큰 할당은 try_reserve 로 미리 확인하세요
+let mut v = Vec::new();
+v.try_reserve(n).map_err(|_| Code::Internal)?;</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>FFI 모듈에 <code>#![deny(clippy::unwrap_used)]</code> 를 붙이세요</b> —
+        패닉 가능성을 <b>컴파일 타임에 제거</b>하는 것이
+        <code>catch_unwind</code> 로 잡는 것보다 훨씬 낫습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 모든 <code>extern "C"</code> 함수는 <b><code>catch_unwind</code> 로 패닉을 가두고</b>
+    <b>에러 코드 + <code>last_error</code> 함수</b>로 실패를 알립니다.
+    <b>에러 코드 숫자는 한 번 배포하면 절대 바꾸지 마세요.</b>
+    확장은 <b>새 함수 · 새 코드 · 크기 필드가 든 구조체</b>로 하고,
+    FFI 층에는 <b><code>unwrap</code>·인덱싱을 clippy 로 금지</b>하세요.</div>
+</section>
+
+
+<!-- ==================== f10 ==================== -->
+<section class="sec" id="f10">
+  <div class="sec-head rv">
+    <span class="no">FFI 10</span>
+    <h2>C# · 자바 · Go — <span class="t">한 라이브러리를 여러 언어에서</span></h2>
+    <p class="lead">
+      C ABI 로 내보냈으면 <b>거의 모든 언어에서 부를 수 있습니다</b>.
+      언어마다 문법만 다를 뿐 <b>패턴은 같습니다</b> —
+      로드 · 시그니처 선언 · 호출 · 해제.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C# — P/Invoke</h4>
+      <pre class="code" data-lang="csharp"><code>using System;
+using System.Runtime.InteropServices;
+
+internal static partial class Native
+{
+    private const string Lib = "mylib";      // libmylib.so / mylib.dll
+
+    // .NET 7+ 의 소스 생성 방식 (더 빠릅니다) ★
+    [LibraryImport(Lib)]
+    internal static partial int mylib_add(int a, int b);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr mylib_greet(string name);
+
+    [LibraryImport(Lib)]
+    internal static partial void mylib_string_free(IntPtr s);
+
+    // 예전 방식
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern double mylib_distance(Point a, Point b);
+}
+
+[StructLayout(LayoutKind.Sequential)]        // ★ #[repr(C)] 에 대응 (f03)
+internal struct Point { public double X, Y; }
+
+// 안전한 래퍼
+public static string Greet(string name)
+{
+    IntPtr p = Native.mylib_greet(name);
+    if (p == IntPtr.Zero) throw new InvalidOperationException(LastError());
+    try { return Marshal.PtrToStringUTF8(p)!; }
+    finally { Native.mylib_string_free(p); }  // ★ 반드시 해제 (f06)
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>csbindgen 크레이트</b>를 쓰면 위 P/Invoke 코드를
+        <b>Rust 소스에서 자동 생성</b>할 수 있습니다(f04).
+        Unity 에서 Rust 를 쓸 때 널리 쓰이는 방식입니다(🟣 C# 가이드 참고).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Go — cgo</h4>
+      <pre class="code" data-lang="go"><code>package mylib
+
+/*
+#cgo LDFLAGS: -L${SRCDIR}/lib -lmylib
+#cgo CFLAGS: -I${SRCDIR}/include
+#include "mylib.h"
+#include &lt;stdlib.h&gt;
+*/
+import "C"
+import (
+    "errors"
+    "unsafe"
+)
+
+func Add(a, b int32) int32 {
+    return int32(C.mylib_add(C.int32_t(a), C.int32_t(b)))
+}
+
+func Greet(name string) (string, error) {
+    cname := C.CString(name)               // Go → C 문자열 (복사)
+    defer C.free(unsafe.Pointer(cname))    // ★ C 힙이므로 free
+
+    p := C.mylib_greet(cname)
+    if p == nil { return "", errors.New(lastError()) }
+    defer C.mylib_string_free(p)           // ★ 라이브러리 해제 함수 (f06)
+    return C.GoString(p), nil
+}
+
+// 슬라이스 넘기기 — 복사 없음
+func Checksum(data []byte) uint32 {
+    if len(data) == 0 { return 0 }
+    return uint32(C.mylib_checksum(
+        (*C.uint8_t)(unsafe.Pointer(&amp;data[0])), C.size_t(len(data))))
+}
+// ❗ Go 의 GC 가 데이터를 옮길 수 있습니다.
+//    호출 중에는 안전하지만, C 쪽이 포인터를 보관하면 안 됩니다 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">자바와 그 외</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자바 — JNA / FFM API</h4>
+      <pre class="code" data-lang="java"><code>// JNA — 간단하지만 호출 비용이 있습니다
+import com.sun.jna.*;
+
+public interface MyLib extends Library {
+    MyLib INSTANCE = Native.load("mylib", MyLib.class);
+
+    int mylib_add(int a, int b);
+    Pointer mylib_greet(String name);
+    void mylib_string_free(Pointer s);
+}
+
+String greet(String name) {
+    Pointer p = MyLib.INSTANCE.mylib_greet(name);
+    if (p == null) throw new IllegalStateException();
+    try { return p.getString(0); }
+    finally { MyLib.INSTANCE.mylib_string_free(p); }
+}</code></pre>
+      <pre class="code" data-lang="java"><code>// Java 22+ 의 FFM API (Project Panama) — JNA 보다 훨씬 빠릅니다 ★
+import java.lang.foreign.*;
+import java.lang.invoke.MethodHandle;
+
+try (Arena arena = Arena.ofConfined()) {
+    SymbolLookup lib = SymbolLookup.libraryLookup("mylib", arena);
+    MethodHandle add = Linker.nativeLinker().downcallHandle(
+        lib.find("mylib_add").orElseThrow(),
+        FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                              ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+    int r = (int) add.invokeExact(1, 2);
+}
+// ☕ 자바 가이드에도 관련 내용이 있습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그 외 언어들</h4>
+      <pre class="code" data-lang="text"><code>Node        koffi · ffi-napi (🟨 j01 — 다만 napi-rs 가 더 낫습니다)
+Deno        Deno.dlopen (내장 FFI)
+Ruby        Fiddle (표준) · ffi 젬
+PHP         FFI 확장 (7.4+)
+Swift       C 헤더를 직접 import (브리징 헤더)
+Kotlin      JNA · Kotlin/Native cinterop
+Lua         LuaJIT FFI · luajit ffi.cdef
+R           .C() · Rcpp
+Julia       ccall — 문법이 매우 간결합니다
+Zig         @cImport — 헤더를 그대로 읽습니다
+
+★ 공통 패턴
+  ① 라이브러리 로드 (경로 · 이름 · 플랫폼별 확장자)
+  ② 시그니처 선언 (직접 또는 헤더 파싱)
+  ③ 호출 (타입 변환)
+  ④ 해제 (라이브러리가 준 것은 라이브러리 함수로 · f06)
+
+★ 배포할 때
+  각 언어의 패키지 매니저 관례를 따르세요
+    C#: NuGet (runtimes/{rid}/native/)
+    자바: JAR 안에 넣고 임시 폴더로 추출
+    Go: 정적 링크 권장 (cgo 는 크로스 컴파일이 까다롭습니다)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">다언어 배포를 관리한다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">저장소 구조 ★</h4>
+      <pre class="code" data-lang="text"><code>mylib/
+├─ core/                Rust 핵심 로직 (순수 · 테스트 완비)
+├─ ffi/                 C ABI 층 (얇게 · f01)
+│  └─ cbindgen.toml
+├─ include/mylib.h      생성된 헤더 (커밋)
+├─ bindings/
+│  ├─ python/           ctypes 래퍼 + setup.py
+│  ├─ node/             koffi 래퍼 + package.json
+│  ├─ csharp/           P/Invoke + .csproj
+│  └─ go/               cgo 래퍼 + go.mod
+├─ examples/            언어별 최소 예제 ★
+└─ .github/workflows/
+   ├─ build.yml         플랫폼별 바이너리
+   └─ test-bindings.yml 각 언어에서 실제로 부르는 테스트 ★
+
+★ 핵심: 각 언어 바인딩에 '스모크 테스트' 를 두고 CI 에서 돌리세요
+  · 로드되는가
+  · 함수가 불리는가
+  · 값이 맞는가
+  · 해제가 되는가 (반복 호출하며 메모리 관찰 · f06)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버전 동기화</h4>
+      <pre class="code" data-lang="text"><code>★ 문제
+  Rust 코어 1.2.0 을 배포했는데
+  파이썬 패키지는 1.1.0, C# 은 1.0.0 인 상태가 되기 쉽습니다.
+
+★ 대응
+  ① 버전을 한 곳에서 관리 (Cargo.toml 이 원본)
+     CI 에서 각 바인딩의 버전 파일을 갱신
+  ② 런타임 버전 확인 (f09)
+     바인딩이 로드 후 mylib_version() 을 확인해
+     맞지 않으면 명확한 에러를 냅니다 ★
+  ③ 태그 하나로 전부 배포
+     git tag v1.2.0 → CI 가 crates.io · PyPI · npm · NuGet 에 동시 배포
+
+★ 릴리스 체크리스트
+  □ 헤더가 최신인가 (f04 의 git diff 검사)
+  □ 모든 플랫폼 바이너리가 빌드됐는가
+  □ 각 언어 스모크 테스트가 통과했는가
+  □ ABI 를 깨는 변경이 있었는가 → 메이저 올림 + SONAME (f09)
+  □ CHANGELOG 에 각 언어 사용자를 위한 마이그레이션 안내가 있는가</code></pre>
+      <div class="note java" style="margin-bottom:0">
+        <b>언어를 하나 더 지원하는 비용</b>은 생각보다 큽니다 —
+        바인딩 코드 + 테스트 + 패키징 + CI + 문서.
+        <b>정말 필요한 언어만</b> 지원하고, 나머지는 <b>C 헤더와 예제를 제공</b>해
+        사용자가 직접 바인딩하게 하는 것도 좋은 전략입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">호출 비용 비교</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언어별 FFI 오버헤드</h4>
+      <pre class="code" data-lang="text"><code>★ 직접 재 보세요 (환경마다 크게 다릅니다 · ⚡ e01)
+  같은 빈 함수를 각 언어에서 호출해 비교하는 벤치마크를 만드세요.
+
+일반적 경향 (상대적)
+  C / C++            기준 (거의 0)
+  Rust → Rust        기준
+  Go (cgo)           비쌈 — 고루틴 스택 전환이 필요 ★
+  C# (LibraryImport) 낮음
+  C# (DllImport)     중간
+  자바 (FFM)         낮음
+  자바 (JNA)         높음
+  파이썬 (ctypes)    높음 (🐍 y01)
+  파이썬 (PyO3)      낮음
+  Node (napi-rs)     낮음
+  Node (koffi)       중간
+
+★ 실무 의미
+  · Go 는 cgo 호출이 비싸므로 배치가 특히 중요합니다
+  · 파이썬·자바는 전용 바인딩(PyO3 · JNI)이 FFI 보다 빠릅니다
+  · 어느 언어든 '경계를 적게 넘는' 설계가 답입니다 (f01 · 🐍 y01)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">벤치마크 만들기</h4>
+      <pre class="code" data-lang="rust"><code>// 비교용 함수들을 라이브러리에 넣어 두면 편합니다
+#[no_mangle] pub extern "C" fn mylib_noop() {}
+#[no_mangle] pub extern "C" fn mylib_add_bench(a: i32, b: i32) -&gt; i32 { a + b }
+#[no_mangle] pub unsafe extern "C" fn mylib_sum_bench(p: *const f64, n: usize) -&gt; f64 {
+    if p.is_null() || n == 0 { return 0.0 }
+    std::slice::from_raw_parts(p, n).iter().sum()
+}</code></pre>
+      <pre class="code" data-lang="python"><code># 파이썬 쪽 측정
+import timeit
+print(timeit.timeit(lambda: lib.mylib_noop(), number=1_000_000))
+# 이 값이 '호출 하나의 하한선' 입니다 ★
+
+# 데이터 크기별로 재서 손익분기점을 찾으세요
+for n in (10, 100, 1_000, 100_000):
+    a = np.random.random(n)
+    p = a.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+    t_rust = timeit.timeit(lambda: lib.mylib_sum_bench(p, n), number=10_000)
+    t_np   = timeit.timeit(lambda: a.sum(), number=10_000)
+    print(n, t_rust, t_np)
+# ★ 작은 n 에서는 numpy 가 이기고, 큰 n 에서 역전되는 지점이 보입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 벤치마크를 저장소에 두세요</b> — 새 언어 바인딩을 추가할 때마다
+        같은 측정을 돌리면 <b>“이 언어에서는 배치를 얼마나 크게 잡아야 하는지”</b>가
+        데이터로 남습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> C ABI 하나면 <b>C# · 자바 · Go · Ruby · Swift 어디서나</b> 부를 수 있고,
+    패턴은 <b>로드 → 시그니처 선언 → 호출 → 해제</b>로 같습니다.
+    각 언어 바인딩에 <b>스모크 테스트를 두고 CI 에서</b> 돌리고,
+    <b>런타임 버전 확인</b>으로 불일치를 즉시 드러내세요.
+    <b>언어를 늘리는 비용</b>은 실제로 크니 필요한 것만 지원하는 편이 낫습니다.
+    다음은 <b>🛠️ 빌드 · 배포 탭</b>입니다.</div>
+</section>
+
+<!-- END pane-ffi -->
+</div>

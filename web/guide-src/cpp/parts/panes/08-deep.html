@@ -1,0 +1,3028 @@
+<!-- ============================================================
+     전문가 PANE
+     ============================================================ -->
+<div class="pane" id="pane-deep">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> ODR · UB · ABI · 메모리 모델 · 크래시 덤프</div>
+  <h1>“컴파일러 버그”가<br>아니라<br>내 코드의 UB 입니다</h1>
+  <p class="tx">
+    여기부터는 <b>“왜 그렇게 동작하는가”</b>를 다룹니다.
+    Release 에서만 터지는 버그, 라이브러리가 안 붙는 이유, 운영 중 크래시 —
+    <b>원인을 추측이 아니라 구조로 설명</b>할 수 있게 됩니다.
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>UB</b><span>1순위 원인</span></div>
+    <div><b>ABI</b><span>배포의 벽</span></div>
+    <div><b>4</b><span>깊이 층</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== d01 ==================== -->
+<section class="sec" id="d01">
+  <div class="sec-head rv">
+    <span class="no">DEEP 01</span>
+    <h2>번역 단위 · <span class="t">ODR</span> · 링커</h2>
+    <p class="lead">
+      <b>진단 없이 조용히 메모리가 깨지는</b> 유일한 규칙 위반이 ODR 입니다.
+      링크는 성공하는데 실행이 이상하다면 여기를 의심해야 합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">하나의 정의 규칙(ODR)</h4>
+      <pre class="code" data-lang="text"><code>규칙
+  · 함수·변수의 '정의'는 프로그램 전체에서 정확히 하나여야 합니다
+  · 클래스·inline 함수·템플릿은 여러 번역 단위에 나와도 되지만
+    ★ 모든 정의가 '완전히 동일'해야 합니다
+  · 어기면 ill-formed, no diagnostic required
+    → 컴파일러도 링커도 알려 주지 않고, 실행이 이상해집니다 ★
+
+왜 중복이 허용되나
+  헤더에 클래스 정의를 두면 그것을 포함한 모든 .cpp 에 생깁니다.
+  링커는 '약한 심볼(W)'로 표시된 것 중 하나만 남기고 버립니다.
+  → 남은 하나가 '어느 것'인지는 정해져 있지 않습니다 ★</code></pre>
+      <pre class="code" data-lang="bash"><code># 심볼 종류 확인
+nm -C build/core.o
+#   T  텍스트(코드) — 이 파일이 정의
+#   W  약한 심볼 — inline·템플릿 (중복 허용, 하나만 남김)
+#   U  미정의 — 다른 곳에서 와야 함
+#   t  소문자 = 내부 링키지 (static · 익명 namespace)
+#   B/D  BSS/데이터 — 전역 변수</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실제로 나는 사고 ★</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 빌드 플래그가 달라 구조체 크기가 달라지는 경우
+// a.cpp 는 -DUSE_EXTRA 로, b.cpp 는 없이 컴파일
+struct Cfg {
+    int a;
+#ifdef USE_EXTRA
+    int b;                  // ★ 한쪽에만 있습니다
+#endif
+};
+//   → 링크는 성공하고, 실행 중에 메모리가 밀려 깨집니다
+//     원인 추적이 극악입니다
+
+// ② 표준 라이브러리 디버그 모드 불일치
+// a.cpp: -D_GLIBCXX_DEBUG   b.cpp: 없음
+//   → std::vector 의 내부 구조가 달라집니다 → 크래시
+
+// ③ 서로 다른 라이브러리가 같은 이름의 클래스를 정의
+namespace { }               // ✅ 익명 namespace 로 격리하세요
+static void helper();       // ✅ 또는 static
+
+// ④ inline 함수를 두 헤더에 다르게 정의
+// v1.h: inline int f() { return 1; }
+// v2.h: inline int f() { return 2; }
+//   → 어느 것이 남을지 모릅니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>파이썬·Node 확장에서 특히 위험합니다</b> —
+        같은 프로세스에 여러 확장이 로드되고,
+        <b>서로 다른 버전의 같은 라이브러리</b>를 정적 링크했다면
+        심볼이 섞일 수 있습니다.
+        <b>가시성을 hidden 으로</b> 두는 이유입니다(🔗 f02).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">링커가 하는 일</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">심볼 해석 과정</h4>
+      <pre class="code" data-lang="text"><code>① 각 오브젝트의 심볼 테이블을 읽습니다 (제공 T · 필요 U)
+② 필요한 심볼을 제공하는 오브젝트를 찾아 연결합니다
+③ 섹션(.text · .data · .rodata · .bss)을 합칩니다
+④ 주소를 확정하고 참조를 고쳐 씁니다 (relocation)
+⑤ 실행 파일 헤더를 만듭니다
+
+★ 정적 라이브러리(.a)는 '오브젝트 묶음'일 뿐입니다
+  · 링커는 필요한 오브젝트만 꺼내 씁니다
+  · 왼쪽→오른쪽으로 훑으므로 순서가 중요합니다 (🛠️ b01)
+  · 이미 지나간 라이브러리는 다시 안 봅니다
+    → g++ main.o -lfoo -lbar (foo 가 bar 를 쓰면 이 순서)
+    → 순환 의존이면 -Wl,--start-group ... --end-group
+
+약한 심볼과 강한 심볼
+  · inline·템플릿 = 약한 심볼 → 중복 허용, 하나만 채택
+  · 일반 함수 = 강한 심볼 → 중복이면 multiple definition 에러
+  · 강한 것이 약한 것을 이깁니다 (라이브러리 함수를 덮어쓸 때 이용)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ODR 위반 찾기</h4>
+      <pre class="code" data-lang="bash"><code># ① LTO 를 켜면 링커가 타입 불일치를 잡아 주기도 합니다 ★
+g++ -flto -O2 *.cpp
+#   warning: type of 'f' does not match original declaration
+
+# ② gold/lld 의 ODR 검사
+g++ -fuse-ld=gold -Wl,--detect-odr-violations
+
+# ③ ASan 은 전역 변수 ODR 위반을 잡습니다
+g++ -fsanitize=address ...
+#   ERROR: AddressSanitizer: odr-violation
+
+# ④ 심볼 크기 비교 — 같은 심볼인데 크기가 다르면 의심
+nm -S --defined-only a.o b.o | sort -k3 | awk '{print $2, $3}' | uniq -d
+
+# ⑤ 근본 대책 ★
+#   · 빌드 플래그로 구조체 내용을 바꾸지 않기
+#   · 모든 번역 단위에 같은 플래그 (CMake 로 통일 — 🛠️ b04)
+#   · 내부 심볼은 익명 namespace 로
+#   · 공개 헤더에 서드파티 타입을 노출하지 않기 (🛠️ b03)
+
+# 확인 — 어떤 플래그로 컴파일됐는지
+readelf -p .comment build/core.o
+strings build/app | grep "GCC:"</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">심볼 충돌 관리</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">같은 프로세스에 여러 라이브러리</h4>
+      <pre class="code" data-lang="text"><code>전형적인 사고
+
+  파이썬 프로세스
+    ├─ 확장 A (libfmt 10.0 정적 링크)
+    └─ 확장 B (libfmt 11.0 정적 링크)
+
+  기본 가시성이면 두 확장의 fmt 심볼이 전역에 노출됩니다.
+  → 먼저 로드된 쪽이 나중 것을 가립니다 (전역 심볼 인터포지션)
+  → B 가 A 의 fmt 10.0 코드를 부르게 됩니다
+  → 헤더는 11.0 인데 구현은 10.0 → ODR 위반 → 조용한 손상 ★
+
+대책
+  ① 가시성을 hidden 으로 (🔗 f02) ★ 가장 중요
+     CXX_VISIBILITY_PRESET hidden
+  ② dlopen 시 RTLD_LOCAL (기본값)
+  ③ 의존성을 동적으로 공유 (버전 통일)
+  ④ 내부 namespace 로 격리
+     일부 라이브러리가 제공: FMT_BEGIN_NAMESPACE 등
+  ⑤ 링커 버전 스크립트로 내보낼 심볼 명시 (🔗 f02)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">검증하기</h4>
+      <pre class="code" data-lang="bash"><code># 내 확장이 무엇을 내보내는지 — 최소여야 합니다 ★
+nm -D --defined-only build/_core.so | grep " T " | wc -l
+#   pybind11 확장이면 PyInit_ 하나만 나와야 이상적입니다
+
+nm -D --defined-only build/_core.so | grep " T " | head
+#   fmt · nlohmann 같은 것이 보이면 가시성 설정이 안 된 것 ★
+
+# 두 라이브러리가 같은 심볼을 내보내는지
+nm -DC --defined-only libA.so libB.so | grep " T " \
+  | awk '{print $3}' | sort | uniq -d | head
+
+# 실행 시 어느 것이 선택됐는지
+LD_DEBUG=bindings python -c "import mymod" 2&gt;&amp;1 | grep fmt
+
+# CI 에 넣을 검사
+test $(nm -D --defined-only _core.so | grep -c " T ") -le 2 \
+  || { echo "내보내는 심볼이 너무 많습니다"; exit 1; }</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>확장 모듈의 심볼 수를 CI 로 지키세요</b> —
+        <code>PyInit_</code> 하나만 내보내는 것이 이상적입니다.
+        늘어났다면 <b>가시성 설정이 깨졌다는 신호</b>이고,
+        나중에 <b>재현 불가능한 버그</b>로 돌아옵니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">인라인과 링키지의 정확한 규칙</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 어디에 있어야 하나</h4>
+      <pre class="code" data-lang="cpp"><code>// 외부 링키지 (다른 번역 단위에서 보임)
+void f();                    // 선언
+void f() { }                 // 정의 — 한 곳에만 ★
+extern int g;                // 선언
+int g = 0;                   // 정의 — 한 곳에만
+
+// 내부 링키지 (이 파일 전용)
+static void h() { }          // C 스타일
+namespace { void h2() { } }  // C++ 권장 ★
+const int k = 1;             // ★ const 는 기본이 내부 링키지 (C++)
+constexpr int m = 2;         // 마찬가지
+
+// inline — "중복 정의를 허용하라"는 링커 지시 (탭 1 x09)
+inline void i() { }          // 헤더에 정의 가능
+inline int counter = 0;      // C++17 인라인 변수 ★
+
+// 템플릿 — 암묵적으로 inline 과 같은 취급
+template&lt;class T&gt; void t(T) { }     // 헤더에 정의
+
+// 클래스 안에 정의한 멤버 함수는 자동으로 inline
+struct S { void f() { } };   // inline
+
+// ⚠ 헤더에 이것을 두면 multiple definition
+int bad = 0;                 // ❌ 각 .cpp 에 별도 정의가 생깁니다
+inline int ok = 0;           // ✅
+extern int decl;             // ✅ 선언만, 정의는 .cpp 에</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">정적 초기화 순서 문제</h4>
+      <pre class="code" data-lang="cpp"><code>// ★ 서로 다른 번역 단위의 전역 객체 초기화 순서는 정해져 있지 않습니다
+// a.cpp
+Logger g_logger;                     // b.cpp 의 g_config 를 씁니다
+// b.cpp
+Config g_config;
+//   → g_config 가 아직 초기화 안 됐을 수 있습니다 (크래시 또는 쓰레기 값)
+
+// ✅ 해법 ① 함수 안 static (첫 호출 때 초기화 · 스레드 안전) ★
+Config&amp; config() {
+    static Config c;                 // C++11 부터 스레드 안전 보장
+    return c;
+}
+Logger&amp; logger() {
+    static Logger l{config()};       // 순서가 보장됩니다
+    return l;
+}
+
+// ✅ 해법 ② constinit (C++20) — 컴파일 시점 초기화를 강제
+constinit static int g_count = 0;    // 동적 초기화면 컴파일 에러
+
+// ⚠ 소멸 순서도 문제입니다 (생성의 역순, 하지만 TU 간에는 불명확)
+//   → 함수 안 static 은 프로그램 종료 시 역순으로 소멸됩니다
+//   → 소멸자에서 다른 전역을 쓰면 이미 파괴됐을 수 있습니다 (static destruction order fiasco)
+//   → 정말 필요하면 의도적으로 누수시키는 방법도 씁니다
+Logger&amp; logger() {
+    static Logger* p = new Logger{};  // 일부러 delete 안 함
+    return *p;
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>확장 모듈에서 자주 겪습니다</b> — 라이브러리 로드 시점에
+        전역 생성자가 실행되는데, 그 안에서 <b>파이썬 API 를 부르거나</b>
+        다른 라이브러리를 쓰면 <b>초기화 순서 문제</b>가 생깁니다.
+        <b>지연 초기화(함수 안 static)</b>가 안전합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> ODR 위반은 <b>진단 없이 조용히 깨지는</b> 유일한 규칙 위반입니다.
+    <b>모든 번역 단위에 같은 플래그</b>, <b>내부 심볼은 익명 namespace</b>,
+    <b>가시성은 hidden</b> — 이 셋으로 대부분 예방됩니다.
+    전역 객체는 <b>함수 안 static</b> 으로 두세요.</div>
+</section>
+
+
+<!-- ==================== d02 ==================== -->
+<section class="sec" id="d02">
+  <div class="sec-head rv">
+    <span class="no">DEEP 02</span>
+    <h2><span class="t">UB</span> — 왜 그렇게 위험한가</h2>
+    <p class="lead">
+      “동작이 정의되지 않음”은 <b>틀린 값이 나오는 정도가 아닙니다</b>.
+      <b>코드가 통째로 사라지거나</b> 시간 여행처럼 앞선 코드가 영향을 받습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최적화와 만나면</h4>
+      <pre class="code" data-lang="cpp"><code>// 컴파일러의 대전제: "이 프로그램에 UB 는 없다"
+// → UB 를 일으키는 경로는 '실행되지 않는다'고 가정하고 최적화합니다
+
+// ① 널 체크가 사라집니다 (탭 1 x05)
+void f(int* p) {
+    int x = *p;              // ① 역참조 → "p 는 널이 아니다"
+    if (!p) return;          // ② 그러므로 항상 거짓
+    use(x);                  // ③ → 검사가 통째로 삭제 ★
+}
+
+// ② 오버플로 검사가 사라집니다
+if (n + 1 &lt; n) { /* 오버플로 처리 */ }
+//   부호 있는 오버플로는 UB → "일어날 리 없다" → 조건이 거짓 → 삭제
+
+// ③ 무한 루프가 제거됩니다
+while (true) { }             // 부수효과 없는 무한 루프는 UB
+//   → 컴파일러가 통째로 없애고 다음 코드로 흘러갈 수 있습니다
+
+// ④ 시간 여행 — UB 이후가 아니라 '이전' 코드도 영향받습니다 ★
+printf("시작\n");            // 이 출력이 안 나올 수 있습니다
+*(int*)nullptr = 1;          // UB
+//   컴파일러는 UB 에 도달하는 경로 전체를 자유롭게 다룰 수 있습니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“Release 에서만 터진다”의 정체</b> — 컴파일러 버그가 아니라
+        <b>내 코드의 UB</b> 입니다. Debug 에서는 최적화가 없어
+        <b>우연히 의도대로 동작했을 뿐</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 밟는 UB 목록 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:52%">UB</th><th>탐지</th></tr>
+        <tr><td>초기화 안 된 변수 읽기</td><td>MSan · 경고</td></tr>
+        <tr><td>배열 범위 초과</td><td><b>ASan</b> ★</td></tr>
+        <tr><td>해제 후 사용 · 이중 해제</td><td><b>ASan</b></td></tr>
+        <tr><td>널 포인터 역참조</td><td>UBSan</td></tr>
+        <tr><td>부호 있는 정수 오버플로</td><td><b>UBSan</b> ★</td></tr>
+        <tr><td>0으로 나누기 · <code>INT_MIN / -1</code></td><td>UBSan</td></tr>
+        <tr><td>시프트 폭이 비트 수 이상</td><td>UBSan</td></tr>
+        <tr><td>strict aliasing 위반</td><td>⚠ 탐지 어려움</td></tr>
+        <tr><td>정렬되지 않은 접근</td><td>UBSan</td></tr>
+        <tr><td>수명이 끝난 객체 접근</td><td>ASan</td></tr>
+        <tr><td>데이터 경쟁</td><td><b>TSan</b></td></tr>
+        <tr><td>반환값 없는 non-void 함수</td><td>경고 · UBSan</td></tr>
+        <tr><td>소멸자에서 예외 던지기</td><td>—</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>대부분 Sanitizer 로 잡힙니다</b>(🛠️ b10) —
+        <code>-fsanitize=address,undefined</code> 를 개발·CI 에 켜 두는 것이
+        <b>UB 를 다루는 유일하게 실용적인 방법</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">UB 를 피하는 습관</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">안전한 대안</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 정수 오버플로 — 미리 검사하거나 안전한 함수
+#include &lt;numeric&gt;
+if (a &gt; INT_MAX - b) { /* 넘칠 상황 */ }
+int r;
+if (__builtin_add_overflow(a, b, &amp;r)) { /* 오버플로 */ }   // GCC·Clang
+//   C++26 에는 표준 함수가 들어옵니다
+
+// 부호 없는 정수는 랩어라운드가 '정의'되어 있습니다 (UB 아님)
+unsigned u = UINT_MAX; ++u;      // 0 — 정의된 동작
+
+// ② 타입 재해석 — bit_cast (탭 1 x05)
+float f = 1.0f;
+int i = std::bit_cast&lt;int&gt;(f);   // ✅ C++20 · UB 아님 · 비용 0
+int j = *(int*)&amp;f;                // ❌ strict aliasing 위반
+std::memcpy(&amp;j, &amp;f, 4);           // ✅ 예전부터 쓰던 합법적 방법
+
+// ③ 범위 접근
+v.at(i);                          // 예외를 던짐
+if (i &lt; v.size()) v[i];           // 검사 후
+std::span sp{v}; sp[i];           // 디버그 빌드에서 검사되기도
+
+// ④ 부호 비교 (탭 1 x02)
+std::cmp_less(i, v.size());       // C++20 · 수학적으로 올바른 비교
+
+// ⑤ 정렬 — memcpy 로 안전하게
+Header h;
+std::memcpy(&amp;h, buf, sizeof h);   // ✅ 컴파일러가 최적화로 없애 줍니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">strict aliasing — 가장 미묘한 것</h4>
+      <pre class="code" data-lang="cpp"><code>// 규칙: 객체를 '그 타입이 아닌 타입'으로 접근하면 UB
+//   예외: char · unsigned char · std::byte 는 무엇이든 볼 수 있습니다
+
+// ❌ 전형적인 위반
+float f = 1.0f;
+unsigned bits = *(unsigned*)&amp;f;        // UB
+//   컴파일러는 float* 와 unsigned* 가 다른 객체를 가리킨다고 가정합니다
+//   → 쓰기와 읽기 순서를 자유롭게 바꿀 수 있습니다
+
+// ❌ union 으로 타입 재해석 (C 에서는 합법, C++ 에서는 UB)
+union U { float f; unsigned u; };
+U x; x.f = 1.0f; use(x.u);             // ⚠ 실제로는 대부분 동작하지만 표준상 UB
+
+// ✅ 합법적인 방법
+std::bit_cast&lt;unsigned&gt;(f);            // C++20
+std::memcpy(&amp;bits, &amp;f, sizeof bits);
+
+// 진단이 어려운 이유
+//   · Sanitizer 가 잘 못 잡습니다
+//   · -O0 에서는 증상이 안 나옵니다
+//   · -fno-strict-aliasing 을 켜면 증상이 사라집니다 ← 이것이 단서 ★
+
+// 확인
+g++ -O2 -Wstrict-aliasing=2 main.cpp
+g++ -O2 -fno-strict-aliasing main.cpp   // 증상이 사라지면 위반입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>바이너리 데이터를 다룬다면 꼭 알아야 합니다</b> —
+        네트워크 패킷·파일 포맷을 <b>구조체로 캐스팅해 읽는 코드</b>가
+        가장 흔한 위반입니다. <b><code>memcpy</code> 로 바꾸세요</b> —
+        컴파일러가 최적화로 없애 주므로 비용도 없습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">UB 를 관리하기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">방어 체계 4중</h4>
+      <ul class="tx">
+        <li><b>① 경고를 전부 켜고 에러로</b> —
+            <code>-Wall -Wextra -Werror</code>. 컴파일러가 잡아 주는 것이 가장 쌉니다</li>
+        <li><b>② Sanitizer 를 CI 에</b>(🛠️ b10) —
+            ASan·UBSan·TSan. <b>UB 대응의 핵심</b>입니다 ★</li>
+        <li><b>③ 정적 분석</b> — <code>clang-tidy</code>·<code>cppcheck</code>.
+            실행하지 않고 잡히는 것들</li>
+        <li><b>④ 표준 라이브러리 검사 모드</b> —
+            <code>-D_GLIBCXX_ASSERTIONS</code>(가벼움, 릴리즈에도 가능),
+            <code>-D_GLIBCXX_DEBUG</code>(무겁지만 철저)</li>
+        <li><b>⑤ 퍼징</b> — 파서가 있다면 반드시(🛠️ b10)</li>
+      </ul>
+      <pre class="code" data-lang="bash"><code># 릴리즈에도 켤 만한 가벼운 보호 (🛠️ b04)
+-D_FORTIFY_SOURCE=3 -fstack-protector-strong -D_GLIBCXX_ASSERTIONS
+#   비용 1% 미만으로 상당수의 오버런을 런타임에 잡습니다 ★
+
+# 정수 오버플로를 정의된 동작으로 (표준은 아니지만 실용적)
+-fwrapv          # 부호 있는 오버플로를 랩어라운드로
+-ftrapv          # 오버플로 시 중단</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">증상으로 원인 좁히기</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">증상</th><th>의심</th></tr>
+        <tr><td>Debug 는 되고 Release 만 실패</td><td><b>UB</b> ★ UBSan 먼저</td></tr>
+        <tr><td><code>-O0</code> 은 되고 <code>-O2</code> 실패</td><td>UB · aliasing</td></tr>
+        <tr><td><code>-fno-strict-aliasing</code> 으로 해결</td><td><b>aliasing 위반</b></td></tr>
+        <tr><td>printf 를 넣으면 사라짐</td><td>초기화 · 경쟁 · UB</td></tr>
+        <tr><td>가끔만 크래시</td><td>경쟁(TSan) · 수명</td></tr>
+        <tr><td>컴파일러 버전을 올리니 실패</td><td>UB (최적화가 강해짐) ★</td></tr>
+        <tr><td>다른 기계에서만 실패</td><td>정렬 · 엔디언 · CPU 명령</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“컴파일러를 업그레이드했더니 코드가 깨졌다”</b> —
+        거의 항상 <b>원래 있던 UB 가 드러난 것</b>입니다.
+        새 컴파일러가 더 공격적으로 최적화하면서
+        <b>이전에는 우연히 동작하던 것</b>이 무너집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">UB 를 직접 관찰하기</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드가 사라지는 것을 보기</h4>
+      <pre class="code" data-lang="cpp"><code>// godbolt.org 에 붙여넣고 -O2 어셈블리를 보세요
+int f(int* p) {
+    int x = *p;
+    if (p == nullptr) return -1;     // ★ 이 검사가 사라집니다
+    return x;
+}
+//   -O0: cmp / je 가 보입니다
+//   -O2: 검사가 통째로 없어지고 mov eax, [rdi]; ret 만 남습니다
+
+bool overflow_check(int n) {
+    return n + 1 &lt; n;                // ★ 항상 false 로 접힙니다
+}
+//   -O2: xor eax, eax; ret   (그냥 0 반환)
+
+// 반대로 부호 없는 것은 살아남습니다
+bool ok(unsigned n) { return n + 1 &lt; n; }   // 랩어라운드가 정의됨 → 검사 유지
+
+// 무한 루프
+int g() { while (true) { } }
+//   부수효과가 없으면 UB → 컴파일러가 제거할 수 있습니다
+//   (실제로 clang 은 함수를 비우기도 합니다)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언어가 나아가는 방향</h4>
+      <pre class="code" data-lang="text"><code>C++ 는 UB 를 줄이는 쪽으로 움직이고 있습니다
+
+  C++20  · 부호 있는 정수를 2의 보수로 확정
+         · std::bit_cast 로 안전한 재해석
+         · constinit 로 초기화 순서 문제 완화
+  C++23  · 일부 UB 를 erroneous behavior 로 재분류
+         · std::start_lifetime_as (버퍼를 객체로 안전하게)
+  C++26  · 초기화되지 않은 읽기를 erroneous 로 (진단 가능) ★
+         · 계약(contracts) — 사전·사후 조건을 언어로
+
+erroneous behavior 란
+  · 여전히 잘못됐지만 '진단 가능'하고
+  · 컴파일러가 그것을 근거로 최적화하지 않습니다
+  · 즉 "코드가 사라지는" 종류의 사고가 줄어듭니다 ★
+
+그래도
+  · 포인터·수명·경쟁 관련 UB 는 남습니다
+  · 그래서 Rust 같은 언어가 주목받는 것이고(🦀 가이드)
+  · C++ 에서는 Sanitizer 와 정적 분석이 계속 중요합니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무적 결론</b> — UB 목록을 외우는 것보다
+        <b>Sanitizer 를 항상 켜 두는 습관</b>이 훨씬 효과적입니다.
+        그리고 <b>“Release 에서만 실패”를 만나면 UBSan 부터</b> 돌리세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> UB 는 <b>틀린 값이 나오는 것이 아니라 코드가 사라지는 것</b>입니다.
+    컴파일러는 “UB 는 없다”를 전제로 최적화하기 때문입니다.
+    <b>Debug 는 되고 Release 만 실패</b>하면 컴파일러 버그가 아니라 UB 이고,
+    <b><code>-fsanitize=undefined</code></b> 가 대개 그 자리를 짚어 줍니다.</div>
+</section>
+
+<!-- ==================== d03 ==================== -->
+<section class="sec" id="d03">
+  <div class="sec-head rv">
+    <span class="no">DEEP 03</span>
+    <h2>객체 수명과 <span class="t">aliasing</span></h2>
+    <p class="lead">
+      “메모리가 있다”와 “객체가 살아 있다”는 <b>다른 이야기</b>입니다.
+      이 구분이 바이너리 데이터를 다룰 때 미묘한 버그를 만듭니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">객체의 수명</h4>
+      <pre class="code" data-lang="cpp"><code>// 객체 수명은 '생성자가 끝날 때 시작 · 소멸자가 시작될 때 끝'
+// 그 밖에서 접근하면 UB 입니다
+
+// ① 소멸 후 접근
+{
+    Widget w;
+    Widget* p = &amp;w;
+}   // w 소멸
+// *p 접근 → UB (ASan 이 잡습니다)
+
+// ② 생성 전 접근 — 기반 클래스 생성자에서 가상 함수
+struct Base {
+    Base() { init(); }               // ⚠ 파생 클래스 부분이 아직 없습니다
+    virtual void init() { }
+};
+struct Derived : Base {
+    std::vector&lt;int&gt; v;
+    void init() override { v.push_back(1); }   // ★ v 가 아직 생성 전 → UB
+};
+//   생성자·소멸자 안에서 가상 함수는 '그 클래스의 버전'이 불립니다
+
+// ③ 원시 메모리를 객체로 다루기 — placement new 가 필요합니다
+alignas(Widget) std::byte buf[sizeof(Widget)];
+Widget* p = new (buf) Widget{};      // ★ 여기서 객체 수명이 시작됩니다
+p-&gt;~Widget();                        // 명시적 소멸
+
+// ④ 버퍼를 구조체로 '그냥 캐스팅'하면 객체가 없습니다
+Header* h = reinterpret_cast&lt;Header*&gt;(buf);   // ⚠ 엄밀히는 UB
+h-&gt;field;                                      // 객체가 생성된 적이 없음
+//   ✅ memcpy 로 복사하거나 (탭 1 x05)
+Header h2; std::memcpy(&amp;h2, buf, sizeof h2);
+//   ✅ C++23 std::start_lifetime_as&lt;Header&gt;(buf)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무에서 부딪히는 지점</h4>
+      <pre class="code" data-lang="cpp"><code>// 네트워크 패킷·파일 포맷 파싱 — 가장 흔한 자리 ★
+struct PacketHeader {
+    std::uint32_t magic;
+    std::uint16_t version;
+    std::uint16_t length;
+};
+static_assert(std::is_trivially_copyable_v&lt;PacketHeader&gt;);
+static_assert(sizeof(PacketHeader) == 8);
+
+// ❌ 캐스팅 — aliasing 위반 + 정렬 문제 + 객체 수명
+auto* h = reinterpret_cast&lt;const PacketHeader*&gt;(buffer);
+
+// ✅ memcpy — 안전하고, 컴파일러가 최적화로 없애 줍니다
+PacketHeader h;
+if (buffer.size() &lt; sizeof h) return error();
+std::memcpy(&amp;h, buffer.data(), sizeof h);
+
+// ✅ 필드 단위로 읽기 (엔디언까지 처리 · 정렬 무관) ★
+std::uint32_t read_u32_le(const std::byte* p) {
+    return std::uint32_t(p[0]) | (std::uint32_t(p[1]) &lt;&lt; 8)
+         | (std::uint32_t(p[2]) &lt;&lt; 16) | (std::uint32_t(p[3]) &lt;&lt; 24);
+}
+//   컴파일러가 대개 단일 mov 명령으로 최적화합니다
+
+// C++23
+auto* h3 = std::start_lifetime_as&lt;PacketHeader&gt;(buffer.data());</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>실제로 대부분의 코드가 캐스팅을 씁니다</b> — 그리고 대개 동작합니다.
+        다만 <b>정렬이 다른 아키텍처(ARM)</b>나
+        <b>공격적 최적화</b>에서 깨집니다.
+        <b><code>memcpy</code> 는 비용이 없으니</b> 쓰지 않을 이유가 없습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">수명을 다루는 도구</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">placement new 와 수동 관리</h4>
+      <pre class="code" data-lang="cpp"><code>// 컨테이너·optional·variant 가 내부적으로 쓰는 기법
+template&lt;class T&gt;
+class SmallOpt {
+    alignas(T) std::byte storage_[sizeof(T)];
+    bool has_ = false;
+public:
+    template&lt;class... A&gt;
+    T&amp; emplace(A&amp;&amp;... a) {
+        reset();
+        T* p = new (storage_) T(std::forward&lt;A&gt;(a)...);   // ★ 수명 시작
+        has_ = true;
+        return *p;
+    }
+    void reset() {
+        if (has_) { std::launder(reinterpret_cast&lt;T*&gt;(storage_))-&gt;~T(); has_ = false; }
+    }
+    T&amp; operator*() {
+        return *std::launder(reinterpret_cast&lt;T*&gt;(storage_));   // ★ launder
+    }
+    ~SmallOpt() { reset(); }
+};
+
+// std::launder (C++17) — "여기 새 객체가 생겼다"고 컴파일러에 알림
+//   객체를 파괴하고 같은 자리에 새로 만들었을 때 필요합니다
+//   (컴파일러가 옛 객체의 정보를 계속 쓰는 것을 막습니다)
+
+// 실무에서는 직접 만들지 마세요
+std::optional&lt;T&gt; · std::variant&lt;...&gt; · std::vector 를 쓰면 됩니다 (탭 2 m10)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">restrict — aliasing 을 알려 주기</h4>
+      <pre class="code" data-lang="cpp"><code>// 컴파일러는 두 포인터가 겹칠 수 있다고 가정합니다 (⚡ e06)
+void add(double* out, const double* a, const double* b, std::size_t n) {
+    for (std::size_t i = 0; i &lt; n; ++i) out[i] = a[i] + b[i];
+}
+//   out 과 a 가 같을 수 있으므로 매 반복마다 다시 로드해야 합니다
+//   → 벡터화 실패
+
+// __restrict 로 "겹치지 않는다"고 약속
+void add(double* __restrict out,
+         const double* __restrict a,
+         const double* __restrict b, std::size_t n);
+//   ★ 표준은 아니지만 gcc·clang·msvc 모두 지원합니다
+//   ⚠ 약속을 어기면 UB — 실제로 겹치는 포인터를 넘기면 결과가 틀립니다
+
+// 확인 — 어셈블리에서 vaddpd 가 나오는지 (⚡ e09)
+// g++ -O3 -fopt-info-vec-optimized add.cpp
+
+// 타입이 다르면 컴파일러가 이미 겹치지 않는다고 가정합니다 (strict aliasing)
+void f(int* i, float* f);      // 서로 다른 타입 → 겹칠 수 없다고 가정
+//   ★ 그래서 타입 재해석이 위험한 것입니다 (d02)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파이썬 확장에서 유용합니다</b> — numpy 배열 두 개를 받아
+        하나에 쓰는 함수라면 <b><code>__restrict</code> 를 붙이는 것만으로</b>
+        벡터화가 걸려 2~4배가 나올 수 있습니다.
+        다만 <b>같은 배열을 입력과 출력으로 넘기지 못하게</b> 문서에 명시하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">수명 버그를 구조로 막기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규칙으로 예방하기</h4>
+      <ul class="tx">
+        <li><b>소유는 <code>unique_ptr</code>·컨테이너</b>, 원시 포인터는 <b>빌려 보기만</b>(탭 2 m02)</li>
+        <li><b>참조·<code>string_view</code>·<code>span</code> 은 인자 전용</b> —
+            멤버로 보관하지 않기(탭 2 m11)</li>
+        <li><b>컨테이너 재할당 후 포인터·반복자 무효</b> — 인덱스를 보관(탭 2 m05)</li>
+        <li><b>생성자·소멸자에서 가상 함수 호출 금지</b></li>
+        <li><b>비동기·스레드에는 값 캡처</b>(탭 2 m07)</li>
+        <li><b>C API 경계에서는 수명을 문서화</b>(🔗 f07)</li>
+      </ul>
+      <pre class="code" data-lang="cpp"><code>// 도구로 잡기
+// clang-tidy
+//   bugprone-dangling-handle
+//   bugprone-use-after-move
+//   cppcoreguidelines-owning-memory
+
+// clang 의 수명 분석 (실험적이지만 유용)
+clang++ -Wlifetime -Wdangling-gsl main.cpp
+
+// GCC
+g++ -Wdangling-pointer -Wdangling-reference -Wuse-after-free</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">진단 절차</h4>
+      <pre class="code" data-lang="bash"><code># ① ASan 이 대부분 잡습니다 ★
+g++ -fsanitize=address -g main.cpp &amp;&amp; ./a.out
+#   ERROR: AddressSanitizer: heap-use-after-free
+#     READ of size 4 at 0x... thread T0
+#       #0 in use() main.cpp:20
+#     freed by thread T0 here:
+#       #0 in operator delete
+#       #1 in main main.cpp:15          ★ 어디서 해제됐는지까지
+
+# ② 스택 객체의 수명
+-fsanitize=address -fsanitize-address-use-after-scope
+#   ERROR: stack-use-after-scope ★
+
+# ③ 반환 후 사용
+ASAN_OPTIONS=detect_stack_use_after_return=1 ./a.out
+
+# ④ 확장 모듈이라면 (🐍 y12)
+PYTHONMALLOC=malloc LD_PRELOAD=$(gcc -print-file-name=libasan.so) python t.py
+
+# ⑤ 재현이 어려우면 rr 로 녹화하고 되감기 (🛠️ b09)
+rr record ./app &amp;&amp; rr replay
+(rr) watch -l *0x7fff1234
+(rr) reverse-continue        # ★ 값이 망가진 시점으로 거꾸로</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>수명 버그는 ASan 이 거의 다 잡습니다</b> —
+        해제 위치와 접근 위치를 <b>둘 다 보여 주기</b> 때문에
+        원인 파악이 빠릅니다. <b>개발 빌드에 항상 켜 두세요</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">포인터 프로버넌스</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">포인터는 주소만이 아닙니다</h4>
+      <pre class="code" data-lang="cpp"><code>// 표준은 포인터에 '어느 객체에서 유래했는가'(provenance)를 부여합니다
+int a[10], b[10];
+int* p = a + 10;            // ✅ 마지막 다음까지는 합법
+int* q = b;
+if (p == q) {               // 주소는 같을 수 있지만
+    *p;                     // ❌ p 로는 b 에 접근할 수 없습니다 (UB)
+}
+
+// 정수로 왕복하면 프로버넌스를 잃습니다
+std::uintptr_t addr = reinterpret_cast&lt;std::uintptr_t&gt;(ptr);
+int* p2 = reinterpret_cast&lt;int*&gt;(addr);
+//   구현 정의 — 대부분 동작하지만 표준상 보장이 약합니다
+//   최적화가 "이 포인터는 어디서 왔는지 모른다"고 판단해
+//   보수적으로 처리하거나, 반대로 잘못 가정할 수 있습니다
+
+// 포인터 태깅 (하위 비트에 정보 넣기) — 흔한 기법이지만 주의
+std::uintptr_t tagged = addr | 1;      // 정렬 덕에 하위 비트가 비어 있음
+//   ⚠ 실무에서 널리 쓰이지만 엄밀히는 회색지대입니다
+//   → std::launder · memcpy 로 다루거나, 별도 필드로 분리하는 편이 안전</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 이런 규칙이 있나</h4>
+      <pre class="code" data-lang="text"><code>컴파일러가 '별칭 분석(alias analysis)'을 할 수 있어야
+최적화가 가능하기 때문입니다
+
+  · 두 포인터가 절대 겹치지 않는다면
+    → 로드·스토어 순서를 바꾸고, 레지스터에 캐시하고, 벡터화합니다
+  · 겹칠 수 있다면
+    → 매번 메모리를 다시 읽어야 합니다 (느림)
+
+프로버넌스 규칙이 없으면
+  "정수로 바꿨다가 되돌린 포인터"가 무엇이든 가리킬 수 있어
+  컴파일러는 모든 최적화를 포기해야 합니다.
+
+실무 지침
+  · 포인터 산술은 같은 배열 안에서만
+  · 타입 재해석은 memcpy · bit_cast (d02)
+  · 정수↔포인터 왕복은 최소화, 필요하면 격리된 함수에서
+  · 저수준 트릭을 쓸 때는 -fno-strict-aliasing 이 필요한지 검토
+
+★ C++26 · C 표준에서 프로버넌스를 명확히 하는 작업이 진행 중입니다
+  (P2318 · TS 6010) — 지금은 '보수적으로 쓰는 것'이 답입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>여기까지 신경 쓸 자리</b> — 할당자·GC·직렬화·JIT 처럼
+        <b>메모리를 직접 관리하는 코드</b>입니다.
+        일반 응용 코드에서는 <b>d02 의 규칙(memcpy·bit_cast)</b>만 지켜도 충분합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> “메모리가 있다”와 “객체가 살아 있다”는 다릅니다.
+    버퍼를 구조체로 <b>캐스팅하지 말고 <code>memcpy</code></b> 하세요 — 비용은 0 입니다.
+    <b><code>__restrict</code></b> 는 벡터화를 여는 열쇠이지만 <b>약속을 어기면 UB</b> 입니다.
+    수명 버그는 <b>ASan 이 해제 위치까지</b> 알려 줍니다.</div>
+</section>
+
+
+<!-- ==================== d04 ==================== -->
+<section class="sec" id="d04">
+  <div class="sec-head rv">
+    <span class="no">DEEP 04</span>
+    <h2><span class="t">vtable</span> 과 가상 호출 비용</h2>
+    <p class="lead">
+      가상 함수는 “느리다”가 아니라 <b>“인라인을 막는다”</b>가 정확한 표현입니다.
+      실제 비용을 수치로 확인하고 대안을 정리합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메모리에 어떻게 놓이나</h4>
+      <pre class="code" data-lang="cpp"><code>struct B { virtual void f(); virtual void g(); int x; };
+struct D : B { void f() override; int y; };
+
+sizeof(B);      // 16 = vptr(8) + int(4) + 패딩(4)
+sizeof(D);      // 24 = vptr(8) + x(4) + y(4) + 패딩(8)
+
+// 객체 배치
+//   [vptr][x][패딩]          ← B
+//   [vptr][x][y][패딩]       ← D (같은 vptr 자리, 다른 테이블을 가리킴)
+//
+// vtable (클래스마다 하나, 읽기 전용 섹션에)
+//   B 의 vtable: [&amp;B::f, &amp;B::g, RTTI 정보, ...]
+//   D 의 vtable: [&amp;D::f, &amp;B::g, RTTI 정보, ...]
+
+// b.f() 가 하는 일
+//   ① 객체에서 vptr 을 읽는다        (메모리 접근 1)
+//   ② 테이블에서 f 의 주소를 읽는다   (메모리 접근 2)
+//   ③ 그 주소로 간접 점프            (분기 예측 필요)
+
+// 확인
+// g++ -fdump-lang-class main.cpp     # vtable 레이아웃 출력
+// clang++ -Xclang -fdump-record-layouts main.cpp   ★
+// objdump -sj .rodata app | grep -A4 vtable</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가상 함수가 하나라도 있으면</b> 객체 앞에 <b>vptr 8바이트</b>가 붙고
+        <code>is_standard_layout</code> 이 깨집니다.
+        <b>C ABI 로 구조체를 그대로 넘길 수 없게</b> 되는 이유입니다(🔗 f01 · 탭 1 x07).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실제 비용</h4>
+      <pre class="code" data-lang="text"><code>직접 측정한 경향 (환경마다 다릅니다 — 직접 재세요)
+
+  1억 회 호출, 본문이 한 줄인 함수
+
+    직접 호출 (인라인)     0.03 ns/회   ← 사실상 사라짐
+    비가상 함수 호출        1.0 ns
+    가상 함수 (같은 타입)    1.5 ns      ← 예측 성공
+    가상 함수 (타입 섞임)    4~8 ns      ← 예측 실패 ★
+    std::function          3~10 ns
+
+★ 진짜 비용은 '호출 자체'가 아니라 인라인 불가입니다
+  · 한 줄짜리 접근자가 인라인되면 0사이클
+  · 가상이면 호출이 남고, 주변 최적화(벡터화·상수 전파)도 막힙니다
+  · 루프 안에서 원소마다 부르면 그 차이가 누적됩니다
+
+언제 문제가 되나 (셋이 겹칠 때)
+  ① 수백만 회 이상 호출  ② 본문이 짧음  ③ 루프 안 · 벡터화 대상</code></pre>
+      <pre class="code" data-lang="bash"><code>perf stat -e branch-misses,iTLB-load-misses ./app
+#   간접 분기 예측 실패가 많으면 다형적 호출이 원인일 수 있습니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">가상 호출을 없애는 방법</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">컴파일러가 직접 호출로 바꾸게</h4>
+      <pre class="code" data-lang="cpp"><code>// ① final — 더 파생될 수 없다면 대상이 확정됩니다 ★
+struct D final : B { void f() override; };
+D d; d.f();                  // 직접 호출 · 인라인 가능
+
+struct B2 { virtual void f() final; };   // 함수 단위로도
+
+// ② 정적 타입이 확실한 경로
+void use(D&amp; d) { d.f(); }    // B&amp; 가 아니라 D&amp; 로 받으면 직접 호출
+
+// ③ LTO — 전체 프로그램을 보고 파생 클래스가 하나뿐이면 확정 ★
+//    (speculative devirtualization)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+
+// ④ 익명 namespace — 이 파일 밖에서 상속할 수 없음을 알려 줍니다
+namespace { struct Impl : Base { ... }; }
+
+// 확인 — 어셈블리에 call *%rax (간접) 가 있는지 (⚡ e09)
+// objdump -dC app | grep "call.*\*"</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설계로 없애기</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 호출 단위를 키우기 ★ 거의 항상 최선입니다
+// ❌ 원소마다 가상 호출
+struct Filter { virtual double apply(double) = 0; };
+for (auto&amp; x : v) x = f-&gt;apply(x);       // 100만 번 간접 호출
+
+// ✅ 배열 전체를 가상 함수로
+struct Filter { virtual void apply(std::span&lt;double&gt;) = 0; };
+f-&gt;apply(v);                              // 가상 호출 1번 + 내부는 순수 루프
+//   → 비용이 사실상 사라지고 벡터화도 됩니다 (탭 1 x08)
+
+// ② variant + visit — 종류가 고정이면 (탭 2 m10)
+using Shape = std::variant&lt;Circle, Rect&gt;;
+double area(const Shape&amp; s) { return std::visit([](auto&amp; x){ return x.area(); }, s); }
+//   점프 테이블 · 인라인 가능 · 힙 할당 없음
+
+// ③ 템플릿 (CRTP) — 컴파일 시점 다형성 (탭 2 m08)
+template&lt;class D&gt; struct Base {
+    double area() const { return static_cast&lt;const D*&gt;(this)-&gt;area_impl(); }
+};
+//   비용 0 · 대신 런타임 교체 불가
+
+// ④ 타입별로 묶어 처리 (⚡ e05)
+for (auto&amp; c : circles) total += c.area();
+for (auto&amp; r : rects)   total += r.area();</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“호출 단위를 키우기”가 핵심입니다</b> —
+        이 가이드 전체에서 반복되는 원칙과 같습니다.
+        파이썬 경계든 가상 함수든, <b>경계를 넘는 횟수를 데이터 크기와 분리</b>하면
+        비용이 사라집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">과잉 반응하지 않기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대부분은 문제가 아닙니다</h4>
+      <pre class="code" data-lang="text"><code>가상 호출이 실제 병목인 경우는 드뭅니다
+
+  · 초당 100만 번 불려도 1.5ns × 100만 = 1.5ms
+  · 웹 요청 하나에 수십 번 부르는 정도면 무시할 수준
+  · 프로파일에 나타나지 않으면 손대지 마세요 ★
+
+과잉 반응의 대가
+  · 전부 템플릿으로 바꾸면 빌드 시간·바이너리 크기 폭발 (d08)
+  · CRTP 는 읽기 어렵고 에러 메시지가 나쁩니다
+  · variant 는 종류를 나중에 추가하기 어렵습니다
+  · 런타임 교체가 필요한 곳에서는 애초에 불가능합니다
+
+★ 가상 함수를 그냥 쓰세요.
+  프로파일러가 그 자리를 가리킬 때만 위의 기법을 꺼내면 됩니다.
+
+가상 함수가 오히려 나은 경우
+  · 플러그인 · 설정으로 구현 선택
+  · 테스트용 가짜 객체 (탭 1 x08)
+  · 컴파일 시간이 중요한 대형 프로젝트</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그래도 지킬 것</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 상속할 클래스에는 virtual 소멸자 (탭 1 x08)
+struct Base { virtual ~Base() = default; };
+//   없으면 Base* 로 delete 할 때 파생 소멸자가 안 불립니다 (UB)
+
+// ② 상속을 안 할 클래스는 final ★
+struct Impl final : Base { ... };
+//   최적화 여지 + 의도 표현
+
+// ③ override 를 반드시
+void f(int) override;        // 시그니처가 다르면 컴파일 에러
+
+// ④ 다중 상속은 인터페이스에만
+//   상태를 가진 클래스를 여럿 상속하면 vtable 이 복잡해지고
+//   thunk(조정 코드)가 생겨 호출 비용이 늘어납니다
+
+// ⑤ 가상 함수를 많이 만들지 마세요
+//   vtable 이 커지면 캐시에도 부담입니다
+
+// 검사
+// clang-tidy: cppcoreguidelines-virtual-class-destructor
+//             modernize-use-override
+//             cppcoreguidelines-explicit-virtual-functions</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 중요한 것은 <code>virtual</code> 소멸자</b>입니다.
+        성능보다 <b>정확성 문제</b>이고, 빠뜨리면 <b>메모리가 샙니다</b>.
+        <code>-Wnon-virtual-dtor</code> 를 켜 두세요(🛠️ b04).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">vtable 의 세부</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다중 상속과 thunk</h4>
+      <pre class="code" data-lang="cpp"><code>struct A { virtual void f(); int a; };
+struct B { virtual void g(); int b; };
+struct C : A, B { void f() override; void g() override; };
+
+// C 객체는 vptr 을 두 개 가집니다
+//   [vptrA][a][vptrB][b]
+//        ↑ A 로 볼 때        ↑ B 로 볼 때 (this 가 다릅니다!)
+
+C c;
+B* pb = &amp;c;                  // ★ 주소가 조정됩니다 (+16 정도)
+pb-&gt;g();                     // vptrB 의 테이블 → thunk → this 를 되돌림 → C::g
+
+// thunk: this 포인터를 조정하고 진짜 함수로 점프하는 작은 코드
+//   → 다중 상속에서 가상 호출이 조금 더 비싼 이유
+
+// dynamic_cast 는 RTTI 를 순회합니다 (더 비쌈)
+if (auto* p = dynamic_cast&lt;C*&gt;(pb)) { ... }     // 수십~수백 사이클
+//   자주 부르면 병목이 됩니다 → 설계를 다시 보세요
+//   (가상 함수로 표현할 수 있으면 그쪽이 낫습니다)
+
+// 가상 상속 (다이아몬드 해결)은 더 복잡합니다
+struct D : virtual A { };
+//   vbase offset 을 통한 간접 접근 → 멤버 접근조차 느려집니다
+//   ★ 꼭 필요한 경우가 아니면 피하세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">RTTI 와 예외를 끄는 선택</h4>
+      <pre class="code" data-lang="bash"><code># 임베디드·게임 엔진에서 종종 씁니다
+g++ -fno-rtti -fno-exceptions
+
+# -fno-rtti 로 잃는 것
+#   dynamic_cast · typeid
+#   (vtable 의 RTTI 포인터가 사라져 바이너리가 조금 작아집니다)
+
+# -fno-exceptions 로 잃는 것 (탭 1 x11)
+#   try/catch/throw
+#   std::vector::at · std::stoi 등 예외에 의존하는 표준 함수
+#   → 자체 컨테이너를 쓰거나 expected 로 대체 (탭 2 m10)
+
+# 효과
+#   바이너리 5~20% 감소 · 예외 테이블 제거
+#   ⚠ 성능은 대개 차이가 없습니다 (예외는 던지지 않으면 비용 0 — d05)
+
+# 확인
+size -A app | grep -E "eh_frame|gcc_except"</code></pre>
+      <pre class="code" data-lang="cpp"><code>// RTTI 없이 타입 구분이 필요하면 — 직접 태그
+struct Base {
+    enum class Kind { Circle, Rect } kind;
+    explicit Base(Kind k) : kind(k) {}
+};
+//   variant 가 이것을 타입 안전하게 해 주는 것입니다 (탭 2 m10)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>확장 모듈에서는 예외를 켜 두세요</b> — pybind11·node-addon-api 가
+        <b>예외로 에러를 전달</b>합니다(🐍 y08 · 🟨 j02).
+        끄면 표준 라이브러리 일부도 못 쓰게 되어 얻는 것보다 잃는 것이 큽니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 가상 호출의 진짜 비용은 <b>인라인 불가</b> 입니다.
+    <b><code>final</code></b> 을 붙이고 <b>호출 단위를 배열 전체로</b> 키우면 대부분 사라집니다.
+    다만 <b>프로파일러가 가리킬 때만</b> 손대세요 —
+    전부 템플릿으로 바꾸면 <b>빌드 시간과 가독성을 잃습니다</b>.</div>
+</section>
+
+
+<!-- ==================== d05 ==================== -->
+<section class="sec" id="d05">
+  <div class="sec-head rv">
+    <span class="no">DEEP 05</span>
+    <h2>예외의 <span class="t">실제 구현</span></h2>
+    <p class="lead">
+      “예외는 느리다”는 절반만 맞습니다.
+      <b>던지지 않으면 비용이 0</b> 이고, <b>던지면 매우 비쌉니다</b>.
+      그 구조를 알면 언제 쓸지 판단할 수 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">테이블 기반(zero-cost) 방식</h4>
+      <pre class="code" data-lang="text"><code>현대 구현(Itanium ABI · MSVC x64)은 이렇게 동작합니다
+
+  컴파일 시점
+    · try 블록에 들어가는 명령을 넣지 않습니다 ★
+    · 대신 '어디서 예외가 나면 무엇을 정리할지' 표를 만들어
+      바이너리의 별도 섹션에 넣습니다
+        .eh_frame · .gcc_except_table (ELF)
+        .pdata · .xdata (Windows)
+
+  던져질 때
+    ① __cxa_allocate_exception 으로 예외 객체 할당
+    ② __cxa_throw 호출
+    ③ 언와인더가 스택을 거슬러 올라가며 표를 조회
+       (2단계: 먼저 핸들러를 찾고, 그다음 실제로 되감기)
+    ④ 각 프레임의 소멸자를 호출
+    ⑤ 핸들러로 점프
+
+비용 구조
+  · 던지지 않을 때 : 실행 비용 0 · 바이너리 +5~15% ★
+  · 던질 때        : 수 μs (표 조회 + 되감기) · 시간이 일정하지 않음
+  · 게다가 언와인더가 전역 락을 잡는 구현이 있어
+    멀티스레드에서 동시에 던지면 직렬화됩니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그래서 나오는 결론</h4>
+      <pre class="code" data-lang="cpp"><code>// ✅ 정상 흐름에는 예외를 쓰지 마세요
+// ❌ 루프 안에서 흐름 제어로
+for (auto&amp; s : lines) {
+    try { v.push_back(std::stoi(s)); }
+    catch (...) { /* 무시 */ }        // 실패가 잦으면 수백 배 느려집니다 ★
+}
+// ✅ 실패가 흔하면 반환값으로 (탭 2 m10)
+for (auto&amp; s : lines)
+    if (auto n = to_int(s)) v.push_back(*n);
+
+// ✅ 진짜 예외적인 상황에는 마음껏
+if (!file) throw std::runtime_error("설정 파일 없음");
+//   프로그램 시작에 한 번 나는 것이라면 비용을 걱정할 이유가 없습니다
+
+// 측정 — 던지는 비용을 직접 재 보기
+auto t = bench_ms([]{
+    for (int i = 0; i &lt; 100000; ++i)
+        try { throw 1; } catch (int) { }
+});
+//   대개 호출당 1~5μs — 함수 호출의 1000배 수준입니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>실시간 시스템에서 예외를 끄는 이유</b> — 느려서가 아니라
+        <b>시간이 예측 불가능</b>하기 때문입니다.
+        게임 프레임·오디오 콜백·거래 시스템처럼
+        <b>최악 지연이 중요한 곳</b>에서는 <code>-fno-exceptions</code> 를 씁니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">예외 안전성 다시 보기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>noexcept</code> 의 의미</h4>
+      <pre class="code" data-lang="cpp"><code>void f() noexcept;
+//   "이 함수는 예외를 던지지 않는다"
+//   어기면 std::terminate — catch 로도 못 막습니다 ★
+
+// 얻는 것
+//   ① 컴파일러가 예외 처리 코드를 생략 → 바이너리 축소
+//   ② ★ 이동 생성자에 noexcept 가 있어야 vector 재할당이 '이동'을 씁니다
+//      (탭 2 m03) — 없으면 복사로 후퇴해 성능이 몇 배 나빠집니다
+static_assert(std::is_nothrow_move_constructible_v&lt;MyType&gt;);
+
+// 반드시 noexcept 여야 하는 것
+//   소멸자 (기본으로 noexcept)
+//   이동 생성자 · 이동 대입
+//   swap
+//   해제 함수
+
+// 조건부 noexcept
+template&lt;class T&gt;
+void g(T t) noexcept(std::is_nothrow_move_constructible_v&lt;T&gt;);
+
+// 검사
+noexcept(expr)               // 이 식이 noexcept 인가 (컴파일 시점)
+static_assert(noexcept(a.swap(b)));</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스택 되감기 관찰하기</h4>
+      <pre class="code" data-lang="cpp"><code>struct Trace {
+    const char* n;
+    explicit Trace(const char* s) : n(s) { std::printf("+ %s\n", n); }
+    ~Trace() { std::printf("- %s\n", n); }
+};
+
+void c() { Trace t{"c"}; throw std::runtime_error("실패"); }
+void b() { Trace t{"b"}; c(); }
+void a() { Trace t{"a"}; b(); }
+
+int main() {
+    try { a(); }
+    catch (const std::exception&amp; e) { std::printf("잡음: %s\n", e.what()); }
+}
+// 출력
+//   + a  + b  + c
+//   - c  - b  - a        ★ 소멸자가 역순으로 전부 불립니다 (RAII)
+//   잡음: 실패</code></pre>
+      <pre class="code" data-lang="bash"><code># 던지는 순간 멈추기 (🛠️ b09)
+gdb ./app
+(gdb) catch throw
+(gdb) run
+(gdb) bt                     # 어디서 던졌는지
+
+# 잡히지 않은 예외로 죽었을 때
+(gdb) break __cxa_throw
+(gdb) break std::terminate</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">경계에서의 처리</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">예외가 새면 프로세스가 죽습니다</h4>
+      <pre class="code" data-lang="cpp"><code>// ① main 을 감싸기 (탭 1 x11)
+int main() try { run(); return 0; }
+catch (const std::exception&amp; e) { log(e.what()); return 1; }
+catch (...) { log("알 수 없는 오류"); return 2; }
+
+// ② 스레드 함수 (탭 2 m12)
+std::jthread t([]{
+    try { work(); } catch (const std::exception&amp; e) { log(e.what()); }
+});
+
+// ③ C ABI 경계 — 반드시 (🔗 f09)
+extern "C" int32_t mylib_run(...) {
+    try { impl(); return 0; }
+    catch (const std::bad_alloc&amp;) { return -2; }
+    catch (...) { return -1; }
+}
+//   C++ 예외가 C 프레임을 통과하면 UB 입니다 ★
+
+// ④ 파이썬·Node 경계 (🐍 y08 · 🟨 j02)
+//   pybind11 이 자동 변환하지만, GIL 해제 구간은 직접 처리해야 합니다
+std::optional&lt;std::string&gt; err;
+{
+    py::gil_scoped_release rel;
+    try { compute(); } catch (const std::exception&amp; e) { err = e.what(); }
+}
+if (err) throw py::value_error(*err);   // GIL 을 가진 상태에서 던지기 ★
+
+// ⑤ 소멸자 (탭 2 m01)
+~File() { try { flush(); } catch (...) { /* 로그만 */ } }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">예외를 쓸까 말까</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">상황</th><th>선택</th></tr>
+        <tr><td>흔한 실패<br><span style="color:var(--dim)">파싱·조회·검증</span></td><td><code>expected</code>·<code>optional</code></td></tr>
+        <tr><td>드물고 회복 불가<br><span style="color:var(--dim)">메모리 부족·설정 손상</span></td><td>예외</td></tr>
+        <tr><td>생성자에서 실패</td><td>예외 <b>(반환값이 없음)</b></td></tr>
+        <tr><td>실시간·최악 지연 중요</td><td>예외 끄기</td></tr>
+        <tr><td>언어 경계 밖</td><td>에러 코드로 변환 ★</td></tr>
+        <tr><td>라이브러리 공개 API</td><td>둘 다 제공 고려</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>프로젝트 단위로 정하세요</b> — 예외를 쓰는 코드와 안 쓰는 코드가 섞이면
+        <b>예외를 잡지 않는 코드 사이로 예외가 지나가</b> 최악입니다.
+        라이브러리라면 <b>예외를 끈 프로젝트도 쓸 수 있게</b>
+        <code>expected</code> 기반 API 를 함께 제공하는 것이 안전합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">예외의 미래와 대안</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">현재 구현의 문제</h4>
+      <pre class="code" data-lang="text"><code>① 던질 때 힙 할당이 일어납니다
+   메모리 부족 상황에서 bad_alloc 을 던지려는데
+   그 예외 객체를 할당할 메모리가 없을 수 있습니다
+   (구현은 비상용 버퍼를 둡니다)
+
+② 언와인더가 전역 락을 잡는 구현이 있습니다
+   여러 스레드가 동시에 던지면 직렬화됩니다 ★
+   서버에서 예외를 흐름 제어로 쓰면 확장성이 무너집니다
+
+③ 바이너리가 커집니다 (5~15%)
+   임베디드에서 문제가 됩니다
+
+④ 되감기 시간이 스택 깊이에 비례합니다
+   최악 지연을 보장할 수 없습니다
+
+⑤ 표(테이블)를 읽어야 해서 캐시를 오염시킵니다
+
+→ P0709 "Zero-overhead deterministic exceptions" 제안
+   · 예외를 반환값처럼 전달 (레지스터)
+   · 할당 없음 · 결정적 시간
+   · 아직 표준에 들어가지 않았습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무적 절충</h4>
+      <pre class="code" data-lang="cpp"><code>// 계층별로 다르게 (탭 2 m10)
+//   안쪽 핫 경로  : expected — 예외 없음, 결정적
+//   중간 계층     : 전파
+//   경계          : 예외 또는 에러 코드로 변환
+
+// 예외를 끈 환경에서도 동작하는 코드
+#if __cpp_exceptions
+    #define MYLIB_THROW(x) throw x
+#else
+    #define MYLIB_THROW(x) (std::fprintf(stderr, "%s\n", #x), std::abort())
+#endif
+
+// 표준 라이브러리도 예외 없이 쓰기
+v.at(i);                        // ❌ 예외에 의존
+if (i &lt; v.size()) v[i];         // ✅
+std::from_chars(...);           // ✅ 예외를 안 던집니다 (탭 2 m11)
+std::filesystem::file_size(p, ec);   // ✅ error_code 오버로드
+
+// 측정 — 예외 테이블이 차지하는 크기
+size -A app | grep -E "eh_frame|except"
+// 예외를 끄면 얼마나 줄어드는지
+g++ -O2 -fno-exceptions -fno-rtti app.cpp -o app_small</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>대부분의 응용 프로그램은 예외를 그냥 쓰면 됩니다</b> —
+        위의 문제들은 <b>실시간·임베디드·초고성능 서버</b>에서 의미가 있습니다.
+        중요한 것은 <b>“정상 흐름에 쓰지 않는다”</b>는 원칙 하나입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 예외는 <b>던지지 않으면 비용이 0</b>,
+    <b>던지면 마이크로초 단위</b>입니다.
+    그래서 <b>정상 흐름에는 쓰지 말고</b> 진짜 예외적인 상황에만 쓰세요.
+    <b>이동 생성자의 <code>noexcept</code></b> 는 성능에 직결되니 반드시 붙이고,
+    <b>언어 경계에서는 예외를 통과시키지 마세요</b>.</div>
+</section>
+
+
+<!-- ==================== d06 ==================== -->
+<section class="sec" id="d06">
+  <div class="sec-head rv">
+    <span class="no">DEEP 06</span>
+    <h2>메모리 모델과 <span class="t">memory_order</span></h2>
+    <p class="lead">
+      멀티스레드에서 <b>다른 CPU 가 내 쓰기를 언제 보게 되는가</b> 를 정하는 규칙입니다.
+      락 프리 코드를 쓰려면 반드시 알아야 합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 순서가 뒤바뀌나</h4>
+      <pre class="code" data-lang="text"><code>세 곳에서 재배치가 일어납니다
+
+  ① 컴파일러 — 최적화로 명령 순서를 바꿉니다
+  ② CPU — 비순차 실행(out-of-order)
+  ③ 캐시·스토어 버퍼 — 쓰기가 다른 코어에 보이는 시점이 늦어집니다
+
+단일 스레드에서는 결과가 같도록 보장되지만
+다른 스레드가 보는 순서는 다를 수 있습니다 ★
+
+아키텍처별 강도
+  x86-64 : 강한 모델 (StoreLoad 만 재배치)
+           → acquire/release 가 사실상 공짜
+  ARM · RISC-V : 약한 모델
+           → 실제 장벽 명령이 생깁니다 ★
+  ⚠ x86 에서 테스트한 락 프리 코드가 ARM(애플 실리콘·서버)에서
+    깨지는 일이 실제로 있습니다</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 고전적인 실패
+bool ready = false;
+int  data  = 0;
+// 스레드 A
+data = 42;
+ready = true;          // ★ 컴파일러·CPU 가 순서를 바꿀 수 있습니다
+// 스레드 B
+if (ready) use(data);  // data 가 아직 0일 수 있습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">memory_order 여섯 가지</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:32%">order</th><th>의미</th></tr>
+        <tr><td><code>relaxed</code></td><td>원자성만. 순서 보장 없음 — 카운터에</td></tr>
+        <tr><td><code>acquire</code></td><td>이후 읽기·쓰기가 앞으로 못 옴 (load 에)</td></tr>
+        <tr><td><code>release</code></td><td>이전 읽기·쓰기가 뒤로 못 감 (store 에)</td></tr>
+        <tr><td><code>acq_rel</code></td><td>둘 다 (RMW 연산에)</td></tr>
+        <tr><td><code>seq_cst</code></td><td><b>기본값</b>. 전역 순서까지 보장 · 가장 안전</td></tr>
+        <tr><td><code>consume</code></td><td>사실상 폐기 — 쓰지 마세요</td></tr>
+      </table></div>
+      <pre class="code" data-lang="cpp"><code>// ✅ 생산자-소비자 — acquire/release 쌍 ★
+std::atomic&lt;bool&gt; ready{false};
+int data = 0;
+
+// 생산자
+data = 42;
+ready.store(true, std::memory_order_release);   // 앞의 쓰기를 모두 공개
+
+// 소비자
+if (ready.load(std::memory_order_acquire))      // 그 이후를 모두 관찰
+    use(data);                                   // ✅ 42 가 보장됩니다
+
+// 카운터 — 순서가 필요 없으면 relaxed
+counter.fetch_add(1, std::memory_order_relaxed);</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">패턴으로 익히기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 쓰는 세 가지</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 플래그로 종료 신호 — relaxed 로 충분한 경우가 많습니다
+std::atomic&lt;bool&gt; stop{false};
+// 워커
+while (!stop.load(std::memory_order_relaxed)) { work(); }
+// 메인
+stop.store(true, std::memory_order_relaxed);
+//   ★ 단, 종료 후 다른 데이터를 읽어야 하면 acquire/release 가 필요합니다
+
+// ② 한 번만 초기화 — 표준 도구를 쓰세요
+static std::once_flag flag;
+std::call_once(flag, []{ init(); });
+Logger&amp; get() { static Logger l; return l; }    // ✅ 이것도 스레드 안전
+
+// ③ 스핀 락 (아주 짧은 임계 구역에만)
+class SpinLock {
+    std::atomic_flag f_ = ATOMIC_FLAG_INIT;
+public:
+    void lock() {
+        while (f_.test_and_set(std::memory_order_acquire))
+            f_.wait(true, std::memory_order_relaxed);   // C++20 ★
+    }
+    void unlock() {
+        f_.clear(std::memory_order_release);
+        f_.notify_one();
+    }
+};
+//   ⚠ 대기가 길면 뮤텍스가 낫습니다 (CPU 를 태우지 않으므로)
+
+// C++20 atomic wait/notify — 스핀 없이 대기
+std::atomic&lt;int&gt; v{0};
+v.wait(0);                     // 0 이 아닐 때까지 대기 (효율적)
+v.store(1); v.notify_all();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실수하기 쉬운 것들</h4>
+      <pre class="code" data-lang="cpp"><code>// ① atomic 이면 안전하다는 오해 (탭 2 m12)
+std::atomic&lt;int&gt; n{0};
+n = n + 1;                     // ❌ 읽기와 쓰기가 분리 — 원자적이지 않음
+n.fetch_add(1);                // ✅
+
+// ② 두 atomic 을 함께 보는 것은 원자적이지 않습니다
+if (a.load() &gt; 0 &amp;&amp; b.load() &gt; 0) { }   // ❌ 그 사이에 바뀔 수 있습니다
+//   → 뮤텍스나 단일 원자 구조체가 필요합니다
+
+// ③ CAS 루프 — compare_exchange_weak 는 '가짜 실패' 가 있습니다
+int expected = cur.load(std::memory_order_relaxed);
+while (!cur.compare_exchange_weak(expected, expected + 1,
+                                  std::memory_order_release,
+                                  std::memory_order_relaxed)) {
+    // expected 가 자동으로 갱신됩니다 ★
+}
+//   weak 는 루프 안에서, strong 은 단발 시도에
+
+// ④ volatile 은 스레드 동기화 도구가 아닙니다 ★
+volatile bool flag;            // ❌ 재배치를 막지 못합니다
+std::atomic&lt;bool&gt; flag;        // ✅
+//   volatile 은 '메모리 맵 I/O' 용입니다
+
+// ⑤ 큰 타입의 atomic 은 락을 씁니다
+std::atomic&lt;BigStruct&gt; a;
+a.is_lock_free();              // false 면 내부적으로 뮤텍스 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">확신이 없으면 seq_cst</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최적화보다 정확성</h4>
+      <pre class="code" data-lang="text"><code>실무 지침
+
+  ① 가능하면 공유하지 마세요 (탭 2 m12 · ⚡ e07)
+  ② 공유해야 하면 뮤텍스 — 대부분 충분히 빠릅니다
+  ③ 원자 변수는 단순한 카운터·플래그에
+  ④ memory_order 는 기본값(seq_cst)으로 시작
+  ⑤ 프로파일러가 그 자리를 가리킬 때만 relaxed·acquire/release 검토
+
+왜 이 순서인가
+  · seq_cst 와 acquire/release 의 차이는 x86 에서 거의 없습니다
+  · ARM 에서도 대개 수 나노초 수준입니다
+  · 반면 잘못된 relaxed 는 '재현 불가능한 버그' 를 만듭니다 ★
+    · 테스트에서 안 나옵니다
+    · 특정 CPU·특정 부하에서만 나타납니다
+    · 디버거를 붙이면 사라집니다
+
+★ 성능 이득은 몇 나노초, 잘못됐을 때의 대가는 며칠입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">검증 방법</h4>
+      <pre class="code" data-lang="bash"><code># ① TSan — 데이터 경쟁 탐지 ★ (🛠️ b10)
+g++ -fsanitize=thread -g -O1 app.cpp
+#   WARNING: ThreadSanitizer: data race
+#     Write of size 8 by thread T2 at core.cpp:88
+#     Previous read of size 8 by thread T1 at core.cpp:71
+
+# ② 스트레스 테스트 — 스레드 수·부하를 바꿔 가며 장시간
+#    ⚠ 통과해도 '경쟁이 없다'는 증명은 아닙니다
+
+# ③ 여러 아키텍처에서 테스트 ★
+#    x86 에서만 테스트한 락 프리 코드는 ARM 에서 깨질 수 있습니다
+#    CI 에 ubuntu-24.04-arm 러너를 넣으세요 (🛠️ b07)
+
+# ④ 모델 체커 (연구 수준)
+#    CDSChecker · GenMC · relacy
+#    가능한 모든 인터리빙을 탐색합니다
+
+# ⑤ 가장 확실한 방법 — 직접 쓰지 않기
+#    moodycamel::ConcurrentQueue · folly · TBB (⚡ e08)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>락 프리 자료구조를 직접 만들지 마세요</b> —
+        ABA 문제·메모리 회수·메모리 순서 세 가지에서 반드시 버그가 납니다.
+        <b>검증된 라이브러리</b>를 쓰거나 <b>샤딩된 뮤텍스</b>로 충분한지 먼저 보세요(⚡ e08).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">happens-before 와 동기화</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">표준이 정의하는 것</h4>
+      <pre class="code" data-lang="text"><code>핵심 개념
+
+  · sequenced-before   : 같은 스레드 안의 순서
+  · synchronizes-with  : release store 와 그것을 읽은 acquire load 사이
+  · happens-before     : 위 둘의 이행적 폐포
+
+데이터 경쟁의 정의
+  두 접근이 (1) 같은 메모리 위치에 (2) 최소 하나가 쓰기이고
+  (3) happens-before 관계가 없으면 → 데이터 경쟁 → UB ★
+
+즉 '동시에 접근하면 안 된다'가 아니라
+'순서 관계를 만들지 않고 접근하면 안 된다' 입니다.
+
+release/acquire 가 만드는 것
+  스레드 A: X 를 쓰고 → flag.store(release)
+  스레드 B: flag.load(acquire) 가 true 를 보면
+            → A 의 모든 이전 쓰기가 B 에게 보입니다 ★
+            (X 가 atomic 이 아니어도)
+
+seq_cst 가 추가로 주는 것
+  모든 seq_cst 연산에 대한 '단일 전역 순서'
+  → 여러 변수 사이의 순서까지 일관되게 보입니다
+  (독립 읽기 독립 쓰기 문제를 해결)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어셈블리로 확인하기</h4>
+      <pre class="code" data-lang="cpp"><code>// godbolt 에서 아키텍처를 바꿔 가며 보세요 (⚡ e09)
+std::atomic&lt;int&gt; a;
+void f() {
+    a.store(1, std::memory_order_relaxed);
+    a.store(1, std::memory_order_release);
+    a.store(1, std::memory_order_seq_cst);
+}
+
+// x86-64 결과
+//   relaxed : mov  DWORD PTR a[rip], 1
+//   release : mov  DWORD PTR a[rip], 1        ★ 같습니다 (공짜)
+//   seq_cst : mov  eax, 1
+//             xchg DWORD PTR a[rip], eax      ★ 이것만 비쌉니다
+
+// AArch64 결과
+//   relaxed : str  w8, [x9]
+//   release : stlr w8, [x9]                   ★ 장벽 명령
+//   seq_cst : stlr w8, [x9]                   (load 쪽에서 차이)
+
+// → x86 에서는 release 가 공짜이므로 굳이 relaxed 를 쓸 이유가 적고,
+//   ARM 에서는 차이가 있으니 핫 경로라면 검토할 가치가 있습니다 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“x86 에서 잘 되니 괜찮다”는 위험합니다</b> —
+        x86 의 강한 메모리 모델이 <b>잘못된 코드를 가려 줍니다</b>.
+        애플 실리콘·ARM 서버가 흔해진 지금은
+        <b>ARM 에서도 반드시 테스트</b>해야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 멀티스레드에서 <b>쓰기가 다른 코어에 보이는 시점</b>을 정하는 것이 메모리 모델입니다.
+    생산자-소비자는 <b><code>release</code>/<code>acquire</code> 쌍</b>,
+    단순 카운터는 <code>relaxed</code>, <b>확신이 없으면 기본값</b>을 쓰세요.
+    그리고 <b>x86 에서만 테스트하지 마세요</b> — ARM 에서 드러납니다.</div>
+</section>
+
+<!-- ==================== d07 ==================== -->
+<section class="sec" id="d07">
+  <div class="sec-head rv">
+    <span class="no">DEEP 07</span>
+    <h2><span class="t">ABI 호환성</span> — 배포의 벽</h2>
+    <p class="lead">
+      C++ 에는 <b>표준 ABI 가 없습니다</b>.
+      컴파일러나 표준 라이브러리 버전이 다르면 <b>같은 소스도 안 붙습니다</b>.
+      라이브러리를 배포할 때 가장 자주 막히는 지점입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 ABI 를 깨나</h4>
+      <pre class="code" data-lang="text"><code>바이너리 호환을 깨는 변경 (재컴파일 없이는 못 씁니다)
+
+  · 클래스에 멤버 변수 추가·삭제·순서 변경  ★ 크기가 바뀜
+  · 가상 함수 추가·삭제·순서 변경           ★ vtable 배치가 바뀜
+  · 기반 클래스 추가·변경
+  · 함수 시그니처 변경 (인자 타입·개수·const)
+  · 인라인 함수의 내용 변경                  ★ 이미 인라인된 코드가 남음
+  · 템플릿 정의 변경
+  · enum 값 변경 · 순서 변경
+  · 기본 인자 변경 (호출부에 박힘)
+  · 구조체 정렬·패딩 변경 (빌드 플래그 포함)
+
+소스 호환은 되는데 ABI 는 깨지는 예
+  private 멤버 하나만 추가 → 재컴파일하면 되지만
+  기존 바이너리와는 못 씁니다 ★</code></pre>
+      <pre class="code" data-lang="text"><code>컴파일러·표준 라이브러리 차이
+
+  · GCC 와 Clang : 대체로 호환 (같은 Itanium ABI · libstdc++)
+  · MSVC : 완전히 다릅니다 (이름 맹글링·예외·레이아웃)
+  · libstdc++ vs libc++ : std:: 타입 레이아웃이 다릅니다 ★
+  · GCC 5 의 _GLIBCXX_USE_CXX11_ABI 전환
+      → std::string 의 ABI 가 바뀌었습니다
+      undefined reference to std::__cxx11::basic_string...</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">해법 — 경계를 C ABI 로 ★</h4>
+      <pre class="code" data-lang="cpp"><code>// ❌ C++ 타입을 공개 인터페이스에 노출
+class MYLIB_API Engine {
+public:
+    std::vector&lt;double&gt; process(const std::string&amp; input);   // ⚠
+    //   쓰는 쪽이 같은 컴파일러·같은 표준 라이브러리여야 합니다
+private:
+    std::vector&lt;double&gt; buf_;      // 멤버를 추가하면 ABI 파괴
+};
+
+// ✅ C ABI 로 (🔗 f01·f03)
+typedef struct mylib_engine mylib_engine;
+MYLIB_EXPORT mylib_engine* mylib_engine_create(void);
+MYLIB_EXPORT int32_t mylib_process(mylib_engine*, const double*, int64_t,
+                                   double*, int64_t*);
+//   숫자와 포인터만 → 어느 컴파일러에서든 동작합니다
+
+// ✅ 절충 — Pimpl 로 멤버를 감추기 (탭 1 x09)
+class MYLIB_API Engine {
+public:
+    Engine(); ~Engine();
+    Engine(Engine&amp;&amp;) noexcept;
+    void process(...);
+private:
+    struct Impl;
+    std::unique_ptr&lt;Impl&gt; p_;      // ★ 크기가 항상 8바이트
+};
+//   내부를 바꿔도 크기가 안 변합니다
+//   ⚠ 다만 인터페이스의 std:: 타입은 여전히 위험합니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 가이드의 모든 탭이 같은 결론에 닿습니다</b> —
+        파이썬은 <code>abi3</code>, Node 는 N-API, C++ 라이브러리는 C ABI.
+        <b>안정된 좁은 경계</b>를 두는 것이 배포 문제를 근본적으로 없앱니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">ABI 변경 감지</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">도구로 검사하기</h4>
+      <pre class="code" data-lang="bash"><code># ① abidiff — 두 버전의 ABI 를 비교 ★
+sudo apt install abigail-tools
+abidiff --headers-dir1 v1/include --headers-dir2 v2/include \
+        v1/libmylib.so v2/libmylib.so
+#   Functions changes summary: 0 Removed, 1 Changed, 2 Added
+#   Variables changes summary: ...
+#   → 0 이 아닌 종료 코드로 CI 에서 실패시킬 수 있습니다
+
+# ② 심볼 목록을 커밋에 기록 (리뷰에서 변경이 보이게)
+nm -DC --defined-only libmylib.so | awk '{print $3}' | sort &gt; abi/symbols.txt
+git diff --exit-code abi/symbols.txt
+
+# ③ 구조체 레이아웃 기록
+pahole -C mylib_config libmylib.so &gt; abi/layout.txt
+#   필드 오프셋·패딩까지 표로 나옵니다 ★
+
+# ④ 컴파일 시점 검증
+static_assert(sizeof(mylib_config) == 24, "ABI 변경 감지");
+static_assert(offsetof(mylib_config, window) == 16);
+
+# ⑤ 옛 클라이언트로 새 라이브러리 테스트
+git checkout v1.0 -- tests/
+./build/test_v1_0          # 새 .so 를 로드해 통과해야 합니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버전 관리 규칙</h4>
+      <pre class="code" data-lang="cmake"><code># soname — 런타임이 찾는 이름
+set_target_properties(mylib PROPERTIES
+    VERSION   ${PROJECT_VERSION}      # 1.2.3
+    SOVERSION 1)                       # ★ ABI 세대
+
+# 결과
+#   libmylib.so       → 심볼릭 링크 (개발용)
+#   libmylib.so.1     → soname (실행 파일이 기록하는 이름) ★
+#   libmylib.so.1.2.3 → 실제 파일
+
+# 규칙
+#   ABI 호환 변경 (기능 추가)  → 1.2.3 → 1.3.0, soname 유지
+#   ABI 파괴                  → soname 을 2로 올림
+#     → 옛 프로그램은 libmylib.so.1 을 계속 쓸 수 있습니다 ★
+
+# 확인
+readelf -d libmylib.so.1.2.3 | grep SONAME
+objdump -p app | grep NEEDED</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>soname 을 올리지 않고 ABI 를 깨면</b> —
+        사용자 시스템에서 <b>기존 프로그램이 조용히 깨집니다</b>.
+        크래시하면 그나마 낫고, <b>잘못된 값으로 계속 도는</b> 경우가 최악입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">배포 전략</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">상황별 선택</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">배포 형태</th><th>전략</th></tr>
+        <tr><td>소스 배포 (헤더 전용)</td><td>ABI 걱정 없음 — 가장 단순 ★</td></tr>
+        <tr><td>사내 정적 라이브러리</td><td>같은 컴파일러로 통일 · CI 로 강제</td></tr>
+        <tr><td>공개 공유 라이브러리</td><td><b>C ABI</b> + Pimpl ★</td></tr>
+        <tr><td>파이썬 확장</td><td><code>abi3</code>(🐍 y03)</td></tr>
+        <tr><td>Node 애드온</td><td>N-API(🟨 j10)</td></tr>
+        <tr><td>플러그인</td><td>C ABI + 버전 확인 함수(🔗 f09)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="cpp"><code>// 플러그인은 반드시 버전을 먼저 확인하게
+extern "C" int32_t plugin_abi_version(void) { return MYLIB_ABI_VERSION; }
+
+// 호스트 쪽
+auto ver = (int32_t(*)())dlsym(h, "plugin_abi_version");
+if (!ver || ver() != MYLIB_ABI_VERSION) {
+    log("플러그인 ABI 불일치 — 로드하지 않습니다");
+    dlclose(h);
+    return;
+}
+//   ★ 이 검사 없이 로드하면 조용히 메모리가 깨집니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 런타임 문제 회피</h4>
+      <pre class="code" data-lang="bash"><code># ① C++ 표준 라이브러리를 정적으로 (🛠️ b08)
+-static-libstdc++ -static-libgcc
+#   libstdc++ 버전 불일치가 통째로 사라집니다 ★
+#   ⚠ 예외를 라이브러리 경계 너머로 던지면 안 됩니다 (런타임이 둘이 됨)
+
+# ② 오래된 환경에서 빌드
+docker run quay.io/pypa/manylinux_2_28_x86_64 ...
+
+# ③ 요구하는 심볼 버전 확인
+objdump -T libmylib.so | grep -E "GLIBCXX|CXXABI" \
+  | sed 's/.*\(GLIBCXX_[0-9.]*\).*/\1/' | sort -uV | tail -3
+#   GLIBCXX_3.4.29   ← 이 이상의 libstdc++ 이 필요합니다
+
+# ④ 어느 표준 라이브러리를 쓰는지
+ldd libmylib.so | grep -E "libstdc|libc\+\+"
+
+# ⑤ MSVC 런타임
+#   /MD  동적 (VC++ 재배포 패키지 필요)
+#   /MT  정적 (파일이 커지지만 의존성 없음) ★
+#   ⚠ 한 프로그램 안에서 섞이면 힙이 달라져 크래시합니다 (🔗 f07)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>가장 확실한 조합</b> — <b>C ABI 인터페이스</b> +
+        <b>C++ 런타임 정적 링크</b> + <b>오래된 환경에서 빌드</b>.
+        이 셋이면 리눅스 배포 문제의 대부분이 사라집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">왜 표준 ABI 가 없나</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">역사와 현실</h4>
+      <pre class="code" data-lang="text"><code>· C++ 표준은 ABI 를 정의하지 않습니다
+  (구현이 자유롭게 최적화할 수 있게 하려고)
+
+· 사실상의 표준
+    Itanium C++ ABI  : GCC · Clang · 대부분의 유닉스
+    MSVC ABI         : 윈도우 (문서화되어 있지만 다릅니다)
+
+· 그래서 같은 플랫폼에서도
+    libstdc++ 로 빌드한 것과 libc++ 로 빌드한 것이 안 붙습니다
+    std::string · std::list 등의 내부 배치가 다릅니다 ★
+
+★ ABI 안정성이 표준 발전을 막기도 합니다
+  예: std::regex 는 성능이 나쁘다고 알려져 있지만
+      고치면 ABI 가 깨져서 그대로 두고 있습니다
+      (std::unordered_map 도 비슷한 상황)
+  → C++ 위원회에서 "ABI break" 는 오래된 논쟁 주제입니다
+
+실무 결론
+  · 라이브러리 경계에서는 std:: 타입을 노출하지 않는다
+  · 필요하면 C ABI 로 감싼다
+  · 사내 코드는 컴파일러를 통일한다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">맹글링으로 보는 ABI</h4>
+      <pre class="code" data-lang="bash"><code># 같은 함수가 컴파일러마다 다른 이름을 갖습니다 (🔗 f02)
+void f(const std::string&amp;);
+
+# GCC/Clang (Itanium ABI · 새 ABI)
+_Z1fRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+
+# GCC (옛 ABI · _GLIBCXX_USE_CXX11_ABI=0)
+_Z1fRKSs
+
+# MSVC
+?f@@YAXAEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z
+
+# 복원
+c++filt _Z1fRKSs
+undname "?f@@YAXAEBV..."
+
+# ★ 이름이 다르다 = 링크가 안 된다
+#   undefined reference to `f(std::__cxx11::basic_string&lt;...&gt;)'
+#   → 이 메시지에 __cxx11 이 보이면 ABI 불일치입니다
+
+# 강제로 맞추기 (옛 라이브러리와 연동할 때)
+g++ -D_GLIBCXX_USE_CXX11_ABI=0 ...</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>에러 메시지에서 <code>__cxx11</code> 을 찾으세요</b> —
+        <code>undefined reference</code> 에 이것이 보이면
+        <b>ABI 불일치</b>입니다. 라이브러리를 다시 빌드하거나
+        플래그를 맞춰야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> C++ 에는 <b>표준 ABI 가 없습니다</b> —
+    컴파일러·표준 라이브러리·빌드 플래그가 다르면 안 붙습니다.
+    해법은 하나입니다 — <b>공개 경계를 C ABI 로</b> 만들고
+    <b>C++ 타입을 인터페이스에 노출하지 않는 것</b>.
+    ABI 변경은 <b><code>abidiff</code> 로 CI 에서</b> 감시하세요.</div>
+</section>
+
+
+<!-- ==================== d08 ==================== -->
+<section class="sec" id="d08">
+  <div class="sec-head rv">
+    <span class="no">DEEP 08</span>
+    <h2>템플릿 인스턴스화와 <span class="t">컴파일 시간</span></h2>
+    <p class="lead">
+      템플릿은 <b>쓰는 곳마다 코드를 새로 생성</b>합니다.
+      그래서 빌드가 느려지고 바이너리가 커집니다 — 그 구조와 대책입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무슨 일이 일어나나</h4>
+      <pre class="code" data-lang="cpp"><code>template&lt;class T&gt; T max_of(T a, T b) { return a &lt; b ? b : a; }
+
+max_of(1, 2);        // max_of&lt;int&gt; 생성
+max_of(1.0, 2.0);    // max_of&lt;double&gt; 생성      ★ 별개의 코드
+max_of&lt;long&gt;(1, 2);  // max_of&lt;long&gt; 생성
+
+// 각 인스턴스는
+//   · 별도의 코드를 만듭니다 (바이너리 증가)
+//   · 약한 심볼로 표시되어 링커가 중복을 제거합니다
+//   · 그 파일을 포함한 '모든 번역 단위'에서 다시 생성됩니다 ★
+//     (링커가 나중에 버리지만 컴파일 시간은 이미 소모)
+
+// std::vector&lt;T&gt; 하나를 쓰면
+//   생성자·소멸자·push_back·reserve·... 수십 개 함수가 T 마다 생성됩니다
+//   vector&lt;int&gt; · vector&lt;double&gt; · vector&lt;MyType&gt; → 전부 별개
+
+// 조합 폭발
+template&lt;class T, class Alloc, class Policy, int N&gt; class Matrix;
+//   타입 3개 × 정책 3개 = 9개 인스턴스 ★</code></pre>
+      <pre class="code" data-lang="bash"><code># 실제로 얼마나 생성됐는지
+nm -C --defined-only build/app | grep " W " | wc -l
+nm -C --size-sort -S build/app | tail -20        # 큰 인스턴스</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">측정하기</h4>
+      <pre class="code" data-lang="bash"><code># ★ clang 의 -ftime-trace — 가장 유용합니다
+clang++ -ftime-trace -c src/big.cpp
+#   big.json 을 ui.perfetto.dev 나 chrome://tracing 에 넣으면
+#   어느 헤더·어느 템플릿이 시간을 먹는지 그림으로 보입니다 ★
+
+# 전체 빌드 분석
+cmake -B build -G Ninja -DCMAKE_CXX_FLAGS="-ftime-trace"
+cmake --build build
+python3 -m ninjatracing build/.ninja_log &gt; trace.json
+
+# GCC
+g++ -ftime-report -c big.cpp
+#   phase parsing / template instantiation 시간이 나옵니다
+
+# 전처리 결과 크기 (헤더 부담의 대리 지표)
+for f in src/*.cpp; do
+  echo "$(g++ -E -Iinclude $f 2&gt;/dev/null | wc -l) $f"
+done | sort -rn | head
+
+# 인스턴스화 횟수 (clang)
+clang++ -Xclang -print-instantiation-stats -c big.cpp</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>-ftime-trace</code> 를 한 번 돌려 보세요</b> —
+        “빌드가 느리다”가 <b>“이 헤더 하나가 40%를 먹는다”</b>로 바뀝니다.
+        대개 <b>한두 개의 무거운 헤더</b>가 원인입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">줄이는 기법</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">명시적 인스턴스화</h4>
+      <pre class="code" data-lang="cpp"><code>// matrix.h
+template&lt;class T&gt; class Matrix { ... };
+extern template class Matrix&lt;double&gt;;     // ★ "여기서 만들지 마"
+extern template class Matrix&lt;float&gt;;
+
+// matrix.cpp
+template class Matrix&lt;double&gt;;             // 여기서 한 번만 생성
+template class Matrix&lt;float&gt;;
+
+//   → 헤더를 포함한 다른 파일들은 인스턴스화를 건너뜁니다
+//     빌드 시간이 크게 줄어듭니다 (파일이 많을수록 효과가 큼) ★
+
+// 표준 라이브러리도 이렇게 되어 있습니다
+extern template class std::basic_string&lt;char&gt;;   // libstdc++ 내부
+
+// 함수 템플릿도 가능
+extern template int max_of&lt;int&gt;(int, int);</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 타입 소거로 코드 팽창 막기 (🛠️ b03)
+// 헤더에는 얇은 템플릿만, 실제 구현은 .cpp 의 비템플릿 함수로
+void process_impl(const void* data, std::size_t n, int type_tag);   // .cpp
+
+template&lt;class T&gt;
+void process(std::span&lt;const T&gt; v) {                    // 헤더
+    process_impl(v.data(), v.size(), tag_of&lt;T&gt;());
+}
+//   → 인스턴스화되는 코드가 아주 작아집니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">헤더 부담 줄이기</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 전방 선언 (탭 1 x09)
+class Engine;                        // #include "engine.h" 대신
+void f(Engine&amp;);                     // 포인터·참조는 정의가 불필요
+
+// ② Pimpl — 무거운 의존성을 .cpp 에 가두기
+class Widget {
+    struct Impl;
+    std::unique_ptr&lt;Impl&gt; p_;
+};
+
+// ③ 미리 컴파일된 헤더 (CMake 3.16+)
+target_precompile_headers(app PRIVATE
+    &lt;vector&gt; &lt;string&gt; &lt;memory&gt; &lt;algorithm&gt;)
+//   자주 쓰는 무거운 헤더를 한 번만 파싱 ★
+
+// ④ 표준 헤더도 무겁습니다
+#include &lt;iostream&gt;      // 3만 줄 · 전역 객체 초기화까지
+#include &lt;cstdio&gt;        // 훨씬 가볍습니다
+#include &lt;regex&gt;         // 매우 무겁습니다 (성능도 나쁩니다)
+#include &lt;format&gt;        // &lt;iostream&gt; 보다 가볍고 빠릅니다 ★
+
+// ⑤ include-what-you-use
+include-what-you-use -p build src/core.cpp
+//   안 쓰는 include 를 찾아 줍니다
+
+// ⑥ Unity 빌드 (여러 .cpp 를 합쳐 컴파일)
+set(CMAKE_UNITY_BUILD ON)
+//   ⚠ 익명 namespace 충돌·매크로 누출 주의</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">빌드 시간 관리</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">효과가 큰 순서</h4>
+      <pre class="code" data-lang="text"><code>① ccache — 재빌드가 몇 배 빨라집니다 (🛠️ b01) ★
+   가장 쉽고 효과가 큽니다
+
+② 빠른 링커 — mold · lld
+   링크가 병목인 프로젝트가 많습니다
+
+③ 헤더 의존성 줄이기
+   전방 선언 · Pimpl · 무거운 헤더를 .cpp 로
+   → -ftime-trace 로 대상을 찾으세요
+
+④ 명시적 인스턴스화
+   같은 템플릿을 여러 파일에서 쓰는 경우
+
+⑤ PCH · Unity 빌드
+   설정이 간단하지만 부작용이 있을 수 있습니다
+
+⑥ 모듈 (C++20)
+   근본 해결이지만 2026년에도 도구 지원이 고르지 않습니다
+   → 확장 모듈과 섞어 쓰기에는 아직 이릅니다
+
+측정 없이 하지 마세요
+  -ftime-trace 로 상위 5개를 찾고 거기만 손대면
+  대개 절반 이하로 줄어듭니다 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">바이너리 크기</h4>
+      <pre class="code" data-lang="bash"><code># 무엇이 크기를 차지하나
+bloaty build/app -d compileunits,symbols | head -20
+nm -C --size-sort -S build/app | tail -20
+
+# 템플릿 인스턴스가 상위에 몰려 있으면 팽창 문제입니다 ★
+
+# 줄이기
+-ffunction-sections -fdata-sections -Wl,--gc-sections
+-Os                          # 크기 우선
+-fvisibility=hidden          # (🔗 f02)
+strip --strip-unneeded
+
+# identical code folding — 같은 코드를 합칩니다
+-Wl,--icf=all                # gold · lld
+#   템플릿 인스턴스는 내용이 같은 경우가 많아 효과가 큽니다 ★
+
+# 확인
+size -A build/app
+ls -lh build/app</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>확장 모듈에서 특히 중요합니다</b> — pybind11 은 템플릿을 많이 써서
+        <b>바인딩 파일 하나가 수십 초</b> 걸리기도 합니다.
+        <b>바인딩을 여러 파일로 쪼개면</b> 병렬 컴파일이 되어 크게 빨라집니다(🐍 y03).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">템플릿 메타프로그래밍의 비용</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">재귀보다 폴드·팩 확장</h4>
+      <pre class="code" data-lang="cpp"><code>// ❌ 재귀 템플릿 — 인스턴스가 N개 생깁니다
+template&lt;int N&gt; struct Sum { static constexpr int v = N + Sum&lt;N-1&gt;::v; };
+template&lt;&gt; struct Sum&lt;0&gt; { static constexpr int v = 0; };
+Sum&lt;1000&gt;::v;                    // 1001개의 인스턴스 ★
+
+// ✅ constexpr 함수 — 인스턴스가 하나
+constexpr int sum(int n) { int s = 0; for (int i = 1; i &lt;= n; ++i) s += i; return s; }
+constexpr int v = sum(1000);
+
+// ✅ 폴드 표현식 (C++17) — 재귀 없이 (탭 2 m08)
+template&lt;class... Ts&gt; auto total(Ts... xs) { return (xs + ...); }
+
+// ❌ 재귀로 타입 리스트 처리
+template&lt;class... Ts&gt; struct Count;
+// ✅ sizeof...
+constexpr std::size_t n = sizeof...(Ts);
+
+// 컴파일 시간 비교 — 직접 재 보세요
+// clang++ -ftime-trace 로 InstantiateFunction 시간 확인
+
+// 실무 지침
+//   · 깊은 재귀 템플릿을 피하세요 (컴파일러 제한에도 걸립니다)
+//   · constexpr 함수로 되는 것은 그쪽으로 (탭 2 m04)
+//   · 컨셉으로 제약을 표현하면 SFINAE 보다 훨씬 빠릅니다 (탭 2 m09) ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러 메시지와 디버깅</h4>
+      <pre class="code" data-lang="bash"><code># 템플릿 에러가 수백 줄일 때
+clang++ -fcaret-diagnostics -ftemplate-backtrace-limit=3 main.cpp
+g++ -ftemplate-backtrace-limit=0 main.cpp    # 전체 보기
+
+# 컨셉을 쓰면 근본적으로 짧아집니다 (탭 2 m09) ★
+template&lt;std::ranges::range R&gt; void f(R&amp;&amp;);
+#   error: constraints not satisfied
+#   note: because 'int' does not satisfy 'range'   ← 3줄
+
+# 타입이 무엇으로 추론됐는지 확인
+template&lt;class T&gt; struct ShowType;      // 정의를 일부러 안 함
+ShowType&lt;decltype(x)&gt; _;                 // 에러 메시지에 타입이 나옵니다 ★
+
+# 인스턴스화 깊이 제한
+-ftemplate-depth=256
+
+# 컴파일러가 만든 코드 확인
+clang++ -Xclang -ast-print -fsyntax-only main.cpp | head -50</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>컨셉 도입이 가장 효과적입니다</b> —
+        에러 메시지가 짧아질 뿐 아니라 <b>SFINAE 보다 컴파일도 빠릅니다</b>.
+        기존 템플릿에 <b>제약만 붙여도</b> 개선됩니다(탭 2 m09).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 템플릿은 <b>쓰는 곳마다 코드를 새로 만듭니다</b> —
+    빌드 시간과 바이너리 크기가 그 대가입니다.
+    <b><code>-ftime-trace</code> 로 상위 원인을 찾고</b>,
+    <b><code>ccache</code>·전방 선언·명시적 인스턴스화</b>로 줄이세요.
+    <b>재귀 템플릿보다 <code>constexpr</code> 함수와 폴드 표현식</b>이 훨씬 쌉니다.</div>
+</section>
+
+
+<!-- ==================== d09 ==================== -->
+<section class="sec" id="d09">
+  <div class="sec-head rv">
+    <span class="no">DEEP 09</span>
+    <h2><span class="t">커스텀 할당자</span></h2>
+    <p class="lead">
+      메모리를 어떻게 나눠 줄지 직접 정합니다.
+      <b>지연 시간이 일정해야 하는</b> 게임·거래 시스템에서 씁니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 필요한가</h4>
+      <pre class="code" data-lang="text"><code>기본 malloc 으로 충분하지 않은 경우
+
+  · 지연 시간이 일정해야 함 (p99 가 중요) ⚡ e03
+  · 할당·해제가 아주 잦음
+  · 수명이 같은 객체를 묶어서 관리 (요청 단위)
+  · 특수 메모리 (공유 메모리 · GPU · 정렬 요구)
+  · 메모리 사용량을 정확히 통제·계측
+  · 임베디드 — 힙이 아예 없거나 제한적
+
+먼저 시도할 것 (대개 여기서 끝납니다) ⚡ e03
+  ① reserve · 버퍼 재사용
+  ② PMR monotonic_buffer_resource
+  ③ 할당자 교체 (tcmalloc · jemalloc · mimalloc)
+  ④ 그래도 부족하면 커스텀
+
+★ 커스텀 할당자는 만들기 쉽지만 '올바르게' 만들기는 어렵습니다.
+  정렬·예외 안전·스레드 안전·재사용 규칙을 전부 지켜야 합니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">PMR 이 대부분의 답입니다 (C++17)</h4>
+      <pre class="code" data-lang="cpp"><code>#include &lt;memory_resource&gt;
+
+// ① 아레나 — 요청 하나를 처리하고 통째로 버리기 ★
+std::array&lt;std::byte, 1&lt;&lt;20&gt; buf;
+std::pmr::monotonic_buffer_resource arena{buf.data(), buf.size()};
+std::pmr::vector&lt;Node&gt; nodes{&amp;arena};
+std::pmr::string       s{&amp;arena};
+//   해제는 arena 소멸 시 통째로 — 개별 free 가 없어 매우 빠릅니다
+
+// ② 풀 — 크기별로 미리 나눠 두기
+std::pmr::unsynchronized_pool_resource pool;    // 단일 스레드
+std::pmr::synchronized_pool_resource   spool;   // 스레드 안전
+
+// ③ 계측 — 얼마나 쓰는지 추적
+class Tracking : public std::pmr::memory_resource {
+    std::pmr::memory_resource* up_ = std::pmr::new_delete_resource();
+    std::size_t total_ = 0, peak_ = 0;
+    void* do_allocate(std::size_t n, std::size_t a) override {
+        total_ += n; peak_ = std::max(peak_, total_);
+        return up_-&gt;allocate(n, a);
+    }
+    void do_deallocate(void* p, std::size_t n, std::size_t a) override {
+        total_ -= n; up_-&gt;deallocate(p, n, a);
+    }
+    bool do_is_equal(const memory_resource&amp; o) const noexcept override {
+        return this == &amp;o;
+    }
+public:
+    std::size_t peak() const { return peak_; }
+};</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>PMR 의 장점</b> — 할당자가 <b>타입의 일부가 아니라 런타임 값</b>입니다.
+        <code>std::vector&lt;T, MyAlloc&gt;</code> 는 다른 타입이 되지만
+        <code>std::pmr::vector&lt;T&gt;</code> 는 <b>하나의 타입</b>이라
+        인터페이스가 오염되지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">직접 만들기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">아레나 할당자</h4>
+      <pre class="code" data-lang="cpp"><code>class Arena {
+    std::byte* buf_;
+    std::size_t cap_, off_ = 0;
+public:
+    Arena(std::byte* b, std::size_t n) : buf_(b), cap_(n) {}
+
+    void* alloc(std::size_t n, std::size_t align) {
+        std::size_t cur = reinterpret_cast&lt;std::uintptr_t&gt;(buf_ + off_);
+        std::size_t pad = (align - (cur % align)) % align;    // ★ 정렬 보정
+        if (off_ + pad + n &gt; cap_) throw std::bad_alloc{};
+        void* p = buf_ + off_ + pad;
+        off_ += pad + n;
+        return p;
+    }
+    void reset() noexcept { off_ = 0; }      // ★ 해제는 통째로
+};
+
+// PMR 로 감싸면 표준 컨테이너에 바로 쓸 수 있습니다
+class ArenaResource : public std::pmr::memory_resource {
+    Arena&amp; a_;
+    void* do_allocate(std::size_t n, std::size_t align) override {
+        return a_.alloc(n, align);
+    }
+    void do_deallocate(void*, std::size_t, std::size_t) override { }  // no-op
+    bool do_is_equal(const memory_resource&amp; o) const noexcept override {
+        return this == &amp;o;
+    }
+public:
+    explicit ArenaResource(Arena&amp; a) : a_(a) {}
+};</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고정 크기 풀</h4>
+      <pre class="code" data-lang="cpp"><code>// 같은 크기 객체를 아주 많이 만들고 버릴 때 (게임 엔티티·패킷)
+template&lt;std::size_t Size, std::size_t Align&gt;
+class FixedPool {
+    union Slot { std::byte data[Size]; Slot* next; };
+    static_assert(Size &gt;= sizeof(Slot*));
+
+    std::vector&lt;std::unique_ptr&lt;Slot[]&gt;&gt; blocks_;
+    Slot* free_ = nullptr;
+    std::size_t block_size_ = 256;
+
+    void grow() {
+        auto blk = std::make_unique&lt;Slot[]&gt;(block_size_);
+        for (std::size_t i = 0; i &lt; block_size_; ++i) {
+            blk[i].next = free_;
+            free_ = &amp;blk[i];
+        }
+        blocks_.push_back(std::move(blk));
+        block_size_ *= 2;
+    }
+public:
+    void* allocate() {
+        if (!free_) grow();
+        Slot* s = free_;
+        free_ = s-&gt;next;
+        return s;                            // ★ O(1) · 포인터 하나 이동
+    }
+    void deallocate(void* p) noexcept {
+        auto* s = static_cast&lt;Slot*&gt;(p);
+        s-&gt;next = free_;
+        free_ = s;
+    }
+};
+//   할당·해제가 각각 몇 사이클 — malloc 대비 10배 이상 빠릅니다 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">주의할 점</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">지켜야 할 규칙</h4>
+      <ul class="tx">
+        <li><b>정렬을 지키세요</b> — <code>alignof(T)</code> 를 만족하지 않으면
+            UB 이고 ARM 에서는 크래시합니다</li>
+        <li><b>수명 관리</b> — 아레나가 죽으면 그 안의 객체도 전부 무효입니다.
+            <b>소멸자가 필요한 객체는 명시적으로 파괴</b>해야 합니다 ★</li>
+        <li><b>스레드 안전성을 명시</b> — 대부분의 커스텀 할당자는 단일 스레드용입니다</li>
+        <li><b>예외 안전</b> — 할당 실패 시 <code>std::bad_alloc</code></li>
+        <li><b>계측 가능하게</b> — 사용량·피크·실패를 기록</li>
+        <li><b>Sanitizer 와 함께 검증</b> — ASan 은 커스텀 할당자를 모릅니다.
+            <code>__asan_poison_memory_region</code> 으로 알려 줄 수 있습니다</li>
+      </ul>
+      <pre class="code" data-lang="cpp"><code>// ⚠ 아레나에서 소멸자가 있는 객체를 쓸 때
+std::pmr::vector&lt;std::pmr::string&gt; v{&amp;arena};
+v.push_back("긴 문자열...");
+arena.release();                 // ★ string 의 소멸자가 안 불립니다
+//   → monotonic_buffer_resource 는 이것을 허용합니다
+//     (trivially destructible 이 아니면 주의)
+//   → 안전하게 하려면 v 를 먼저 파괴하세요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">측정으로 정당화하기</h4>
+      <pre class="code" data-lang="cpp"><code>// 커스텀 할당자를 도입하기 전후를 반드시 비교하세요
+// ⚡ e03 의 할당 카운터 + 지연 히스토그램
+
+struct Stats {
+    std::vector&lt;double&gt; samples;
+    void record(double us) { samples.push_back(us); }
+    void report() {
+        std::ranges::sort(samples);
+        auto pct = [&amp;](double p) { return samples[samples.size() * p]; };
+        std::printf("p50 %.1f  p99 %.1f  p999 %.1f  max %.1f μs\n",
+                    pct(0.5), pct(0.99), pct(0.999), samples.back());
+    }
+};
+
+// 전형적인 개선
+//   기본 malloc : p50 0.8μs  p99 45μs   max 800μs   ★ 튀는 값
+//   아레나      : p50 0.1μs  p99 0.2μs  max 3μs     ★ 일정함
+//
+// ★ 평균은 비슷해도 p99 가 크게 달라집니다.
+//   이것이 커스텀 할당자를 쓰는 진짜 이유입니다.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>대부분의 프로젝트는 필요 없습니다</b> —
+        <code>reserve</code> · 버퍼 재사용 · PMR 아레나로 충분합니다(⚡ e03).
+        <b>커스텀 할당자는 유지보수 부담</b>이 크니
+        <b>측정으로 정당화</b>된 경우에만 도입하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">Allocator 요구사항</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">표준 할당자 인터페이스</h4>
+      <pre class="code" data-lang="cpp"><code>// C++17 이후 최소 요구사항은 간단해졌습니다
+template&lt;class T&gt;
+struct MyAlloc {
+    using value_type = T;
+
+    MyAlloc() = default;
+    template&lt;class U&gt; constexpr MyAlloc(const MyAlloc&lt;U&gt;&amp;) noexcept {}
+
+    T* allocate(std::size_t n) {
+        if (n &gt; std::numeric_limits&lt;std::size_t&gt;::max() / sizeof(T))
+            throw std::bad_array_new_length{};
+        void* p = ::operator new(n * sizeof(T), std::align_val_t{alignof(T)});
+        return static_cast&lt;T*&gt;(p);
+    }
+    void deallocate(T* p, std::size_t) noexcept {
+        ::operator delete(p, std::align_val_t{alignof(T)});
+    }
+
+    template&lt;class U&gt; bool operator==(const MyAlloc&lt;U&gt;&amp;) const noexcept
+        { return true; }        // ★ 상태가 있으면 정확히 비교해야 합니다
+};
+
+// 상태가 있는 할당자의 함정
+//   · 두 컨테이너가 다른 할당자를 가지면 swap · 이동이 복잡해집니다
+//   · propagate_on_container_* 특성으로 동작을 정합니다
+using POCCA = std::true_type;   // copy assignment 시 전파
+using POCMA = std::true_type;   // move assignment 시 전파
+using POCS  = std::true_type;   // swap 시 전파
+//   ★ 이것이 PMR 이 나온 이유입니다 — 타입이 아니라 값으로 다룹니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전역 operator new 교체</h4>
+      <pre class="code" data-lang="cpp"><code>// 프로그램 전체의 할당을 가로채기
+void* operator new(std::size_t n) {
+    if (void* p = my_malloc(n)) return p;
+    throw std::bad_alloc{};
+}
+void* operator new(std::size_t n, std::align_val_t a) { ... }
+void  operator delete(void* p) noexcept { my_free(p); }
+void  operator delete(void* p, std::size_t) noexcept { my_free(p); }
+void  operator delete(void* p, std::align_val_t) noexcept { my_free(p); }
+//   ★ 모든 오버로드를 제공해야 합니다 (안 그러면 섞여서 크래시)
+
+// 더 간단한 방법 — 링크 시점에 교체 (⚡ e03)
+LD_PRELOAD=/usr/lib/libjemalloc.so ./app
+target_link_libraries(app PRIVATE mimalloc)
+
+// ⚠ 확장 모듈에서는 하지 마세요
+//   파이썬·Node 프로세스 전체의 할당을 바꾸게 됩니다
+//   → 호스트 런타임과 충돌할 수 있습니다 ★
+
+// 계측만 하려면 (⚡ e03)
+static std::atomic&lt;std::size_t&gt; g_allocs{0};
+void* operator new(std::size_t n) { ++g_allocs; return std::malloc(n); }</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>확장 모듈에서 전역 <code>operator new</code> 를 교체하지 마세요</b> —
+        같은 프로세스의 <b>다른 모듈과 호스트 런타임</b>까지 영향을 받습니다.
+        필요하면 <b>컨테이너별 PMR</b> 로 범위를 한정하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 커스텀 할당자는 <b>지연 시간을 일정하게</b> 만들기 위한 도구입니다.
+    대부분은 <b>PMR 아레나</b>(<code>monotonic_buffer_resource</code>)로 충분하고,
+    직접 만들 때는 <b>정렬·수명·스레드 안전성</b>을 반드시 지켜야 합니다.
+    그리고 <b>p99 개선을 수치로 보여</b> 도입을 정당화하세요.</div>
+</section>
+
+
+<!-- ==================== d10 ==================== -->
+<section class="sec" id="d10">
+  <div class="sec-head rv">
+    <span class="no">DEEP 10</span>
+    <h2>인트린식과 <span class="t">인라인 어셈블리</span></h2>
+    <p class="lead">
+      컴파일러가 뽑아 주지 못하는 명령을 직접 씁니다.
+      <b>마지막 수단</b>이고, 대가는 <b>이식성과 유지보수</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인트린식이 필요한 경우</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 컴파일러가 자동으로 못 내는 명령
+#include &lt;immintrin.h&gt;
+_mm_popcnt_u64(x);              // 비트 세기 (std::popcount 로 대체 가능 ★)
+_pdep_u64(x, mask);             // 비트 분배 (BMI2)
+_mm_crc32_u64(crc, x);          // CRC32 하드웨어 가속
+_mm256_shuffle_epi8(v, idx);    // 바이트 셔플
+
+// ② 표준에 있으면 표준을 쓰세요 (C++20) ★
+#include &lt;bit&gt;
+std::popcount(x);       std::countl_zero(x);   std::countr_zero(x);
+std::rotl(x, 3);        std::has_single_bit(x); std::bit_width(x);
+//   → 이식성 있고 컴파일러가 최적 명령으로 바꿔 줍니다
+
+// ③ 원자·장벽
+std::atomic_thread_fence(std::memory_order_acquire);   // 표준 (d06)
+_mm_pause();                    // 스핀 루프에서 (하이퍼스레딩 양보)
+
+// ④ 프리페치 (⚡ e02)
+__builtin_prefetch(p, 0, 3);
+_mm_prefetch(p, _MM_HINT_T0);
+
+// ⑤ 캐시 우회 쓰기 (큰 데이터를 한 번만 쓸 때)
+_mm256_stream_pd(dst, v);       // 캐시를 오염시키지 않음
+_mm_sfence();                   // ★ 스트리밍 후 반드시</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인라인 어셈블리는 정말 마지막</h4>
+      <pre class="code" data-lang="cpp"><code>// GCC/Clang 확장 인라인 어셈블리
+std::uint64_t rdtsc() {
+    std::uint32_t lo, hi;
+    asm volatile("rdtsc" : "=a"(lo), "=d"(hi));    // 출력 제약
+    return (std::uint64_t(hi) &lt;&lt; 32) | lo;
+}
+//   → 표준 대안이 있습니다: std::chrono::steady_clock
+
+// 최적화 방지 장벽 (벤치마크에 — ⚡ e01)
+template&lt;class T&gt; void keep(T const&amp; v) {
+    asm volatile("" : : "r,m"(v) : "memory");
+}
+
+// ⚠ 인라인 어셈블리의 문제
+//   · 컴파일러가 최적화하지 못하는 블랙박스가 됩니다
+//   · 제약(constraint) 문법이 어렵고 실수하면 조용히 깨집니다
+//   · 아키텍처·컴파일러마다 문법이 다릅니다 (MSVC 는 x64 에서 금지)
+//   · 레지스터 할당을 방해해 오히려 느려질 수 있습니다 ★
+
+// 대안 순서
+//   ① 표준 함수 (&lt;bit&gt; · &lt;atomic&gt; · &lt;chrono&gt;)
+//   ② 컴파일러 내장 함수 (__builtin_*)
+//   ③ 인트린식
+//   ④ 인라인 어셈블리     ← 여기까지 오는 경우는 드뭅니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">이식성 지키기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">런타임 CPU 감지 (⚡ e06)</h4>
+      <pre class="code" data-lang="cpp"><code>// 배포 바이너리는 보수적으로 빌드하고 실행 시 분기 ★
+#if defined(__x86_64__)
+  #include &lt;immintrin.h&gt;
+  static bool has_avx2() { return __builtin_cpu_supports("avx2"); }
+#elif defined(__aarch64__)
+  #include &lt;arm_neon.h&gt;
+  static bool has_avx2() { return false; }
+#endif
+
+using Fn = void(*)(const double*, double*, std::size_t);
+static Fn select() {
+#if defined(__x86_64__)
+    if (has_avx2()) return &amp;process_avx2;
+    return &amp;process_sse2;
+#elif defined(__aarch64__)
+    return &amp;process_neon;
+#else
+    return &amp;process_scalar;
+#endif
+}
+static const Fn g_process = select();     // 한 번만 결정
+
+// GCC 의 함수 다중 버전 — 컴파일러가 자동으로
+__attribute__((target_clones("default,avx2,avx512f")))
+void process(const double* in, double* out, std::size_t n) { ... }
+
+// 함수 단위 타깃 (파일 전체 옵션 대신) ★
+__attribute__((target("avx2,fma")))
+void process_avx2(...) { ... }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스칼라 버전을 반드시 남기세요</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 정확성 검증용 기준 구현
+void process_scalar(const double* in, double* out, std::size_t n) {
+    for (std::size_t i = 0; i &lt; n; ++i) out[i] = std::sqrt(in[i]);
+}
+
+// ② 테스트로 항상 대조 ★
+TEST(simd, matches_scalar) {
+    for (std::size_t n : {0u, 1u, 3u, 4u, 7u, 8u, 1000u}) {   // ★ 꼬리 케이스
+        std::vector&lt;double&gt; in(n), a(n), b(n);
+        fill_random(in);
+        process_scalar(in.data(), a.data(), n);
+        process_avx2  (in.data(), b.data(), n);
+        for (std::size_t i = 0; i &lt; n; ++i)
+            EXPECT_NEAR(a[i], b[i], 1e-12) &lt;&lt; "n=" &lt;&lt; n &lt;&lt; " i=" &lt;&lt; i;
+    }
+}
+
+// ③ 환경변수로 강제 전환 (운영 사고 대비)
+if (std::getenv("MYLIB_NO_SIMD")) return &amp;process_scalar;
+
+// ④ Sanitizer 와 함께 (🛠️ b10)
+//    SIMD 코드는 범위 초과가 나기 쉽습니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>꼬리 처리가 버그의 온상입니다</b> — <code>n</code> 이
+        벡터 폭의 배수가 아닐 때 <b>마지막 몇 개만 틀리는</b> 경우가 전형적입니다.
+        <b>0, 1, 폭-1, 폭, 폭+1</b> 을 반드시 테스트하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">라이브러리를 먼저</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 쓰기 전에 확인 (⚡ e06)</h4>
+      <pre class="code" data-lang="text"><code>이식성 있는 SIMD 라이브러리
+  · google/highway  — 런타임 디스패치까지 포함 ★
+  · xsimd           — 간결한 API
+  · std::simd       — C++26 표준화 예정 (experimental 로 사용 가능)
+  · Eigen           — 선형대수 전반
+
+이미 최적화된 도메인 라이브러리
+  · BLAS (OpenBLAS · MKL)  선형대수
+  · simdjson               JSON (GB/s)
+  · fast_float             문자열→실수
+  · xxHash · wyhash        해시
+  · zstd · lz4             압축
+  · pdqsort · vqsort       정렬
+
+★ "SIMD 로 3배 빠르게 하겠다" 싶은 것은
+  대개 누군가 이미 10배 빠르게 만들어 두었습니다.
+
+직접 써야 하는 경우
+  · 도메인 특화 연산 (특수한 필터·인코딩)
+  · 라이브러리 의존성을 늘릴 수 없는 환경
+  · 프로파일러가 그 루프만 계속 가리킬 때</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">유지보수 비용</h4>
+      <pre class="code" data-lang="text"><code>인트린식 코드를 두면 생기는 일
+
+  · x86 과 ARM 두 벌을 유지해야 합니다 (애플 실리콘 · ARM 서버)
+  · 새 명령 세트가 나오면 또 한 벌
+  · 읽을 수 있는 사람이 팀에 한두 명뿐이 됩니다
+  · 리팩터링 때마다 스칼라·SIMD 양쪽을 고쳐야 합니다
+  · 테스트 케이스가 늘어납니다 (꼬리·정렬·경계)
+
+그래서
+  · 인트린식 코드는 '한곳에 격리'하세요
+      src/kernels/ 에 모으고 인터페이스는 단순하게
+  · 반드시 스칼라 기준 구현과 대조 테스트 ★
+  · 주석에 '왜 이렇게 썼는지'와 측정 결과를 남기세요
+      // AVX2 버전: 스칼라 대비 3.2배 (n=1M, Zen4, 2026-08 측정)
+
+★ 성능 이득이 2배 미만이면 대개 유지보수 비용이 더 큽니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>먼저 자동 벡터화를 노리세요</b>(⚡ e06) —
+        <code>__restrict</code> 와 단순한 루프 구조만으로
+        <b>인트린식의 70~90% 성능</b>이 나오는 경우가 많습니다.
+        코드는 그대로 읽히고요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">컴파일러 내장 함수</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">알아 두면 유용한 <code>__builtin_*</code></h4>
+      <pre class="code" data-lang="cpp"><code>// 오버플로 검사 (d02)
+int r;
+if (__builtin_add_overflow(a, b, &amp;r)) { /* 오버플로 */ }
+__builtin_mul_overflow · __builtin_sub_overflow
+
+// 비트 조작 — 표준 &lt;bit&gt; 가 있으면 그쪽을 쓰세요
+__builtin_popcountll(x)   → std::popcount(x)
+__builtin_clzll(x)        → std::countl_zero(x)
+__builtin_bswap64(x)      → std::byteswap(x)   (C++23)
+
+// 분기 힌트 (⚡ e05) — C++20 [[likely]] 가 표준
+__builtin_expect(x, 0)
+__builtin_unreachable()          // "여기 도달할 수 없다" ★
+//   std::unreachable() (C++23)
+
+// 정렬 힌트
+__builtin_assume_aligned(p, 64)
+
+// 함수 정보
+__builtin_FILE() · __builtin_LINE() · __builtin_FUNCTION()
+//   → std::source_location (C++20)
+
+// 프리페치 (⚡ e02)
+__builtin_prefetch(addr, rw, locality)
+
+// 컴파일 시점 판단
+__builtin_constant_p(x)          // 상수인가
+if consteval { }                 // C++23 표준</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">위험한 것 — <code>unreachable</code></h4>
+      <pre class="code" data-lang="cpp"><code>// "여기 도달할 수 없다"고 약속하면 컴파일러가 그것을 이용합니다
+int f(int x) {
+    switch (x) {
+        case 0: return 10;
+        case 1: return 20;
+        default: std::unreachable();     // ★ 다른 값이 오면 UB
+    }
+}
+//   → 범위 검사가 사라지고 점프 테이블이 최적화됩니다
+//   ⚠ 실제로 2가 들어오면 무슨 일이든 일어납니다 (d02)
+
+// 안전한 사용
+//   · 입력을 이미 검증한 뒤 내부 함수에서만
+//   · 디버그 빌드에서는 assert 로 확인
+#ifndef NDEBUG
+    #define MYLIB_UNREACHABLE() assert(false &amp;&amp; "도달 불가")
+#else
+    #define MYLIB_UNREACHABLE() std::unreachable()
+#endif
+
+// 확인 — 어셈블리에서 검사가 사라졌는지 (⚡ e09)
+// godbolt 에서 unreachable 있는 버전과 없는 버전 비교</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>unreachable</code> 은 컴파일러에게 주는 약속입니다</b> —
+        어기면 <b>d02 의 모든 무서운 일</b>이 일어납니다.
+        성능 이득이 확실히 측정된 자리에만,
+        <b>디버그 빌드에서는 assert 로</b> 이중 방어하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 순서는 <b>표준 함수 → <code>__builtin_*</code> → 인트린식 → 인라인 어셈블리</b> 입니다.
+    <code>&lt;bit&gt;</code> 헤더에 이미 있는 것을 인트린식으로 쓰지 마세요.
+    직접 쓴다면 <b>스칼라 기준 구현과 대조 테스트</b>를 반드시 두고,
+    <b>런타임 CPU 감지</b>로 이식성을 지키세요.</div>
+</section>
+
+
+<!-- ==================== d11 ==================== -->
+<section class="sec" id="d11">
+  <div class="sec-head rv">
+    <span class="no">DEEP 11</span>
+    <h2><span class="t">크래시 덤프</span> 분석</h2>
+    <p class="lead">
+      운영 중 죽은 프로그램의 <b>덤프 파일 하나로</b> 원인을 찾아냅니다.
+      재현할 수 없는 버그를 다루는 유일한 방법입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">덤프를 남기게 설정하기</h4>
+      <pre class="code" data-lang="bash"><code># ① 코어 덤프 활성화
+ulimit -c unlimited
+echo "/tmp/core.%e.%p.%t" | sudo tee /proc/sys/kernel/core_pattern
+#   %e 실행파일 %p PID %t 시각
+
+# systemd 환경이면 systemd-coredump 가 받습니다
+coredumpctl list
+coredumpctl gdb 12345        # 바로 gdb 로 열기 ★
+
+# 컨테이너에서
+docker run --ulimit core=-1 --security-opt seccomp=unconfined ...
+#   호스트의 core_pattern 이 적용됩니다 (컨테이너 안 경로가 아님 주의)
+
+# ② 프로그램에서 직접
+#include &lt;sys/resource.h&gt;
+struct rlimit rl{RLIM_INFINITY, RLIM_INFINITY};
+setrlimit(RLIMIT_CORE, &amp;rl);
+
+# ③ 윈도우 — 미니덤프
+#   SetUnhandledExceptionFilter + MiniDumpWriteDump
+#   또는 레지스트리의 LocalDumps 설정</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>심볼을 미리 보관하세요</b>(🛠️ b01) —
+        <code>strip</code> 한 바이너리의 덤프는 <b>주소만 보입니다</b>.
+        <code>objcopy --only-keep-debug</code> 로 분리해 두고
+        <b>배포한 바이너리와 짝을 맞춰</b> 저장해야 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">분석 절차</h4>
+      <pre class="code" data-lang="bash"><code>gdb ./app /tmp/core.app.12345
+
+(gdb) bt full                    # ★ 가장 먼저 — 스택과 지역 변수
+(gdb) info registers
+(gdb) info threads               # 여러 스레드면
+(gdb) thread apply all bt        # ★ 교착·경쟁 진단
+(gdb) frame 2                    # 관심 프레임으로
+(gdb) print *this
+(gdb) print *ptr@10              # 배열 앞 10개
+(gdb) info sharedlibrary         # 어느 .so 에서 났는지
+(gdb) x/16xb 0x7fff1234          # 메모리 덤프
+
+# 파이썬 확장이라면 (🐍 y12)
+(gdb) py-bt                      # 파이썬 스택까지 ★
+
+# 주소만 있을 때 (심볼 분리 보관한 경우)
+addr2line -e app.debug -f -C 0x401234
+#   Engine::run(int)
+#   /src/core.cpp:42              ★
+
+# build-id 로 심볼 찾기
+readelf -n core | grep -i build
+#   /usr/lib/debug/.build-id/ab/cdef...debug</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">증상으로 원인 좁히기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">신호와 스택 패턴</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:28%">신호 · 패턴</th><th>흔한 원인</th></tr>
+        <tr><td>SIGSEGV<br>주소 0x0 근처</td><td>널 포인터 역참조</td></tr>
+        <tr><td>SIGSEGV<br>주소가 이상한 값</td><td>해제 후 사용 · 손상된 포인터 ★</td></tr>
+        <tr><td>SIGABRT<br><code>__cxa_throw</code> 가 보임</td><td>잡히지 않은 예외 (d05)</td></tr>
+        <tr><td>SIGABRT<br><code>free()</code> 근처</td><td>힙 손상 · 이중 해제</td></tr>
+        <tr><td>SIGILL</td><td>지원하지 않는 CPU 명령<br><span style="color:var(--dim)"><code>-march=native</code> 로 빌드(🛠️ b04)</span></td></tr>
+        <tr><td>SIGBUS</td><td>정렬 위반 (ARM) · mmap 문제</td></tr>
+        <tr><td>스택이 재귀로 가득</td><td>무한 재귀 · 스택 오버플로</td></tr>
+        <tr><td>스택이 <code>??</code> 뿐</td><td>스택 손상 · 심볼 없음</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># 힙 손상이면 다음 실행에 ASan 을 붙여 재현을 시도하세요 (🛠️ b10)
+# 스택 손상이면
+(gdb) bt
+#0  0x00007f... in ?? ()          ← 심볼이 깨짐
+#   → -fstack-protector-strong 로 다시 빌드해 조기 탐지</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">죽이지 않고 들여다보기</h4>
+      <pre class="code" data-lang="bash"><code># 운영 중인 프로세스의 스택 (재시작 없이) ★
+gdb -p $(pgrep -f myapp) -batch -ex "thread apply all bt" &gt; stacks.txt
+
+# 파이썬 확장이라면 (🐍 y12)
+py-spy dump --pid 12345 --native
+#   파이썬 + C++ 스택을 함께 보여 줍니다 ★
+
+# 살아 있는 프로세스의 코어 덤프 뜨기 (계속 실행됨)
+gcore -o /tmp/snapshot 12345
+
+# 무한 루프·교착 진단
+#   1초 간격으로 여러 번 떠서 스택이 그대로면 멈춘 것입니다
+for i in 1 2 3; do
+  gdb -p 12345 -batch -ex "thread apply all bt" &gt;&gt; hang.txt
+  sleep 1
+done
+
+# 파일 디스크립터·메모리 상태
+ls -l /proc/12345/fd | wc -l
+cat /proc/12345/status | grep -E "VmRSS|Threads"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>운영 장애 대응의 첫 명령</b> — <b>스택을 뜨는 것</b>입니다.
+        재시작하면 증거가 사라지므로,
+        <b>재시작 전에 <code>gcore</code> 나 스택 덤프</b>를 반드시 남기세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">덤프 수집 체계</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자동 수집</h4>
+      <pre class="code" data-lang="cpp"><code>// 프로그램 안에서 크래시 정보를 남기기
+#include &lt;csignal&gt;
+#include &lt;execinfo.h&gt;
+
+void crash_handler(int sig) {
+    void* frames[64];
+    int n = backtrace(frames, 64);
+
+    // ★ async-signal-safe 함수만 써야 합니다 (printf 도 위험)
+    int fd = ::open("/var/log/app/crash.log", O_WRONLY|O_CREAT|O_APPEND, 0644);
+    backtrace_symbols_fd(frames, n, fd);
+    ::close(fd);
+
+    std::signal(sig, SIG_DFL);
+    std::raise(sig);              // 기본 처리로 → 코어 덤프 생성 ★
+}
+
+int main() {
+    std::signal(SIGSEGV, crash_handler);
+    std::signal(SIGABRT, crash_handler);
+    std::signal(SIGFPE,  crash_handler);
+    ...
+}</code></pre>
+      <pre class="code" data-lang="bash"><code># 더 나은 도구들
+#   · Google Breakpad · Crashpad — 미니덤프 생성·업로드
+#   · Sentry Native — 크래시 리포트 수집 서비스
+#   · systemd-coredump — 자동 수집·압축·보관
+#   · backward-cpp — 예쁜 스택 트레이스 출력 (헤더 하나)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">분석에 필요한 것들</h4>
+      <ul class="tx">
+        <li><b>바이너리와 심볼</b> — 배포한 것과 <b>정확히 같은</b> 빌드 ★</li>
+        <li><b>build-id</b> — 덤프와 심볼을 짝지을 유일한 열쇠</li>
+        <li><b>빌드 정보</b> — 컴파일러·플래그·커밋(🛠️ b02·🐍 y03)</li>
+        <li><b>공유 라이브러리</b> — 시스템 버전이 다르면 스택이 안 풀립니다</li>
+        <li><b>로그</b> — 크래시 직전의 요청·상태</li>
+        <li><b>재현 조건</b> — 부하·입력·타이밍</li>
+      </ul>
+      <pre class="code" data-lang="bash"><code># 심볼 서버 구성 (build-id 기반)
+readelf -n app | grep "Build ID"
+#   Build ID: abcdef1234...
+mkdir -p /srv/symbols/.build-id/ab
+cp app.debug /srv/symbols/.build-id/ab/cdef1234....debug
+
+# gdb 가 자동으로 찾게
+(gdb) set debug-file-directory /srv/symbols
+
+# CI 에서 심볼을 아티팩트로 보관 (🛠️ b07)
+- uses: actions/upload-artifact@v4
+  with: { name: symbols, path: 'build/*.debug', retention-days: 90 }</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>심볼 없는 덤프는 거의 쓸모없습니다</b> —
+        릴리스마다 <b>심볼을 반드시 보관</b>하세요.
+        “운영에서 크래시가 났는데 분석할 수 없다”는
+        <b>대부분 이 준비가 없어서</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">스택이 깨졌을 때</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">수동으로 복원하기</h4>
+      <pre class="code" data-lang="bash"><code># bt 가 ?? 만 보여 줄 때
+(gdb) info registers rsp rbp rip
+(gdb) x/64gx $rsp                # 스택 메모리를 직접 보기
+#   반환 주소처럼 보이는 값(코드 영역 주소)을 찾습니다
+
+(gdb) info proc mappings         # 어느 영역이 코드인지
+(gdb) info symbol 0x401234       # 그 주소가 어느 함수인지 ★
+
+# 프레임 포인터가 있으면 훨씬 쉽습니다
+#   -fno-omit-frame-pointer 로 빌드하세요 (⚡ e01 · 🛠️ b09)
+#   성능 손실은 대개 1% 미만인데 진단 능력이 크게 올라갑니다
+
+# 스택 손상의 원인
+#   · 버퍼 오버런 (지역 배열) → -fstack-protector-strong 로 탐지
+#   · 함수 포인터 손상
+#   · 스택 오버플로 (깊은 재귀)
+(gdb) p $sp - (char*)&amp;stack_start    # 스택을 얼마나 썼는지
+
+# 힙 손상 진단
+(gdb) call malloc_stats()
+#   또는 다음 실행에 ASan (🛠️ b10)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최적화 빌드의 어려움</h4>
+      <pre class="code" data-lang="text"><code>Release 덤프에서 흔한 상황
+
+  · 변수가 &lt;optimized out&gt;
+      → 레지스터에만 있거나 아예 사라졌습니다
+      → 주변 변수·인자로 추론하거나 RelWithDebInfo 로 재현
+  · 함수가 인라인되어 스택에 없음
+      → gdb 는 인라인 프레임을 보여 주기도 합니다 (DWARF 정보)
+      → bt 에 "(inlined by)" 표시를 찾으세요
+  · 실행 순서가 소스와 다름
+      → 줄 번호가 이상해 보일 수 있습니다
+  · 꼬리 호출 최적화로 프레임이 사라짐
+
+대책
+  · RelWithDebInfo 로 배포 (-O2 -g) ★
+  · -fno-omit-frame-pointer
+  · 중요한 상태를 전역 로그 버퍼에 남기기
+      static thread_local char g_last_op[64];
+      → 덤프에서 이 값을 읽으면 무엇을 하던 중이었는지 알 수 있습니다 ★
+  · 크래시 직전 로그를 링 버퍼로 유지</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“마지막 작업” 흔적을 남기는 기법</b> —
+        <code>thread_local</code> 버퍼에 현재 처리 중인 <b>요청 ID·단계</b>를
+        기록해 두면, 덤프에서 그 값을 읽어 <b>재현 범위를 즉시 좁힐 수</b> 있습니다.
+        비용은 거의 없고 효과는 큽니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 운영 크래시는 <b>덤프와 심볼</b>이 있어야 분석할 수 있습니다.
+    <b><code>ulimit -c unlimited</code></b> · <b>심볼 분리 보관</b> ·
+    <b><code>RelWithDebInfo</code> 배포</b> 세 가지를 미리 준비하세요.
+    분석은 <b><code>bt full</code></b> 과 <b><code>thread apply all bt</code></b> 로 시작합니다.</div>
+</section>
+
+
+<!-- ==================== d12 ==================== -->
+<section class="sec" id="d12">
+  <div class="sec-head rv">
+    <span class="no">DEEP 12</span>
+    <h2>C++ 를 <span class="t">쓰지 말아야 할 때</span></h2>
+    <p class="lead">
+      마지막 섹션은 <b>안 쓰는 판단</b>입니다.
+      기술 선택은 <b>팀이 6개월 뒤에도 고칠 수 있는가</b>로 결정됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 가 답이 아닌 경우</h4>
+      <ul class="tx">
+        <li><b>I/O 가 병목</b> — 계산 언어를 바꿔도 그대로입니다(⚡ e01)</li>
+        <li><b>이미 numpy·polars 로 충분</b> — 1~3배를 위해 치를 비용이 아닙니다(⚡ e10)</li>
+        <li><b>요구가 자주 바뀌는 초기 코드</b> — 빌드·배포 부담이 개발 속도를 깎습니다</li>
+        <li><b>팀에 C++ 경험자가 없음</b> — 버스 팩터 1 은 위험합니다</li>
+        <li><b>크래시가 서비스를 죽이면 안 됨</b> — 세그폴트는 프로세스 전체를 죽입니다(🐍 y12)</li>
+        <li><b>numba·Cython 으로 충분</b> — 빌드 파이프라인 없이 70~90% 성능(⚡ e10)</li>
+        <li><b>보안이 최우선</b> — 메모리 안전 언어가 구조적으로 유리합니다</li>
+      </ul>
+      <div class="note warn" style="margin-bottom:0">
+        <b>전체에서 차지하는 비중을 먼저 보세요</b> —
+        프로파일에서 <b>30% 미만</b>인 함수는 100배 빠르게 해도
+        전체는 <b>1.4배</b>입니다(암달의 법칙).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대안 비교</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">선택지</th><th>고르는 이유</th></tr>
+        <tr><td><b>numba</b></td><td>파이썬 코드 그대로 · 빌드 불필요 ★</td></tr>
+        <tr><td><b>Cython</b></td><td>점진 전환 · 기존 코드 유지</td></tr>
+        <tr><td><b>polars · DuckDB</b></td><td>표 데이터는 직접 짜는 것보다 빠릅니다</td></tr>
+        <tr><td><b>Rust</b></td><td>메모리 안전 · 빌드 편함 · 배포 쉬움 <b>(🦀)</b></td></tr>
+        <tr><td><b>Go</b></td><td>서비스 · 동시성 · 배포 단순</td></tr>
+        <tr><td><b>C++</b></td><td>기존 C/C++ 자산 · 최고 성능 · 세밀한 제어</td></tr>
+        <tr><td><b>GPU</b></td><td>대규모 병렬 · 대역폭</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>새로 시작한다면 Rust 를 진지하게 보세요</b> —
+        메모리 안전이 컴파일러로 보장되고, <code>cargo</code> 로 빌드·의존성이 해결되며,
+        <b>PyO3·napi-rs 의 개발 경험이 훨씬 매끄럽습니다</b>.
+        이 가이드의 <b>🦀 Rust 편</b>에서 같은 주제를 다룹니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">C++ 가 여전히 최선인 경우</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대체하기 어려운 영역</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>기존 C/C++ 자산</b> — OpenCV·ffmpeg·PCL·Eigen 을 써야 한다면
+            같은 언어가 가장 매끄럽습니다</li>
+        <li><b>게임 엔진·그래픽스</b> — Unreal·언리티 네이티브 플러그인</li>
+        <li><b>임베디드·실시간</b> — 런타임 없이 하드웨어에 가깝게</li>
+        <li><b>초저지연</b> — 거래 시스템·오디오. 할당자·캐시까지 통제(d09·⚡ e02)</li>
+        <li><b>과학 계산</b> — BLAS·MPI 생태계</li>
+        <li><b>여러 언어에 동시에 노출</b> — C ABI 가 공용어(🔗 f01)</li>
+        <li><b>수십 년 유지되는 시스템</b> — ABI 안정성과 방대한 생태계</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이 가이드가 다룬 관점에서</h4>
+      <pre class="code" data-lang="text"><code>"파이썬·Node 에서 불러 쓸 모듈" 이라는 목적에서 보면
+
+  C++ 가 유리한 경우
+    · 이미 있는 C/C++ 라이브러리를 감싸야 한다  ★ 가장 흔한 이유
+    · 팀에 C++ 경험이 있다
+    · 성능을 마지막 한 방울까지 짜내야 한다
+    · 여러 언어에서 같은 코어를 쓴다 (🔗 f10)
+
+  Rust 가 유리한 경우
+    · 새로 작성한다
+    · 빌드·배포 부담을 줄이고 싶다 (cargo · maturin)
+    · 메모리 안전 버그를 구조적으로 막고 싶다
+    · 팀이 배울 여력이 있다
+
+  둘 다 필요 없는 경우
+    · numba · Cython · polars 로 충분하다  ★ 먼저 확인하세요 (⚡ e10)
+
+★ 정직한 조언
+  "C++ 를 배웠으니 써야 한다" 가 아니라
+  "이 문제에 이것이 맞는가" 로 판단하세요.
+  안 쓰는 결정을 근거와 함께 제시하는 것도 실력입니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">도입 결정 체크리스트</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">결정 전에 답할 질문</h4>
+      <ul class="tx">
+        <li><b>① 측정했는가</b> — 프로파일에서 그 함수가 몇 %인가(⚡ e01)</li>
+        <li><b>② 더 싼 방법을 다 해 봤는가</b> — 알고리즘·I/O·numpy·numba(🐍 y01)</li>
+        <li><b>③ 얼마나 빨라지는가</b> — 프로토타입으로 실측(⚡ e10)</li>
+        <li><b>④ 누가 유지보수하는가</b> — 고칠 수 있는 사람이 몇 명인가</li>
+        <li><b>⑤ 배포 부담은</b> — wheel·prebuild·3 OS(🛠️ b06 · 🟨 j09)</li>
+        <li><b>⑥ 되돌릴 수 있는가</b> — 순수 파이썬 폴백(🐍 y02)</li>
+        <li><b>⑦ 실패하면 어떻게 되는가</b> — 세그폴트가 서비스를 죽이는가</li>
+      </ul>
+      <pre class="code" data-lang="text"><code>★ 안전한 도입 형태
+  ① 순수 파이썬 구현을 먼저 만들고 테스트를 갖춘다
+  ② 같은 결과를 내는 C++ 구현을 추가한다
+  ③ 두 결과를 대조하는 테스트를 둔다 (parity test)
+  ④ 환경변수로 전환 가능하게 한다
+  ⑤ 일부 트래픽에만 켜고 지표를 비교한다 (카나리)
+
+  → 언제든 되돌릴 수 있고, 정확성도 자동으로 검증됩니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">팀에 제안할 때</h4>
+      <pre class="code" data-lang="markdown"><code>## 제안: 정산 집계를 C++ 확장으로
+
+### 현황
+- 프로파일 결과 `aggregate()` 가 전체의 68% (평균 4.2초/건)
+- numpy 벡터화 시도 → 원소별 분기 때문에 적용 불가
+- numba 시도 → 2.1배 (객체 타입 때문에 nopython 모드 실패)
+
+### 제안
+pybind11 로 `aggregate()` 만 C++ 로. 인터페이스는 numpy 배열 in/out.
+
+### 예상 효과 (프로토타입 실측)
+| 건수    | 현행   | C++   | 배수  |
+|---------|-------:|------:|------:|
+| 10,000  | 4.2s   | 0.31s | 13.5× |
+| 100,000 | 41s    | 2.8s  | 14.6× |
+전체 배치: 6분 → 1.4분
+
+### 비용
+- 개발 2주 · CI 에 wheel 빌드 추가(3 OS × 5 버전 → abi3 로 6개)
+- 유지보수: 정산팀 2명이 리뷰 가능
+
+### 위험과 대응
+- 크래시 시 프로세스 종료 → 입력 검증 + ASan CI + 순수 파이썬 폴백
+- `FASTAGG_PURE=1` 로 즉시 되돌릴 수 있음
+- 두 구현 결과를 대조하는 테스트를 CI 에 상시</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이런 형태의 제안이 통과됩니다</b> —
+        <b>측정 → 대안 검토 → 실측 → 비용 → 위험 대응</b>.
+        “C++ 로 하면 빠릅니다”만으로는 설득되지 않고, 설득되어서도 안 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">여기서 어디로</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이 가이드에서 이어지는 길</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>🦀 Rust 가이드</b> — 같은 목적(모듈 만들기)을 Rust 로.
+            PyO3·maturin·napi-rs. <b>C++ 와 비교하며 읽으면</b> 두 언어의 설계 차이가 보입니다</li>
+        <li><b>🐍 파이썬 가이드</b> — 확장을 쓰는 쪽의 관점.
+            GIL·free-threading·프로파일링</li>
+        <li><b>🟨 JS·TS 가이드</b> — Node 런타임·이벤트 루프</li>
+        <li><b>🗄️ Database · 🌐 Web Server</b> — 병목이 계산이 아니라 I/O 일 때</li>
+      </ul>
+      <pre class="code" data-lang="text"><code>C++ 를 더 깊이 보려면
+  · cppreference.com          — 표준 레퍼런스 (가장 정확)
+  · C++ Core Guidelines       — 스타일·설계 지침
+  · Compiler Explorer         — 어셈블리 확인 (⚡ e09)
+  · CppCon 강연               — 최신 주제
+  · "Effective Modern C++"    — 이동·스마트 포인터
+  · "C++ Concurrency in Action" — 동시성 (탭 2 m12 · d06)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이 가이드가 반복한 원칙</h4>
+      <pre class="code" data-lang="text"><code>탭이 달라도 결론은 같았습니다
+
+  ① 경계를 넘는 횟수를 데이터 크기와 분리하라
+     파이썬 호출 · Node 호출 · C ABI · 가상 함수 · 콜백
+     → 전부 "배열 통째로 한 번" 이 답이었습니다
+
+  ② 좁고 안정된 경계를 두라
+     C ABI · abi3 · N-API · 불투명 포인터
+     → 내부는 자유롭게, 표면은 단순하게
+
+  ③ 측정하고 결정하라
+     프로파일러 · 벤치마크 · Sanitizer
+     → 추측으로 최적화하지 않기
+
+  ④ 되돌릴 수 있게 만들라
+     순수 구현 폴백 · 환경변수 전환 · parity 테스트
+
+  ⑤ 안 쓰는 판단도 실력이다
+     numba 로 충분하면 그것이 정답입니다
+
+★ 이 다섯 가지는 언어가 바뀌어도 유효합니다.
+  Rust 가이드에서도 같은 원칙이 반복될 것입니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>마지막 한 문장</b> — 목표는 <b>C++ 개발자가 되는 것이 아니라</b>
+        <b>파이썬·Node 가 못 하는 일을 대신할 모듈을 만드는 것</b>이었습니다.
+        그 목적에는 <b>기초 탭 + 현대 C++ 앞부분 + 모듈 탭 하나</b>면 충분합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> C++ 는 강력하지만 <b>비쌉니다</b> —
+    빌드·배포·디버깅·유지보수가 함께 옵니다.
+    <b>측정으로 정당화</b>되고 <b>되돌릴 수 있게</b> 만든 뒤에 도입하세요.
+    그리고 <b>numba·polars·Rust 가 더 나은 경우</b>를 인정하는 것이
+    좋은 기술 판단입니다.</div>
+</section>
+
+</div><!-- /pane-deep -->

@@ -1,0 +1,2719 @@
+<!-- ============================================================
+     Node 애드온 PANE
+     ============================================================ -->
+<div class="pane" id="pane-node">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> N-API · node-addon-api · 제로카피 Buffer · AsyncWorker</div>
+  <h1>이벤트 루프를<br>막지 않고<br>C++ 를 부릅니다</h1>
+  <p class="tx">
+    Node 는 단일 스레드입니다. 그래서 C++ 를 붙일 때 가장 중요한 것은 속도가 아니라
+    <b>이벤트 루프를 막지 않는 것</b>입니다.
+    N-API 로 만들면 <b>Node 버전이 올라가도 다시 빌드할 필요가 없습니다</b>.
+  </p>
+  <div class="stats">
+    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>N-API</b><span>ABI 안정</span></div>
+    <div><b>0</b><span>재빌드</span></div>
+    <div><b>4</b><span>깊이 층</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== j01 ==================== -->
+<section class="sec" id="j01">
+  <div class="sec-head rv">
+    <span class="no">NODE 01</span>
+    <h2>애드온 · WASM · <span class="t">별도 프로세스</span> — 무엇을 고를까</h2>
+    <p class="lead">
+      네이티브 애드온이 항상 답은 아닙니다.
+      <b>배포와 유지보수 비용</b>까지 보면 다른 선택이 나은 경우가 많습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 가지 방식 비교</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:22%"></th><th>네이티브 애드온</th><th>WASM</th><th>별도 프로세스</th></tr>
+        <tr><td>속도</td><td><b>최고</b></td><td>0.7~0.9배</td><td>IPC 비용</td></tr>
+        <tr><td>배포</td><td>OS별 바이너리</td><td><b>파일 하나</b> ★</td><td>실행 파일</td></tr>
+        <tr><td>격리</td><td>없음(크래시=전체)</td><td><b>샌드박스</b></td><td><b>완전 격리</b> ★</td></tr>
+        <tr><td>스레드</td><td>자유</td><td>제한적</td><td>자유</td></tr>
+        <tr><td>메모리 공유</td><td><b>제로카피</b> ★</td><td>선형 메모리 복사</td><td>불가(파이프)</td></tr>
+        <tr><td>시스템 접근</td><td><b>전부</b></td><td>WASI 범위만</td><td>전부</td></tr>
+        <tr><td>브라우저</td><td>❌</td><td><b>✅</b></td><td>❌</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>고르는 기준</b> — <b>큰 데이터를 자주 주고받으면</b> 애드온,
+        <b>배포 편의와 안전이 우선이면</b> WASM,
+        <b>크래시가 서버를 죽이면 안 되거나 GPL 라이브러리를 쓴다면</b> 별도 프로세스입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">FFI 와도 비교해야 합니다</h4>
+      <pre class="code" data-lang="text"><code>같은 C++ 코드를 Node 에서 쓰는 네 가지 길
+
+  ① 네이티브 애드온 (N-API)     ← 이 탭
+     · 가장 빠름 · JS 객체를 자유롭게 다룸
+     · 빌드 필요 · prebuild 배포 · 이 탭의 주제
+
+  ② FFI (koffi · Deno.dlopen)   ← 🔗 f06
+     · 빌드 불필요 · 여러 언어가 같은 .so 공유
+     · 호출 비용이 조금 큼 · JS 객체를 다루기 어려움
+
+  ③ WASM (Emscripten)
+     · 파일 하나로 배포 · 브라우저에서도 동작
+     · 메모리 경계를 넘을 때 복사 · 시스템 호출 제한
+
+  ④ 별도 프로세스 + IPC
+     · 크래시 격리 · 라이선스 분리 · 언어 자유
+     · 직렬화 비용 · 프로세스 관리 부담
+
+★ 실무 조언
+  먼저 ②(FFI)로 만들어 동작을 검증하고,
+  호출 비용이 문제가 되면 ①(애드온)으로 옮기는 순서가 안전합니다.
+  C API 를 잘 만들어 두면 둘 사이 이동이 쉽습니다(🔗 f03).</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">언제 애드온이 정답인가</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실제로 쓰이는 곳</h4>
+      <ul class="tx">
+        <li><b>이미지·영상 처리</b> — sharp(libvips), ffmpeg 바인딩.
+            Buffer 를 <b>복사 없이</b> 넘길 수 있는 것이 결정적입니다</li>
+        <li><b>암호·해시</b> — bcrypt, argon2. CPU 를 오래 쓰므로
+            <b>워커 스레드로 빼는 것</b>이 필수입니다</li>
+        <li><b>DB 드라이버</b> — better-sqlite3, node-oracledb.
+            기존 C 라이브러리를 그대로 씁니다</li>
+        <li><b>직렬화</b> — protobuf, msgpack 가속</li>
+        <li><b>OS 통합</b> — 트레이 아이콘, 전역 단축키, 화면 캡처(Electron)</li>
+        <li><b>ML 추론</b> — onnxruntime-node, node-llama-cpp</li>
+      </ul>
+      <div class="note warn" style="margin-bottom:0">
+        <b>애드온이 답이 아닌 경우</b> — JSON 파싱·문자열 처리 같은 것은
+        <b>V8 이 이미 매우 빠릅니다</b>. 경계 비용 때문에
+        <b>C++ 로 옮기면 오히려 느려지는 경우</b>가 흔합니다.
+        <b>반드시 먼저 측정하세요</b>.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">N-API 를 써야 하는 이유 ★</h4>
+      <pre class="code" data-lang="text"><code>Node 애드온 API 의 역사
+
+  ① V8 API 직접 사용 (옛 방식 · nan)
+     · V8 버전이 바뀔 때마다 코드가 깨집니다
+     · Node 메이저 버전마다 재빌드 필요
+     · Electron 은 또 다른 V8 버전 → 별도 빌드
+
+  ② N-API / Node-API (Node 8.6+, 안정화 10+)  ★ 현재 표준
+     · C 로 된 ABI 안정 인터페이스
+     · 한 번 빌드하면 Node 여러 메이저 버전에서 동작
+     · Electron·Bun·Deno 도 일부 지원
+     · node-addon-api 는 이것의 C++ 래퍼(헤더 전용)
+
+★ 지금 새로 만든다면 선택지는 하나입니다 — node-addon-api
+  nan(Native Abstractions for Node) 은 레거시입니다.
+
+버전 확인
+  napi_version 3 → Node 10+
+  napi_version 8 → Node 16+   (대부분 여기면 충분)
+  napi_version 9 → Node 18.17+</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">도입 전에 계산할 것</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">진짜 비용은 배포입니다</h4>
+      <pre class="code" data-lang="text"><code>지원해야 할 조합
+  OS      : linux · darwin · win32
+  아키텍처 : x64 · arm64
+  libc    : glibc · musl(alpine) ★ 도커에서 자주 문제
+  런타임   : Node · Electron · Bun
+
+  → 최소 6~12개 바이너리. prebuild 로 자동화하지 않으면 감당 못 합니다(j09)
+
+사용자 쪽에서 나는 문제
+  · 컴파일러가 없어 설치 실패 (윈도우가 특히)
+  · node-gyp 이 Python 을 요구 (예전 버전)
+  · 알파인 리눅스에서 musl 불일치
+  · Electron 버전이 다르면 재빌드 필요
+  · CI 캐시에 안 맞는 바이너리가 남아 있음
+
+★ 그래서 prebuildify + node-gyp-build 조합이 사실상 표준입니다
+  (모든 바이너리를 패키지에 넣고 런타임에 골라 로드)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">되돌릴 수 있게 만들기</h4>
+      <pre class="code" data-lang="javascript"><code>// JS 폴백을 함께 두면 배포 사고에 강해집니다 ★
+let impl
+try {
+  impl = require('node-gyp-build')(__dirname)      // 네이티브
+} catch (err) {
+  console.warn('[mylib] 네이티브 로드 실패, JS 구현 사용:', err.message)
+  impl = require('./fallback.js')                  // 순수 JS
+}
+export const smooth = impl.smooth
+
+// 환경변수로 강제 전환
+if (process.env.MYLIB_PURE_JS === '1') impl = require('./fallback.js')
+
+// 두 구현이 같은 결과를 내는지 테스트로 대조
+test('parity', () =&gt; {
+  const a = Float64Array.from({length: 1000}, Math.random)
+  expect(native.smooth(a, 3)).toEqual(js.smooth(a, 3))
+})</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 구조의 값어치</b> — 네이티브가 없는 환경(알파인·새 아키텍처)에서도
+        <b>느리게라도 동작</b>합니다. 설치 실패로 서비스가 뜨지 않는 것보다
+        <b>훨씬 나은 실패 모드</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">Node 아키텍처와의 관계</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이벤트 루프와 스레드 풀</h4>
+      <pre class="code" data-lang="text"><code>Node 의 구조
+  · 메인 스레드 하나가 JS 를 실행합니다 (이벤트 루프)
+  · libuv 스레드 풀(기본 4개)이 파일 I/O·DNS·zlib 을 처리합니다
+  · 네이티브 애드온의 AsyncWorker 도 이 풀을 씁니다 ★
+
+★ 그래서 생기는 일
+  ① 동기 애드온 호출은 이벤트 루프를 통째로 멈춥니다
+     500ms 걸리면 그동안 모든 HTTP 요청이 대기합니다
+  ② AsyncWorker 를 많이 쓰면 스레드 풀이 고갈됩니다
+     → 파일 I/O 까지 느려집니다
+     UV_THREADPOOL_SIZE 로 늘릴 수 있습니다 (최대 1024)
+  ③ 자체 스레드를 쓰면 풀과 무관하지만
+     JS 를 부를 때 ThreadSafeFunction 이 필요합니다(j07)
+
+측정
+  node --cpu-prof app.js          # CPU 프로파일
+  process.env.UV_THREADPOOL_SIZE  # 현재 설정
+  perf_hooks.monitorEventLoopDelay()   # 이벤트 루프 지연 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이벤트 루프 지연 측정하기</h4>
+      <pre class="code" data-lang="javascript"><code>import { monitorEventLoopDelay } from 'node:perf_hooks'
+
+const h = monitorEventLoopDelay({ resolution: 10 })
+h.enable()
+
+// 동기 애드온 호출
+for (let i = 0; i &lt; 100; i++) addon.heavySync(data)
+
+h.disable()
+console.log(`평균 ${(h.mean/1e6).toFixed(1)}ms  최대 ${(h.max/1e6).toFixed(1)}ms`)
+//   ★ 최대값이 수백 ms 면 사용자가 체감하는 응답 지연입니다
+
+// 비동기 버전과 비교
+h.reset(); h.enable()
+await Promise.all(Array.from({length:100}, () =&gt; addon.heavyAsync(data)))
+h.disable()
+console.log(`비동기: 최대 ${(h.max/1e6).toFixed(1)}ms`)   // 훨씬 작아야 정상</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>기준선</b> — 웹 서버라면 이벤트 루프 지연이
+        <b>10ms 를 넘으면 문제</b>로 봅니다.
+        <b>1ms 이상 걸리는 애드온 함수는 비동기로</b> 만드세요(j06).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 애드온은 <b>큰 데이터를 복사 없이 다뤄야 할 때</b> 가장 강력합니다.
+    배포가 부담이면 <b>WASM</b>, 크래시 격리가 필요하면 <b>별도 프로세스</b>,
+    빠르게 검증하려면 <b>FFI</b> 를 먼저 보세요.
+    그리고 무엇을 고르든 <b>이벤트 루프를 막지 않는 것</b>이 첫 번째 원칙입니다.</div>
+</section>
+
+
+<!-- ==================== j02 ==================== -->
+<section class="sec" id="j02">
+  <div class="sec-head rv">
+    <span class="no">NODE 02</span>
+    <h2><span class="t">node-addon-api</span> — 첫 모듈</h2>
+    <p class="lead">
+      C++ 함수를 <code>require()</code> 로 부르기까지, <b>파일 네 개</b>면 됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① C++ 파일</h4>
+      <pre class="code" data-lang="cpp"><code>// src/addon.cpp
+#include &lt;napi.h&gt;
+#include &lt;vector&gt;
+
+// 모든 함수는 CallbackInfo 를 받고 Napi::Value 를 돌려줍니다
+Napi::Value Add(const Napi::CallbackInfo&amp; info) {
+    Napi::Env env = info.Env();
+
+    // ★ 인자 검증을 반드시 하세요 (안 하면 크래시)
+    if (info.Length() &lt; 2 || !info[0].IsNumber() || !info[1].IsNumber()) {
+        Napi::TypeError::New(env, "숫자 두 개가 필요합니다")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    double a = info[0].As&lt;Napi::Number&gt;().DoubleValue();
+    double b = info[1].As&lt;Napi::Number&gt;().DoubleValue();
+    return Napi::Number::New(env, a + b);
+}
+
+// 모듈 등록
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+    exports.Set("add", Napi::Function::New(env, Add));
+    return exports;
+}
+NODE_API_MODULE(addon, Init)      // ★ 첫 인자는 binding.gyp 의 target_name</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 빌드 설정 · ③ 실행</h4>
+      <pre class="code" data-lang="json"><code>// binding.gyp
+{
+  "targets": [{
+    "target_name": "addon",
+    "sources": ["src/addon.cpp"],
+    "include_dirs": ["&lt;!@(node -p \"require('node-addon-api').include\")"],
+    "cflags!": ["-fno-exceptions"],
+    "cflags_cc!": ["-fno-exceptions"],
+    "cflags_cc": ["-std=c++20"],
+    "defines": ["NAPI_CPP_EXCEPTIONS"],
+    "xcode_settings": {
+      "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
+      "CLANG_CXX_LIBRARY": "libc++",
+      "MACOSX_DEPLOYMENT_TARGET": "10.15"
+    },
+    "msvs_settings": {
+      "VCCLCompilerTool": { "ExceptionHandling": 1, "AdditionalOptions": ["/std:c++20"] }
+    }
+  }]
+}</code></pre>
+      <pre class="code" data-lang="json"><code>// package.json
+{
+  "name": "myaddon",
+  "gypfile": true,
+  "dependencies": { "node-addon-api": "^8.0.0" },
+  "devDependencies": { "node-gyp": "^10.0.0" },
+  "scripts": { "build": "node-gyp rebuild" }
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>// index.js
+const addon = require('./build/Release/addon.node')
+console.log(addon.add(1, 2))      // 3</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">JS 답게 만들기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인자 검증을 헬퍼로</h4>
+      <pre class="code" data-lang="cpp"><code>// 매번 쓰는 검증 코드를 줄이는 관용구
+namespace {
+double RequireNumber(const Napi::CallbackInfo&amp; info, std::size_t i,
+                     const char* name) {
+    if (info.Length() &lt;= i || !info[i].IsNumber())
+        throw Napi::TypeError::New(info.Env(),
+            std::string(name) + " 는 숫자여야 합니다");
+    return info[i].As&lt;Napi::Number&gt;().DoubleValue();
+}
+int RequireInt(const Napi::CallbackInfo&amp; info, std::size_t i,
+               const char* name, int def) {
+    if (info.Length() &lt;= i || info[i].IsUndefined()) return def;
+    return RequireNumber(info, i, name);
+}
+}  // namespace
+
+Napi::Value Smooth(const Napi::CallbackInfo&amp; info) {
+    Napi::Env env = info.Env();
+    try {
+        auto window = RequireInt(info, 1, "window", 3);
+        ...
+    } catch (const Napi::Error&amp; e) {
+        e.ThrowAsJavaScriptException();     // ★ NAPI_CPP_EXCEPTIONS 필요
+        return env.Null();
+    }
+}
+
+// C++ 예외를 JS 예외로 (모든 진입점에서)
+#define WRAP_TRY(env, body) \
+    try { body } \
+    catch (const std::exception&amp; e) { \
+        Napi::Error::New(env, e.what()).ThrowAsJavaScriptException(); \
+        return env.Null(); \
+    }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">TypeScript 타입 붙이기</h4>
+      <pre class="code" data-lang="typescript"><code>// index.d.ts — 사용자가 처음 만나는 얼굴 ★
+export interface SmoothOptions {
+  window?: number
+  mode?: 'nearest' | 'reflect'
+}
+
+export function smooth(
+  data: Float64Array,
+  options?: SmoothOptions
+): Float64Array
+
+export function smoothAsync(
+  data: Float64Array,
+  options?: SmoothOptions
+): Promise&lt;Float64Array&gt;
+
+export class Engine {
+  constructor(window?: number)
+  feed(data: Float64Array): void
+  readonly size: number
+  close(): void
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>// index.js — 얇은 JS 래퍼로 검증·기본값을 처리 ★
+const native = require('node-gyp-build')(__dirname)
+
+export function smooth(data, { window = 3, mode = 'nearest' } = {}) {
+  if (!(data instanceof Float64Array))
+    data = Float64Array.from(data)          // 정규화
+  if (!Number.isInteger(window) || window &lt; 1)
+    throw new RangeError(`window 는 1 이상 정수여야 합니다 (받음: ${window})`)
+  return native.smooth(data, window, mode === 'reflect' ? 1 : 0)
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파이썬 탭과 같은 원칙</b> — <b>C++ 쪽은 단순하게, JS 래퍼에서 파이썬답게</b>.
+        옵션 객체·기본값·에러 메시지는 JS 에서 처리하는 편이
+        코드가 짧고 유지보수도 쉽습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">패키지 구조</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">저장소 배치</h4>
+      <pre class="code" data-lang="text"><code>myaddon/
+  binding.gyp
+  package.json
+  src/
+    addon.cpp          ← N-API 바인딩만 (얇게)
+    core.cpp / core.hpp ← 순수 C++ 로직 (테스트 가능) ★
+  index.js             ← JS 래퍼 (검증·기본값)
+  index.d.ts           ← 타입
+  fallback.js          ← 순수 JS 폴백
+  test/
+    addon.test.js
+    parity.test.js     ← 네이티브 vs JS 결과 대조
+  prebuilds/           ← prebuildify 산출물 (j09)
+    linux-x64/node.napi.node
+    darwin-arm64/node.napi.node
+    win32-x64/node.napi.node</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>로직과 바인딩을 분리하세요</b> — <code>core.cpp</code> 는
+        Node 를 모르는 순수 C++ 이라 <b>C++ 테스트로 검증</b>할 수 있고,
+        같은 코드를 <b>파이썬 바인딩에도 재사용</b>할 수 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">개발 반복 주기 줄이기</h4>
+      <pre class="code" data-lang="bash"><code># 빌드
+npx node-gyp rebuild            # 전체
+npx node-gyp build              # 증분 (빠름)
+npx node-gyp build --debug      # 디버그 심볼
+
+# 병렬 빌드
+npx node-gyp build -- -j8
+
+# ccache 붙이기 (재빌드가 크게 빨라집니다) ★
+export CC="ccache gcc" CXX="ccache g++"
+
+# 자동 재빌드 + 테스트
+npx nodemon --watch src -e cpp,hpp --exec "npm run build &amp;&amp; npm test"
+
+# 로드된 애드온 확인
+node -p "require('./build/Release/addon.node')"
+
+# 심볼 확인 (로드 실패 진단)
+nm -D build/Release/addon.node | grep napi_register</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>애드온 파일이 잠기는 문제(윈도우)</b> — Node 프로세스가 살아 있으면
+        <code>.node</code> 파일을 덮어쓸 수 없습니다.
+        <b>테스트 프로세스를 확실히 종료</b>한 뒤 빌드하세요.
+        watch 모드에서 자주 겪습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">모듈이 로드되는 과정</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>NODE_API_MODULE</code> 의 실체</h4>
+      <pre class="code" data-lang="cpp"><code>// 이 매크로는 결국 등록 함수를 만듭니다
+//   napi_value napi_register_module_v1(napi_env, napi_value exports)
+//
+// require('./addon.node') 를 하면
+//   ① process.dlopen 으로 공유 라이브러리를 로드
+//   ② napi_register_module_v1 심볼을 찾아 호출
+//   ③ 돌려받은 exports 를 모듈 캐시에 등록
+
+// 확인
+nm -D addon.node | grep napi_register_module_v1
+
+// ⚠ 모듈은 프로세스당 한 번만 초기화됩니다
+//   전역 상태를 두면 여러 worker_threads 가 공유합니다 ★
+static std::vector&lt;double&gt; g_cache;     // ❌ 스레드 간 경쟁
+
+// ✅ 인스턴스별 데이터를 쓰세요 (context-aware addon)
+class AddonData {
+public:
+    std::vector&lt;double&gt; cache;
+};
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+    auto* data = new AddonData();
+    env.SetInstanceData(data);          // ★ 환경(스레드)마다 별도
+    ...
+}
+// 꺼내기: env.GetInstanceData&lt;AddonData&gt;()</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">worker_threads 대응</h4>
+      <pre class="code" data-lang="javascript"><code>// Node 는 worker_threads 마다 별도 V8 격리 환경을 만듭니다.
+// 애드온이 'context-aware' 가 아니면 로드가 거부됩니다 ★
+import { Worker } from 'node:worker_threads'
+new Worker('./worker.js')        // 애드온을 쓰면 여기서 실패할 수 있습니다
+
+// node-addon-api 는 기본적으로 context-aware 입니다.
+// 다만 전역 static 을 쓰면 스레드 간 공유가 되어 위험합니다.</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 인스턴스 데이터 패턴 (권장) ★
+struct PerEnv {
+    std::mt19937 rng;                 // 스레드마다 별도
+    std::vector&lt;double&gt; scratch;
+};
+
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+    env.SetInstanceData&lt;PerEnv&gt;(new PerEnv{});
+    exports.Set("run", Napi::Function::New(env, Run));
+    return exports;
+}
+
+Napi::Value Run(const Napi::CallbackInfo&amp; info) {
+    auto* d = info.Env().GetInstanceData&lt;PerEnv&gt;();
+    d-&gt;scratch.clear();               // 이 스레드 전용 버퍼 ★
+    ...
+}
+// 소멸자는 환경이 정리될 때 자동으로 불립니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>왜 중요한가</b> — Node 서버에서 <code>worker_threads</code> 로
+        CPU 작업을 분산하는 것은 흔한 패턴입니다.
+        전역 상태를 둔 애드온은 <b>그 순간 조용히 깨집니다</b>.
+        처음부터 <code>SetInstanceData</code> 를 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>napi.h</code> 를 include 하고
+    <b><code>NODE_API_MODULE</code></b> 로 등록하면 끝입니다.
+    C++ 쪽은 <b>인자 검증과 예외 변환</b>만 하고,
+    옵션·기본값·타입은 <b>JS 래퍼와 <code>.d.ts</code></b> 에서 처리하세요.
+    전역 상태 대신 <b><code>SetInstanceData</code></b> 를 쓰면 worker_threads 에서도 안전합니다.</div>
+</section>
+
+<!-- ==================== j03 ==================== -->
+<section class="sec" id="j03">
+  <div class="sec-head rv">
+    <span class="no">NODE 03</span>
+    <h2>빌드 — <span class="t">node-gyp</span> 과 <span class="t">cmake-js</span></h2>
+    <p class="lead">
+      <code>binding.gyp</code> 은 Node 전용 빌드 설명 파일입니다.
+      외부 라이브러리를 붙일 일이 많다면 <b>CMake 로 가는 편</b>이 편합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">node-gyp — 기본 경로</h4>
+      <pre class="code" data-lang="json"><code>// binding.gyp — 조건부 설정까지
+{
+  "targets": [{
+    "target_name": "addon",
+    "sources": ["src/addon.cpp", "src/core.cpp"],
+    "include_dirs": [
+      "&lt;!@(node -p \"require('node-addon-api').include\")",
+      "src"
+    ],
+    "defines": ["NAPI_VERSION=8"],
+    "conditions": [
+      ["OS=='linux'", { "libraries": ["-lpthread"] }],
+      ["OS=='mac'",   { "xcode_settings": { "MACOSX_DEPLOYMENT_TARGET": "10.15" } }],
+      ["OS=='win'",   { "libraries": ["ws2_32.lib"] }]
+    ],
+    "cflags_cc": ["-std=c++20", "-O3"],
+    "msvs_settings": {
+      "VCCLCompilerTool": { "AdditionalOptions": ["/std:c++20", "/O2"] }
+    }
+  }]
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>binding.gyp</code> 은 JSON 이 아니라 파이썬 딕셔너리 문법입니다</b> —
+        주석은 안 되고, 오타가 나면 에러 메시지가 불친절합니다.
+        <code>&lt;!@(...)</code> 같은 확장 문법도 gyp 전용이라 학습 비용이 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">cmake-js — 외부 의존성이 있다면 ★</h4>
+      <pre class="code" data-lang="cmake"><code># CMakeLists.txt
+cmake_minimum_required(VERSION 3.20)
+project(addon LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+
+# cmake-js 가 주는 변수들
+include_directories(${CMAKE_JS_INC})
+file(GLOB SRC "src/*.cpp")
+add_library(${PROJECT_NAME} SHARED ${SRC} ${CMAKE_JS_SRC})
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    PREFIX "" SUFFIX ".node")
+target_link_libraries(${PROJECT_NAME} ${CMAKE_JS_LIB})
+
+# node-addon-api 헤더
+execute_process(COMMAND node -p "require('node-addon-api').include"
+    OUTPUT_VARIABLE NAPI_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
+string(REPLACE "\"" "" NAPI_DIR ${NAPI_DIR})
+target_include_directories(${PROJECT_NAME} PRIVATE ${NAPI_DIR})
+target_compile_definitions(${PROJECT_NAME} PRIVATE NAPI_VERSION=8)
+
+# ★ 여기서부터 CMake 생태계를 그대로 씁니다
+find_package(OpenCV REQUIRED)
+target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS})
+# 또는 FetchContent · vcpkg</code></pre>
+      <pre class="code" data-lang="json"><code>// package.json
+{ "scripts": { "build": "cmake-js compile -B Release" },
+  "devDependencies": { "cmake-js": "^7.3.0" } }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">고르는 기준과 함정</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">둘 중 무엇을</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:46%">node-gyp</th><th>cmake-js</th></tr>
+        <tr><td>파일 몇 개짜리 단순 애드온</td><td>외부 라이브러리 링크 ★</td></tr>
+        <tr><td>npm 생태계 표준</td><td>C++ 팀이 이미 CMake 를 씀</td></tr>
+        <tr><td>prebuild 도구 지원이 넓음</td><td>같은 코드를 파이썬에도 재사용</td></tr>
+        <tr><td>설정이 gyp 문법</td><td>vcpkg·FetchContent 사용 가능</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># node-gyp 이 실패할 때 확인 순서
+node-gyp configure --verbose        # 어느 단계에서 막히는지
+node -p "process.versions"          # node · v8 · napi 버전
+npx node-gyp list                   # 받아 둔 헤더 목록
+
+# 윈도우 — 빌드 도구
+npm i -g windows-build-tools        # (구버전) 또는
+# Visual Studio Build Tools + "C++ 데스크톱 개발" 워크로드 설치
+
+# 헤더 캐시가 꼬였을 때
+rm -rf ~/.node-gyp ~/.cache/node-gyp
+npx node-gyp rebuild</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">플랫폼별 함정</h4>
+      <pre class="code" data-lang="text"><code>① 맥 — 배포 대상 버전
+   MACOSX_DEPLOYMENT_TARGET 을 낮게 잡아야 옛 맥에서 돕니다.
+   arm64 와 x64 를 둘 다 지원하려면 유니버설 빌드 또는 각각 빌드.
+
+② 리눅스 — glibc 버전
+   최신 우분투에서 빌드하면 옛 배포판에서 로드 실패합니다.
+   → 도커(예: ubuntu:20.04)에서 빌드하거나 정적 링크.
+   알파인(musl)은 별도 바이너리가 필요합니다 ★
+
+③ 윈도우 — 런타임 라이브러리
+   /MD(동적) 로 빌드하면 VC++ 재배포 패키지가 필요합니다.
+   /MT(정적) 로 하면 파일이 커지지만 의존성이 없어집니다.
+   msvs_settings 의 RuntimeLibrary 로 지정합니다.
+
+④ 예외 처리
+   node-gyp 기본 설정은 -fno-exceptions 입니다.
+   node-addon-api 의 C++ 예외를 쓰려면 반드시 꺼야 합니다:
+     "cflags!": ["-fno-exceptions"], "cflags_cc!": ["-fno-exceptions"]
+     "defines": ["NAPI_CPP_EXCEPTIONS"]
+   ★ 이걸 빠뜨리면 예외를 던지는 순간 프로세스가 죽습니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">CI 로 자동화</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">3 OS 빌드 워크플로</h4>
+      <pre class="code" data-lang="yaml"><code># .github/workflows/build.yml
+name: build
+on: [push, pull_request]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        node: [18, 20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '${{ matrix.node }}' }
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  # 알파인(musl)도 별도로 ★
+  musl:
+    runs-on: ubuntu-latest
+    container: node:20-alpine
+    steps:
+      - uses: actions/checkout@v4
+      - run: apk add --no-cache build-base python3
+      - run: npm ci &amp;&amp; npm test</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드 시간과 캐시</h4>
+      <pre class="code" data-lang="yaml"><code># ccache 로 재빌드 가속
+- uses: hendrikmuhs/ccache-action@v1
+  with: { key: '${{ matrix.os }}-${{ matrix.node }}' }
+- run: |
+    export CC="ccache gcc" CXX="ccache g++"
+    npm run build
+
+# node-gyp 헤더 캐시
+- uses: actions/cache@v4
+  with:
+    path: ~/.cache/node-gyp
+    key: node-gyp-${{ matrix.node }}</code></pre>
+      <pre class="code" data-lang="bash"><code># 로컬에서 도커로 리눅스 빌드 재현
+docker run --rm -v $PWD:/app -w /app node:20 \
+  sh -c "npm ci &amp;&amp; npm run build &amp;&amp; npm test"
+
+# 알파인
+docker run --rm -v $PWD:/app -w /app node:20-alpine \
+  sh -c "apk add build-base python3 &amp;&amp; npm ci &amp;&amp; npm test"
+
+# 결과물이 어떤 것에 의존하는지
+ldd build/Release/addon.node        # 리눅스
+otool -L build/Release/addon.node   # 맥
+dumpbin /dependents addon.node      # 윈도우</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>의존성을 줄이는 것이 배포를 쉽게 합니다</b> —
+        외부 <code>.so</code> 에 의존하면 사용자 환경에 그것이 있어야 합니다.
+        가능하면 <b>정적 링크</b>로 애드온 파일 하나에 담으세요(🛠️ b08).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">빌드 산출물 들여다보기</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">.node 파일의 정체</h4>
+      <pre class="code" data-lang="bash"><code># 그냥 공유 라이브러리입니다 (확장자만 다름)
+file build/Release/addon.node
+#   ELF 64-bit LSB shared object, x86-64 ...
+
+# 내보내는 심볼 — 이것 하나만 있으면 됩니다
+nm -D build/Release/addon.node | grep napi_register
+#   T napi_register_module_v1
+
+# 크기 줄이기
+strip --strip-unneeded build/Release/addon.node    # 디버그 심볼 제거
+#   보통 절반 이하로 줄어듭니다
+
+# 무엇이 크기를 차지하나
+nm -C --size-sort -S build/Release/addon.node | tail -20
+bloaty build/Release/addon.node
+
+# NAPI 버전 확인 (호환성 문제 진단)
+strings build/Release/addon.node | grep -i napi | head</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최적화 플래그와 검증 빌드</h4>
+      <pre class="code" data-lang="json"><code>// 릴리즈 최적화 (binding.gyp)
+"configurations": {
+  "Release": {
+    "cflags_cc": ["-O3", "-fvisibility=hidden"],
+    "ldflags": ["-Wl,--gc-sections"],
+    "msvs_settings": {
+      "VCCLCompilerTool": { "Optimization": 2, "FavorSizeOrSpeed": 1 }
+    }
+  },
+  "Debug": {
+    "cflags_cc": ["-O0", "-g", "-fsanitize=address"],
+    "ldflags": ["-fsanitize=address"]
+  }
+}</code></pre>
+      <pre class="code" data-lang="bash"><code># Sanitizer 빌드로 테스트 (메모리 버그 잡기) ★
+npx node-gyp rebuild --debug
+LD_PRELOAD=$(gcc -print-file-name=libasan.so) \
+  node --expose-gc test/stress.js
+
+# ⚠ -march=native 는 넣지 마세요 — 다른 기계에서 즉사합니다
+#   배포용은 보수적인 기준으로, 필요하면 런타임 분기(⚡ e06)
+
+# 반복 호출 누수 검사
+node --expose-gc -e "
+const addon = require('./build/Release/addon.node')
+const before = process.memoryUsage().rss
+for (let i = 0; i &lt; 1e5; i++) addon.smooth(new Float64Array(1000), 3)
+global.gc()
+console.log('증가', (process.memoryUsage().rss - before) / 1e6, 'MB')
+"</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가시성을 숨기세요</b> — <code>-fvisibility=hidden</code> 을 안 쓰면
+        애드온의 내부 심볼이 전부 노출되어, <b>같은 프로세스의 다른 애드온과 충돌</b>할 수 있습니다.
+        두 애드온이 같은 정적 라이브러리를 다른 버전으로 링크한 경우 특히 위험합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 단순하면 <b>node-gyp</b>,
+    외부 라이브러리를 붙이면 <b>cmake-js</b> 입니다.
+    반드시 확인할 것 셋 — <b>예외 설정</b>(<code>-fno-exceptions</code> 끄기),
+    <b>맥 배포 타깃</b>, <b>리눅스 glibc·musl 구분</b>.
+    그리고 <b>가시성은 hidden</b> 으로 두세요.</div>
+</section>
+
+
+<!-- ==================== j04 ==================== -->
+<section class="sec" id="j04">
+  <div class="sec-head rv">
+    <span class="no">NODE 04</span>
+    <h2>값 · 객체 · <span class="t">배열 변환</span></h2>
+    <p class="lead">
+      JS 값과 C++ 값 사이를 오갑니다.
+      <b>모든 변환에는 비용이 있고</b>, 그 비용이 애드온 성능의 대부분을 정합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 타입</h4>
+      <pre class="code" data-lang="cpp"><code>Napi::Env env = info.Env();
+
+// JS → C++
+double d   = info[0].As&lt;Napi::Number&gt;().DoubleValue();
+int32_t i  = info[0].As&lt;Napi::Number&gt;().Int32Value();
+int64_t l  = info[0].As&lt;Napi::Number&gt;().Int64Value();
+bool b     = info[0].As&lt;Napi::Boolean&gt;().Value();
+std::string s = info[0].As&lt;Napi::String&gt;().Utf8Value();   // ★ 복사 발생
+std::u16string w = info[0].As&lt;Napi::String&gt;().Utf16Value();
+
+// BigInt (64비트 정수) — 정밀도 손실 없이
+bool lossless;
+int64_t big = info[0].As&lt;Napi::BigInt&gt;().Int64Value(&amp;lossless);
+
+// C++ → JS
+Napi::Number::New(env, 3.14);
+Napi::String::New(env, "안녕");         // UTF-8 → UTF-16 변환 ★
+Napi::Boolean::New(env, true);
+Napi::BigInt::New(env, int64_t{1} &lt;&lt; 40);
+env.Null();  env.Undefined();
+
+// 타입 검사 — 반드시 하세요
+info[0].IsNumber()  IsString()  IsBoolean()  IsArray()
+info[0].IsBuffer()  IsTypedArray()  IsFunction()  IsObject()
+info[0].IsNull()    IsUndefined()  IsBigInt()  IsPromise()</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>JS 숫자는 전부 double 입니다</b> — 정수처럼 보여도 내부는 배정도 실수라
+        <b>2^53 을 넘는 정수는 정밀도를 잃습니다</b>.
+        큰 정수를 주고받아야 하면 <b>BigInt</b> 를 쓰거나
+        <b>문자열로</b> 넘기세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">객체와 배열</h4>
+      <pre class="code" data-lang="cpp"><code>// 객체 읽기
+Napi::Object opts = info[0].As&lt;Napi::Object&gt;();
+if (opts.Has("window")) {
+    int w = opts.Get("window").As&lt;Napi::Number&gt;().Int32Value();
+}
+// 안전한 헬퍼
+int GetInt(const Napi::Object&amp; o, const char* key, int def) {
+    if (!o.Has(key)) return def;
+    auto v = o.Get(key);
+    if (!v.IsNumber()) return def;
+    return v.As&lt;Napi::Number&gt;().Int32Value();
+}
+
+// 객체 만들기
+Napi::Object r = Napi::Object::New(env);
+r.Set("count", Napi::Number::New(env, 42));
+r.Set("name",  Napi::String::New(env, "결과"));
+r.Set("ok",    Napi::Boolean::New(env, true));
+
+// 배열 — ⚠ 원소마다 경계를 넘습니다 (느립니다)
+Napi::Array arr = info[0].As&lt;Napi::Array&gt;();
+std::vector&lt;double&gt; v;
+v.reserve(arr.Length());
+for (uint32_t i = 0; i &lt; arr.Length(); ++i)
+    v.push_back(arr.Get(i).As&lt;Napi::Number&gt;().DoubleValue());
+//   ★ 10만 개면 10만 번의 개별 변환 — TypedArray 를 쓰세요(j05)
+
+Napi::Array out = Napi::Array::New(env, n);
+for (uint32_t i = 0; i &lt; n; ++i)
+    out.Set(i, Napi::Number::New(env, data[i]));</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">인터페이스 설계</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">옵션 객체 패턴</h4>
+      <pre class="code" data-lang="cpp"><code>// JS 관용구 — 옵션은 객체 하나로 받습니다
+struct Options {
+    int  window = 3;
+    bool reflect = false;
+    int  threads = 1;
+};
+
+Options ParseOptions(const Napi::Value&amp; v) {
+    Options o;
+    if (!v.IsObject()) return o;
+    auto obj = v.As&lt;Napi::Object&gt;();
+    if (obj.Has("window"))  o.window  = obj.Get("window").ToNumber().Int32Value();
+    if (obj.Has("reflect")) o.reflect = obj.Get("reflect").ToBoolean().Value();
+    if (obj.Has("threads")) o.threads = obj.Get("threads").ToNumber().Int32Value();
+    return o;
+}
+//   ★ ToNumber()/ToBoolean() 은 JS 의 암묵 변환을 따릅니다.
+//     엄격하게 하려면 IsNumber() 로 검사하고 TypeError 를 던지세요.
+
+// 결과도 객체로 — 필드가 늘어도 호환이 유지됩니다
+Napi::Object MakeResult(Napi::Env env, const Stats&amp; s) {
+    auto r = Napi::Object::New(env);
+    r.Set("mean",   s.mean);
+    r.Set("stddev", s.stddev);
+    r.Set("count",  static_cast&lt;double&gt;(s.count));
+    return r;
+}
+// JS: const { mean, stddev } = addon.analyze(data)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러 던지기</h4>
+      <pre class="code" data-lang="cpp"><code>// JS 표준 에러 타입으로 던지세요
+Napi::TypeError::New(env, "Float64Array 가 필요합니다")
+    .ThrowAsJavaScriptException();
+Napi::RangeError::New(env, "window 는 1 이상이어야 합니다")
+    .ThrowAsJavaScriptException();
+Napi::Error::New(env, "내부 오류").ThrowAsJavaScriptException();
+
+// C++ 예외를 쓰려면 (NAPI_CPP_EXCEPTIONS 정의 시)
+throw Napi::TypeError::New(env, "잘못된 인자");
+//   ★ 이 경우 노드가 알아서 JS 예외로 변환합니다
+
+// 에러에 부가 정보 붙이기
+auto err = Napi::Error::New(env, "처리 실패");
+err.Set("code", Napi::String::New(env, "E_PARSE"));
+err.Set("line", Napi::Number::New(env, 12));
+err.ThrowAsJavaScriptException();
+// JS: try { ... } catch (e) { console.log(e.code, e.line) }
+
+// ⚠ ThrowAsJavaScriptException() 후에는 반드시 즉시 반환하세요
+//   JS 예외 상태가 설정된 채로 다른 N-API 호출을 하면 동작이 깨집니다 ★
+if (bad) {
+    Napi::TypeError::New(env, "...").ThrowAsJavaScriptException();
+    return env.Null();          // ★ 이 return 이 없으면 위험
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">변환 비용을 줄이는 설계</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">경계를 넘는 횟수가 전부입니다</h4>
+      <pre class="code" data-lang="javascript"><code>// ❌ 원소마다 호출 — 최악
+for (const row of rows) result.push(addon.processOne(row))
+
+// ❌ 일반 Array 를 넘기기 — 원소마다 변환 ★
+addon.process(rows.map(r =&gt; r.value))       // 10만 개면 10만 번 변환
+
+// ✅ TypedArray 로 한 번에 (j05)
+const values = Float64Array.from(rows, r =&gt; r.value)
+const out = addon.process(values)            // 경계 1회 · 복사 0
+
+// ✅ 상태가 필요하면 객체로 유지
+const engine = new addon.Engine({ window: 5 })
+for (const chunk of stream) engine.feed(chunk)
+const result = engine.result()
+
+// ✅ 구조체 배열은 '열 단위'로 분해해 넘기기 (SoA) ★
+//    { x, y, z } 객체 10만 개  →  Float64Array 세 개
+addon.transform(xs, ys, zs, n)
+//    JS 객체 배열을 C++ 로 옮기는 비용이 통째로 사라집니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문자열 다루기</h4>
+      <pre class="code" data-lang="cpp"><code>// JS 문자열은 UTF-16 입니다. Utf8Value() 는 변환 + 할당이 일어납니다 ★
+std::string s = info[0].As&lt;Napi::String&gt;().Utf8Value();
+
+// 자주 부르는 경로라면
+//   ① 문자열 대신 숫자 코드로 (enum) ★
+addon.setMode(0)          // "nearest" 대신
+//   ② 한 번만 변환해 캐시
+//   ③ 대량 텍스트는 Buffer 로 (UTF-8 바이트 그대로)
+Napi::Buffer&lt;uint8_t&gt; buf = info[0].As&lt;Napi::Buffer&lt;uint8_t&gt;&gt;();
+std::string_view sv(reinterpret_cast&lt;const char*&gt;(buf.Data()), buf.Length());
+//   ★ 복사 없이 바로 파싱할 수 있습니다
+
+// 한글 주의 — JS 는 UTF-16, C++ std::string 은 UTF-8 바이트
+// "안녕".length === 2 (JS)   vs   s.size() == 6 (C++)
+// 길이 제한·자르기는 JS 쪽에서 처리하는 편이 안전합니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>측정으로 확인하세요</b> — 빈 함수 호출과 실제 함수의 시간을 비교하면
+        <b>변환 비용이 차지하는 비율</b>이 나옵니다.
+        <b>30% 를 넘으면 인터페이스를 다시 설계</b>해야 한다는 신호입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">V8 값의 수명과 핸들 스코프</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Napi::Value 는 GC 대상입니다</h4>
+      <pre class="code" data-lang="cpp"><code>// Napi::Value 는 V8 힙의 객체를 가리키는 '핸들' 입니다.
+// 함수가 끝나면 그 스코프의 핸들은 전부 무효가 됩니다 ★
+
+// ❌ 함수 밖으로 들고 나가면 안 됩니다
+static Napi::Value g_cached;         // 크래시의 원인
+
+// ✅ 오래 보관하려면 Reference 를 쓰세요
+class Holder {
+    Napi::ObjectReference ref_;
+public:
+    void Save(Napi::Object o) {
+        ref_ = Napi::Persistent(o);   // 참조 카운트 +1 → GC 되지 않음
+    }
+    ~Holder() { ref_.Reset(); }       // 반드시 해제 (안 하면 누수) ★
+};
+
+// 루프에서 값을 많이 만들면 핸들이 쌓입니다
+for (int i = 0; i &lt; 1'000'000; ++i) {
+    Napi::HandleScope scope(env);     // ★ 반복마다 정리
+    auto v = Napi::Number::New(env, i);
+    ...
+}
+//   없으면 함수가 끝날 때까지 100만 개 핸들이 유지됩니다 (메모리 급증)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">GC 와 외부 메모리</h4>
+      <pre class="code" data-lang="cpp"><code>// C++ 가 큰 메모리를 잡고 있으면 V8 이 그걸 모릅니다.
+// → GC 가 늦게 돌아 실제 메모리가 계속 늘어납니다 ★
+Napi::MemoryManagement::AdjustExternalMemory(env, +size_bytes);
+// 해제할 때
+Napi::MemoryManagement::AdjustExternalMemory(env, -size_bytes);
+//   이걸 알려 주면 V8 이 GC 시점을 조절합니다
+
+// Buffer 는 자동으로 처리됩니다 (외부 메모리로 등록됨)
+
+// 객체가 GC 될 때 C++ 자원 정리하기
+Napi::Object obj = Napi::Object::New(env);
+obj.AddFinalizer([](Napi::Env, MyData* d){ delete d; }, data);
+//   ⚠ Finalizer 는 '언제 불릴지 모릅니다' (GC 시점)
+//     확정적 해제가 필요하면 명시적 close() 를 제공하세요 ★
+
+// 진단
+node --expose-gc --trace-gc app.js
+process.memoryUsage()      // heapUsed vs external ★ external 이 네이티브 메모리
+v8.getHeapStatistics()</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“메모리가 계속 늘어난다”의 1순위 원인</b> —
+        <code>Persistent</code> 참조를 <code>Reset</code> 하지 않았거나,
+        <code>AdjustExternalMemory</code> 로 알려 주지 않아 <b>GC 가 압박을 못 느끼는</b> 경우입니다.
+        <code>process.memoryUsage().external</code> 을 모니터링하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> JS↔C++ 변환은 <b>모두 비용</b>입니다.
+    일반 <code>Array</code> 는 <b>원소마다 변환</b>되므로 큰 데이터에는 쓰지 마세요 —
+    <b>TypedArray</b> 로 한 번에 넘기는 것이 정답입니다(다음 섹션).
+    옵션은 객체로, 에러는 <b>표준 에러 타입</b>으로 던지고 <b>즉시 반환</b>하세요.</div>
+</section>
+
+<!-- ==================== j05 ==================== -->
+<section class="sec" id="j05">
+  <div class="sec-head rv">
+    <span class="no">NODE 05</span>
+    <h2>Buffer · TypedArray — <span class="t">복사 없이</span></h2>
+    <p class="lead">
+      이미지 한 장이 수십 MB 입니다. <b>복사하면 그 자체가 병목</b>이 됩니다.
+      Node 애드온이 진짜 힘을 내는 지점입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">받아서 그대로 읽기</h4>
+      <pre class="code" data-lang="cpp"><code>Napi::Value Smooth(const Napi::CallbackInfo&amp; info) {
+    Napi::Env env = info.Env();
+
+    if (!info[0].IsTypedArray()) {
+        Napi::TypeError::New(env, "Float64Array 가 필요합니다")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    auto input = info[0].As&lt;Napi::Float64Array&gt;();
+
+    const double* p = input.Data();      // ★ 포인터를 그대로 얻습니다
+    const std::size_t n = input.ElementLength();
+    //   복사 0 — JS 힙의 메모리를 직접 읽습니다
+
+    // 결과 배열을 만들어 돌려주기
+    auto output = Napi::Float64Array::New(env, n);
+    double* q = output.Data();
+
+    core::smooth(p, n, q, window);       // 순수 C++ 로직
+    return output;
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>const a = new Float64Array(1_000_000)
+const out = addon.smooth(a, 3)          // 8MB 를 복사 없이 처리</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Buffer 와 ArrayBuffer</h4>
+      <pre class="code" data-lang="cpp"><code>// Buffer — Node 고유 타입 (Uint8Array 의 하위 클래스)
+auto buf = info[0].As&lt;Napi::Buffer&lt;uint8_t&gt;&gt;();
+uint8_t* data = buf.Data();
+std::size_t len = buf.Length();
+
+// ArrayBuffer 를 직접
+auto ab = info[0].As&lt;Napi::ArrayBuffer&gt;();
+void* p = ab.Data();  std::size_t n = ab.ByteLength();
+
+// ⚠ TypedArray 는 ArrayBuffer 의 '일부'일 수 있습니다 ★
+auto ta = info[0].As&lt;Napi::TypedArray&gt;();
+ta.ByteOffset();          // 시작 오프셋 — 0이 아닐 수 있습니다!
+ta.ElementLength();
+auto base = static_cast&lt;uint8_t*&gt;(ta.ArrayBuffer().Data()) + ta.ByteOffset();
+//   const view = new Float64Array(bigBuffer, 800, 100) 같은 경우
+
+// 만들어 돌려주기 — 세 가지 방법
+// ① 새로 할당 (Node 가 소유)
+auto out = Napi::Buffer&lt;uint8_t&gt;::New(env, size);
+
+// ② 기존 데이터를 복사
+auto out = Napi::Buffer&lt;uint8_t&gt;::Copy(env, src, size);
+
+// ③ C++ 메모리를 소유권째 넘기기 ★ 복사 0
+auto* raw = new std::vector&lt;uint8_t&gt;(std::move(result));
+auto out = Napi::Buffer&lt;uint8_t&gt;::New(
+    env, raw-&gt;data(), raw-&gt;size(),
+    [](Napi::Env, uint8_t*, std::vector&lt;uint8_t&gt;* v){ delete v; },  // finalizer
+    raw);</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">타입별 처리와 검증</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">여러 dtype 을 받기</h4>
+      <pre class="code" data-lang="cpp"><code>Napi::Value Process(const Napi::CallbackInfo&amp; info) {
+    Napi::Env env = info.Env();
+    auto ta = info[0].As&lt;Napi::TypedArray&gt;();
+
+    switch (ta.TypedArrayType()) {
+        case napi_float64_array: {
+            auto a = ta.As&lt;Napi::Float64Array&gt;();
+            core::run(a.Data(), a.ElementLength());
+            break;
+        }
+        case napi_float32_array: {
+            auto a = ta.As&lt;Napi::Float32Array&gt;();
+            core::run(a.Data(), a.ElementLength());
+            break;
+        }
+        case napi_uint8_array: { ... }
+        default:
+            Napi::TypeError::New(env, "float32 · float64 · uint8 만 지원합니다")
+                .ThrowAsJavaScriptException();
+            return env.Null();
+    }
+    return env.Undefined();
+}
+
+// 템플릿으로 줄이기
+template&lt;class T, class Arr&gt;
+void RunTyped(const Napi::Value&amp; v) {
+    auto a = v.As&lt;Arr&gt;();
+    core::run&lt;T&gt;(a.Data(), a.ElementLength());
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JS 쪽에서 정규화하기 ★</h4>
+      <pre class="code" data-lang="javascript"><code>// C++ 쪽을 단순하게 유지하려면 JS 에서 통일합니다
+function toF64(data) {
+  if (data instanceof Float64Array) return data
+  if (ArrayBuffer.isView(data))
+    return Float64Array.from(data)          // 다른 TypedArray → 변환
+  if (Array.isArray(data)) return Float64Array.from(data)
+  throw new TypeError('배열 또는 TypedArray 가 필요합니다')
+}
+
+export function smooth(data, window = 3) {
+  const a = toF64(data)
+  if (a.length === 0) return new Float64Array(0)      // ★ 빈 입력 처리
+  if (!Number.isInteger(window) || window &lt; 1 || window &gt; a.length)
+    throw new RangeError(`window 는 1~${a.length} 여야 합니다 (받음: ${window})`)
+  return native.smooth(a, window)
+}
+
+// 출력 버퍼를 재사용하는 API 도 함께 제공 (할당 없음) ★
+export function smoothInto(data, out, window = 3) {
+  if (out.length !== data.length) throw new RangeError('크기 불일치')
+  native.smoothInto(data, out, window)
+  return out
+}
+// 사용: const out = new Float64Array(n); for (...) smoothInto(chunk, out)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">이미지·스트림 처리</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">제자리 수정과 소유권</h4>
+      <pre class="code" data-lang="cpp"><code>// 이미지 필터 — 입력 Buffer 를 직접 수정 (할당 0)
+Napi::Value Grayscale(const Napi::CallbackInfo&amp; info) {
+    auto buf = info[0].As&lt;Napi::Buffer&lt;uint8_t&gt;&gt;();
+    const int w = info[1].ToNumber().Int32Value();
+    const int h = info[2].ToNumber().Int32Value();
+
+    if (buf.Length() &lt; static_cast&lt;std::size_t&gt;(w) * h * 4) {
+        Napi::RangeError::New(info.Env(), "버퍼가 너무 작습니다")
+            .ThrowAsJavaScriptException();
+        return info.Env().Null();
+    }
+
+    uint8_t* p = buf.Data();
+    for (int i = 0; i &lt; w * h; ++i) {
+        uint8_t g = static_cast&lt;uint8_t&gt;(
+            0.299 * p[i*4] + 0.587 * p[i*4+1] + 0.114 * p[i*4+2]);
+        p[i*4] = p[i*4+1] = p[i*4+2] = g;
+    }
+    return info.Env().Undefined();     // 입력을 직접 바꿨습니다
+}
+//   ★ 문서에 "입력 버퍼를 수정합니다" 를 반드시 명시하세요</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>버퍼 길이 검증은 필수입니다</b> — JS 에서 잘못된 크기를 넘기면
+        <b>버퍼 오버런으로 프로세스가 죽거나 메모리가 손상</b>됩니다.
+        <code>width * height * channels</code> 를 <b>항상 계산해 비교</b>하세요.
+        곱셈 오버플로도 조심해야 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스트림과 청크 처리</h4>
+      <pre class="code" data-lang="javascript"><code>import { Transform } from 'node:stream'
+
+// 애드온을 Transform 스트림으로 감싸기
+class Resampler extends Transform {
+  #engine
+  constructor(opts) {
+    super(opts)
+    this.#engine = new addon.Engine(opts)
+  }
+  _transform(chunk, _enc, cb) {
+    try {
+      cb(null, this.#engine.process(chunk))   // Buffer 를 그대로
+    } catch (e) { cb(e) }
+  }
+  _flush(cb) {
+    try { cb(null, this.#engine.finish()) } catch (e) { cb(e) }
+  }
+  _destroy(err, cb) { this.#engine.close(); cb(err) }   // ★ 자원 해제
+}
+
+// 사용
+createReadStream('in.raw')
+  .pipe(new Resampler({ rate: 48000 }))
+  .pipe(createWriteStream('out.raw'))</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>스트림으로 감싸면 좋은 이유</b> — 메모리를 일정하게 유지하고,
+        <b>역압(backpressure)</b>이 자동으로 처리됩니다.
+        큰 파일을 통째로 Buffer 에 올리면 <b>2GB 한계</b>에도 걸립니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">GC 와 버퍼 수명</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">포인터를 보관하면 안 되는 이유</h4>
+      <pre class="code" data-lang="cpp"><code>// ❌ Buffer 의 포인터를 멤버로 저장
+class Engine {
+    uint8_t* data_;          // ★ JS 가 버퍼를 놓으면 GC 됩니다
+public:
+    void SetSource(const Napi::CallbackInfo&amp; info) {
+        data_ = info[0].As&lt;Napi::Buffer&lt;uint8_t&gt;&gt;().Data();   // 위험
+    }
+};
+
+// ✅ ① 참조를 유지해 GC 를 막기
+class Engine {
+    Napi::Reference&lt;Napi::Buffer&lt;uint8_t&gt;&gt; ref_;
+    uint8_t* data_ = nullptr;
+public:
+    void SetSource(const Napi::CallbackInfo&amp; info) {
+        auto buf = info[0].As&lt;Napi::Buffer&lt;uint8_t&gt;&gt;();
+        ref_ = Napi::Persistent(buf);          // ★ 살려 둡니다
+        data_ = buf.Data();
+    }
+    ~Engine() { ref_.Reset(); }
+};
+
+// ✅ ② 또는 C++ 쪽으로 복사해 소유 (안전하지만 복사 비용)
+std::vector&lt;uint8_t&gt; owned_(buf.Data(), buf.Data() + buf.Length());
+
+// ⚠ 비동기 작업 중에도 마찬가지입니다 — AsyncWorker 가 도는 동안
+//   JS 쪽에서 버퍼를 놓으면 GC 될 수 있습니다.
+//   → Worker 안에서 Reference 를 유지하세요 (j06)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">외부 메모리와 GC 압박</h4>
+      <pre class="code" data-lang="cpp"><code>// Buffer::New 로 만든 것은 V8 이 '외부 메모리'로 인식합니다.
+// 하지만 C++ 가 따로 잡은 큰 메모리는 모릅니다 ★
+class BigEngine {
+    std::vector&lt;double&gt; cache_;   // 100MB
+    Napi::Env env_;
+public:
+    void Grow(std::size_t bytes) {
+        cache_.resize(...);
+        Napi::MemoryManagement::AdjustExternalMemory(env_, +bytes);  // 알려주기
+    }
+    ~BigEngine() {
+        Napi::MemoryManagement::AdjustExternalMemory(env_, -total_);
+    }
+};
+//   이걸 안 하면 RSS 는 계속 느는데 V8 은 GC 를 안 돌립니다
+
+// 진단
+node --expose-gc -e "
+const addon = require('./build/Release/addon.node')
+const before = process.memoryUsage()
+for (let i=0;i&lt;1000;i++) { const e = new addon.Engine(); e.load(bigBuf) }
+global.gc()
+const after = process.memoryUsage()
+console.log('heap', (after.heapUsed-before.heapUsed)/1e6,
+            'external', (after.external-before.external)/1e6,
+            'rss', (after.rss-before.rss)/1e6)
+"
+//   rss 만 늘고 external 이 그대로면 → AdjustExternalMemory 누락 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>메모리 문제의 진단 순서</b> —
+        <code>process.memoryUsage()</code> 에서 <b>heapUsed 는 그대로인데 rss 가 늘면</b>
+        네이티브 쪽 문제입니다. <code>--expose-gc</code> 로 강제 GC 후에도
+        줄지 않으면 <b>해제 누락</b>, 줄면 <b>GC 압박 신호 누락</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>Float64Array</code>·<code>Buffer</code> 는
+    <b><code>.Data()</code> 로 포인터를 그대로</b> 얻을 수 있어 <b>복사가 0</b>입니다.
+    <b>길이 검증</b>과 <b><code>ByteOffset</code> 확인</b>을 빠뜨리지 마세요.
+    포인터를 보관해야 하면 <b><code>Napi::Persistent</code></b> 로 GC 를 막아야 합니다.</div>
+</section>
+
+
+<!-- ==================== j06 ==================== -->
+<section class="sec" id="j06">
+  <div class="sec-head rv">
+    <span class="no">NODE 06</span>
+    <h2>비동기 — <span class="t">AsyncWorker</span></h2>
+    <p class="lead">
+      무거운 계산을 <b>백그라운드 스레드</b>에서 돌려 이벤트 루프를 살려 둡니다.
+      Node 애드온에서 <b>가장 중요한 패턴</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">AsyncWorker 기본형</h4>
+      <pre class="code" data-lang="cpp"><code>class SmoothWorker : public Napi::AsyncWorker {
+public:
+    SmoothWorker(Napi::Function&amp; cb, Napi::Float64Array input, int window)
+        : Napi::AsyncWorker(cb),
+          window_(window),
+          n_(input.ElementLength()),
+          ref_(Napi::Persistent(input))          // ★ GC 방지
+    {
+        src_ = input.Data();
+        out_.resize(n_);
+    }
+
+    // ⚠ 워커 스레드에서 실행 — 여기서 JS 를 만지면 절대 안 됩니다 ★
+    void Execute() override {
+        core::smooth(src_, n_, out_.data(), window_);
+    }
+
+    // 메인 스레드로 돌아와서 실행 — 여기서만 JS 를 다룹니다
+    void OnOK() override {
+        Napi::HandleScope scope(Env());
+        auto arr = Napi::Float64Array::New(Env(), n_);
+        std::copy(out_.begin(), out_.end(), arr.Data());
+        Callback().Call({ Env().Null(), arr });   // (err, result)
+    }
+
+    void OnError(const Napi::Error&amp; e) override {
+        Napi::HandleScope scope(Env());
+        Callback().Call({ e.Value(), Env().Undefined() });
+    }
+
+private:
+    const double* src_; int window_; std::size_t n_;
+    std::vector&lt;double&gt; out_;
+    Napi::Reference&lt;Napi::Float64Array&gt; ref_;
+};
+
+Napi::Value SmoothAsync(const Napi::CallbackInfo&amp; info) {
+    auto cb = info[1].As&lt;Napi::Function&gt;();
+    auto* w = new SmoothWorker(cb, info[0].As&lt;Napi::Float64Array&gt;(),
+                               info[2].ToNumber().Int32Value());
+    w-&gt;Queue();                    // ★ 스레드 풀에 넣습니다 (delete 는 자동)
+    return info.Env().Undefined();
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규칙 세 가지 ★</h4>
+      <ul class="tx">
+        <li><b><code>Execute()</code> 안에서는 JS 를 만지지 마세요</b> —
+            <code>Napi::</code> 로 시작하는 것, <code>Env()</code>, 콜백 호출 전부 금지입니다.
+            <b>순수 C++ 데이터만</b> 다뤄야 합니다</li>
+        <li><b>필요한 데이터는 생성자에서 미리 복사·참조</b>해 두세요.
+            <code>Execute()</code> 시점에는 JS 값에 접근할 수 없습니다</li>
+        <li><b>Worker 는 <code>new</code> 로 만들고 <code>Queue()</code> 하면 자동 삭제</b>됩니다.
+            직접 <code>delete</code> 하지 마세요</li>
+      </ul>
+      <pre class="code" data-lang="cpp"><code>// 에러 전달 — Execute 안에서 예외를 던지면 OnError 로 갑니다
+void Execute() override {
+    if (window_ &gt; n_) {
+        SetError("window 가 데이터 길이보다 큽니다");   // ★ 이 방법
+        return;
+    }
+    try {
+        core::smooth(...);
+    } catch (const std::exception&amp; e) {
+        SetError(e.what());          // C++ 예외를 문자열로
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>Execute()</code> 에서 예외가 밖으로 나가면 프로세스가 죽습니다</b> —
+        반드시 <code>try/catch</code> 로 감싸고 <code>SetError()</code> 로 전달하세요.
+        <b>워커 스레드에는 JS 예외 처리기가 없습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">진행률과 취소</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">AsyncProgressWorker</h4>
+      <pre class="code" data-lang="cpp"><code>class ProgressWorker : public Napi::AsyncProgressWorker&lt;double&gt; {
+public:
+    ProgressWorker(Napi::Function&amp; cb, Napi::Function&amp; onProgress, ...)
+        : AsyncProgressWorker(cb), prog_(Napi::Persistent(onProgress)) {}
+
+    void Execute(const ExecutionProgress&amp; p) override {
+        const std::size_t step = std::max&lt;std::size_t&gt;(n_ / 100, 1);
+        for (std::size_t i = 0; i &lt; n_; ++i) {
+            if (cancel_.load(std::memory_order_relaxed)) {
+                SetError("취소됨");
+                return;
+            }
+            work(i);
+            if (i % step == 0) {
+                double frac = double(i) / n_;
+                p.Send(&amp;frac, 1);          // ★ 메인 스레드로 신호
+            }
+        }
+    }
+
+    // 메인 스레드에서 실행 — 여기서 JS 콜백을 부릅니다
+    void OnProgress(const double* data, std::size_t /*count*/) override {
+        Napi::HandleScope scope(Env());
+        prog_.Call({ Napi::Number::New(Env(), *data) });
+    }
+
+    void Cancel() { cancel_.store(true); }
+
+private:
+    Napi::FunctionReference prog_;
+    std::atomic&lt;bool&gt; cancel_{false};
+    std::size_t n_ = 0;
+};</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JS 쪽 인터페이스</h4>
+      <pre class="code" data-lang="javascript"><code>// 취소 가능한 작업 — AbortSignal 과 연결 ★
+export function smoothAsync(data, { window = 3, signal, onProgress } = {}) {
+  return new Promise((resolve, reject) =&gt; {
+    const task = native.smoothAsync(
+      toF64(data), window,
+      (err, result) =&gt; err ? reject(err) : resolve(result),
+      onProgress
+    )
+    if (signal) {
+      if (signal.aborted) { task.cancel(); return reject(signal.reason) }
+      signal.addEventListener('abort', () =&gt; task.cancel(), { once: true })
+    }
+  })
+}
+
+// 사용
+const ac = new AbortController()
+setTimeout(() =&gt; ac.abort(), 5000)          // 5초 타임아웃
+const out = await smoothAsync(data, {
+  signal: ac.signal,
+  onProgress: (f) =&gt; bar.update(f * 100),
+})</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>AbortSignal</code> 을 지원하세요</b> — Node 생태계의 표준 취소 방식입니다.
+        <code>fetch</code>·타이머와 같은 방식으로 다룰 수 있어
+        <b>사용자가 배울 것이 없어집니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">스레드 풀 관리</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">libuv 풀 고갈에 주의 ★</h4>
+      <pre class="code" data-lang="text"><code>AsyncWorker 는 libuv 스레드 풀을 씁니다 (기본 크기 4).
+같은 풀을 파일 I/O · DNS · zlib · crypto 도 씁니다.
+
+★ 그래서 생기는 일
+  · 긴 계산 4개가 동시에 돌면 파일 읽기가 전부 대기합니다
+  · 서버 응답이 갑자기 느려지는데 CPU 는 놀고 있는 상태
+
+대책
+  ① UV_THREADPOOL_SIZE 를 늘리기 (프로세스 시작 전에 설정해야 함)
+       UV_THREADPOOL_SIZE=16 node app.js
+     ⚠ 프로세스 시작 후 변경은 반영되지 않습니다
+  ② 자체 스레드 풀을 쓰고 ThreadSafeFunction 으로 결과 전달 (j07) ★
+     → libuv 풀에 영향을 주지 않습니다
+  ③ 아주 무거운 작업은 worker_threads 나 별도 프로세스로
+
+측정
+  · 이벤트 루프 지연 (monitorEventLoopDelay)
+  · 큐 대기 시간을 직접 기록 (Queue 시각 vs Execute 시작 시각)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자체 스레드 풀 쓰기</h4>
+      <pre class="code" data-lang="cpp"><code>// libuv 풀을 피하고 싶을 때 — 직접 스레드에서 돌리고 TSFN 으로 알림
+#include &lt;thread&gt;
+
+Napi::Value RunOwnThread(const Napi::CallbackInfo&amp; info) {
+    auto env = info.Env();
+    auto deferred = Napi::Promise::Deferred::New(env);
+    auto input = info[0].As&lt;Napi::Float64Array&gt;();
+
+    // 데이터를 C++ 로 복사 (스레드가 안전하게 소유)
+    auto data = std::make_shared&lt;std::vector&lt;double&gt;&gt;(
+        input.Data(), input.Data() + input.ElementLength());
+
+    auto tsfn = Napi::ThreadSafeFunction::New(
+        env, Napi::Function::New(env, [](const Napi::CallbackInfo&amp;){}),
+        "worker", 0, 1);
+
+    std::thread([data, tsfn, deferred]() mutable {
+        auto result = std::make_shared&lt;std::vector&lt;double&gt;&gt;(core::run(*data));
+        tsfn.BlockingCall([deferred, result](Napi::Env env, Napi::Function) {
+            auto arr = Napi::Float64Array::New(env, result-&gt;size());
+            std::copy(result-&gt;begin(), result-&gt;end(), arr.Data());
+            deferred.Resolve(arr);            // ★ 메인 스레드에서 resolve
+        });
+        tsfn.Release();
+    }).detach();
+
+    return deferred.Promise();
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>자체 스레드를 쓸 때의 대가</b> — 스레드 수를 직접 관리해야 하고,
+        <b>프로세스 종료 시 정리</b>도 직접 해야 합니다.
+        <b>대부분은 AsyncWorker + <code>UV_THREADPOOL_SIZE</code> 조정</b>으로 충분합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">비동기 비용과 배치</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 비동기가 손해인가</h4>
+      <pre class="code" data-lang="text"><code>AsyncWorker 한 번의 오버헤드
+  ① Worker 객체 할당
+  ② libuv 큐 삽입 + 스레드 깨우기
+  ③ 작업 실행
+  ④ 메인 스레드로 완료 통지 (이벤트 루프 한 바퀴)
+  ⑤ HandleScope · 결과 변환 · 콜백 호출
+  합계 대략 수십~수백 μs ★
+
+  → 계산이 100μs 미만이면 동기가 더 빠릅니다.
+    게다가 이벤트 루프도 그 정도는 막아도 문제없습니다.
+
+판단 기준
+  &lt; 0.1ms  : 동기 (비동기 오버헤드가 더 큼)
+  0.1~1ms  : 동기여도 대개 괜찮음 (동시 요청 수에 따라)
+  &gt; 1ms    : 비동기 ★
+  &gt; 100ms  : 비동기 + 진행률 + 취소
+
+★ 둘 다 제공하는 것이 실무 표준입니다
+  addon.smoothSync(a, 3)      // 작은 데이터 · CLI 도구
+  await addon.smooth(a, 3)    // 큰 데이터 · 서버</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배치로 오버헤드 줄이기</h4>
+      <pre class="code" data-lang="cpp"><code>// ❌ 요청마다 Worker 하나 — 1000개면 오버헤드도 1000배
+for (const chunk of chunks) await addon.process(chunk)
+
+// ✅ 한 Worker 가 여러 청크를 처리
+class BatchWorker : public Napi::AsyncWorker {
+    std::vector&lt;std::vector&lt;double&gt;&gt; inputs_;
+    std::vector&lt;std::vector&lt;double&gt;&gt; outputs_;
+public:
+    void Execute() override {
+        outputs_.resize(inputs_.size());
+        // 내부에서 병렬화까지 (⚡ e07)
+        std::transform(std::execution::par,
+                       inputs_.begin(), inputs_.end(), outputs_.begin(),
+                       [](const auto&amp; in){ return core::run(in); });
+    }
+    void OnOK() override {
+        Napi::HandleScope scope(Env());
+        auto arr = Napi::Array::New(Env(), outputs_.size());
+        for (std::size_t i = 0; i &lt; outputs_.size(); ++i) {
+            auto ta = Napi::Float64Array::New(Env(), outputs_[i].size());
+            std::copy(outputs_[i].begin(), outputs_[i].end(), ta.Data());
+            arr.Set(i, ta);
+        }
+        Callback().Call({ Env().Null(), arr });
+    }
+};
+// JS: const results = await addon.processBatch(chunks)   // 경계 1회 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 가이드 전체를 관통하는 원칙</b> —
+        파이썬이든 Node 든 <b>경계를 넘는 횟수를 데이터 크기와 분리</b>하는 것이
+        네이티브 확장 설계의 핵심입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>1ms 이상 걸리는 함수는 <code>AsyncWorker</code></b> 로 만드세요.
+    규칙은 하나 — <b><code>Execute()</code> 안에서 JS 를 만지지 않기</b>.
+    입력은 <b>생성자에서 <code>Persistent</code> 로 잡아 두고</b>,
+    결과는 <code>OnOK()</code> 에서 만듭니다. 그리고 <b>동기·비동기 둘 다 제공</b>하는 것이 표준입니다.</div>
+</section>
+
+
+<!-- ==================== j07 ==================== -->
+<section class="sec" id="j07">
+  <div class="sec-head rv">
+    <span class="no">NODE 07</span>
+    <h2>Promise 와 <span class="t">ThreadSafeFunction</span></h2>
+    <p class="lead">
+      콜백 대신 <code>await</code> 로 쓰게 만들고,
+      <b>C++ 스레드에서 JS 를 안전하게</b> 부릅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Promise 반환하기</h4>
+      <pre class="code" data-lang="cpp"><code>class PromiseWorker : public Napi::AsyncWorker {
+public:
+    PromiseWorker(Napi::Env env, Napi::Float64Array input, int window)
+        : Napi::AsyncWorker(env),                 // ★ 콜백 없는 생성자
+          deferred_(Napi::Promise::Deferred::New(env)),
+          ref_(Napi::Persistent(input)),
+          window_(window), n_(input.ElementLength())
+    {
+        src_ = input.Data();
+        out_.resize(n_);
+    }
+
+    Napi::Promise Promise() { return deferred_.Promise(); }
+
+    void Execute() override { core::smooth(src_, n_, out_.data(), window_); }
+
+    void OnOK() override {
+        Napi::HandleScope scope(Env());
+        auto arr = Napi::Float64Array::New(Env(), n_);
+        std::copy(out_.begin(), out_.end(), arr.Data());
+        deferred_.Resolve(arr);                    // ★ 성공
+    }
+    void OnError(const Napi::Error&amp; e) override {
+        Napi::HandleScope scope(Env());
+        deferred_.Reject(e.Value());               // ★ 실패
+    }
+
+private:
+    Napi::Promise::Deferred deferred_;
+    Napi::Reference&lt;Napi::Float64Array&gt; ref_;
+    const double* src_; int window_; std::size_t n_;
+    std::vector&lt;double&gt; out_;
+};
+
+Napi::Value SmoothAsync(const Napi::CallbackInfo&amp; info) {
+    auto* w = new PromiseWorker(info.Env(),
+                                info[0].As&lt;Napi::Float64Array&gt;(),
+                                info[1].ToNumber().Int32Value());
+    auto p = w-&gt;Promise();
+    w-&gt;Queue();
+    return p;
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>const out = await addon.smoothAsync(data, 3)     // ★ 자연스러운 JS</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ThreadSafeFunction — 다른 스레드에서 JS 부르기</h4>
+      <pre class="code" data-lang="cpp"><code>// C++ 가 만든 스레드에서는 JS 를 직접 부를 수 없습니다.
+// TSFN 이 '메인 스레드로 안전하게 전달' 해 줍니다 ★
+
+Napi::Value Watch(const Napi::CallbackInfo&amp; info) {
+    auto env = info.Env();
+    auto jsCallback = info[0].As&lt;Napi::Function&gt;();
+
+    auto tsfn = Napi::ThreadSafeFunction::New(
+        env,
+        jsCallback,          // 부를 JS 함수
+        "watcher",           // 리소스 이름 (프로파일러 표시용)
+        0,                   // 큐 최대 크기 (0 = 무제한)
+        1,                   // 초기 스레드 수
+        [](Napi::Env) { /* 마지막 Release 후 정리 */ });
+
+    std::thread([tsfn]() mutable {
+        while (running) {
+            auto ev = wait_for_event();           // 블로킹 (JS 무관)
+
+            // 메인 스레드에서 실행될 람다를 큐에 넣습니다
+            tsfn.BlockingCall([ev](Napi::Env env, Napi::Function cb) {
+                cb.Call({ Napi::String::New(env, ev.name) });
+            });
+        }
+        tsfn.Release();       // ★ 반드시 해제 (안 하면 프로세스가 안 끝납니다)
+    }).detach();
+
+    return env.Undefined();
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>Release()</code> 를 빼먹으면 프로세스가 종료되지 않습니다</b> —
+        TSFN 이 살아 있는 동안 이벤트 루프가 <b>참조를 유지</b>하기 때문입니다.
+        <code>tsfn.Unref(env)</code> 로 이벤트 루프 참조를 끊을 수도 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">TSFN 실전 패턴</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">BlockingCall vs NonBlockingCall</h4>
+      <pre class="code" data-lang="cpp"><code>// BlockingCall — 큐가 꽉 차면 대기합니다 (역압) ★
+tsfn.BlockingCall(data, callback);
+//   생산자가 소비자보다 빠를 때 메모리 폭증을 막아 줍니다
+
+// NonBlockingCall — 큐가 꽉 차면 즉시 실패
+auto status = tsfn.NonBlockingCall(data, callback);
+if (status != napi_ok) {
+    dropped_++;                    // 이벤트를 버리고 계속
+}
+//   실시간 데이터(오디오·센서)처럼 '최신이 중요한' 경우에 적합
+
+// 큐 크기를 정해 역압 걸기
+auto tsfn = Napi::ThreadSafeFunction::New(env, cb, "stream",
+                                          1000,   // ★ 최대 1000개
+                                          1);
+
+// 데이터 전달 — 타입 안전한 형태
+struct Event { std::string name; double value; };
+using TSFN = Napi::TypedThreadSafeFunction&lt;std::nullptr_t, Event,
+    [](Napi::Env env, Napi::Function cb, std::nullptr_t*, Event* e) {
+        cb.Call({ Napi::String::New(env, e-&gt;name),
+                  Napi::Number::New(env, e-&gt;value) });
+        delete e;                  // ★ 전달한 데이터 해제
+    }&gt;;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이벤트 스트림을 JS 로</h4>
+      <pre class="code" data-lang="javascript"><code>// C++ 이벤트를 EventEmitter 로 감싸기 ★
+import { EventEmitter } from 'node:events'
+
+class Watcher extends EventEmitter {
+  #handle
+  constructor(path) {
+    super()
+    this.#handle = native.watch(path, (type, file) =&gt; {
+      this.emit(type, file)                // C++ 스레드 → TSFN → 여기
+    })
+  }
+  close() { native.unwatch(this.#handle) }
+}
+
+const w = new Watcher('/data')
+w.on('change', f =&gt; console.log('변경', f))
+w.on('error', e =&gt; console.error(e))
+
+// 또는 async iterator 로 (역압이 자연스럽게 처리됩니다) ★
+async function* events(path) {
+  const queue = []
+  let resolve
+  const w = native.watch(path, (t, f) =&gt; {
+    queue.push({ t, f })
+    resolve?.()
+  })
+  try {
+    while (true) {
+      if (!queue.length) await new Promise(r =&gt; { resolve = r })
+      yield queue.shift()
+    }
+  } finally { native.unwatch(w) }
+}
+for await (const ev of events('/data')) console.log(ev)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">종료 처리</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로세스가 안 끝나는 문제 ★</h4>
+      <pre class="code" data-lang="cpp"><code>// 원인 1 — TSFN 을 Release 하지 않음
+tsfn.Release();                // 스레드 종료 시 반드시
+
+// 원인 2 — detach 한 스레드가 살아 있음
+//   → jthread 나 명시적 join 을 쓰고, 종료 신호를 주세요
+class Watcher {
+    std::jthread th_;
+    std::atomic&lt;bool&gt; stop_{false};
+public:
+    ~Watcher() { stop_ = true; }    // jthread 소멸자가 join
+};
+
+// 원인 3 — 이벤트 루프 참조가 남음
+tsfn.Unref(env);               // ★ "이것 때문에 프로세스를 붙잡지 마라"
+//   백그라운드 감시처럼 '있어도 프로세스는 끝나도 되는' 경우
+
+// Node 종료 훅에서 정리
+napi_add_env_cleanup_hook(env, [](void* arg){
+    static_cast&lt;Watcher*&gt;(arg)-&gt;Stop();
+}, watcher);
+
+// 확인 — 무엇이 프로세스를 붙잡고 있나
+node -e "
+process.on('exit', () =&gt; console.log('종료'))
+setTimeout(() =&gt; { console.log(process._getActiveHandles().length) }, 1000)
+"
+// 또는 why-is-node-running 패키지</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러 처리 계층</h4>
+      <pre class="code" data-lang="javascript"><code>// ① Promise 는 reject 로 — try/catch 로 잡힙니다
+try {
+  await addon.smoothAsync(data, 3)
+} catch (e) {
+  console.error(e.code, e.message)
+}
+
+// ② EventEmitter 는 'error' 이벤트를 반드시 처리해야 합니다
+//    안 하면 uncaught exception 으로 프로세스가 죽습니다 ★
+watcher.on('error', e =&gt; log(e))
+
+// ③ 콜백 스타일은 (err, result) 관례를 지키세요
+addon.smooth(data, 3, (err, out) =&gt; { if (err) return handle(err) })
+
+// ④ 네이티브 크래시는 잡을 수 없습니다
+//    → 세그폴트가 나면 프로세스 전체가 죽습니다
+//    대비: 클러스터·PM2 로 자동 재시작 + 코어 덤프 수집
+process.on('uncaughtException', (e) =&gt; { log(e); process.exit(1) })
+//    ⚠ 네이티브 세그폴트는 이것으로도 못 잡습니다 (신호 수준)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>네이티브 크래시는 격리할 수 없습니다</b> — JS 예외는 요청 하나가 실패하지만
+        <b>세그폴트는 서버 전체가 죽습니다</b>.
+        입력 검증을 철저히 하고, <b>불안한 코드는 별도 프로세스</b>로 빼는 것이
+        운영 관점에서 안전합니다(j01).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">TSFN 의 내부와 성능</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한 번의 호출에 드는 것</h4>
+      <pre class="code" data-lang="text"><code>tsfn.BlockingCall() 이 하는 일
+  ① 뮤텍스 잡고 큐에 항목 추가
+  ② uv_async_send 로 이벤트 루프를 깨움
+  ③ (다음 루프 틱) 메인 스레드가 큐를 비우며 콜백 실행
+  ④ HandleScope 생성 · 값 변환 · JS 함수 호출
+
+  → 호출당 대략 수~수십 μs.
+    게다가 ③은 '다음 틱'이라 지연이 이벤트 루프 상태에 좌우됩니다 ★
+
+그래서
+  · 초당 수천 회까지는 문제없습니다
+  · 초당 수십만 회는 불가능합니다 → 배치로 묶으세요
+  · 지연이 중요한 실시간 처리에는 부적합합니다
+    (오디오 콜백은 C++ 안에서 끝내고 JS 는 상태만 폴링)
+
+배치 패턴
+  워커 스레드에서 결과를 버퍼에 모으고,
+  N개 또는 M밀리초마다 한 번만 TSFN 호출 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">측정과 튜닝</h4>
+      <pre class="code" data-lang="javascript"><code>// 이벤트 전달 지연 측정
+const t0 = process.hrtime.bigint()
+native.fireEvent(() =&gt; {
+  const dt = Number(process.hrtime.bigint() - t0) / 1e6
+  console.log(`전달 지연 ${dt.toFixed(3)}ms`)
+})
+
+// 큐가 쌓이는지 확인 — 생산자가 소비자보다 빠른가
+let sent = 0, received = 0
+setInterval(() =&gt; {
+  console.log(`대기 중 ${sent - received}`)     // 계속 늘면 역압 필요 ★
+}, 1000)
+
+// 이벤트 루프가 막히면 TSFN 콜백도 늦어집니다
+import { monitorEventLoopDelay } from 'node:perf_hooks'
+const h = monitorEventLoopDelay(); h.enable()
+// ... 부하 ...
+console.log('p99 지연', h.percentile(99) / 1e6, 'ms')</code></pre>
+      <pre class="code" data-lang="cpp"><code>// 배치 전달 — 지연과 처리량의 균형
+std::vector&lt;Event&gt; batch;
+auto last = std::chrono::steady_clock::now();
+while (running) {
+    batch.push_back(wait_event());
+    auto now = std::chrono::steady_clock::now();
+    if (batch.size() &gt;= 100 || now - last &gt; std::chrono::milliseconds(16)) {
+        tsfn.BlockingCall(new std::vector&lt;Event&gt;(std::move(batch)), send_batch);
+        batch.clear();
+        last = now;
+    }
+}
+//   16ms = 한 프레임 — UI 갱신에는 이 정도면 충분합니다 ★</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>Promise::Deferred</code></b> 로 Promise 를 돌려주면
+    사용자가 <code>await</code> 로 자연스럽게 씁니다.
+    C++ 스레드에서 JS 를 부르려면 <b><code>ThreadSafeFunction</code></b> 이 필수이고,
+    <b><code>Release()</code> 를 빼먹으면 프로세스가 끝나지 않습니다</b>.
+    이벤트가 잦으면 <b>배치로 묶어</b> 전달하세요.</div>
+</section>
+
+<!-- ==================== j08 ==================== -->
+<section class="sec" id="j08">
+  <div class="sec-head rv">
+    <span class="no">NODE 08</span>
+    <h2>클래스 — <span class="t">ObjectWrap</span></h2>
+    <p class="lead">
+      C++ 객체를 <code>new</code> 로 만드는 JS 클래스로 노출합니다.
+      <b>무거운 준비를 한 번만 하고 여러 번 호출</b>하는 구조에 필요합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 형태</h4>
+      <pre class="code" data-lang="cpp"><code>class Engine : public Napi::ObjectWrap&lt;Engine&gt; {
+public:
+    static Napi::Object Init(Napi::Env env, Napi::Object exports) {
+        Napi::Function func = DefineClass(env, "Engine", {
+            InstanceMethod("feed",   &amp;Engine::Feed),
+            InstanceMethod("result", &amp;Engine::Result),
+            InstanceMethod("close",  &amp;Engine::Close),
+            InstanceAccessor("size", &amp;Engine::GetSize, nullptr),   // 읽기 전용
+            StaticMethod("version",  &amp;Engine::Version),
+        });
+        // ★ 생성자를 인스턴스 데이터에 보관 (worker_threads 안전)
+        auto* ctor = new Napi::FunctionReference();
+        *ctor = Napi::Persistent(func);
+        env.SetInstanceData(ctor);
+
+        exports.Set("Engine", func);
+        return exports;
+    }
+
+    explicit Engine(const Napi::CallbackInfo&amp; info)
+        : Napi::ObjectWrap&lt;Engine&gt;(info)
+    {
+        int window = 3;
+        if (info.Length() &gt; 0 &amp;&amp; info[0].IsObject())
+            window = info[0].As&lt;Napi::Object&gt;()
+                        .Get("window").ToNumber().Int32Value();
+        if (window &lt;= 0)
+            throw Napi::RangeError::New(info.Env(), "window 는 1 이상");
+        impl_ = std::make_unique&lt;core::Engine&gt;(window);
+    }
+
+private:
+    std::unique_ptr&lt;core::Engine&gt; impl_;
+
+    Napi::Value Feed(const Napi::CallbackInfo&amp; info) {
+        auto a = info[0].As&lt;Napi::Float64Array&gt;();
+        impl_-&gt;feed(a.Data(), a.ElementLength());
+        return info.Env().Undefined();
+    }
+    Napi::Value GetSize(const Napi::CallbackInfo&amp; info) {
+        return Napi::Number::New(info.Env(),
+                                 static_cast&lt;double&gt;(impl_-&gt;size()));
+    }
+    Napi::Value Close(const Napi::CallbackInfo&amp; info) {
+        impl_.reset();                     // ★ 명시적 해제
+        return info.Env().Undefined();
+    }
+};</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JS 답게 다듬기</h4>
+      <pre class="code" data-lang="javascript"><code>// 얇은 JS 래퍼로 감싸면 훨씬 자연스러워집니다 ★
+const native = require('node-gyp-build')(__dirname)
+
+export class Engine {
+  #impl
+  #closed = false
+
+  constructor({ window = 3 } = {}) {
+    this.#impl = new native.Engine({ window })
+  }
+
+  feed(data) {
+    if (this.#closed) throw new Error('이미 닫힌 엔진입니다')
+    this.#impl.feed(toF64(data))
+    return this                      // 메서드 체이닝
+  }
+
+  get size() { return this.#impl.size }
+
+  close() {
+    if (!this.#closed) { this.#impl.close(); this.#closed = true }
+  }
+
+  // ★ using 문 지원 (TC39 explicit resource management)
+  [Symbol.dispose]() { this.close() }
+
+  // 반복 가능하게
+  *[Symbol.iterator]() { yield* this.#impl.result() }
+
+  // console.log 출력
+  [Symbol.for('nodejs.util.inspect.custom')]() {
+    return `Engine(size=${this.size})`
+  }
+}
+
+// 사용
+using engine = new Engine({ window: 5 })   // 스코프를 벗어나면 자동 close
+engine.feed(a).feed(b)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">수명 관리</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">GC 는 언제 부를지 모릅니다 ★</h4>
+      <pre class="code" data-lang="cpp"><code>// ObjectWrap 의 소멸자는 GC 시점에 불립니다.
+// 즉 '언제 불릴지 모르고, 아예 안 불릴 수도' 있습니다.
+class Engine : public Napi::ObjectWrap&lt;Engine&gt; {
+    ~Engine() {
+        // 여기서 파일·소켓을 닫으면 언제 닫힐지 알 수 없습니다 ★
+    }
+};
+
+// ✅ 확정적 해제를 위한 close() 를 반드시 제공하세요
+Napi::Value Close(const Napi::CallbackInfo&amp; info) {
+    if (impl_) { impl_-&gt;flush(); impl_.reset(); }
+    return info.Env().Undefined();
+}
+//   소멸자는 '안전망'으로만 두고, 실제 해제는 close() 로
+
+// ⚠ 닫힌 뒤 호출 방어
+Napi::Value Feed(const Napi::CallbackInfo&amp; info) {
+    if (!impl_) {
+        Napi::Error::New(info.Env(), "닫힌 엔진입니다")
+            .ThrowAsJavaScriptException();
+        return info.Env().Undefined();
+    }
+    ...
+}
+//   이 검사가 없으면 널 역참조로 프로세스가 죽습니다
+
+// 큰 메모리를 잡고 있다면 GC 에 알려 주기
+Napi::MemoryManagement::AdjustExternalMemory(env, +bytes);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">객체를 돌려주고 받기</h4>
+      <pre class="code" data-lang="cpp"><code>// C++ 에서 새 인스턴스 만들기
+Napi::Value CreateEngine(const Napi::CallbackInfo&amp; info) {
+    auto env = info.Env();
+    auto* ctor = env.GetInstanceData&lt;Napi::FunctionReference&gt;();
+    return ctor-&gt;New({ info[0] });        // ★ 저장해 둔 생성자로
+}
+
+// 인자로 받은 객체에서 C++ 포인터 꺼내기
+Napi::Value Merge(const Napi::CallbackInfo&amp; info) {
+    Engine* other = Napi::ObjectWrap&lt;Engine&gt;::Unwrap(
+                        info[0].As&lt;Napi::Object&gt;());
+    if (!other) {
+        Napi::TypeError::New(info.Env(), "Engine 인스턴스가 필요합니다")
+            .ThrowAsJavaScriptException();
+        return info.Env().Undefined();
+    }
+    impl_-&gt;merge(*other-&gt;impl_);
+    return info.Env().Undefined();
+}
+//   ⚠ Unwrap 은 타입 검사를 하지 않습니다.
+//     다른 클래스 객체를 넘기면 엉뚱한 포인터가 나옵니다 ★
+//     instanceof 검사를 JS 래퍼에서 하거나, 타입 태그를 두세요
+
+// 타입 태그 (N-API 8+)
+static constexpr napi_type_tag kTag = { 0x1234..., 0x5678... };
+info.This().As&lt;Napi::Object&gt;().TypeTag(&amp;kTag);      // 생성자에서
+if (!obj.CheckTypeTag(&amp;kTag)) throw ...;             // 사용 전 검사 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">클래스보다 함수가 나을 때</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">노출 표면을 최소로</h4>
+      <pre class="code" data-lang="javascript"><code>// ❌ C++ 클래스 계층을 그대로 옮기기
+new addon.AbstractProcessor()
+new addon.BaseFilter()
+new addon.AdvancedFilter()
+
+// ✅ 상태가 없으면 그냥 함수
+const out = addon.smooth(data, 3)
+
+// ✅ 상태가 필요할 때만 클래스 — 그리고 메서드는 최소로
+const engine = new addon.Engine({ window: 5 })
+engine.feed(chunk)
+engine.result()
+engine.close()
+
+// ✅ 팩토리 함수로 감싸면 나중에 구현을 바꾸기 쉽습니다
+export function createEngine(opts) {
+  return new Engine(opts)          // 내부가 네이티브든 JS 든 무관
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파이썬 탭과 같은 결론</b> — <b>바인딩은 얇게</b> 유지하고
+        편의 기능은 JS 래퍼에서 만드세요.
+        C++ 클래스를 통째로 노출하면 <b>바인딩 코드가 로직보다 커지고</b>
+        구현을 바꿀 때마다 그것도 같이 고쳐야 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">리소스 누수 테스트</h4>
+      <pre class="code" data-lang="javascript"><code>// 반복 생성·해제 후 메모리 확인 ★
+test('엔진 누수 없음', async () =&gt; {
+  const before = process.memoryUsage().rss
+  for (let i = 0; i &lt; 10_000; i++) {
+    const e = new Engine({ window: 3 })
+    e.feed(new Float64Array(1000))
+    e.close()                            // ★ 명시적 해제
+  }
+  global.gc?.()
+  await new Promise(r =&gt; setImmediate(r))
+  const after = process.memoryUsage().rss
+  expect((after - before) / 1e6).toBeLessThan(50)     // 50MB 미만
+})
+
+// close() 를 안 부르면 어떻게 되는지도 확인
+test('GC 로도 회수됨', async () =&gt; {
+  for (let i = 0; i &lt; 10_000; i++) new Engine({ window: 3 })
+  global.gc?.()
+  // 소멸자가 불려 결국 회수되어야 합니다 (다만 시점은 불확정)
+})
+
+// 닫힌 뒤 사용 방어 확인
+test('닫힌 엔진 사용 시 예외', () =&gt; {
+  const e = new Engine(); e.close()
+  expect(() =&gt; e.feed(new Float64Array(1))).toThrow()
+})</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">ObjectWrap 의 내부</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JS 객체와 C++ 객체의 연결</h4>
+      <pre class="code" data-lang="text"><code>new addon.Engine() 이 하는 일
+
+  ① V8 이 JS 객체를 만듭니다
+  ② napi_wrap 으로 그 객체에 C++ 포인터를 붙입니다
+     (내부 필드 또는 숨은 속성에 저장)
+  ③ finalizer 를 등록합니다 — GC 될 때 C++ 소멸자를 부르도록
+  ④ 메서드 호출 시 napi_unwrap 으로 포인터를 꺼내 씁니다
+
+★ 그래서 생기는 특성
+  · JS 객체가 살아 있는 동안 C++ 객체도 살아 있습니다
+  · JS 참조가 사라지면 GC 시점에 C++ 소멸자가 불립니다
+  · GC 가 안 돌면 소멸자도 안 불립니다 (프로세스 종료 시 보장 없음) ★
+  · 그래서 close()/dispose 패턴이 필요합니다
+
+메서드 호출 비용
+  ① unwrap (포인터 조회)  ② 인자 변환  ③ C++ 호출  ④ 반환값 변환
+  → 대략 100~300ns. 초당 수백만 회는 무리입니다.
+    핫 루프라면 배열 단위 API 로 바꾸세요.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">진단</h4>
+      <pre class="code" data-lang="bash"><code># 힙 스냅샷으로 JS 객체 수 확인
+node --expose-gc -e "
+const v8 = require('v8')
+const { Engine } = require('./index.js')
+const arr = []
+for (let i=0;i&lt;1000;i++) arr.push(new Engine())
+v8.writeHeapSnapshot('/tmp/heap.heapsnapshot')
+"
+#   Chrome DevTools 에서 열어 Engine 인스턴스 수를 확인
+
+# 네이티브 메모리 추적
+valgrind --leak-check=full --show-leak-kinds=definite \
+  node test/leak.js 2&gt;&amp;1 | grep -A10 "definitely lost"
+
+# ASan 빌드로
+npx node-gyp rebuild --debug
+LD_PRELOAD=$(gcc -print-file-name=libasan.so) node test/leak.js
+
+# 메서드 호출 비용 측정
+node -e "
+const { Engine } = require('./index.js')
+const e = new Engine()
+const t = process.hrtime.bigint()
+for (let i=0;i&lt;1e6;i++) e.size
+console.log(Number(process.hrtime.bigint()-t)/1e6, 'ms / 1M')
+"</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>속성 접근도 경계를 넘습니다</b> — <code>engine.size</code> 를
+        루프 안에서 읽으면 <b>매번 네이티브 호출</b>입니다.
+        <b>루프 밖에서 한 번 읽어 지역 변수에</b> 담으세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>Napi::ObjectWrap</code> 으로 C++ 객체를 JS 클래스로 만들 수 있습니다.
+    핵심은 <b>수명 관리</b> — 소멸자는 <b>GC 시점이라 언제 불릴지 모르므로</b>
+    반드시 <b><code>close()</code></b> 를 제공하고 <b>닫힌 뒤 호출을 방어</b>하세요.
+    그리고 <b>노출은 최소로</b>, 편의는 JS 래퍼에서.</div>
+</section>
+
+
+<!-- ==================== j09 ==================== -->
+<section class="sec" id="j09">
+  <div class="sec-head rv">
+    <span class="no">NODE 09</span>
+    <h2><span class="t">prebuild</span> — 사용자는 컴파일하지 않습니다</h2>
+    <p class="lead">
+      <code>npm install</code> 이 컴파일러를 요구하면 <b>절반의 사용자가 실패</b>합니다.
+      미리 빌드한 바이너리를 함께 배포하는 것이 사실상 필수입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">prebuildify — 패키지에 전부 담기 ★</h4>
+      <pre class="code" data-lang="json"><code>// package.json
+{
+  "name": "myaddon",
+  "main": "index.js",
+  "files": ["index.js", "index.d.ts", "prebuilds/", "src/", "binding.gyp"],
+  "dependencies": {
+    "node-addon-api": "^8.0.0",
+    "node-gyp-build": "^4.8.0"
+  },
+  "devDependencies": {
+    "prebuildify": "^6.0.0",
+    "prebuildify-cross": "^5.0.0"
+  },
+  "scripts": {
+    "install": "node-gyp-build",
+    "prebuild": "prebuildify --napi --strip -t 18.0.0"
+  }
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>// index.js — 런타임에 알맞은 바이너리를 고릅니다
+const native = require('node-gyp-build')(__dirname)
+//   prebuilds/{platform}-{arch}/node.napi.node 를 찾고
+//   없으면 소스에서 빌드합니다 (폴백)
+
+module.exports = native</code></pre>
+      <pre class="code" data-lang="text"><code>prebuilds/
+  linux-x64/node.napi.node
+  linux-x64/node.napi.musl.node      ← 알파인용 ★
+  linux-arm64/node.napi.node
+  darwin-x64+arm64/node.napi.node    ← 유니버설
+  win32-x64/node.napi.node</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>N-API 덕분에 파일 수가 적습니다</b> — Node 버전마다 빌드할 필요가 없어
+        <b>플랫폼 × 아키텍처</b>만 필요합니다.
+        <code>--napi</code> 플래그가 그 뜻입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI 로 전부 만들기</h4>
+      <pre class="code" data-lang="yaml"><code># .github/workflows/release.yml
+name: release
+on: { push: { tags: ['v*'] } }
+
+jobs:
+  prebuild:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest,  arch: x64 }
+          - { os: ubuntu-latest,  arch: arm64, cross: true }
+          - { os: macos-14,       arch: arm64 }
+          - { os: macos-13,       arch: x64 }
+          - { os: windows-latest, arch: x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - run: npx prebuildify --napi --strip --arch ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with: { name: 'prebuilds-${{ matrix.os }}-${{ matrix.arch }}',
+                path: prebuilds/ }
+
+  # 알파인(musl) — 컨테이너에서
+  musl:
+    runs-on: ubuntu-latest
+    container: node:20-alpine
+    steps:
+      - uses: actions/checkout@v4
+      - run: apk add --no-cache build-base python3 git
+      - run: npm ci &amp;&amp; npx prebuildify --napi --strip --libc musl
+      - uses: actions/upload-artifact@v4
+        with: { name: prebuilds-musl, path: prebuilds/ }
+
+  publish:
+    needs: [prebuild, musl]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: prebuilds/, merge-multiple: true }
+      - run: npm publish --provenance --access public</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">다른 배포 방식</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 가지 전략</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">방식</th><th>특징</th></tr>
+        <tr><td><b>prebuildify</b><br>+ node-gyp-build</td><td>패키지에 <b>전부 포함</b> · 오프라인 설치 가능 · 패키지 크기 큼 ★ 권장</td></tr>
+        <tr><td><b>prebuild-install</b></td><td>설치 시 GitHub Releases 에서 <b>다운로드</b> · 패키지는 작지만 네트워크 필요</td></tr>
+        <tr><td><b>플랫폼별 패키지</b></td><td><code>optionalDependencies</code> 로 분리<br><span style="color:var(--dim)">esbuild·swc 방식 · 필요한 것만 설치됨</span></td></tr>
+      </table></div>
+      <pre class="code" data-lang="json"><code>// 플랫폼별 패키지 방식 (esbuild 스타일)
+{
+  "optionalDependencies": {
+    "myaddon-linux-x64": "1.0.0",
+    "myaddon-darwin-arm64": "1.0.0",
+    "myaddon-win32-x64": "1.0.0"
+  }
+}
+// 각 하위 패키지의 package.json 에
+{ "os": ["linux"], "cpu": ["x64"] }
+//   → npm 이 현재 플랫폼에 맞는 것만 설치합니다 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>고르는 기준</b> — 바이너리가 <b>작으면 prebuildify</b>(전부 포함해도 부담 없음),
+        <b>수십 MB 이면 플랫폼별 패키지</b>가 낫습니다.
+        사내망처럼 <b>네트워크가 제한된 환경</b>이면 반드시 전부 포함 방식으로.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설치 실패를 부드럽게</h4>
+      <pre class="code" data-lang="json"><code>// install 스크립트가 실패해도 설치는 성공하게
+{
+  "scripts": {
+    "install": "node-gyp-build || node scripts/warn-no-native.js"
+  }
+}</code></pre>
+      <pre class="code" data-lang="javascript"><code>// scripts/warn-no-native.js
+console.warn(`
+[myaddon] 네이티브 바이너리를 찾지 못했고 빌드도 실패했습니다.
+순수 JS 폴백으로 동작합니다 (약 20배 느림).
+
+빌드하려면:
+  · Linux : apt install build-essential
+  · macOS : xcode-select --install
+  · Windows : Visual Studio Build Tools + "C++ 데스크톱 개발"
+`)
+process.exit(0)      // ★ 0 으로 끝내야 npm install 이 성공합니다</code></pre>
+      <pre class="code" data-lang="javascript"><code>// index.js — 폴백 (j01)
+let impl
+try { impl = require('node-gyp-build')(__dirname) }
+catch { impl = require('./fallback.js') }
+export const isNative = impl !== require('./fallback.js')</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">검증과 운영</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 전 체크리스트</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>깨끗한 환경에서 설치 테스트</b> —
+            <code>docker run node:20 npm i myaddon</code> (컴파일러 없는 이미지)</li>
+        <li><b>알파인에서도</b> — <code>node:20-alpine</code></li>
+        <li><b>패키지 내용 확인</b> — <code>npm pack --dry-run</code> 으로
+            prebuilds 가 들어갔는지</li>
+        <li><b>크기 확인</b> — <code>npm pack</code> 후 tarball 크기.
+            수십 MB 면 사용자가 싫어합니다</li>
+        <li><b>바이너리에 디버그 심볼이 없는지</b> — <code>--strip</code></li>
+        <li><b>의존 라이브러리</b> — <code>ldd</code> 로 외부 <code>.so</code> 확인</li>
+        <li><b>provenance</b> — <code>npm publish --provenance</code> 로
+            빌드 출처 증명(공급망 보안)</li>
+      </ul>
+      <pre class="code" data-lang="bash"><code># 컴파일러 없는 환경에서 설치되는지 확인 ★
+docker run --rm -it node:20-slim sh -c "
+  npm i myaddon &amp;&amp; node -e \"
+    const m = require('myaddon');
+    console.log('native:', m.isNative);
+    console.log(m.smooth(new Float64Array([1,2,3]), 3));
+  \""</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버전 정보를 남기기</h4>
+      <pre class="code" data-lang="cpp"><code>// 빌드 정보를 모듈에 노출 — 장애 대응에 반드시 필요합니다 ★
+exports.Set("buildInfo", [&amp;]{
+    auto o = Napi::Object::New(env);
+    o.Set("compiler",  Napi::String::New(env,
+#if defined(__clang__)
+        "clang " __clang_version__
+#elif defined(__GNUC__)
+        "gcc " __VERSION__
+#elif defined(_MSC_VER)
+        "msvc"
+#endif
+    ));
+    o.Set("napiVersion", Napi::Number::New(env, NAPI_VERSION));
+    o.Set("date", Napi::String::New(env, __DATE__));
+    o.Set("commit", Napi::String::New(env, GIT_COMMIT));   // -D 로 주입
+    return o;
+}());</code></pre>
+      <pre class="code" data-lang="javascript"><code>&gt; require('myaddon').buildInfo
+{ compiler: 'gcc 13.2.0', napiVersion: 8,
+  date: 'Aug  6 2026', commit: 'a1b2c3d' }
+
+// 이슈 리포트 템플릿에 이걸 넣게 하세요
+console.log(JSON.stringify({
+  addon: require('myaddon').buildInfo,
+  node: process.versions,
+  platform: `${process.platform}-${process.arch}`,
+}, null, 2))</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“내 환경에선 안 돼요” 를 30초에 해결하는 방법</b> —
+        빌드 정보와 플랫폼을 <b>한 번에 출력하는 명령</b>을 문서에 넣으세요.
+        네이티브 모듈 이슈의 절반은 <b>잘못된 바이너리가 로드된 것</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">바이너리 크기와 호환성</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">glibc 버전 문제</h4>
+      <pre class="code" data-lang="bash"><code># 최신 우분투에서 빌드하면 옛 배포판에서 로드 실패합니다
+node -e "require('./addon.node')"
+#   Error: /lib/x86_64-linux-gnu/libm.so.6: version `GLIBC_2.38' not found
+
+# 어떤 버전을 요구하는지 확인
+objdump -T addon.node | grep GLIBC | sed 's/.*GLIBC_\([0-9.]*\).*/\1/' | sort -uV
+#   2.17  2.29  2.38   ← 가장 높은 것이 최소 요구 버전 ★
+
+# 해결 ① 옛 배포판 컨테이너에서 빌드
+docker run --rm -v $PWD:/app -w /app node:20-bullseye \
+  sh -c "npm ci &amp;&amp; npx prebuildify --napi --strip"
+
+# 해결 ② zig cc 로 glibc 버전을 지정해 크로스 컴파일
+CC="zig cc -target x86_64-linux-gnu.2.17" \
+CXX="zig c++ -target x86_64-linux-gnu.2.17" npx prebuildify --napi
+
+# 해결 ③ 정적 링크 (libstdc++ 만이라도)
+"ldflags": ["-static-libstdc++", "-static-libgcc"]
+#   ★ C++ 표준 라이브러리 버전 문제를 통째로 없앱니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크기 줄이기</h4>
+      <pre class="code" data-lang="json"><code>// binding.gyp
+"cflags_cc": [
+  "-Os",                        // 크기 우선 최적화
+  "-ffunction-sections", "-fdata-sections",
+  "-fvisibility=hidden", "-fvisibility-inlines-hidden",
+  "-fno-rtti"                   // RTTI 를 안 쓴다면
+],
+"ldflags": [
+  "-Wl,--gc-sections",          // 안 쓰는 섹션 제거
+  "-Wl,--as-needed",
+  "-Wl,-s"                      // 심볼 제거
+]</code></pre>
+      <pre class="code" data-lang="bash"><code># 무엇이 크기를 차지하나
+bloaty prebuilds/linux-x64/node.napi.node -d sections,symbols | head -20
+nm -C --size-sort -S addon.node | tail -20
+
+# 템플릿 폭발이 원인인 경우가 많습니다 (🔬 d08)
+#   → 바인딩 코드에서 템플릿 사용을 줄이세요
+
+# 압축 후 크기도 확인 (npm 은 tarball 로 전송)
+gzip -9 -c addon.node | wc -c
+
+# 전형적인 크기
+#   단순 애드온        50~200KB
+#   OpenCV 정적 링크   20~80MB   ★ 이 정도면 플랫폼별 패키지로 분리
+#   ONNX Runtime      100MB+</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>패키지 크기는 사용자 경험입니다</b> — CI 마다 <code>npm ci</code> 를 도는 팀에서
+        <b>100MB 패키지는 실질적인 비용</b>입니다.
+        20MB 를 넘으면 <b>플랫폼별 <code>optionalDependencies</code></b> 로 분리하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>prebuildify + node-gyp-build</b> 가 사실상 표준입니다.
+    N-API 덕분에 <b>Node 버전마다 빌드할 필요가 없고</b>,
+    필요한 것은 <b>플랫폼 × 아키텍처 × libc</b> 조합뿐입니다.
+    <b>컴파일러 없는 도커 이미지에서 설치 테스트</b>를 CI 에 꼭 넣으세요.</div>
+</section>
+
+
+<!-- ==================== j10 ==================== -->
+<section class="sec" id="j10">
+  <div class="sec-head rv">
+    <span class="no">NODE 10</span>
+    <h2>Electron 과 <span class="t">ABI 버전</span> 함정</h2>
+    <p class="lead">
+      Electron 은 Node 와 <b>다른 V8 버전</b>을 씁니다.
+      N-API 를 쓰면 대부분 해결되지만, <b>남는 함정들</b>이 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 깨지나</h4>
+      <pre class="code" data-lang="text"><code>애드온이 로드되지 않는 대표 메시지
+
+  Error: The module was compiled against a different Node.js version
+  using NODE_MODULE_VERSION 108. This version requires 115.
+
+  → V8 API 를 직접 쓴 애드온(nan)의 문제입니다.
+    N-API 로 만들면 이 에러 자체가 나지 않습니다 ★
+
+NODE_MODULE_VERSION (ABI)
+  Node 18 → 108
+  Node 20 → 115
+  Node 22 → 127
+  Electron 28 → 119   ← 같은 Node 버전이어도 다릅니다
+
+N-API 를 쓰면
+  · napi_version 만 맞으면 됩니다 (하위 호환 보장)
+  · Electron 도 N-API 를 지원합니다
+  · 재빌드 없이 그대로 로드됩니다 ★
+
+확인
+  node -p "process.versions.modules"       # ABI 버전
+  node -p "process.versions.napi"          # 지원하는 최대 napi 버전
+  npx electron -p "process.versions.napi"</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Electron 에서 실제로 겪는 것들</h4>
+      <pre class="code" data-lang="javascript"><code>// ① 렌더러에서는 쓸 수 없습니다 (contextIsolation 기본값)
+//    → 메인 프로세스에서만 로드하고 IPC 로 노출 ★
+// main.js
+import { ipcMain } from 'electron'
+const addon = require('myaddon')
+ipcMain.handle('smooth', async (_e, data, w) =&gt; addon.smoothAsync(data, w))
+
+// preload.js
+import { contextBridge, ipcRenderer } from 'electron'
+contextBridge.exposeInMainWorld('native', {
+  smooth: (data, w) =&gt; ipcRenderer.invoke('smooth', data, w),
+})
+
+// ⚠ IPC 는 구조적 복제를 씁니다 — TypedArray 는 복사됩니다
+//   큰 데이터는 SharedArrayBuffer 나 파일 경로를 주고받으세요 ★</code></pre>
+      <pre class="code" data-lang="json"><code>// ② 패키징 — asar 안에서는 로드 못 합니다
+// electron-builder 설정
+{
+  "build": {
+    "asarUnpack": ["**/*.node", "**/prebuilds/**"],
+    "files": ["!**/*.{cpp,hpp,gyp}"]
+  }
+}
+// ③ 코드 서명 (맥) — .node 파일도 서명 대상입니다
+//    "hardenedRuntime": true 면 서명 안 된 바이너리는 로드 거부됩니다 ★</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">다른 런타임 지원</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Bun · Deno</h4>
+      <pre class="code" data-lang="text"><code>Bun
+  · N-API 를 상당 부분 지원합니다 (완전하지는 않습니다)
+  · 대부분의 애드온이 그대로 동작하지만 검증이 필요합니다
+  · Bun 자체 FFI(bun:ffi)가 더 빠르므로, C API 도 함께 제공하면 좋습니다
+
+Deno
+  · N-API 지원 (Deno 2.x 에서 npm 패키지와 함께)
+  · 권한 모델 때문에 --allow-ffi 등이 필요할 수 있습니다
+  · Deno.dlopen(FFI)가 더 자연스러운 경로입니다(🔗 f06)
+
+★ 실무 조언
+  하나의 C++ 코어를 두 가지로 노출하면 모든 런타임을 덮습니다
+    ① N-API 애드온  → Node · Electron (성능 최우선)
+    ② C ABI 공유 라이브러리 → Deno · Bun · 파이썬 · 그 외 (🔗 탭)
+  코어 로직을 순수 C++ 로 분리해 두면 어렵지 않습니다 (j02 구조)
+
+호환성 테스트
+  matrix: [node18, node20, node22, electron28, bun, deno]</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Electron 재빌드가 필요한 경우</h4>
+      <pre class="code" data-lang="bash"><code># nan 기반 옛 애드온이거나 N-API 미사용 시
+npx electron-rebuild
+npx @electron/rebuild -f -w myaddon
+
+# 또는 직접
+npx node-gyp rebuild \
+  --target=28.0.0 \
+  --arch=x64 \
+  --dist-url=https://electronjs.org/headers
+
+# prebuildify 로 Electron 용도 함께 만들기
+npx prebuildify --napi --strip \
+  -t 18.0.0 -t electron@28.0.0
+
+# 확인 — 어떤 런타임에서 로드되는지
+npx electron -e "console.log(require('myaddon').buildInfo)"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>N-API 로 만들었다면</b> 이 명령들이 <b>대부분 필요 없습니다</b>.
+        기존 프로젝트가 <code>electron-rebuild</code> 를 계속 돌리고 있다면
+        <b>nan 을 쓰고 있다는 신호</b>이고, N-API 로 이전할 이유가 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">데스크탑 앱에서의 운영</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크래시가 앱 전체를 죽입니다</h4>
+      <pre class="code" data-lang="javascript"><code>// ★ 네이티브 크래시는 try/catch 로 못 잡습니다
+// 대책 ① utilityProcess 로 격리 (Electron 22+)
+import { utilityProcess } from 'electron'
+const child = utilityProcess.fork(path.join(__dirname, 'native-worker.js'))
+child.on('exit', (code) =&gt; {
+  log.error(`네이티브 워커 종료 (${code}) — 재시작`)
+  restart()                       // 앱은 살아 있습니다 ★
+})
+child.postMessage({ cmd: 'smooth', data })
+
+// 대책 ② 크래시 리포터
+import { crashReporter } from 'electron'
+crashReporter.start({ submitURL: 'https://crash.example.com', uploadToServer: true })
+//   덤프에서 네이티브 스택을 복원할 수 있습니다 (🔬 d11)
+
+// 대책 ③ 입력 검증을 IPC 경계에서
+ipcMain.handle('smooth', (_e, data, w) =&gt; {
+  if (!(data instanceof Float64Array)) throw new TypeError('...')
+  if (!Number.isInteger(w) || w &lt; 1 || w &gt; data.length) throw new RangeError('...')
+  return addon.smoothAsync(data, w)
+})
+//   렌더러(신뢰할 수 없는 입력)와 네이티브 사이에 방벽을 두세요 ★</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">큰 데이터를 렌더러와 주고받기</h4>
+      <pre class="code" data-lang="javascript"><code>// ❌ IPC 로 100MB 를 보내면 구조적 복제가 두 번 일어납니다
+ipcRenderer.invoke('process', bigArray)
+
+// ✅ ① 파일 경로를 주고받기 (가장 단순)
+const outPath = await ipcRenderer.invoke('process', inputPath)
+
+// ✅ ② SharedArrayBuffer (같은 메모리를 공유)
+//    Electron 에서 쓰려면 crossOriginIsolated 설정이 필요합니다
+const sab = new SharedArrayBuffer(n * 8)
+const view = new Float64Array(sab)
+await ipcRenderer.invoke('processShared', sab)   // 복사 없음 ★
+
+// ✅ ③ MessagePort 로 transferable 전달 (소유권 이전)
+const { port1, port2 } = new MessageChannel()
+ipcRenderer.postMessage('port', null, [port2])
+port1.postMessage(buffer, [buffer])              // 복사 대신 이전
+
+// 측정 — IPC 지연
+const t = performance.now()
+await ipcRenderer.invoke('smooth', data, 3)
+console.log(`왕복 ${(performance.now()-t).toFixed(1)}ms`)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Electron 에서 네이티브를 쓰는 진짜 이유</b>는 대개
+        <b>OS 기능 접근</b>(캡처·후킹·드라이버)이지 순수 계산이 아닙니다.
+        계산이 목적이라면 <b>IPC 비용이 이득을 깎아먹지 않는지</b> 먼저 재 보세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">호환성을 지키는 설계</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">napi_version 을 낮게 잡기</h4>
+      <pre class="code" data-lang="cpp"><code>// 필요한 최소 버전만 요구하면 더 많은 런타임을 덮습니다
+#define NAPI_VERSION 8        // Node 16+ · Electron 대부분
+
+// 상위 버전 기능을 조건부로 쓰기
+#if NAPI_VERSION &gt;= 9
+    napi_add_async_cleanup_hook(...);
+#endif
+
+// 런타임에 지원 여부 확인
+uint32_t ver;
+napi_get_version(env, &amp;ver);
+if (ver &gt;= 9) { /* 새 기능 */ } else { /* 대체 경로 */ }
+
+// 실험적 기능은 피하세요
+#define NAPI_EXPERIMENTAL     // ⚠ 다음 버전에서 바뀔 수 있습니다
+
+// node-addon-api 도 버전을 맞춰야 합니다
+// package.json
+"dependencies": { "node-addon-api": "^8.0.0" }
+// binding.gyp
+"defines": ["NAPI_VERSION=8", "NODE_ADDON_API_DISABLE_DEPRECATED"]</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호환성 매트릭스 테스트</h4>
+      <pre class="code" data-lang="yaml"><code># 한 번 빌드한 바이너리가 여러 런타임에서 도는지 ★
+jobs:
+  compat:
+    needs: prebuild
+    strategy:
+      matrix:
+        runtime:
+          - { name: node, ver: '18' }
+          - { name: node, ver: '20' }
+          - { name: node, ver: '22' }
+          - { name: electron, ver: '28' }
+          - { name: bun, ver: 'latest' }
+    steps:
+      - uses: actions/download-artifact@v4      # 빌드된 바이너리
+      - name: 로드 테스트
+        run: |
+          # 재빌드 없이 그대로 로드되어야 합니다
+          npx ${{ matrix.runtime.name }} -e "
+            const m = require('./index.js')
+            console.log(m.buildInfo)
+            console.assert(m.smooth(new Float64Array([1,2,3]), 3).length === 3)
+          "</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 테스트가 N-API 의 값어치를 증명합니다</b> —
+        <b>한 번 빌드한 바이너리</b>가 Node 18~22 와 Electron 에서
+        <b>재빌드 없이 그대로</b> 도는 것을 CI 가 계속 확인해 줍니다.
+        nan 기반이었다면 조합마다 별도 빌드가 필요했습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>N-API 로 만들면 ABI 문제가 대부분 사라집니다</b> —
+    Node 버전이 올라가도, Electron 에서도 <b>재빌드가 필요 없습니다</b>.
+    Electron 에서는 <b>메인 프로세스에서만 로드</b>하고 IPC 로 노출하며,
+    <b><code>asarUnpack</code></b> 을 잊지 마세요.
+    크래시가 앱을 죽이는 것이 문제라면 <b><code>utilityProcess</code> 로 격리</b>하세요.</div>
+</section>
+
+</div><!-- /pane-node -->

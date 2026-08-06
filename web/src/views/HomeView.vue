@@ -32,10 +32,6 @@ import AppIcon from '@/components/AppIcon.vue'
           포트폴리오 보기 <AppIcon name="arrow" :size="17" />
         </RouterLink>
         <RouterLink to="/career" class="btn btn-ghost">경력 상세</RouterLink>
-        <a v-for="g in guides" :key="g.key" :href="g.href"
-           class="btn btn-ghost btn-guide" :title="g.title">
-          {{ g.emoji }} {{ g.label }} <span class="ext" aria-hidden="true">↗</span>
-        </a>
         <a v-for="l in links" :key="l.label" :href="l.href" class="btn btn-icon" target="_blank" rel="noopener" :title="l.value">
           <AppIcon :name="l.icon" :size="18" />
         </a>
@@ -78,8 +74,8 @@ import AppIcon from '@/components/AppIcon.vue'
     </div>
   </section>
 
-  <!-- 학습 가이드 -->
-  <section class="container block">
+  <!-- 학습 가이드 — 푸터의 '학습 가이드' 링크가 여기로 데려온다 -->
+  <section id="guides" class="container block">
     <div class="block-head">
       <span class="eyebrow">Side Project</span>
       <h2 class="section-title">직접 만든 학습 자료</h2>
@@ -312,19 +308,6 @@ import AppIcon from '@/components/AppIcon.vue'
   margin-top: 34px;
   display: flex;
   justify-content: center;
-}
-
-/* 히어로의 가이드 버튼 — 다른 ghost 버튼과 구분되게 살짝만 강조 */
-.btn-guide {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.btn-guide:hover {
-  background: var(--accent-soft);
-}
-.btn-guide .ext {
-  font-size: 0.8em;
-  opacity: 0.7;
 }
 
 /* 학습 가이드 진입 카드 — 가이드 수가 늘어도 폭에 맞춰 알아서 접힙니다 */
