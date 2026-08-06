@@ -23523,17 +23523,24 @@ document.addEventListener("visibilitychange", () => {
 })();
 
 /* --- 가로 스크롤 가능한 표에 힌트 배지 (첫 스크롤 시 제거) --- */
+/* 가로로 넘치는 표에 '밀어서 보세요' 표시를 붙인다.
+   예전에는 요소마다 rAF 를 따로 걸어 두고 그 안에서 재고 고치기를 반복했다.
+   표가 80개면 콜백도 80개, 강제 레이아웃도 80번이었다.
+   한 프레임에 모아서 재고, 그다음에 모아서 고친다. */
 function markScrollables(root){
-  $$(".tw, .scw", root || document).forEach(tw => {
-    if (tw.dataset.sc) return;
+  const list = $$(".tw, .scw", root || document).filter(tw => {
+    if (tw.dataset.sc) return false;
     tw.dataset.sc = "1";
-    requestAnimationFrame(() => {
-      if (tw.scrollWidth > tw.clientWidth + 8){
-        tw.classList.add("scrollable");
-        tw.addEventListener("scroll",
-          () => tw.classList.remove("scrollable"), { once:true, passive:true });
-      }
-    });
+    return true;
+  });
+  if (!list.length) return;
+  requestAnimationFrame(() => {
+    const over = list.filter(tw => tw.scrollWidth > tw.clientWidth + 8);   // ① 읽기만
+    for (const tw of over){                                               // ② 쓰기만
+      tw.classList.add("scrollable");
+      tw.addEventListener("scroll",
+        () => tw.classList.remove("scrollable"), { once:true, passive:true });
+    }
   });
 }
 
@@ -23546,11 +23553,36 @@ function secTop(){
   const n = parseFloat(v);
   return isNaN(n) ? 84 : n;
 }
+/* 화면에 걸린 .rv 를 즉시 드러낸다.
+   화면 밖의 것들은 IntersectionObserver 가 스크롤하며 알아서 처리하므로
+   여기서는 '지금 눈에 보이는 것'만 서둘러 드러내면 된다.
+
+   ★ 두 가지를 지킨다 —
+   ① 재는 것과 고치는 것을 섞지 않는다.
+      번갈아 하면 고칠 때마다 레이아웃이 무효화되어 다음 측정이 또 레이아웃을
+      강제한다(layout thrashing).
+   ② 문서 아래쪽이 연달아 나오면 그만 잰다.
+      탭을 막 열었을 때는 맨 위에 있으므로 화면에 드는 것은 몇 개뿐인데,
+      예전에는 그 몇 개를 찾겠다고 탭 안의 수십~수백 개를 전부 쟀다.
+      실측으로 이 함수 한 번이 35ms 였고, 얻는 것은 한 개였다.
+      (앞의 일부만 재는 것으로 0.3ms 가 됐다 — 놓친 것은 관찰기가 곧 처리한다) */
 function revealIn(){
-  $$(".pane.on .rv").forEach(e => {
-    const r = e.getBoundingClientRect();
-    if (r.top < innerHeight + 80 && r.bottom > -80) e.classList.add("in");
-  });
+  const list = $$(".pane.on .rv:not(.in)");
+  if (!list.length) return;
+  const h = innerHeight;
+
+  const box = [];
+  let below = 0;
+  for (let i = 0; i < list.length; i++){                    // ① 읽기만
+    const r = list[i].getBoundingClientRect();
+    box.push(r);
+    if (r.top <= h + 80) below = 0;
+    else if (++below > 12) break;                           // 화면 아래가 계속 → 그만
+  }
+  for (let i = 0; i < box.length; i++){                     // ② 쓰기만
+    const r = box[i];
+    if (r.top < h + 80 && r.bottom > -80) list[i].classList.add("in");
+  }
 }
 let goSecRun = 0;                    // 연속 클릭 시 이전 보정 루프를 무효화
 function goSec(id){
@@ -23578,7 +23610,6 @@ function goSec(id){
   const fix = () => {
     if (my !== goSecRun) return;                 // 더 최신 요청이 들어옴 → 중단
     const y = Math.max(0, Math.round(el.getBoundingClientRect().top + window.scrollY - pad));
-    revealIn();
     if (n++ > 14 || (Math.abs(y - Math.round(window.scrollY)) < 2 && y === last)){ done(); return; }
     last = y;
     window.scrollTo(0, y);
@@ -23612,32 +23643,6 @@ window.addEventListener("hashchange", () => {
   const go = () => { const id = hashId(); if (id && document.getElementById(id)) goSec(id); };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", go, {once:true});
   else go();
-})();
-
-/* ── 지금 보고 있는 자리를 주소에 남긴다 ──
-   주소창을 복사해 메신저에 붙이면 받는 쪽이 '그 탭 그 섹션'에서 시작한다.
-   예전에는 탭을 옮겨도 주소가 그대로여서 무엇을 보고 있든 첫 화면만 공유됐다.
-   pushState 가 아니라 replaceState 라 뒤로 가기 기록은 늘지 않는다. */
-function syncShareHash(){
-  const secs = $(".pane.on .sec[id]");
-  if (!secs.length) return;
-  const line = secTop() + 16;              // 헤더에 가린 만큼 내려서 판정
-  let cur = secs[0];
-  for (const s of secs){
-    if (s.getBoundingClientRect().top <= line) cur = s;
-    else break;                            // 문서 순서라 하나 넘어가면 끝
-  }
-  if ("#" + cur.id === location.hash) return;
-  try { history.replaceState(null, "", "#" + cur.id); } catch(e){}
-}
-window.syncShareHash = syncShareHash;
-
-(function watchShareHash(){
-  let t = null;
-  addEventListener("scroll", () => {       // 스크롤이 멎은 뒤에만 (주소를 매 프레임 고치지 않는다)
-    clearTimeout(t);
-    t = setTimeout(syncShareHash, 160);
-  }, { passive:true });
 })();
 
 /* --- 맨 위로 버튼 (모바일) --- */
@@ -23698,6 +23703,13 @@ function setCode(sel, text){
       if (!e.isIntersecting) return;
       const id = e.target.id;
       links.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + id));
+      /* 주소도 지금 섹션으로 맞춘다 — 주소창을 복사해 보내면
+         받는 쪽이 그 탭 그 자리에서 시작한다.
+         이미 돌고 있는 관찰기에 얹은 것이라 스크롤 비용은 늘지 않는다.
+         replaceState 라 뒤로 가기 기록도 쌓이지 않는다. */
+      if ("#" + id !== location.hash){
+        try { history.replaceState(null, "", "#" + id); } catch(err){}
+      }
     });
   }, {rootMargin:"-25% 0px -65% 0px"});
   secs.forEach(s => { if (s.id) spy.observe(s); });
@@ -23805,13 +23817,25 @@ function setCode(sel, text){
     /* 팝오버는 body 에 붙어 있고 위치는 열 때 한 번 계산한 값이다.
        그래서 무엇이든 스크롤되면 가리키던 그룹과 어긋난다.
        스크롤은 거품처럼 올라오지 않으므로(캡처 단계에서만 잡힌다)
-       사이드바 안쪽 스크롤까지 받으려면 capture 가 필요하다. */
-    addEventListener("scroll", hide, {passive:true, capture:true});
+       사이드바 안쪽 스크롤까지 받으려면 capture 가 필요하다.
+       닫혀 있을 때는 아무것도 하지 않도록 먼저 걸러 낸다 —
+       이 리스너는 문서의 모든 스크롤에 붙기 때문이다. */
+    addEventListener("scroll", () => { if (pop.classList.contains("on")) hide(); },
+                     {passive:true, capture:true});
     addEventListener("blur", hide);
     addEventListener("resize", hide);
     document.addEventListener("keydown", e => { if (e.key === "Escape") hide(); });
-    // 키보드로 사이드바를 빠져나가면 (focus 로 열린 팝오버가) 남지 않도록
-    document.addEventListener("focusin", e => { if (!side.contains(e.target)) hide(); });
+
+    /* 키보드로 사이드바를 빠져나가면 (focus 로 열린 팝오버가) 남지 않도록.
+       ★ 팝오버 자신은 반드시 빼야 한다 —
+       팝오버 버튼을 누르면 mousedown 단계에서 그 버튼이 포커스를 받는데,
+       팝오버는 body 에 붙어 있어 side.contains() 가 false 다.
+       여기서 닫아 버리면 display:none 이 되어 버튼이 사라지고,
+       mouseup 이 갈 곳을 잃어 click 이 아예 발생하지 않는다
+       (= 눌러도 탭이 바뀌지 않는다). */
+    document.addEventListener("focusin", e => {
+      if (!side.contains(e.target) && !pop.contains(e.target)) hide();
+    });
   }
 
   /* 탭이 바뀌면(단축키 · 검색 · 시트) 그 탭이 속한 그룹으로 양쪽을 맞춘다 */
@@ -23923,15 +23947,10 @@ function switchTab(name){
   const tc = $("#tabcurTxt");
   if (tc && TAB_LABEL[name]) tc.textContent = TAB_LABEL[name];
   tabDrop(false);
-  // 탭을 옮기면 주소도 그 탭의 첫 섹션으로 (공유 링크가 지금 화면을 가리키도록)
-  if (window.syncShareHash) requestAnimationFrame(window.syncShareHash);
   try { sessionStorage.setItem("jsg-tab", name); } catch(e) {}
 
-  requestAnimationFrame(() => {
-    $$(".pane.on .rv").forEach(e => {
-      if (e.getBoundingClientRect().top < innerHeight) e.classList.add("in");
-    });
-  });
+  // 새로 보이는 pane 에서 화면에 걸린 것은 즉시 드러낸다 (읽기·쓰기를 가른 판)
+  requestAnimationFrame(revealIn);
 }
 
 /* 주제 탭 드롭다운 (전 해상도 공통) */

@@ -29,15 +29,10 @@ function switchTab(name){
   const tc = $("#tabcurTxt");
   if (tc && TAB_LABEL[name]) tc.textContent = TAB_LABEL[name];
   tabDrop(false);
-  // 탭을 옮기면 주소도 그 탭의 첫 섹션으로 (공유 링크가 지금 화면을 가리키도록)
-  if (window.syncShareHash) requestAnimationFrame(window.syncShareHash);
   try { sessionStorage.setItem("jvg-tab", name); } catch(e) {}
 
-  requestAnimationFrame(() => {
-    $$(".pane.on .rv").forEach(e => {
-      if (e.getBoundingClientRect().top < innerHeight) e.classList.add("in");
-    });
-  });
+  // 새로 보이는 pane 에서 화면에 걸린 것은 즉시 드러낸다 (읽기·쓰기를 가른 판)
+  requestAnimationFrame(revealIn);
 }
 
 /* 주제 탭 드롭다운 (전 해상도 공통) */

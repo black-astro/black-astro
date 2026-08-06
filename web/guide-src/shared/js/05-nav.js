@@ -100,13 +100,25 @@
     /* 팝오버는 body 에 붙어 있고 위치는 열 때 한 번 계산한 값이다.
        그래서 무엇이든 스크롤되면 가리키던 그룹과 어긋난다.
        스크롤은 거품처럼 올라오지 않으므로(캡처 단계에서만 잡힌다)
-       사이드바 안쪽 스크롤까지 받으려면 capture 가 필요하다. */
-    addEventListener("scroll", hide, {passive:true, capture:true});
+       사이드바 안쪽 스크롤까지 받으려면 capture 가 필요하다.
+       닫혀 있을 때는 아무것도 하지 않도록 먼저 걸러 낸다 —
+       이 리스너는 문서의 모든 스크롤에 붙기 때문이다. */
+    addEventListener("scroll", () => { if (pop.classList.contains("on")) hide(); },
+                     {passive:true, capture:true});
     addEventListener("blur", hide);
     addEventListener("resize", hide);
     document.addEventListener("keydown", e => { if (e.key === "Escape") hide(); });
-    // 키보드로 사이드바를 빠져나가면 (focus 로 열린 팝오버가) 남지 않도록
-    document.addEventListener("focusin", e => { if (!side.contains(e.target)) hide(); });
+
+    /* 키보드로 사이드바를 빠져나가면 (focus 로 열린 팝오버가) 남지 않도록.
+       ★ 팝오버 자신은 반드시 빼야 한다 —
+       팝오버 버튼을 누르면 mousedown 단계에서 그 버튼이 포커스를 받는데,
+       팝오버는 body 에 붙어 있어 side.contains() 가 false 다.
+       여기서 닫아 버리면 display:none 이 되어 버튼이 사라지고,
+       mouseup 이 갈 곳을 잃어 click 이 아예 발생하지 않는다
+       (= 눌러도 탭이 바뀌지 않는다). */
+    document.addEventListener("focusin", e => {
+      if (!side.contains(e.target) && !pop.contains(e.target)) hide();
+    });
   }
 
   /* 탭이 바뀌면(단축키 · 검색 · 시트) 그 탭이 속한 그룹으로 양쪽을 맞춘다 */
