@@ -300,6 +300,92 @@ sudo journalctl -u tomcat -f</code></pre>
     <b>DNS 역조회를 수행</b>해 요청당 수십~수백 ms 가 추가될 수 있습니다.
     기본값은 false 이지만 옛 설정에서 true 인 경우가 있습니다.
   </div>
+
+  <div class="diag rv d2">
+    <svg viewBox="0 0 680 232" role="img" aria-label="요청은 네 개의 관문을 차례로 통과한다. 먼저 maxConnections까지 연결이 받아들여지고, 그중 maxThreads 개수만 실제로 처리되며, 스레드가 다 차면 acceptCount 길이의 대기열에 들어가고 그마저 넘치면 연결이 거부된다. 처리 중인 요청은 다시 DB 커넥션 풀을 기다리므로 가장 좁은 관문이 실제 처리량을 정한다">
+      <text x="16" y="16" class="lbl">요청이 통과하는 네 관문 — 가장 좁은 곳이 실제 처리량입니다</text>
+      <rect class="bx" x="16" y="30" width="126" height="62"/>
+      <text x="79" y="49" font-size="10" text-anchor="middle">① 연결 수락</text>
+      <text x="79" y="65" font-size="9" text-anchor="middle" class="lbl">maxConnections</text>
+      <text x="79" y="78" font-size="9" text-anchor="middle" class="lbl">기본 8192</text>
+      <path class="fl" d="M144 61 L168 61"/>
+      <rect class="bx bx-warn" x="170" y="30" width="132" height="62"/>
+      <text x="236" y="49" font-size="10" text-anchor="middle">② 처리 스레드</text>
+      <text x="236" y="65" font-size="9" text-anchor="middle" class="lbl">maxThreads</text>
+      <text x="236" y="78" font-size="9" text-anchor="middle" class="lbl">기본 200 ← 좁아짐</text>
+      <path class="fl" d="M304 61 L328 61"/>
+      <rect class="bx" x="330" y="30" width="132" height="62"/>
+      <text x="396" y="49" font-size="10" text-anchor="middle">③ 대기열</text>
+      <text x="396" y="65" font-size="9" text-anchor="middle" class="lbl">acceptCount</text>
+      <text x="396" y="78" font-size="9" text-anchor="middle" class="lbl">넘치면 연결 거부</text>
+      <path class="fl" d="M464 61 L488 61"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="3.2s" repeatCount="indefinite" path="M144 61 L168 61 L304 61 L328 61 L464 61 L488 61"/></circle>
+      <rect class="bx bx-warn" x="490" y="30" width="174" height="62"/>
+      <text x="577" y="49" font-size="10" text-anchor="middle">④ DB 커넥션 풀</text>
+      <text x="577" y="65" font-size="9" text-anchor="middle" class="lbl">HikariCP 기본 10</text>
+      <text x="577" y="78" font-size="9" text-anchor="middle" class="lbl">← 실제로는 여기가 병목</text>
+      <rect class="bx" x="16" y="104" width="648" height="40"/>
+      <text x="340" y="120" font-size="9" text-anchor="middle" class="lbl">maxThreads 500 · DB 풀 20 이면 → 480개 스레드는 커넥션을 기다리며 놀고 있습니다</text>
+      <text x="340" y="134" font-size="9" text-anchor="middle" class="lbl">메모리(스레드당 1MB)와 문맥 전환 비용만 늘고 처리량은 그대로입니다</text>
+      <text x="16" y="168" class="lbl" font-size="10">"maxThreads 를 올렸는데 안 빨라져요" — 정상입니다. 병목이 ②가 아니라 ④에 있다는 신호입니다.</text>
+      <text x="16" y="184" class="lbl" font-size="10">"Connection refused" 가 나면 ③까지 가득 찬 것입니다. 늘려야 할 것은 대기열이 아니라 처리 속도입니다.</text>
+      <text x="16" y="200" class="lbl" font-size="10">대기열을 늘리면 거부 대신 "오래 기다리다 타임아웃"이 됩니다 — 사용자 경험은 오히려 나빠집니다.</text>
+      <text x="16" y="216" class="lbl" font-size="10">진단은 항상 스레드 덤프부터입니다. 스레드들이 어디서 멈춰 있는지가 곧 병목의 위치입니다.</text>
+    </svg>
+    <div class="cap">튜닝의 첫 질문은 <b>"어느 관문이 가장 좁은가"</b> 입니다 — 그 밖의 숫자를 만지는 것은 대부분 헛수고입니다.</div>
+  </div>
+
+  <h3 class="sub">프록시 뒤에 둘 때 꼭 맞춰야 하는 값</h3>
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:30%">설정</th><th>안 맞추면 생기는 일</th></tr>
+      <tr><td><code>address="127.0.0.1"</code></td><td class="warn"><b>8080 포트가 인터넷에 노출</b> — 프록시의 보안 설정이 전부 우회됩니다</td></tr>
+      <tr><td><code>keepAliveTimeout</code></td><td class="warn">Nginx 값보다 <b>짧으면 간헐적 502</b> — 재사용하려는 순간 톰캣이 끊습니다</td></tr>
+      <tr><td><code>proxyName</code>·<code>proxyPort</code>·<code>scheme</code></td><td>앱이 만든 리다이렉트 URL 이 <code>http://127.0.0.1:8080</code> 으로 나갑니다</td></tr>
+      <tr><td><code>RemoteIpValve</code></td><td>접근 로그와 앱의 IP 가 <b>전부 프록시 주소</b>로 찍힙니다</td></tr>
+      <tr><td><code>maxHttpHeaderSize</code></td><td>쿠키·JWT 가 크면 <b>431 Request Header Fields Too Large</b></td></tr>
+      <tr><td><code>compression="off"</code></td><td>Nginx 와 <b>이중 압축</b> — CPU 만 쓰고 이득이 없습니다</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d2" data-lang="xml"><code>&lt;!-- server.xml 의 &lt;Host&gt; 안 — 실제 클라이언트 IP 를 복원합니다 --&gt;
+&lt;Valve className="org.apache.catalina.valves.RemoteIpValve"
+       remoteIpHeader="X-Forwarded-For"
+       protocolHeader="X-Forwarded-Proto"
+       internalProxies="127\.0\.0\.1|10\.\d+\.\d+\.\d+" /&gt;
+&lt;!-- ★ internalProxies 를 반드시 지정하세요.
+     안 하면 클라이언트가 X-Forwarded-For 를 위조해
+     IP 기반 접근 제어를 헤더 한 줄로 우회할 수 있습니다. --&gt;</code></pre>
+
+  <pre class="code rv d2" data-lang="properties"><code># Spring Boot 내장 톰캣이면 설정 파일 한 곳에서 끝납니다
+server.address=127.0.0.1
+server.port=8080
+server.tomcat.threads.max=200
+server.tomcat.accept-count=200
+server.tomcat.max-connections=8192
+server.tomcat.connection-timeout=20s
+server.tomcat.keep-alive-timeout=65s      # ★ Nginx keepalive_timeout(60s) 보다 길게
+server.tomcat.max-http-form-post-size=10MB
+server.max-http-request-header-size=16KB
+
+# 프록시 헤더 신뢰 — 이 한 줄이면 RemoteIpValve 가 자동 등록됩니다
+server.forward-headers-strategy=native
+server.tomcat.remoteip.internal-proxies=127\\.0\\.0\\.1|10\\.\\d+\\.\\d+\\.\\d+
+
+# 접근 로그 (기본 꺼져 있습니다 — 켜 두세요)
+server.tomcat.accesslog.enabled=true
+server.tomcat.accesslog.pattern=%h %l %u %t "%r" %s %b %D
+#   %D = 처리 시간(ms) ★ 이게 없으면 "어느 요청이 느린가"를 못 봅니다</code></pre>
+
+  <div class="note warn rv d2">
+    <b><code>keepAliveTimeout</code> 을 Nginx 보다 짧게 두면 간헐적 502 가 납니다.</b>
+    Nginx 가 유휴 연결을 재사용하려는 <b>바로 그 순간 톰캣이 연결을 닫으면</b>,
+    요청이 허공에 나가 502 로 끝납니다.
+    재현이 안 되고 <b>부하가 낮을 때 오히려 자주</b> 나는 것이 특징입니다
+    (유휴 시간이 길어야 생기므로).
+    <b>백엔드 쪽을 항상 더 길게</b> 잡는 것이 원칙입니다.
+  </div>
 </section>
 
 <!-- ==================== t05 ==================== -->
@@ -541,6 +627,65 @@ Tomcat : HTML(API) 1개만 처리
     Nginx 의 <code>X-Accel-Redirect</code>(내부 리다이렉트)를 쓰면
     <b>권한 검사는 앱이 하고 파일 전송은 Nginx 가</b> 하는 구성이 가능합니다.
   </div>
+
+  <h3 class="sub">X-Accel-Redirect — 권한은 앱이, 전송은 Nginx 가</h3>
+  <pre class="code rv d2" data-lang="java"><code>// 앱은 권한만 확인하고 "이 파일을 보내라"고 지시만 합니다 — 전송은 안 합니다
+@GetMapping("/files/{id}")
+public ResponseEntity&lt;Void&gt; download(@PathVariable Long id, @LoginUser Member me) {
+
+    Attachment att = attachmentService.findAccessible(id, me);   // 권한 검사
+
+    return ResponseEntity.ok()
+        // ★ Nginx 만 이해하는 내부 경로 — 브라우저에는 안 나갑니다
+        .header("X-Accel-Redirect", "/protected/" + att.storedName())
+        .header(HttpHeaders.CONTENT_DISPOSITION,
+                ContentDisposition.attachment()
+                    .filename(att.originalName(), StandardCharsets.UTF_8).build().toString())
+        .header(HttpHeaders.CONTENT_TYPE, att.contentType())
+        .build();   // ★ 본문 없음 — 스레드가 즉시 반납됩니다
+}</code></pre>
+
+  <pre class="code rv d2" data-lang="conf"><code>location /protected/ {
+    internal;                       # ★ 외부에서 직접 접근 불가 — 앱을 거쳐야만
+    alias /var/data/uploads/;
+    sendfile on;
+    sendfile_max_chunk 512k;        # 큰 파일이 워커를 독점하지 않게
+}</code></pre>
+
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:34%">100MB 파일 1000명 동시 다운로드</th><th>결과</th></tr>
+      <tr><td>앱이 직접 스트리밍</td><td class="warn">스레드 1000개 필요 — <b>maxThreads 200 이면 즉시 포화</b></td></tr>
+      <tr><td>X-Accel-Redirect</td><td class="ok">앱 스레드는 <b>수 ms 만</b> 사용 — 전송은 Nginx 가 이벤트 루프로</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>Apache 에도 같은 기능이 있습니다</b> — <code>X-Sendfile</code>(<code>mod_xsendfile</code>).
+    S3 같은 오브젝트 스토리지를 쓴다면 <b>서명된 URL(presigned URL)</b>이
+    같은 역할을 합니다 — 앱이 권한을 확인하고 <b>짧은 수명의 URL 만 발급</b>하면
+    파일은 스토리지가 직접 내보냅니다.
+    <b>어떤 방식이든 원칙은 하나</b>입니다 — <b>앱 스레드로 바이트를 나르지 마세요</b>.
+  </div>
+
+  <h3 class="sub">Spring Boot 정적 자원을 밖으로 빼는 실전</h3>
+  <pre class="code rv d2" data-lang="bash"><code># 방법 ① 빌드 산출물에서 정적 파일만 뽑아 배포
+./gradlew bootJar
+mkdir -p /opt/myapp/static
+unzip -o build/libs/app.jar 'BOOT-INF/classes/static/*' -d /tmp/x
+cp -r /tmp/x/BOOT-INF/classes/static/* /opt/myapp/static/
+#   → Nginx 의 location ^~ /static/ 이 이 폴더를 직접 서빙합니다
+
+# 방법 ② 프런트엔드를 완전히 분리 (권장)
+#   프런트: Vite·Next 빌드 → dist/ → Nginx 또는 CDN
+#   백엔드: API 만 담당 → 톰캣은 JSON 만 만듭니다
+#   장점: 배포 주기 분리 · 캐시 전략 분리 · 톰캣 부하 최소</code></pre>
+
+  <pre class="code rv d2" data-lang="properties"><code># 톰캣이 정적 파일을 아예 안 다루게 하기 (API 전용 서버라면)
+spring.web.resources.add-mappings=false
+#   → 없는 경로가 404 로 명확히 떨어집니다.
+#     기본값 true 면 정적 리소스를 찾느라 불필요한 파일 시스템 접근이 생기고,
+#     API 오타가 404 대신 index.html(200) 로 응답되는 혼란도 사라집니다.</code></pre>
 </section>
 
 <!-- ==================== t08 ==================== -->
@@ -675,6 +820,61 @@ spring.threads.virtual.enabled=true
     <br>· <b>DB 커넥션 풀이 여전히 병목</b>입니다 — 스레드가 늘어도 커넥션은 20개
     <br>· <b>ThreadLocal 을 많이 쓰면</b> 메모리 사용이 늘 수 있습니다
     <br>자세한 내용은 <a href="../java-web/">☕ 자바 가이드</a>의 고급·동시성 탭을 보세요.
+  </div>
+
+  <h3 class="sub">스레드 풀과 DB 풀을 함께 맞추기</h3>
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:24%">서비스 성격</th><th style="width:22%">maxThreads</th><th>DB 풀 · 근거</th></tr>
+      <tr><td><b>DB 위주 CRUD</b></td><td>100~200</td><td>풀 <b>10~20</b> — 요청 대부분이 DB 를 씁니다. 풀보다 스레드를 크게 잡아도 대기만 늘어납니다</td></tr>
+      <tr><td><b>외부 API 호출 위주</b></td><td>200~400</td><td>풀 10 — DB 는 거의 안 쓰고 <b>네트워크 대기</b>가 깁니다</td></tr>
+      <tr><td><b>계산 위주</b></td><td class="ok"><b>코어 수 × 2</b></td><td>풀 5 — 더 늘리면 문맥 전환만 늘어납니다</td></tr>
+      <tr><td><b>정적 · 프록시</b></td><td>—</td><td>애초에 톰캣까지 오면 안 됩니다(t07)</td></tr>
+      <tr><td><b>가상 스레드</b><br><span class="sm">Java 21+</span></td><td class="ok">제약 없음</td><td class="warn">풀이 유일한 상한이 됩니다 — <b>풀 크기를 반드시 재검토</b></td></tr>
+    </table>
+  </div>
+
+  <div class="note info rv d2">
+    <b>DB 커넥션 풀은 크게 잡을수록 좋은 것이 아닙니다.</b>
+    HikariCP 문서의 권장 공식은 <code>커넥션 수 = (코어 수 × 2) + 디스크 수</code> 정도입니다 —
+    <b>4코어면 10 안팎</b>이 출발점입니다.
+    DB 도 결국 코어 수만큼만 동시에 일할 수 있어서,
+    커넥션을 100개 열면 <b>DB 내부에서 경합이 생겨 오히려 전체가 느려집니다</b>.
+    <b>앱 서버 대수 × 풀 크기</b>가 DB 의 <code>max_connections</code> 를 넘지 않는지도 함께 확인하세요.
+  </div>
+
+  <pre class="code rv d2" data-lang="bash"><code># ① 지금 스레드가 몇 개 쓰이고 있나 (JMX)
+jcmd &lt;pid&gt; ManagementAgent.status
+# Spring Boot Actuator 를 쓰면 훨씬 간단합니다
+curl -s localhost:8081/actuator/metrics/tomcat.threads.busy
+curl -s localhost:8081/actuator/metrics/tomcat.threads.config.max
+curl -s localhost:8081/actuator/metrics/hikaricp.connections.pending   # ★ 이게 핵심
+
+# ② 스레드가 어디서 막혀 있나 — 튜닝 전에 반드시
+jcmd &lt;pid&gt; Thread.print &gt; dump.txt
+grep -c 'java.lang.Thread.State: BLOCKED'       dump.txt   # 락 경합
+grep -c 'java.lang.Thread.State: WAITING'       dump.txt   # 외부 대기
+grep -A3 '"http-nio-8080-exec' dump.txt | grep -o 'at [a-z.]*' | sort | uniq -c | sort -rn | head
+#   → 톰캣 워커 스레드들이 공통으로 멈춰 있는 지점이 곧 병목입니다
+
+# ③ 30초 간격으로 3번 떠서 비교하면 "계속 같은 곳"인지 알 수 있습니다</code></pre>
+
+  <div class="note warn rv d2">
+    <b><code>hikaricp.connections.pending</code> 이 0 이 아니면 스레드를 늘려도 소용없습니다.</b>
+    이 값은 <b>커넥션을 못 받아 대기 중인 스레드 수</b>입니다.
+    여기에 숫자가 쌓여 있다는 것은 <b>병목이 DB 풀</b>이라는 확정적인 증거입니다.
+    이때 할 일은 <code>maxThreads</code> 상향이 아니라
+    <b>느린 쿼리 개선 · N+1 제거 · 캐시 · 풀 크기 재조정</b> 순입니다.
+    <b>지표를 안 보고 스레드 수부터 올리는 것</b>이 가장 흔한 잘못된 대응입니다.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>가상 스레드를 켜면 병목의 위치가 옮겨 갑니다.</b>
+    톰캣 스레드 제약이 사라지는 대신,
+    <b>DB 풀·외부 API 커넥션 풀·메모리</b>가 새로운 상한이 됩니다.
+    켜기 전에 <code>maximum-pool-size</code> 를 다시 검토하고,
+    <b>속도 제한(rate limit)</b>을 함께 두세요 —
+    수만 요청이 한꺼번에 들어와 <b>DB 를 밀어붙이는</b> 구조가 될 수 있습니다.
   </div>
 </section>
 

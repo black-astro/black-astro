@@ -345,6 +345,144 @@ finally { ArrayPool&lt;byte&gt;.Shared.Return(buf); }   // ★ 반드시 반납<
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 200" role="img" aria-label="Substring은 원본 문자열에서 필요한 부분을 새 메모리에 복사해 만들기 때문에 조각마다 힙 할당이 생긴다. Span은 원본을 그대로 두고 시작 위치와 길이만 가리키는 창을 만들어, 몇 개를 잘라도 할당이 전혀 없다">
+      <text x="16" y="16" class="lbl">문자열 하나를 세 조각으로 자를 때 — 메모리에서 벌어지는 일</text>
+      <text x="16" y="36" class="lbl" font-size="10">Substring — 조각마다 새로 복사합니다</text>
+      <rect class="bx" x="16" y="44" width="316" height="26"/>
+      <text x="174" y="61" font-size="9" text-anchor="middle" class="lbl">원본 "2026-08-07" (힙)</text>
+      <rect class="bx bx-warn" x="16" y="76" width="100" height="24"/>
+      <text x="66" y="92" font-size="9" text-anchor="middle" class="lbl">"2026" 새 할당</text>
+      <rect class="bx bx-warn" x="124" y="76" width="100" height="24"/>
+      <text x="174" y="92" font-size="9" text-anchor="middle" class="lbl">"08" 새 할당</text>
+      <rect class="bx bx-warn" x="232" y="76" width="100" height="24"/>
+      <text x="282" y="92" font-size="9" text-anchor="middle" class="lbl">"07" 새 할당</text>
+      <text x="174" y="116" font-size="9" text-anchor="middle" class="lbl">→ 객체 3개 추가. 초당 만 번이면 GC 가 계속 돕니다</text>
+      <text x="366" y="36" class="lbl" font-size="10">Span — 원본을 가리키는 창만 만듭니다</text>
+      <rect class="bx bx-ok" x="366" y="44" width="298" height="26"/>
+      <text x="515" y="61" font-size="9" text-anchor="middle" class="lbl">원본 "2026-08-07" — 그대로 두고 건드리지 않음</text>
+      <rect class="bx" x="366" y="76" width="94" height="24"/>
+      <text x="413" y="92" font-size="9" text-anchor="middle" class="lbl">(0, 4)</text>
+      <rect class="bx" x="468" y="76" width="94" height="24"/>
+      <text x="515" y="92" font-size="9" text-anchor="middle" class="lbl">(5, 2)</text>
+      <rect class="bx" x="570" y="76" width="94" height="24"/>
+      <text x="617" y="92" font-size="9" text-anchor="middle" class="lbl">(8, 2)</text>
+      <path class="fl" d="M413 72 L413 74"/>
+      <circle class="pk" r="3">
+        <animateMotion dur="2.2s" repeatCount="indefinite" path="M413 74 L515 74 L617 74"/></circle>
+      <text x="515" y="116" font-size="9" text-anchor="middle" class="lbl">→ 시작 위치와 길이 두 숫자뿐. 할당 0</text>
+      <text x="16" y="146" class="lbl" font-size="10">Span 은 "복사본"이 아니라 "참조 + 길이"입니다 — 그래서 원본이 사라지면 함께 무효가 됩니다.</text>
+      <text x="16" y="162" class="lbl" font-size="10">필드에 저장하거나 async 메서드를 넘길 수 없는 것도 이 때문입니다(수명을 컴파일러가 보장해야 하니까요).</text>
+      <text x="16" y="178" class="lbl" font-size="10">그 제약이 걸리는 자리에서는 Memory&lt;T&gt; 를 쓰고, 실제로 읽고 쓸 때만 .Span 으로 꺼냅니다.</text>
+      <text x="16" y="194" class="lbl" font-size="10">"할당을 줄인다"의 실체는 GC 가 돌 이유를 줄이는 것입니다 — 프레임이 튀는 원인을 하나 없애는 셈입니다.</text>
+    </svg>
+    <div class="cap"><b>자르기·찾기·파싱</b>이 반복되는 경로에서만 의미가 있습니다 — 그 밖에서는 <code>Substring</code> 이 읽기 좋고 충분히 빠릅니다.</div>
+  </div>
+
+  <h3 class="sub">Span · Memory · 배열 — 언제 무엇을</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>타입</th><th>어디에 살 수 있나</th><th>쓸 곳</th><th>못 하는 것</th></tr></thead>
+      <tbody>
+        <tr><td><code>Span&lt;T&gt;</code></td><td><b>스택만</b>(ref struct)</td><td>동기 메서드 안의 파싱·슬라이스</td><td>필드 저장 · async · 컬렉션에 넣기</td></tr>
+        <tr><td><code>ReadOnlySpan&lt;T&gt;</code></td><td>스택만</td><td><b>읽기 전용 파싱</b> — 기본으로 이것을</td><td>같음</td></tr>
+        <tr><td><code>Memory&lt;T&gt;</code></td><td>힙 가능</td><td><b>async 경계를 넘을 때</b> · 필드에 보관</td><td><code>stackalloc</code> 을 담을 수 없음</td></tr>
+        <tr><td><code>T[]</code></td><td>힙</td><td>수명이 길거나 공유해야 할 때</td><td>—</td></tr>
+        <tr><td><code>ArrayPool&lt;T&gt;</code></td><td>힙(재사용)</td><td><b>큰 임시 버퍼</b>(수 KB~수 MB)</td><td>반납을 잊으면 누수</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">할당 없이 파싱하기 — 실전 형태</h4>
+      <pre class="code" data-lang="csharp"><code>// CSV 한 줄을 문자열 하나도 안 만들고 읽기
+static bool TryParseRow(ReadOnlySpan&lt;char&gt; line, out Row row)
+{
+    row = default;
+
+    var i1 = line.IndexOf(',');
+    if (i1 &lt; 0) return false;
+    var i2 = line[(i1 + 1)..].IndexOf(',');
+    if (i2 &lt; 0) return false;
+    i2 += i1 + 1;
+
+    if (!int.TryParse(line[..i1], out var id)) return false;              // 할당 0
+    var name = line[(i1 + 1)..i2];                                        // 창만
+    if (!decimal.TryParse(line[(i2 + 1)..], out var amount)) return false;
+
+    row = new Row(id, name.ToString(), amount);   // 필요한 것만 문자열로
+    return true;
+}
+
+// 구분자로 나누기 — Split 은 배열 + 문자열들을 만듭니다
+foreach (var part in line.Split(','))            // ✗ 할당 여러 개
+{ }
+
+foreach (var range in line.AsSpan().Split(','))  // ✓ .NET 9+ — 할당 0
+{
+    var part = line.AsSpan()[range];
+}
+
+// 문자열 조립도 할당 없이 (길이를 아는 경우)
+var key = string.Create(16, (roomId, slot), static (dst, s) =&gt;
+{
+    s.roomId.TryFormat(dst, out var w);
+    dst[w] = ':';
+    s.slot.TryFormat(dst[(w + 1)..], out _);
+});</code></pre>
+      <div class="note tip">
+        <b><code>int.TryParse</code>·<code>decimal.TryParse</code>·<code>DateTime.TryParse</code> 는
+        전부 <code>ReadOnlySpan&lt;char&gt;</code> 오버로드가 있습니다.</b>
+        그래서 <b>문자열로 만들지 않고 바로 숫자로</b> 갈 수 있습니다.
+        반대 방향인 <code>TryFormat</code> 도 마찬가지여서,
+        <b>파싱과 출력 양쪽 모두 할당 0</b> 이 가능합니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">여기서 실수합니다</h4>
+      <pre class="code" data-lang="csharp"><code>// ✗ ① stackalloc 을 루프 안에서 — 스택이 쌓여 넘칩니다
+for (var i = 0; i &lt; 10000; i++)
+{
+    Span&lt;byte&gt; buf = stackalloc byte[1024];   // 스택 오버플로
+}
+// ✓ 루프 밖에서 한 번, 또는 ArrayPool 로
+Span&lt;byte&gt; buf = stackalloc byte[1024];
+for (var i = 0; i &lt; 10000; i++) { buf.Clear(); /* ... */ }
+
+// ✗ ② 크기를 입력에서 받아 stackalloc — 공격 지점이 됩니다
+Span&lt;byte&gt; b = stackalloc byte[header.Length];       // 위험
+// ✓ 상한을 두고 넘으면 풀에서
+byte[]? rented = null;
+Span&lt;byte&gt; b2 = header.Length &lt;= 256
+    ? stackalloc byte[256]
+    : (rented = ArrayPool&lt;byte&gt;.Shared.Rent(header.Length));
+try { /* 사용 */ }
+finally { if (rented is not null) ArrayPool&lt;byte&gt;.Shared.Return(rented); }
+
+// ✗ ③ 반납한 배열을 계속 씀 — 다른 곳이 그 배열을 빌려 갑니다
+var arr = ArrayPool&lt;byte&gt;.Shared.Rent(1024);
+ArrayPool&lt;byte&gt;.Shared.Return(arr);
+Process(arr);                                  // 내용이 이미 바뀌었을 수 있습니다
+
+// ✗ ④ Rent 는 "요청한 크기 이상"을 줍니다 — Length 를 믿지 마세요
+var a = ArrayPool&lt;byte&gt;.Shared.Rent(100);
+// a.Length 는 128 일 수 있습니다
+Process(a.AsSpan(0, 100));                     // ✓ 실제 크기를 직접 잘라 쓰기
+
+// ✗ ⑤ 민감 데이터를 담았다면 반납 전에 지우기
+ArrayPool&lt;byte&gt;.Shared.Return(a, clearArray: true);</code></pre>
+      <div class="note warn">
+        <b>ArrayPool 은 "빌린 것을 반드시 돌려주는" 규칙 위에서만 안전합니다.</b>
+        예외가 나서 <code>Return</code> 을 건너뛰면 <b>풀이 말라</b>
+        이후 <code>Rent</code> 가 매번 새로 할당하게 됩니다 —
+        최적화하려다 <b>오히려 더 많이 할당</b>하는 상태가 됩니다.
+        반드시 <code>try/finally</code> 로 감싸세요.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -658,6 +796,102 @@ public static partial class Log
       </div>
     </div>
   </div>
+
+  <h3 class="sub">무엇을 언제 — 리플렉션 · 제너레이터 · 명시적 등록</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>방식</th><th>비용</th><th>AOT · IL2CPP</th><th>쓸 곳</th></tr></thead>
+      <tbody>
+        <tr><td><b>리플렉션</b></td><td>호출마다 느림<br><span class="sm">(캐시하면 완화)</span></td><td class="warn">잘릴 수 있음</td><td>개발 도구 · 테스트 · 시작 시 한 번</td></tr>
+        <tr><td><b>표현식 트리 캐시</b></td><td>첫 회만 느림</td><td class="warn"><b>불가</b>(동적 코드 생성)</td><td>ORM · 매퍼 내부</td></tr>
+        <tr><td class="ok"><b>소스 제너레이터</b></td><td class="ok"><b>0</b> — 그냥 코드입니다</td><td class="ok">안전</td><td><b>정규식 · 로깅 · JSON · DI 등록</b></td></tr>
+        <tr><td><b>수동 등록</b></td><td>0</td><td class="ok">안전</td><td>플러그인 목록 · 핸들러 매핑</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">세 가지를 실제로 바꿔 보기</h4>
+      <pre class="code" data-lang="csharp"><code>// ① 정규식 — new Regex 는 매번 파싱·컴파일합니다
+// ✗
+public bool IsValid(string n) =&gt; new Regex(@"^\w{3,16}$").IsMatch(n);
+// ✓ 빌드 시점에 최적화된 코드가 생성됩니다
+[GeneratedRegex(@"^\w{3,16}$", RegexOptions.CultureInvariant)]
+private static partial Regex NameRule();
+
+// ② 로깅 — 보간 문자열은 레벨이 꺼져 있어도 문자열을 만듭니다
+// ✗ Debug 가 꺼져 있어도 ToString() 이 전부 실행됩니다
+_log.LogDebug($"매칭 {roomId} {player.Name} {DateTime.UtcNow}");
+// ✓ 실제로 찍힐 때만 포맷됩니다 + 구조화 로그로 검색 가능
+[LoggerMessage(Level = LogLevel.Debug, Message = "매칭 {RoomId} {Player}")]
+public static partial void Matched(ILogger l, int roomId, string player);
+
+// ③ JSON — 기본 직렬화는 리플렉션으로 타입을 훑습니다
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(PlayerDto))]
+[JsonSerializable(typeof(List&lt;ItemDto&gt;))]
+internal partial class AppJson : JsonSerializerContext;
+
+var s = JsonSerializer.Serialize(dto, AppJson.Default.PlayerDto);
+
+// ASP.NET Core 전역 적용
+builder.Services.ConfigureHttpJsonOptions(o =&gt;
+    o.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJson.Default));</code></pre>
+      <div class="note tip">
+        <b>셋 다 <code>partial</code> 키워드 하나로 끝납니다.</b>
+        내가 선언만 해 두면 <b>컴파일러가 본체를 채워 넣습니다</b> —
+        생성된 코드는 IDE 에서 <b>F12(정의로 이동)로 직접 열어 볼 수</b> 있습니다.
+        "마법"이 아니라 <b>읽을 수 있는 평범한 C# 코드</b>가 만들어지는 것입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">리플렉션을 꼭 써야 한다면</h4>
+      <pre class="code" data-lang="csharp"><code>// 시작할 때 한 번만 훑고 결과를 캐시합니다 — 매 호출 조회는 금물
+public static class CommandRegistry
+{
+    private static readonly FrozenDictionary&lt;string, Action&lt;string[]&gt;&gt; Map =
+        BuildMap();
+
+    private static FrozenDictionary&lt;string, Action&lt;string[]&gt;&gt; BuildMap()
+    {
+        var d = new Dictionary&lt;string, Action&lt;string[]&gt;&gt;(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in typeof(Commands).GetMethods(
+                     BindingFlags.Public | BindingFlags.Static))
+        {
+            if (m.GetCustomAttribute&lt;CommandAttribute&gt;() is not { } attr) continue;
+            // ★ 델리게이트로 만들어 두면 이후 호출은 리플렉션이 아닙니다
+            var fn = m.CreateDelegate&lt;Action&lt;string[]&gt;&gt;();
+            d[attr.Name] = fn;
+        }
+        return d.ToFrozenDictionary();     // .NET 8+ — 읽기 전용에 최적화
+    }
+
+    public static bool TryRun(string name, string[] args)
+    {
+        if (!Map.TryGetValue(name, out var fn)) return false;
+        fn(args);                          // 일반 델리게이트 호출 속도
+        return true;
+    }
+}</code></pre>
+      <div class="note warn">
+        <b>AOT·IL2CPP 에서는 이 코드가 조용히 깨질 수 있습니다.</b>
+        <code>GetMethods()</code> 로만 참조되는 메서드는
+        <b>“아무도 안 쓴다”고 판단되어 통째로 잘려 나갑니다</b>.
+        핸들러가 하나도 안 찾아지는데 <b>에디터에서는 잘 되는</b> 상황이 되죠.
+        <br>· .NET AOT — <code>[DynamicDependency]</code> 로 보존 지정
+        <br>· Unity IL2CPP — <code>link.xml</code> 에 <code>preserve="all"</code>
+        <br>· <b>가장 확실한 것</b> — 목록을 <b>손으로 등록</b>하거나 소스 제너레이터로 만들기
+      </div>
+      <div class="note tip">
+        <b>"리플렉션을 쓰지 마라"가 아니라 "요청 경로에서 쓰지 마라"입니다.</b>
+        시작 시 한 번, 개발 도구, 테스트 코드에서는 아무 문제가 없습니다.
+        문제가 되는 것은 <b>초당 수천 번 도는 곳</b>에서
+        매번 <code>GetProperty</code> 를 부르는 종류의 코드입니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -705,6 +939,122 @@ internal static partial class Native
         네이티브 플러그인은 <b>에디터에서 한 번 로드되면 안 내려갑니다</b> —
         DLL 을 교체하려면 에디터를 재시작해야 하고,
         플러그인이 죽으면 <b>에디터가 통째로 죽습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">타입을 어떻게 넘기나 — 마셜링 대응표</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>C / C++</th><th>C#</th><th>주의</th></tr></thead>
+      <tbody>
+        <tr><td><code>int</code> · <code>float</code> · <code>double</code></td><td><code>int</code> · <code>float</code> · <code>double</code></td><td>그대로 복사됩니다(blittable)</td></tr>
+        <tr><td><code>bool</code></td><td><code>[MarshalAs(UnmanagedType.I1)] bool</code></td><td class="warn">C# <code>bool</code> 은 기본 <b>4바이트</b> — 명시하지 않으면 어긋납니다</td></tr>
+        <tr><td><code>const char*</code> (UTF-8)</td><td><code>string</code> + <code>StringMarshalling.Utf8</code></td><td>복사가 일어납니다</td></tr>
+        <tr><td><code>wchar_t*</code> (UTF-16)</td><td><code>string</code> + <code>StringMarshalling.Utf16</code></td><td>Windows API 는 대개 이쪽</td></tr>
+        <tr><td><code>float*</code> · 배열</td><td class="ok"><code>Span&lt;float&gt;</code> · <code>ReadOnlySpan&lt;T&gt;</code></td><td class="ok"><b>복사 없음</b> — 가장 좋은 형태</td></tr>
+        <tr><td><code>struct</code></td><td><code>[StructLayout(LayoutKind.Sequential)]</code></td><td class="warn"><b>필드 순서·패딩이 정확히 같아야</b> 합니다</td></tr>
+        <tr><td>콜백 함수 포인터</td><td><code>delegate*</code> · <code>[UnmanagedCallersOnly]</code></td><td class="warn">GC 가 델리게이트를 수거하면 <b>크래시</b></td></tr>
+        <tr><td>불투명 핸들</td><td><code>SafeHandle</code> 파생</td><td class="ok">해제를 <b>구조적으로 보장</b>합니다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">안전하게 감싸는 형태</h4>
+      <pre class="code" data-lang="csharp"><code>// ① 핸들은 SafeHandle 로 — Dispose 를 잊어도 파이널라이저가 해제합니다
+internal sealed class AudioHandle() : SafeHandleZeroOrMinusOneIsInvalid(true)
+{
+    protected override bool ReleaseHandle()
+    {
+        Native.AudioClose(handle);
+        return true;
+    }
+}
+
+internal static partial class Native
+{
+    [LibraryImport("audio", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial AudioHandle AudioOpen(string device);
+
+    [LibraryImport("audio")]
+    internal static partial void AudioClose(nint h);
+
+    // ② 배열은 Span 으로 — 복사도 고정(pinning)도 필요 없습니다
+    [LibraryImport("audio")]
+    internal static partial int AudioMix(
+        ReadOnlySpan&lt;float&gt; input, Span&lt;float&gt; output, int frames);
+}
+
+// ③ 구조체는 레이아웃을 못 박습니다
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal struct Vec3
+{
+    public float X, Y, Z;
+}
+
+// ④ 콜백은 정적 메서드 + 함수 포인터로 (GC 수거 걱정이 없습니다)
+[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+private static void OnFrame(nint ctx, int frames) { /* ... */ }
+
+unsafe
+{
+    Native.AudioSetCallback(&amp;OnFrame);
+}</code></pre>
+      <div class="note warn">
+        <b>델리게이트를 넘기고 참조를 안 들고 있으면 GC 가 수거합니다.</b>
+        네이티브 쪽은 이미 사라진 함수를 계속 부르게 되고,
+        <b>재현이 거의 안 되는 무작위 크래시</b>가 됩니다.
+        정적 필드로 델리게이트를 <b>붙잡아 두거나</b>,
+        위처럼 <code>[UnmanagedCallersOnly]</code> + 함수 포인터를 쓰세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">배포와 진단</h4>
+      <pre class="code" data-lang="xml"><code>&lt;!-- 플랫폼별 네이티브 바이너리를 전부 넣어야 합니다 --&gt;
+&lt;ItemGroup&gt;
+  &lt;None Include="native/win-x64/audio.dll"&gt;
+    &lt;CopyToOutputDirectory&gt;PreserveNewest&lt;/CopyToOutputDirectory&gt;
+    &lt;Link&gt;runtimes/win-x64/native/audio.dll&lt;/Link&gt;
+  &lt;/None&gt;
+  &lt;None Include="native/linux-x64/libaudio.so"&gt;
+    &lt;CopyToOutputDirectory&gt;PreserveNewest&lt;/CopyToOutputDirectory&gt;
+    &lt;Link&gt;runtimes/linux-x64/native/libaudio.so&lt;/Link&gt;
+  &lt;/None&gt;
+&lt;/ItemGroup&gt;</code></pre>
+      <pre class="code" data-lang="csharp"><code>// 이름이 플랫폼마다 다르면 직접 해석기를 등록합니다
+static Native()
+{
+    NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, (name, asm, path) =&gt;
+    {
+        if (name != "audio") return nint.Zero;
+        var file = OperatingSystem.IsWindows() ? "audio.dll"
+                 : OperatingSystem.IsMacOS()   ? "libaudio.dylib"
+                 :                               "libaudio.so";
+        return NativeLibrary.Load(file, asm, path);
+    });
+}</code></pre>
+      <div class="tw">
+        <table>
+          <thead><tr><th>증상</th><th>원인 1순위</th></tr></thead>
+          <tbody>
+            <tr><td><code>DllNotFoundException</code></td><td>파일이 출력 폴더에 없음 · <b>의존 DLL 이 없음</b></td></tr>
+            <tr><td><code>EntryPointNotFoundException</td><td>함수 이름 불일치 — C++ 이면 <code>extern "C"</code> 확인</td></tr>
+            <tr><td><code>AccessViolationException</code></td><td class="warn"><b>구조체 레이아웃·크기 불일치</b> · 해제된 포인터</td></tr>
+            <tr><td>값이 이상하게 들어옴</td><td><code>bool</code> 크기 · 패딩 · 엔디안</td></tr>
+            <tr><td>가끔 크래시</td><td>델리게이트 GC 수거 · 배열 미고정</td></tr>
+            <tr><td>x86 에서만 실패</td><td>호출 규약(<code>Cdecl</code> vs <code>StdCall</code>)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        <b><code>DllImport</code> 대신 <code>LibraryImport</code> 를 쓰세요(C# 12+).</b>
+        마셜링 코드를 <b>빌드 시점에 생성</b>하므로 런타임 비용이 없고
+        <b>AOT·IL2CPP 에서도 안전</b>합니다.
+        기존 <code>DllImport</code> 코드는 <code>partial</code> 로 바꾸고
+        분석기가 알려 주는 대로 고치면 대부분 그대로 전환됩니다.
       </div>
     </div>
   </div>

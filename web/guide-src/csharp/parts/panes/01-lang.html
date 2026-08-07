@@ -264,6 +264,93 @@ var s = sb.ToString();   // 마지막에 한 번</code></pre>
       </div>
     </div>
   </div>
+
+  <h3 class="sub rv">이어 붙이는 방법 — 상황별로 답이 다릅니다</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>상황</th><th>쓸 것</th><th>이유</th></tr></thead>
+      <tbody>
+        <tr><td>몇 개를 한 줄에</td><td class="ok"><code>$"{a} {b}"</code></td><td>컴파일러가 알아서 최적화합니다 — 가장 읽기 좋습니다</td></tr>
+        <tr><td>목록을 구분자로</td><td class="ok"><code>string.Join(", ", items)</code></td><td>전체 길이를 미리 계산해 한 번에 만듭니다</td></tr>
+        <tr><td>반복문에서 누적</td><td class="ok"><code>StringBuilder</code></td><td>중간 결과를 안 만듭니다</td></tr>
+        <tr><td>조건에 따라 조금씩</td><td><code>StringBuilder</code></td><td>—</td></tr>
+        <tr><td>고정 길이·초당 수천 번</td><td><code>string.Create</code></td><td>버퍼에 직접 씁니다 — 할당 1회</td></tr>
+        <tr><td>여러 줄 템플릿</td><td><code>"""원시 문자열"""</code></td><td>이스케이프 없이 그대로</td></tr>
+        <tr><td class="warn">루프에서 <code>+=</code></td><td class="warn"><b>쓰지 마세요</b></td><td>N번 반복에 N개의 문자열이 쓰레기로</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">비교와 검색 — 문화권이 결과를 바꿉니다</h4>
+      <pre class="code" data-lang="csharp"><code>// ★ 비교는 항상 방식을 명시하세요. 기본값이 상황마다 다릅니다.
+string.Equals(a, b, StringComparison.Ordinal);           // 바이트 그대로 — 가장 빠름
+string.Equals(a, b, StringComparison.OrdinalIgnoreCase); // ID·파일명·토큰 비교
+
+// 사용자에게 보여줄 정렬은 문화권을 따릅니다
+names.Sort(StringComparer.CurrentCulture);               // 한국어 가나다순
+Array.Sort(ids, StringComparer.Ordinal);                 // 내부 키 정렬
+
+// ✗ 이렇게 쓰면 터키어 환경에서 "I".ToLower() 가 ı(점 없는 i)가 됩니다
+if (input.ToLower() == "id") { }
+// ✓
+if (input.Equals("id", StringComparison.OrdinalIgnoreCase)) { }
+
+// 딕셔너리 키도 비교자를 지정할 수 있습니다
+var lookup = new Dictionary&lt;string, Item&gt;(StringComparer.OrdinalIgnoreCase);
+
+// 시작·포함 검사
+path.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+text.Contains("검", StringComparison.CurrentCulture);
+
+// 여러 값 중 하나인지
+if (cmd is "help" or "?" or "h") { }        // 패턴 매칭이 읽기 좋습니다</code></pre>
+      <div class="note warn">
+        <b>문화권 기본값이 부른 실제 사고가 있습니다.</b>
+        터키어 로캘에서 <code>"ID".ToLower()</code> 가 <code>"ıd"</code> 가 되어
+        <b>설정 키를 못 찾는</b> 버그가 대표적입니다.
+        <b>사람에게 보여줄 것은 문화권, 프로그램이 판단할 것은 Ordinal</b> —
+        이 한 줄만 지키면 이 종류의 버그가 통째로 사라집니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">숫자·날짜 서식 — 자주 쓰는 것만</h4>
+      <pre class="code" data-lang="csharp"><code>var gold = 1234567; var rate = 0.4567; var dt = DateTime.Now;
+
+$"{gold:N0}"        // 1,234,567     천 단위 구분
+$"{gold:C}"         // ₩1,234,567    통화(현재 문화권)
+$"{rate:P1}"        // 45.7%         백분율
+$"{rate:F2}"        // 0.46          소수점 2자리
+$"{gold:X}"         // 12D687        16진수
+$"{42:D5}"          // 00042         자릿수 채우기
+
+$"{dt:yyyy-MM-dd}"       // 2026-08-07
+$"{dt:HH:mm:ss}"         // 14:30:22
+$"{dt:yyyyMMdd_HHmmss}"  // 파일명에
+$"{dt:O}"                // ISO 8601 — ★ 저장·전송에는 항상 이것
+
+// 정렬 폭 지정 — 콘솔 표 만들 때
+foreach (var p in players)
+    Console.WriteLine($"{p.Name,-12}{p.Level,4}{p.Gold,12:N0}");
+//                     왼쪽정렬 12  오른쪽 4  오른쪽 12
+
+// ★ 저장·통신에는 문화권 무관 형식을 쓰세요
+var s = value.ToString(CultureInfo.InvariantCulture);
+//   독일 등에서는 소수점이 쉼표(1,5)라 파싱이 깨집니다
+
+// 파싱도 마찬가지
+decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v);</code></pre>
+      <div class="note tip">
+        <b>화면 표시는 문화권, 저장·전송은 Invariant.</b>
+        이 구분을 안 하면 <b>“해외 사용자만 숫자가 깨지는”</b> 버그가 납니다 —
+        국내에서는 절대 재현되지 않아서 원인을 찾기가 매우 어렵습니다.
+        날짜도 같습니다. <b><code>{dt:O}</code>(ISO 8601)</b> 로 저장하면
+        어느 나라에서 읽어도 같은 값이 됩니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -640,6 +727,120 @@ ArgumentNullException.ThrowIfNull(weapon);   // 인자 검사 한 줄</code></pr
       </div>
     </div>
   </div>
+
+  <h3 class="sub rv">null 을 다루는 다섯 가지 방법</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>쓰는 것</th><th>뜻</th><th>언제</th></tr></thead>
+      <tbody>
+        <tr><td><code>ArgumentNullException.ThrowIfNull(x)</code></td><td>null 이면 즉시 예외</td><td class="ok"><b>공개 메서드의 인자 검사</b> — 기본으로 이것</td></tr>
+        <tr><td><code>x?.Foo()</code></td><td>null 이면 건너뜀</td><td>선택적 값 · 이벤트 발행</td></tr>
+        <tr><td><code>x ?? 기본값</code></td><td>null 이면 대체</td><td>기본값이 명확할 때</td></tr>
+        <tr><td><code>x ??= 값</code></td><td>null 일 때만 대입</td><td>지연 초기화</td></tr>
+        <tr><td class="warn"><code>x!</code></td><td>“null 아님”이라고 컴파일러에 단언</td><td class="warn"><b>최후 수단</b> — 런타임 보호가 전혀 없습니다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">경고를 없애는 올바른 방법</h4>
+      <pre class="code" data-lang="csharp"><code>// ✗ ! 로 경고만 지우면 런타임에 그대로 터집니다
+var weapon = inventory.Find(x =&gt; x.Id == id)!;
+weapon.Use();                      // 못 찾으면 NullReferenceException
+
+// ✓ 못 찾은 경우를 코드로 다룹니다
+if (inventory.Find(x =&gt; x.Id == id) is not { } weapon)
+    return Result.NotFound;
+weapon.Use();                      // 여기서는 컴파일러도 압니다
+
+// 필수 값은 required 로 — 생성자를 안 써도 강제됩니다 (C# 11+)
+public class Player
+{
+    public required string Name { get; init; }
+    public required int Level    { get; init; }
+    public string? Guild         { get; init; }   // 선택
+}
+var p = new Player { Name = "용사", Level = 1 };   // Name 을 빼면 컴파일 오류
+
+// 나중에 채워지는 필드 — DI·프레임워크가 넣어 주는 경우
+private readonly ILogger _log = null!;   // 여기서는 !가 정당합니다
+                                         // (프레임워크가 반드시 채운다는 계약)
+
+// 패턴 매칭으로 한 번에
+if (dict.TryGetValue(key, out var v) &amp;&amp; v is { Count: &gt; 0 })
+{
+    Process(v);
+}</code></pre>
+      <div class="note tip">
+        <b><code>is not { } x</code> 패턴이 가장 실용적입니다.</b>
+        <b>null 검사와 변수 선언을 동시에</b> 하면서,
+        아래 코드에서는 컴파일러가 <b>null 이 아님을 알게</b> 됩니다.
+        <code>if (x != null)</code> 보다 짧고, <code>!</code> 를 쓸 이유를 없앱니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">제네릭 제약 — 무엇을 언제 거나</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>제약</th><th>얻는 것</th></tr></thead>
+          <tbody>
+            <tr><td><code>where T : class</code></td><td>null 비교 · 참조 비교 가능</td></tr>
+            <tr><td><code>where T : struct</code></td><td>박싱 없음 · <code>T?</code> 가 <code>Nullable&lt;T&gt;</code></td></tr>
+            <tr><td><code>where T : notnull</code></td><td>딕셔너리 키로 안전</td></tr>
+            <tr><td><code>where T : new()</code></td><td><code>new T()</code> 호출 가능</td></tr>
+            <tr><td><code>where T : IComparable&lt;T&gt;</code></td><td class="ok"><b>박싱 없이</b> 인터페이스 메서드 호출</td></tr>
+            <tr><td><code>where T : Enemy</code></td><td>그 타입의 멤버 사용</td></tr>
+            <tr><td><code>where T : INumber&lt;T&gt;</code></td><td class="ok">숫자 연산 — .NET 7+ <b>제네릭 수학</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="csharp"><code>// 제약이 없으면 아무것도 못 합니다 — object 수준
+static T Max&lt;T&gt;(T a, T b) =&gt; a &gt; b ? a : b;          // ✗ 컴파일 오류
+
+// 인터페이스 제약 — 박싱 없이 호출됩니다
+static T Max&lt;T&gt;(T a, T b) where T : IComparable&lt;T&gt;
+    =&gt; a.CompareTo(b) &gt;= 0 ? a : b;                   // ✓
+
+// 제네릭 수학 (.NET 7+) — int·float·decimal 을 하나로
+static T Sum&lt;T&gt;(ReadOnlySpan&lt;T&gt; xs) where T : INumber&lt;T&gt;
+{
+    var acc = T.Zero;
+    foreach (var x in xs) acc += x;
+    return acc;
+}
+Sum&lt;int&gt;([1, 2, 3]);        // 6
+Sum&lt;double&gt;([1.5, 2.5]);    // 4.0
+
+// 게임에서 자주 쓰는 형태 — 컴포넌트 풀
+public sealed class Pool&lt;T&gt; where T : Component
+{
+    private readonly Stack&lt;T&gt; _idle = new();
+    private readonly T _prefab;
+
+    public T Rent()
+    {
+        var x = _idle.Count &gt; 0 ? _idle.Pop() : Object.Instantiate(_prefab);
+        x.gameObject.SetActive(true);
+        return x;
+    }
+    public void Return(T x)
+    {
+        x.gameObject.SetActive(false);
+        _idle.Push(x);
+    }
+}</code></pre>
+      <div class="note warn">
+        <b>제네릭 메서드에서 <code>T</code> 를 <code>object</code> 로 다루면 박싱이 일어납니다.</b>
+        <code>where T : IComparable&lt;T&gt;</code> 처럼 <b>제네릭 인터페이스로 제약</b>하면
+        박싱 없이 직접 호출됩니다.
+        값 타입을 수만 개 다루는 게임 코드에서는
+        <b>이 차이가 GC 부담으로 그대로 나타납니다</b> —
+        🧬 <b>고급 탭</b>의 메모리 배치 절에서 자세히 다룹니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -910,6 +1111,125 @@ var save = JsonSerializer.Deserialize&lt;SaveData&gt;(json, opt)
         <code>Path.Combine(dir, "save.json")</code> 을 쓰면 OS 차이를 신경 쓸 필요가 없습니다.
         Unity 라면 저장 위치는 반드시 <code>Application.persistentDataPath</code> —
         <b>설치 폴더에 쓰면 권한 오류</b>가 납니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub rv">이 예외를 만나면 — 원인 1순위</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>예외</th><th>원인 1순위</th><th>고치는 법</th></tr></thead>
+      <tbody>
+        <tr><td><code>NullReferenceException</code></td><td>초기화 전 접근 · Unity 인스펙터 미할당</td><td><code>Nullable</code> 켜기 · <code>is not { }</code> 검사</td></tr>
+        <tr><td><code>IndexOutOfRangeException</code></td><td>배열 경계 — <code>&lt;=</code> 를 <code>&lt;</code> 로</td><td><code>^1</code>·범위 연산자 사용</td></tr>
+        <tr><td><code>InvalidOperationException</code><br><span class="sm">Collection was modified</span></td><td><code>foreach</code> 도중 컬렉션 변경</td><td><code>ToList()</code> 로 복사 후 순회 · 역순 <code>for</code></td></tr>
+        <tr><td><code>ObjectDisposedException</code></td><td><code>using</code> 블록 밖에서 사용</td><td>수명을 다시 설계</td></tr>
+        <tr><td><code>FormatException</code></td><td><code>int.Parse</code> 에 빈 값·문자</td><td class="ok"><code>TryParse</code> 로 바꾸기</td></tr>
+        <tr><td><code>JsonException</code></td><td>필드 이름·타입 불일치</td><td>네이밍 정책 확인 · <code>[JsonPropertyName]</code></td></tr>
+        <tr><td><code>UnauthorizedAccessException</code></td><td>쓰기 권한 없는 경로</td><td><code>LocalApplicationData</code> · <code>persistentDataPath</code></td></tr>
+        <tr><td><code>IOException</code><br><span class="sm">파일이 사용 중</span></td><td>다른 프로그램이 열어 둠</td><td>사용자에게 <b>“파일을 닫아 주세요”</b> 안내</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">예외를 던질 곳과 안 던질 곳</h4>
+      <pre class="code" data-lang="csharp"><code>// ✗ 흔한 상황을 예외로 다루면 느리고 코드가 지저분해집니다
+try { var n = int.Parse(input); }
+catch (FormatException) { n = 0; }
+
+// ✓ 실패가 정상 흐름이면 Try 패턴
+if (!int.TryParse(input, out var n)) n = 0;
+
+// ✓ 결과 타입으로 명시하는 방법도 있습니다
+public readonly record struct Result&lt;T&gt;(bool Ok, T? Value, string? Error)
+{
+    public static Result&lt;T&gt; Success(T v) =&gt; new(true, v, null);
+    public static Result&lt;T&gt; Fail(string e) =&gt; new(false, default, e);
+}
+
+public Result&lt;Player&gt; Login(string id, string pw)
+{
+    if (Find(id) is not { } p)        return Result&lt;Player&gt;.Fail("없는 계정");
+    if (!p.Verify(pw))                return Result&lt;Player&gt;.Fail("비밀번호 불일치");
+    if (p.Banned)                     return Result&lt;Player&gt;.Fail("정지된 계정");
+    return Result&lt;Player&gt;.Success(p);
+}
+
+// ✓ 예외는 "일어나면 안 되는 일"에 — 프로그래머의 실수·복구 불가
+if (config is null)
+    throw new InvalidOperationException("설정을 먼저 초기화하세요");
+
+// 커스텀 예외는 정보를 담아서
+public sealed class NotEnoughGoldException(long need, long have)
+    : Exception($"골드 부족: 필요 {need:N0} 보유 {have:N0}")
+{
+    public long Need { get; } = need;
+    public long Have { get; } = have;
+}</code></pre>
+      <div class="note tip">
+        <b>판단 기준은 “호출한 쪽이 이 상황을 예상하는가”입니다.</b>
+        사용자가 비밀번호를 틀리는 것은 <b>예상되는 일</b>이니 반환값으로,
+        설정 파일이 없는 것은 <b>일어나면 안 되는 일</b>이니 예외로 —
+        이렇게 나누면 <code>try/catch</code> 가 코드 곳곳에 퍼지지 않습니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">저장이 깨지지 않게 — 실전 패턴</h4>
+      <pre class="code" data-lang="csharp"><code>public sealed class SaveStore(string dir)
+{
+    private readonly JsonSerializerOptions _opt = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    public async Task SaveAsync(SaveData data, CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "save.json");
+        var tmp  = path + ".tmp";
+        var bak  = path + ".bak";
+
+        // ① 임시 파일에 먼저 씁니다
+        await using (var fs = File.Create(tmp))
+            await JsonSerializer.SerializeAsync(fs, data, _opt, ct);
+
+        // ② 원자적으로 바꿔치기 — 쓰는 도중 전원이 꺼져도 원본은 무사합니다
+        if (File.Exists(path)) File.Replace(tmp, path, bak);
+        else                   File.Move(tmp, path);
+    }
+
+    public async Task&lt;SaveData&gt; LoadAsync(CancellationToken ct = default)
+    {
+        foreach (var name in new[] { "save.json", "save.json.bak" })
+        {
+            var p = Path.Combine(dir, name);
+            if (!File.Exists(p)) continue;
+            try
+            {
+                await using var fs = File.OpenRead(p);
+                if (await JsonSerializer.DeserializeAsync&lt;SaveData&gt;(fs, _opt, ct)
+                    is { } d) return d;
+            }
+            catch (JsonException ex)
+            {
+                _log.LogWarning(ex, "세이브 손상 {File} — 백업을 시도합니다", name);
+            }
+        }
+        return SaveData.Default;      // 전부 실패하면 새로 시작
+    }
+}</code></pre>
+      <div class="note warn">
+        <b>세이브 파일을 직접 덮어쓰면 언젠가 반드시 깨집니다.</b>
+        쓰는 도중에 전원이 나가거나 앱이 죽으면
+        <b>절반만 쓰인 JSON</b>이 남고, 사용자는 진행도를 전부 잃습니다.
+        <b>임시 파일 → 바꿔치기</b>는 두 줄이면 끝나는 일이고,
+        <b>백업 한 세대</b>를 남겨 두면 손상돼도 되돌릴 수 있습니다.
+        모바일 게임에서 특히 중요합니다 — <b>OS 가 앱을 임의로 종료</b>합니다.
       </div>
     </div>
   </div>
