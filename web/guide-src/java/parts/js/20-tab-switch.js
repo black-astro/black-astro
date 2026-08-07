@@ -504,5 +504,4 @@ document.addEventListener("keydown", e => {
   if (t === "INPUT" || t === "TEXTAREA") return;
   const i = "1234567890".indexOf(e.key);
   if (i >= 0 && TAB_ORDER[i]) { switchTab(TAB_ORDER[i]); return; }
-  if (e.key.toLowerCase() === "p") perfToggle?.();
 });

@@ -19,7 +19,7 @@
 
 콘텐츠는 `src/data/*.ts`에 데이터로 분리되어 있어 텍스트만 수정하면 됩니다.
 
-## 학습 가이드 (정적 페이지 3종)
+## 학습 가이드 (정적 페이지 9종)
 
 포트폴리오와 함께 배포되는 단일 HTML 학습 가이드입니다.
 소스는 `guide-src/`에 조각으로 두고, 빌드하면 `public/*-web/index.html`로 합쳐집니다.
@@ -30,6 +30,12 @@
 | 🐍 Python | `/python-web/` | `guide-src/python/` |
 | ☕ Java | `/java-web/` | `guide-src/java/` |
 | 🟨 JS · TS | `/js-ts-web/` | `guide-src/js-ts/` |
+| 🟣 C# · Unity | `/csharp-web/` | `guide-src/csharp/` |
+| 🔵 C++ | `/cpp-web/` | `guide-src/cpp/` |
+| 🦀 Rust | `/rust-web/` | `guide-src/rust/` |
+| 🗄️ Database | `/db-web/` | `guide-src/db/` |
+| 🌐 Web Server | `/server-web/` | `guide-src/server/` |
+| 🎓 CS 기술 | `/cs-web/` | `guide-src/cs/` |
 
 ## 폴더 구조
 

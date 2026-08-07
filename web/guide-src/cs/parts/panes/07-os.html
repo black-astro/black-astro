@@ -1,0 +1,1836 @@
+<!-- ============================================================
+     운영체제 PANE
+     ============================================================ -->
+<div class="pane" id="pane-os">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> 서버가 느릴 때 · 메모리가 샐 때 · 프로세스가 죽을 때 답이 있는 곳</div>
+  <h1>내 코드가<br>혼자 돌고 있다는<br>착각을 걷어냅니다</h1>
+  <p class="tx">
+    프로세스 · 스레드 · 가상 메모리 · 파일 · 소켓.
+    <b>매일 쓰면서 정확히는 모르는 것들</b>입니다.
+    이 탭은 개념을 설명하고 끝내지 않고,
+    <b>운영 중 장애를 어떤 명령으로 어떤 순서로 좁히는지</b>까지 이어갑니다.
+    마지막 절이 실전 진단 명령 모음입니다.
+  </p>
+  <div class="stats">
+    <div><b>13</b><span>SECTIONS</span></div>
+    <div><b>진단</b><span>명령 포함</span></div>
+    <div><b>리눅스</b><span>기준</span></div>
+    <div><b>컨테이너</b><span>까지</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== o01 ==================== -->
+<section class="sec" id="o01">
+  <div class="sec-head rv">
+    <span class="no">OS 01</span>
+    <h2>운영체제가 하는 일 — <span class="t">자원을 나눠 쓰게 하는 심판</span></h2>
+    <p class="lead">
+      OS 가 없으면 프로그램 하나가 <b>메모리 전체를 덮어쓰고 CPU 를 독점</b>할 수 있습니다.
+      그래서 OS 는 하드웨어를 감추고, 대신 <b>추상화</b>를 제공합니다 —
+      프로세스 · 파일 · 소켓이 전부 그 추상화입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">네 가지 핵심 역할</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">역할</th><th>추상화</th><th>없으면</th></tr>
+        <tr><td>CPU 관리</td><td>프로세스 · 스레드</td><td>하나가 독점</td></tr>
+        <tr><td>메모리 관리</td><td>가상 주소 공간</td><td>서로 덮어씀</td></tr>
+        <tr><td>저장 관리</td><td>파일 · 디렉터리</td><td>블록을 직접 다뤄야</td></tr>
+        <tr><td>장치 관리</td><td>디바이스 파일 · 소켓</td><td>하드웨어별 코드 필요</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“모든 것은 파일”</b>이 유닉스의 설계 철학입니다 —
+        디스크 · 터미널 · 소켓 · 프로세스 정보(<code>/proc</code>)가
+        전부 같은 <code>read</code>/<code>write</code> 인터페이스로 다뤄집니다.
+        <b>인터페이스를 하나로 줄이는 것</b>의 위력을 보여 주는 예입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">사용자 모드와 커널 모드</h4>
+      <pre class="code" data-lang="text"><code>CPU 에는 특권 레벨이 있다 (x86: 링 0 ~ 3)
+
+  링 0 — 커널      모든 명령 실행 가능
+  링 3 — 사용자    특권 명령 금지 · 자기 주소 공간만
+
+사용자 모드에서 금지된 것
+  · 임의의 물리 메모리 접근
+  · I/O 포트 직접 제어
+  · 인터럽트 활성/비활성
+  · 페이지 테이블 변경
+
+그래서 파일을 읽으려면 커널에게 부탁해야 한다
+  → 시스템 콜 (11절)
+
+  read() 호출
+    → 트랩 명령 (syscall)
+    → CPU 가 링 0 으로 전환 + 커널 코드로 점프
+    → 커널이 작업 수행
+    → 다시 링 3 으로 복귀</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">커널 구조의 종류</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:24%">구조</th><th>특징</th><th>예</th></tr>
+      <tr><td><b>모놀리식</b></td><td>드라이버·파일시스템이 전부 커널 안 · 빠름</td><td><b>리눅스</b> · BSD</td></tr>
+      <tr><td><b>마이크로커널</b></td><td>최소 기능만 커널 · 나머지는 사용자 프로세스</td><td>QNX · seL4 · Minix</td></tr>
+      <tr><td>하이브리드</td><td>둘의 절충</td><td>Windows NT · macOS(XNU)</td></tr>
+      <tr><td>유니커널</td><td>앱과 커널을 한 바이너리로</td><td>MirageOS · 클라우드 특화</td></tr>
+    </table></div>
+    <pre class="code" data-lang="text"><code>모놀리식의 장단점
+  + 함수 호출로 통신 → 빠르다
+  - 드라이버 하나의 버그가 시스템 전체를 죽인다
+
+마이크로커널의 장단점
+  + 드라이버가 죽어도 재시작 가능 (자동차·의료기기)
+  - 메시지 전달 비용
+
+리눅스의 절충
+  · 모놀리식이지만 모듈을 동적 로드 (lsmod)
+  · FUSE — 파일 시스템을 사용자 공간에서
+  · eBPF — 검증된 코드를 커널에 안전하게 주입 ★
+    (관측 · 네트워킹 · 보안에서 최근 가장 중요한 기술)</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>eBPF 가 실무에서 점점 중요해집니다</b> —
+      커널을 고치지 않고 <b>커널 안에서 도는 관측 코드</b>를 넣을 수 있습니다.
+      <code>bpftrace</code> · Cilium · Pixie 가 전부 이것 위에 있습니다.
+      “검증기가 종료를 보장”하기 때문에 안전합니다 → <b>🧮 계산이론 05</b>.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">/proc 로 들여다보기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="bash"><code># 커널이 노출하는 정보는 대부분 파일로 읽을 수 있다
+cat /proc/cpuinfo            # CPU 정보 · 코어 수 · 플래그(avx2 등)
+cat /proc/meminfo            # 메모리 상세
+cat /proc/loadavg            # 부하 평균
+cat /proc/PID/status         # 프로세스 상태 · 메모리 · 스레드 수
+cat /proc/PID/limits         # ulimit 실제 적용값 ★ 자주 유용
+cat /proc/PID/maps           # 메모리 맵 (어떤 라이브러리가 어디에)
+ls -l /proc/PID/fd           # 열린 파일 디스크립터 ★ 누수 확인
+cat /proc/PID/cmdline | tr '\0' ' '   # 실행 명령줄
+cat /proc/PID/environ | tr '\0' '\n'  # 환경 변수
+
+# 커널 파라미터
+sysctl -a | grep somaxconn
+sysctl net.core.somaxconn=4096          # 임시
+echo "net.core.somaxconn=4096" &gt;&gt; /etc/sysctl.conf   # 영구</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:38%">자주 보는 곳</th><th>확인하는 것</th></tr>
+      <tr><td><code>/proc/PID/limits</code></td><td>파일 디스크립터 한도 (Too many open files)</td></tr>
+      <tr><td><code>/proc/PID/fd</code></td><td>FD 누수 · 열린 소켓 수</td></tr>
+      <tr><td><code>/proc/PID/status</code></td><td>VmRSS(실제 메모리) · Threads</td></tr>
+      <tr><td><code>/proc/PID/stack</code></td><td>커널 스택 (어디서 블로킹 중인가)</td></tr>
+      <tr><td><code>/proc/pressure/*</code></td><td>PSI — CPU·메모리·I/O 압박 지표</td></tr>
+      <tr><td><code>/sys/fs/cgroup/</code></td><td>컨테이너 리소스 제한과 실제 사용량</td></tr>
+    </table></div>
+    <div class="note tip" style="margin-bottom:0">
+      <b>PSI(Pressure Stall Information)가 유용합니다</b> —
+      “CPU 사용률”이 아니라 <b>“얼마나 기다리고 있나”</b>를 직접 알려 줍니다.
+      <code>cat /proc/pressure/io</code> 로 I/O 대기 비율을 바로 볼 수 있습니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o02 ==================== -->
+<section class="sec" id="o02">
+  <div class="sec-head rv">
+    <span class="no">OS 02</span>
+    <h2>프로세스와 스레드 — <span class="t">무엇을 공유하는가</span></h2>
+    <p class="lead">
+      프로세스는 <b>따로 사는 집</b>, 스레드는 <b>한 집에 사는 식구</b>입니다.
+      이 차이가 성능 · 안정성 · 동시성 버그의 성격을 전부 결정합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">공유하는 것과 안 하는 것</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">자원</th><th>프로세스 간</th><th>스레드 간</th></tr>
+        <tr><td>주소 공간 (힙 · 전역)</td><td>독립</td><td><b>공유</b></td></tr>
+        <tr><td>코드</td><td>독립</td><td>공유</td></tr>
+        <tr><td>파일 디스크립터</td><td>독립(상속 시 복사)</td><td><b>공유</b></td></tr>
+        <tr><td>스택</td><td>독립</td><td><b>독립</b></td></tr>
+        <tr><td>레지스터 · PC</td><td>독립</td><td>독립</td></tr>
+        <tr><td>시그널 핸들러</td><td>독립</td><td>공유</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“힙은 공유, 스택은 독립”</b> 한 줄이 핵심입니다 —
+        지역 변수는 스레드마다 따로지만, 그 지역 변수가 가리키는
+        <b>힙 객체는 공유</b>됩니다. 여기서 대부분의 경쟁 상태가 생깁니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고르는 기준</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">상황</th><th>선택</th></tr>
+        <tr><td>격리가 중요 (플러그인 · 렌더링)</td><td><b>프로세스</b></td></tr>
+        <tr><td>하나가 죽어도 전체는 살아야</td><td><b>프로세스</b></td></tr>
+        <tr><td>파이썬 CPU 작업 (GIL)</td><td><b>프로세스</b></td></tr>
+        <tr><td>대량의 데이터 공유</td><td><b>스레드</b> (복사 없음)</td></tr>
+        <tr><td>생성이 잦음</td><td><b>스레드</b> (10~100배 저렴)</td></tr>
+        <tr><td>I/O 대기가 대부분</td><td><b>비동기 · 코루틴</b></td></tr>
+        <tr><td>수만 개 동시 연결</td><td><b>이벤트 루프</b> (10절)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>비용 비교 (리눅스 대략)
+  프로세스 생성(fork+exec): 수백 µs ~ 수 ms
+  스레드 생성            :  수십 µs
+  코루틴 생성            :  수백 ns  ★
+  스택 크기: 프로세스·스레드 8MB(가상) / 코루틴 수 KB</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">프로세스 생성과 좀비</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="python"><code>import os, sys
+
+pid = os.fork()          # ★ 한 번 호출되고 두 번 반환된다
+if pid == 0:
+    print("자식", os.getpid())
+    os._exit(0)          # 자식은 반드시 _exit (버퍼 중복 플러시 방지)
+else:
+    print("부모", os.getpid(), "자식", pid)
+    os.waitpid(pid, 0)   # ★ 안 하면 좀비가 남는다
+
+# fork 는 copy-on-write
+#  · 주소 공간을 '복사한 척' 만 한다
+#  · 쓰는 순간에만 실제 복사
+#  · 그래서 큰 프로세스도 fork 가 빠르다
+#  ★ 단, 파이썬은 참조 카운트 때문에 읽기만 해도 페이지가 복사된다
+
+# 프로세스 상태
+#  R 실행/대기  S 인터럽트 가능 슬립  D 인터럽트 불가 슬립(I/O)
+#  Z 좀비 — 끝났는데 부모가 회수 안 함
+#  T 정지</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:26%">문제</th><th>원인</th><th>대응</th></tr>
+      <tr><td><b>좀비 프로세스</b></td><td>부모가 <code>wait</code> 안 함</td><td>wait · SIGCHLD 처리 · init 에 위임</td></tr>
+      <tr><td><b>고아 프로세스</b></td><td>부모가 먼저 죽음</td><td>init(PID 1)이 입양</td></tr>
+      <tr><td><b>컨테이너에 좀비 쌓임</b></td><td>PID 1 이 앱이라 회수 안 함</td><td><code>tini</code> · <code>--init</code> 사용</td></tr>
+      <tr><td>D 상태에서 안 죽음</td><td>I/O 대기 (kill -9 도 안 통함)</td><td>디스크·NFS 문제 확인</td></tr>
+    </table></div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>도커에서 <code>--init</code> 을 쓰라는 이유</b>가 이것입니다 —
+      컨테이너 안의 PID 1 은 보통 애플리케이션인데,
+      <b>좀비를 회수하는 코드가 없어서</b> 프로세스 테이블이 찹니다.
+      <code>docker run --init</code> 또는 <code>tini</code> 를 엔트리포인트로 두세요.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">스레드 수를 정하는 법</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="mth">
+      스레드 수 ≈ 코어 수 × (1 + <b>대기 시간 / 계산 시간</b>)
+      <small>순수 CPU 작업이면 코어 수, I/O 가 90% 면 코어 수 × 10</small>
+    </div>
+    <pre class="code" data-lang="python"><code>import os
+cores = os.cpu_count()
+
+# CPU 바운드 → 코어 수 (컨텍스트 스위치 낭비를 피함)
+cpu_pool = ProcessPoolExecutor(max_workers=cores)
+
+# I/O 바운드 → 훨씬 크게, 다만 상한을 둔다
+io_pool = ThreadPoolExecutor(max_workers=min(32, cores * 8))
+
+# ★ 컨테이너에서는 os.cpu_count() 가 호스트 코어를 반환할 수 있다
+def container_cpus():
+    try:                        # cgroup v2
+        with open("/sys/fs/cgroup/cpu.max") as f:
+            quota, period = f.read().split()
+            if quota != "max": return max(1, int(int(quota) / int(period)))
+    except FileNotFoundError: pass
+    return os.cpu_count()
+
+# 자바도 같은 문제 — JDK 10+ 는 자동 인식
+#   -XX:ActiveProcessorCount=4 로 강제 가능</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">증상</th><th>원인</th></tr>
+      <tr><td>스레드를 늘렸는데 느려짐</td><td>컨텍스트 스위치 · 락 경합 · 캐시 오염</td></tr>
+      <tr><td>CPU 는 노는데 처리량이 안 늘어남</td><td>락 경합 · 커넥션 풀 부족 · 외부 API 한도</td></tr>
+      <tr><td>메모리가 스레드 수에 비례해 증가</td><td>스레드별 스택 · 버퍼</td></tr>
+      <tr><td>컨테이너에서만 스레드가 폭증</td><td>호스트 코어 수를 읽음</td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>리틀의 법칙으로 검산하세요</b> —
+      “초당 500 요청 × 평균 100ms” 면 <b>동시 처리 50개</b> 입니다.
+      스레드 풀이 200이면 과다이고, 20이면 부족합니다 →
+      <b>➗ 선형대수 · 확률 09</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o03 ==================== -->
+<section class="sec" id="o03">
+  <div class="sec-head rv">
+    <span class="no">OS 03</span>
+    <h2>스케줄링 — <span class="t">CPU 를 누구에게 얼마나</span></h2>
+    <p class="lead">
+      실행 가능한 스레드가 코어 수보다 많을 때 누구를 먼저 돌릴지 정하는 규칙입니다.
+      <b>응답성 · 처리량 · 공정성</b>이 서로 상충하고,
+      그 균형이 서비스 지연에 직접 나타납니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 알고리즘</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">방식</th><th>특징</th><th>문제</th></tr>
+        <tr><td>FCFS</td><td>온 순서대로</td><td>긴 작업이 뒤를 막음</td></tr>
+        <tr><td>SJF</td><td>짧은 것 먼저</td><td>긴 작업 <b>기아</b> · 길이를 모름</td></tr>
+        <tr><td>라운드로빈</td><td>시간 조각씩 돌아가며</td><td>조각 크기 정하기</td></tr>
+        <tr><td>우선순위</td><td>중요한 것 먼저</td><td>기아 · 우선순위 역전</td></tr>
+        <tr><td><b>MLFQ</b></td><td>여러 큐 · 오래 쓰면 강등</td><td>튜닝 복잡</td></tr>
+        <tr><td><b>CFS</b> (리눅스)</td><td>가상 실행 시간이 적은 것 먼저</td><td>실시간엔 부적합</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>리눅스 CFS 의 아이디어
+ · 각 태스크의 '가상 실행 시간(vruntime)' 을 기록
+ · 가장 적게 실행된 태스크를 다음에 실행
+ · nice 값이 vruntime 증가 속도를 바꾼다
+   nice -20 (높은 우선순위) → vruntime 이 천천히 늘어 자주 선택
+ · 레드블랙 트리로 최소 vruntime 을 O(log n) 에
+
+※ 커널 6.6 부터는 EEVDF 스케줄러로 교체됐다
+   (지연에 더 민감한 태스크를 잘 다루도록)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">지표의 상충</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">지표</th><th>뜻</th><th>유리한 방식</th></tr>
+        <tr><td>처리량</td><td>단위 시간당 완료 수</td><td>긴 시간 조각</td></tr>
+        <tr><td>응답 시간</td><td>첫 반응까지</td><td><b>짧은 시간 조각</b></td></tr>
+        <tr><td>반환 시간</td><td>제출~완료</td><td>SJF</td></tr>
+        <tr><td>공정성</td><td>고르게 배분</td><td>CFS</td></tr>
+        <tr><td>예측 가능성</td><td>편차가 작음</td><td>실시간 스케줄러</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># 우선순위 조정
+nice -n 10 ./batch_job          # 낮은 우선순위로 시작
+renice -n 5 -p 1234             # 실행 중 변경
+
+# I/O 우선순위 (배치 작업이 디스크를 독점하지 않게)
+ionice -c 3 ./backup.sh         # idle 클래스
+
+# 실시간 스케줄링 (지연이 결정적이어야 할 때)
+chrt -f 50 ./realtime_task      # FIFO, 우선순위 50
+# ★ 잘못 쓰면 시스템이 멈춘다 — 무한 루프가 CPU 를 독점
+
+# CPU 고정 (캐시 지역성 · NUMA)
+taskset -c 0-3 ./program</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">부하 평균 읽는 법</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="bash"><code>$ uptime
+ 15:04:23 up 42 days,  load average: 3.21, 2.85, 2.40
+                                     1분   5분   15분
+
+★ 리눅스의 load average 는 'CPU 대기' 만이 아니다
+  실행 가능(R) + 인터럽트 불가 슬립(D, 주로 디스크 I/O) 을 함께 센다
+  → load 가 높은데 CPU 는 놀고 있으면 대개 I/O 대기다
+
+해석 기준 (코어 수로 나눈다)
+  4코어에서 load 4.0 → 사용률 100% 근처
+  4코어에서 load 8.0 → 대기 줄이 있다
+  1분 &gt; 15분 → 부하가 증가 중
+  1분 &lt; 15분 → 완화 중</code></pre>
+    <pre class="code" data-lang="bash"><code># load 가 높을 때 원인 좁히기
+vmstat 1
+#  r  = 실행 대기 중인 프로세스 수  ← 코어 수보다 크면 CPU 부족
+#  b  = I/O 대기(D 상태)            ← 크면 디스크·네트워크 문제
+#  wa = I/O 대기 시간 비율
+#  si/so = 스왑 in/out              ← 0 이 아니면 메모리 부족
+
+mpstat -P ALL 1        # 코어별 사용률 — 한 코어만 높으면 단일 스레드 병목
+pidstat -u 1           # 프로세스별 CPU
+
+# PSI 로 더 정확하게 (커널 4.20+)
+cat /proc/pressure/cpu
+# some avg10=12.34 ... → 최근 10초간 12% 의 시간 동안 무언가 대기했다</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>진단 순서</b> — <code>uptime</code> 으로 부하를 보고 →
+      <code>vmstat 1</code> 로 <b>r 인지 b 인지</b> 가르고 →
+      r 이면 <code>top</code>/<code>pidstat</code>, b 이면 <code>iostat</code> 로 갑니다.
+      이 세 단계로 대부분의 원인이 좁혀집니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">스케줄링이 지연에 나타날 때</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:32%">증상</th><th>원인</th><th>대응</th></tr>
+      <tr><td>p99 만 불규칙하게 튐</td><td>CPU 스로틀링 (cgroup quota)</td><td><code>nr_throttled</code> 확인 · limit 상향</td></tr>
+      <tr><td>배치 작업 중 API 가 느려짐</td><td>우선순위 미분리</td><td><code>nice</code> · cgroup 분리 · 별도 노드</td></tr>
+      <tr><td>GC 중 전체가 멈춤</td><td>STW · CPU 부족</td><td>GC 튜닝 · 힙 축소 · 코어 추가</td></tr>
+      <tr><td>가끔 수백 ms 지연</td><td>스케줄 지연 · 스왑 · THP</td><td>PSI · <code>perf sched</code></td></tr>
+      <tr><td>코어를 늘려도 처리량 그대로</td><td>단일 스레드 병목 · 락</td><td><code>mpstat -P ALL</code></td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># 컨테이너 CPU 스로틀링 확인 — 실무에서 가장 자주 놓치는 것
+cat /sys/fs/cgroup/cpu.stat
+#   nr_periods 1000
+#   nr_throttled 250        ← 25% 의 기간에서 강제로 멈췄다
+#   throttled_usec 3200000  ← 총 3.2초 멈춤
+
+# 쿠버네티스에서
+kubectl top pod
+# CPU limit 을 너무 낮게 잡으면 평균 사용률이 낮아도 스로틀링이 난다
+# → limit 을 올리거나, 아예 limit 을 빼고 request 로만 관리하는 전략도 있다
+
+# 스케줄 지연 직접 측정
+perf sched record -- sleep 10 &amp;&amp; perf sched latency</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>CPU 스로틀링은 “평균 사용률”에 안 보입니다</b> —
+      100ms 주기 안에서 앞 20ms 만 쓰고 80ms 를 멈춰도
+      평균은 20% 로 보입니다. 그런데 그 80ms 동안 <b>요청은 전부 대기</b>합니다.
+      <code>nr_throttled</code> 를 대시보드에 올려 두세요.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o04 ==================== -->
+<section class="sec" id="o04">
+  <div class="sec-head rv">
+    <span class="no">OS 04</span>
+    <h2>컨텍스트 스위치 — <span class="t">공짜가 아닙니다</span></h2>
+    <p class="lead">
+      스레드를 바꿔 끼우는 데도 비용이 듭니다.
+      그것도 <b>직접 비용보다 간접 비용(캐시 오염)이 훨씬 큽니다</b>.
+      “스레드를 늘렸는데 느려졌다”의 답이 여기 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무슨 일이 벌어지나</h4>
+      <pre class="code" data-lang="text"><code>직접 비용 (1~5µs)
+  ① 현재 레지스터를 저장
+  ② 스케줄러가 다음 태스크 선택
+  ③ 새 태스크의 레지스터 복원
+  ④ 프로세스가 다르면 페이지 테이블 전환 (+ TLB 플러시)
+
+간접 비용 (훨씬 큼 · 수십~수백 µs)
+  ⑤ ★ 캐시가 새 태스크의 데이터로 채워져야 한다
+     내 데이터가 L1/L2 에서 밀려나 있다
+     → 돌아왔을 때 전부 미스
+
+  ⑥ TLB 도 마찬가지 (프로세스 전환 시)
+  ⑦ 분기 예측기도 새로 학습해야 함</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>그래서 코루틴이 빠릅니다</b> — 같은 스레드 안에서
+        <b>스택 포인터만 바꾸므로</b> 커널 진입도, TLB 플러시도,
+        캐시 오염도 최소입니다(수십~수백 ns).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">측정하기</h4>
+      <pre class="code" data-lang="bash"><code># 시스템 전체
+vmstat 1
+#  cs 컬럼 = 초당 컨텍스트 스위치 수
+#  일반 서버: 수천~수만이면 정상
+#  수십만이면 의심
+
+# 프로세스별 (자발/비자발 구분)
+pidstat -w -p PID 1
+#  cswch/s   자발 (I/O 대기 · 락 대기 → 정상)
+#  nvcswch/s 비자발 (시간 조각 소진 → CPU 경합) ★
+
+cat /proc/PID/status | grep ctxt_switches
+
+# 어디서 스위치가 나는지
+perf record -e sched:sched_switch -g -- sleep 5
+perf report</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>비자발적 스위치(nvcswch)가 높으면</b> CPU 경합입니다 —
+        실행 가능한 스레드가 코어보다 많다는 뜻이므로
+        <b>스레드 수를 줄이거나 코어를 늘려야</b> 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">스레드 vs 코루틴 vs 이벤트 루프</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:22%">모델</th><th>전환 비용</th><th>메모리/개</th><th>동시 개수</th><th>예</th></tr>
+      <tr><td><b>프로세스</b></td><td>~5µs+</td><td>수 MB</td><td>수백</td><td>fork 서버</td></tr>
+      <tr><td><b>스레드</b></td><td>1~5µs</td><td>~8MB 가상</td><td>수천</td><td>자바 플랫폼 스레드</td></tr>
+      <tr><td><b>경량 스레드</b></td><td>~200ns</td><td>수 KB</td><td><b>수백만</b></td><td>고루틴 · 가상 스레드</td></tr>
+      <tr><td><b>코루틴</b></td><td>~100ns</td><td>수백 B~KB</td><td><b>수백만</b></td><td>async/await</td></tr>
+      <tr><td><b>이벤트 루프</b></td><td>없음(콜백)</td><td>수십 B</td><td>수십만</td><td>Node.js · Nginx</td></tr>
+    </table></div>
+    <pre class="code" data-lang="text"><code>언어별 현재 상황
+
+ Go       고루틴 — 런타임이 M:N 스케줄링 (M 고루틴 : N OS 스레드)
+ Java 21+ 가상 스레드 — 같은 아이디어를 JVM 이 구현
+ Python   asyncio 코루틴 (단일 스레드 이벤트 루프) + GIL 제약
+ Node.js  단일 스레드 이벤트 루프 + 워커 스레드
+ Rust     async/await — 런타임 선택 (tokio · async-std)
+ C#       async/await — 스레드 풀 위에서
+
+★ 공통 원리: I/O 를 기다릴 때 OS 스레드를 붙잡고 있지 않는다
+  → 블로킹 호출 하나가 이 모델을 전부 무너뜨린다</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>비동기 코드에서 블로킹 호출은 치명적입니다</b> —
+      이벤트 루프 스레드가 멈추면 <b>수천 개의 다른 요청이 함께 멈춥니다</b>.
+      파일 읽기 · 동기 DB 드라이버 · CPU 집약 계산은
+      반드시 <b>별도 스레드 풀</b>로 보내세요.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">스위치를 줄이는 설계</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:32%">기법</th><th>효과</th></tr>
+      <tr><td><b>스레드 풀 크기 조정</b></td><td>비자발 스위치 감소</td></tr>
+      <tr><td><b>배치 처리</b></td><td>깨어나는 횟수 자체를 줄임</td></tr>
+      <tr><td><b>CPU 친화도 고정</b></td><td>캐시 유지 · NUMA 지역성</td></tr>
+      <tr><td><b>스핀락 (짧은 임계 구역)</b></td><td>커널 진입 없이 대기</td></tr>
+      <tr><td><b>락 프리 자료구조</b></td><td>블로킹 자체를 제거</td></tr>
+      <tr><td><b>비동기 I/O</b></td><td>대기 중 스레드를 놓지 않음</td></tr>
+      <tr><td>커널 우회 (DPDK · io_uring)</td><td>극단적 저지연</td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># 배치로 깨어나는 횟수 줄이기 — 가장 실용적인 기법
+class BatchWriter:
+    def __init__(self, flush_size=1000, flush_ms=100):
+        self.buf, self.size, self.ms = [], flush_size, flush_ms
+        self.last = time.monotonic()
+
+    def add(self, item):
+        self.buf.append(item)
+        now = time.monotonic()
+        if len(self.buf) &gt;= self.size or (now - self.last) * 1000 &gt;= self.ms:
+            self.flush()
+
+    def flush(self):
+        if not self.buf: return
+        db.bulk_insert(self.buf)        # 한 번의 왕복
+        self.buf.clear(); self.last = time.monotonic()
+
+# 1000건을 개별 INSERT: 1000번의 왕복 + 스위치
+# 배치 INSERT:          1번
+# → 처리량이 수십 배 차이 난다</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>“크기 또는 시간” 두 조건</b>이 배치의 표준 패턴입니다 —
+      크기만 쓰면 트래픽이 적을 때 영원히 안 나가고,
+      시간만 쓰면 폭주할 때 배치가 너무 커집니다.
+      Kafka 프로듀서 · 로그 수집기가 전부 이 방식입니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o05 ==================== -->
+<section class="sec" id="o05">
+  <div class="sec-head rv">
+    <span class="no">OS 05</span>
+    <h2>메모리 관리 · 페이징 — <span class="t">4KB 조각으로 나눠 관리</span></h2>
+    <p class="lead">
+      OS 는 메모리를 <b>페이지</b> 단위로 자릅니다.
+      그래야 흩어진 빈 공간을 모아 쓸 수 있고, 램보다 큰 프로그램을 돌릴 수 있고,
+      프로세스를 서로 격리할 수 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로세스 메모리 구성</h4>
+      <pre class="code" data-lang="text"><code>높은 주소
+  ┌──────────────┐
+  │ 커널 공간      │  (프로세스는 접근 불가)
+  ├──────────────┤
+  │ 스택          │  ↓ 아래로 자람 · 지역변수 · 호출 프레임
+  │      ↓        │
+  │               │
+  │      ↑        │
+  │ 힙            │  ↑ 위로 자람 · malloc/new
+  ├──────────────┤
+  │ BSS           │  초기화 안 된 전역 (0으로 채워짐)
+  ├──────────────┤
+  │ Data          │  초기화된 전역
+  ├──────────────┤
+  │ Text (코드)    │  읽기 전용 · 실행 가능
+  └──────────────┘
+낮은 주소
+
+mmap 영역 — 공유 라이브러리 · 큰 할당 · 파일 매핑이 중간에</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메모리 지표 읽는 법</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:22%">지표</th><th>뜻</th><th>주의</th></tr>
+        <tr><td><b>VSZ · VIRT</b></td><td>가상 주소 공간 크기</td><td>실제 사용량 아님 — <b>무시해도 됨</b></td></tr>
+        <tr><td><b>RSS · RES</b></td><td>실제 물리 메모리</td><td>공유분이 중복 계산됨</td></tr>
+        <tr><td><b>PSS</b></td><td>공유분을 나눠 계산</td><td><b>가장 정확</b></td></tr>
+        <tr><td><b>USS</b></td><td>이 프로세스만의 메모리</td><td>죽이면 회수되는 양</td></tr>
+        <tr><td>Shared</td><td>공유 라이브러리 · 페이지 캐시</td><td>여러 프로세스가 공유</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># PSS 로 실제 사용량 보기
+smem -k -P myapp
+cat /proc/PID/smaps_rollup       # Pss · Private · Shared
+
+# free 읽는 법
+free -h
+#   available 이 진짜 여유 (buff/cache 는 회수 가능)
+#   ★ "메모리가 꽉 찼다" 는 대부분 정상 — 캐시로 쓰는 중
+
+# 어디에 메모리를 쓰는지
+pmap -x PID | sort -k3 -n | tail -20</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>VSZ 를 보고 놀라지 마세요</b> — 자바나 Go 프로세스가
+        수십 GB 의 VSZ 를 잡는 것은 정상입니다.
+        <b>주소 공간을 예약</b>했을 뿐 실제 메모리가 아닙니다.
+        <b>RSS 또는 PSS</b> 를 보세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">페이지 테이블과 주소 변환</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>가상 주소 48비트를 4단계로 쪼갠다 (x86-64)
+
+  [ 9비트 | 9비트 | 9비트 | 9비트 | 12비트 오프셋 ]
+     PML4    PDPT    PD      PT      페이지 내 위치
+
+  각 단계가 다음 단계 테이블의 주소를 담는다
+  → 4번의 메모리 접근 (TLB 미스 시)
+
+왜 다단계인가
+  · 1단계 평면 테이블이면 2^36 개 엔트리 × 8B = 512GB (불가능)
+  · 다단계면 실제로 쓰는 부분만 테이블을 만든다 (희소)
+
+페이지 테이블 엔트리에 담긴 것
+  · 물리 프레임 번호
+  · 권한 (읽기 · 쓰기 · 실행)   ← W^X · NX 비트
+  · 유효(present) 비트          ← 0 이면 페이지 폴트
+  · 접근/변경(accessed/dirty)   ← 페이지 교체 정책에 사용
+  · 캐시 정책</code></pre>
+    <div class="grid2" style="margin-top:16px">
+      <div class="card" style="margin:0">
+        <h4 class="mini" style="margin-top:0">권한 비트가 보안이 되는 자리</h4>
+        <div class="tw"><table class="cheat" style="margin:0">
+          <tr><td><b>NX 비트</b></td><td>데이터 영역 실행 금지 → 스택 코드 실행 차단</td></tr>
+          <tr><td><b>읽기 전용</b></td><td>코드 영역 변조 방지 · CoW 구현</td></tr>
+          <tr><td><b>가드 페이지</b></td><td>스택 오버플로 감지 (접근 불가 페이지)</td></tr>
+          <tr><td><b>ASLR</b></td><td>매번 다른 주소에 배치 → 공격 난이도 상승</td></tr>
+        </table></div>
+      </div>
+      <div class="card" style="margin:0">
+        <h4 class="mini" style="margin-top:0">Copy-on-Write</h4>
+        <div class="note tip" style="margin:0">
+          <code>fork()</code> 가 빠른 이유입니다 — 페이지를 복사하지 않고
+          <b>양쪽 다 읽기 전용으로 표시</b>합니다.
+          누군가 쓰려고 하면 그때 페이지 폴트가 나고 <b>그 페이지만 복사</b>합니다.
+          Redis 의 백그라운드 스냅숏(BGSAVE)이 이 원리로 동작합니다.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">메모리 누수 찾기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:26%">언어</th><th>도구</th><th>흔한 원인</th></tr>
+      <tr><td>C · C++</td><td>valgrind · ASan · heaptrack</td><td>free 누락 · 예외 경로</td></tr>
+      <tr><td>파이썬</td><td>tracemalloc · objgraph · memray</td><td>전역 캐시 · 순환 참조 + __del__</td></tr>
+      <tr><td>자바</td><td>힙 덤프 + MAT · JFR</td><td>정적 컬렉션 · 리스너 미해제 · ThreadLocal</td></tr>
+      <tr><td>JS · Node</td><td>Chrome DevTools · clinic</td><td>클로저 · 이벤트 리스너 · 전역 Map</td></tr>
+      <tr><td>Go</td><td>pprof heap</td><td>고루틴 누수 · 슬라이스 참조 유지</td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># 파이썬 — 어디서 늘어나는지 찾기
+import tracemalloc
+tracemalloc.start(10)                     # 스택 10프레임까지
+
+snap1 = tracemalloc.take_snapshot()
+run_workload()
+snap2 = tracemalloc.take_snapshot()
+
+for stat in snap2.compare_to(snap1, "traceback")[:5]:
+    print(stat)
+    for line in stat.traceback.format(): print("   ", line)</code></pre>
+    <pre class="code" data-lang="bash"><code># 언어 무관 — RSS 추세를 먼저 확인
+while true; do
+  echo "$(date +%s) $(grep VmRSS /proc/$PID/status | awk '{print $2}')"
+  sleep 60
+done | tee rss.log
+
+# 계속 우상향하면 누수, 톱니 모양이면 GC 가 도는 정상 패턴
+
+# 네이티브 누수 (파이썬·자바에서도 C 확장이 샐 수 있다)
+LD_PRELOAD=/usr/lib/libjemalloc.so MALLOC_CONF=prof:true ./app</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>“누수”가 아닌 경우도 많습니다</b> — 할당자가
+      <b>OS 에 메모리를 안 돌려주는 것</b>(단편화)일 수 있습니다.
+      glibc malloc 은 특히 그렇고, <b>jemalloc·tcmalloc 으로 교체</b>하면
+      해결되는 사례가 많습니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o06 ==================== -->
+<section class="sec" id="o06">
+  <div class="sec-head rv">
+    <span class="no">OS 06</span>
+    <h2>가상 메모리 · 페이지 폴트 — <span class="t">스왑이 시작되면 끝입니다</span></h2>
+    <p class="lead">
+      메모리에 없는 페이지를 건드리면 <b>페이지 폴트</b>가 납니다.
+      대부분은 정상이고 아주 빠르지만,
+      <b>디스크까지 가야 하는 폴트</b>는 서비스를 멈춥니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">폴트의 종류</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">종류</th><th>내용</th><th>비용</th></tr>
+        <tr><td><b>마이너 폴트</b></td><td>메모리에는 있는데 매핑만 없음</td><td><b>~1µs</b> 정상</td></tr>
+        <tr><td><b>메이저 폴트</b></td><td>디스크에서 읽어야 함</td><td><b>~50µs~10ms</b> ★</td></tr>
+        <tr><td>CoW 폴트</td><td>쓰기 시 복사</td><td>마이너 + 복사</td></tr>
+        <tr><td>세그먼테이션 폴트</td><td>권한 없는 접근</td><td><b>프로세스 종료</b></td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># 폴트 관찰
+ps -o min_flt,maj_flt,cmd -p PID
+sar -B 1                  # majflt/s 컬럼
+vmstat 1                  # si/so — 스왑 in/out
+
+# ★ 마이너 폴트는 많아도 정상이다
+#   (지연 할당 · 페이지 캐시 매핑 · CoW)
+# ★ 메이저 폴트가 지속되면 메모리 부족 신호</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스왑과 스래싱</h4>
+      <pre class="code" data-lang="text"><code>메모리가 부족하면 OS 는 잘 안 쓰는 페이지를 디스크로 내린다
+
+  정상: 진짜 안 쓰는 페이지만 나감 → 문제 없음
+  스래싱: 내리자마자 다시 필요해짐 → 계속 왕복
+          → CPU 는 노는데 아무 일도 진행이 안 됨
+          → 응답 시간이 수십 초로
+
+판단
+  vmstat 1 에서 si/so 가 지속적으로 0 이 아니면 위험
+
+대응 (순서대로)
+  ① 메모리를 실제로 쓰는 프로세스를 줄인다
+  ② 힙 크기 · 캐시 크기 설정을 낮춘다
+  ③ 메모리를 늘린다
+  ④ swappiness 조정 (0 이 아니라 1~10 권장)
+     sysctl vm.swappiness=10</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>스왑을 완전히 끄는 것이 항상 정답은 아닙니다</b> —
+        끄면 스래싱 대신 <b>OOM Killer 가 바로 동작</b>합니다.
+        DB 서버는 보통 <code>swappiness=1</code>,
+        쿠버네티스 노드는 전통적으로 스왑을 껐지만
+        최근에는 제한적으로 허용하는 방향입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">OOM Killer</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="bash"><code># 프로세스가 갑자기 사라졌다면 먼저 이걸 본다
+dmesg -T | grep -i -E "oom|killed process"
+journalctl -k | grep -i oom
+
+# 출력 예
+# Out of memory: Killed process 1234 (java) total-vm:8000000kB,
+#   anon-rss:6000000kB, file-rss:0kB, shmem-rss:0kB, UID:1000
+
+# 어떤 프로세스가 먼저 죽을지 (점수가 높을수록 먼저)
+cat /proc/PID/oom_score
+cat /proc/PID/oom_score_adj      # -1000 ~ 1000 (조정값)
+
+# 중요한 프로세스를 보호
+echo -500 &gt; /proc/PID/oom_score_adj
+
+# 컨테이너에서는 cgroup 메모리 한도 초과 시 그 안에서만 kill
+cat /sys/fs/cgroup/memory.max
+cat /sys/fs/cgroup/memory.events    # oom_kill 카운트</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">상황</th><th>진짜 원인</th></tr>
+      <tr><td>컨테이너가 반복 재시작 (OOMKilled)</td><td>limit 부족 또는 앱 누수 — <b>둘을 구분해야</b></td></tr>
+      <tr><td>자바가 limit 을 넘어 죽음</td><td>힙 외 메모리(메타스페이스 · 스레드 스택 · 네이티브)</td></tr>
+      <tr><td>메모리 여유가 있는데 OOM</td><td>cgroup 한도 · 단편화 · 큰 연속 할당 실패</td></tr>
+      <tr><td>호스트 전체가 느려짐</td><td>페이지 캐시 회수 압박 · 스래싱</td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># 자바 컨테이너의 전형적 설정 (힙만 잡으면 안 된다)
+# 컨테이너 limit 이 2Gi 일 때
+JAVA_OPTS="-XX:MaxRAMPercentage=70.0 \
+           -XX:MaxMetaspaceSize=256m \
+           -XX:+ExitOnOutOfMemoryError \
+           -XX:+HeapDumpOnOutOfMemoryError \
+           -XX:HeapDumpPath=/dumps"
+# 힙 70% + 메타스페이스 + 스레드 스택 + 네이티브 = 100% 안쪽으로</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>“OOMKilled” 는 원인이 아니라 결과</b>입니다 —
+      limit 을 올리기 전에 <b>RSS 가 우상향인지(누수) 톱니인지(정상)</b>를
+      먼저 확인하세요. 누수라면 limit 을 올려도 며칠 뒤 다시 죽습니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">페이지 캐시 이해하기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="bash"><code># 파일을 읽으면 OS 가 자동으로 캐시한다 (페이지 캐시)
+free -h
+#               total   used   free  shared  buff/cache  available
+# Mem:           31Gi   8Gi   1Gi    0.1Gi        22Gi        22Gi
+#                                                  ↑ 이게 캐시
+#   free 가 적어도 available 이 크면 정상이다
+
+# 특정 파일이 캐시에 얼마나 있는지
+vmtouch -v /var/lib/postgresql/data/base/16384/2619
+
+# 캐시 비우기 (테스트용 — 운영에서는 절대 금지)
+sync; echo 3 &gt; /proc/sys/vm/drop_caches</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">알아 두면 유용한 것</th><th>이유</th></tr>
+      <tr><td>DB 는 자체 캐시 + 페이지 캐시를 <b>둘 다</b> 씀</td><td>이중 캐싱 — shared_buffers 를 램의 25% 정도로</td></tr>
+      <tr><td>첫 쿼리만 느린 이유</td><td>캐시가 비어 있음 (콜드 스타트)</td></tr>
+      <tr><td>배포 직후 느린 이유</td><td>페이지 캐시 · JIT · 커넥션 풀이 다 비어 있음</td></tr>
+      <tr><td>큰 파일 복사 후 서비스가 느려짐</td><td>캐시가 그 파일로 밀림 → <code>posix_fadvise(DONTNEED)</code></td></tr>
+      <tr><td>컨테이너 메모리에 캐시가 포함됨</td><td>cgroup 은 페이지 캐시도 센다</td></tr>
+    </table></div>
+    <div class="note tip" style="margin-bottom:0">
+      <b>배포 직후 지연이 튀는 것은 정상입니다</b> —
+      대응은 <b>워밍업</b>입니다. 헬스체크를 통과하기 전에
+      주요 쿼리를 몇 번 돌리고, 카나리 배포로 트래픽을 서서히 올리세요 →
+      <b>🏛️ SW 공학 11</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o07 ==================== -->
+<section class="sec" id="o07">
+  <div class="sec-head rv">
+    <span class="no">OS 07</span>
+    <h2>동기화 — <span class="t">뮤텍스 · 세마포어 · 조건 변수</span></h2>
+    <p class="lead">
+      여러 스레드가 같은 것을 동시에 건드리지 못하게 막는 장치들입니다.
+      <b>무엇을 고르느냐보다 임계 구역을 얼마나 짧게 하느냐</b>가
+      실제 성능을 결정합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">도구 고르기</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:28%">도구</th><th>용도</th></tr>
+        <tr><td><b>뮤텍스</b></td><td>한 번에 하나만 — 가장 기본</td></tr>
+        <tr><td><b>스핀락</b></td><td>아주 짧은 임계 구역 (커널 내부)</td></tr>
+        <tr><td><b>읽기-쓰기 락</b></td><td>읽기가 압도적으로 많을 때</td></tr>
+        <tr><td><b>세마포어</b></td><td>동시 접근 N개 허용 (자원 풀)</td></tr>
+        <tr><td><b>조건 변수</b></td><td>“어떤 조건이 될 때까지 대기”</td></tr>
+        <tr><td><b>배리어</b></td><td>모두 도착할 때까지 대기</td></tr>
+        <tr><td><b>원자 연산</b></td><td>카운터 · 플래그 — 락 불필요</td></tr>
+      </table></div>
+      <pre class="code" data-lang="python"><code>import threading
+
+lock = threading.Lock()
+with lock:                      # ★ with 로 — 예외 시에도 해제
+    shared_counter += 1
+
+sem = threading.Semaphore(10)   # 동시 10개까지
+with sem:
+    call_external_api()
+
+# 조건 변수 — 큐가 빌 때까지 대기
+cond = threading.Condition()
+with cond:
+    while not queue:            # ★ while (if 아님) — 가짜 깨어남 대비
+        cond.wait()
+    item = queue.pop()</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">락을 쓸 때의 규칙</h4>
+      <ol class="steps">
+        <li><b>임계 구역을 최소로</b> — I/O · 네트워크 호출을 락 안에 두지 마세요.</li>
+        <li><b>락 순서를 정하고 지킨다</b> — 데드락 예방의 가장 확실한 방법(08절).</li>
+        <li><b>락을 잡은 채 콜백을 부르지 않는다</b> — 사용자 코드가 무엇을 할지 모릅니다.</li>
+        <li><b>RAII · with 로 해제 보장</b> — 예외 경로에서 새는 것을 막습니다.</li>
+        <li><b>가능하면 락 없는 설계</b> — 불변 데이터 · 스레드 로컬 · 메시지 전달.</li>
+      </ol>
+      <div class="vs">
+        <div class="bad">
+          <h5>✗ 락 안에서 I/O</h5>
+          <pre class="code" data-lang="python"><code>with lock:
+    data = fetch_from_api()   # 200ms
+    cache[key] = data
+# 모든 스레드가 200ms 씩 대기</code></pre>
+        </div>
+        <div class="good">
+          <h5>✓ 밖에서 하고 짧게 잠금</h5>
+          <pre class="code" data-lang="python"><code>data = fetch_from_api()
+with lock:
+    cache[key] = data          # 1µs</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">락 경합 측정과 완화</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:30%">완화 기법</th><th>내용</th><th>주의</th></tr>
+      <tr><td><b>락 분할 (샤딩)</b></td><td>해시로 나눠 락을 N개로</td><td>전체 순회 시 복잡</td></tr>
+      <tr><td><b>읽기-쓰기 락</b></td><td>읽기끼리는 동시 허용</td><td>쓰기 기아 주의</td></tr>
+      <tr><td><b>스레드 로컬 누적</b></td><td>각자 세고 마지막에 합침</td><td>실시간 정확도 저하</td></tr>
+      <tr><td><b>불변 자료구조</b></td><td>복사 후 교체 (CoW)</td><td>쓰기가 비쌈</td></tr>
+      <tr><td><b>원자 연산</b></td><td>카운터는 락 불필요</td><td>복합 연산엔 부족</td></tr>
+      <tr><td><b>메시지 전달</b></td><td>소유권을 한 스레드에</td><td>설계 변경 필요</td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># 락 분할 — 해시맵을 16개 샤드로
+class ShardedCounter:
+    def __init__(self, shards=16):
+        self.locks = [threading.Lock() for _ in range(shards)]
+        self.counts = [0] * shards
+        self.n = shards
+
+    def incr(self, key):
+        i = hash(key) % self.n
+        with self.locks[i]:            # 다른 샤드는 서로 안 막는다
+            self.counts[i] += 1
+
+    def total(self):
+        return sum(self.counts)        # 근사치 (정확하려면 전부 잠금)
+
+# 자바 ConcurrentHashMap · Go sync.Map 이 비슷한 아이디어</code></pre>
+    <pre class="code" data-lang="bash"><code># 락 경합 측정
+perf lock record ./program &amp;&amp; perf lock report
+
+# 자바
+# async-profiler -e lock
+# JFR: jdk.JavaMonitorEnter 이벤트
+
+# Go
+# go tool pprof http://localhost:6060/debug/pprof/mutex
+
+# 파이썬 — GIL 경합
+py-spy dump --pid PID        # 어느 스레드가 GIL 을 쥐고 있나</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>파이썬에서는 락 경합보다 GIL 이 먼저 문제입니다</b> —
+      CPU 작업은 스레드를 늘려도 병렬이 안 됩니다.
+      <b>멀티프로세싱 · C 확장 · 3.13+ 의 free-threaded 빌드</b>가 답입니다 →
+      <b>🐍 Python 가이드</b>.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">우선순위 역전과 그 밖의 함정</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>우선순위 역전 (Mars Pathfinder 를 멈추게 한 버그)
+
+  ① 낮은 우선순위 스레드 L 이 락을 잡음
+  ② 높은 우선순위 스레드 H 가 그 락을 기다림
+  ③ 중간 우선순위 스레드 M 이 L 을 밀어냄
+  → H 가 M 때문에 무한정 대기 (우선순위가 뒤집힘)
+
+해결
+  · 우선순위 상속 — 락을 잡은 L 의 우선순위를 H 만큼 올린다
+  · 우선순위 상한 — 락마다 최고 우선순위를 지정
+  · 실시간 시스템에서는 필수 (PTHREAD_PRIO_INHERIT)</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:30%">함정</th><th>증상 · 대응</th></tr>
+      <tr><td><b>가짜 깨어남</b></td><td>조건 없이 깨어남 → <code>while</code> 로 재확인</td></tr>
+      <tr><td><b>잃어버린 신호</b></td><td>wait 전에 notify → 락 안에서 상태 변경 + notify</td></tr>
+      <tr><td><b>천둥 무리</b></td><td><code>notify_all</code> 로 전부 깨어나 하나만 성공 → <code>notify</code> 선호</td></tr>
+      <tr><td><b>재진입 불가</b></td><td>같은 스레드가 다시 잠금 → 데드락 · RLock 사용</td></tr>
+      <tr><td><b>ABBA 데드락</b></td><td>락 순서 불일치 → 전역 순서 정의(08절)</td></tr>
+      <tr><td><b>락 잡은 채 fork</b></td><td>자식이 영원히 대기 → <code>pthread_atfork</code></td></tr>
+    </table></div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>가장 좋은 락은 없는 락입니다</b> —
+      데이터를 불변으로 만들거나, 소유권을 한 스레드에 두고
+      메시지로 주고받는 설계가 근본적으로 더 안전합니다 →
+      <b>🕸️ 분산 · 동시성 05</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o08 ==================== -->
+<section class="sec" id="o08">
+  <div class="sec-head rv">
+    <span class="no">OS 08</span>
+    <h2>데드락 — <span class="t">네 조건 중 하나만</span> 깨면 됩니다</h2>
+    <p class="lead">
+      서로가 서로를 기다려 영원히 멈추는 상태입니다.
+      <b>네 조건이 동시에 성립할 때만</b> 발생하므로,
+      하나만 무너뜨리면 구조적으로 예방됩니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 620 170" role="img" aria-label="스레드 A 는 락1 을 쥔 채 락2 를 기다리고, 스레드 B 는 락2 를 쥔 채 락1 을 기다려 순환 대기가 생긴다">
+      <rect class="bx bx-warn" x="60" y="30" width="120" height="44"/>
+      <text x="88" y="57" font-size="12.5" fill="#e8f0ff">스레드 A</text>
+      <rect class="bx bx-warn" x="440" y="30" width="120" height="44"/>
+      <text x="468" y="57" font-size="12.5" fill="#e8f0ff">스레드 B</text>
+      <rect class="bx" x="60" y="106" width="120" height="40"/>
+      <text x="96" y="131" font-size="12" fill="#fbbf24">락 1</text>
+      <rect class="bx" x="440" y="106" width="120" height="40"/>
+      <text x="476" y="131" font-size="12" fill="#fbbf24">락 2</text>
+
+      <path class="ln" d="M120 74 L120 102" stroke="#34d399"/>
+      <text x="128" y="94" class="lbl" fill="#34d399">보유</text>
+      <path class="ln" d="M500 74 L500 102" stroke="#34d399"/>
+      <text x="508" y="94" class="lbl" fill="#34d399">보유</text>
+
+      <path class="fl" d="M180 44 L436 118" stroke="#fb7185"/>
+      <path class="fl" d="M440 60 L184 122" stroke="#fb7185"/>
+      <text x="250" y="36" class="lbl" fill="#fb7185">A 는 락2 를 기다림</text>
+      <text x="250" y="160" class="lbl" fill="#fb7185">B 는 락1 을 기다림 — 순환 대기</text>
+    </svg>
+    <div class="cap">화살표가 <b>원을 이루는 순간</b> 두 스레드는 영원히 진행하지 못합니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">네 가지 필요 조건</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">조건</th><th>내용</th><th>깨는 법</th></tr>
+        <tr><td><b>상호 배제</b></td><td>한 번에 하나만</td><td>불변 데이터 · 락 프리</td></tr>
+        <tr><td><b>점유 대기</b></td><td>가진 채로 기다림</td><td><b>한 번에 전부 잡기</b></td></tr>
+        <tr><td><b>비선점</b></td><td>뺏을 수 없음</td><td><b>타임아웃 후 포기</b></td></tr>
+        <tr><td><b>순환 대기</b></td><td>원형으로 기다림</td><td><b>락 순서 고정 ★</b></td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무에서 가장 실용적인 것은 “락 순서 고정”</b>입니다 —
+        모든 락에 전역 순서를 정하고(예: 주소 순 · ID 순)
+        <b>항상 그 순서로만 잡습니다</b>. 코드 리뷰로 검증할 수 있고
+        런타임 비용이 없습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드로 보기</h4>
+      <div class="vs">
+        <div class="bad">
+          <h5>✗ 순서가 다름</h5>
+          <pre class="code" data-lang="python"><code>def transfer(a, b, amt):
+    with a.lock:
+        with b.lock:
+            a.bal -= amt
+            b.bal += amt
+
+# transfer(x, y) 와 transfer(y, x) 가
+# 동시에 실행되면 데드락</code></pre>
+        </div>
+        <div class="good">
+          <h5>✓ ID 순으로 고정</h5>
+          <pre class="code" data-lang="python"><code>def transfer(a, b, amt):
+    first, second = sorted((a, b), key=lambda x: x.id)
+    with first.lock:
+        with second.lock:
+            a.bal -= amt
+            b.bal += amt
+# 어느 방향이든 항상 같은 순서</code></pre>
+        </div>
+      </div>
+      <pre class="code" data-lang="python"><code># 타임아웃으로 비선점 조건 깨기
+if a.lock.acquire(timeout=1.0):
+    try:
+        if b.lock.acquire(timeout=1.0):
+            try: do_work()
+            finally: b.lock.release()
+        else:
+            metrics.inc("lock_timeout")     # 포기하고 재시도
+    finally:
+        a.lock.release()</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">데드락 찾아내기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:24%">환경</th><th>방법</th></tr>
+      <tr><td><b>자바</b></td><td><code>jstack PID</code> — “Found one Java-level deadlock” 을 자동 출력</td></tr>
+      <tr><td><b>파이썬</b></td><td><code>py-spy dump --pid</code> · <code>faulthandler.dump_traceback_later</code></td></tr>
+      <tr><td><b>Go</b></td><td>런타임이 전역 데드락 감지 · <code>SIGQUIT</code> 으로 전체 스택</td></tr>
+      <tr><td><b>C · C++</b></td><td>ThreadSanitizer · <code>gdb</code> 에서 <code>thread apply all bt</code></td></tr>
+      <tr><td><b>리눅스 전반</b></td><td><code>cat /proc/PID/task/*/stack</code> · <code>eu-stack -p PID</code></td></tr>
+      <tr><td><b>DB</b></td><td>데드락 로그 · <code>SHOW ENGINE INNODB STATUS</code></td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># 자바 — 가장 편하다
+jstack -l $(pgrep -f myapp) &gt; stack.txt
+grep -A 30 "Found one Java-level deadlock" stack.txt
+
+# 파이썬 — 멈춘 순간의 모든 스레드 스택
+py-spy dump --pid 1234
+# 또는 코드에 미리 넣어 두기
+import faulthandler, signal
+faulthandler.register(signal.SIGUSR1)     # kill -USR1 PID 로 덤프
+
+# ★ 운영에서 "멈췄다" 는 신고를 받으면
+#   ① 프로세스가 살아 있는지 (ps)
+#   ② CPU 를 쓰는지 (top) — 0% 면 대기, 100% 면 무한 루프
+#   ③ 스레드 덤프 두 번 (10초 간격) — 같은 자리면 블로킹</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>“스레드 덤프를 10초 간격으로 두 번”</b>이 핵심 요령입니다 —
+      한 번만 보면 <b>일시적인 대기</b>와 <b>영구 블로킹</b>을 구분할 수 없습니다.
+      같은 자리에 멈춰 있으면 데드락이나 무한 대기입니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">DB 데드락은 다릅니다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>DB 는 데드락을 '예방' 하지 않고 '감지 후 한쪽을 죽인다'
+
+  · 대기 그래프에서 사이클을 찾으면 희생자를 롤백
+  · 애플리케이션은 데드락 에러를 받고 재시도해야 한다
+  · MySQL: Error 1213 · PostgreSQL: 40P01 · Oracle: ORA-00060
+
+흔한 원인
+  ① 여러 행을 서로 다른 순서로 UPDATE
+  ② 갭 락 · 넥스트키 락 (MySQL 반복 읽기)
+  ③ 인덱스가 없어 넓은 범위를 잠금
+  ④ 긴 트랜잭션 안에 외부 API 호출
+
+대응
+  · UPDATE 순서를 PK 순으로 고정 (ORDER BY 로 정렬 후)
+  · 트랜잭션을 짧게 · 외부 호출을 트랜잭션 밖으로
+  · 적절한 인덱스로 잠금 범위 축소
+  · ★ 재시도 로직을 반드시 넣는다 (지수 백오프 + 지터)</code></pre>
+    <pre class="code" data-lang="python"><code>import random, time
+from psycopg2 import errors
+
+def with_retry(fn, retries=3):
+    for i in range(retries):
+        try:
+            return fn()
+        except errors.DeadlockDetected:
+            if i == retries - 1: raise
+            time.sleep(random.uniform(0, 0.1 * (2 ** i)))   # 백오프 + 지터
+            metrics.inc("db_deadlock_retry")
+
+# 순서 고정 — 여러 행을 갱신할 때
+ids = sorted(target_ids)                # ★ 항상 같은 순서
+for pk in ids:
+    cur.execute("UPDATE accounts SET bal = bal + %s WHERE id = %s", (d, pk))</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>DB 데드락은 “버그”가 아니라 “정상 동작”</b>입니다 —
+      동시성이 있으면 어느 정도는 발생합니다.
+      중요한 것은 <b>빈도를 낮추고 재시도로 흡수</b>하는 것이고,
+      <b>데드락 발생률을 지표로 감시</b>하는 것입니다 → <b>🗄️ Database 가이드</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o09 ==================== -->
+<section class="sec" id="o09">
+  <div class="sec-head rv">
+    <span class="no">OS 09</span>
+    <h2>파일 시스템 — <span class="t">쓴 것이 정말 저장됐을까</span></h2>
+    <p class="lead">
+      <code>write()</code> 가 성공했다고 데이터가 디스크에 있는 것은 아닙니다.
+      전원이 나가면 사라집니다. <b>내구성을 보장하는 지점</b>이 어디인지가
+      이 절의 핵심입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조 — 이름과 내용은 따로</h4>
+      <pre class="code" data-lang="text"><code>디렉터리 항목        아이노드(inode)          데이터 블록
+  "report.txt" ──▶  · 크기 · 권한 · 시각  ──▶  실제 내용
+  "backup.txt" ──┘  · 링크 수
+                    · 블록 위치
+
+★ 이름은 디렉터리에, 메타데이터는 아이노드에, 내용은 블록에
+
+그래서
+ · 이름 변경(rename)이 순식간 — 디렉터리 항목만 수정
+ · 하드 링크 = 같은 아이노드를 가리키는 이름이 여러 개
+ · 열려 있는 파일을 지워도 프로세스는 계속 읽을 수 있다
+   (링크 수는 0 이지만 열린 참조가 남아 있음)
+ · ★ 디스크가 안 비는 이유: 지웠는데 프로세스가 아직 열고 있음
+   lsof | grep deleted</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쓰기가 디스크에 닿기까지</h4>
+      <pre class="code" data-lang="text"><code>  앱 버퍼 (fwrite)
+    ↓ fflush
+  커널 페이지 캐시 (write)
+    ↓ fsync / fdatasync
+  디스크 쓰기 캐시
+    ↓ FUA · 캐시 플러시
+  실제 저장 매체 ★ 여기까지 와야 안전
+
+각 단계에서 전원이 나가면
+  · 앱 버퍼   → 데이터 손실
+  · 페이지 캐시 → 데이터 손실
+  · 디스크 캐시 → 손실 (배터리 백업 없으면)</code></pre>
+      <pre class="code" data-lang="python"><code># 안전하게 파일 저장하는 관용구 (원자적 교체)
+import os, tempfile
+
+def atomic_write(path, data):
+    d = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(dir=d)         # 같은 파일 시스템에
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())              # ① 내용을 디스크로
+        os.replace(tmp, path)                 # ② 원자적 교체
+        dirfd = os.open(d, os.O_DIRECTORY)
+        try: os.fsync(dirfd)                  # ③ 디렉터리도 fsync
+        finally: os.close(dirfd)
+    except BaseException:
+        os.unlink(tmp); raise</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">저널링 · 파일 시스템 선택</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:22%">파일 시스템</th><th>특징</th><th>쓰는 곳</th></tr>
+      <tr><td><b>ext4</b></td><td>안정적 · 기본값</td><td>대부분의 리눅스</td></tr>
+      <tr><td><b>XFS</b></td><td>큰 파일 · 병렬 I/O 강함</td><td>DB · 대용량 스토리지</td></tr>
+      <tr><td><b>Btrfs · ZFS</b></td><td>스냅숏 · 체크섬 · 압축</td><td>백업 · NAS</td></tr>
+      <tr><td>overlayfs</td><td>레이어 합성</td><td><b>도커 이미지</b></td></tr>
+      <tr><td>tmpfs</td><td>메모리 기반</td><td><code>/dev/shm</code> · 임시 파일</td></tr>
+      <tr><td>NFS · EFS</td><td>네트워크</td><td>공유 · <b>지연·일관성 주의</b></td></tr>
+    </table></div>
+    <pre class="code" data-lang="text"><code>저널링 모드 (ext4)
+  data=journal   메타데이터 + 데이터 모두 저널 → 가장 안전 · 가장 느림
+  data=ordered   메타데이터만 저널, 데이터를 먼저 씀 → 기본값 ★
+  data=writeback 순서 보장 없음 → 빠르지만 크래시 후 쓰레기 가능
+
+마운트 옵션
+  noatime        읽을 때마다 접근 시각 갱신 안 함 → 쓰기 감소 ★
+  nodiratime     디렉터리만
+  discard        TRIM 을 즉시 (보통은 fstrim 주기 실행이 낫다)
+
+/etc/fstab 예
+  /dev/sda1  /data  ext4  defaults,noatime  0 2</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>NFS 에서는 파일 락과 <code>fsync</code> 의 의미가 달라집니다</b> —
+      DB 데이터 디렉터리를 NFS 에 두면 <b>손상 위험</b>이 있습니다.
+      SQLite 를 네트워크 파일 시스템에 두는 것도 같은 이유로 위험합니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">디스크 문제 진단</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="bash"><code># ① 용량 — 두 가지를 봐야 한다
+df -h                     # 블록 사용량
+df -i                     # ★ 아이노드 사용량 (작은 파일이 많으면 먼저 참)
+
+# ② 어디가 큰지
+du -xh --max-depth=1 / | sort -h | tail -20
+ncdu /var                 # 대화형
+
+# ③ 지웠는데 안 줄어드는 경우
+lsof +L1                  # 링크 수 0 인 열린 파일
+lsof | grep deleted
+# → 해당 프로세스를 재시작하거나 로그를 truncate
+
+# ④ 어떤 파일에 쓰고 있는지
+fuser -vm /data
+lsof +D /var/log
+
+# ⑤ 파일 시스템 오류
+dmesg -T | grep -i -E "ext4|xfs|i/o error"
+smartctl -a /dev/sda      # 디스크 자체의 건강 상태</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">증상</th><th>원인</th></tr>
+      <tr><td>“No space left” 인데 <code>df</code> 는 여유</td><td><b>아이노드 소진</b> (<code>df -i</code>)</td></tr>
+      <tr><td>로그를 지웠는데 용량 그대로</td><td>프로세스가 아직 열고 있음</td></tr>
+      <tr><td>쓰기만 느림</td><td>fsync 대기 · 디스크 캐시 정책</td></tr>
+      <tr><td>파일 개수가 많은 디렉터리가 느림</td><td>디렉터리 인덱스 · 하위 디렉터리로 분산</td></tr>
+      <tr><td>컨테이너 디스크가 계속 참</td><td>로그 로테이션 미설정 · overlayfs 레이어</td></tr>
+    </table></div>
+    <div class="note tip" style="margin-bottom:0">
+      <b>로그 파일을 안전하게 비우는 법</b> —
+      <code>rm</code> 하지 말고 <code>truncate -s 0 app.log</code> 를 쓰세요.
+      프로세스가 열고 있는 파일을 지우면 <b>용량이 안 줄고</b>,
+      로그도 계속 쌓입니다. 근본적으로는 <code>logrotate</code> 를 설정하세요.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o10 ==================== -->
+<section class="sec" id="o10">
+  <div class="sec-head rv">
+    <span class="no">OS 10</span>
+    <h2>I/O 모델 — <span class="t">블로킹 · 논블로킹 · epoll</span></h2>
+    <p class="lead">
+      “요청 하나에 스레드 하나”로는 <b>동시 접속 만 개</b>를 감당할 수 없습니다.
+      그 한계를 넘는 방법이 이벤트 기반 I/O 이고,
+      Nginx · Node.js · Netty 가 전부 이 위에 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다섯 가지 모델</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">모델</th><th>동작</th></tr>
+        <tr><td><b>블로킹</b></td><td>데이터가 올 때까지 스레드가 멈춤</td></tr>
+        <tr><td><b>논블로킹</b></td><td>없으면 즉시 EAGAIN 반환 → 폴링 필요</td></tr>
+        <tr><td><b>I/O 다중화</b></td><td><b>여러 FD 를 한 번에 감시</b> (select · poll · epoll)</td></tr>
+        <tr><td>시그널 기반</td><td>준비되면 시그널 — 거의 안 씀</td></tr>
+        <tr><td><b>비동기 I/O</b></td><td>커널이 <b>복사까지 끝내고</b> 알려 줌 (io_uring · IOCP)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>select / poll 의 한계
+  · 매번 감시할 FD 목록을 커널에 통째로 전달 → O(n)
+  · select 는 FD 1024개 제한
+  · 준비된 것을 찾으려면 전체를 순회 → O(n)
+
+epoll 의 개선
+  · 감시 목록을 커널에 등록해 두고 유지 (epoll_ctl)
+  · 준비된 것만 반환 → O(준비된 개수)
+  · 10만 연결에서도 성능이 안 떨어진다  ★ C10K 문제 해결
+
+  BSD/macOS: kqueue    Windows: IOCP    Solaris: /dev/poll</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">epoll 사용 흐름</h4>
+      <pre class="code" data-lang="python"><code>import selectors, socket
+
+sel = selectors.DefaultSelector()      # 플랫폼별 최적 (리눅스=epoll)
+
+srv = socket.socket()
+srv.bind(("0.0.0.0", 8080)); srv.listen(1024)
+srv.setblocking(False)
+sel.register(srv, selectors.EVENT_READ, data=None)
+
+while True:
+    for key, mask in sel.select(timeout=1.0):     # 준비된 것만 반환
+        if key.data is None:                       # 새 연결
+            conn, addr = key.fileobj.accept()
+            conn.setblocking(False)
+            sel.register(conn, selectors.EVENT_READ, data=addr)
+        else:                                      # 데이터 도착
+            conn = key.fileobj
+            data = conn.recv(4096)
+            if not data:
+                sel.unregister(conn); conn.close()
+            else:
+                conn.sendall(process(data))
+
+# 스레드 하나로 수만 연결을 처리한다
+# ★ 단, 하나의 요청이 오래 걸리면 나머지 전부가 막힌다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">레벨 트리거와 엣지 트리거</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>레벨 트리거 (LT · 기본)
+  · 읽을 데이터가 '있는 동안' 계속 알려 준다
+  · 한 번에 다 안 읽어도 다음 루프에서 또 알려 줌
+  · 안전하고 구현이 쉽다 ★ 기본 선택
+
+엣지 트리거 (ET)
+  · '새로 도착했을 때만' 한 번 알려 준다
+  · 반드시 EAGAIN 이 날 때까지 전부 읽어야 한다
+  · 안 그러면 남은 데이터를 영원히 못 본다
+  · 이벤트 수가 적어 성능은 조금 유리
+
+ET 를 쓸 때의 필수 형태
+  while True:
+      try: data = conn.recv(4096)
+      except BlockingIOError: break        # EAGAIN → 다 읽음
+      if not data: close(); break
+      handle(data)</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">이벤트 루프의 대표 함정</th><th>대응</th></tr>
+      <tr><td><b>CPU 작업으로 루프를 막음</b></td><td>워커 스레드/프로세스로 위임</td></tr>
+      <tr><td><b>동기 라이브러리 사용</b></td><td>비동기 드라이버로 교체 · executor 로</td></tr>
+      <tr><td>느린 클라이언트가 버퍼를 점유</td><td>쓰기 타임아웃 · 백프레셔</td></tr>
+      <tr><td>한 연결이 대량 전송</td><td>공정 스케줄링 · 청크 단위 처리</td></tr>
+      <tr><td>파일 I/O 가 블로킹</td><td>리눅스는 파일에 epoll 이 안 됨 → 스레드 풀 · io_uring</td></tr>
+    </table></div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>리눅스에서 일반 파일은 항상 “읽기 준비됨”으로 보고됩니다</b> —
+      epoll 로 파일 I/O 를 비동기화할 수 없습니다.
+      그래서 Node.js 는 파일 작업을 <b>스레드 풀(libuv)</b>로 보냅니다.
+      이 한계를 없앤 것이 <code>io_uring</code> 입니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">io_uring 과 서버 아키텍처</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>io_uring (리눅스 5.1+)
+  · 제출 큐(SQ)와 완료 큐(CQ)를 사용자·커널이 공유 메모리로 함께 봄
+  · 시스템 콜 없이 요청을 쌓고, 한 번의 호출로 수백 개 제출
+  · 파일 · 소켓 · 타이머를 모두 같은 인터페이스로
+  · 폴링 모드면 시스템 콜이 아예 0
+
+효과
+  · 시스템 콜 비용이 커진 Spectre 이후 특히 유리
+  · 고성능 스토리지 · 프록시 · DB 에서 채택 증가
+  · Rust: tokio-uring · glommio  ·  C: liburing
+
+주의
+  · 커널 버전 의존 · 일부 배포판은 보안상 비활성
+  · 컨테이너 런타임이 seccomp 로 막는 경우가 많다</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:26%">서버 아키텍처</th><th>구조</th><th>예</th></tr>
+      <tr><td>스레드 per 연결</td><td>단순 · 연결 수 제한</td><td>전통적 Apache prefork</td></tr>
+      <tr><td><b>이벤트 루프 단일</b></td><td>CPU 1코어 활용</td><td>Node.js · Redis</td></tr>
+      <tr><td><b>이벤트 루프 다중</b></td><td>코어마다 루프 + SO_REUSEPORT</td><td><b>Nginx</b> · Envoy</td></tr>
+      <tr><td>스레드 풀 + 비동기</td><td>혼합</td><td>Netty · Tomcat NIO</td></tr>
+      <tr><td>경량 스레드</td><td>동기 코드처럼 작성</td><td>Go · Java 가상 스레드</td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># SO_REUSEPORT — 여러 프로세스가 같은 포트를 리슨
+# 커널이 연결을 분산해 준다 (락 경합 없이 멀티코어 활용)
+srv = socket.socket()
+srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+srv.bind(("0.0.0.0", 8080)); srv.listen(1024)
+
+# gunicorn · uvicorn 의 --workers 가 이 방식을 씁니다
+# 무중단 재시작에도 유용 — 새 프로세스가 같은 포트를 열고
+# 옛 프로세스를 천천히 종료</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>실무 선택 기준</b> — 동시 연결이 수천 이하면
+      <b>익숙한 모델(스레드 · 프레임워크 기본)</b>이 낫습니다.
+      만 개를 넘어가거나 <b>연결은 많은데 대부분 유휴</b>(웹소켓 · 롱폴링)일 때
+      이벤트 기반이 결정적 차이를 만듭니다 → <b>🌐 Web Server 가이드</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o11 ==================== -->
+<section class="sec" id="o11">
+  <div class="sec-head rv">
+    <span class="no">OS 11</span>
+    <h2>시스템 콜 — <span class="t">커널에게 부탁하는 유일한 창구</span></h2>
+    <p class="lead">
+      파일을 읽든 메모리를 늘리든 <b>커널을 거쳐야</b> 합니다.
+      그 전환에 비용이 있고, 그래서 <b>호출 횟수를 줄이는 것</b>이
+      성능 최적화의 큰 축이 됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">라이브러리 함수 vs 시스템 콜</h4>
+      <pre class="code" data-lang="text"><code>fwrite()  →  라이브러리 (버퍼링)  →  write()  →  커널
+
+fwrite 는 버퍼가 찰 때만 write 를 부른다
+  → 1000번 fwrite = 몇 번의 write
+
+printf 도 마찬가지
+  · 터미널이면 줄 단위 버퍼링
+  · 파이프·파일이면 4KB 블록 버퍼링 ★
+  → 그래서 파이프로 넘기면 출력이 늦게 보인다
+    stdbuf -oL command | grep ...   로 강제 가능
+
+자주 쓰는 시스템 콜
+  open · read · write · close · lseek
+  mmap · munmap · brk       (메모리)
+  fork · execve · wait4     (프로세스)
+  socket · bind · accept    (네트워크)
+  futex                     (락 대기)  ← 경합이 있으면 급증
+  clock_gettime             (시간)     ← vDSO 로 커널 진입 없이</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비용과 줄이는 법</h4>
+      <pre class="code" data-lang="bash"><code># 어떤 시스템 콜에 시간을 쓰는지
+strace -c -f ./program
+# % time  seconds  calls  syscall
+#  45.2    1.203   50000  write        ← 5만 번?
+#  30.1    0.802   50000  futex        ← 락 경합
+#  ...
+
+# 특정 콜만 추적
+strace -e trace=openat,read -f -p PID
+
+# 오버헤드가 큰 strace 대신 (운영에서는 이쪽)
+perf trace -p PID
+bpftrace -e 'tracepoint:syscalls:sys_enter_write { @[comm] = count(); }'</code></pre>
+      <div class="tw"><table class="cheat" style="margin:14px 0 0">
+        <tr><th style="width:34%">줄이는 방법</th><th>효과</th></tr>
+        <tr><td>버퍼링 (기본 버퍼드 I/O)</td><td>write 횟수 1/1000</td></tr>
+        <tr><td><code>writev</code> · <code>readv</code></td><td>여러 버퍼를 한 번에</td></tr>
+        <tr><td><code>sendfile</code> · <code>splice</code></td><td>복사 + 호출 동시 감소</td></tr>
+        <tr><td><code>io_uring</code></td><td>수백 개를 한 번에 제출</td></tr>
+        <tr><td>vDSO (시간 조회)</td><td>커널 진입 없이</td></tr>
+        <tr><td>배치 API (DB · 캐시)</td><td>왕복 자체를 감소</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">시그널 — 비동기 알림</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:20%">시그널</th><th>의미</th><th>실무</th></tr>
+      <tr><td><b>SIGTERM</b></td><td>정중한 종료 요청</td><td><b>그레이스풀 셧다운</b> 처리 필수</td></tr>
+      <tr><td><b>SIGKILL</b></td><td>강제 종료</td><td>잡을 수 없음</td></tr>
+      <tr><td>SIGINT</td><td>Ctrl+C</td><td>개발 중 종료</td></tr>
+      <tr><td><b>SIGHUP</b></td><td>터미널 종료 · 관례상 <b>설정 재로드</b></td><td>nginx -s reload</td></tr>
+      <tr><td>SIGPIPE</td><td>끊긴 파이프에 쓰기</td><td>무시하고 EPIPE 로 처리</td></tr>
+      <tr><td>SIGSEGV</td><td>잘못된 메모리 접근</td><td>크래시 · 코어 덤프</td></tr>
+      <tr><td>SIGCHLD</td><td>자식 종료</td><td>좀비 회수</td></tr>
+      <tr><td>SIGUSR1/2</td><td>사용자 정의</td><td>덤프 · 로그 레벨 변경</td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># 그레이스풀 셧다운 — 컨테이너 환경의 필수 요소
+import signal, sys, threading
+
+shutdown = threading.Event()
+
+def handle(signum, frame):
+    print(f"신호 {signum} 수신 — 새 요청 거부, 진행 중 작업 완료 대기")
+    shutdown.set()
+
+signal.signal(signal.SIGTERM, handle)
+signal.signal(signal.SIGINT, handle)
+
+# 서버 루프
+while not shutdown.is_set():
+    handle_request()
+
+drain_in_flight(timeout=25)     # ★ 쿠버네티스 기본 유예는 30초
+close_connections()
+sys.exit(0)</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>SIGTERM 을 처리하지 않으면 배포 때마다 요청이 끊깁니다</b> —
+      쿠버네티스는 SIGTERM 을 보내고 <code>terminationGracePeriodSeconds</code>(기본 30초) 뒤
+      SIGKILL 을 보냅니다. 그 사이에 <b>진행 중 요청을 마치고
+      새 요청을 안 받아야</b> 무중단 배포가 됩니다 → <b>🏛️ SW 공학 11</b>.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">권한과 자원 한도</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="bash"><code># ulimit — 프로세스별 자원 한도
+ulimit -a
+ulimit -n              # 열 수 있는 파일 수 ★ 가장 자주 문제
+ulimit -n 65536        # 셸에서 임시 변경
+
+# 실제 적용값은 프로세스별로 확인
+cat /proc/PID/limits | grep "open files"
+
+# systemd 서비스에서
+# [Service]
+# LimitNOFILE=65536
+# LimitNPROC=4096
+
+# 도커
+docker run --ulimit nofile=65536:65536 ...
+
+# 커널 전체 한도
+sysctl fs.file-max
+sysctl fs.nr_open</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:32%">에러</th><th>원인</th><th>확인</th></tr>
+      <tr><td><b>Too many open files</b></td><td>FD 한도 · <b>FD 누수</b></td><td><code>ls /proc/PID/fd | wc -l</code></td></tr>
+      <tr><td>Cannot allocate memory</td><td>메모리 · <code>vm.max_map_count</code></td><td><code>sysctl vm.max_map_count</code></td></tr>
+      <tr><td>Resource temporarily unavailable</td><td>프로세스·스레드 한도</td><td><code>ulimit -u</code></td></tr>
+      <tr><td>Address already in use</td><td>TIME_WAIT · 다른 프로세스</td><td><code>ss -lntp</code></td></tr>
+      <tr><td>Permission denied</td><td>권한 · SELinux · AppArmor</td><td><code>ausearch -m avc</code></td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># FD 누수 찾기 — 가장 흔한 운영 이슈 중 하나
+watch -n 5 'ls /proc/$(pgrep -f myapp)/fd | wc -l'
+# 계속 늘어나면 누수
+
+ls -l /proc/PID/fd | awk '{print $11}' | sort | uniq -c | sort -rn | head
+# 어떤 종류가 늘어나는지 (소켓? 파일? 파이프?)
+
+# 원인은 대부분
+#  · 응답 객체를 close 하지 않음 (HTTP 클라이언트)
+#  · 커넥션 풀을 매번 새로 생성
+#  · 예외 경로에서 finally 누락</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>Elasticsearch 가 <code>vm.max_map_count</code> 를 요구하는 이유</b>가
+      이 항목입니다 — mmap 으로 인덱스를 여는데 기본 한도(65530)로는 부족합니다.
+      설치 문서의 커널 파라미터 요구는 대부분 이런 이유가 있습니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o12 ==================== -->
+<section class="sec" id="o12">
+  <div class="sec-head rv">
+    <span class="no">OS 12</span>
+    <h2>컨테이너 — <span class="t">가상 머신이 아닙니다</span></h2>
+    <p class="lead">
+      컨테이너는 <b>같은 커널 위에서 시야만 가린 프로세스</b>입니다.
+      이 한 문장을 이해하면 컨테이너의 장점과 한계가
+      전부 유도됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 가지 커널 기능의 조합</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">기능</th><th>역할</th></tr>
+        <tr><td><b>네임스페이스</b></td><td>“무엇을 볼 수 있나” — 격리</td></tr>
+        <tr><td><b>cgroup</b></td><td>“얼마나 쓸 수 있나” — 제한</td></tr>
+        <tr><td>capabilities</td><td>루트 권한을 쪼개서 부여</td></tr>
+        <tr><td>seccomp</td><td>허용할 시스템 콜 제한</td></tr>
+        <tr><td>overlayfs</td><td>이미지 레이어 합성</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>네임스페이스 종류
+  pid    — 프로세스 ID 공간 (컨테이너 안에서는 PID 1)
+  mount  — 파일 시스템 뷰
+  net    — 네트워크 인터페이스 · 포트
+  uts    — 호스트명
+  ipc    — 공유 메모리 · 세마포어
+  user   — UID/GID 매핑 (루트리스 컨테이너)
+  cgroup — cgroup 계층 뷰
+  time   — 시계 (최근 추가)
+
+★ 커널은 공유한다 → VM 보다 가볍지만 격리는 약하다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 만들어 보기</h4>
+      <pre class="code" data-lang="bash"><code># 네임스페이스를 직접 만들면 '컨테이너 비슷한 것' 이 된다
+sudo unshare --pid --net --mount --uts --ipc --fork --mount-proc bash
+
+hostname mycontainer      # uts 네임스페이스 — 호스트에 영향 없음
+ps aux                    # pid 네임스페이스 — 자기 프로세스만 보임
+ip addr                   # net 네임스페이스 — lo 만 있음
+
+# cgroup 으로 제한 걸기 (v2)
+sudo mkdir /sys/fs/cgroup/mygroup
+echo "200000 1000000" | sudo tee /sys/fs/cgroup/mygroup/cpu.max   # 0.2 코어
+echo "268435456" | sudo tee /sys/fs/cgroup/mygroup/memory.max     # 256MB
+echo $$ | sudo tee /sys/fs/cgroup/mygroup/cgroup.procs
+
+# 실행 중인 컨테이너의 네임스페이스에 들어가기
+sudo nsenter -t $(docker inspect -f '{{.State.Pid}}' mycontainer) -n -p bash</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>nsenter</code> 는 디버깅에 아주 유용합니다</b> —
+        컨테이너에 <code>curl</code> · <code>tcpdump</code> 가 없어도
+        호스트의 도구로 <b>그 컨테이너의 네트워크 네임스페이스</b>에
+        들어가 진단할 수 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">컨테이너에서 자주 겪는 문제</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:34%">증상</th><th>원인</th><th>대응</th></tr>
+      <tr><td>CPU 사용률은 낮은데 느림</td><td><b>CPU 스로틀링</b></td><td><code>cpu.stat</code> 의 <code>nr_throttled</code></td></tr>
+      <tr><td>OOMKilled 반복</td><td>limit 부족 · 힙 설정</td><td>RSS 추세 확인 (06절)</td></tr>
+      <tr><td>스레드가 과도하게 생성됨</td><td>호스트 코어 수를 읽음</td><td>cgroup 인식 · 명시적 설정</td></tr>
+      <tr><td>좀비 프로세스 누적</td><td>PID 1 이 회수 안 함</td><td><code>--init</code> · tini</td></tr>
+      <tr><td>SIGTERM 이 앱에 안 감</td><td>셸이 PID 1</td><td><code>exec</code> 형식 ENTRYPOINT</td></tr>
+      <tr><td>DNS 가 느림</td><td>ndots 설정 · 검색 도메인</td><td><code>ndots:1</code> · FQDN 사용</td></tr>
+      <tr><td>디스크가 계속 참</td><td>로그 · 레이어 · 볼륨</td><td>로그 드라이버 제한 · prune</td></tr>
+    </table></div>
+    <pre class="code" data-lang="dockerfile"><code># ✗ 셸 형식 — 셸이 PID 1 이 되어 시그널이 앱에 안 간다
+CMD python app.py
+
+# ✓ exec 형식 — 앱이 PID 1
+CMD ["python", "app.py"]
+
+# ✓ 시그널 처리와 좀비 회수를 함께
+ENTRYPOINT ["tini", "--"]
+CMD ["python", "app.py"]
+
+# 또는 docker run --init / 쿠버네티스는 shareProcessNamespace 등</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>셸 형식과 exec 형식의 차이가 무중단 배포를 가릅니다</b> —
+      셸 형식이면 <code>/bin/sh</code> 가 PID 1 이 되고,
+      그 셸은 SIGTERM 을 자식에게 전달하지 않습니다.
+      결과적으로 <b>매 배포마다 요청이 강제 종료</b>됩니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">격리 수준과 보안</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:24%">방식</th><th>격리</th><th>오버헤드</th><th>쓰는 곳</th></tr>
+      <tr><td><b>컨테이너</b></td><td>네임스페이스 (커널 공유)</td><td>거의 없음</td><td>일반적인 배포</td></tr>
+      <tr><td>gVisor</td><td>사용자 공간 커널</td><td>중간</td><td>멀티테넌트</td></tr>
+      <tr><td><b>Firecracker · Kata</b></td><td>경량 VM (커널 분리)</td><td>작음</td><td><b>서버리스 · 신뢰 못할 코드</b></td></tr>
+      <tr><td>VM</td><td>완전 분리</td><td>큼</td><td>강한 격리 필요</td></tr>
+    </table></div>
+    <pre class="code" data-lang="yaml"><code># 컨테이너 보안 기본 설정
+securityContext:
+  runAsNonRoot: true              # 루트로 실행 금지
+  runAsUser: 10001
+  readOnlyRootFilesystem: true    # 쓰기는 볼륨으로만
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]                 # 모든 capability 제거
+    add: ["NET_BIND_SERVICE"]     # 필요한 것만 (1024 미만 포트)
+  seccompProfile:
+    type: RuntimeDefault          # 위험한 시스템 콜 차단</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>“컨테이너 = 보안 경계”라고 가정하지 마세요</b> —
+      커널을 공유하므로 <b>커널 취약점 하나로 탈출</b>이 가능합니다.
+      신뢰할 수 없는 코드(사용자 제출 코드 · 멀티테넌트)를 돌린다면
+      <b>경량 VM 수준의 격리</b>가 필요합니다 → <b>🔐 보안 · 암호 13</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== o13 ==================== -->
+<section class="sec" id="o13">
+  <div class="sec-head rv">
+    <span class="no">OS 13</span>
+    <h2>리눅스 실전 진단 — <span class="t">15분 안에 범위 좁히기</span></h2>
+    <p class="lead">
+      “서버가 느리다”는 신고를 받았을 때
+      <b>어떤 명령을 어떤 순서로</b> 치는지입니다.
+      이 절만 따로 북마크해 두어도 좋습니다.
+    </p>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">첫 60초 — 넷플릭스 체크리스트</h4>
+    <pre class="code" data-lang="bash"><code>uptime                 # ① 부하 추세 (1분 vs 15분)
+dmesg -T | tail -20    # ② 커널 에러 · OOM · 하드웨어
+vmstat 1 5             # ③ r(CPU 대기) · b(I/O 대기) · si/so(스왑)
+mpstat -P ALL 1 3      # ④ 코어별 — 한 코어만 높으면 단일 스레드 병목
+pidstat 1 3            # ⑤ 프로세스별 CPU
+iostat -xz 1 3         # ⑥ 디스크 — await · %util
+free -h                # ⑦ 메모리 — available 을 볼 것
+sar -n DEV 1 3         # ⑧ 네트워크 처리량
+sar -n TCP,ETCP 1 3    # ⑨ TCP 재전송 · 연결 실패
+top                    # ⑩ 전체 그림</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>이 순서에는 이유가 있습니다</b> — 넓은 것에서 좁은 것으로,
+      <b>싼 명령에서 비싼 명령으로</b> 갑니다.
+      ③ 에서 r 이 높으면 CPU 쪽으로, b 가 높으면 I/O 쪽으로 갈라집니다.
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CPU 가 병목일 때</h4>
+      <pre class="code" data-lang="bash"><code>top -H -p PID          # 스레드별 CPU
+pidstat -t -p PID 1    # 같은 것 (스레드 분해)
+
+# 어느 함수인가
+perf top -p PID                       # 실시간
+perf record -F 99 -g -p PID -- sleep 30
+perf report --stdio | head -40
+
+# 언어별 프로파일러 (더 읽기 쉽다)
+py-spy top --pid PID                  # 파이썬
+async-profiler -d 30 -e cpu PID       # 자바
+go tool pprof http://:6060/debug/pprof/profile   # Go
+node --cpu-prof app.js                # Node
+
+# IPC 로 '기다리는 중' 인지 판단 (🖥️ 컴퓨터구조 09)
+perf stat -p PID -- sleep 10</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">I/O 가 병목일 때</h4>
+      <pre class="code" data-lang="bash"><code>iostat -xz 1
+#  await   요청당 평균 대기 (ms) — 높으면 디스크 문제
+#  r_await / w_await 로 읽기·쓰기 구분
+#  aqu-sz  큐 길이
+
+iotop -oPa                 # 어느 프로세스가 I/O 를 쓰나
+pidstat -d 1
+
+# 어느 파일인지
+sudo bpftrace -e 'tracepoint:syscalls:sys_enter_openat
+  { printf("%s %s\n", comm, str(args-&gt;filename)); }'
+
+# 블로킹된 스레드 (D 상태)
+ps -eo state,pid,cmd | awk '$1=="D"'
+cat /proc/PID/stack        # 커널 어디서 멈췄나
+
+# PSI — 얼마나 기다리는지
+cat /proc/pressure/io</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">네트워크 · 메모리</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="grid2">
+      <div class="card" style="margin:0">
+        <h4 class="mini" style="margin-top:0">네트워크</h4>
+        <pre class="code" data-lang="bash"><code>ss -s                  # 소켓 요약 (상태별 개수)
+ss -tan state time-wait | wc -l
+ss -ltnp               # 리슨 중인 포트와 프로세스
+ss -tanp | grep ESTAB | wc -l
+
+# accept 큐가 넘치는지 (연결이 거절됨)
+ss -lnt                # Recv-Q = 대기 중, Send-Q = backlog 크기
+netstat -s | grep -i -E "listen|overflow"
+sysctl net.core.somaxconn
+
+# 재전송 · 드롭
+sar -n ETCP 1
+nstat -az | grep -i retrans
+ethtool -S eth0 | grep -i -E "drop|err"</code></pre>
+      </div>
+      <div class="card" style="margin:0">
+        <h4 class="mini" style="margin-top:0">메모리</h4>
+        <pre class="code" data-lang="bash"><code>free -h                       # available 을 볼 것
+cat /proc/meminfo | head -20
+smem -k -P myapp              # PSS 기준
+pmap -x PID | tail -1
+
+# 슬랩(커널 메모리)
+slabtop -o | head -10
+
+# 어떤 프로세스가 늘어나는지
+ps -eo pid,rss,cmd --sort=-rss | head -10
+
+# 페이지 폴트
+sar -B 1
+ps -o min_flt,maj_flt,cmd -p PID
+
+# OOM 이력
+dmesg -T | grep -i oom
+cat /sys/fs/cgroup/memory.events</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">증상 → 원인 매핑표</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:30%">증상</th><th>먼저 확인</th><th>흔한 원인</th></tr>
+      <tr><td>load 는 높은데 CPU 는 낮음</td><td><code>vmstat</code> b 컬럼</td><td>디스크 I/O 대기 · NFS</td></tr>
+      <tr><td>CPU 100% 인데 처리량 낮음</td><td><code>perf stat</code> IPC</td><td>캐시 미스 · 스핀락 · GC</td></tr>
+      <tr><td>한 코어만 100%</td><td><code>mpstat -P ALL</code></td><td>단일 스레드 · 인터럽트 편중</td></tr>
+      <tr><td>메모리 여유 있는데 OOM</td><td>cgroup limit</td><td>컨테이너 한도 · 단편화</td></tr>
+      <tr><td>가끔 수 초 멈춤</td><td>GC 로그 · <code>vmstat</code> si/so</td><td>GC STW · 스왑 · THP</td></tr>
+      <tr><td>Too many open files</td><td><code>/proc/PID/fd</code></td><td>FD 누수 · 한도</td></tr>
+      <tr><td>연결이 간헐적으로 거절</td><td><code>ss -lnt</code> Recv-Q</td><td>accept 큐 넘침 · somaxconn</td></tr>
+      <tr><td>재시작 직후만 느림</td><td>정상</td><td>캐시 · JIT 워밍업</td></tr>
+      <tr><td>특정 시각마다 느림</td><td>cron · 배치</td><td>백업 · 컴팩션 · 로그 로테이션</td></tr>
+      <tr><td>디스크 여유 있는데 쓰기 실패</td><td><code>df -i</code></td><td>아이노드 소진</td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># 장애 시 한 번에 스냅숏 뜨기 (나중에 분석용)
+mkdir -p /tmp/diag-$(date +%s) &amp;&amp; cd $_
+uptime            &gt; uptime.txt
+dmesg -T | tail -200 &gt; dmesg.txt
+vmstat 1 10       &gt; vmstat.txt
+mpstat -P ALL 1 5 &gt; mpstat.txt
+iostat -xz 1 5    &gt; iostat.txt
+free -h           &gt; free.txt
+ps auxf           &gt; ps.txt
+ss -s             &gt; ss.txt
+top -bn1          &gt; top.txt
+cat /proc/pressure/* &gt; psi.txt 2&gt;/dev/null
+
+# ★ 장애가 지나가면 증거도 사라진다. 먼저 모으고 나중에 본다.</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>이 탭에서 이어지는 곳</b> —
+      네트워크 계층의 진단은 <b>🌐 네트워크 13</b>,
+      하드웨어 관점은 <b>🖥️ 컴퓨터구조 13</b>,
+      동시성 문제는 <b>🕸️ 분산 · 동시성 02~04</b>,
+      운영 체계로 만드는 법은 <b>🏛️ SW 공학 12</b> 에 있습니다.
+      다음 탭은 <kbd>8</kbd> <b>🌐 네트워크</b>를 추천합니다.
+    </div>
+  </div>
+</section>
+
+</div>

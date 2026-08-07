@@ -1,0 +1,1877 @@
+<!-- ============================================================
+     분산 · 동시성 PANE
+     ============================================================ -->
+<div class="pane" id="pane-dist">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> 재현이 안 되는 버그와 가끔 일어나는 장애가 사는 곳</div>
+  <h1>둘 이상이<br>동시에 일하면<br>규칙이 달라집니다</h1>
+  <p class="tx">
+    스레드 두 개든 서버 백 대든 문제의 성격은 같습니다 —
+    <b>순서를 보장할 수 없고, 일부만 실패할 수 있고, 시계를 믿을 수 없습니다</b>.
+    이 탭은 <b>한 프로세스 안의 동시성</b>에서 시작해
+    <b>여러 대에 걸친 분산</b>까지 같은 흐름으로 이어갑니다.
+    마지막 절은 장애를 견디는 실무 패턴입니다.
+  </p>
+  <div class="stats">
+    <div><b>13</b><span>SECTIONS</span></div>
+    <div><b>CAP</b><span>· 합의까지</span></div>
+    <div><b>재시도</b><span>· 멱등성</span></div>
+    <div><b>실무</b><span>패턴</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== d01 ==================== -->
+<section class="sec" id="d01">
+  <div class="sec-head rv">
+    <span class="no">DIST 01</span>
+    <h2>동시성 vs 병렬성 — <span class="t">다른 문제입니다</span></h2>
+    <p class="lead">
+      <b>동시성</b>은 여러 일을 <b>번갈아</b> 잘 다루는 것이고,
+      <b>병렬성</b>은 <b>진짜 동시에</b> 하는 것입니다.
+      해결책과 병목이 완전히 다릅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구분</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%"></th><th>동시성</th><th>병렬성</th></tr>
+        <tr><td>정의</td><td>여러 작업을 <b>다룬다</b></td><td>여러 작업을 <b>실행한다</b></td></tr>
+        <tr><td>코어 1개로</td><td><b>가능</b></td><td>불가능</td></tr>
+        <tr><td>주된 목표</td><td>응답성 · 자원 활용</td><td>처리량 · 속도</td></tr>
+        <tr><td>적합한 작업</td><td><b>I/O 바운드</b></td><td><b>CPU 바운드</b></td></tr>
+        <tr><td>도구</td><td>async · 이벤트 루프 · 코루틴</td><td>스레드 · 프로세스 · SIMD · GPU</td></tr>
+        <tr><td>병목</td><td>블로킹 호출</td><td>순차 부분 (암달)</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“느리다”의 원인부터 확인하세요</b> —
+        CPU 사용률이 100% 에 가까우면 병렬성 문제,
+        CPU 는 노는데 처리량이 안 나오면 동시성 문제입니다.
+        <b>⚙️ 운영체제 13</b> 의 진단 순서가 이 판단에 쓰입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">잘못 고르면</h4>
+      <pre class="code" data-lang="python"><code># CPU 작업에 asyncio 를 쓰면 — 아무 이득이 없다
+async def compute(n):
+    return sum(i * i for i in range(n))    # 이벤트 루프를 통째로 막는다
+
+await asyncio.gather(*[compute(10**7) for _ in range(4)])
+# 순차 실행과 같은 시간 + 다른 요청도 전부 대기
+
+# ✓ CPU 작업은 프로세스로
+loop = asyncio.get_running_loop()
+with ProcessPoolExecutor() as pool:
+    results = await asyncio.gather(
+        *[loop.run_in_executor(pool, compute, 10**7) for _ in range(4)])
+
+# I/O 작업에 프로세스를 쓰면 — 낭비다
+# 프로세스 100개보다 코루틴 10000개가 훨씬 가볍다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">암달의 법칙 다시 보기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>병렬화의 상한 (🖥️ 컴퓨터구조 10)
+
+  속도 향상 = 1 / ((1-p) + p/n)
+
+  p=0.95, n=∞ 이면 최대 20배
+
+★ 실무에서는 '순차 부분' 이 생각보다 크다
+  · 락 경합 구간
+  · 결과를 모으는 단계
+  · 단일 DB 로의 쓰기
+  · 로그 · 메트릭 전송
+  · 직렬화 · 네트워크
+
+★ 그리고 병렬화 자체의 비용이 있다
+  · 태스크 분할 · 스케줄링
+  · 데이터 복사 · 동기화
+  · 캐시 오염
+  → 작은 작업을 병렬화하면 오히려 느려진다</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">병렬화 전에 확인</th><th>이유</th></tr>
+      <tr><td>정말 CPU 가 병목인가</td><td>대개 I/O · DB 가 먼저</td></tr>
+      <tr><td>작업 하나가 충분히 큰가</td><td>오버헤드 &gt; 이득</td></tr>
+      <tr><td>공유 상태가 있는가</td><td>락 경합이 이득을 먹는다</td></tr>
+      <tr><td>순서가 필요한가</td><td>결과 정렬 비용</td></tr>
+      <tr><td>메모리가 충분한가</td><td>워커마다 복사본</td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>가장 좋은 병렬화는 “작업이 서로를 모르는 것”</b>입니다 —
+      공유 상태가 없으면 락도, 순서도, 경쟁도 없습니다.
+      데이터를 <b>미리 나눠서</b> 각자 처리하고 마지막에 합치는 구조를
+      먼저 고려하세요.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">언어별 현실</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:22%">언어</th><th>동시성</th><th>병렬성</th><th>주의</th></tr>
+      <tr><td><b>파이썬</b></td><td>asyncio · 스레드</td><td><b>프로세스</b> (GIL)</td><td>3.13+ free-threaded 실험 중</td></tr>
+      <tr><td><b>JS · Node</b></td><td>이벤트 루프</td><td>워커 스레드 · 클러스터</td><td>루프를 막지 말 것</td></tr>
+      <tr><td><b>Go</b></td><td>고루틴</td><td>고루틴 (자동)</td><td>고루틴 누수 주의</td></tr>
+      <tr><td><b>자바</b></td><td>가상 스레드 (21+)</td><td>플랫폼 스레드</td><td>동기화 구간에서 핀 고정</td></tr>
+      <tr><td><b>Rust</b></td><td>async</td><td>스레드 · rayon</td><td>컴파일러가 데이터 경쟁 차단</td></tr>
+      <tr><td><b>C#</b></td><td>async/await</td><td>Task · Parallel</td><td>동기 컨텍스트 데드락</td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># 파이썬 GIL — CPU 작업은 스레드로 병렬이 안 된다
+import threading, time
+
+def burn(n):
+    while n &gt; 0: n -= 1
+
+# 스레드 4개
+t = time.perf_counter()
+ts = [threading.Thread(target=burn, args=(10**8,)) for _ in range(4)]
+[x.start() for x in ts]; [x.join() for x in ts]
+print("스레드", time.perf_counter() - t)      # 순차와 비슷하거나 더 느림
+
+# 프로세스 4개
+from multiprocessing import Process
+t = time.perf_counter()
+ps = [Process(target=burn, args=(10**8,)) for _ in range(4)]
+[x.start() for x in ps]; [x.join() for x in ps]
+print("프로세스", time.perf_counter() - t)    # 약 4배 빠름
+
+# ★ 단, I/O 대기 중에는 GIL 이 풀린다
+#   그래서 I/O 바운드는 스레드로도 잘 된다
+#   numpy · 압축 · 암호화 같은 C 확장도 내부에서 GIL 을 푼다</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>파이썬에서 “GIL 때문에 안 된다”는 절반만 맞습니다</b> —
+      I/O 와 C 확장은 잘 병렬화됩니다.
+      순수 파이썬 CPU 루프만 문제이고, 그건 대개
+      <b>numpy · numba · Rust 확장</b>으로 옮기는 것이 답입니다 →
+      <b>🐍 Python</b> · <b>🦀 Rust 가이드</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d02 ==================== -->
+<section class="sec" id="d02">
+  <div class="sec-head rv">
+    <span class="no">DIST 02</span>
+    <h2>경쟁 상태 · 원자성 — <span class="t">count += 1 은 세 단계입니다</span></h2>
+    <p class="lead">
+      한 줄처럼 보이는 연산이 사실 <b>읽기 · 계산 · 쓰기</b> 세 단계입니다.
+      그 사이에 다른 스레드가 끼어들면 값이 사라집니다.
+      <b>재현이 안 되는 버그</b>의 대표적인 원인입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 660 190" role="img" aria-label="두 스레드가 동시에 카운터를 증가시킬 때 읽기와 쓰기가 겹쳐 증가 하나가 사라지는 과정">
+      <text x="16" y="22" class="lbl">스레드 A</text>
+      <text x="360" y="22" class="lbl">스레드 B</text>
+      <rect class="bx" x="16" y="34" width="150" height="30"/>
+      <text x="30" y="54" font-size="11" fill="#e8f0ff">읽기 → 5</text>
+      <rect class="bx" x="360" y="70" width="150" height="30"/>
+      <text x="374" y="90" font-size="11" fill="#e8f0ff">읽기 → 5</text>
+      <rect class="bx" x="16" y="106" width="150" height="30"/>
+      <text x="30" y="126" font-size="11" fill="#e8f0ff">쓰기 ← 6</text>
+      <rect class="bx bx-warn" x="360" y="142" width="150" height="30"/>
+      <text x="374" y="162" font-size="11" fill="#fb7185">쓰기 ← 6 (덮어씀)</text>
+
+      <path class="ln" d="M240 20 L240 182" stroke-dasharray="4 5"/>
+      <text x="250" y="18" class="lbl">시간 ↓</text>
+      <path class="fl" d="M166 49 L356 85"/>
+      <path class="fl" d="M166 121 L356 157"/>
+      <text x="530" y="100" class="lbl">두 번 증가했는데</text>
+      <text x="530" y="118" class="lbl" fill="#fb7185">결과는 6 — 하나가 사라짐</text>
+    </svg>
+    <div class="cap">겹치는 구간이 아주 짧아 <b>대부분의 실행에서는 문제가 안 보입니다</b> — 그래서 위험합니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 재현해 보기</h4>
+      <pre class="code" data-lang="python"><code>import threading
+
+counter = 0
+def worker():
+    global counter
+    for _ in range(100_000):
+        counter += 1          # ★ 원자적이지 않다
+
+ts = [threading.Thread(target=worker) for _ in range(4)]
+[t.start() for t in ts]; [t.join() for t in ts]
+print(counter)                # 400000 이 아니다 (실행마다 다름)
+
+# ✓ 락으로
+lock = threading.Lock()
+def worker_safe():
+    global counter
+    for _ in range(100_000):
+        with lock:
+            counter += 1
+
+# ✓ 더 나은 방법: 각자 세고 마지막에 합친다 (경합 제거)
+def worker_local(results, idx):
+    local = 0
+    for _ in range(100_000): local += 1
+    results[idx] = local
+# → 락이 아예 필요 없다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">원자성이 필요한 자리</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">패턴</th><th>안전한 방법</th></tr>
+        <tr><td>카운터 증가</td><td>원자 연산 · 락 · 샤딩</td></tr>
+        <tr><td>읽고-확인하고-쓰기</td><td><b>CAS</b> · 조건부 UPDATE</td></tr>
+        <tr><td>“없으면 만들기”</td><td>유니크 제약 + upsert</td></tr>
+        <tr><td>재고 차감</td><td><code>UPDATE ... WHERE qty &gt;= n</code></td></tr>
+        <tr><td>중복 방지</td><td>DB 유니크 인덱스</td></tr>
+        <tr><td>순번 발급</td><td>시퀀스 · 원자적 INCR</td></tr>
+      </table></div>
+      <pre class="code" data-lang="sql"><code>-- ✗ 애플리케이션에서 확인 후 갱신 (경쟁)
+SELECT qty FROM stock WHERE id=1;    -- 5
+-- (다른 트랜잭션이 끼어듦)
+UPDATE stock SET qty = 4 WHERE id=1; -- 잘못된 값
+
+-- ✓ 조건을 UPDATE 에 넣어 원자적으로
+UPDATE stock SET qty = qty - 1
+ WHERE id = 1 AND qty &gt;= 1;
+-- 영향받은 행이 0 이면 재고 부족
+
+-- ✓ 중복 생성 방지는 DB 제약으로
+CREATE UNIQUE INDEX ON orders (idempotency_key);
+INSERT ... ON CONFLICT (idempotency_key) DO NOTHING;</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">원자 연산과 락 프리 카운터</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>하드웨어가 제공하는 원자 연산
+  · 원자적 로드 · 스토어
+  · fetch_and_add       (카운터)
+  · compare_and_swap    (CAS — 04절)
+  · exchange
+
+이들은 CPU 명령 하나로 처리되어 중간에 끼어들 수 없다
+  x86: LOCK 접두사 · ARM: LDREX/STREX 또는 LSE 명령
+
+비용
+  · 캐시 라인을 독점해야 하므로 일반 연산보다 느리다 (수십 사이클)
+  · 여러 코어가 같은 변수를 다투면 급격히 느려진다
+  → 샤딩 · 스레드 로컬 누적으로 경합을 줄인다</code></pre>
+    <pre class="code" data-lang="java"><code>// 자바 — 상황별 선택
+AtomicLong counter = new AtomicLong();
+counter.incrementAndGet();          // 경합이 적을 때
+
+LongAdder adder = new LongAdder();  // ★ 경합이 심할 때
+adder.increment();                  // 내부적으로 셀을 나눠 쓴다
+adder.sum();                        // 읽을 때 합산
+
+// Go
+var counter int64
+atomic.AddInt64(&amp;counter, 1)
+
+// Rust
+use std::sync::atomic::{AtomicU64, Ordering};
+counter.fetch_add(1, Ordering::Relaxed);   // 순서 요구가 없으면 Relaxed</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>메트릭 카운터에는 <code>LongAdder</code> 계열을 쓰세요</b> —
+      단일 <code>AtomicLong</code> 은 코어가 많을수록
+      <b>캐시 라인 경합</b>으로 급격히 느려집니다.
+      <b>🖥️ 컴퓨터구조 08</b> 의 false sharing 과 같은 문제입니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">경쟁 상태 찾아내기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:26%">도구</th><th>내용</th></tr>
+      <tr><td><b>ThreadSanitizer</b></td><td>C/C++ · Go · Rust — 실행 중 데이터 경쟁 탐지</td></tr>
+      <tr><td>Go <code>-race</code></td><td>테스트·개발 빌드에 항상 켜기</td></tr>
+      <tr><td>자바 JCStress</td><td>동시성 불변식 스트레스 테스트</td></tr>
+      <tr><td>Loom · 결정적 재생</td><td>가능한 인터리빙을 전부 탐색</td></tr>
+      <tr><td>Jepsen</td><td>분산 시스템의 일관성 검증</td></tr>
+      <tr><td>부하 테스트 + 검증</td><td>동시 요청 후 <b>불변식 확인</b></td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># 경쟁 상태 테스트 — 동시에 때리고 결과를 검증
+import concurrent.futures as cf
+
+def test_no_double_spend():
+    create_coupon(code="X", limit=1)
+
+    with cf.ThreadPoolExecutor(50) as ex:
+        results = list(ex.map(lambda _: try_use_coupon("X"), range(50)))
+
+    # ★ 불변식: 성공은 정확히 1건이어야 한다
+    assert sum(1 for r in results if r.ok) == 1
+    assert get_coupon("X").used == 1
+
+# 이런 테스트를 CI 에 넣어 두면
+# "가끔 쿠폰이 두 번 쓰인다" 를 배포 전에 잡을 수 있다</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>“한 번 돌려 봤는데 괜찮았다”는 증거가 아닙니다</b> —
+      경쟁 상태는 <b>타이밍에 의존</b>하므로 대부분의 실행에서 통과합니다.
+      <b>반복 실행 · 스레드 수 증가 · 인위적 지연 삽입</b>으로
+      확률을 높여서 테스트하세요.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d03 ==================== -->
+<section class="sec" id="d03">
+  <div class="sec-head rv">
+    <span class="no">DIST 03</span>
+    <h2>메모리 모델 — <span class="t">내가 쓴 값을 상대가 못 볼 수 있습니다</span></h2>
+    <p class="lead">
+      락 없이 변수를 공유하면 <b>값이 안 보이거나 순서가 뒤집혀</b> 보일 수 있습니다.
+      컴파일러와 CPU 가 <b>단일 스레드 기준으로</b> 최적화하기 때문입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가시성 문제</h4>
+      <pre class="code" data-lang="java"><code>// ✗ 영원히 안 끝날 수 있다
+class Worker {
+    boolean running = true;          // volatile 없음
+
+    void run() {
+        while (running) { /* 일 */ }  // 컴파일러가 레지스터에 캐시
+    }                                 // → 다른 스레드의 변경을 못 봄
+    void stop() { running = false; }
+}
+
+// ✓ volatile — 항상 메모리에서 읽고 쓴다
+volatile boolean running = true;
+
+// ✓ 또는 원자 타입
+AtomicBoolean running = new AtomicBoolean(true);</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>이 버그는 최적화 수준과 CPU 에 따라 나타납니다</b> —
+        디버그 빌드나 x86 에서는 우연히 동작하다가
+        <b>릴리즈 빌드나 ARM 에서 멈춥니다</b>.
+        “맥북에서만 안 된다”의 원인이 되기도 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">재정렬 문제</h4>
+      <pre class="code" data-lang="text"><code>스레드 A            스레드 B
+  data = 42;          if (ready)
+  ready = true;           use(data);
+
+★ 컴파일러나 CPU 가 A 의 두 줄 순서를 바꿀 수 있다
+  (단일 스레드 관점에서는 결과가 같으므로 허용된다)
+  → B 가 ready=true 를 보고 data 는 아직 0 일 수 있다
+
+메모리 순서 강도
+  x86 : 비교적 강함 (스토어-로드 재정렬만)
+  ARM : 약함 — 더 많은 재정렬 허용
+  → ★ x86 에서 잘 되던 코드가 ARM 에서 깨지는 이유</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Apple Silicon 도입 이후 실제로 많이 드러난 문제</b>입니다.
+        해결은 <b>적절한 동기화 원시</b>(락 · 원자 연산 · 채널)를
+        쓰는 것이고, 그러면 언어가 순서를 보장해 줍니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">happens-before 와 메모리 순서</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>happens-before 관계가 성립하면 가시성이 보장된다
+
+자바에서 happens-before 를 만드는 것들
+  · 같은 스레드의 프로그램 순서
+  · 락 해제 → 이후의 같은 락 획득
+  · volatile 쓰기 → 이후의 같은 volatile 읽기
+  · Thread.start() → 그 스레드의 첫 동작
+  · 그 스레드의 마지막 동작 → join() 반환
+  · 동시성 컬렉션 · CountDownLatch 등의 연산
+
+★ 즉 "락을 제대로 쓰면 재정렬을 걱정할 필요가 없다"
+  락 없이 공유하려 할 때만 이 이론이 필요해진다</code></pre>
+    <pre class="code" data-lang="rust"><code>// Rust · C++ 의 메모리 순서 (약한 것부터)
+use std::sync::atomic::Ordering;
+
+Ordering::Relaxed  // 원자성만 보장 · 순서 보장 없음 (카운터)
+Ordering::Acquire  // 이 읽기 이후의 연산이 앞으로 못 옴 (락 획득)
+Ordering::Release  // 이 쓰기 이전의 연산이 뒤로 못 감 (락 해제)
+Ordering::AcqRel   // 둘 다 (읽고-수정하고-쓰기)
+Ordering::SeqCst   // 전역 순서 보장 · 가장 강하고 가장 느림 ★ 기본 선택
+
+// 전형적인 Release/Acquire 쌍
+// 생산자
+data.store(42, Ordering::Relaxed);
+ready.store(true, Ordering::Release);     // 이 앞의 쓰기가 모두 보인다
+
+// 소비자
+if ready.load(Ordering::Acquire) {        // 이 뒤의 읽기가 뒤로 안 밀린다
+    assert_eq!(data.load(Ordering::Relaxed), 42);   // 보장됨
+}</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>확신이 없으면 <code>SeqCst</code> 를 쓰세요</b> —
+      약한 순서로 성능을 얻는 것은 <b>측정으로 필요성이 증명된 뒤</b>에만
+      의미가 있고, 틀렸을 때 재현이 거의 불가능합니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">이중 검사 잠금의 함정</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="vs">
+      <div class="bad">
+        <h5>✗ 유명한 깨진 패턴</h5>
+        <pre class="code" data-lang="java"><code>class Singleton {
+    private static Singleton inst;   // volatile 없음
+    static Singleton get() {
+        if (inst == null) {
+            synchronized (Singleton.class) {
+                if (inst == null)
+                    inst = new Singleton();
+            }
+        }
+        return inst;
+    }
+}
+// 문제: 생성자 실행과 참조 대입이 재정렬될 수 있다
+// → 다른 스레드가 '아직 초기화 안 된 객체' 를 볼 수 있다</code></pre>
+      </div>
+      <div class="good">
+        <h5>✓ 올바른 방법들</h5>
+        <pre class="code" data-lang="java"><code>// ① volatile 추가
+private static volatile Singleton inst;
+
+// ② 홀더 관용구 (더 깔끔)
+private static class Holder {
+    static final Singleton INST = new Singleton();
+}
+static Singleton get() { return Holder.INST; }
+// 클래스 초기화는 JVM 이 스레드 안전하게 보장
+
+// ③ enum (직렬화까지 안전)
+enum Singleton { INSTANCE; }</code></pre>
+      </div>
+    </div>
+    <pre class="code" data-lang="python"><code># 파이썬 · Go 에서도 같은 문제가 있다
+# 파이썬: functools.cache 나 모듈 레벨 초기화를 쓰면 안전
+from functools import cache
+
+@cache
+def get_client():
+    return ExpensiveClient()        # 첫 호출 시 한 번만 · GIL 이 보호
+
+# Go: sync.Once 를 쓴다
+var once sync.Once
+var client *Client
+func Get() *Client {
+    once.Do(func() { client = NewClient() })
+    return client
+}</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>언어가 제공하는 관용구를 쓰세요</b> —
+      <code>sync.Once</code> · <code>lazy_static</code> · 홀더 관용구 ·
+      <code>@cache</code>. 직접 이중 검사를 구현할 이유가 거의 없고,
+      직접 하면 대개 틀립니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d04 ==================== -->
+<section class="sec" id="d04">
+  <div class="sec-head rv">
+    <span class="no">DIST 04</span>
+    <h2>락 프리 · CAS — <span class="t">“바뀌지 않았으면 바꿔라”</span></h2>
+    <p class="lead">
+      락 없이 동기화하는 핵심 도구가 <b>Compare-And-Swap</b> 입니다.
+      빠르지만 <b>함정이 많고 구현이 어렵습니다</b> —
+      왜 그런지, 언제 락이 더 나은지를 봅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CAS 의 원리</h4>
+      <pre class="code" data-lang="text"><code>CAS(주소, 기대값, 새값)
+  if (*주소 == 기대값) { *주소 = 새값; return true; }
+  else                 { return false; }
+  ★ 이 전체가 CPU 명령 하나로 원자적으로 실행된다
+
+전형적인 사용 — 재시도 루프
+  loop {
+      old = load(addr)
+      new = f(old)
+      if CAS(addr, old, new) break;   // 성공하면 끝
+      // 실패 = 그 사이에 누가 바꿨다 → 다시 계산
+  }
+
+성질
+  · 락이 없어 데드락이 없다
+  · 한 스레드가 멈춰도 다른 스레드는 진행 (논블로킹)
+  · 경합이 심하면 재시도가 늘어 오히려 느려질 수 있다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ABA 문제</h4>
+      <pre class="code" data-lang="text"><code>스레드 A: old = X 를 읽음
+스레드 B: X → Y → X 로 두 번 바꿈
+스레드 A: CAS 성공! (값은 X 로 같으니까)
+          ★ 그런데 그 사이에 상태가 달라졌다
+
+포인터를 다루는 락프리 스택에서 특히 위험
+  · A 가 노드를 읽음
+  · B 가 그 노드를 꺼내 해제하고, 같은 주소에 새 노드 할당
+  · A 의 CAS 가 성공 → 해제된 메모리를 참조
+
+해결
+  · 태그된 포인터 (값 + 버전 카운터를 함께 CAS)
+  · 해저드 포인터 · epoch 기반 회수
+  · GC 언어에서는 메모리 재사용이 없어 덜 심각하다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>락프리 자료구조를 직접 만들지 마세요</b> —
+        메모리 회수 · ABA · 메모리 순서를 모두 맞춰야 하고,
+        <b>테스트로 검증하기가 거의 불가능</b>합니다.
+        검증된 라이브러리를 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">낙관적 잠금 — 같은 아이디어를 DB 에</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="sql"><code>-- 비관적 잠금: 먼저 잠그고 작업 (충돌이 잦을 때)
+SELECT * FROM accounts WHERE id = 1 FOR UPDATE;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+
+-- 낙관적 잠금: 충돌이 없다고 보고 진행, 버전으로 확인 (CAS 와 같은 발상)
+SELECT id, balance, version FROM accounts WHERE id = 1;   -- version = 7
+-- 애플리케이션에서 계산
+UPDATE accounts
+   SET balance = 900, version = 8
+ WHERE id = 1 AND version = 7;      -- ★ 그 사이에 안 바뀌었으면
+-- 영향받은 행이 0 이면 충돌 → 다시 읽고 재시도</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:26%"></th><th>비관적</th><th>낙관적</th></tr>
+      <tr><td>충돌이 잦을 때</td><td><b>유리</b></td><td>재시도가 늘어 불리</td></tr>
+      <tr><td>충돌이 드물 때</td><td>락 비용만 낭비</td><td><b>유리</b></td></tr>
+      <tr><td>긴 트랜잭션</td><td>다른 요청을 막음</td><td><b>안 막음</b></td></tr>
+      <tr><td>사용자 편집 화면</td><td>부적합 (오래 잠금)</td><td><b>적합</b></td></tr>
+      <tr><td>데드락</td><td>가능</td><td>없음</td></tr>
+      <tr><td>구현</td><td>단순</td><td>재시도 로직 필요</td></tr>
+    </table></div>
+    <div class="note tip" style="margin-bottom:0">
+      <b>사용자가 폼을 열어 두고 편집하는 경우</b>에는
+      낙관적 잠금이 정답입니다 — 비관적으로 잠그면
+      <b>커피 마시러 간 사람 때문에</b> 다른 모두가 막힙니다.
+      충돌 시 “다른 사람이 먼저 수정했습니다”를 보여 주면 됩니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">언제 락프리가 이득인가</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:34%">상황</th><th>선택</th></tr>
+      <tr><td>단순 카운터 · 플래그</td><td><b>원자 연산</b></td></tr>
+      <tr><td>경합이 낮은 짧은 임계 구역</td><td>락이 충분히 빠름</td></tr>
+      <tr><td>경합이 극심한 카운터</td><td>샤딩 · <code>LongAdder</code></td></tr>
+      <tr><td>실시간 요구 (오디오 · 게임)</td><td>락프리 (지연 예측 가능)</td></tr>
+      <tr><td>복잡한 자료구조</td><td><b>검증된 라이브러리</b></td></tr>
+      <tr><td>대부분의 애플리케이션 코드</td><td><b>락 또는 메시지 전달</b></td></tr>
+    </table></div>
+    <pre class="code" data-lang="text"><code>실무 순서 (권장)
+
+ ① 공유 상태를 없앤다        — 가장 좋다
+ ② 불변 데이터로 만든다      — 읽기는 동기화가 필요 없다
+ ③ 메시지 전달로 소유권 이전  — 채널 · 액터
+ ④ 표준 동시성 컬렉션        — ConcurrentHashMap · sync.Map
+ ⑤ 락                        — 짧게 · 순서 고정
+ ⑥ 원자 연산                 — 단순한 것만
+ ⑦ 락프리 자료구조           — 정말 필요할 때 · 라이브러리로
+
+★ 위에서부터 시도하고, 측정으로 필요성이 증명될 때만 아래로 내려간다</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>“락은 느리다”는 과장입니다</b> —
+      경합이 없는 뮤텍스는 <b>20ns 정도</b>이고,
+      대부분의 애플리케이션에서 병목이 아닙니다.
+      <b>측정하지 않은 락프리 최적화는 대개 손해</b>입니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d05 ==================== -->
+<section class="sec" id="d05">
+  <div class="sec-head rv">
+    <span class="no">DIST 05</span>
+    <h2>동시성 모델 — <span class="t">액터 · CSP · 이벤트 루프</span></h2>
+    <p class="lead">
+      스레드 + 락 말고도 방법이 있습니다.
+      <b>메모리를 공유하는 대신 메시지를 주고받으면</b>
+      경쟁 상태가 구조적으로 사라집니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">모델 비교</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">모델</th><th>핵심</th><th>대표</th></tr>
+        <tr><td><b>공유 메모리 + 락</b></td><td>같은 데이터를 잠그고 접근</td><td>자바 · C++</td></tr>
+        <tr><td><b>액터</b></td><td>각자 상태를 갖고 <b>메시지만</b> 주고받음</td><td>Erlang · Akka</td></tr>
+        <tr><td><b>CSP</b></td><td><b>채널</b>로 값을 전달</td><td>Go · Clojure</td></tr>
+        <tr><td><b>이벤트 루프</b></td><td>단일 스레드 + 콜백/await</td><td>Node · asyncio</td></tr>
+        <tr><td>STM</td><td>트랜잭션 메모리</td><td>Haskell · Clojure</td></tr>
+        <tr><td>데이터 병렬</td><td>같은 연산을 데이터에</td><td>rayon · numpy</td></tr>
+      </table></div>
+      <div class="dep">
+        Go 의 격언: <b>“메모리를 공유해서 통신하지 말고, 통신해서 메모리를 공유하라”</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">채널 (CSP)</h4>
+      <pre class="code" data-lang="go"><code>// 소유권을 넘긴다 — 공유가 없으니 락도 없다
+jobs := make(chan Job, 100)
+results := make(chan Result, 100)
+
+for w := 0; w &lt; 8; w++ {         // 워커 8개
+    go func() {
+        for job := range jobs {
+            results &lt;- process(job)
+        }
+    }()
+}
+
+for _, j := range allJobs { jobs &lt;- j }
+close(jobs)                       // ★ 닫아야 워커의 range 가 끝난다
+
+// select 로 여러 채널을 기다린다
+select {
+case r := &lt;-results:
+    handle(r)
+case &lt;-ctx.Done():                // 취소
+    return ctx.Err()
+case &lt;-time.After(5 * time.Second):
+    return errors.New("timeout")
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">각 모델의 함정</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:24%">모델</th><th>함정</th><th>대응</th></tr>
+      <tr><td><b>액터</b></td><td>메일박스가 무한히 참 · 메시지 유실</td><td>바운드 메일박스 · 배압</td></tr>
+      <tr><td><b>채널</b></td><td>닫지 않아 고루틴 누수 · 데드락</td><td>context 로 취소 · 반드시 close</td></tr>
+      <tr><td><b>이벤트 루프</b></td><td><b>블로킹 호출이 전체를 멈춤</b></td><td>비동기 드라이버 · 워커 위임</td></tr>
+      <tr><td><b>async/await</b></td><td>색깔 문제 (동기↔비동기 경계)</td><td>경계를 명확히 · executor</td></tr>
+      <tr><td>공유 메모리</td><td>데드락 · 경쟁</td><td>락 순서 · 검사 도구</td></tr>
+    </table></div>
+    <pre class="code" data-lang="go"><code>// 고루틴 누수 — 가장 흔한 Go 버그
+// ✗ 채널을 읽는 사람이 없으면 영원히 블로킹
+func leak() {
+    ch := make(chan int)          // 버퍼 없음
+    go func() { ch &lt;- 1 }()       // 아무도 안 읽으면 이 고루틴은 영원히 남는다
+}
+
+// ✓ context 로 취소 가능하게
+func noLeak(ctx context.Context) {
+    ch := make(chan int, 1)       // 버퍼를 두거나
+    go func() {
+        select {
+        case ch &lt;- compute():
+        case &lt;-ctx.Done():        // 취소되면 빠져나온다
+        }
+    }()
+}
+
+// 누수 확인
+// go test -race
+// runtime.NumGoroutine() 을 메트릭으로 노출
+// pprof goroutine 프로파일</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>고루틴 누수는 메모리 누수로 이어집니다</b> —
+      고루틴이 붙잡은 변수가 GC 되지 않습니다.
+      <b><code>runtime.NumGoroutine()</code> 을 메트릭으로 항상 노출</b>하고
+      우상향하면 경보를 울리세요.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">배압(backpressure)</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>생산이 소비보다 빠르면 어딘가에 쌓인다
+  · 큐가 무한이면 → 메모리 폭발 · 지연 폭발
+  · 큐가 유한이면 → 어떻게 할지 정해야 한다
+
+배압 = "느려졌으니 천천히 보내라" 는 신호를 위로 전달하는 것
+
+방법
+ ① 블로킹 — 생산자를 멈춘다 (가장 단순 · 자연스러운 배압)
+ ② 거절   — 즉시 실패 · 429 응답
+ ③ 버리기 — 오래된 것 · 새 것 (메트릭에는 최신이 중요)
+ ④ 샘플링 — 일부만 처리
+ ⑤ 병합   — 같은 키의 갱신을 합침
+
+★ 반드시 '버린 개수' 를 메트릭으로 남긴다
+  조용히 버리면 데이터가 왜 없는지 아무도 모른다</code></pre>
+    <pre class="code" data-lang="python"><code># asyncio 에서 동시 실행 수 제한 (배압)
+sem = asyncio.Semaphore(20)
+
+async def fetch_one(url):
+    async with sem:                      # 동시에 20개까지만
+        return await client.get(url)
+
+results = await asyncio.gather(*[fetch_one(u) for u in urls])
+# ★ gather 자체는 태스크를 전부 만들므로 URL 이 100만 개면 메모리가 터진다
+#   → 청크로 나누거나 큐 기반으로
+
+# 큐 기반 (메모리 상한이 명확)
+queue = asyncio.Queue(maxsize=1000)      # ★ 유한
+async def producer():
+    for u in urls:
+        await queue.put(u)               # 가득 차면 여기서 대기 = 배압
+</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>배압이 없는 시스템은 반드시 무너집니다</b> —
+      부하가 용량을 넘는 순간 큐가 무한히 자라고,
+      <b>지연이 폭발한 뒤 메모리가 터집니다</b>.
+      유한 큐 + 명시적 거절이 훨씬 나은 실패 방식입니다 →
+      <b>🗂️ 자료구조 03</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d06 ==================== -->
+<section class="sec" id="d06">
+  <div class="sec-head rv">
+    <span class="no">DIST 06</span>
+    <h2>분산 시스템의 여덟 가지 오해 — <span class="t">조용한 가정들</span></h2>
+    <p class="lead">
+      1994년에 정리된 목록인데 지금도 그대로 유효합니다.
+      <b>설계 리뷰에서 이 여덟 개를 훑는 것만으로</b>
+      큰 실수를 상당히 걸러 낼 수 있습니다.
+    </p>
+  </div>
+
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:6%">#</th><th style="width:26%">오해</th><th>현실 · 대응</th></tr>
+      <tr><td>1</td><td><b>네트워크는 안정적이다</b></td><td>끊긴다 · 재시도 + 멱등성 (13절)</td></tr>
+      <tr><td>2</td><td><b>지연은 0 이다</b></td><td>왕복이 쌓인다 · 호출 사슬을 얕게 (🌐 네트워크 12)</td></tr>
+      <tr><td>3</td><td><b>대역폭은 무한하다</b></td><td>페이로드를 줄인다 · 압축 · 페이지네이션</td></tr>
+      <tr><td>4</td><td><b>네트워크는 안전하다</b></td><td>내부망도 암호화 · mTLS · 제로 트러스트</td></tr>
+      <tr><td>5</td><td><b>토폴로지는 안 변한다</b></td><td>IP 를 하드코딩하지 말 것 · 서비스 디스커버리</td></tr>
+      <tr><td>6</td><td><b>관리자는 한 명이다</b></td><td>여러 팀 · 여러 정책 · 버전 불일치</td></tr>
+      <tr><td>7</td><td><b>전송 비용은 0 이다</b></td><td>직렬화 · 이그레스 요금 · CPU</td></tr>
+      <tr><td>8</td><td><b>네트워크는 균질하다</b></td><td>다른 OS · 인코딩 · 시간대 · MTU</td></tr>
+    </table></div>
+    <div class="note tip" style="margin-bottom:0">
+      <b>추가로 자주 하는 가정들</b> — “시계는 맞다”(12절) ·
+      “메시지는 순서대로 온다” · “한 번만 도착한다” ·
+      “장애는 명확하다(살았나 죽었나)”.
+      마지막이 특히 중요합니다 — <b>느린 것과 죽은 것을 구분할 수 없습니다</b>.
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">부분 실패 — 분산 시스템의 본질</h4>
+      <pre class="code" data-lang="text"><code>단일 프로세스: 함수 호출은 성공하거나 예외를 던진다
+분산 시스템:   ★ 세 번째 경우가 있다 — "모른다"
+
+  요청을 보냈는데 응답이 없다. 그러면
+   · 요청이 도착하지 않았나?
+   · 도착했는데 처리 중인가?
+   · 처리했는데 응답이 유실됐나?
+  → 구분할 수 없다
+
+결과
+ · 재시도하면 중복 처리 위험
+ · 재시도 안 하면 유실 위험
+ → ★ 그래서 멱등성이 필수다 (13절)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">장애 감지의 한계</h4>
+      <pre class="code" data-lang="text"><code>"노드가 죽었나?" 를 확실히 알 수 없다
+
+  타임아웃을 짧게 → 느린 노드를 죽었다고 오판
+  타임아웃을 길게 → 장애 감지가 늦어짐
+
+★ 비동기 네트워크에서는 완벽한 장애 감지가 불가능하다
+  (FLP 불가능성 정리와 연결된다)
+
+실무 대응
+ · 여러 신호를 조합 (하트비트 + 요청 성공률 + 지연)
+ · phi accrual 장애 감지기 — 확률적 판단
+ · 펜싱 토큰으로 '부활한 좀비' 를 차단 (09절)
+ · 죽었다고 판단해도 되돌릴 수 있게 설계</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">스플릿 브레인</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>네트워크가 둘로 갈라지면 양쪽이 각각 "내가 리더" 라고 생각할 수 있다
+
+  [노드1 노드2]  ✂ 단절 ✂  [노드3 노드4 노드5]
+   각자 리더 선출 → 데이터가 갈라진다 → 합칠 때 충돌
+
+방지: 쿼럼 (과반수)
+  · 5노드 중 과반은 3
+  · 2노드 쪽은 과반을 못 만들어 리더가 될 수 없다
+  · 3노드 쪽만 계속 동작 → 일관성 유지
+
+★ 짝수 노드는 피한다
+  4노드에서 2:2 로 갈리면 양쪽 다 과반이 안 됨 → 전체 정지
+  같은 내결함성(1대 장애 허용)이면 3노드가 낫다
+
+  3노드: 1대 장애 허용    5노드: 2대 장애 허용
+  4노드: 1대 장애 허용    6노드: 2대 장애 허용  ← 늘려도 이득 없음</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>“가용성을 위해 노드를 늘렸는데 더 잘 죽는다”</b>는
+      쿼럼을 고려하지 않았을 때 생깁니다.
+      etcd · Consul · ZooKeeper 를 <b>홀수 개로 배치</b>하라는 이유입니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">장애를 전제로 설계하기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:34%">질문</th><th>확인할 것</th></tr>
+      <tr><td>이 호출이 실패하면?</td><td>폴백 · 캐시 · 부분 응답</td></tr>
+      <tr><td>이 호출이 느려지면?</td><td>타임아웃 · 서킷 브레이커</td></tr>
+      <tr><td>두 번 실행되면?</td><td>멱등성</td></tr>
+      <tr><td>순서가 바뀌면?</td><td>버전 · 시퀀스 번호</td></tr>
+      <tr><td>이 노드가 죽으면?</td><td>다른 노드가 이어받나 · 상태는?</td></tr>
+      <tr><td>전체 리전이 죽으면?</td><td>다중 리전 · RTO/RPO</td></tr>
+      <tr><td>의존 서비스가 전부 죽으면?</td><td>우아한 저하 · 읽기 전용 모드</td></tr>
+    </table></div>
+    <pre class="code" data-lang="text"><code>카오스 엔지니어링 — 장애를 일부러 일으켜 검증
+
+  ① 정상 상태를 정의한다 (지표로)
+  ② 가설을 세운다 ("인스턴스 하나가 죽어도 지표가 유지된다")
+  ③ 실제 환경에서 실험한다 (통제된 범위 · 중단 스위치 준비)
+  ④ 가설이 틀리면 그것이 발견한 취약점이다
+
+주입할 장애
+  · 인스턴스 종료 · 네트워크 지연 · 패킷 손실
+  · 의존 서비스 응답 지연 · 에러율 상승
+  · 디스크 가득 · CPU 포화 · 시계 왜곡
+
+★ 프로덕션에서 하기 전에 스테이징에서 · 업무 시간에 · 롤백 준비</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>“장애가 나면”이 아니라 “장애가 날 때”</b> 로 생각하는 것이
+      분산 시스템 설계의 출발점입니다.
+      규모가 커지면 <b>매일 무언가는 죽고 있습니다</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d07 ==================== -->
+<section class="sec" id="d07">
+  <div class="sec-head rv">
+    <span class="no">DIST 07</span>
+    <h2>CAP 정리 · PACELC — <span class="t">자주 오해되는 정리</span></h2>
+    <p class="lead">
+      “<b>일관성과 가용성 중 하나를 고르라</b>”가 아닙니다.
+      정확히는 “<b>망이 갈라졌을 때</b> 무엇을 포기할지 정하라”이고,
+      평소에는 다른 선택(PACELC)이 더 중요합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">정확한 진술</h4>
+      <div class="dep">
+        네트워크 <b>분단(P)이 일어났을 때</b>,
+        <b>일관성(C)</b> 과 <b>가용성(A)</b> 을 동시에 만족할 수 없다
+      </div>
+      <pre class="code" data-lang="text"><code>분단이 일어났을 때의 선택
+
+  CP — 일관성 우선
+       소수 쪽 노드가 요청을 거부한다
+       "정확하지 않은 답을 줄 바에 답을 안 한다"
+       예: etcd · ZooKeeper · 전통적 RDBMS 클러스터
+
+  AP — 가용성 우선
+       양쪽 다 응답하고 나중에 합친다
+       "오래된 답이라도 주는 게 낫다"
+       예: Cassandra · DynamoDB(설정) · DNS
+
+★ CA 는 존재하지 않는다
+  네트워크 분단은 '선택' 이 아니라 '현실' 이기 때문
+  (단일 노드라면 P 가 없으니 CA 지만, 그건 분산이 아니다)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">PACELC — 더 유용한 틀</h4>
+      <div class="dep">
+        <b>P</b>artition 이면 <b>A</b> or <b>C</b>,
+        <b>E</b>lse(평소에는) <b>L</b>atency or <b>C</b>onsistency
+      </div>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">시스템</th><th>분단 시</th><th>평소</th></tr>
+        <tr><td>PostgreSQL (단일)</td><td>—</td><td>C</td></tr>
+        <tr><td>MongoDB (기본)</td><td>C</td><td>C</td></tr>
+        <tr><td>Cassandra</td><td>A</td><td><b>L</b> (조정 가능)</td></tr>
+        <tr><td>DynamoDB</td><td>A</td><td>L (강한 읽기 옵션)</td></tr>
+        <tr><td>etcd · ZooKeeper</td><td>C</td><td>C</td></tr>
+        <tr><td>Redis 복제</td><td>A</td><td>L</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무에서 더 자주 마주치는 것은 E 쪽</b>입니다 —
+        분단은 드물지만, <b>“복제본에서 읽어 빠르게 vs 리더에서 읽어 정확하게”</b>는
+        매일 결정해야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">기능별로 다르게 고르기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:34%">기능</th><th>선택</th><th>이유</th></tr>
+      <tr><td>결제 · 재고 차감</td><td><b>강한 일관성</b></td><td>중복·초과 판매가 치명적</td></tr>
+      <tr><td>사용자 프로필 조회</td><td>최종 일관성</td><td>몇 초 지연 무해</td></tr>
+      <tr><td>좋아요 · 조회수</td><td>최종 일관성</td><td>근사값으로 충분</td></tr>
+      <tr><td>인증 · 권한</td><td><b>강한 일관성</b></td><td>권한 회수가 늦으면 위험</td></tr>
+      <tr><td>피드 · 타임라인</td><td>최종 일관성</td><td>가용성이 더 중요</td></tr>
+      <tr><td>주문 상태</td><td>읽기-내-쓰기</td><td>내 주문은 바로 보여야</td></tr>
+      <tr><td>로그 · 분석</td><td>최종 일관성</td><td>배치로 정합</td></tr>
+    </table></div>
+    <pre class="code" data-lang="text"><code>★ 시스템 전체를 하나로 고르지 않는다
+  같은 서비스 안에서도 기능마다 다르게 선택한다
+
+전형적인 구성
+  주문 · 결제 → PostgreSQL (강한 일관성)
+  세션 · 캐시 → Redis (빠름 · 유실 허용)
+  상품 검색   → Elasticsearch (최종 일관성)
+  이벤트 로그 → Kafka (순서 보장 · 재처리 가능)
+  파일        → S3 (최종 일관성 · 지금은 강한 읽기)
+
+이것을 '다중 저장소 지속성(polyglot persistence)' 이라 부른다
+비용: 데이터 동기화 · 일관성 관리가 복잡해진다</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>저장소를 늘리는 것에는 큰 비용이 따릅니다</b> —
+      동기화 · 백업 · 운영 · 장애 대응이 배로 늡니다.
+      <b>정말 필요한지</b>를 먼저 묻고, PostgreSQL 하나로
+      해결되는지 검토하세요.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">분단 시 동작을 미리 정하기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>설계 문서에 반드시 적을 것
+
+  "DB 복제가 끊기면"
+    → 읽기 전용 모드로 전환 · 쓰기는 503
+    → 사용자에게 보여 줄 메시지
+    → 복구 후 자동 재개 조건
+
+  "캐시가 죽으면"
+    → DB 직접 조회 (성능 저하 감수)
+    → 또는 서킷 브레이커로 일부 기능 비활성
+
+  "외부 결제사가 응답 없으면"
+    → 주문은 '결제 대기' 로 접수
+    → 백그라운드에서 상태 조회 후 확정
+
+★ 이것을 정하지 않으면 장애 때 즉흥적으로 대응하게 되고,
+  그때 내린 판단이 데이터를 망친다</code></pre>
+    <pre class="code" data-lang="python"><code># 우아한 저하 — 기능별로 다르게
+async def get_product_page(pid):
+    # 필수: 실패하면 에러
+    product = await db.get_product(pid)
+
+    # 선택: 실패해도 페이지는 보여 준다
+    recommendations = []
+    reviews_count = None
+    try:
+        recommendations = await asyncio.wait_for(rec_service.get(pid), 0.2)
+    except Exception:
+        metrics.inc("rec_degraded")
+
+    try:
+        reviews_count = await asyncio.wait_for(review_service.count(pid), 0.1)
+    except Exception:
+        metrics.inc("review_degraded")
+
+    return render(product, recommendations, reviews_count)
+# ★ 부가 기능의 장애가 핵심 기능을 막지 않게 한다</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>“전부 아니면 전무”가 가장 나쁜 설계</b>입니다 —
+      추천 서비스가 죽었다고 상품 페이지가 안 뜨면
+      <b>작은 장애가 큰 장애가 됩니다</b>.
+      필수와 선택을 구분하고 <b>선택은 타임아웃을 짧게</b> 두세요.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d08 ==================== -->
+<section class="sec" id="d08">
+  <div class="sec-head rv">
+    <span class="no">DIST 08</span>
+    <h2>일관성 모델 — <span class="t">“쓴 걸 바로 읽을 수 있나”</span></h2>
+    <p class="lead">
+      복제본을 두는 순간 <b>여러 단계의 답</b>이 생깁니다.
+      각 모델이 무엇을 보장하고 무엇은 안 하는지,
+      그리고 <b>사용자가 어떤 이상함을 겪게 되는지</b>를 봅니다.
+    </p>
+  </div>
+
+  <div class="layer rv">
+    <div class="lrow l-svc">
+      <span class="tagn">강함</span>
+      <div><b>선형화 (Linearizability)</b><span>단일 사본처럼 동작 · 모든 연산이 실시간 순서를 지킴 · 가장 비쌈</span></div>
+    </div>
+    <div class="larrow">▼ 약해질수록 빠르고 가용성이 높아진다</div>
+    <div class="lrow l-web">
+      <span class="tagn">순차</span>
+      <div><b>순차 일관성</b><span>모두가 같은 순서로 보지만 실시간과는 다를 수 있음</span></div>
+    </div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-repo">
+      <span class="tagn">인과</span>
+      <div><b>인과 일관성</b><span>인과 관계가 있는 것만 순서 보장 (댓글이 원글보다 먼저 안 보임)</span></div>
+    </div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-db">
+      <span class="tagn">세션</span>
+      <div><b>읽기-내-쓰기 · 단조 읽기</b><span>내가 쓴 건 내가 보고, 시간이 뒤로 가지 않음</span></div>
+    </div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-hw">
+      <span class="tagn">약함</span>
+      <div><b>최종 일관성</b><span>언젠가는 같아짐 · 그 사이에는 무엇이든 보일 수 있음</span></div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">사용자가 겪는 이상함</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">증상</th><th>깨진 보장</th></tr>
+        <tr><td>글을 썼는데 목록에 없다</td><td><b>읽기-내-쓰기</b></td></tr>
+        <tr><td>새로고침하면 있다가 없다가</td><td><b>단조 읽기</b></td></tr>
+        <tr><td>답글이 원글보다 먼저 보인다</td><td><b>인과 일관성</b></td></tr>
+        <tr><td>잔액이 잠깐 이상하다</td><td>선형화</td></tr>
+        <tr><td>주문 후 목록에 안 보인다</td><td>읽기-내-쓰기</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>대부분의 사용자 불만은 “읽기-내-쓰기”가 깨질 때 나옵니다</b> —
+        남의 데이터가 몇 초 늦는 것은 아무도 모르지만,
+        <b>내가 방금 한 일이 안 보이면</b> 즉시 알아챕니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무적인 해결</h4>
+      <pre class="code" data-lang="python"><code># ① 쓰기 직후에는 리더에서 읽는다 (가장 간단)
+def get_my_posts(user_id):
+    if recently_wrote(user_id, within_seconds=5):
+        return db.leader.query(...)          # 복제 지연 회피
+    return db.replica.query(...)
+
+# ② 세션 스티키 — 같은 사용자를 같은 복제본으로
+#    (복제본이 죽으면 다시 뒤로 갈 수 있음)
+
+# ③ 버전(LSN) 을 클라이언트가 들고 다닌다
+#    쓰기 응답에 버전을 주고, 읽을 때 그 버전 이상인 복제본에서만
+resp = write(...)                 # {"lsn": 123456}
+read(min_lsn=resp["lsn"])         # 복제본이 따라잡을 때까지 대기 또는 리더로
+
+# ④ 낙관적 UI — 서버 응답 전에 화면을 먼저 갱신
+#    실패하면 되돌린다 (사용자 체감이 가장 좋다)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">쿼럼 — R + W &gt; N</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>N 개의 복제본, 쓰기에 W 개 응답, 읽기에 R 개 조회
+
+  R + W &gt; N  이면 읽기와 쓰기 집합이 반드시 겹친다
+  → 최신 값을 최소 하나는 읽게 된다
+
+예 (N=3)
+  W=3, R=1 → 쓰기 느림 · 읽기 빠름 · 쓰기 가용성 낮음
+  W=2, R=2 → ★ 균형 (한 노드 장애 허용)
+  W=1, R=1 → 둘 다 빠름 · 일관성 없음 (최종 일관성)
+  W=1, R=3 → 쓰기 빠름 · 읽기 느림
+
+★ 주의: 쿼럼만으로 선형화가 보장되지는 않는다
+  · 동시 쓰기 충돌 · 부분 실패 · 롤백 없음
+  · 진짜 선형화가 필요하면 합의 프로토콜 (09절)</code></pre>
+    <pre class="code" data-lang="text"><code>Cassandra 의 일관성 수준 (요청마다 지정 가능)
+  ONE · TWO · THREE
+  QUORUM        — 과반
+  LOCAL_QUORUM  — 같은 DC 안에서 과반 ★ 다중 DC 에서 실용적
+  ALL           — 전부 (가용성 최악)
+
+# 쓰기는 QUORUM, 읽기는 QUORUM → R+W &gt; N
+# 로그성 데이터는 ONE 으로 빠르게</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>같은 저장소 안에서도 요청마다 다르게 고를 수 있습니다</b> —
+      중요한 쓰기는 QUORUM, 로그는 ONE.
+      <b>일관성을 시스템이 아니라 연산 단위로</b> 생각하는 것이
+      현대적인 접근입니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">복제 지연 다루기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="sql"><code>-- PostgreSQL — 복제 지연 확인
+SELECT client_addr, state,
+       pg_wal_lsn_diff(sent_lsn, replay_lsn) AS replay_lag_bytes,
+       replay_lag
+  FROM pg_stat_replication;
+
+-- 복제본에서 지연 확인
+SELECT now() - pg_last_xact_replay_timestamp() AS lag;
+
+-- MySQL
+SHOW REPLICA STATUS\G      -- Seconds_Behind_Source</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">지연이 커지는 원인</th><th>대응</th></tr>
+      <tr><td>대량 배치 쓰기</td><td>청크로 나눠 실행 · 저부하 시간에</td></tr>
+      <tr><td>복제본에서 무거운 쿼리</td><td>충돌하는 쿼리 격리 · 타임아웃</td></tr>
+      <tr><td>단일 스레드 적용</td><td>병렬 복제 활성화</td></tr>
+      <tr><td>네트워크 대역폭</td><td>압축 · 리전 간 구성 재검토</td></tr>
+      <tr><td>복제본 하드웨어가 약함</td><td>동등한 사양으로</td></tr>
+    </table></div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>복제 지연은 반드시 모니터링하세요</b> —
+      지연이 커지면 <b>읽기 복제본을 쓰는 모든 기능</b>이
+      조용히 오래된 데이터를 보여 줍니다.
+      임계값을 정하고, 넘으면 <b>자동으로 리더로 폴백</b>하는 것도 방법입니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d09 ==================== -->
+<section class="sec" id="d09">
+  <div class="sec-head rv">
+    <span class="no">DIST 09</span>
+    <h2>합의 — <span class="t">여러 대가 같은 값에 동의하는 법</span></h2>
+    <p class="lead">
+      리더 선출 · 분산 락 · 설정 저장이 전부 <b>합의</b> 위에 있습니다.
+      Raft 를 직접 구현할 일은 없어도,
+      <b>왜 느리고 무엇을 보장하는지</b>는 알아야 잘 쓸 수 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Raft 의 세 요소</h4>
+      <ol class="steps">
+        <li><b>리더 선출</b> — 임기(term)마다 하나의 리더.
+          하트비트가 끊기면 후보가 되어 투표를 요청하고, <b>과반 득표</b>로 리더가 됩니다.</li>
+        <li><b>로그 복제</b> — 모든 쓰기는 리더를 거칩니다.
+          리더가 팔로워에게 로그를 보내고 <b>과반이 기록</b>하면 커밋합니다.</li>
+        <li><b>안전성</b> — 커밋된 항목은 <b>절대 사라지지 않고 순서가 바뀌지 않습니다</b>.</li>
+      </ol>
+      <pre class="code" data-lang="text"><code>노드 상태
+  Follower  → 타임아웃 → Candidate → 과반 득표 → Leader
+                              ↓ 실패
+                          다시 Follower
+
+★ 무작위 선거 타임아웃으로 동시 후보를 줄인다
+★ 쓰기 한 번에 최소 1 RTT × (리더 → 과반 팔로워)
+  → 지연이 있는 다중 리전에서는 비싸다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쓰는 곳과 주의점</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">시스템</th><th>용도</th></tr>
+        <tr><td><b>etcd</b></td><td>쿠버네티스의 상태 저장소</td></tr>
+        <tr><td><b>ZooKeeper</b></td><td>Kafka · HBase 의 코디네이션</td></tr>
+        <tr><td><b>Consul</b></td><td>서비스 디스커버리 · 설정</td></tr>
+        <tr><td>TiKV · CockroachDB</td><td>분산 트랜잭션 저장소</td></tr>
+        <tr><td>Kafka (KRaft)</td><td>ZooKeeper 대체</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>합의 저장소를 일반 DB 처럼 쓰지 마세요</b> —
+        모든 쓰기가 과반 합의를 거치므로 <b>처리량이 낮습니다</b>.
+        설정 · 메타데이터 · 리더 정보처럼
+        <b>작고 자주 안 바뀌는 것</b>에만 씁니다.
+        etcd 가 느려지면 쿠버네티스 전체가 느려집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">분산 락의 어려움</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>분산 락은 생각보다 위험하다
+
+  ① 클라이언트 A 가 락을 얻는다 (TTL 30초)
+  ② A 가 GC 정지나 네트워크 지연으로 40초간 멈춘다
+  ③ TTL 만료 → B 가 락을 얻는다
+  ④ A 가 깨어나서 "나는 락을 갖고 있다" 며 작업을 계속한다
+  ★ 두 클라이언트가 동시에 임계 구역에 있다
+
+해결: 펜싱 토큰
+  · 락을 줄 때마다 증가하는 번호를 함께 준다
+  · 자원(스토리지)이 그 번호를 확인해 오래된 것을 거부한다
+    A: 토큰 33 으로 쓰기 → 성공
+    B: 토큰 34 로 쓰기   → 성공 (저장소가 34 를 기억)
+    A: 토큰 33 으로 쓰기 → ★ 거부
+
+★ 자원 쪽이 토큰을 검사해 주지 않으면 완전한 해결이 안 된다</code></pre>
+    <pre class="code" data-lang="python"><code># Redis 단일 인스턴스 락 (Redlock 은 논쟁이 있으니 신중히)
+import uuid, redis
+
+def acquire(r, key, ttl_ms=30000):
+    token = str(uuid.uuid4())
+    ok = r.set(key, token, nx=True, px=ttl_ms)      # 원자적
+    return token if ok else None
+
+RELEASE = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+"""   # ★ 내 토큰일 때만 해제 (남의 락을 지우면 안 된다)
+
+def release(r, key, token):
+    r.eval(RELEASE, 1, key, token)
+
+# ★ 더 중요한 질문: 락이 정말 필요한가?
+#   · 효율 목적(중복 작업 방지)이면 → 가끔 중복돼도 괜찮게 설계
+#   · 정확성 목적(중복이 치명적)이면 → 락이 아니라 DB 제약·멱등성으로</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>“정확성을 위한 분산 락”은 거의 항상 잘못된 선택입니다</b> —
+      <b>DB 유니크 제약 · 조건부 UPDATE · 멱등성 키</b>가
+      훨씬 단순하고 확실합니다.
+      락은 <b>“중복 작업을 줄이면 좋겠다”</b> 수준의 효율 목적에만 쓰세요.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">리더 선출이 필요한 경우</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:34%">상황</th><th>대안</th></tr>
+      <tr><td>스케줄된 배치를 한 대만 실행</td><td><b>DB 락 · 유니크 제약</b> · 쿠버네티스 CronJob</td></tr>
+      <tr><td>캐시 갱신을 한 번만</td><td>확률적 조기 만료 · singleflight</td></tr>
+      <tr><td>파티션 소유권 배정</td><td>Kafka 컨슈머 그룹이 자동 처리</td></tr>
+      <tr><td>진짜 리더가 필요</td><td>etcd/Consul 의 리더 선출 API</td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># 배치 중복 실행 방지 — 락보다 DB 제약이 확실하다
+# CREATE UNIQUE INDEX ON job_runs (job_name, run_date);
+
+def run_daily_job(name, date):
+    try:
+        db.execute(
+            "INSERT INTO job_runs (job_name, run_date, started_at) VALUES (%s,%s,now())",
+            (name, date))
+    except UniqueViolation:
+        log.info("이미 실행됨 — 건너뜀")
+        return
+    do_work()
+
+# singleflight — 같은 키의 동시 요청을 하나로 합친다
+# (캐시 미스가 겹칠 때 DB 로 한 번만 간다)
+# Go: golang.org/x/sync/singleflight
+# 파이썬: 자체 구현 또는 asyncio 의 Future 공유</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>“합의가 필요 없게 설계하는 것”이 최선</b>입니다 —
+      상태를 없애거나(무상태), 파티션으로 나누거나,
+      멱등하게 만들면 합의 없이도 안전합니다.
+      <b>합의는 마지막 수단</b>으로 남겨 두세요.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d10 ==================== -->
+<section class="sec" id="d10">
+  <div class="sec-head rv">
+    <span class="no">DIST 10</span>
+    <h2>복제 · 샤딩 — <span class="t">복사할 것인가 나눌 것인가</span></h2>
+    <p class="lead">
+      <b>복제</b>는 같은 데이터를 여러 곳에(가용성 · 읽기 확장),
+      <b>샤딩</b>은 데이터를 쪼개서 나눠(쓰기 · 용량 확장).
+      목적이 다르고 대개 <b>둘 다</b> 씁니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복제 방식</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">방식</th><th>특징</th></tr>
+        <tr><td><b>단일 리더</b></td><td>쓰기는 리더만 · 가장 흔함 · 충돌 없음</td></tr>
+        <tr><td><b>다중 리더</b></td><td>여러 곳에서 쓰기 · <b>충돌 해결 필요</b></td></tr>
+        <tr><td><b>리더 없음</b></td><td>아무 노드에나 · 쿼럼으로 (Dynamo 계열)</td></tr>
+      </table></div>
+      <div class="tw"><table class="cheat" style="margin:12px 0 0">
+        <tr><th style="width:26%">동기화</th><th>내용</th><th>트레이드오프</th></tr>
+        <tr><td>동기</td><td>복제본 응답까지 대기</td><td>안전 · <b>느림 · 가용성↓</b></td></tr>
+        <tr><td>비동기</td><td>바로 응답</td><td>빠름 · <b>장애 시 유실 가능</b></td></tr>
+        <tr><td><b>반동기</b></td><td>일부만 동기</td><td><b>실무 절충</b></td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>비동기 복제에서 리더가 죽으면 데이터가 사라집니다</b> —
+        아직 복제되지 않은 쓰기는 회복되지 않습니다.
+        RPO(허용 데이터 손실)를 <b>명시적으로 정하세요</b>.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">샤딩 키 고르기</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">방식</th><th>장점</th><th>단점</th></tr>
+        <tr><td><b>범위</b></td><td>범위 조회 효율</td><td><b>핫스팟</b> (최신 데이터에 몰림)</td></tr>
+        <tr><td><b>해시</b></td><td>고른 분산</td><td>범위 조회 불가</td></tr>
+        <tr><td><b>일관 해싱</b></td><td>노드 변경에 강함</td><td>구현 복잡</td></tr>
+        <tr><td><b>디렉터리</b></td><td>유연함</td><td>조회 계층 추가</td></tr>
+        <tr><td>지역 기반</td><td>지연 · 규제 대응</td><td>불균형</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>샤딩 키 선택 기준
+ ① 카디널리티가 높은가 (값 종류가 충분한가)
+ ② 고르게 분산되는가 (핫스팟이 없는가)
+ ③ ★ 대부분의 쿼리가 한 샤드에서 끝나는가
+ ④ 시간이 지나도 균형이 유지되는가
+
+나쁜 예
+  · 국가 코드 — 특정 국가에 몰림
+  · 생성 시각 — 최신 샤드에만 쓰기 집중
+  · 사용자 등급 — 카디널리티가 낮음
+좋은 예
+  · user_id 해시 (사용자 단위 쿼리가 많다면)
+  · tenant_id (멀티테넌트)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">샤딩의 대가</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:32%">잃는 것</th><th>내용</th><th>대응</th></tr>
+      <tr><td><b>크로스 샤드 조인</b></td><td>불가능하거나 매우 비쌈</td><td>비정규화 · 애플리케이션 조인</td></tr>
+      <tr><td><b>전역 트랜잭션</b></td><td>2PC 필요 (느림)</td><td>사가 · 샤드 내로 제한</td></tr>
+      <tr><td><b>전역 유니크</b></td><td>보장 어려움</td><td>UUID · 스노우플레이크 (12절)</td></tr>
+      <tr><td><b>집계 쿼리</b></td><td>모든 샤드 조회 후 병합</td><td>사전 집계 · OLAP 분리</td></tr>
+      <tr><td><b>리밸런싱</b></td><td>데이터 이동이 비쌈</td><td>가상 노드 · 온라인 이동</td></tr>
+      <tr><td>운영 복잡도</td><td>백업 · 스키마 변경 · 모니터링</td><td>자동화 · 관리형 서비스</td></tr>
+    </table></div>
+    <pre class="code" data-lang="text"><code>★ 샤딩 전에 시도할 것 (순서대로)
+
+ ① 인덱스 · 쿼리 튜닝            — 대부분 여기서 해결된다
+ ② 수직 확장 (더 큰 인스턴스)    — 지금 하드웨어는 매우 크다
+ ③ 읽기 복제본                   — 읽기가 많으면
+ ④ 캐시                          — 반복 조회 제거
+ ⑤ 아카이빙 · 파티셔닝           — 오래된 데이터 분리
+ ⑥ 기능별 DB 분리 (수직 분할)    — 서비스 경계로
+ ⑦ ★ 샤딩 (수평 분할)           — 마지막
+
+단일 PostgreSQL 인스턴스가 다룰 수 있는 규모는 생각보다 크다
+ (수 TB · 수만 TPS) — 대부분의 서비스는 여기 도달하지 못한다</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>“나중에 샤딩할 수 있게” 설계는 해 두세요</b> —
+      샤딩 키가 될 컬럼을 모든 테이블에 두고,
+      크로스 샤드 조인이 될 쿼리를 미리 피하면
+      나중에 전환 비용이 크게 줄어듭니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">리밸런싱</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>노드를 추가할 때 데이터를 어떻게 옮기나
+
+✗ 해시 mod N
+  N 이 바뀌면 거의 모든 키가 이동한다 (🔢 이산수학 10)
+
+✓ 고정 파티션 수
+  · 처음부터 파티션을 많이 만든다 (예: 1024개)
+  · 노드가 늘면 파티션을 통째로 재배정
+  · 이동하는 데이터가 정확히 필요한 만큼
+  · Kafka · Elasticsearch 가 이 방식
+
+✓ 일관 해싱
+  · 링 위에 가상 노드를 배치
+  · 노드 추가 시 1/N 만 이동
+  · Cassandra · DynamoDB · Redis Cluster
+
+★ 자동 리밸런싱은 위험할 수 있다
+  부하가 높을 때 자동으로 시작되면 상황이 악화된다
+  → 사람이 승인하는 반자동이 안전하다</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">운영 시 확인</th><th>내용</th></tr>
+      <tr><td>샤드별 크기 · QPS</td><td>불균형이 생기면 조기에 대응</td></tr>
+      <tr><td>핫 키 탐지</td><td>특정 키에 트래픽 집중 (인기 상품 · 유명인)</td></tr>
+      <tr><td>리밸런싱 진행률 · 영향</td><td>지연 증가를 감시</td></tr>
+      <tr><td>샤드 맵의 일관성</td><td>클라이언트가 옛 맵을 쓰면 오류</td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>핫 키는 샤딩으로 해결되지 않습니다</b> —
+      한 키가 뜨거우면 그 샤드만 죽습니다.
+      <b>키에 접미사를 붙여 분산</b>하거나(<code>key#1</code>~<code>key#N</code>),
+      <b>로컬 캐시</b>로 흡수해야 합니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d11 ==================== -->
+<section class="sec" id="d11">
+  <div class="sec-head rv">
+    <span class="no">DIST 11</span>
+    <h2>분산 트랜잭션 — <span class="t">“다 되거나 다 안 되게”</span></h2>
+    <p class="lead">
+      여러 서비스에 걸친 작업을 원자적으로 만드는 문제입니다.
+      <b>2PC 는 이론적으로 맞지만 실무에서는 위험</b>하고,
+      대부분 <b>사가 패턴</b>으로 풉니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">2단계 커밋 (2PC)</h4>
+      <pre class="code" data-lang="text"><code>1단계 — 준비
+  코디네이터 → 모든 참여자: "커밋할 수 있나?"
+  참여자 → "예" (이 시점부터 자원을 잠근 채 대기)
+
+2단계 — 커밋
+  코디네이터 → 모든 참여자: "커밋해"
+  참여자 → 커밋 완료
+
+★ 치명적 문제
+  · 코디네이터가 1단계 뒤에 죽으면
+    참여자들은 락을 쥔 채 영원히 대기 (블로킹)
+  · 참여자 하나가 느리면 전체가 대기
+  · 가용성이 모든 참여자의 곱이 된다
+    99% × 99% × 99% = 97%
+
+→ 그래서 마이크로서비스에서는 거의 안 쓴다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">사가 패턴</h4>
+      <pre class="code" data-lang="text"><code>긴 트랜잭션을 여러 로컬 트랜잭션으로 쪼개고
+실패하면 ★ 보상 트랜잭션으로 되돌린다
+
+  주문 생성  → 결제 승인  → 재고 차감  → 배송 요청
+     ↓ 실패      ↓ 실패       ↓ 실패
+  주문 취소  ← 결제 취소  ← 재고 복구
+
+두 가지 방식
+  오케스트레이션 — 중앙 조정자가 순서를 관리
+    + 흐름이 한눈에 보임 · 디버깅 쉬움
+    - 조정자가 단일 지점
+
+  코레오그래피 — 각 서비스가 이벤트를 듣고 반응
+    + 결합도 낮음
+    - 전체 흐름을 파악하기 어려움</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>사가는 격리성이 없습니다</b> —
+        중간 상태가 다른 트랜잭션에 보입니다.
+        “결제는 됐는데 재고는 아직”인 상태를
+        <b>사용자와 다른 서비스가 볼 수 있다는 전제</b>로 설계해야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">아웃박스 패턴</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>문제: DB 저장과 이벤트 발행을 원자적으로 할 수 없다
+
+  db.save(order)          ← 성공
+  kafka.publish(event)    ← 실패!  → 이벤트가 유실된다
+
+  순서를 바꿔도 마찬가지 (이벤트만 나가고 저장 실패)
+
+해결: 아웃박스 테이블
+  ① 같은 DB 트랜잭션 안에서 데이터와 이벤트를 함께 저장
+  ② 별도 프로세스가 아웃박스를 읽어 메시지 브로커로 발행
+  ③ 발행 성공하면 아웃박스에서 삭제(또는 표시)
+
+  → 원자성이 DB 트랜잭션 하나로 보장된다
+  → 최소 한 번 전달 (중복 가능 → 소비자가 멱등해야 함)</code></pre>
+    <pre class="code" data-lang="sql"><code>CREATE TABLE outbox (
+  id          BIGSERIAL PRIMARY KEY,
+  aggregate   TEXT NOT NULL,
+  event_type  TEXT NOT NULL,
+  payload     JSONB NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT now(),
+  published_at TIMESTAMPTZ
+);
+CREATE INDEX ON outbox (published_at) WHERE published_at IS NULL;
+
+-- 애플리케이션
+BEGIN;
+  INSERT INTO orders (...) VALUES (...);
+  INSERT INTO outbox (aggregate, event_type, payload)
+       VALUES ('order', 'OrderCreated', '{"id":123}');
+COMMIT;   -- ★ 둘 다 되거나 둘 다 안 된다
+
+-- 발행 워커 (여러 대여도 안전하게)
+BEGIN;
+  SELECT * FROM outbox
+   WHERE published_at IS NULL
+   ORDER BY id LIMIT 100
+     FOR UPDATE SKIP LOCKED;     -- ★ 다른 워커와 겹치지 않는다
+  -- 발행 후
+  UPDATE outbox SET published_at = now() WHERE id = ANY(...);
+COMMIT;</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b><code>FOR UPDATE SKIP LOCKED</code> 가 큐 구현의 핵심</b>입니다 —
+      여러 워커가 같은 행을 잡지 않고 각자 다른 행을 가져갑니다.
+      <b>DB 를 간단한 작업 큐로 쓸 때</b>도 같은 패턴을 씁니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">전달 보장</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:26%">보장</th><th>내용</th><th>현실</th></tr>
+      <tr><td>최대 한 번</td><td>중복 없음 · 유실 가능</td><td>메트릭 등 손실 허용</td></tr>
+      <tr><td><b>최소 한 번</b></td><td>유실 없음 · <b>중복 가능</b></td><td><b>대부분의 시스템</b></td></tr>
+      <tr><td>정확히 한 번</td><td>이상적</td><td><b>엄밀히는 불가능</b></td></tr>
+    </table></div>
+    <pre class="code" data-lang="text"><code>"정확히 한 번" 이 불가능한 이유
+  네트워크에서 ACK 가 유실되면 보낸 쪽은 알 수 없다
+  → 재전송할 수밖에 없고, 그러면 중복이 생긴다
+
+★ 실무의 답: "최소 한 번 전달 + 멱등한 처리"
+  = 결과적으로 정확히 한 번처럼 보인다 (effectively once)
+
+Kafka 의 '정확히 한 번' 도 사실
+  · 멱등 프로듀서 (시퀀스 번호로 중복 제거)
+  · 트랜잭션 (읽기-처리-쓰기를 원자적으로)
+  · ★ Kafka 안에서만 보장 — 외부 시스템에 쓰면 깨진다</code></pre>
+    <pre class="code" data-lang="python"><code># 소비자를 멱등하게 만드는 표준 방법
+def handle_event(event):
+    # ① 처리 이력 테이블에 이벤트 ID 를 먼저 기록 (유니크 제약)
+    try:
+        db.execute("INSERT INTO processed_events (id) VALUES (%s)",
+                   (event.id,))
+    except UniqueViolation:
+        log.info("이미 처리한 이벤트 — 건너뜀")
+        return
+
+    # ② 같은 트랜잭션 안에서 실제 처리
+    apply_business_logic(event)
+    db.commit()
+
+# ★ ① 과 ② 가 같은 트랜잭션이어야 한다
+#   따로 하면 기록만 되고 처리가 안 되는 경우가 생긴다</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>“정확히 한 번”을 요구받으면</b> 이렇게 답하세요 —
+      “<b>전달은 최소 한 번으로 하고, 처리를 멱등하게 만들겠습니다.
+      결과적으로 한 번 처리된 것과 같습니다.</b>”
+      이것이 실무에서 유일하게 동작하는 답입니다 → <b>13절</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d12 ==================== -->
+<section class="sec" id="d12">
+  <div class="sec-head rv">
+    <span class="no">DIST 12</span>
+    <h2>시간과 순서 — <span class="t">서버 시계를 믿지 마세요</span></h2>
+    <p class="lead">
+      “<b>더 나중에 쓴 것이 이긴다</b>”는 규칙은
+      시계가 정확하다는 가정 위에 있습니다.
+      그 가정이 깨지면 데이터가 조용히 사라집니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">시계는 왜 못 믿나</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">문제</th><th>내용</th></tr>
+        <tr><td>클럭 드리프트</td><td>수정 없이 하루에 수십 ms~수 초</td></tr>
+        <tr><td>NTP 조정</td><td><b>시계가 뒤로 갈 수 있다</b></td></tr>
+        <tr><td>윤초</td><td>과거에 대규모 장애를 일으켰다</td></tr>
+        <tr><td>VM 정지·마이그레이션</td><td>시계가 튄다</td></tr>
+        <tr><td>가상화 오버헤드</td><td>측정이 부정확</td></tr>
+      </table></div>
+      <pre class="code" data-lang="python"><code># ✗ 경과 시간 측정에 벽시계를 쓰면 안 된다
+start = time.time()
+...
+elapsed = time.time() - start      # NTP 조정으로 음수가 될 수 있다
+
+# ✓ 단조 시계를 쓴다 (뒤로 가지 않음)
+start = time.monotonic()
+elapsed = time.monotonic() - start
+
+# Go:   time.Since(start)  (내부적으로 단조)
+# Java: System.nanoTime()   (currentTimeMillis 아님)
+# JS:   performance.now()
+# Rust: std::time::Instant</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">논리 시계</h4>
+      <pre class="code" data-lang="text"><code>램포트 시계 — 사건에 순서를 매기는 카운터
+  · 로컬 이벤트마다 +1
+  · 메시지를 보낼 때 내 시계를 함께 전송
+  · 받을 때 max(내 시계, 받은 시계) + 1
+
+  → a → b 이면 L(a) &lt; L(b)  (인과 순서 보장)
+  → 반대는 성립하지 않는다 (L(a) &lt; L(b) 여도 무관할 수 있다)
+
+벡터 시계 — 노드마다 카운터를 배열로
+  · 두 사건이 인과 관계인지 '동시' 인지 구분할 수 있다
+  · V(a) ≤ V(b) 이면 a → b
+  · 서로 크고 작으면 → ★ 동시 발생 = 충돌
+  · 비용: 노드 수만큼 공간
+
+쓰는 곳
+  · Dynamo 계열의 충돌 감지
+  · CRDT · 협업 편집
+  · 분산 디버깅</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">정렬 가능한 ID</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:24%">방식</th><th>구성</th><th>특징</th></tr>
+      <tr><td>자동 증가</td><td>DB 시퀀스</td><td>단순 · <b>샤딩 불가</b> · 개수 노출</td></tr>
+      <tr><td>UUID v4</td><td>랜덤 122비트</td><td>충돌 없음 · <b>정렬 안 됨</b> (인덱스 나쁨)</td></tr>
+      <tr><td><b>UUID v7</b></td><td>타임스탬프 + 랜덤</td><td><b>정렬 가능 · 표준</b></td></tr>
+      <tr><td><b>ULID</b></td><td>48비트 시각 + 80비트 랜덤</td><td>정렬 가능 · 26자 문자열</td></tr>
+      <tr><td><b>스노우플레이크</b></td><td>시각 + 노드ID + 시퀀스</td><td>정렬 가능 · 64비트 · 노드 ID 관리 필요</td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># UUID v7 (파이썬 3.14+ 또는 uuid6 패키지)
+from uuid6 import uuid7
+str(uuid7())    # 018f4c8e-...  앞부분이 시각이라 정렬된다
+
+# 스노우플레이크 직접 구현
+class Snowflake:
+    EPOCH = 1700000000000        # 기준 시각 (ms)
+    def __init__(self, node_id):
+        self.node = node_id &amp; 0x3FF        # 10비트
+        self.seq = 0
+        self.last = -1
+    def next_id(self):
+        now = int(time.time() * 1000)
+        if now &lt; self.last:                 # ★ 시계가 뒤로 갔다
+            raise RuntimeError("클럭 역행 — ID 발급 중단")
+        if now == self.last:
+            self.seq = (self.seq + 1) &amp; 0xFFF        # 12비트
+            if self.seq == 0:
+                while now &lt;= self.last: now = int(time.time()*1000)
+        else:
+            self.seq = 0
+        self.last = now
+        return ((now - self.EPOCH) &lt;&lt; 22) | (self.node &lt;&lt; 12) | self.seq</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>정렬 가능한 ID 를 쓰면 B+트리 인덱스가 훨씬 효율적</b>입니다 —
+      순차 삽입이 되어 페이지 분할과 랜덤 I/O 가 줄어듭니다
+      (<b>🗂️ 자료구조 08</b>). 새 프로젝트라면
+      <b>UUID v7 또는 ULID</b> 를 기본으로 두세요.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">LWW 의 위험</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>Last-Write-Wins (마지막 쓰기가 이김)
+  · 타임스탬프가 큰 쪽을 채택
+  · 구현이 단순해서 널리 쓰인다
+
+★ 위험
+  · 시계가 어긋난 노드의 쓰기가 항상 이긴다
+  · 시계가 앞선 노드의 옛 데이터가 최신 데이터를 덮어쓴다
+  · ★ 조용히 데이터가 사라진다 (에러도 안 난다)
+
+대안
+  · 벡터 시계로 충돌을 감지하고 애플리케이션이 병합
+  · CRDT — 수학적으로 병합이 항상 수렴하도록 설계
+    (카운터 · 집합 · 텍스트 등 자료형별)
+  · 단일 리더로 충돌 자체를 없앰 ★ 가장 단순한 답
+  · 하이브리드 논리 시계(HLC) — 물리 + 논리 시계 결합</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">시간 관련 실무 규칙</th><th>이유</th></tr>
+      <tr><td><b>저장은 UTC 로</b></td><td>시간대·서머타임 혼란 방지</td></tr>
+      <tr><td><b>표시할 때만 지역 시간</b></td><td>사용자 시간대 적용</td></tr>
+      <tr><td><b>경과 시간은 단조 시계</b></td><td>NTP 조정에 안전</td></tr>
+      <tr><td><b>NTP 를 반드시 설정</b></td><td>chrony · 클라우드 시간 동기화</td></tr>
+      <tr><td><b>시계 오프셋을 모니터링</b></td><td>드리프트를 조기 발견</td></tr>
+      <tr><td>미래·과거 타임스탬프 검증</td><td>클라이언트가 보낸 시각을 믿지 말 것</td></tr>
+    </table></div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>Kafka 의 로그 보존 · TTL · 토큰 만료가 시계에 의존</b>합니다 —
+      시계가 크게 어긋나면 <b>데이터가 즉시 삭제되거나
+      만료된 토큰이 통과</b>할 수 있습니다.
+      NTP 는 선택이 아니라 필수 설정입니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== d13 ==================== -->
+<section class="sec" id="d13">
+  <div class="sec-head rv">
+    <span class="no">DIST 13</span>
+    <h2>멱등성 · 재시도 · 장애 대응 — <span class="t">실무 패턴 모음</span></h2>
+    <p class="lead">
+      분산 시스템에서 <b>가장 자주 쓰는 다섯 가지 패턴</b>입니다.
+      이 절만 제대로 적용해도 장애의 상당 부분이 사라집니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 멱등성 — 모든 것의 기초</h4>
+      <pre class="code" data-lang="python"><code># 클라이언트가 멱등성 키를 보낸다 (Stripe 방식)
+@app.post("/payments")
+def create_payment(req, idempotency_key: str = Header(...)):
+    # 같은 키로 이미 처리했으면 그 결과를 그대로 반환
+    existing = db.get_by_key(idempotency_key)
+    if existing:
+        return existing.response          # ★ 새로 만들지 않는다
+
+    with db.transaction():
+        # 유니크 제약이 동시 요청도 막아 준다
+        rec = db.insert_idempotency(idempotency_key, status="processing")
+        result = do_payment(req)
+        db.update_idempotency(idempotency_key, response=result, status="done")
+    return result
+
+# 진행 중인 요청이 또 오면?
+#  · 409 Conflict 로 응답하고 클라이언트가 재시도하게 하거나
+#  · 완료를 기다렸다가 같은 응답을 반환</code></pre>
+      <div class="tw"><table class="cheat" style="margin:14px 0 0">
+        <tr><th style="width:38%">멱등하게 만드는 방법</th><th></th></tr>
+        <tr><td>멱등성 키 + 유니크 제약</td><td>가장 일반적</td></tr>
+        <tr><td>자연 키 사용</td><td><code>order_id</code> 로 upsert</td></tr>
+        <tr><td>절대값 설정 (증감 아님)</td><td><code>set qty=5</code> vs <code>qty-=1</code></td></tr>
+        <tr><td>조건부 갱신</td><td>버전 · 상태 조건</td></tr>
+        <tr><td>이벤트 ID 중복 제거</td><td>소비자 측 (11절)</td></tr>
+      </table></div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 재시도 — 지수 백오프 + 지터</h4>
+      <pre class="code" data-lang="python"><code>import random, time
+
+def retry(fn, attempts=5, base=0.1, cap=10.0):
+    for i in range(attempts):
+        try:
+            return fn()
+        except RetryableError as e:
+            if i == attempts - 1: raise
+            # ★ full jitter — 동시 재시도를 흩뜨린다
+            delay = random.uniform(0, min(cap, base * (2 ** i)))
+            time.sleep(delay)
+
+# 재시도해도 되는 것과 안 되는 것을 구분해야 한다
+RETRYABLE = {408, 429, 500, 502, 503, 504}
+# ★ 400 · 401 · 403 · 404 · 422 는 재시도해도 똑같이 실패한다
+# ★ POST 는 멱등성 키가 없으면 재시도하면 안 된다
+
+# Retry-After 헤더를 존중할 것
+if resp.status_code == 429 and "Retry-After" in resp.headers:
+    time.sleep(int(resp.headers["Retry-After"]))</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>지터가 없으면 재시도가 부하를 증폭</b>합니다 —
+        모든 클라이언트가 정확히 같은 시각에 재시도해
+        <b>회복 중인 서버를 다시 죽입니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">③ 서킷 브레이커 · ④ 타임아웃</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="python"><code>import time, threading
+
+class CircuitBreaker:
+    """closed(정상) → open(차단) → half-open(탐색) → closed"""
+    def __init__(self, threshold=5, timeout=30, half_open_max=3):
+        self.threshold, self.timeout = threshold, timeout
+        self.half_open_max = half_open_max
+        self.failures = 0
+        self.state = "closed"
+        self.opened_at = 0
+        self.half_open_calls = 0
+        self.lock = threading.Lock()
+
+    def call(self, fn, fallback=None):
+        with self.lock:
+            if self.state == "open":
+                if time.monotonic() - self.opened_at &lt; self.timeout:
+                    if fallback: return fallback()
+                    raise CircuitOpenError()
+                self.state, self.half_open_calls = "half-open", 0
+            if self.state == "half-open" and self.half_open_calls &gt;= self.half_open_max:
+                if fallback: return fallback()
+                raise CircuitOpenError()
+            if self.state == "half-open": self.half_open_calls += 1
+
+        try:
+            result = fn()
+        except Exception:
+            with self.lock:
+                self.failures += 1
+                if self.failures &gt;= self.threshold:
+                    self.state, self.opened_at = "open", time.monotonic()
+            raise
+        else:
+            with self.lock:
+                self.failures, self.state = 0, "closed"
+            return result</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:30%">패턴</th><th>막는 것</th></tr>
+      <tr><td><b>서킷 브레이커</b></td><td>죽은 서비스에 계속 요청해 자원 낭비</td></tr>
+      <tr><td><b>타임아웃</b></td><td>느린 응답이 스레드·커넥션을 묶는 것</td></tr>
+      <tr><td><b>벌크헤드</b></td><td>한 의존성의 장애가 전체 풀을 먹는 것</td></tr>
+      <tr><td><b>레이트 리밋</b></td><td>과부하 · 남용</td></tr>
+      <tr><td><b>부하 차단(load shedding)</b></td><td>용량 초과 시 일부를 즉시 거절</td></tr>
+      <tr><td><b>데드라인 전파</b></td><td>이미 포기한 요청을 계속 처리하는 낭비</td></tr>
+    </table></div>
+    <div class="note tip" style="margin-bottom:0">
+      <b>벌크헤드가 자주 빠집니다</b> —
+      의존성별로 <b>커넥션 풀·스레드 풀을 분리</b>하면
+      추천 서비스의 장애가 결제 호출용 커넥션까지 먹지 않습니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">⑤ 관측과 체크리스트</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">분산 시스템 설계 체크리스트</h4>
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:8%"></th><th>항목</th></tr>
+      <tr><td>□</td><td>모든 외부 호출에 <b>타임아웃</b>이 있는가 (연결·읽기 따로)</td></tr>
+      <tr><td>□</td><td>재시도에 <b>지수 백오프 + 지터</b>가 있는가</td></tr>
+      <tr><td>□</td><td>재시도 가능한 오류만 재시도하는가</td></tr>
+      <tr><td>□</td><td>상태 변경 API 가 <b>멱등</b>한가</td></tr>
+      <tr><td>□</td><td><b>서킷 브레이커</b>가 있는가</td></tr>
+      <tr><td>□</td><td>큐에 <b>상한</b>과 넘칠 때의 정책이 있는가</td></tr>
+      <tr><td>□</td><td>의존성별로 <b>풀이 분리</b>돼 있는가</td></tr>
+      <tr><td>□</td><td>부가 기능 실패 시 <b>우아하게 저하</b>되는가</td></tr>
+      <tr><td>□</td><td><b>분산 추적</b>으로 요청 경로를 볼 수 있는가</td></tr>
+      <tr><td>□</td><td>상관관계 ID 가 <b>로그에 전파</b>되는가</td></tr>
+      <tr><td>□</td><td>복제 지연 · 큐 적체 · 고루틴 수를 <b>감시</b>하는가</td></tr>
+      <tr><td>□</td><td>시계 동기화(NTP)가 설정돼 있는가</td></tr>
+      <tr><td>□</td><td>노드가 <b>홀수</b>인가 (합의 시스템)</td></tr>
+      <tr><td>□</td><td>장애 주입 테스트를 해 봤는가</td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># 상관관계 ID 전파 — 분산 추적의 기본
+import contextvars, uuid
+
+request_id = contextvars.ContextVar("request_id", default=None)
+
+@app.middleware("http")
+async def add_request_id(request, call_next):
+    rid = request.headers.get("X-Request-Id") or str(uuid.uuid4())
+    request_id.set(rid)
+    response = await call_next(request)
+    response.headers["X-Request-Id"] = rid
+    return response
+
+# 로그에 자동 포함
+class RequestIdFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = request_id.get() or "-"
+        return True
+
+# 하위 호출에도 전달
+headers = {"X-Request-Id": request_id.get()}
+# ★ OpenTelemetry 를 쓰면 이 전파가 자동으로 된다</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>다음 탭 추천</b> — <b>🏛️ 소프트웨어 공학</b>으로 가면
+      여기서 본 패턴들을 <b>설계와 운영 체계</b>로 정리합니다.
+      특히 <b>12 관측 가능성</b> 절이 이 탭과 바로 이어집니다.
+      동시성의 하드웨어 근거는 <b>🖥️ 컴퓨터구조 07·10</b>,
+      OS 관점은 <b>⚙️ 운영체제 07·08</b> 에 있습니다.
+    </div>
+  </div>
+</section>
+
+</div>

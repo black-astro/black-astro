@@ -71,6 +71,34 @@
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 176" role="img" aria-label="의존 방향은 UI와 Gameplay가 Core를 바라보는 한 방향이어야 한다. Core는 아무도 참조하지 않으므로 어디서든 재사용되고, 컴파일도 고친 어셈블리만 다시 돈다">
+      <text x="16" y="18" class="lbl">의존은 항상 아래로 — 화살표가 한 방향이면 건강한 구조</text>
+      <rect class="bx" x="60" y="30" width="150" height="44"/>
+      <text x="135" y="49" font-size="11" text-anchor="middle">Game.UI</text>
+      <text x="135" y="65" font-size="10" text-anchor="middle" class="lbl">HUD · 메뉴</text>
+      <rect class="bx" x="250" y="30" width="150" height="44"/>
+      <text x="325" y="49" font-size="11" text-anchor="middle">Game.Gameplay</text>
+      <text x="325" y="65" font-size="10" text-anchor="middle" class="lbl">전투 · AI · 스폰</text>
+      <rect class="bx" x="440" y="30" width="150" height="44"/>
+      <text x="515" y="49" font-size="11" text-anchor="middle">Game.Editor</text>
+      <text x="515" y="65" font-size="10" text-anchor="middle" class="lbl">빌드에서 자동 제외</text>
+      <path class="fl" d="M135 76 L240 116"/>
+      <path class="fl" d="M325 76 L297 116"/>
+      <path class="fl" d="M515 76 L350 120"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="2.4s" repeatCount="indefinite" path="M325 76 L297 116"/></circle>
+      <rect class="bx bx-ok" x="190" y="118" width="196" height="46"/>
+      <text x="288" y="138" font-size="11" text-anchor="middle">Game.Core</text>
+      <text x="288" y="154" font-size="10" text-anchor="middle" class="lbl">이벤트 버스 · 인터페이스 · 유틸</text>
+      <rect class="bx bx-warn" x="440" y="118" width="224" height="46"/>
+      <text x="452" y="138" font-size="10">UI ↔ Gameplay 가 서로를 참조하면</text>
+      <text x="452" y="154" font-size="10" class="lbl">컴파일 에러 — 인터페이스를 Core 로</text>
+      <text x="16" y="174" class="lbl" font-size="10">Gameplay 를 고치면 Gameplay·UI 만 재컴파일 — Core 와 외부 패키지는 건드리지 않습니다</text>
+    </svg>
+    <div class="cap">"UI 가 전투 코드를 직접 부른다"가 편해 보여도, <b>화살표가 양방향이 되는 순간</b> 컴파일 시간과 테스트 가능성을 잃습니다.</div>
+  </div>
 </section>
 
 
@@ -158,6 +186,62 @@
       </div>
     </div>
   </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">풀 말고도 GC 를 만드는 것들</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>범인</th><th>대책</th></tr></thead>
+          <tbody>
+            <tr><td><code>"HP: " + hp</code> 문자열 연결</td><td><code>TMP_Text.SetText("{0}", hp)</code> · StringBuilder 재사용</td></tr>
+            <tr><td>루프 안 LINQ (<code>Where</code>·<code>ToList</code>)</td><td>일반 for 문으로 풀기</td></tr>
+            <tr><td><code>GetComponents</code>·<code>Physics.RaycastAll</code></td><td><code>NonAlloc</code> 버전 + 배열 재사용</td></tr>
+            <tr><td>람다가 지역 변수 캡처(클로저)</td><td>캐시하거나 정적 람다로</td></tr>
+            <tr><td><code>yield return new WaitForSeconds</code></td><td>필드에 만들어 재사용</td></tr>
+            <tr><td>박싱 — <code>enum</code> 키 Dictionary</td><td><code>IEqualityComparer</code> 지정 · int 키</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="csharp"><code>// RaycastAll → NonAlloc 패턴
+static readonly RaycastHit[] s_hits = new RaycastHit[16];
+
+int n = Physics.RaycastNonAlloc(ray, s_hits, dist, mask);
+for (int i = 0; i &lt; n; i++) Process(s_hits[i]);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini">풀 매니저 — 프리팹별 풀을 하나로</h4>
+      <pre class="code" data-lang="csharp"><code>public class PoolHub : MonoBehaviour
+{
+    static readonly Dictionary&lt;GameObject, ObjectPool&lt;GameObject&gt;&gt; s_pools = new();
+
+    public static GameObject Spawn(GameObject prefab, Vector3 pos, Quaternion rot)
+    {
+        if (!s_pools.TryGetValue(prefab, out var pool))
+        {
+            pool = new ObjectPool&lt;GameObject&gt;(
+                () =&gt; { var g = Instantiate(prefab); g.AddComponent&lt;PoolTag&gt;().Origin = prefab; return g; },
+                g =&gt; g.SetActive(true),
+                g =&gt; g.SetActive(false),
+                Destroy, defaultCapacity: 32, maxSize: 256);
+            s_pools[prefab] = pool;
+        }
+        var go = pool.Get();
+        go.transform.SetPositionAndRotation(pos, rot);
+        return go;
+    }
+
+    public static void Despawn(GameObject go) =&gt;
+        s_pools[go.GetComponent&lt;PoolTag&gt;().Origin].Release(go);
+}
+// 사용처는 Instantiate/Destroy 를 Spawn/Despawn 으로 바꾸기만</code></pre>
+      <div class="note tip">
+        <b>이펙트 자동 반납</b> — 파티클에
+        <code>Stop Action: Callback</code> 을 걸고 <code>OnParticleSystemStopped</code> 에서
+        <code>Despawn</code> 하면 수명 관리 코드가 사라집니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -167,6 +251,34 @@
     <span class="no">GAME 03</span>
     <h2>프로파일링 — <span class="t">추측 대신 측정</span></h2>
     <p class="lead">"느린 것 같다"로 고치면 엉뚱한 곳을 만집니다. <b>어디서 몇 ms</b> 를 먼저 확인하세요.</p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 168" role="img" aria-label="60fps는 프레임당 16.6밀리초의 예산이다. 스크립트, 물리, 렌더링, UI가 이 예산을 나눠 쓰며, 어느 하나가 초과하면 그 프레임이 늦어져 화면이 멈칫한다">
+      <text x="16" y="18" class="lbl">한 프레임의 예산 — 16.6ms (60fps 기준) 를 누가 나눠 쓰는가</text>
+      <rect class="bx" x="16" y="28" width="648" height="44"/>
+      <rect class="bx bx-ok" x="24" y="36" width="180" height="28"/>
+      <text x="114" y="55" font-size="10" text-anchor="middle">스크립트 (Update) ~5ms</text>
+      <rect class="bx bx-ok" x="208" y="36" width="90" height="28"/>
+      <text x="253" y="55" font-size="10" text-anchor="middle">물리 ~2ms</text>
+      <rect class="bx bx-ok" x="302" y="36" width="200" height="28"/>
+      <text x="402" y="55" font-size="10" text-anchor="middle">렌더링 (컬링·드로우) ~6ms</text>
+      <rect class="bx bx-ok" x="506" y="36" width="80" height="28"/>
+      <text x="546" y="55" font-size="10" text-anchor="middle">UI ~1.5ms</text>
+      <rect class="bx" x="590" y="36" width="66" height="28" stroke-dasharray="4 3"/>
+      <text x="623" y="55" font-size="10" text-anchor="middle">여유 2ms</text>
+
+      <text x="16" y="98" class="lbl">스파이크가 나는 프레임 — GC 가 예산을 통째로 삼킨다</text>
+      <rect class="bx" x="16" y="108" width="648" height="44"/>
+      <rect class="bx bx-ok" x="24" y="116" width="180" height="28"/>
+      <text x="114" y="135" font-size="10" text-anchor="middle">스크립트 ~5ms</text>
+      <rect class="bx bx-warn" x="208" y="116" width="260" height="28"/>
+      <text x="338" y="135" font-size="10" text-anchor="middle">GC.Collect 12ms — 쌓인 쓰레기 청소</text>
+      <rect class="bx bx-ok" x="472" y="116" width="184" height="28"/>
+      <text x="564" y="135" font-size="10" text-anchor="middle">렌더링 — 예산 초과, 프레임 드랍</text>
+      <text x="16" y="164" class="lbl" font-size="10">평균 fps 는 그대로인데 "가끔 멈칫"하는 이유 — 33ms 를 넘는 프레임이 스파이크입니다</text>
+    </svg>
+    <div class="cap">최적화는 <b>가장 큰 칸부터</b> 줄이는 게임입니다 — 어디가 큰지는 측정 없이 알 수 없습니다.</div>
   </div>
 
   <div class="grid2 rv">
@@ -229,6 +341,38 @@ void Think()
     <span class="no">GAME 04</span>
     <h2>그래픽 최적화 — <span class="t">드로우콜 · 배칭</span></h2>
     <p class="lead">GPU 가 아니라 <b>"몇 번 그리라고 시켰는가"</b> 가 병목인 경우가 대부분입니다.</p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 180" role="img" aria-label="CPU가 물체마다 그리기 명령을 따로 보내면 명령 준비 비용이 물체 수만큼 쌓인다. 배칭은 같은 재질의 물체를 묶어 명령 한 번으로 보내므로 CPU 부담이 크게 준다">
+      <text x="16" y="18" class="lbl">배칭 없음 — 물체마다 명령 한 번씩</text>
+      <rect class="bx" x="16" y="28" width="90" height="38"/>
+      <text x="61" y="52" font-size="11" text-anchor="middle">CPU</text>
+      <path class="fl" d="M108 36 L196 36"/>
+      <path class="fl" d="M108 48 L196 48"/>
+      <path class="fl" d="M108 60 L196 60"/>
+      <text x="118" y="30" font-size="9" class="lbl">나무1 그려라 · 나무2 그려라 · 나무3…</text>
+      <rect class="bx bx-warn" x="198" y="28" width="90" height="38"/>
+      <text x="243" y="52" font-size="11" text-anchor="middle">GPU</text>
+      <rect class="bx bx-warn" x="308" y="28" width="356" height="38"/>
+      <text x="322" y="46" font-size="10">명령 500번 = 상태 준비 500번 — <tspan fill="#fb7185">CPU 가 먼저 지친다</tspan></text>
+      <text x="322" y="60" font-size="10" class="lbl">GPU 는 놀고 있는데 프레임이 안 나오는 전형적 패턴</text>
+
+      <text x="16" y="102" class="lbl">배칭 — 같은 재질끼리 묶어 한 번에</text>
+      <rect class="bx" x="16" y="112" width="90" height="38"/>
+      <text x="61" y="136" font-size="11" text-anchor="middle">CPU</text>
+      <path class="fl" d="M108 131 L196 131"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="2s" repeatCount="indefinite" path="M108 131 L196 131"/></circle>
+      <text x="118" y="124" font-size="9" class="lbl">"나무 500그루 한 번에"</text>
+      <rect class="bx bx-ok" x="198" y="112" width="90" height="38"/>
+      <text x="243" y="136" font-size="11" text-anchor="middle">GPU</text>
+      <rect class="bx bx-ok" x="308" y="112" width="356" height="38"/>
+      <text x="322" y="130" font-size="10">SetPass 1번 + 인스턴싱 — 같은 그림, CPU 비용 1/100</text>
+      <text x="322" y="144" font-size="10" class="lbl">묶이는 조건: 같은 셰이더(SRP Batcher) · 같은 메시+재질(Instancing)</text>
+      <text x="16" y="172" class="lbl" font-size="10">Frame Debugger(Window → Analysis)로 "왜 안 묶였는지" 이유를 항목별로 보여 줍니다 — 배칭이 깨진 원인 추적은 여기서 시작하세요</text>
+    </svg>
+    <div class="cap">드로우콜 최적화의 본질은 GPU 가 아니라 <b>CPU 가 명령을 준비하는 횟수</b>를 줄이는 것입니다.</div>
   </div>
 
   <div class="grid2 rv">
@@ -337,6 +481,60 @@ if (size &gt; 0)
       </div>
     </div>
   </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">그룹 설계 — 무엇을 어디에 담나</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>그룹</th><th>담는 것</th><th>배포</th></tr></thead>
+          <tbody>
+            <tr><td><b>Local-Core</b></td><td>첫 화면 · 튜토리얼 · 공용 UI</td><td>앱에 포함</td></tr>
+            <tr><td><b>Remote-Stage</b></td><td>스테이지별 배경·적 (라벨 stage01…)</td><td>CDN — 진입 직전 다운로드</td></tr>
+            <tr><td><b>Remote-Event</b></td><td>시즌 이벤트 에셋</td><td>CDN — 심사 없이 교체</td></tr>
+            <tr><td><b>Local-Shared</b></td><td>여러 스테이지가 공유하는 텍스처</td><td>중복 방지용 분리 ★</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>중복은 이렇게 생깁니다</b> — 스테이지 1과 2 번들이 <b>같은 나무 텍스처를 각자</b>
+        품으면 메모리에 두 벌 올라갑니다. Analyze 창의
+        <b>Check Duplicate Bundle Dependencies</b> 로 찾아 공유 그룹으로 빼세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini">씬 전환과 메모리 수명</h4>
+      <pre class="code" data-lang="csharp"><code>// 스테이지 진입 — 라벨 단위로 미리 받고, 나갈 때 통째로 해제
+public class StageLoader
+{
+    readonly List&lt;AsyncOperationHandle&gt; _held = new();
+
+    public async Task EnterAsync(string label)
+    {
+        var locs = await Addressables.LoadResourceLocationsAsync(label).Task;
+        foreach (var loc in locs)
+        {
+            var h = Addressables.LoadAssetAsync&lt;Object&gt;(loc);
+            _held.Add(h);
+            await h.Task;
+        }
+    }
+
+    public void Exit()
+    {
+        foreach (var h in _held) Addressables.Release(h);
+        _held.Clear();
+        // 씬 언로드 후 남은 것 정리
+        Resources.UnloadUnusedAssets();
+    }
+}</code></pre>
+      <div class="note tip">
+        <b>"스테이지를 나가면 그 스테이지의 메모리가 0이 되는가"</b> —
+        Memory Profiler 스냅샷을 진입 전·후로 찍어 비교하는 것이
+        Addressables 도입의 완료 조건입니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -407,6 +605,59 @@ handle.Complete();                              // 결과가 필요한 시점에
       </div>
     </div>
   </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">Transform 수천 개도 Job 으로 — TransformAccessArray</h4>
+      <pre class="code" data-lang="csharp"><code>using UnityEngine.Jobs;
+
+[BurstCompile]
+struct SwarmJob : IJobParallelForTransform
+{
+    [ReadOnly] public NativeArray&lt;float3&gt; Vel;
+    public float Dt;
+
+    public void Execute(int i, TransformAccess t) =&gt;
+        t.position += (Vector3)(Vel[i] * Dt);
+}
+
+TransformAccessArray _tfs;    // 스폰 시 Add, 파괴 시 RemoveAtSwapBack
+
+void Update()
+{
+    var job = new SwarmJob { Vel = _vel, Dt = Time.deltaTime };
+    _handle = job.Schedule(_tfs);   // Transform 인데도 워커 스레드에서 돈다
+}
+void LateUpdate() =&gt; _handle.Complete();</code></pre>
+      <p class="tx">"Job 은 Transform 을 못 쓴다"의 <b>예외 통로</b>입니다 —
+      군중 이동·총알 수천 발이 메인 스레드를 떠납니다.</p>
+    </div>
+    <div class="card">
+      <h4 class="mini">Complete() 를 어디서 부를 것인가</h4>
+      <div class="vs">
+        <div class="bad">
+          <h5>Schedule 직후 Complete</h5>
+          <pre class="code" data-lang="csharp"><code>var h = job.Schedule(n, 64);
+h.Complete();   // 메인이 그냥 기다림
+// = 멀티코어 효과 없음</code></pre>
+        </div>
+        <div class="good">
+          <h5>한 프레임 벌려 주기</h5>
+          <pre class="code" data-lang="csharp"><code>// Update 에서 Schedule
+_h = job.Schedule(n, 64);
+// LateUpdate 에서 회수
+_h.Complete();
+// 그 사이 워커가 일한다</code></pre>
+        </div>
+      </div>
+      <div class="note warn">
+        <b>NativeArray 는 GC 가 안 치워 줍니다.</b>
+        <code>OnDestroy</code> 에서 <code>Dispose()</code> 를 빠뜨리면 메모리 누수 경고가
+        콘솔을 덮습니다. <code>Allocator.TempJob</code> 은 4프레임 안에,
+        <code>Persistent</code> 는 수동으로 — 수명 규칙을 정해 두세요.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -468,6 +719,34 @@ if (SystemInfo.systemMemorySize &lt; 3000)
         벤치마크로는 절대 발견되지 않습니다.
       </div>
     </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 172" role="img" aria-label="풀파워로 돌리면 몇 분 만에 발열 한계에 닿아 기기가 강제로 성능을 낮추고 프레임이 널뛴다. 처음부터 부하를 예산 안으로 낮추면 온도가 한계 아래에서 평형을 이뤄 끝까지 일정한 프레임이 나온다">
+      <text x="16" y="18" class="lbl">풀파워 전략 — 5분 뒤 무너진다</text>
+      <path class="ln" d="M16 130 L320 130"/>
+      <path class="ln" d="M16 130 L16 34"/>
+      <path class="ln" d="M16 52 L320 52" stroke="#fb7185" stroke-dasharray="5 4"/>
+      <text x="240" y="46" font-size="9" class="lbl">발열 한계</text>
+      <path class="fl" d="M16 120 C 70 60, 110 52, 150 50 C 190 50, 200 96, 226 88 C 250 82, 260 110, 290 100"/>
+      <text x="30" y="34" font-size="10" class="lbl">60fps → 스로틀링 → 40↕55 널뛰기</text>
+      <text x="16" y="150" class="lbl" font-size="10">그래프가 꺾이는 지점부터 사용자 리뷰에</text>
+      <text x="16" y="164" class="lbl" font-size="10">"폰이 뜨겁고 버벅여요"가 달립니다</text>
+
+      <path class="ln" d="M352 18 L352 158"/>
+
+      <text x="376" y="18" class="lbl">예산 전략 — 끝까지 일정하다</text>
+      <path class="ln" d="M376 130 L664 130"/>
+      <path class="ln" d="M376 130 L376 34"/>
+      <path class="ln" d="M376 52 L664 52" stroke="#fb7185" stroke-dasharray="5 4"/>
+      <path class="fl" d="M376 100 C 420 78, 460 74, 500 73 L 650 72"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="3s" repeatCount="indefinite" path="M376 100 C 420 78, 460 74, 500 73 L 650 72"/></circle>
+      <text x="390" y="34" font-size="10" class="lbl">해상도 80% · 그림자 베이크 · 30/60 선택제</text>
+      <text x="376" y="150" class="lbl" font-size="10">온도가 한계 아래에서 평형 — 성능을 조금 양보하고</text>
+      <text x="376" y="164" class="lbl" font-size="10">일관성을 삽니다 — 목표는 피크가 아니라 지속</text>
+    </svg>
+    <div class="cap">모바일 성능의 진짜 목표는 최고 fps 가 아니라 <b>30분 뒤에도 같은 fps</b> 입니다.</div>
   </div>
 </section>
 
@@ -533,6 +812,37 @@ public static class BuildScript
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 150" role="img" aria-label="커밋을 올리면 CI가 자동으로 빌드하고 테스트를 돌린 뒤 내부 테스트 트랙에 올린다. 사람은 검수와 승격 버튼만 누른다. 손 빌드는 이 전체를 매번 사람이 반복하는 것이다">
+      <text x="16" y="18" class="lbl">빌드 파이프라인 — 사람은 마지막 버튼만 누른다</text>
+      <rect class="bx" x="16" y="34" width="96" height="46"/>
+      <text x="64" y="54" font-size="11" text-anchor="middle">git push</text>
+      <text x="64" y="70" font-size="10" text-anchor="middle" class="lbl">개발자</text>
+      <path class="fl" d="M114 57 L146 57"/>
+      <rect class="bx bx-ok" x="148" y="34" width="130" height="46"/>
+      <text x="213" y="54" font-size="11" text-anchor="middle">CI 서버 빌드</text>
+      <text x="213" y="70" font-size="10" text-anchor="middle" class="lbl">-batchmode · 로그 보존</text>
+      <path class="fl" d="M280 57 L312 57"/>
+      <rect class="bx bx-ok" x="314" y="34" width="120" height="46"/>
+      <text x="374" y="54" font-size="11" text-anchor="middle">자동 테스트</text>
+      <text x="374" y="70" font-size="10" text-anchor="middle" class="lbl">PlayMode · 스모크</text>
+      <path class="fl" d="M436 57 L468 57"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="3s" repeatCount="indefinite" path="M114 57 L146 57 L280 57 L312 57 L436 57 L468 57 L586 57 L610 57"/></circle>
+      <rect class="bx" x="470" y="34" width="116" height="46"/>
+      <text x="528" y="54" font-size="11" text-anchor="middle">내부 트랙 업로드</text>
+      <text x="528" y="70" font-size="10" text-anchor="middle" class="lbl">TestFlight · 내부 테스트</text>
+      <path class="fl" d="M588 57 L610 57"/>
+      <rect class="bx" x="612" y="34" width="52" height="46"/>
+      <text x="638" y="54" font-size="10" text-anchor="middle">검수 →</text>
+      <text x="638" y="70" font-size="10" text-anchor="middle">승격</text>
+      <text x="16" y="106" class="lbl" font-size="10">Unity 라이선스가 걸린 CI 는 GameCI(GitHub Actions) · Unity Build Automation · Jenkins + 자체 머신이 대표적입니다</text>
+      <text x="16" y="122" class="lbl" font-size="10">손 빌드는 "그날 그 PC 의 상태"가 결과물에 섞입니다 — 재현이 안 되는 빌드는 사고가 났을 때 원인 추적이 불가능합니다</text>
+      <text x="16" y="138" class="lbl" font-size="10">최소 구성이라도: 버전 태그를 밀면 자동 빌드 + 산출물 보관. 이것만으로 "어느 커밋의 빌드인가"가 항상 답해집니다</text>
+    </svg>
+    <div class="cap">자동화의 목적은 편함이 아니라 <b>"이 빌드가 정확히 어떤 코드인가"에 항상 답할 수 있는 상태</b>입니다.</div>
+  </div>
 </section>
 
 
@@ -591,6 +901,57 @@ public static class BuildScript
         여러 개를 동시에 붙이면 <b>시작 시간이 몇 초씩 늘어납니다</b>.
         보상형 광고는 <b>보상 지급도 서버 검증(SSV)</b> 을 붙이세요 —
         안 그러면 무한 보상 치트의 표적이 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">미완료 거래 복구 — 돈 받고 지급 안 되는 사고 막기</h4>
+      <pre class="code" data-lang="csharp"><code>// "결제됐는데 아이템이 안 왔어요" — CS 문의 1순위
+// 원인: 지급 처리 도중 앱 종료·네트워크 끊김
+
+// 대책 1 — Pending 큐를 로컬에 남긴다
+void OnPurchaseConfirmedByStore(string txId, string receipt)
+{
+    PendingQueue.Add(txId, receipt);     // ① 디스크에 먼저 기록
+    TryDeliver(txId);                    // ② 서버 검증 시도
+}
+
+// 대책 2 — 앱 시작 때마다 미처리분 재시도
+async void Start()
+{
+    foreach (var p in PendingQueue.All())
+    {
+        var ok = await Api.VerifyAndGrantAsync(p.TxId, p.Receipt);
+        if (ok) PendingQueue.Remove(p.TxId);   // 서버가 중복은 걸러 준다
+    }
+}</code></pre>
+      <div class="note tip">
+        서버가 <code>transactionID</code> 기준으로 <b>멱등</b>하면
+        클라이언트는 몇 번을 다시 보내도 안전합니다 —
+        "일단 기록, 성공할 때까지 재시도"가 전부가 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini">상품 설계 — 심사·정책에 걸리는 지점</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>항목</th><th>규칙</th></tr></thead>
+          <tbody>
+            <tr><td>확률형 아이템</td><td><b>확률 공시 의무</b> — 국내법 · 스토어 정책 모두</td></tr>
+            <tr><td>가격 표시</td><td>스토어가 준 <b>현지 통화 문자열</b> 그대로</td></tr>
+            <tr><td>복원 버튼</td><td>iOS 는 <b>비소모성 구매 복원</b> 버튼이 없으면 반려</td></tr>
+            <tr><td>구독</td><td>해지 방법 안내 필수</td></tr>
+            <tr><td>미성년자</td><td>결제 한도 · 보호자 동의 흐름</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>수익화 설계는 나중에 붙일수록 비쌉니다.</b>
+        재화가 하나뿐인 게임에 이중 재화(무료·유료 구분)를 나중에 넣으면
+        <b>경제 전체를 갈아엎게</b> 됩니다. 환불 시 회수 로직까지
+        첫 설계에 포함하세요.
       </div>
     </div>
   </div>
@@ -653,6 +1014,38 @@ async Task BootAsync()
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 168" role="img" aria-label="게임이 켜지면 원격 설정을 먼저 받아 점검 여부와 최소 버전을 확인하고, 통과한 경우에만 로그인과 게임 진입으로 이어진다. 이 관문이 없으면 서버 장애나 구버전 호환 문제를 원격으로 막을 방법이 없다">
+      <text x="16" y="18" class="lbl">부팅 관문 — 게임에 들어가기 전 반드시 지나는 문</text>
+      <rect class="bx" x="16" y="30" width="92" height="44"/>
+      <text x="62" y="50" font-size="11" text-anchor="middle">앱 시작</text>
+      <path class="fl" d="M110 52 L142 52"/>
+      <rect class="bx bx-ok" x="144" y="30" width="140" height="44"/>
+      <text x="214" y="50" font-size="11" text-anchor="middle">원격 설정 조회</text>
+      <text x="214" y="66" font-size="10" text-anchor="middle" class="lbl">타임아웃 3초 + 캐시 폴백</text>
+      <path class="fl" d="M286 52 L318 52"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="2.8s" repeatCount="indefinite" path="M110 52 L142 52 L286 52 L318 52 L448 52 L480 52"/></circle>
+      <rect class="bx" x="320" y="30" width="126" height="44"/>
+      <text x="383" y="50" font-size="11" text-anchor="middle">관문 검사</text>
+      <text x="383" y="66" font-size="10" text-anchor="middle" class="lbl">점검? 강제 업데이트?</text>
+      <path class="fl" d="M448 52 L480 52"/>
+      <rect class="bx bx-ok" x="482" y="30" width="182" height="44"/>
+      <text x="573" y="50" font-size="11" text-anchor="middle">로그인 → 게임 진입</text>
+      <text x="573" y="66" font-size="10" text-anchor="middle" class="lbl">공지·이벤트 배너 표시</text>
+
+      <path class="fl" d="M383 76 L383 104"/>
+      <rect class="bx bx-warn" x="240" y="106" width="140" height="40"/>
+      <text x="310" y="124" font-size="10" text-anchor="middle">점검 중 → 안내 화면</text>
+      <text x="310" y="139" font-size="10" text-anchor="middle" class="lbl">재시도 버튼 · 종료</text>
+      <rect class="bx bx-warn" x="396" y="106" width="160" height="40"/>
+      <text x="476" y="124" font-size="10" text-anchor="middle">구버전 → 스토어로 이동</text>
+      <text x="476" y="139" font-size="10" text-anchor="middle" class="lbl">minVersion 미달</text>
+      <text x="16" y="162" class="lbl" font-size="10">설정 서버 자체가 죽었을 때의 폴백(마지막 캐시 사용 · 일정 시간 뒤 재시도)까지 정해야 관문이 완성됩니다</text>
+    </svg>
+    <div class="cap">라이브 게임의 첫 코드는 게임 로직이 아니라 <b>이 관문</b>입니다 — 출시 후에는 여기에만 손을 댈 수 있습니다.</div>
+  </div>
 </section>
 
 
@@ -713,6 +1106,39 @@ public struct SecureInt
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 176" role="img" aria-label="클라이언트 신뢰 구조에서는 클라이언트가 결과를 통보하고 서버가 그대로 저장하므로 값을 조작하면 그대로 반영된다. 서버 권위 구조에서는 클라이언트가 행동만 보내고 서버가 규칙으로 결과를 계산하므로 조작된 결과는 애초에 만들어질 수 없다">
+      <text x="16" y="18" class="lbl">클라이언트 신뢰 — 결과를 "통보"받는다</text>
+      <rect class="bx bx-warn" x="16" y="30" width="140" height="46"/>
+      <text x="86" y="50" font-size="11" text-anchor="middle">클라이언트</text>
+      <text x="86" y="66" font-size="10" text-anchor="middle" class="lbl">"보스 잡았고 골드 +1억"</text>
+      <path class="fl" d="M158 53 L204 53"/>
+      <rect class="bx bx-warn" x="206" y="30" width="110" height="46"/>
+      <text x="261" y="50" font-size="11" text-anchor="middle">서버</text>
+      <text x="261" y="66" font-size="10" text-anchor="middle" class="lbl">그대로 저장</text>
+      <text x="16" y="102" class="lbl">메모리 조작 = 즉시 반영.</text>
+      <text x="16" y="118" class="lbl">서버는 검증할 재료 자체가 없다</text>
+
+      <path class="ln" d="M348 18 L348 160"/>
+
+      <text x="372" y="18" class="lbl">서버 권위 — 행동을 보내면 서버가 계산한다</text>
+      <rect class="bx" x="372" y="30" width="128" height="46"/>
+      <text x="436" y="50" font-size="11" text-anchor="middle">클라이언트</text>
+      <text x="436" y="66" font-size="10" text-anchor="middle" class="lbl">"스킬 3번을 썼다" (행동만)</text>
+      <path class="fl" d="M502 53 L536 53"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="2.4s" repeatCount="indefinite" path="M502 53 L536 53"/></circle>
+      <rect class="bx bx-ok" x="538" y="30" width="126" height="46"/>
+      <text x="601" y="50" font-size="11" text-anchor="middle">서버가 계산</text>
+      <text x="601" y="66" font-size="10" text-anchor="middle" class="lbl">데미지 · 드랍 · 골드</text>
+      <rect class="bx bx-ok" x="372" y="92" width="292" height="42"/>
+      <text x="386" y="112" font-size="10">쿨타임 안 지난 스킬 · 사거리 밖 공격 · 불가능한 이동속도</text>
+      <text x="386" y="127" font-size="10" class="lbl">→ 서버 규칙이 거부 — 조작된 "결과"는 만들어질 수 없다</text>
+      <text x="372" y="158" class="lbl" font-size="10">대가는 비용과 지연 — "돈이 걸린 값만" 서버 권위가 표준</text>
+    </svg>
+    <div class="cap">치트 방지의 분수령은 암호화 기술이 아니라 <b>"결과를 누가 계산하는가"</b>입니다.</div>
+  </div>
 </section>
 
 
@@ -752,6 +1178,48 @@ public struct SecureInt
         온라인 기능이 있다면 <b>🌐 게임 서버</b>와 <b>⚡ 대규모 트래픽</b>,
         계정·상점 같은 백엔드는 <b>🔷 ASP.NET Core</b>,
         서버 배포·무중단 운영은 🌐 <b>웹서버 가이드</b>가 이어집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">사람이 놓치는 것 — 시나리오 QA 와 출시 당일 런북</h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">악의적 시나리오 테스트 — 정상 플레이는 QA 가 아닙니다</h4>
+      <ul class="tx">
+        <li>☐ 결제 승인 화면에서 <b>홈 버튼 → 앱 강제 종료</b> → 재시작 시 지급 복구되는지</li>
+        <li>☐ 보상 수령 버튼 <b>연타</b> — 두 번 지급되지 않는지</li>
+        <li>☐ 기기 시계를 <b>내일로</b> 바꾸면 일일 보상이 뚫리는지</li>
+        <li>☐ 튜토리얼 도중 <b>모든 화면에서</b> 종료 → 재시작해도 진행 가능한지</li>
+        <li>☐ 저장 직전 강제 종료 <b>10회 반복</b> — 세이브 파일이 깨지는지</li>
+        <li>☐ 언어를 아랍어(RTL)·독일어(긴 단어)로 — UI 가 터지는지</li>
+        <li>☐ 알림 권한 <b>거부</b> 상태로 전체 플레이 — 어딘가에서 막히는지</li>
+      </ul>
+      <div class="note tip">
+        <b>QA 의 관점은 "어떻게 하면 깨질까"입니다.</b>
+        개발자는 무의식적으로 되는 길로만 다닙니다 —
+        체크리스트를 남에게 주고 <b>깨는 것이 목표</b>라고 말해 주세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini">출시 당일 런북 — 미리 적어 두는 대응표</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>상황</th><th>즉시 행동</th></tr></thead>
+          <tbody>
+            <tr><td>크래시율 &gt; 1%</td><td>Crashlytics 상위 스택 확인 → 심하면 <b>단계적 출시 중단</b></td></tr>
+            <tr><td>서버 응답 지연</td><td>대시보드 → 스케일 아웃 → 안 되면 <b>점검 모드 ON</b></td></tr>
+            <tr><td>결제 오류 문의 급증</td><td>스토어 콘솔 상태 확인 → 미지급분은 <b>거래 ID 로 일괄 재지급</b></td></tr>
+            <tr><td>밸런스 파괴 버그</td><td>원격 설정으로 해당 기능 OFF → 핫픽스 빌드</td></tr>
+            <tr><td>스토어 노출 안 됨</td><td>심사 상태·국가 설정 확인 (전파에 몇 시간 걸림)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>단계적 출시(Staged Rollout)를 쓰세요.</b>
+        첫날 5% → 20% → 50% → 100%.
+        치명적 버그가 나와도 <b>피해가 5%에서 멈춥니다.</b>
+        100% 출시 후 발견되면 되돌릴 방법이 없습니다.
       </div>
     </div>
   </div>

@@ -362,6 +362,126 @@ PieChart pie = new PieChart(FXCollections.observableArrayList(
         new PieChart.Data("A", 30), new PieChart.Data("B", 70)));</code></pre>
     </div>
   </div>
+
+  <h3 class="sub">무엇을 쓸지 고르기 — 목적별</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">하고 싶은 것</th><th>쓸 컨트롤</th></tr>
+      <tr><td>목록에서 하나 고르기</td><td>항목 10개 미만 → <code>ComboBox</code> · 그 이상 → <code>ComboBox</code> + 검색 · 아주 많으면 별도 검색 창</td></tr>
+      <tr><td>표 형태 데이터</td><td class="ok"><code>TableView</code> — <b>가상화가 기본</b>이라 수만 행도 견딥니다(x11)</td></tr>
+      <tr><td>계층 구조</td><td><code>TreeView</code> · 컬럼도 필요하면 <code>TreeTableView</code></td></tr>
+      <tr><td>숫자 입력</td><td><code>Spinner</code>(범위가 좁을 때) · <code>TextField</code> + <code>TextFormatter</code></td></tr>
+      <tr><td>여러 개 선택</td><td><code>ListView</code> + <code>SelectionMode.MULTIPLE</code> · 또는 <code>CheckBox</code> 목록</td></tr>
+      <tr><td>진행 상황</td><td>비율을 알면 <code>ProgressBar</code> · 모르면 <code>ProgressIndicator</code></td></tr>
+      <tr><td>알림 · 확인</td><td><code>Alert</code>(간단) · <code>Dialog&lt;R&gt;</code>(입력을 받을 때)</td></tr>
+      <tr><td>화면 전환</td><td><code>TabPane</code>(동등한 화면) · <code>BorderPane</code> 센터 교체(마스터-디테일)</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대화상자 — 사용자에게 묻고 받기</h4>
+      <pre class="code" data-lang="java"><code>// 확인 — 되돌릴 수 없는 작업 앞에는 반드시
+Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+confirm.setTitle("삭제 확인");
+confirm.setHeaderText("주문 " + order.getNo() + " 을 삭제합니다");
+confirm.setContentText("삭제하면 되돌릴 수 없습니다. 계속할까요?");
+confirm.initOwner(stage);                         // ★ 부모 창 지정 — 뒤로 숨지 않게
+
+if (confirm.showAndWait().filter(b -&gt; b == ButtonType.OK).isPresent()) {
+    delete(order);
+}
+
+// 오류 — 스택 추적을 접어서 넣어 두면 문의 대응이 쉬워집니다
+Alert err = new Alert(Alert.AlertType.ERROR);
+err.setHeaderText("저장에 실패했습니다");
+err.setContentText(ex.getMessage());
+var sw = new StringWriter();
+ex.printStackTrace(new PrintWriter(sw));
+var area = new TextArea(sw.toString());
+area.setEditable(false);
+err.getDialogPane().setExpandableContent(area);
+err.showAndWait();
+
+// 입력받기
+TextInputDialog input = new TextInputDialog("기본값");
+input.setHeaderText("사유를 입력하세요");
+input.showAndWait().ifPresent(reason -&gt; cancel(order, reason));
+
+// 파일 선택 — 마지막 폴더를 기억해 두면 사용성이 크게 오릅니다
+FileChooser fc = new FileChooser();
+fc.setInitialDirectory(lastDir);
+fc.setInitialFileName("주문_" + LocalDate.now() + ".xlsx");
+fc.getExtensionFilters().add(
+        new FileChooser.ExtensionFilter("Excel 파일", "*.xlsx"));
+File f = fc.showSaveDialog(stage);
+if (f != null) { lastDir = f.getParentFile(); export(f); }</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>initOwner(stage)</code> 를 빠뜨리면 대화상자가 본 창 뒤로 숨습니다.</b>
+        사용자에게는 <b>프로그램이 멈춘 것</b>으로 보입니다 —
+        실제로는 어딘가에서 응답을 기다리고 있을 뿐인데,
+        작업 표시줄에도 따로 뜨지 않아 찾을 방법이 없습니다.
+        <b>모든 대화상자에 습관적으로</b> 붙이세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">TableView 를 실무 수준으로</h4>
+      <pre class="code" data-lang="java"><code>TableView&lt;Order&gt; table = new TableView&lt;&gt;();
+
+// 컬럼 — record 도 그대로 씁니다
+TableColumn&lt;Order, String&gt; noCol = new TableColumn&lt;&gt;("주문번호");
+noCol.setCellValueFactory(c -&gt;
+        new SimpleStringProperty(c.getValue().no()));
+
+TableColumn&lt;Order, Integer&gt; amtCol = new TableColumn&lt;&gt;("금액");
+amtCol.setCellValueFactory(c -&gt;
+        new SimpleIntegerProperty(c.getValue().amount()).asObject());
+
+// 셀 서식 — 숫자는 오른쪽 정렬 + 천 단위 구분
+amtCol.setCellFactory(col -&gt; new TableCell&lt;&gt;() {
+    @Override protected void updateItem(Integer v, boolean empty) {
+        super.updateItem(v, empty);
+        if (empty || v == null) { setText(null); setStyle(""); return; }
+        setText(String.format("%,d", v));
+        setStyle("-fx-alignment: CENTER-RIGHT;"
+               + (v &gt;= 1_000_000 ? " -fx-text-fill: #fb7185;" : ""));
+    }
+});
+
+table.getColumns().setAll(noCol, amtCol);
+
+// 정렬 + 검색 — 이 세 줄이면 필터가 완성됩니다
+ObservableList&lt;Order&gt; master = FXCollections.observableArrayList(orders);
+FilteredList&lt;Order&gt; filtered = new FilteredList&lt;&gt;(master, o -&gt; true);
+SortedList&lt;Order&gt; sorted = new SortedList&lt;&gt;(filtered);
+sorted.comparatorProperty().bind(table.comparatorProperty());
+table.setItems(sorted);
+
+searchField.textProperty().addListener((obs, o, kw) -&gt;
+        filtered.setPredicate(item -&gt; kw == null || kw.isBlank()
+                || item.no().toLowerCase().contains(kw.toLowerCase())));
+
+// 더블클릭으로 상세 열기
+table.setRowFactory(tv -&gt; {
+    TableRow&lt;Order&gt; row = new TableRow&lt;&gt;();
+    row.setOnMouseClicked(e -&gt; {
+        if (e.getClickCount() == 2 &amp;&amp; !row.isEmpty()) openDetail(row.getItem());
+    });
+    return row;
+});
+
+table.setPlaceholder(new Label("조건에 맞는 주문이 없습니다"));  // ★ 빈 화면 안내
+table.getColumns().forEach(c -&gt; c.setReorderable(false));</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>setPlaceholder</code> 를 안 주면 빈 표에 "내용 없음"이라는 영어가 뜹니다.</b>
+        사용자는 <b>프로그램이 잘못된 줄 압니다</b>.
+        <b>왜 비었는지</b>를 알려 주세요 —
+        "조회 조건을 입력하고 검색을 누르세요" 와 "조건에 맞는 결과가 없습니다"는
+        <b>사용자가 할 일이 완전히 다릅니다</b>.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -434,6 +554,125 @@ textField.textProperty().bindBidirectional(model.nameProperty());</code></pre>
         <b>바인딩을 쓰면 “값 바뀔 때마다 화면 갱신 코드”가 사라집니다.</b>
         모델의 값만 바꾸면 UI 는 알아서 따라옵니다.
         JavaFX 를 쓸 거라면 이 개념을 꼭 익히세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv d1">
+    <svg viewBox="0 0 680 216" role="img" aria-label="바인딩이 없으면 값이 바뀔 때마다 화면을 갱신하는 코드를 곳곳에 직접 써야 하고, 한 곳이라도 빠뜨리면 화면과 데이터가 어긋난다. 바인딩을 걸면 프로퍼티가 바뀌는 순간 연결된 컨트롤이 스스로 갱신되므로 갱신 코드 자체가 사라진다">
+      <text x="16" y="16" class="lbl">바인딩이 실제로 없애 주는 것 — "갱신하는 코드"</text>
+      <text x="16" y="36" class="lbl" font-size="10">바인딩 없이 — 값을 바꾼 곳마다 화면 갱신을 직접</text>
+      <rect class="bx bx-warn" x="16" y="44" width="316" height="66"/>
+      <rect class="bx" x="28" y="54" width="126" height="24"/>
+      <text x="91" y="70" font-size="9" text-anchor="middle" class="lbl">model.count++</text>
+      <path class="ln" d="M156 66 L176 66"/>
+      <rect class="bx" x="178" y="54" width="142" height="24"/>
+      <text x="249" y="70" font-size="9" text-anchor="middle" class="lbl">label.setText(...) 직접</text>
+      <text x="174" y="94" font-size="9" text-anchor="middle" class="lbl">갱신할 곳이 열 군데면 열 번 써야 하고</text>
+      <text x="174" y="106" font-size="9" text-anchor="middle" class="lbl">하나만 빠뜨려도 화면과 데이터가 어긋납니다</text>
+      <text x="366" y="36" class="lbl" font-size="10">바인딩 — 한 번 연결해 두면 끝</text>
+      <rect class="bx bx-ok" x="366" y="44" width="298" height="66"/>
+      <rect class="bx" x="378" y="54" width="120" height="24"/>
+      <text x="438" y="70" font-size="9" text-anchor="middle" class="lbl">count.set(n)</text>
+      <path class="fl" d="M500 66 L520 66"/>
+      <circle class="pk" r="3">
+        <animateMotion dur="2.2s" repeatCount="indefinite" path="M500 66 L520 66"/></circle>
+      <rect class="bx" x="522" y="54" width="130" height="24"/>
+      <text x="587" y="70" font-size="9" text-anchor="middle" class="lbl">연결된 컨트롤 자동 갱신</text>
+      <text x="515" y="94" font-size="9" text-anchor="middle" class="lbl">라벨 · 버튼 활성화 · 진행률이 한꺼번에</text>
+      <text x="515" y="106" font-size="9" text-anchor="middle" class="lbl">갱신 코드가 아예 존재하지 않습니다</text>
+      <text x="16" y="140" class="lbl" font-size="10">UI 버그의 큰 몫은 "데이터는 맞는데 화면이 안 바뀐다"입니다 — 갱신 호출을 빠뜨렸기 때문입니다.</text>
+      <text x="16" y="156" class="lbl" font-size="10">바인딩은 그 실수를 할 자리 자체를 없앱니다. 코드를 줄이는 것이 아니라 버그의 종류를 없애는 것입니다.</text>
+      <text x="16" y="172" class="lbl" font-size="10">주의 ①: bind() 를 건 프로퍼티에 setText 를 직접 부르면 예외가 납니다 — 소유권이 바인딩에 넘어갑니다.</text>
+      <text x="16" y="188" class="lbl" font-size="10">주의 ②: 프로퍼티 변경은 반드시 FX 애플리케이션 스레드에서. 백그라운드에서 바꾸면 화면이 깨집니다.</text>
+      <text x="16" y="204" class="lbl" font-size="10">주의 ③: 오래 사는 프로퍼티에 리스너를 붙이면 화면이 닫혀도 참조가 남습니다 — 해제하거나 약한 리스너를 쓰세요.</text>
+    </svg>
+    <div class="cap">WPF·SwiftUI·React 가 각자의 방식으로 하는 일과 <b>같은 발상</b>입니다 — <b>상태를 선언하면 화면이 따라온다</b>.</div>
+  </div>
+
+  <h3 class="sub">바인딩 실전 — 폼 하나를 통째로 묶기</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">모델을 프로퍼티로 만들면</h4>
+      <pre class="code" data-lang="java"><code>public class OrderForm {
+    private final StringProperty  customer = new SimpleStringProperty("");
+    private final IntegerProperty qty      = new SimpleIntegerProperty(1);
+    private final IntegerProperty price    = new SimpleIntegerProperty(0);
+    private final BooleanProperty saving   = new SimpleBooleanProperty(false);
+
+    // 계산된 값 — 수량이나 단가가 바뀌면 자동으로 다시 계산됩니다
+    public final IntegerBinding total =
+            Bindings.createIntegerBinding(
+                    () -&gt; qty.get() * price.get(), qty, price);
+
+    // 유효성도 바인딩으로
+    public final BooleanBinding invalid =
+            customer.isEmpty()
+                .or(qty.lessThanOrEqualTo(0))
+                .or(price.lessThanOrEqualTo(0));
+
+    public StringProperty  customerProperty() { return customer; }
+    public IntegerProperty qtyProperty()      { return qty; }
+    public IntegerProperty priceProperty()    { return price; }
+    public BooleanProperty savingProperty()   { return saving; }
+}</code></pre>
+      <pre class="code" data-lang="java"><code>// 화면과 묶기 — 이게 전부입니다
+customerField.textProperty().bindBidirectional(form.customerProperty());
+qtySpinner.getValueFactory().valueProperty()
+          .bindBidirectional(form.qtyProperty().asObject());
+
+totalLabel.textProperty().bind(form.total.asString("합계 %,d 원"));
+
+// 저장 중이거나 입력이 부족하면 버튼 비활성화 — 조건이 늘어도 여기만 고칩니다
+saveButton.disableProperty().bind(form.invalid.or(form.savingProperty()));
+progress.visibleProperty().bind(form.savingProperty());</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 걸리는 것</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:38%">증상</th><th>원인</th></tr>
+          <tr><td><code>bound value cannot be set</code></td><td>bind() 걸린 프로퍼티에 <code>setText</code> 직접 호출</td></tr>
+          <tr><td>백그라운드에서 바꾸니 예외</td><td class="warn">FX 스레드가 아님 — <code>Platform.runLater</code></td></tr>
+          <tr><td>바인딩이 조용히 끊김</td><td><b>중간 바인딩을 지역 변수로만</b> 두면 GC 됩니다</td></tr>
+          <tr><td>창을 닫아도 메모리가 안 줄어듦</td><td>오래 사는 프로퍼티에 리스너를 붙이고 안 뗌</td></tr>
+          <tr><td>값이 두 번 갱신됨</td><td>양방향 바인딩 + 리스너를 함께 걸었을 때</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// ✗ 중간 바인딩을 지역 변수로 두면 GC 되어 조용히 멈춥니다
+{
+    var b = form.qtyProperty().multiply(form.priceProperty());
+    label.textProperty().bind(b.asString());
+}   // b 가 수거되면 갱신이 끊깁니다
+
+// ✓ 필드로 보관하세요
+private final NumberBinding total =
+        form.qtyProperty().multiply(form.priceProperty());
+
+// ✗ 백그라운드 스레드에서 UI 프로퍼티 변경
+new Thread(() -&gt; statusLabel.setText("완료")).start();   // 예외
+
+// ✓ FX 스레드로 넘기거나
+Platform.runLater(() -&gt; statusLabel.setText("완료"));
+
+// ✓✓ Task 를 쓰면 애초에 그럴 일이 없습니다 (x09 참고)
+Task&lt;List&lt;Order&gt;&gt; task = new Task&lt;&gt;() {
+    @Override protected List&lt;Order&gt; call() { return repo.findAll(); }
+};
+task.setOnSucceeded(e -&gt; table.getItems().setAll(task.getValue()));
+progressBar.progressProperty().bind(task.progressProperty());
+
+// 리스너 해제 — 창이 닫힐 때
+ChangeListener&lt;String&gt; l = (o, ov, nv) -&gt; filter(nv);
+model.keywordProperty().addListener(l);
+stage.setOnHidden(e -&gt; model.keywordProperty().removeListener(l));</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>바인딩을 걸었으면 그 프로퍼티는 더 이상 직접 건드리지 마세요.</b>
+        <code>bind()</code> 는 <b>소유권을 넘기는 것</b>에 가깝습니다 —
+        값을 바꾸고 싶으면 <b>원본 프로퍼티를</b> 바꿔야 합니다.
+        양방향이 필요하면 <code>bindBidirectional</code> 을 쓰되,
+        <b>같은 프로퍼티에 리스너까지 붙이면</b> 갱신이 두 번 도는 일이 생깁니다.
       </div>
     </div>
   </div>

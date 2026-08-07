@@ -71,6 +71,121 @@
     새로운 언어를 만나도 "이 언어는 앱을 어떻게 띄우지?"만 찾으면
     나머지(웹서버 설정·systemd·정적 파일 분리)는 <b>거의 동일합니다.</b>
   </div>
+
+  <div class="diag rv d2">
+    <svg viewBox="0 0 680 224" role="img" aria-label="어떤 언어든 배포 구조는 같다. 브라우저 요청이 웹서버에 닿으면 정적 파일은 웹서버가 바로 돌려주고, 나머지만 뒤쪽 앱 프로세스로 프록시된다. 앱 프로세스는 systemd나 컨테이너 같은 관리자가 죽으면 되살린다. 언어마다 다른 것은 앱을 띄우는 명령 하나뿐이다">
+      <text x="16" y="16" class="lbl">언어가 무엇이든 이 구조는 같습니다 — 바뀌는 건 가운데 상자 하나</text>
+      <rect class="bx" x="16" y="30" width="112" height="52"/>
+      <text x="72" y="50" font-size="10" text-anchor="middle">브라우저</text>
+      <text x="72" y="66" font-size="9" text-anchor="middle" class="lbl">요청</text>
+      <path class="fl" d="M130 56 L158 56"/>
+      <rect class="bx" x="160" y="30" width="164" height="52"/>
+      <text x="242" y="48" font-size="10" text-anchor="middle">웹서버</text>
+      <text x="242" y="63" font-size="9" text-anchor="middle" class="lbl">Nginx · Apache · Caddy</text>
+      <text x="242" y="75" font-size="9" text-anchor="middle" class="lbl">TLS · 압축 · 라우팅</text>
+      <path class="ln" d="M326 44 L358 44"/>
+      <rect class="bx bx-ok" x="360" y="26" width="140" height="30"/>
+      <text x="430" y="45" font-size="9" text-anchor="middle" class="lbl">정적 파일 → 여기서 끝</text>
+      <path class="fl" d="M326 70 L358 70"/>
+      <circle class="pk" r="3">
+        <animateMotion dur="2.6s" repeatCount="indefinite" path="M130 56 L158 56 L326 70 L358 70"/></circle>
+      <rect class="bx bx-ok" x="360" y="60" width="140" height="34"/>
+      <text x="430" y="76" font-size="9" text-anchor="middle" class="lbl">나머지 → 앱으로 프록시</text>
+      <text x="430" y="89" font-size="9" text-anchor="middle" class="lbl">127.0.0.1:8080</text>
+      <path class="fl" d="M502 77 L530 77"/>
+      <rect class="bx" x="532" y="52" width="132" height="50"/>
+      <text x="598" y="70" font-size="10" text-anchor="middle">앱 프로세스</text>
+      <text x="598" y="85" font-size="9" text-anchor="middle" class="lbl">언어마다 다른 것은</text>
+      <text x="598" y="97" font-size="9" text-anchor="middle" class="lbl">이 실행 명령뿐</text>
+      <rect class="bx" x="532" y="112" width="132" height="34"/>
+      <text x="598" y="128" font-size="9" text-anchor="middle" class="lbl">systemd · 컨테이너</text>
+      <text x="598" y="140" font-size="9" text-anchor="middle" class="lbl">죽으면 되살림</text>
+      <path class="ln" d="M598 104 L598 110"/>
+      <text x="16" y="170" class="lbl" font-size="10">정적 파일을 앱이 처리하지 않게 하는 것이 첫 번째 최적화입니다 — 웹서버가 수십 배 빠릅니다.</text>
+      <text x="16" y="186" class="lbl" font-size="10">앱은 127.0.0.1 이나 유닉스 소켓에만 바인딩하세요. 0.0.0.0 이면 웹서버를 건너뛰고 직접 접근됩니다.</text>
+      <text x="16" y="202" class="lbl" font-size="10">프로세스 관리자가 없으면 앱이 한 번 죽고 끝납니다 — 재부팅 후 자동 시작도 여기서 결정됩니다.</text>
+      <text x="16" y="218" class="lbl" font-size="10">이 네 조각(웹서버 · 프록시 · 앱 · 프로세스 관리)만 갖추면 언어는 갈아 끼우기만 하면 됩니다.</text>
+    </svg>
+    <div class="cap">"파이썬 배포"·"Node 배포"를 따로 배울 필요가 없는 이유입니다 — <b>다른 것은 실행 명령 한 줄</b>뿐입니다.</div>
+  </div>
+
+  <h3 class="sub">어떤 언어든 쓰는 systemd 템플릿</h3>
+  <pre class="code rv d2" data-lang="ini"><code># /etc/systemd/system/myapp.service
+[Unit]
+Description=My App
+After=network.target
+# 의존 서비스가 있으면
+# Requires=postgresql.service
+
+[Service]
+Type=simple
+User=myapp                          # ★ 전용 계정 — root 로 돌리지 마세요
+Group=myapp
+WorkingDirectory=/opt/myapp
+
+# ── 이 줄만 언어별로 바뀝니다 ─────────────────────
+ExecStart=/usr/bin/java -jar app.jar              # Java
+# ExecStart=/opt/myapp/venv/bin/gunicorn -c gunicorn.conf.py app:app   # Python
+# ExecStart=/usr/bin/node server.js                # Node
+# ExecStart=/opt/myapp/bin/myapp                   # Go · Rust
+# ────────────────────────────────────────────────
+
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/myapp/env     # 비밀은 파일로 (권한 600)
+
+Restart=always                      # 죽으면 되살림
+RestartSec=3
+StartLimitBurst=5                   # 5회 연속 실패하면 포기(무한 재시작 방지)
+StartLimitIntervalSec=60
+
+# 그레이스풀 종료 — 진행 중 요청을 마치게
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# 리소스 한계
+LimitNOFILE=65535
+MemoryMax=2G
+
+# 보안 강화 — 넣어 두면 침해 시 피해가 줄어듭니다
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/myapp/data /var/log/myapp
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+
+  <pre class="code rv d2" data-lang="bash"><code>sudo systemctl daemon-reload
+sudo systemctl enable --now myapp
+sudo systemctl status myapp
+sudo journalctl -u myapp -f           # 로그 실시간
+sudo journalctl -u myapp --since "10 min ago" -p err   # 오류만
+
+# 무중단 재시작이 되는지 (앱이 SIGTERM 을 제대로 처리하는지)
+while true; do curl -s -o /dev/null -w "%{http_code} " localhost:8080/health; sleep 0.2; done &
+sudo systemctl restart myapp
+#  → 200 사이에 000·502 가 섞이면 그레이스풀 종료가 안 되고 있는 것입니다</code></pre>
+
+  <div class="note warn rv d2">
+    <b>앱을 <code>0.0.0.0</code> 에 바인딩하면 웹서버를 우회할 수 있습니다.</b>
+    방화벽으로 막았다고 생각해도, 클라우드 보안 그룹 설정 하나가 어긋나면
+    <b>8080 포트가 인터넷에 그대로 열립니다</b> —
+    TLS 도 없고 웹서버의 접근 제어도 안 거칩니다.
+    <b><code>127.0.0.1:8080</code> 또는 유닉스 소켓</b>에만 바인딩하는 것이 원칙이고,
+    <code>ss -tlnp</code> 로 <b>실제로 그런지 확인</b>하세요.
+  </div>
+
+  <div class="note tip rv d2">
+    <b><code>Restart=always</code> 만 넣어도 운영 안정성이 크게 올라갑니다.</b>
+    다만 <b><code>StartLimitBurst</code> 를 함께</b> 넣으세요 —
+    설정 오류로 즉시 죽는 앱을 무한히 재시작하면
+    <b>로그가 초당 수백 줄씩 쌓여 디스크를 채웁니다</b>.
+    5회 실패 후 멈추게 해 두면, 감시 도구가 "죽어 있음"을 정확히 알려 줍니다.
+  </div>
 </section>
 
 <!-- ==================== l02 ==================== -->
@@ -125,6 +240,67 @@ dependencies {
     <b>새로 만든다면 WAR 가 아니라 jar 를 쓰세요.</b>
     톰캣을 따로 설치·관리할 필요가 없고, 컨테이너 이미지로 만들기도 쉽습니다 → 다음 섹션.
     WAR 를 유지하는 이유는 <b>기존 WAS 인프라·조직 정책</b> 정도입니다.
+  </div>
+
+  <h3 class="sub">WAR vs 실행 가능 jar — 실제 차이</h3>
+  <div class="tw rv d2">
+    <table class="df">
+      <thead><tr><th>항목</th><th>WAR (외부 톰캣)</th><th>실행 jar (내장)</th></tr></thead>
+      <tbody>
+        <tr><td>배포 단위</td><td>WAR 파일 + <b>톰캣 설치</b></td><td class="ok"><b>jar 하나</b></td></tr>
+        <tr><td>버전 관리</td><td>앱과 톰캣을 <b>따로</b></td><td>앱에 포함 — 함께 올라갑니다</td></tr>
+        <tr><td>로컬 실행</td><td>톰캣 설치 필요</td><td class="ok"><code>java -jar</code> 한 줄</td></tr>
+        <tr><td>컨테이너화</td><td>번거로움</td><td class="ok">기본 이미지 + jar 복사</td></tr>
+        <tr><td>한 서버에 여러 앱</td><td class="ok"><b>webapps 에 여러 개</b></td><td>포트를 나눠 여러 프로세스</td></tr>
+        <tr><td>무중단 배포</td><td>톰캣 재시작 필요(또는 병렬 배포)</td><td class="ok">인스턴스 단위 롤링</td></tr>
+        <tr><td>설정 위치</td><td><code>server.xml</code>·<code>context.xml</code></td><td><code>application.yml</code></td></tr>
+        <tr><td>메모리</td><td>여러 앱이 <b>JVM 하나를 공유</b></td><td>앱마다 JVM — 더 씁니다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre class="code rv d2" data-lang="bash"><code># 실행 jar 방식 — 이 정도면 배포 전체입니다
+./gradlew clean bootJar
+scp build/libs/app.jar deploy@server:/opt/myapp/app.jar.new
+
+ssh deploy@server '
+  sudo mv /opt/myapp/app.jar /opt/myapp/app.jar.prev   # 롤백용으로 남기기
+  sudo mv /opt/myapp/app.jar.new /opt/myapp/app.jar
+  sudo systemctl restart myapp
+  sleep 5
+  curl -fsS localhost:8080/actuator/health || {
+      echo "기동 실패 — 되돌립니다"
+      sudo mv /opt/myapp/app.jar.prev /opt/myapp/app.jar
+      sudo systemctl restart myapp
+      exit 1
+  }
+'</code></pre>
+
+  <pre class="code rv d2" data-lang="ini"><code># JVM 옵션 — 컨테이너·systemd 어느 쪽이든 이 정도는 챙기세요
+Environment=JAVA_OPTS=" \
+  -XX:MaxRAMPercentage=75.0 \        # ★ -Xmx 대신 비율로 (컨테이너 메모리 인식)
+  -XX:+UseG1GC \
+  -XX:+HeapDumpOnOutOfMemoryError \  # ★ OOM 시 덤프 — 원인 추적의 유일한 단서
+  -XX:HeapDumpPath=/var/log/myapp/ \
+  -XX:+ExitOnOutOfMemoryError \      # OOM 이면 죽고 재시작 (반쯤 살아있는 상태 방지)
+  -Djava.security.egd=file:/dev/./urandom \
+  -Duser.timezone=Asia/Seoul \
+  -Dfile.encoding=UTF-8"</code></pre>
+
+  <div class="note warn rv d2">
+    <b>컨테이너에서 <code>-Xmx</code> 를 고정값으로 주지 마세요.</b>
+    메모리 한도를 바꿔도 JVM 이 옛 값을 그대로 써서,
+    <b>한도보다 힙이 커지면 컨테이너가 통째로 강제 종료(OOMKilled)</b>됩니다.
+    <code>-XX:MaxRAMPercentage</code> 를 쓰면 JVM 이 <b>cgroup 한도를 읽어</b> 알아서 맞춥니다.
+    "잘 돌다가 갑자기 재시작되는데 로그에 아무것도 없다"면 대부분 이것입니다 —
+    <code>dmesg | grep -i kill</code> 이나 파드 이벤트에서 확인할 수 있습니다.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>WAR 를 유지해야 한다면 병렬 배포(parallel deployment)를 알아 두세요.</b>
+    <code>ROOT##002.war</code> 처럼 <b><code>##버전</code></b> 을 붙여 넣으면
+    톰캣이 <b>기존 세션은 옛 버전에서 마치게 하고 새 요청만 새 버전으로</b> 보냅니다.
+    재시작 없이 전환되므로, 외부 톰캣 환경에서 <b>가장 현실적인 무중단 수단</b>입니다.
   </div>
 </section>
 
@@ -277,6 +453,63 @@ def application(environ, start_response):
     <br>비동기 전용 라이브러리(<code>httpx</code>·<code>asyncpg</code>)를 쓰거나
     <code>run_in_executor</code> 로 분리해야 합니다.
     자세한 내용은 <a href="../python-web/">🐍 파이썬 가이드</a>의 대규모 트래픽 탭에 있습니다.
+  </div>
+
+  <h3 class="sub">워커 수를 정하는 법 — 가장 자주 틀리는 설정</h3>
+  <pre class="code rv d2" data-lang="python"><code># gunicorn.conf.py — WSGI (Django · Flask)
+import multiprocessing
+
+bind = "unix:/run/myapp/gunicorn.sock"   # 유닉스 소켓이 TCP 보다 조금 빠릅니다
+workers = multiprocessing.cpu_count() * 2 + 1     # ★ CPU 바운드 기준 출발점
+worker_class = "gthread"                 # IO 대기가 많으면 스레드를 함께
+threads = 4                              # 워커당 스레드
+
+timeout = 30                             # 이 시간을 넘으면 워커를 죽이고 재시작
+graceful_timeout = 30                    # 종료 신호 후 마무리 시간
+keepalive = 65                           # ★ Nginx 보다 길게 (502 방지)
+
+max_requests = 1000                      # ★ 메모리 누수 대비 — 주기적으로 워커 교체
+max_requests_jitter = 100                #   동시에 교체되지 않게 흔들기
+
+preload_app = True                       # 메모리 절약(fork 전에 로드)
+accesslog = "-"
+errorlog  = "-"</code></pre>
+
+  <pre class="code rv d2" data-lang="bash"><code># ASGI (FastAPI) — uvicorn 워커를 gunicorn 이 관리하는 구성이 안정적입니다
+gunicorn app:app \
+  -k uvicorn.workers.UvicornWorker \
+  -w 4 \
+  -b unix:/run/myapp/uvicorn.sock \
+  --timeout 30 --graceful-timeout 30 --keep-alive 65
+
+# 또는 uvicorn 단독 (컨테이너에서는 이쪽이 단순합니다)
+uvicorn app:app --host 127.0.0.1 --port 8000 --workers 4 --timeout-keep-alive 65</code></pre>
+
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:26%">서비스 성격</th><th>워커 설정</th></tr>
+      <tr><td>CPU 연산 중심</td><td class="ok"><code>workers = 코어 수</code> — 더 늘려도 GIL 때문에 이득이 없습니다</td></tr>
+      <tr><td>DB·API 대기 중심 (WSGI)</td><td><code>workers = 코어×2+1</code> + <code>gthread</code>·<code>threads 4~8</code></td></tr>
+      <tr><td>DB·API 대기 중심 (ASGI)</td><td class="ok"><code>workers = 코어 수</code> — 대기는 이벤트 루프가 흡수합니다</td></tr>
+      <tr><td>메모리를 많이 쓰는 앱</td><td class="warn">워커 수 × 워커당 메모리가 <b>서버 메모리를 넘지 않게</b></td></tr>
+      <tr><td>컨테이너(코어 제한)</td><td><code>cpu_count()</code> 가 <b>호스트 코어를 반환</b>할 수 있습니다 — 값을 직접 지정</td></tr>
+    </table>
+  </div>
+
+  <div class="note warn rv d2">
+    <b>워커를 늘릴수록 좋다는 생각이 가장 흔한 실수입니다.</b>
+    워커 하나가 <b>앱과 라이브러리를 통째로 메모리에 올립니다</b>(Django 는 보통 100~300MB).
+    2GB 서버에 워커 16개를 띄우면 <b>메모리가 터지거나 스왑으로 빠져</b> 오히려 훨씬 느려집니다.
+    그리고 <b>워커 수만큼 DB 커넥션이 늘어나</b> DB 쪽이 먼저 무너지는 경우도 많습니다 —
+    <b>워커 수 × 커넥션 풀 크기</b>가 DB 의 최대 접속 수를 넘지 않는지 반드시 확인하세요.
+  </div>
+
+  <div class="note tip rv d2">
+    <b><code>max_requests</code> 는 파이썬 배포에서 특히 유용합니다.</b>
+    라이브러리의 미묘한 누수로 <b>메모리가 며칠에 걸쳐 서서히 오르는</b> 일이 흔한데,
+    워커를 1000요청마다 교체하면 <b>원인을 못 찾아도 운영은 안정</b>됩니다.
+    근본 해결은 아니지만, <b>새벽에 OOM 으로 깨는 것보다는 훨씬 낫습니다</b>.
+    <code>jitter</code> 를 함께 주어 <b>워커가 동시에 교체되지 않게</b> 하는 것을 잊지 마세요.
   </div>
 </section>
 

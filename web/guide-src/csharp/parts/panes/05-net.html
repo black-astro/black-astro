@@ -109,10 +109,10 @@
       <text x="58" y="122" class="lbl">버리고 최신</text>
       <text x="200" y="36" class="lbl">①</text><text x="260" y="36" class="lbl">②✗</text>
       <text x="320" y="36" class="lbl">③</text><text x="380" y="36" class="lbl">④</text>
-      <text x="470" y="42" class="lbl">② 재전송을 기다리는 동안 ③④ 도 못 씀 (지연 급증)</text>
+      <text x="440" y="42" class="lbl">② 재전송까지 ③④ 도 못 씀 (지연 급증)</text>
       <text x="200" y="104" class="lbl">①</text><text x="260" y="104" class="lbl">②✗</text>
       <text x="320" y="104" class="lbl">③</text><text x="380" y="104" class="lbl">④</text>
-      <text x="470" y="110" class="lbl">② 는 버린다 — ③④ 가 더 최신이므로 문제없다</text>
+      <text x="440" y="110" class="lbl">② 는 버린다 — ③④ 가 더 최신이다</text>
     </svg>
     <div class="cap">위치 정보는 <b>0.05초 전 좌표를 굳이 다시 받을 이유가 없습니다</b>. 그래서 UDP 입니다.</div>
   </div>
@@ -787,6 +787,125 @@ await Parallel.ForEachAsync(Enumerable.Range(0, 5000),
         빈 서버에서 기능을 시험하고, <b>회귀 테스트</b>로도 씁니다.
         일반 API 부하는 <b>k6</b> 로, 게임 프로토콜은 <b>직접 만든 봇</b>이 정답입니다.
       </div>
+    </div>
+  </div>
+
+  <h3 class="sub rv">네 가지 부하 유형 — 목적이 다릅니다</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>유형</th><th>어떻게</th><th>답하는 질문</th><th>언제</th></tr></thead>
+      <tbody>
+        <tr><td><b>부하 테스트</b></td><td>목표 CCU 를 30분 유지</td><td>목표에서 지표가 SLO 안에 드는가</td><td>배포 전 매번</td></tr>
+        <tr><td><b>스트레스 테스트</b></td><td>무너질 때까지 계속 올림</td><td><b>어디가 먼저 터지나 · 한계는 얼마인가</b></td><td>분기 1회 · 구조 변경 시</td></tr>
+        <tr><td><b>스파이크 테스트</b></td><td>0 → 목표를 30초 만에</td><td>점검 종료·이벤트 오픈을 견디나</td><td><b>출시 전 필수</b></td></tr>
+        <tr><td><b>내구 테스트</b></td><td>중간 부하를 6~24시간</td><td>메모리 누수 · 커넥션 누수 · 로그 폭증</td><td>출시 전 1회 이상</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note warn rv">
+    <b>스파이크와 내구 테스트를 건너뛰는 팀이 많습니다.</b>
+    부하 테스트는 <b>서서히 올리기</b> 때문에 커넥션 풀도 캐시도 천천히 데워집니다 —
+    실제 오픈은 그렇지 않습니다. <b>0에서 만 명이 30초 만에</b> 들어옵니다.
+    그리고 30분짜리 테스트로는 <b>6시간 뒤에 드러나는 누수</b>를 절대 못 잡습니다.
+    두 가지는 성격이 완전히 다른 사고를 잡아냅니다.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">봇을 제대로 만들기 — 실제와 같아야 의미가 있습니다</h4>
+      <pre class="code" data-lang="csharp"><code>// 봇은 "실제 사용자 행동"을 흉내 내야 합니다
+// 모두가 같은 방에 들어가 같은 입력을 보내면 캐시가 100% 적중해
+// 실제보다 훨씬 좋은 숫자가 나옵니다 — 가장 흔한 실수입니다
+
+static async Task RunBotAsync(int id, ScenarioConfig cfg, CancellationToken ct)
+{
+    var rnd = new Random(id);                    // ★ 봇마다 다른 시드
+
+    // ① 접속 타이밍을 흩뿌린다 (실제 사용자는 동시에 안 옵니다)
+    await Task.Delay(rnd.Next(0, cfg.RampUpMs), ct);
+
+    using var cli = new GameClient();
+    var sw = Stopwatch.StartNew();
+    await cli.ConnectAsync(cfg.Host, cfg.Port, ct);
+    Metrics.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
+
+    await cli.LoginAsync($"bot{id}", ct);
+
+    while (!ct.IsCancellationRequested)
+    {
+        // ② 행동 분포를 실제 로그에서 뽑아 씁니다
+        var roll = rnd.NextDouble();
+        if (roll &lt; 0.60)      await PlayMatchAsync(cli, rnd, ct);   // 60% 전투
+        else if (roll &lt; 0.80) await BrowseShopAsync(cli, ct);       // 20% 상점
+        else if (roll &lt; 0.92) await CheckMailAsync(cli, ct);        // 12% 우편
+        else                  await ViewRankingAsync(cli, ct);      //  8% 랭킹
+
+        // ③ 생각하는 시간 — 없으면 실제보다 10배 부하가 됩니다
+        await Task.Delay(rnd.Next(2000, 8000), ct);
+    }
+}
+
+static async Task PlayMatchAsync(GameClient cli, Random rnd, CancellationToken ct)
+{
+    await cli.JoinRandomRoomAsync(ct);
+    var end = DateTime.UtcNow.AddMinutes(3);
+    while (DateTime.UtcNow &lt; end &amp;&amp; !ct.IsCancellationRequested)
+    {
+        var t0 = Stopwatch.GetTimestamp();
+        await cli.SendInputAsync(new Input {
+            Dir = rnd.Next(0, 8), Fire = rnd.Next(10) == 0 }, ct);
+        Metrics.InputRtt.Record(Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
+        await Task.Delay(50, ct);                // 20Hz
+    }
+    await cli.LeaveRoomAsync(ct);
+}</code></pre>
+      <div class="note tip">
+        <b>부하 생성기 자체가 병목이 되는 일이 흔합니다.</b>
+        봇 1만 개를 한 PC 에서 돌리면 <b>그 PC 의 CPU·소켓이 먼저 한계</b>에 닿아
+        서버가 아니라 <b>클라이언트를 측정</b>하게 됩니다.
+        봇 프로세스의 CPU 가 <b>70% 를 넘으면 결과를 믿지 마세요</b> —
+        여러 대에 나눠서 돌리고, 봇 쪽 지표도 함께 기록하세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">무엇을 재고 어떻게 읽나</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>지표</th><th>정상</th><th>나쁘면 원인</th></tr></thead>
+          <tbody>
+            <tr><td><b>틱 시간 p99</b></td><td>&lt; 주기의 50%</td><td>룸 로직 · GC · 락 경합</td></tr>
+            <tr><td><b>입력 RTT p99</b></td><td>&lt; 100ms</td><td>틱 지연 · 네트워크 · 큐 적체</td></tr>
+            <tr><td><b>Gen2 GC 횟수</b></td><td>분당 &lt; 1</td><td><b>루프에서 할당</b> — 가장 흔합니다</td></tr>
+            <tr><td><b>GC 일시정지 비율</b></td><td>&lt; 2%</td><td>LOH · 큰 객체 · 서버 GC 미설정</td></tr>
+            <tr><td><b>인당 대역폭</b></td><td>목표 이하</td><td>AOI 미적용 · 패킷 크기</td></tr>
+            <tr><td><b>접속 성공률</b></td><td>100%</td><td>accept 백로그 · 파일 디스크립터 한계</td></tr>
+            <tr><td><b>스레드풀 큐</b></td><td>0~5</td><td>동기 블로킹 → 🔬 고급 탭 06</td></tr>
+            <tr><td><b>메모리 기울기</b></td><td>평평</td><td>세션·룸 객체 누수</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="text"><code>결과를 읽는 법 — 실제 예시
+
+  CCU     틱p99   RTTp99   CPU   Gen2/분   판정
+  1,000    12ms    38ms    18%     0.1     여유
+  3,000    18ms    52ms    41%     0.3     정상
+  5,000    31ms    78ms    63%     0.8     정상
+  7,000    47ms   140ms    78%     2.4     ★ 주의 — 틱이 주기(50ms)에 근접
+  8,000   112ms   380ms    82%     6.1     붕괴 시작
+  9,000   340ms   900ms    85%    11.0     사실상 서비스 불가
+
+  → 안전 운영선은 5,000. 7,000 이 한계.
+    CPU 는 82% 밖에 안 되는데 무너졌다는 것에 주목하세요.
+    범인은 CPU 가 아니라 GC 입니다 (Gen2 가 0.8 → 6.1 로 급증).
+    이 서버는 증설이 아니라 "루프에서 할당 없애기"가 답입니다.</code></pre>
+      <ul class="tx">
+        <li><b>평균은 거짓말을 합니다</b> — 평균 20ms 라도 p99 가 200ms 면 100명 중 1명은 매 순간 렉을 겪습니다. 항상 <b>p95·p99</b> 로 판단하세요</li>
+        <li><b>무너지기 직전 구간</b>이 가장 중요한 정보입니다. "몇 명까지 되나"보다 <b>"어떤 지표가 먼저 나빠졌나"</b>가 개선 방향을 알려 줍니다</li>
+        <li>테스트마다 <b>커밋 해시와 설정</b>을 함께 기록하세요. 나중에 "언제부터 나빠졌나"를 추적할 수 있는 유일한 방법입니다</li>
+        <li><b>CI 에 가벼운 부하 테스트를 넣으세요</b> — 소규모(500 CCU · 3분)라도 <b>성능 회귀를 배포 전에</b> 잡습니다</li>
+        <li>일반 REST API 는 <b>k6·NBomber</b> 로 충분합니다. 게임 프로토콜(UDP·커스텀 바이너리)은 <b>직접 만든 봇</b> 외에 방법이 없습니다</li>
+      </ul>
     </div>
   </div>
 </section>

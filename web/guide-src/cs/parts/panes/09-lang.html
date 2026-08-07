@@ -1,0 +1,1929 @@
+<!-- ============================================================
+     컴파일러 · 언어이론 PANE
+     ============================================================ -->
+<div class="pane" id="pane-lang">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> 내가 쓴 글자가 기계가 도는 일이 되기까지 · 그리고 그 사이의 모든 층</div>
+  <h1>빌드 에러가<br>어디서 났는지<br>알게 됩니다</h1>
+  <p class="tx">
+    컴파일러를 만들 일은 없어도 <b>컴파일러가 무엇을 하는지</b>는 매일 마주칩니다 —
+    빌드 에러 · 링크 에러 · 최적화 옵션 · GC 정지 · JIT 워밍업 · 타입 검사.
+    이 탭은 <b>소스에서 실행까지</b>를 단계별로 따라가고,
+    각 단계가 우리 코드에 어떤 얼굴로 나타나는지까지 이어갑니다.
+  </p>
+  <div class="stats">
+    <div><b>13</b><span>SECTIONS</span></div>
+    <div><b>GC</b><span>· JIT 포함</span></div>
+    <div><b>타입</b><span>이론까지</span></div>
+    <div><b>실습</b><span>미니 언어</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== c01 ==================== -->
+<section class="sec" id="c01">
+  <div class="sec-head rv">
+    <span class="no">LANG 01</span>
+    <h2>소스가 실행되기까지 — <span class="t">전체 그림</span></h2>
+    <p class="lead">
+      <code>gcc main.c</code> 한 줄 안에서 <b>네 개의 프로그램</b>이 차례로 돕니다.
+      어느 단계에서 에러가 났는지 구분하는 것만으로도
+      디버깅 시간이 크게 줄어듭니다.
+    </p>
+  </div>
+
+  <div class="layer rv">
+    <div class="lrow l-web">
+      <span class="tagn">1</span>
+      <div><b>전처리기</b><span><code>#include</code> 붙여넣기 · 매크로 치환 · 조건부 컴파일 → <code>gcc -E</code></span></div>
+    </div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-svc">
+      <span class="tagn">2</span>
+      <div><b>컴파일러</b><span>렉서 → 파서 → 의미 분석 → 최적화 → 어셈블리 생성 → <code>gcc -S</code></span></div>
+    </div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-repo">
+      <span class="tagn">3</span>
+      <div><b>어셈블러</b><span>어셈블리 → 기계어 오브젝트 파일(.o) → <code>gcc -c</code></span></div>
+    </div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-db">
+      <span class="tagn">4</span>
+      <div><b>링커</b><span>여러 .o 와 라이브러리를 합쳐 실행 파일로 → 심볼 해석 · 재배치</span></div>
+    </div>
+    <div class="larrow">▼</div>
+    <div class="lrow l-hw">
+      <span class="tagn">5</span>
+      <div><b>로더</b><span>실행 시 메모리에 올리고 동적 라이브러리를 연결 · ASLR 적용</span></div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러 메시지로 단계 구분하기</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">메시지</th><th>단계</th><th>원인</th></tr>
+        <tr><td><code>No such file: x.h</code></td><td>전처리</td><td>include 경로</td></tr>
+        <tr><td><code>expected ';'</code></td><td>파싱</td><td>문법</td></tr>
+        <tr><td><code>'x' undeclared</code></td><td>의미 분석</td><td>선언 없음</td></tr>
+        <tr><td><code>invalid conversion</code></td><td>타입 검사</td><td>타입 불일치</td></tr>
+        <tr><td><b><code>undefined reference</code></b></td><td><b>링크</b></td><td>정의 없음 · 라이브러리 누락</td></tr>
+        <tr><td><b><code>multiple definition</code></b></td><td><b>링크</b></td><td>헤더에 정의를 넣음</td></tr>
+        <tr><td><code>cannot open shared object</code></td><td>로드</td><td>런타임 라이브러리 경로</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>줄 번호가 있으면 컴파일, 없으면 링크</b>가 대체로 맞습니다.
+        링크 에러는 <b>코드가 아니라 빌드 구성</b>의 문제라
+        고칠 곳이 완전히 다릅니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언어별 실행 방식</h4>
+      <pre class="code" data-lang="text"><code>완전 컴파일 (AOT)
+  C · C++ · Rust · Go
+  소스 → 기계어 실행 파일
+  빠름 · 배포 단순 · 플랫폼별 빌드 필요
+
+바이트코드 + VM
+  자바 · C# · 파이썬
+  소스 → 바이트코드 → VM 이 해석/JIT
+  이식성 좋음 · 워밍업 필요
+
+인터프리터
+  파이썬(CPython) · 루비
+  바이트코드를 반복문으로 실행
+  시작이 빠름 · 실행이 느림
+
+JIT
+  JS(V8) · 자바(HotSpot) · C#(RyuJIT) · PyPy
+  실행 중 뜨거운 코드를 기계어로
+  워밍업 후에는 AOT 에 근접</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">직접 단계별로 보기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="bash"><code># C — 각 단계를 따로 실행
+gcc -E main.c -o main.i        # ① 전처리 결과 (수만 줄이 된다)
+gcc -S main.i -o main.s        # ② 어셈블리
+gcc -c main.s -o main.o        # ③ 오브젝트
+gcc main.o -o app              # ④ 링크
+
+nm main.o                      # 심볼 목록 (U = 미정의, T = 정의됨)
+objdump -d main.o              # 디스어셈블
+ldd app                        # 동적 라이브러리 의존성
+readelf -d app                 # 실행 파일 헤더 정보</code></pre>
+    <pre class="code" data-lang="bash"><code># 파이썬 — 바이트코드
+python -c "import dis; dis.dis('a + b * 2')"
+python -m py_compile main.py   # __pycache__/main.cpython-312.pyc
+
+# 자바
+javac Main.java &amp;&amp; javap -c Main
+
+# TypeScript
+tsc --noEmit                   # 타입 검사만 (의미 분석 단계)
+tsc --emitDeclarationOnly      # 선언만
+
+# Rust
+cargo expand                   # 매크로 전개 결과 (전처리에 해당)
+cargo rustc -- --emit=llvm-ir  # 중간 표현</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>전처리 결과를 한 번 열어 보면 놀랍습니다</b> —
+      <code>#include &lt;stdio.h&gt;</code> 한 줄이 <b>수만 줄</b>로 펼쳐집니다.
+      C++ 빌드가 느린 이유의 큰 부분이 여기 있고,
+      그래서 <b>모듈</b>과 <b>전방 선언</b>이 중요합니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">빌드 시간 줄이기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:30%">기법</th><th>줄이는 단계</th><th>도구</th></tr>
+      <tr><td><b>증분 빌드</b></td><td>바뀐 것만 재컴파일</td><td>make · ninja · cargo</td></tr>
+      <tr><td><b>컴파일 캐시</b></td><td>같은 입력 → 캐시된 출력</td><td>ccache · sccache</td></tr>
+      <tr><td><b>병렬 빌드</b></td><td>여러 파일 동시에</td><td><code>-j$(nproc)</code></td></tr>
+      <tr><td><b>의존성 줄이기</b></td><td>전처리 · 파싱</td><td>전방 선언 · pimpl · 모듈</td></tr>
+      <tr><td><b>미리 컴파일된 헤더</b></td><td>전처리 반복</td><td>PCH</td></tr>
+      <tr><td><b>분산 빌드</b></td><td>전체</td><td>distcc · Bazel RBE</td></tr>
+      <tr><td>링크 최적화 끄기(개발 중)</td><td>링크</td><td>mold · lld 로 교체</td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># 어디에 시간이 가는지 먼저 측정
+# C++ (Clang)
+clang++ -ftime-trace main.cpp    # main.json → chrome://tracing 에서 보기
+
+# Rust
+cargo build --timings            # HTML 리포트
+
+# TypeScript
+tsc --diagnostics --extendedDiagnostics
+
+# 웹팩·비트
+npx webpack --profile --json &gt; stats.json
+
+# ★ 대부분 원인은 셋 중 하나
+#   ① 헤더/타입 의존성이 과도하게 얽힘
+#   ② 템플릿·제네릭 인스턴스화 폭발
+#   ③ 링커가 느림 (mold 로 바꾸면 수 배)</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>빌드 시간은 개발 속도에 직접 영향을 줍니다</b> —
+      10분 빌드는 하루에 시도할 수 있는 실험 횟수를 결정합니다.
+      <b>측정 → 상위 3개 파일 개선</b> 만으로도 대개 절반이 줄어듭니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c02 ==================== -->
+<section class="sec" id="c02">
+  <div class="sec-head rv">
+    <span class="no">LANG 02</span>
+    <h2>어휘 분석 — <span class="t">글자를 낱말로</span> 자르기</h2>
+    <p class="lead">
+      <code>x=1+2</code> 라는 글자 나열을
+      <code>[x][=][1][+][2]</code> 라는 <b>토큰</b>으로 자르는 단계입니다.
+      로그 파서 · 설정 파서 · DSL 을 만들 때 그대로 쓰입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">렉서가 하는 일</h4>
+      <pre class="code" data-lang="text"><code>입력:  let x = 42 + y;  // 주석
+
+토큰:  KEYWORD(let)
+       IDENT(x)
+       OP(=)
+       NUMBER(42)
+       OP(+)
+       IDENT(y)
+       SEMI(;)
+       (주석과 공백은 버린다)
+
+규칙
+ · 최장 일치 (maximal munch)
+   "==" 를 만나면 "=" 두 개가 아니라 "==" 하나로
+ · 키워드는 식별자 규칙에 먼저 걸리므로
+   식별자를 뽑은 뒤 예약어 표에서 확인한다
+ · 위치 정보(줄·열)를 함께 담는다 → 에러 메시지에 필요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 만들기 — 30줄</h4>
+      <pre class="code" data-lang="python"><code>import re
+from dataclasses import dataclass
+
+@dataclass
+class Token:
+    kind: str; value: str; line: int; col: int
+
+SPEC = [
+    ("NUMBER",  r"\d+(\.\d+)?"),
+    ("IDENT",   r"[A-Za-z_]\w*"),
+    ("STRING",  r'"[^"\n]*"'),
+    ("OP",      r"[+\-*/=&lt;&gt;!]=?|&amp;&amp;|\|\|"),
+    ("PUNCT",   r"[(){}\[\],;]"),
+    ("SKIP",    r"[ \t]+"),
+    ("COMMENT", r"//[^\n]*"),
+    ("NEWLINE", r"\n"),
+]
+MASTER = re.compile("|".join(f"(?P&lt;{k}&gt;{v})" for k, v in SPEC))
+KEYWORDS = {"let", "if", "else", "while", "return"}
+
+def tokenize(src):
+    line = col_base = 1
+    for m in MASTER.finditer(src):
+        kind, value = m.lastgroup, m.group()
+        if kind == "NEWLINE":
+            line += 1; col_base = m.end() + 1; continue
+        if kind in ("SKIP", "COMMENT"): continue
+        if kind == "IDENT" and value in KEYWORDS: kind = "KEYWORD"
+        yield Token(kind, value, line, m.start() - col_base + 2)
+
+list(tokenize("let x = 42 + y;"))</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">실무에서 렉서를 쓰는 자리</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:32%">상황</th><th>정규식만으로</th><th>렉서가 필요한 이유</th></tr>
+      <tr><td>로그 한 줄 파싱</td><td><b>충분</b></td><td>—</td></tr>
+      <tr><td>CSV (따옴표 포함)</td><td>부족</td><td>상태가 필요 (인용 안/밖)</td></tr>
+      <tr><td>검색 쿼리 문법</td><td>부족</td><td>중첩 · 우선순위</td></tr>
+      <tr><td>템플릿 엔진</td><td>부족</td><td>모드 전환 (텍스트/표현식)</td></tr>
+      <tr><td>구문 강조</td><td>부분적</td><td>문자열·주석 안의 키워드 구분</td></tr>
+      <tr><td>SQL · 코드 분석</td><td>불가능</td><td>완전한 문법 필요</td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># 상태를 가진 렉서 — 문자열 안의 이스케이프 처리
+def lex_string(src, i):
+    """i 는 여는 따옴표 위치"""
+    out, i = [], i + 1
+    while i &lt; len(src):
+        c = src[i]
+        if c == "\\":
+            nxt = src[i+1]
+            out.append({"n": "\n", "t": "\t", '"': '"', "\\": "\\"}.get(nxt, nxt))
+            i += 2
+        elif c == '"':
+            return "".join(out), i + 1
+        elif c == "\n":
+            raise SyntaxError("문자열이 닫히지 않음")
+        else:
+            out.append(c); i += 1
+    raise SyntaxError("문자열이 닫히지 않음")
+
+# ★ 정규식으로는 이스케이프된 따옴표를 정확히 다루기 어렵다
+#   "he said \"hi\"" 같은 입력에서 무너진다</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>판단 기준</b> — “<b>상태를 기억해야 하는가</b>”입니다.
+      한 줄을 보고 바로 판단할 수 있으면 정규식,
+      <b>지금 문자열 안인지 밖인지</b> 같은 문맥이 필요하면 렉서입니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">에러 메시지의 품질</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="vs">
+      <div class="bad">
+        <h5>✗ 쓸모없는 에러</h5>
+        <pre class="code" data-lang="text"><code>SyntaxError: unexpected token
+
+→ 어디서? 무엇을 기대했는데?</code></pre>
+      </div>
+      <div class="good">
+        <h5>✓ 위치와 기대값을 함께</h5>
+        <pre class="code" data-lang="text"><code>error: ')' 를 기대했는데 '}' 를 만났습니다
+  --&gt; config.dsl:12:24
+   |
+12 |   filter(status = "open"}
+   |         -              ^ 여기
+   |         |
+   |         이 괄호와 짝이 맞아야 합니다</code></pre>
+      </div>
+    </div>
+    <pre class="code" data-lang="python"><code>def error(src, tok, message, hint=None):
+    lines = src.splitlines()
+    line = lines[tok.line - 1]
+    caret = " " * (tok.col - 1) + "^" * max(1, len(tok.value))
+    parts = [
+        f"error: {message}",
+        f"  --&gt; {tok.line}:{tok.col}",
+        f"   |",
+        f"{tok.line:&gt;3} | {line}",
+        f"   | {caret}",
+    ]
+    if hint: parts.append(f"   = 힌트: {hint}")
+    raise SyntaxError("\n".join(parts))
+
+# 좋은 에러 메시지의 세 요소
+#  ① 정확한 위치 (줄 · 열)
+#  ② 무엇을 기대했는지
+#  ③ 어떻게 고치면 되는지 (힌트)</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>Rust · Elm 의 에러 메시지가 칭찬받는 이유</b>가 이 셋을 지키기 때문입니다.
+      사용자가 쓰는 <b>설정 파일 · DSL · API 요청 검증</b>에도
+      같은 원칙을 적용하면 지원 문의가 크게 줄어듭니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c03 ==================== -->
+<section class="sec" id="c03">
+  <div class="sec-head rv">
+    <span class="no">LANG 03</span>
+    <h2>구문 분석 — <span class="t">토큰을 나무로</span></h2>
+    <p class="lead">
+      토큰 나열을 <b>구조가 있는 트리(AST)</b> 로 세웁니다.
+      린터 · 포매터 · 코드 변환 도구 · IDE 가
+      전부 이 트리 위에서 동작합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">AST — 우선순위가 구조가 된다</h4>
+      <pre class="code" data-lang="text"><code>1 + 2 * 3
+
+        (+)
+       /   \
+      1    (*)
+          /   \
+         2     3
+
+★ 트리 모양 자체가 계산 순서다
+  괄호도 필요 없고, 우선순위 규칙도 이미 반영돼 있다
+
+파스 트리 vs AST
+  파스 트리 — 문법 규칙을 그대로 반영 (중간 노드가 많음)
+  AST      — 의미에 필요한 것만 (실무에서 쓰는 것)</code></pre>
+      <pre class="code" data-lang="python"><code>import ast
+tree = ast.parse("x = 1 + 2 * 3")
+print(ast.dump(tree, indent=2))
+# Module(body=[Assign(targets=[Name(id='x')],
+#   value=BinOp(left=Constant(1),
+#               op=Add(),
+#               right=BinOp(Constant(2), Mult(), Constant(3))))])</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파서 종류</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">방식</th><th>특징</th><th>쓰는 곳</th></tr>
+        <tr><td><b>재귀 하강</b></td><td>손으로 작성 · 디버깅 쉬움</td><td><b>GCC · Clang · TS</b></td></tr>
+        <tr><td><b>Pratt</b></td><td>연산자 우선순위를 우아하게</td><td>표현식 파서</td></tr>
+        <tr><td>LL(k)</td><td>위에서 아래로 · 생성기</td><td>ANTLR</td></tr>
+        <tr><td>LR / LALR</td><td>아래에서 위로 · 강력</td><td>yacc · bison</td></tr>
+        <tr><td>PEG</td><td>순서 있는 선택 · 백트래킹</td><td>파이썬 3.9+</td></tr>
+        <tr><td>파서 컴비네이터</td><td>함수를 조합</td><td>함수형 언어</td></tr>
+      </table></div>
+      <pre class="code" data-lang="python"><code># Pratt 파서 — 우선순위를 표로 관리
+PREC = {"||":1, "&amp;&amp;":2, "==":3, "&lt;":4, "+":5, "-":5, "*":6, "/":6}
+
+def parse_expr(toks, min_prec=0):
+    left = parse_atom(toks)
+    while toks.peek() and toks.peek().value in PREC:
+        op = toks.peek().value
+        prec = PREC[op]
+        if prec &lt; min_prec: break
+        toks.next()
+        right = parse_expr(toks, prec + 1)      # 좌결합
+        left = {"op": op, "left": left, "right": right}
+    return left
+
+# 연산자를 추가하려면 PREC 표에 한 줄만 넣으면 된다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">AST 로 코드 다루기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="python"><code># 실무 예: 코드베이스에서 위험한 호출을 전부 찾기
+import ast, pathlib
+
+class DangerFinder(ast.NodeVisitor):
+    DANGEROUS = {"eval", "exec", "pickle.loads", "os.system"}
+
+    def __init__(self, path):
+        self.path, self.hits = path, []
+
+    def visit_Call(self, node):
+        name = ast.unparse(node.func)
+        if name in self.DANGEROUS:
+            self.hits.append((self.path, node.lineno, name))
+        self.generic_visit(node)
+
+for p in pathlib.Path("src").rglob("*.py"):
+    f = DangerFinder(p)
+    f.visit(ast.parse(p.read_text()))
+    for path, line, name in f.hits:
+        print(f"{path}:{line}  {name}")
+
+# ★ 정규식으로 하면 주석·문자열 안의 'eval' 도 걸린다.
+#   AST 는 진짜 호출만 잡는다.</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:26%">도구</th><th>하는 일</th><th>기반</th></tr>
+      <tr><td>ESLint · Ruff</td><td>린팅</td><td>AST 순회</td></tr>
+      <tr><td>Prettier · Black</td><td>포매팅</td><td>AST → 재출력</td></tr>
+      <tr><td>Babel · SWC</td><td>변환 · 트랜스파일</td><td>AST 변형</td></tr>
+      <tr><td>codemod · jscodeshift</td><td>대규모 리팩터링</td><td>AST 변형</td></tr>
+      <tr><td>tree-sitter</td><td>구문 강조 · 증분 파싱</td><td>증분 파서</td></tr>
+      <tr><td>Semgrep · CodeQL</td><td>보안 분석</td><td>AST + 데이터 흐름</td></tr>
+    </table></div>
+    <div class="note tip" style="margin-bottom:0">
+      <b>대규모 리팩터링을 정규식으로 하지 마세요</b> —
+      “함수 인자 순서 바꾸기”, “API 이름 변경”은
+      <b>codemod</b> 로 하면 안전하고 빠릅니다.
+      수백 파일을 한 번에, 오탐 없이 고칠 수 있습니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">에러 복구</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>IDE 파서는 '첫 에러에서 멈추면' 쓸모가 없다
+  → 에러가 있어도 최대한 파싱을 계속해야
+    자동완성 · 구문 강조 · 다른 에러 표시가 동작한다
+
+에러 복구 전략
+ ① 패닉 모드 — 동기화 토큰(;  }  등)까지 건너뛰고 재개
+ ② 구문 삽입 — 빠진 토큰을 있다고 가정하고 계속
+ ③ 오류 노드 — 파싱 실패 구간을 특수 노드로 만들어 트리에 남김
+ ④ 증분 파싱 — 바뀐 부분만 다시 (tree-sitter)
+
+실무에서 이걸 알면
+ · IDE 가 "왜 여기서 자동완성이 안 되지" 를 이해하게 된다
+ · 파일 위쪽에 문법 오류가 있으면 아래 전체가 망가진다</code></pre>
+    <pre class="code" data-lang="python"><code># 패닉 모드 복구의 형태
+SYNC = {";", "}", ")"}
+
+def parse_statement(toks):
+    try:
+        return real_parse_statement(toks)
+    except SyntaxError as e:
+        errors.append(e)
+        while toks.peek() and toks.peek().value not in SYNC:
+            toks.next()                        # 동기화 지점까지 버린다
+        if toks.peek(): toks.next()
+        return ErrorNode(e)                     # 트리에는 남긴다
+
+# 여러 에러를 한 번에 보고할 수 있게 된다
+# → 사용자가 빌드를 여러 번 돌리지 않아도 된다</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>“에러를 하나만 보여 주는 컴파일러”가 답답한 이유</b>가 이것입니다.
+      다만 <b>연쇄 에러</b>(첫 에러 때문에 생긴 가짜 에러)를 걸러 내는 것도
+      중요해서, 좋은 컴파일러는 <b>첫 몇 개만 보여 주고 나머지는 요약</b>합니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c04 ==================== -->
+<section class="sec" id="c04">
+  <div class="sec-head rv">
+    <span class="no">LANG 04</span>
+    <h2>의미 분석 — <span class="t">이름과 타입</span>을 확인하는 단계</h2>
+    <p class="lead">
+      문법이 맞아도 <b>말이 되는지</b>는 다른 문제입니다.
+      “선언되지 않은 변수”, “타입 불일치”가 여기서 잡히고,
+      IDE 의 “정의로 이동”도 이 단계의 결과물입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">심볼 테이블 · 스코프</h4>
+      <pre class="code" data-lang="python"><code>class Scope:
+    def __init__(self, parent=None):
+        self.symbols = {}
+        self.parent = parent
+
+    def declare(self, name, info):
+        if name in self.symbols:
+            raise NameError(f"'{name}' 이 이미 선언됨")
+        self.symbols[name] = info
+
+    def lookup(self, name):
+        s = self
+        while s:                              # ★ 안쪽부터 바깥으로
+            if name in s.symbols: return s.symbols[name]
+            s = s.parent
+        raise NameError(f"'{name}' 을 찾을 수 없음")
+
+# 블록마다 새 스코프
+# 이 '체인' 이 클로저와 변수 섀도잉의 근거다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 구조가 클로저의 정체</b>입니다 —
+        함수가 만들어질 때 <b>자기 바깥 스코프에 대한 참조</b>를 들고 다닙니다.
+        “왜 반복문 안에서 만든 함수들이 같은 값을 보나”가
+        여기서 설명됩니다(<code>var</code> vs <code>let</code>).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호이스팅과 선언 시점</h4>
+      <pre class="code" data-lang="js"><code>// JS — var 는 스코프 시작으로 끌어올려진다
+console.log(x);   // undefined (에러가 아님!)
+var x = 1;
+
+console.log(y);   // ReferenceError (일시적 사각지대)
+let y = 1;
+
+// 함수 선언은 통째로 호이스팅
+foo();            // 동작한다
+function foo() {}
+
+bar();            // TypeError
+var bar = function() {};
+
+// ★ 이 차이는 '의미 분석 단계에서 선언을 언제 등록하는가' 의 결과다</code></pre>
+      <pre class="code" data-lang="python"><code># 파이썬 — 할당이 있으면 그 변수는 지역 변수로 확정된다
+x = 10
+def f():
+    print(x)      # UnboundLocalError!
+    x = 20        # ← 이 줄 때문에 x 가 지역 변수가 된다
+
+def g():
+    global x      # 명시하면 전역
+    x = 20
+
+def outer():
+    y = 1
+    def inner():
+        nonlocal y    # 바깥 함수의 지역 변수
+        y = 2
+    inner(); return y   # 2</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">타입 검사와 좁히기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="typescript"><code>// 타입 좁히기(narrowing) — 의미 분석기가 흐름을 따라간다
+function f(x: string | number | null) {
+  if (x === null) return "없음";
+  // 여기서 x 는 string | number
+  if (typeof x === "string") {
+    return x.toUpperCase();      // x 는 string
+  }
+  return x.toFixed(2);           // x 는 number
+}
+
+// 판별 유니온 — 가장 안전한 패턴
+type Result =
+  | { ok: true;  value: number }
+  | { ok: false; error: string };
+
+function handle(r: Result) {
+  if (r.ok) return r.value;      // value 에 접근 가능
+  return r.error;                // error 에 접근 가능
+}
+
+// 사용자 정의 타입 가드
+function isUser(x: unknown): x is User {
+  return typeof x === "object" &amp;&amp; x !== null &amp;&amp; "id" in x;
+}
+
+// 망라성 검사 — 케이스를 빠뜨리면 컴파일 에러
+function area(s: Shape): number {
+  switch (s.kind) {
+    case "circle": return Math.PI * s.r ** 2;
+    case "rect":   return s.w * s.h;
+    default:
+      const _exhaustive: never = s;   // ★ 새 도형을 추가하면 여기서 잡힌다
+      throw new Error("unreachable");
+  }
+}</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b><code>never</code> 를 이용한 망라성 검사</b>는 실무에서 아주 유용합니다 —
+      새로운 케이스를 추가했을 때 <b>처리를 빠뜨린 곳을 컴파일러가 전부 찾아 줍니다</b>.
+      Rust 의 <code>match</code>, Kotlin 의 <code>when</code> 도 같은 보장을 제공합니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">언어 서버(LSP)</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>Language Server Protocol
+  에디터 ↔ 언어 서버 를 표준 프로토콜로 연결
+
+  이전:  에디터 N개 × 언어 M개 = N×M 개의 플러그인
+  이후:  N + M 개
+
+언어 서버가 제공하는 것 (전부 의미 분석의 결과물)
+  · 자동완성 (스코프에 무엇이 있나)
+  · 정의로 이동 (심볼 테이블 조회)
+  · 참조 찾기 (역방향 인덱스)
+  · 이름 바꾸기 (스코프를 정확히 알아야 안전)
+  · 타입 힌트 · 인레이 힌트
+  · 진단(에러·경고)
+  · 코드 액션 (자동 수정)
+
+★ IDE 가 느린 이유도 여기 있다 — 프로젝트 전체의
+  심볼 테이블과 타입 정보를 유지해야 하므로 메모리와 CPU 를 많이 쓴다</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">IDE 가 느릴 때</th><th>대응</th></tr>
+      <tr><td>프로젝트가 너무 큼</td><td>워크스페이스 분할 · 인덱스 제외 설정</td></tr>
+      <tr><td>타입이 지나치게 복잡</td><td>조건부 타입 · 깊은 제네릭 단순화</td></tr>
+      <tr><td>생성된 코드가 많음</td><td>인덱스에서 제외 (<code>.gitignore</code> 유사 설정)</td></tr>
+      <tr><td><code>node_modules</code> 스캔</td><td>제외 · <code>skipLibCheck</code></td></tr>
+      <tr><td>메모리 부족</td><td>언어 서버 힙 상향</td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>“타입이 너무 복잡해서 IDE 가 멈춘다”</b>는 TypeScript 에서 실제로 흔합니다.
+      <code>tsc --extendedDiagnostics</code> 로 타입 인스턴스화 수를 확인하고,
+      <b>가장 비싼 타입 몇 개</b>를 단순화하면 극적으로 개선됩니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c05 ==================== -->
+<section class="sec" id="c05">
+  <div class="sec-head rv">
+    <span class="no">LANG 05</span>
+    <h2>중간 표현 · 최적화 — <span class="t">-O2 가 하는 일</span></h2>
+    <p class="lead">
+      컴파일러는 소스도 기계어도 아닌 <b>중간 언어</b>로 한번 옮긴 뒤 최적화합니다.
+      그 덕분에 <b>언어 N개 × 아키텍처 M개</b> 를
+      <b>N + M</b> 으로 줄일 수 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">LLVM 구조</h4>
+      <pre class="code" data-lang="text"><code>  C ─┐                        ┌─▶ x86
+ C++ ─┤                        ├─▶ ARM
+Rust ─┼─▶ [ LLVM IR ] ─최적화─▶├─▶ RISC-V
+Swift ─┤                        ├─▶ WASM
+Julia ─┘                        └─▶ GPU
+
+프런트엔드는 IR 만 만들면 되고
+백엔드는 IR 만 읽으면 된다
+
+SSA (Static Single Assignment)
+  각 변수에 딱 한 번만 대입한다
+    x = 1;  x = 2;  y = x;
+    →  x1 = 1;  x2 = 2;  y1 = x2;
+  · "이 값이 어디서 왔나" 가 자명해진다
+  · 데이터 흐름 분석이 훨씬 쉬워진다
+  · 거의 모든 현대 컴파일러가 SSA 를 쓴다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">주요 최적화</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">최적화</th><th>내용</th></tr>
+        <tr><td>상수 폴딩</td><td><code>2*3</code> → <code>6</code></td></tr>
+        <tr><td>상수 전파</td><td>변수를 아는 값으로 치환</td></tr>
+        <tr><td><b>데드 코드 제거</b></td><td>결과를 안 쓰는 계산 삭제</td></tr>
+        <tr><td><b>인라인</b></td><td>함수 호출을 본문으로 치환</td></tr>
+        <tr><td>공통 부분식 제거</td><td>같은 계산을 한 번만</td></tr>
+        <tr><td>루프 불변식 이동</td><td>반복 안 변하는 계산을 밖으로</td></tr>
+        <tr><td>루프 언롤링</td><td>반복 횟수를 줄여 분기 감소</td></tr>
+        <tr><td><b>자동 벡터화</b></td><td>SIMD 명령으로 (🖥️ 컴퓨터구조 10)</td></tr>
+        <tr><td>꼬리 호출 최적화</td><td>재귀를 반복으로</td></tr>
+        <tr><td>강도 감소</td><td><code>x*2</code> → <code>x&lt;&lt;1</code></td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>인라인이 가장 중요합니다</b> — 함수 호출 비용을 없앨 뿐 아니라
+        <b>다른 최적화가 가능해집니다</b>(호출 경계를 넘어 상수 전파 등).
+        그래서 “작은 함수로 나누면 느려진다”는 대개 사실이 아닙니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">최적화가 코드를 바꾸는 것을 보기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="c"><code>// 이 함수가 -O2 에서 어떻게 되나
+int sum(int n) {
+    int s = 0;
+    for (int i = 1; i &lt;= n; i++) s += i;
+    return s;
+}
+
+// GCC -O2 결과 (요약)
+//   반복문이 사라지고 수식 하나가 된다
+//   s = n * (n + 1) / 2
+//   → 컴파일러가 등차수열 합 공식을 찾아냈다 (귀납 변수 분석)
+
+// 확인
+//   godbolt.org 에서 -O0 과 -O2 를 나란히 비교</code></pre>
+    <pre class="code" data-lang="c"><code>// ★ UB 가 있으면 최적화가 코드를 지운다
+int f(int *p) {
+    int x = *p;          // 여기서 역참조했으므로
+    if (p == NULL)       // 컴파일러: "p 는 NULL 일 리 없다"
+        return -1;       // → 이 검사를 통째로 삭제
+    return x;
+}
+// NULL 을 넘기면 크래시하는데, 검사는 사라졌다
+
+// 부호 있는 정수 오버플로도 마찬가지
+int g(int x) {
+    return x + 1 &gt; x;    // 컴파일러: "항상 참" → return 1
+}
+// x = INT_MAX 면 실제로는 거짓인데</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>“최적화를 켜니 버그가 생겼다”는 대부분 원래 있던 UB 입니다</b> —
+      최적화가 <b>UB 가 없다는 가정</b> 위에서 동작하기 때문입니다.
+      <code>-fsanitize=undefined</code> 로 확인하세요 → <b>🔵 C++ 가이드</b>.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">최적화 옵션 고르기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:22%">옵션</th><th>내용</th><th>쓸 때</th></tr>
+      <tr><td><code>-O0</code></td><td>최적화 없음</td><td>디버깅</td></tr>
+      <tr><td><code>-Og</code></td><td>디버깅 친화 최적화</td><td><b>개발 중 기본</b></td></tr>
+      <tr><td><code>-O2</code></td><td>일반적인 최적화</td><td><b>배포 기본</b></td></tr>
+      <tr><td><code>-O3</code></td><td>공격적 (벡터화 · 인라인 확대)</td><td>측정 후 선택</td></tr>
+      <tr><td><code>-Os</code> · <code>-Oz</code></td><td>크기 우선</td><td>임베디드 · WASM</td></tr>
+      <tr><td><code>-flto</code></td><td>링크 시 전체 최적화</td><td>빌드 시간과 교환</td></tr>
+      <tr><td><code>-march=native</code></td><td>이 CPU 전용 명령 사용</td><td><b>배포 환경이 같을 때만</b></td></tr>
+      <tr><td><code>-ffast-math</code></td><td>부동소수점 규칙 완화</td><td><b>정확도 손실 주의</b></td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># PGO — 실제 실행 데이터를 보고 최적화
+gcc -O2 -fprofile-generate -o app main.c
+./app &lt; typical_workload            # 대표적인 부하로 실행
+gcc -O2 -fprofile-use -o app main.c
+# 분기 예측 · 인라인 · 코드 배치가 실제 사용 패턴에 맞춰진다
+# 보통 5~20% 개선
+
+# 다른 언어에서도
+#  · Rust: cargo-pgo
+#  · Go:   PGO 지원 (1.21+)
+#  · .NET: 동적 PGO (기본 활성)
+#  · JVM:  JIT 이 런타임에 항상 하는 일</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b><code>-O3</code> 가 항상 빠르지 않습니다</b> —
+      코드 크기가 커져 <b>명령 캐시 미스</b>가 늘면 오히려 느려집니다.
+      <b>-O2 와 -O3 를 측정해서 고르세요</b>.
+      <code>-ffast-math</code> 는 NaN·무한대 처리를 바꾸므로
+      수치 코드에서는 위험합니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c06 ==================== -->
+<section class="sec" id="c06">
+  <div class="sec-head rv">
+    <span class="no">LANG 06</span>
+    <h2>코드 생성 · 레지스터 할당 — <span class="t">컴파일러의 마지막 큰 결정</span></h2>
+    <p class="lead">
+      IR 을 실제 기계어로 옮기는 단계입니다.
+      핵심은 <b>“어떤 값을 레지스터에 둘 것인가”</b> —
+      레지스터는 수십 개뿐인데 변수는 훨씬 많습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그래프 색칠 문제</h4>
+      <pre class="code" data-lang="text"><code>레지스터 할당 = 그래프 색칠 (🧮 계산이론 11 — NP-완전)
+
+ · 정점 = 변수
+ · 간선 = "동시에 살아 있다" (간섭)
+ · 색   = 레지스터
+ · 같은 색을 인접 정점에 못 준다
+
+레지스터가 부족하면 → 스필(spill)
+ · 일부 변수를 스택(메모리)에 저장
+ · 필요할 때 다시 로드
+ · ★ 느려진다
+
+그래서 실무에서
+ · 함수가 너무 크면 스필이 늘어난다
+ · 반복문 안에서 변수를 많이 쓰면 마찬가지
+ · 인라인을 과하게 하면 레지스터 압박이 커진다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드 생성이 만드는 차이</h4>
+      <pre class="code" data-lang="c"><code>// 같은 의미, 다른 코드
+// ① 조건 분기
+int max_a(int a, int b) {
+    if (a &gt; b) return a;
+    return b;
+}
+// → cmp + jump (분기 예측 실패 가능)
+
+// ② 조건부 이동
+int max_b(int a, int b) {
+    return a &gt; b ? a : b;
+}
+// → cmp + cmov (분기 없음)
+
+// ★ 현대 컴파일러는 대개 알아서 cmov 를 쓴다.
+//   무엇을 쓸지는 '예측 가능성' 에 달렸다 —
+//   예측이 잘 되는 분기는 분기가 더 빠르다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>확인하는 법</b> — godbolt.org 에서 두 버전을 나란히 놓고
+        어셈블리를 비교하세요. <b>추측하지 말고 보는 것</b>이
+        이 층에서는 특히 중요합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">호출 규약(ABI)</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>ABI 가 정하는 것
+ · 인자를 어느 레지스터·스택에 두는가
+ · 반환값은 어디에
+ · 어느 레지스터를 호출자가 보존하고 어느 것을 피호출자가
+ · 스택 정렬 · 구조체 배치 · 이름 맹글링
+
+System V AMD64 (리눅스 · macOS)
+  정수 인자: rdi, rsi, rdx, rcx, r8, r9
+  부동소수점: xmm0~7
+  반환:      rax (rdx 와 함께 128비트)
+  피호출자 보존: rbx, rbp, r12-r15
+
+Windows x64
+  정수 인자: rcx, rdx, r8, r9   ← 다르다!
+  섀도 스페이스 32바이트 필요
+
+★ 그래서 FFI 에서 ABI 를 맞추는 것이 중요하다
+  틀리면 컴파일은 되는데 실행 시 쓰레기 값이 들어온다</code></pre>
+    <pre class="code" data-lang="c"><code>// C ABI 는 언어 간 공용어다
+// C++ 는 이름 맹글링을 하므로 extern "C" 로 꺼야 한다
+#ifdef __cplusplus
+extern "C" {
+#endif
+    int add(int a, int b);
+#ifdef __cplusplus
+}
+#endif
+
+// 구조체를 넘길 때는 레이아웃이 같아야 한다
+// C:      struct P { int x; double y; };   // 패딩 주의
+// Python: class P(ctypes.Structure):
+//             _fields_ = [("x", c_int), ("y", c_double)]
+// Rust:   #[repr(C)] struct P { x: c_int, y: c_double }</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>C ABI 가 사실상 유일한 표준</b>인 이유는
+      <b>안정적이고 단순하기</b> 때문입니다. C++ 는 이름 맹글링과
+      템플릿 때문에 컴파일러 간 호환이 깨집니다 →
+      <b>🔵 C++</b> · <b>🦀 Rust 가이드</b>의 C ABI 탭.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">생성된 코드 읽기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:34%">확인하고 싶은 것</th><th>보는 법</th></tr>
+      <tr><td>이 함수가 인라인 됐나</td><td>어셈블리에 <code>call</code> 이 없는지</td></tr>
+      <tr><td>벡터화 됐나</td><td><code>xmm</code>/<code>ymm</code> 레지스터 · <code>padd</code> 계열</td></tr>
+      <tr><td>스필이 나나</td><td>반복문 안 <code>mov [rsp+..]</code> 가 많은지</td></tr>
+      <tr><td>분기가 남아 있나</td><td><code>cmov</code> vs <code>j*</code></td></tr>
+      <tr><td>내 검사가 지워졌나</td><td>UB 로 삭제됐는지 (05절)</td></tr>
+      <tr><td>바운드 체크가 남았나</td><td>Rust · Go 에서 <code>panic</code> 호출 경로</td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># 컴파일러가 왜 최적화를 못 했는지 물어보기
+gcc -O2 -fopt-info-vec-missed -c main.c
+clang -O2 -Rpass-missed=loop-vectorize -c main.c
+# "loop not vectorized: value that could not be identified as reduction"
+# → 어떤 의존성 때문인지 알려 준다
+
+# Rust — 바운드 체크 제거 확인
+cargo asm --rust my_crate::my_function
+# 또는 iterator 를 쓰면 대개 자동으로 제거된다
+#   for i in 0..v.len() { v[i] }   ← 체크 남을 수 있음
+#   for x in &amp;v { x }              ← 체크 없음
+
+# Go
+go build -gcflags="-m" ./...      # 인라인·이스케이프 분석 결과</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>Go 의 <code>-gcflags="-m"</code> 이 특히 유용합니다</b> —
+      “이 변수가 힙으로 이스케이프했다”를 알려 주므로
+      <b>불필요한 할당</b>을 찾아 GC 압력을 줄일 수 있습니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c07 ==================== -->
+<section class="sec" id="c07">
+  <div class="sec-head rv">
+    <span class="no">LANG 07</span>
+    <h2>링커와 로더 — <span class="t">undefined reference</span>의 정체</h2>
+    <p class="lead">
+      여러 조각을 하나로 붙이는 단계입니다.
+      <b>C/C++ 개발자가 가장 자주 막히는 곳</b>이고,
+      동적 라이브러리 문제는 다른 언어에서도 그대로 만납니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">링커가 하는 일</h4>
+      <pre class="code" data-lang="text"><code>① 심볼 해석
+   각 .o 파일의 "정의되지 않은 심볼(U)" 을
+   다른 .o 나 라이브러리의 "정의(T)" 와 연결
+
+② 재배치
+   심볼의 최종 주소가 정해지면 참조하는 곳을 전부 수정
+
+③ 섹션 병합
+   .text(코드) · .data · .bss · .rodata 를 모아서 배치
+
+확인
+  nm main.o | grep " U "     # 필요로 하는 심볼
+  nm libfoo.a | grep " T "   # 제공하는 심볼
+  nm -C ...                  # C++ 이름 디맹글링</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대표 에러와 원인</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">에러</th><th>원인</th></tr>
+        <tr><td><code>undefined reference to 'foo'</code></td><td>정의가 없음 · .cpp 를 빌드에 안 넣음 · <b>-l 누락</b></td></tr>
+        <tr><td>같은 에러인데 C++ 에서만</td><td><code>extern "C"</code> 누락 (맹글링 불일치)</td></tr>
+        <tr><td><code>multiple definition</code></td><td>헤더에 정의를 넣음 → <code>inline</code> · <code>static</code></td></tr>
+        <tr><td><code>cannot find -lfoo</code></td><td>라이브러리 경로 → <code>-L</code></td></tr>
+        <tr><td><code>error while loading shared libraries</code></td><td>런타임 경로 → <code>LD_LIBRARY_PATH</code> · rpath</td></tr>
+        <tr><td><code>version GLIBC_2.34 not found</code></td><td>빌드 환경이 실행 환경보다 최신</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>링크 순서가 중요합니다</b> — 전통적인 유닉스 링커는
+        <b>왼쪽에서 오른쪽으로</b> 처리하므로
+        <code>gcc -lfoo main.o</code> 는 실패하고
+        <code>gcc main.o -lfoo</code> 는 성공합니다.
+        <b>라이브러리는 그것을 쓰는 것 뒤에</b> 놓으세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">정적 링크 vs 동적 링크</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:24%"></th><th>정적 (.a · .lib)</th><th>동적 (.so · .dll · .dylib)</th></tr>
+      <tr><td>실행 파일 크기</td><td>큼</td><td>작음</td></tr>
+      <tr><td>배포</td><td><b>단순 — 파일 하나</b></td><td>의존성을 함께 배포</td></tr>
+      <tr><td>메모리</td><td>프로세스마다 사본</td><td><b>여러 프로세스가 공유</b></td></tr>
+      <tr><td>보안 패치</td><td><b>재빌드 필요</b></td><td>라이브러리만 교체</td></tr>
+      <tr><td>시작 시간</td><td>빠름</td><td>심볼 해석 시간</td></tr>
+      <tr><td>버전 충돌</td><td>없음</td><td><b>있음 (의존성 지옥)</b></td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># 무엇에 의존하는지
+ldd app                        # 리눅스
+otool -L app                   # macOS
+dumpbin /dependents app.exe    # 윈도우
+
+# 런타임 검색 경로
+readelf -d app | grep -E "RPATH|RUNPATH|NEEDED"
+export LD_LIBRARY_PATH=/opt/mylib:$LD_LIBRARY_PATH    # 임시
+# 배포에는 rpath 를 쓰는 편이 낫다
+gcc main.c -L/opt/mylib -lfoo -Wl,-rpath,'$ORIGIN/../lib'
+
+# 정적으로 링크 (배포 단순화)
+gcc -static main.c -o app                # 전부 정적
+gcc main.c -Wl,-Bstatic -lfoo -Wl,-Bdynamic -lm   # 선택적</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>컨테이너 시대에는 정적 링크가 다시 인기</b>입니다 —
+      Go 와 Rust 가 기본적으로 정적에 가깝게 빌드하고,
+      <code>scratch</code> · <code>distroless</code> 이미지를 쓸 수 있습니다.
+      이미지가 작아지고 <b>공급망 공격 표면</b>도 줄어듭니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">다른 언어에서의 같은 문제</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:24%">언어</th><th>“링크 에러”에 해당하는 것</th></tr>
+      <tr><td><b>파이썬</b></td><td><code>ImportError</code> · C 확장의 <code>.so</code> 로드 실패 · glibc 버전</td></tr>
+      <tr><td><b>자바</b></td><td><code>NoClassDefFoundError</code> · 클래스패스 · 버전 충돌</td></tr>
+      <tr><td><b>Node</b></td><td><code>MODULE_NOT_FOUND</code> · 네이티브 모듈 ABI 불일치</td></tr>
+      <tr><td><b>.NET</b></td><td>어셈블리 바인딩 · 버전 리다이렉트</td></tr>
+      <tr><td><b>Go</b></td><td>cgo 사용 시 C 라이브러리 의존</td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># 파이썬 — C 확장이 안 불러와질 때
+python -c "import numpy"        # ImportError 의 실제 원인 확인
+ldd $(python -c "import numpy, os; print(os.path.dirname(numpy.__file__))")/core/_multiarray_umath*.so
+
+# manylinux 휠이 중요한 이유
+#  · 오래된 glibc 로 빌드해야 최신·구형 리눅스 모두에서 동작
+#  · auditwheel 이 필요한 .so 를 휠 안에 번들링
+
+# 자바 — 어떤 jar 에서 클래스가 왔는지
+java -verbose:class -jar app.jar | grep MyClass
+jdeps --print-module-deps app.jar
+
+# Node — 네이티브 모듈 ABI
+node -p "process.versions.modules"    # Node 버전마다 다르다
+npm rebuild                            # 현재 Node 로 재빌드</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>“내 컴퓨터에서는 되는데”의 절반이 링크 문제입니다</b> —
+      로컬에는 있는 라이브러리가 서버에 없거나,
+      버전이 다르거나, 경로가 다릅니다.
+      <b>컨테이너로 빌드 환경을 고정</b>하는 것이 가장 확실한 해결책입니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c08 ==================== -->
+<section class="sec" id="c08">
+  <div class="sec-head rv">
+    <span class="no">LANG 08</span>
+    <h2>인터프리터 · 바이트코드 VM — <span class="t">파이썬과 자바가 도는 법</span></h2>
+    <p class="lead">
+      기계어 대신 <b>가상 기계용 코드</b>로 번역하고,
+      그것을 도는 반복문이 인터프리터입니다.
+      <b>왜 느린지</b>와 <b>어디를 최적화할 수 있는지</b>가 여기서 나옵니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스택 머신 — 파이썬 · JVM</h4>
+      <pre class="code" data-lang="python"><code>import dis
+dis.dis("x = a + b * 2")
+
+#   LOAD_NAME    a        스택: [a]
+#   LOAD_NAME    b        스택: [a, b]
+#   LOAD_CONST   2        스택: [a, b, 2]
+#   BINARY_OP    *        스택: [a, b*2]
+#   BINARY_OP    +        스택: [a + b*2]
+#   STORE_NAME   x        스택: []
+
+# 스택 머신의 특징
+#  · 명령이 짧다 (피연산자를 명시 안 함) → 바이트코드가 작다
+#  · 구현이 단순하다
+#  · 명령 수가 많다 → 디스패치 비용
+
+# 레지스터 머신 (Lua · Dalvik · V8 Ignition)
+#   ADD r3, r1, r2        한 명령에 다 담는다
+#  · 명령 수가 적다 · 최적화하기 좋다
+#  · 명령이 길고 구현이 복잡</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인터프리터가 느린 이유</h4>
+      <pre class="code" data-lang="c"><code>// 인터프리터 루프의 뼈대
+while (1) {
+    opcode = *pc++;              // ① 명령 읽기
+    switch (opcode) {            // ② 디스패치 (분기 예측 실패 잦음)
+        case LOAD_NAME:  ...     // ③ 실행
+        case BINARY_OP:  ...
+    }
+}
+
+// 오버헤드
+//  · 명령마다 디스패치 (기계어는 CPU 가 직접)
+//  · 값이 전부 객체 (타입 확인 · 참조 카운트)
+//  · 스택 조작이 메모리 접근
+
+// 개선 기법
+//  · 계산된 goto (switch 대신 점프 테이블) — CPython 이 사용
+//  · 슈퍼명령 (자주 나오는 조합을 하나로)
+//  · 인라인 캐싱 (타입 확인 결과를 기억) — CPython 3.11+
+//  · JIT (09절)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>CPython 3.11 이 크게 빨라진 이유</b>가 위 기법들입니다 —
+        적응형 인라인 캐싱(“specializing adaptive interpreter”)으로
+        <b>같은 타입이 반복되면 전용 명령으로 교체</b>합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">바이트코드를 직접 보기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="python"><code># 성능 차이의 원인을 바이트코드로 확인
+import dis
+
+def f1(items):
+    out = []
+    for x in items:
+        out.append(x * 2)
+    return out
+
+def f2(items):
+    return [x * 2 for x in items]
+
+dis.dis(f1)   # LOAD_METHOD append / CALL_METHOD 가 매 반복마다
+dis.dis(f2)   # LIST_APPEND — 메서드 조회 없이 바로
+
+# ★ 리스트 컴프리헨션이 빠른 이유가 여기 있다
+#   메서드 조회(LOAD_METHOD)와 호출 오버헤드가 없다
+
+# 전역 vs 지역 변수
+def g1():
+    for i in range(1000): len(i)     # LOAD_GLOBAL len — 매번 딕셔너리 조회
+
+def g2():
+    _len = len                        # 지역으로 캐시
+    for i in range(1000): _len(i)     # LOAD_FAST — 배열 인덱스
+# 3.11+ 에서는 LOAD_GLOBAL 도 캐시되어 차이가 줄었다</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">파이썬 성능 요령</th><th>이유</th></tr>
+      <tr><td>반복문을 내장 함수로</td><td><code>sum</code>·<code>map</code> 은 C 루프</td></tr>
+      <tr><td>numpy 로 벡터화</td><td>인터프리터 루프 자체를 제거</td></tr>
+      <tr><td>지역 변수 사용</td><td>LOAD_FAST 가 가장 빠름</td></tr>
+      <tr><td>속성 접근 캐시</td><td><code>obj.method</code> 를 변수에</td></tr>
+      <tr><td><code>__slots__</code></td><td>딕셔너리 대신 배열</td></tr>
+      <tr><td>C 확장 · Cython · numba</td><td>인터프리터 밖으로</td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>가장 큰 개선은 “인터프리터 루프를 안 도는 것”</b>입니다 —
+      100만 번 도는 반복문을 numpy 연산 한 줄로 바꾸면
+      <b>100배</b> 차이가 납니다. 미세 최적화보다 이쪽이 먼저입니다 →
+      <b>🐍 Python 가이드</b>.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">바이트코드 배포와 보안</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:34%">사실</th><th>실무적 의미</th></tr>
+      <tr><td><code>.pyc</code> · <code>.class</code> 는 쉽게 복원된다</td><td><b>소스 보호 수단이 아님</b> — 난독화도 한계</td></tr>
+      <tr><td>바이트코드는 버전에 묶인다</td><td>파이썬 3.11 pyc 는 3.12 에서 안 돌아감</td></tr>
+      <tr><td>클래스 로딩이 지연된다</td><td>첫 호출이 느림 (JVM 워밍업)</td></tr>
+      <tr><td>바이트코드 조작이 가능하다</td><td>APM · 모킹 · AOP 가 이걸 씀</td></tr>
+      <tr><td>역직렬화가 코드를 실행할 수 있다</td><td><b><code>pickle</code> · 자바 직렬화는 위험</b></td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># ★ pickle 은 신뢰되지 않은 데이터에 절대 쓰지 말 것
+import pickle
+# pickle.loads(untrusted)   ← 임의 코드 실행 가능
+
+# 안전한 대안
+import json                  # 데이터만
+import msgpack               # 바이너리 · 데이터만
+# 스키마가 있는 것: protobuf · Avro · Cap'n Proto
+
+# 자바도 같은 문제 (역직렬화 취약점)
+#  · ObjectInputStream 에 외부 데이터를 넣지 말 것
+#  · 필요하면 필터 사용: ObjectInputFilter</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>역직렬화 취약점은 가장 심각한 원격 코드 실행 경로</b> 중 하나입니다 —
+      Log4Shell · 다수의 자바 RCE 가 이 계열입니다.
+      <b>“객체를 그대로 복원한다”는 기능 자체가 위험</b>하다는 것을 기억하세요 →
+      <b>🔐 보안 · 암호 09</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c09 ==================== -->
+<section class="sec" id="c09">
+  <div class="sec-head rv">
+    <span class="no">LANG 09</span>
+    <h2>JIT 컴파일 — <span class="t">실행 중에 다시 컴파일</span></h2>
+    <p class="lead">
+      자주 도는 부분만 골라 기계어로 바꿉니다.
+      실행 중이라 <b>실제 타입과 분기 통계</b>를 알 수 있어
+      정적 컴파일러보다 유리한 경우도 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동작 흐름</h4>
+      <pre class="code" data-lang="text"><code>① 처음에는 인터프리터로 실행 (시작이 빠름)
+② 호출 횟수·반복 횟수를 센다
+③ 임계값을 넘으면 "뜨겁다(hot)" 고 판단
+④ 그 메서드를 기계어로 컴파일
+⑤ 실행 중 수집한 정보로 공격적으로 최적화
+   · 이 호출은 항상 같은 타입 → 타입 검사 생략 + 인라인
+   · 이 분기는 항상 참 → 반대쪽 제거
+⑥ 가정이 깨지면 역최적화(deoptimization) → 인터프리터로 복귀
+
+★ ⑤ 가 정적 컴파일러가 못 하는 일이다
+  실제 실행 데이터를 알고 있기 때문</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JIT 계층</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">런타임</th><th>계층</th></tr>
+        <tr><td><b>V8</b></td><td>Ignition(인터프리터) → Sparkplug → Maglev → TurboFan</td></tr>
+        <tr><td><b>HotSpot</b></td><td>인터프리터 → C1(빠른 컴파일) → C2(공격적)</td></tr>
+        <tr><td><b>.NET</b></td><td>Tier0 → Tier1 (+ 동적 PGO)</td></tr>
+        <tr><td>PyPy</td><td>인터프리터 → 트레이싱 JIT</td></tr>
+        <tr><td>LuaJIT</td><td>인터프리터 → 트레이싱 JIT</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>메서드 JIT vs 트레이싱 JIT
+  메서드 — 뜨거운 '함수' 단위로 컴파일 (V8 · JVM)
+  트레이싱 — 뜨거운 '실행 경로' 단위로 (PyPy · LuaJIT)
+             반복문 한 바퀴의 실제 경로를 기록해 컴파일
+             분기가 예상과 다르면 가드에서 탈출</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">JIT 를 방해하지 않는 코드</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:34%">JIT 에 나쁜 것</th><th>이유</th></tr>
+      <tr><td><b>같은 자리에서 타입이 바뀜</b></td><td>다형성 → 인라인 캐시 실패</td></tr>
+      <tr><td>객체 모양이 제각각</td><td>히든 클래스 폭발 (V8)</td></tr>
+      <tr><td>메가모픽 호출 (4종류 이상)</td><td>인라인 캐시 포기</td></tr>
+      <tr><td>거대한 함수</td><td>인라인 안 됨 · 컴파일 지연</td></tr>
+      <tr><td><code>try/catch</code> 를 뜨거운 루프에</td><td>일부 런타임에서 최적화 저해</td></tr>
+      <tr><td><code>arguments</code> · <code>eval</code> · <code>with</code></td><td>최적화 자체를 막음 (JS)</td></tr>
+      <tr><td>배열에 구멍</td><td>희소 배열 → 느린 경로</td></tr>
+    </table></div>
+    <pre class="code" data-lang="js"><code>// ✗ 객체 모양이 달라지면 히든 클래스가 갈라진다
+function make(a, b) {
+  const o = {};
+  o.a = a;
+  if (b !== undefined) o.b = b;    // 모양이 두 가지
+  return o;
+}
+
+// ✓ 항상 같은 모양으로
+function make(a, b) {
+  return { a, b: b ?? null };      // 한 가지 모양
+}
+
+// ✗ 같은 자리에서 여러 타입 (메가모픽)
+function get(o) { return o.value; }   // Foo, Bar, Baz, Qux ... 로 호출
+
+// ✓ 타입별로 나누거나 단일 인터페이스로
+
+// ★ 확인
+// node --trace-deopt --trace-opt app.js
+// node --allow-natives-syntax -e "%GetOptimizationStatus(f)"</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>일상적으로 신경 쓸 필요는 없습니다</b> —
+      <b>측정해서 병목으로 확인된 뜨거운 코드</b>에서만 의미가 있습니다.
+      다만 “객체 모양을 일정하게 유지”는 코드 품질 측면에서도 좋습니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">워밍업과 벤치마크</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>JIT 환경에서의 벤치마크 함정
+
+ ① 워밍업 없이 측정 → 인터프리터 속도를 잼
+ ② 결과를 안 쓰면 → 데드 코드로 삭제됨
+ ③ 상수를 넣으면 → 상수 폴딩으로 계산 자체가 사라짐
+ ④ 반복 횟수가 적으면 → JIT 이 발동 안 함
+ ⑤ 같은 프로세스에서 여러 벤치마크 → 서로 오염 (프로파일 공유)
+
+★ 마이크로 벤치마크는 전용 도구를 쓸 것
+   자바: JMH · JS: benchmark.js/tinybench
+   .NET: BenchmarkDotNet · Go: testing.B
+   파이썬: pyperf · timeit (JIT 없지만 GC·캐시 영향)</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">운영에서의 워밍업 이슈</th><th>대응</th></tr>
+      <tr><td>배포 직후 p99 가 튐</td><td>워밍업 요청 · 카나리로 서서히</td></tr>
+      <tr><td>오토스케일 신규 인스턴스가 느림</td><td>준비 상태 확인 후 트래픽 투입</td></tr>
+      <tr><td>서버리스 콜드 스타트</td><td>AOT · SnapStart · 프로비저닝된 동시성</td></tr>
+      <tr><td>배치 작업이 매번 느림</td><td>프로세스를 오래 유지</td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># 자바 — AOT 로 워밍업 없애기
+native-image -jar app.jar          # GraalVM
+# 시작 수십 ms · 메모리 절감 · 다만 최대 처리량은 JIT 이 유리
+
+# AWS Lambda SnapStart — 초기화 후 스냅숏을 떠서 복원
+# .NET ReadyToRun — 사전 컴파일된 코드를 포함
+
+# 쿠버네티스 — 워밍업 후에 트래픽을 받게
+# readinessProbe 를 /ready 로 두고
+# 그 핸들러에서 주요 경로를 몇 번 실행한 뒤 200 을 반환</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>AOT 와 JIT 은 트레이드오프</b>입니다 —
+      AOT 는 <b>시작이 빠르고 메모리가 적지만</b> 최대 처리량이 낮고,
+      JIT 은 반대입니다. <b>짧게 사는 프로세스(서버리스 · CLI)는 AOT</b>,
+      <b>오래 사는 서버는 JIT</b> 이 유리합니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c10 ==================== -->
+<section class="sec" id="c10">
+  <div class="sec-head rv">
+    <span class="no">LANG 10</span>
+    <h2>가비지 컬렉션 — <span class="t">멈춤 시간이 어디서 오나</span></h2>
+    <p class="lead">
+      “아무도 안 가리키는 메모리”를 찾아 회수합니다.
+      방식에 따라 <b>멈추는 시간과 처리량</b>이 달라지고,
+      그것이 p99 지연에 직접 나타납니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 방식들</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:28%">방식</th><th>원리</th><th>약점</th></tr>
+        <tr><td><b>참조 카운팅</b></td><td>참조 수를 세다가 0 이면 해제</td><td><b>순환 참조</b> · 갱신 비용</td></tr>
+        <tr><td><b>마크 앤 스윕</b></td><td>루트에서 도달 가능한 것을 표시 후 나머지 해제</td><td>단편화 · 정지</td></tr>
+        <tr><td><b>마크 앤 컴팩트</b></td><td>표시 후 살아 있는 것을 모음</td><td>이동 비용</td></tr>
+        <tr><td><b>복사</b></td><td>살아 있는 것만 반대편으로 복사</td><td>메모리 2배</td></tr>
+        <tr><td><b>세대별</b></td><td>새 객체를 자주, 오래된 것은 가끔</td><td>세대 간 참조 관리</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>세대별 가설</b> — “<b>대부분의 객체는 금방 죽는다</b>”.
+        실측으로 확인된 경향이고, 그래서 <b>젊은 세대만 자주 수집</b>하면
+        적은 비용으로 대부분의 쓰레기를 치울 수 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언어별 GC</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">언어</th><th>방식</th></tr>
+        <tr><td><b>파이썬</b></td><td>참조 카운팅 + 순환 탐지 (세대별)</td></tr>
+        <tr><td><b>자바</b></td><td>G1 (기본) · ZGC · Shenandoah (저지연)</td></tr>
+        <tr><td><b>Go</b></td><td>동시 마크 앤 스윕 · 매우 짧은 STW</td></tr>
+        <tr><td><b>JS (V8)</b></td><td>세대별 · Scavenger + Mark-Compact</td></tr>
+        <tr><td><b>C#</b></td><td>세대별 · 서버/워크스테이션 모드</td></tr>
+        <tr><td><b>Rust · C++</b></td><td><b>GC 없음</b> — 소유권 · RAII</td></tr>
+        <tr><td>Swift</td><td>ARC (컴파일 시 삽입된 참조 카운팅)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="python"><code># 파이썬의 순환 참조
+import gc
+
+class Node: pass
+a, b = Node(), Node()
+a.ref = b; b.ref = a       # 순환 — 참조 카운트가 0 이 안 된다
+del a, b
+gc.collect()               # 순환 수집기가 처리
+
+# __del__ 이 있으면 파이썬 3.4 이전에는 수집 불가였다
+# 지금은 되지만 여전히 순환 + __del__ 은 피하는 것이 좋다
+
+gc.get_stats()             # 세대별 수집 통계
+gc.freeze()                # fork 전에 호출하면 CoW 페이지 복사 감소</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">GC 지연 줄이기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:32%">기법</th><th>효과</th><th>주의</th></tr>
+      <tr><td><b>할당 자체를 줄인다</b></td><td>가장 근본적</td><td>가독성과 균형</td></tr>
+      <tr><td><b>객체 재사용 · 풀</b></td><td>젊은 세대 압력 감소</td><td>누수 · 상태 오염 위험</td></tr>
+      <tr><td><b>값 타입 · 원시 배열</b></td><td>객체 수 감소</td><td>언어 지원 필요</td></tr>
+      <tr><td><b>저지연 GC 선택</b></td><td>STW 를 ms 단위로</td><td>처리량 약간 감소</td></tr>
+      <tr><td><b>힙 크기 조정</b></td><td>수집 빈도 조절</td><td>너무 크면 한 번이 길어짐</td></tr>
+      <tr><td>오프힙 저장</td><td>GC 대상에서 제외</td><td>직접 관리 필요</td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># 자바 — GC 로그를 켜는 것이 첫 단계
+java -Xlog:gc*:file=gc.log:time,uptime -jar app.jar
+# 분석: GCViewer · gceasy.io
+
+# 저지연이 필요하면
+java -XX:+UseZGC -Xmx8g -jar app.jar          # STW &lt; 1ms 목표
+java -XX:+UseShenandoahGC ...
+
+# 처리량이 중요하면
+java -XX:+UseParallelGC ...
+
+# 컨테이너에서 (⚙️ OS 06 참고)
+java -XX:MaxRAMPercentage=70 ...
+
+# Go
+GOGC=200 ./app          # 힙이 2배가 되면 수집 (기본 100)
+GOMEMLIMIT=6GiB ./app   # 소프트 메모리 상한 (1.19+) ★ 권장
+GODEBUG=gctrace=1 ./app # GC 로그</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>Go 의 <code>GOMEMLIMIT</code> 이 컨테이너에서 특히 유용합니다</b> —
+      메모리 상한에 가까워지면 GC 를 더 자주 돌려
+      <b>OOMKilled 를 예방</b>합니다. 컨테이너 limit 의 80% 정도로 잡습니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">GC 로 인한 장애 패턴</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:30%">증상</th><th>원인</th><th>확인</th></tr>
+      <tr><td>주기적으로 수백 ms 멈춤</td><td>Full GC · STW</td><td>GC 로그의 pause 시간</td></tr>
+      <tr><td>CPU 는 높은데 처리량 낮음</td><td>GC 가 CPU 를 먹음</td><td>GC 시간 비율 (&gt;5% 면 문제)</td></tr>
+      <tr><td>메모리가 계속 증가</td><td>누수 (도달 가능한 쓰레기)</td><td>힙 덤프 · 지배자 트리</td></tr>
+      <tr><td>OOM 직전 GC 가 계속 돎</td><td>회수할 것이 없음</td><td><b>죽기 전 힙 덤프 필수</b></td></tr>
+      <tr><td>지연이 톱니 모양</td><td>정상적인 GC 주기</td><td>—</td></tr>
+      <tr><td>부하가 적을 때만 느림</td><td>JIT 역최적화 · 캐시 냉각</td><td>워밍업</td></tr>
+    </table></div>
+    <pre class="code" data-lang="bash"><code># 자바 — 죽기 전에 힙 덤프를 남기도록 설정 (필수)
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=/dumps/heap.hprof
+-XX:+ExitOnOutOfMemoryError
+
+# 실행 중 덤프
+jcmd PID GC.heap_dump /tmp/heap.hprof
+jmap -dump:live,format=b,file=/tmp/heap.hprof PID
+
+# 분석 — Eclipse MAT 의 "Leak Suspects" 리포트가 가장 빠르다
+# 지배자 트리(Dominator Tree)에서 큰 것부터 본다
+
+# 흔한 누수 원인
+#  · static 컬렉션에 계속 추가
+#  · ThreadLocal 을 remove 안 함 (스레드 풀에서 치명적)
+#  · 리스너·콜백 등록 후 해제 안 함
+#  · 캐시에 만료 정책 없음
+#  · ClassLoader 누수 (핫 리로드 환경)</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>메모리 누수는 “GC 가 못 치우는 것”이 아니라
+      “도달 가능해서 안 치우는 것”</b>입니다 —
+      즉 <b>코드 어딘가가 계속 참조를 들고 있습니다</b>.
+      힙 덤프에서 <b>“누가 이것을 붙잡고 있나”</b>(GC 루트까지의 경로)를
+      보는 것이 해결의 핵심입니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c11 ==================== -->
+<section class="sec" id="c11">
+  <div class="sec-head rv">
+    <span class="no">LANG 11</span>
+    <h2>타입 시스템 — <span class="t">실행 전에 잡아 주는 증명</span></h2>
+    <p class="lead">
+      타입은 <b>“이 값에 대해 할 수 있는 일”</b>을 미리 제한해
+      틀린 조합을 컴파일 시점에 막습니다.
+      어디까지 막아 줄 수 있고 어디부터는 못 하는지를 봅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">축들</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">구분</th><th>뜻</th><th>예</th></tr>
+        <tr><td><b>정적 / 동적</b></td><td>검사 시점</td><td>자바 / 파이썬</td></tr>
+        <tr><td><b>강함 / 약함</b></td><td>암묵 변환 정도</td><td>파이썬 / JS · C</td></tr>
+        <tr><td><b>명시 / 추론</b></td><td>타입을 적는가</td><td>자바 / Haskell · Rust</td></tr>
+        <tr><td>구조적 / 명목적</td><td>모양으로? 이름으로?</td><td>TypeScript / 자바</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>흔한 오해
+ · "동적 = 약한 타입" (아니다)
+   파이썬은 동적이지만 강하다: "1" + 1 → 에러
+   JS 는 동적이고 약하다:     "1" + 1 → "11"
+
+ · "정적 타입 = 안전" (부분적)
+   자바도 NullPointerException 이 난다
+   → 널 안전성은 별개의 축</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">타입이 잡아 주는 것 / 못 잡는 것</h4>
+      <div class="vs">
+        <div class="good">
+          <h5>✓ 잡아 준다</h5>
+          <pre class="code" data-lang="text"><code>· 타입 불일치
+· 오타 (필드명 · 메서드명)
+· 인자 개수 · 순서
+· 널 가능성 (널 안전 언어)
+· 케이스 누락 (망라성)
+· 리팩터링 시 놓친 곳</code></pre>
+        </div>
+        <div class="bad">
+          <h5>✗ 못 잡는다</h5>
+          <pre class="code" data-lang="text"><code>· 로직 오류 (a+b 를 a-b 로)
+· 단위 혼동 (미터 vs 피트)*
+· 배열 범위 초과*
+· 경쟁 상태*
+· 성능 문제
+· 요구사항 오해
+
+* 고급 타입으로 일부 가능</code></pre>
+        </div>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>단위 혼동은 타입으로 막을 수 있습니다</b> —
+        <code>type Meters = number &amp; {__brand: "m"}</code> 같은
+        <b>브랜드 타입</b>이나 Rust 의 newtype 을 쓰면
+        미터와 피트를 섞는 것이 컴파일 에러가 됩니다.
+        화성 탐사선을 잃은 실제 사고의 원인이기도 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">타입 추론 — 힌들리-밀너</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>타입을 안 적었는데 컴파일러가 알아내는 방법
+
+  let f = fun x -&gt; x + 1
+
+ ① 미지수를 둔다: x : α, f : α → β
+ ② 제약을 모은다: + 는 int → int → int 이므로 α = int, β = int
+ ③ 단일화(unification)로 제약을 푼다
+ ④ 결과: f : int → int
+
+일반화(generalization)
+  let id = fun x -&gt; x
+  제약이 없으므로 α 가 자유롭다 → id : ∀α. α → α (제네릭!)
+
+한계
+ · 부분 타입(subtyping)이 있으면 어려워진다 (OOP 언어)
+ · 그래서 자바·C# 은 지역 변수만 추론(var)
+ · TypeScript 는 구조적 타입 + 추론을 섞어 복잡하지만 강력하다</code></pre>
+    <pre class="code" data-lang="typescript"><code>// 타입 레벨 프로그래밍 — 타입 자체가 계산이 된다
+type Path&lt;T&gt; = T extends object
+  ? { [K in keyof T &amp; string]:
+        T[K] extends object ? `${K}` | `${K}.${Path&lt;T[K]&gt;}` : `${K}` }[keyof T &amp; string]
+  : never;
+
+type Config = { db: { host: string; port: number }; debug: boolean };
+type Keys = Path&lt;Config&gt;;
+// "db" | "db.host" | "db.port" | "debug"
+
+function get&lt;T, P extends Path&lt;T&gt;&gt;(obj: T, path: P): unknown { ... }
+get(config, "db.host");     // ✓
+get(config, "db.hostt");    // ✗ 컴파일 에러
+
+// ★ 강력하지만 과하면 IDE 가 느려지고 에러 메시지가 읽기 어려워진다</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>타입 레벨 프로그래밍은 적당히</b> —
+      팀원이 에러 메시지를 이해하지 못하면 <b>순이득이 마이너스</b>입니다.
+      “<b>런타임 버그를 실제로 막았는가</b>”를 기준으로 판단하세요.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">점진적 타입 도입</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:30%">단계</th><th>내용</th></tr>
+      <tr><td>① 경계부터</td><td><b>API 요청·응답 · DB 모델 · 설정</b> — 외부와 만나는 곳</td></tr>
+      <tr><td>② 런타임 검증과 함께</td><td>zod · pydantic — 타입과 검증을 한 소스에서</td></tr>
+      <tr><td>③ 새 코드부터 엄격하게</td><td><code>strict</code> 를 새 파일에만</td></tr>
+      <tr><td>④ 자주 고치는 파일부터</td><td>변경이 잦은 곳이 이득이 큼</td></tr>
+      <tr><td>⑤ <code>any</code> 를 점진적으로 제거</td><td>린트 규칙으로 증가를 막음</td></tr>
+    </table></div>
+    <pre class="code" data-lang="python"><code># 파이썬 — 런타임 검증과 타입을 한 번에
+from pydantic import BaseModel, Field
+
+class CreateOrder(BaseModel):
+    user_id: int
+    items: list[int] = Field(min_length=1, max_length=100)
+    coupon: str | None = None
+
+# ★ 타입 힌트가 곧 검증 규칙이 된다
+#   외부 입력을 이걸로 받으면 타입과 검증이 어긋날 수 없다
+
+# 정적 검사
+# mypy --strict src/
+# pyright src/</code></pre>
+    <pre class="code" data-lang="typescript"><code>// TS — zod 로 런타임 검증 + 타입 추론
+import { z } from "zod";
+
+const CreateOrder = z.object({
+  userId: z.number().int().positive(),
+  items: z.array(z.number()).min(1).max(100),
+  coupon: z.string().optional(),
+});
+type CreateOrder = z.infer&lt;typeof CreateOrder&gt;;   // 타입이 자동 생성
+
+const parsed = CreateOrder.parse(req.body);        // 실패 시 예외
+// ★ 여기를 통과하면 이후 코드에서 타입이 보장된다</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>핵심은 “타입과 검증의 단일 출처”</b>입니다 —
+      둘을 따로 관리하면 반드시 어긋납니다.
+      스키마 하나에서 <b>타입 · 검증 · 문서(OpenAPI)</b> 를
+      모두 생성하는 것이 현재의 모범 사례입니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c12 ==================== -->
+<section class="sec" id="c12">
+  <div class="sec-head rv">
+    <span class="no">LANG 12</span>
+    <h2>패러다임 · 람다 계산법 — <span class="t">“함수형이 좋다”의 실제 내용</span></h2>
+    <p class="lead">
+      패러다임은 종교가 아니라 <b>도구 상자</b>입니다.
+      각각이 무엇을 쉽게 만들고 무엇을 어렵게 만드는지,
+      그리고 실무에서 어떻게 섞어 쓰는지를 봅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">패러다임 비교</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">패러다임</th><th>중심</th><th>강점</th></tr>
+        <tr><td>절차형</td><td>순서</td><td>단순 · 직관적</td></tr>
+        <tr><td>객체지향</td><td>상태 + 행위</td><td><b>도메인 모델링 · 다형성</b></td></tr>
+        <tr><td>함수형</td><td>변환</td><td><b>동시성 · 테스트 · 추론</b></td></tr>
+        <tr><td>선언형</td><td>결과 명세</td><td>최적화 여지 (SQL · React)</td></tr>
+        <tr><td>데이터 지향</td><td>데이터 배치</td><td>성능 (🖥️ 컴퓨터구조 08)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="python"><code># 같은 문제, 다른 패러다임
+# 절차형
+total = 0
+for o in orders:
+    if o.status == "paid":
+        total += o.amount
+
+# 함수형
+total = sum(o.amount for o in orders if o.status == "paid")
+
+# 선언형 (SQL)
+# SELECT SUM(amount) FROM orders WHERE status = 'paid'
+
+# ★ 아래로 갈수록 '어떻게' 가 사라지고 '무엇' 만 남는다
+#   → 최적화 여지가 커진다 (병렬화 · 인덱스 활용)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">함수형의 실제 이득</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">개념</th><th>실무 이득</th></tr>
+        <tr><td><b>순수 함수</b></td><td>테스트가 쉬움 · 캐시 가능 · 병렬 안전</td></tr>
+        <tr><td><b>불변성</b></td><td>경쟁 상태 없음 · 스냅숏 · 시간 여행 디버깅</td></tr>
+        <tr><td><b>고차 함수</b></td><td>중복 제거 · 조합</td></tr>
+        <tr><td><b>대수적 자료형</b></td><td>불가능한 상태를 표현 불가능하게</td></tr>
+        <tr><td>지연 평가</td><td>무한 스트림 · 필요한 것만 계산</td></tr>
+        <tr><td>커링 · 부분 적용</td><td>설정 주입 · 재사용</td></tr>
+      </table></div>
+      <pre class="code" data-lang="python"><code># 순수 함수는 테스트가 다르다
+# ✗ 부수효과가 있는 함수
+def process(order):
+    order.status = "done"          # 상태 변경
+    db.save(order)                 # 외부 의존
+    send_email(order.user)         # 외부 의존
+    return order
+
+# ✓ 계산과 효과를 분리
+def compute_next(order) -&gt; Order:  # 순수 — 테스트에 모킹 불필요
+    return replace(order, status="done")
+
+def apply(order):                  # 효과는 얇게
+    new = compute_next(order)
+    db.save(new); send_email(new.user)
+    return new</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">람다 계산법 — 계산의 다른 정의</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>람다 계산법은 함수 세 가지만으로 모든 계산을 표현한다
+
+  변수      x
+  추상화    λx. M        (함수 정의)
+  적용      M N          (함수 호출)
+
+★ 튜링 기계와 계산 능력이 정확히 같다 (처치-튜링)
+
+숫자도 함수로 표현할 수 있다 (처치 수)
+  0 = λf.λx. x
+  1 = λf.λx. f x
+  2 = λf.λx. f (f x)
+  succ = λn.λf.λx. f (n f x)
+
+불린도, 조건문도, 재귀(Y 콤비네이터)도 전부 함수로
+
+실무적 의미
+ · 클로저 = λ 추상화 + 환경 캡처
+ · 커링 = 다인자 함수를 단인자 함수의 연쇄로
+ · 함수형 언어의 이론적 뿌리</code></pre>
+    <pre class="code" data-lang="python"><code># 클로저 — 환경을 캡처한다
+def make_counter():
+    count = 0
+    def inc():
+        nonlocal count
+        count += 1
+        return count
+    return inc
+
+c = make_counter()
+c(); c()        # 1, 2   ← count 가 살아 있다
+
+# ★ 반복문 안의 클로저 함정 (모든 언어에 있다)
+fns = [lambda: i for i in range(3)]
+[f() for f in fns]        # [2, 2, 2]  ← i 를 공유
+
+fns = [lambda i=i: i for i in range(3)]   # 기본값으로 캡처
+[f() for f in fns]        # [0, 1, 2]
+
+# JS 에서는 let 이 블록 스코프라 자연히 해결된다
+# for (let i = 0; i &lt; 3; i++) fns.push(() =&gt; i);   // 0,1,2</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>“값을 캡처하나 변수를 캡처하나”</b>가 이 함정의 핵심입니다 —
+      대부분의 언어가 <b>변수</b>를 캡처합니다.
+      루프 변수를 캡처할 때는 <b>매 반복마다 새 바인딩</b>을 만들어야 합니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">섞어 쓰기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>실무의 현실적인 구성
+
+  경계(I/O · DB · 네트워크)   — 명령형 · 효과가 있는 얇은 층
+  도메인 로직                 — ★ 순수 함수 · 불변 데이터
+  데이터 모델                 — 대수적 자료형 · 값 객체
+  구성 · 조립                 — 객체지향 (의존성 주입)
+  질의                        — 선언형 (SQL · 쿼리 빌더)
+  성능 임계 구간              — 데이터 지향 (배열 · SoA)
+
+"함수형 코어, 명령형 셸"
+  · 결정 로직은 전부 순수 함수로 (테스트 쉬움)
+  · 효과는 가장자리에서 한 번에 (모킹 최소)</code></pre>
+    <div class="tw"><table class="cheat" style="margin:16px 0 0">
+      <tr><th style="width:34%">함수형을 과하게 쓰면</th><th>문제</th></tr>
+      <tr><td>모든 것을 불변으로</td><td>대량 데이터에서 복사 비용</td></tr>
+      <tr><td>깊은 함수 합성</td><td>스택 트레이스가 읽기 어려움</td></tr>
+      <tr><td>모나드 남용</td><td>팀이 이해 못 하면 부채</td></tr>
+      <tr><td>과도한 커링</td><td>디버깅 어려움</td></tr>
+      <tr><td>재귀 고집</td><td>스택 오버플로 (파이썬 · 자바)</td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>판단 기준은 “팀이 6개월 뒤에 읽을 수 있는가”</b>입니다.
+      기법 자체의 우아함보다 <b>변경 비용</b>이 중요합니다 →
+      <b>🏛️ 소프트웨어 공학 01</b>.
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== c13 ==================== -->
+<section class="sec" id="c13">
+  <div class="sec-head rv">
+    <span class="no">LANG 13</span>
+    <h2>미니 언어 만들기 — <span class="t">200줄로 인터프리터</span></h2>
+    <p class="lead">
+      앞의 모든 단계를 한 번에 엮어 봅니다.
+      <b>렉서 → 파서 → 평가기</b>를 직접 만들면
+      컴파일러가 갑자기 익숙해집니다. 실무에서 <b>DSL</b> 을 만들 때 그대로 씁니다.
+    </p>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">전체 코드 — 변수 · 조건 · 반복이 있는 언어</h4>
+    <pre class="code" data-lang="python"><code>import re
+from dataclasses import dataclass
+
+# ───────── 1. 렉서 ─────────
+TOKEN = re.compile(r"""
+    (?P&lt;NUM&gt;\d+(?:\.\d+)?)
+  | (?P&lt;ID&gt;[A-Za-z_]\w*)
+  | (?P&lt;OP&gt;&lt;=|&gt;=|==|!=|[-+*/&lt;&gt;=])
+  | (?P&lt;PUNCT&gt;[(){};,])
+  | (?P&lt;WS&gt;\s+)
+  | (?P&lt;COMMENT&gt;\#[^\n]*)
+""", re.VERBOSE)
+KEYWORDS = {"let", "if", "else", "while", "print"}
+
+def tokenize(src):
+    pos, out = 0, []
+    while pos &lt; len(src):
+        m = TOKEN.match(src, pos)
+        if not m: raise SyntaxError(f"알 수 없는 문자: {src[pos]!r} (위치 {pos})")
+        pos = m.end()
+        kind, val = m.lastgroup, m.group()
+        if kind in ("WS", "COMMENT"): continue
+        if kind == "ID" and val in KEYWORDS: kind = "KW"
+        out.append((kind, val))
+    out.append(("EOF", ""))
+    return out
+
+# ───────── 2. 파서 (재귀 하강) ─────────
+class Parser:
+    def __init__(self, toks): self.t, self.i = toks, 0
+    def peek(self):  return self.t[self.i]
+    def next(self):  self.i += 1; return self.t[self.i - 1]
+    def accept(self, val):
+        if self.peek()[1] == val: return self.next()
+        return None
+    def expect(self, val):
+        if not self.accept(val):
+            raise SyntaxError(f"'{val}' 를 기대했는데 {self.peek()[1]!r}")
+
+    def program(self):
+        stmts = []
+        while self.peek()[0] != "EOF": stmts.append(self.statement())
+        return ("block", stmts)
+
+    def statement(self):
+        if self.accept("let"):
+            name = self.next()[1]; self.expect("="); e = self.expr(); self.expect(";")
+            return ("let", name, e)
+        if self.accept("print"):
+            e = self.expr(); self.expect(";"); return ("print", e)
+        if self.accept("if"):
+            self.expect("("); c = self.expr(); self.expect(")")
+            then = self.block()
+            els = self.block() if self.accept("else") else None
+            return ("if", c, then, els)
+        if self.accept("while"):
+            self.expect("("); c = self.expr(); self.expect(")")
+            return ("while", c, self.block())
+        name = self.next()[1]; self.expect("="); e = self.expr(); self.expect(";")
+        return ("assign", name, e)
+
+    def block(self):
+        self.expect("{"); stmts = []
+        while not self.accept("}"): stmts.append(self.statement())
+        return ("block", stmts)
+
+    # 우선순위: 비교 &lt; 덧셈 &lt; 곱셈 &lt; 단항
+    def expr(self):   return self.binary(self.add,  ("&lt;", "&gt;", "&lt;=", "&gt;=", "==", "!="))
+    def add(self):    return self.binary(self.mul,  ("+", "-"))
+    def mul(self):    return self.binary(self.unary, ("*", "/"))
+    def binary(self, sub, ops):
+        left = sub()
+        while self.peek()[1] in ops:
+            op = self.next()[1]
+            left = ("bin", op, left, sub())
+        return left
+    def unary(self):
+        if self.accept("-"): return ("neg", self.unary())
+        return self.atom()
+    def atom(self):
+        kind, val = self.next()
+        if kind == "NUM": return ("num", float(val))
+        if kind == "ID":  return ("var", val)
+        if val == "(":
+            e = self.expr(); self.expect(")"); return e
+        raise SyntaxError(f"예상치 못한 토큰: {val!r}")
+
+# ───────── 3. 평가기 ─────────
+import operator
+BINOPS = {"+": operator.add, "-": operator.sub, "*": operator.mul,
+          "/": operator.truediv, "&lt;": operator.lt, "&gt;": operator.gt,
+          "&lt;=": operator.le, "&gt;=": operator.ge,
+          "==": operator.eq, "!=": operator.ne}
+
+def evaluate(node, env, out):
+    kind = node[0]
+    if kind == "block":
+        for s in node[1]: evaluate(s, env, out)
+    elif kind == "let" or kind == "assign":
+        env[node[1]] = evaluate(node[2], env, out)
+    elif kind == "print":
+        out.append(evaluate(node[1], env, out))
+    elif kind == "if":
+        if evaluate(node[1], env, out): evaluate(node[2], env, out)
+        elif node[3]: evaluate(node[3], env, out)
+    elif kind == "while":
+        guard = 0
+        while evaluate(node[1], env, out):
+            evaluate(node[2], env, out)
+            guard += 1
+            if guard &gt; 1_000_000: raise RuntimeError("반복 한도 초과")  # 🧮 계산이론 06
+    elif kind == "bin":
+        return BINOPS[node[1]](evaluate(node[2], env, out), evaluate(node[3], env, out))
+    elif kind == "neg":  return -evaluate(node[1], env, out)
+    elif kind == "num":  return node[1]
+    elif kind == "var":
+        if node[1] not in env: raise NameError(f"정의되지 않은 변수: {node[1]}")
+        return env[node[1]]
+
+def run(src):
+    out = []
+    evaluate(Parser(tokenize(src)).program(), {}, out)
+    return out
+
+# ───────── 실행 ─────────
+print(run("""
+    let n = 10;
+    let a = 0;
+    let b = 1;
+    while (n &gt; 0) {
+        let t = a + b;
+        a = b;
+        b = t;
+        n = n - 1;
+    }
+    print a;          # 피보나치 10번째
+"""))
+# [55.0]</code></pre>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">여기서 더 나아가려면</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:30%">다음 단계</th><th>배우게 되는 것</th></tr>
+      <tr><td>함수 · 클로저 추가</td><td>스코프 체인 · 환경 모델 (04절)</td></tr>
+      <tr><td>타입 검사기 추가</td><td>단일화 · 추론 (11절)</td></tr>
+      <tr><td>바이트코드로 컴파일</td><td>VM · 스택 머신 (08절)</td></tr>
+      <tr><td>최적화 패스 추가</td><td>상수 폴딩 · 데드 코드 (05절)</td></tr>
+      <tr><td>REPL · 에러 복구</td><td>사용성 (03절)</td></tr>
+      <tr><td>가비지 컬렉터</td><td>메모리 관리 (10절)</td></tr>
+    </table></div>
+    <pre class="code" data-lang="text"><code>더 볼 만한 자료
+  · Crafting Interpreters (craftinginterpreters.com) — 무료 · 두 가지 구현
+  · Writing an Interpreter in Go
+  · Nand2Tetris — 논리 게이트부터 OS 까지
+
+★ 하나를 끝까지 만들어 보는 것이 열 권을 읽는 것보다 낫다</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>실무에서 이 코드를 그대로 쓰는 자리</b> —
+      검색 쿼리 문법 · 알림 조건식 · 리포트 수식 · 게임 스크립트 ·
+      워크플로 표현식. 위 200줄에 <b>함수 호출과 값 타입</b>만 더하면
+      실용적인 DSL 이 됩니다 → <b>🧮 계산이론 05</b>의 “최소 권한의 언어”.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">언어를 고르는 기준 · 이어지는 곳</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:30%">기준</th><th>질문</th></tr>
+      <tr><td><b>생태계</b></td><td>필요한 라이브러리가 성숙한가 — <b>가장 큰 요인</b></td></tr>
+      <tr><td><b>팀 역량</b></td><td>지금 사람들이 잘 쓰는가 · 채용이 되는가</td></tr>
+      <tr><td><b>실행 특성</b></td><td>지연 · 처리량 · 메모리 · 시작 시간</td></tr>
+      <tr><td><b>안전성</b></td><td>타입 · 메모리 · 동시성 보장 수준</td></tr>
+      <tr><td><b>운영</b></td><td>배포 · 관측 · 디버깅 도구</td></tr>
+      <tr><td>장기 유지</td><td>버전 정책 · 하위 호환</td></tr>
+    </table></div>
+    <div class="tw"><table class="cheat" style="margin:14px 0 0">
+      <tr><th style="width:36%">여기서 배운 것</th><th>다음</th></tr>
+      <tr><td>02~04 렉서 · 파서 · 의미 분석</td><td><b>🧮 계산이론 02~05</b></td></tr>
+      <tr><td>05·06 최적화 · 코드 생성</td><td><b>🖥️ 컴퓨터구조 06~08</b></td></tr>
+      <tr><td>07 링커 · 로더</td><td><b>⚙️ 운영체제 05</b> · <b>🔵 C++ 가이드</b></td></tr>
+      <tr><td>10 GC</td><td><b>⚙️ 운영체제 06</b> · <b>☕ Java 가이드</b></td></tr>
+      <tr><td>11 타입 시스템</td><td><b>🟨 JS · TS 가이드</b> TypeScript 탭</td></tr>
+      <tr><td>12 패러다임</td><td><b>🏛️ 소프트웨어 공학</b> 전체</td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>다음 탭 추천</b> — <kbd>0</kbd> <b>🔐 보안 · 암호</b>로 가면
+      여기서 본 <b>역직렬화 · 메모리 · 컴파일러 가정</b>이
+      어떻게 취약점이 되는지 이어집니다.
+    </div>
+  </div>
+</section>
+
+</div>

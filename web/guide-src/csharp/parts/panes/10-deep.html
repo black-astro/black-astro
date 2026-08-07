@@ -151,6 +151,165 @@ struct Good { long B; byte A; byte C; }   // 16바이트</code></pre>
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 232" role="img" aria-label="스택에는 지역 변수가 놓이고, 참조 타입의 변수는 힙에 있는 객체의 주소만 담는다. 구조체는 자기가 놓인 자리에 있어서 지역 변수면 스택, 객체의 필드나 배열 원소면 힙에 있다. 힙은 세대별로 나뉘고 큰 객체는 별도 영역으로 간다">
+      <text x="16" y="16" class="lbl">값 타입은 "스택"이 아니라 "자기가 놓인 곳"에 있습니다</text>
+      <rect class="bx" x="16" y="30" width="200" height="130"/>
+      <text x="116" y="48" font-size="11" text-anchor="middle">스택 (스레드마다 1MB)</text>
+      <rect class="bx bx-ok" x="30" y="58" width="172" height="22"/>
+      <text x="116" y="73" font-size="9" text-anchor="middle" class="lbl">int a = 1  → 값 그대로</text>
+      <rect class="bx bx-ok" x="30" y="84" width="172" height="22"/>
+      <text x="116" y="99" font-size="9" text-anchor="middle" class="lbl">Point p  → struct 통째로</text>
+      <rect class="bx" x="30" y="110" width="172" height="22"/>
+      <text x="116" y="125" font-size="9" text-anchor="middle" class="lbl">Node n  → 주소 8바이트만</text>
+      <text x="116" y="150" font-size="9" text-anchor="middle" class="lbl">메서드가 끝나면 그냥 사라짐</text>
+      <path class="fl" d="M204 121 L246 121"/>
+      <circle class="pk" r="3">
+        <animateMotion dur="2.2s" repeatCount="indefinite" path="M204 121 L246 121"/></circle>
+      <rect class="bx" x="248" y="30" width="416" height="130"/>
+      <text x="456" y="48" font-size="11" text-anchor="middle">힙 (GC 가 관리)</text>
+      <rect class="bx" x="262" y="58" width="126" height="46"/>
+      <text x="325" y="74" font-size="9" text-anchor="middle" class="lbl">Gen 0 — 새 객체</text>
+      <text x="325" y="88" font-size="9" text-anchor="middle" class="lbl">자주 · 빠르게 수집</text>
+      <rect class="bx" x="394" y="58" width="126" height="46"/>
+      <text x="457" y="74" font-size="9" text-anchor="middle" class="lbl">Gen 1 → Gen 2</text>
+      <text x="457" y="88" font-size="9" text-anchor="middle" class="lbl">살아남은 것이 승격</text>
+      <rect class="bx bx-warn" x="526" y="58" width="126" height="46"/>
+      <text x="589" y="74" font-size="9" text-anchor="middle" class="lbl">LOH (85KB 이상)</text>
+      <text x="589" y="88" font-size="9" text-anchor="middle" class="lbl">기본은 압축 안 함</text>
+      <rect class="bx" x="262" y="112" width="390" height="34"/>
+      <text x="457" y="126" font-size="9" text-anchor="middle" class="lbl">Node 객체 { 헤더 8 + 메서드테이블 8 + 필드… } — 최소 24바이트</text>
+      <text x="457" y="139" font-size="9" text-anchor="middle" class="lbl">class Holder 의 Point 필드도 여기 안에 있습니다</text>
+      <text x="16" y="184" class="lbl" font-size="10">"struct 는 스택이라 빠르다"가 아니라, "복사된다"가 struct 의 본질입니다. 스택이냐 힙이냐는 결과일 뿐입니다.</text>
+      <text x="16" y="200" class="lbl" font-size="10">List&lt;Point&gt; 의 원소는 전부 힙에 있습니다 — 대신 배열 하나에 연속으로 놓여 캐시 적중률이 좋습니다.</text>
+      <text x="16" y="216" class="lbl" font-size="10">그것이 게임 루프에서 struct 배열이 빠른 진짜 이유입니다. 객체 100만 개는 힙 곳곳에 흩어집니다.</text>
+    </svg>
+    <div class="cap">GC 를 줄이는 것은 <b>"스택에 올리기"가 아니라 "객체 수를 줄이기"</b> 입니다 — 값 100만 개를 배열 하나에 담으면 힙 객체는 1개입니다.</div>
+  </div>
+
+  <h3 class="sub rv">struct 냐 class 냐 — 판단표</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>조건</th><th>struct</th><th>class</th><th>이유</th></tr></thead>
+      <tbody>
+        <tr><td>크기 16바이트 이하</td><td><b>✓</b></td><td>—</td><td>복사가 참조보다 싸거나 비슷</td></tr>
+        <tr><td>크기 24바이트 초과</td><td>—</td><td><b>✓</b></td><td>복사 비용이 커집니다(<code>in</code> 으로 완화 가능)</td></tr>
+        <tr><td>불변(만들고 안 바꿈)</td><td><b>✓</b></td><td>—</td><td><code>readonly struct</code> 로 방어 복사도 방지</td></tr>
+        <tr><td>수백만 개를 배열로</td><td><b>✓✓</b></td><td>—</td><td>연속 메모리 · 객체 헤더 없음 · GC 부담 0</td></tr>
+        <tr><td>상속·다형성이 필요</td><td>—</td><td><b>✓</b></td><td>struct 는 상속 불가</td></tr>
+        <tr><td>null 이 의미 있음</td><td>—</td><td><b>✓</b></td><td><code>Nullable&lt;T&gt;</code> 는 크기가 늘고 박싱 위험</td></tr>
+        <tr><td>인터페이스로 다룸</td><td><b>주의</b></td><td>✓</td><td>박싱됩니다 — 제네릭 제약(<code>where T : IFoo</code>)으로 회피</td></tr>
+        <tr><td>컬렉션에 자주 넣고 뺌</td><td>주의</td><td>✓</td><td>복사가 반복됩니다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">눈에 안 보이는 할당 — 이것들을 찾아야 합니다</h4>
+      <pre class="code" data-lang="csharp"><code>// ① 박싱 — struct 를 object·인터페이스로 다루는 순간
+int n = 42;
+object o = n;                       // 힙에 24바이트
+Console.WriteLine("값 " + n);       // n.ToString() → 문자열 할당
+list.Add(n);                        // List&lt;object&gt; 면 박싱, List&lt;int&gt; 면 안 함
+
+// 인터페이스 호출도 박싱
+IComparable c = n;                  // ✗ 박싱
+static int Cmp&lt;T&gt;(T a, T b) where T : IComparable&lt;T&gt; =&gt; a.CompareTo(b);  // ✓ 안 함
+
+// ② 클로저 — 람다가 바깥 변수를 잡으면 클래스가 하나 생깁니다
+for (var i = 0; i &lt; 1000; i++)
+    items.Where(x =&gt; x.Id == i);    // ✗ i 를 캡처 → 반복마다 클로저 객체
+
+// 캡처를 없애면 할당이 사라집니다
+items.Where(static x =&gt; x.Id &gt; 0);  // ✓ static 람다 (C# 9+)
+
+// ③ params · LINQ · foreach 의 숨은 할당
+void Log(params object[] a) { }     // 호출마다 배열 할당
+Log("a", 1, true);                  //   + int·bool 박싱 2회
+
+foreach (var x in (IEnumerable&lt;int&gt;)array)  // ✗ 열거자가 박싱됨
+foreach (var x in array)                     // ✓ 배열은 구조체 열거자
+
+// ④ 문자열 — 게임 루프에서 가장 흔한 범인
+label.Text = "HP: " + hp;                    // ✗ 매 프레임 문자열 할당
+label.Text = string.Create(...)              // ✓ 또는 값이 바뀔 때만 갱신
+
+// ⑤ async 상태 기계 — 완료된 경우가 많으면 ValueTask
+public async ValueTask&lt;int&gt; GetAsync(int id)   // 캐시 적중이 잦으면 할당 회피
+{
+    if (_cache.TryGetValue(id, out var v)) return v;   // 동기 완료 → 할당 없음
+    return await LoadAsync(id);
+}</code></pre>
+      <div class="note warn">
+        <b>이 최적화들은 "게임 루프·초당 수만 번" 자리에서만 의미가 있습니다.</b>
+        웹 요청 처리에서 클로저 하나를 없애는 것은
+        <b>DB 쿼리 한 번 앞에서 아무 의미가 없습니다</b>.
+        <b>먼저 측정하고</b>(BenchmarkDotNet · dotnet-counters),
+        <b>할당이 실제로 병목인 자리</b>에만 적용하세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">레이아웃을 직접 확인하고 줄이기</h4>
+      <pre class="code" data-lang="csharp"><code>// 패딩 때문에 필드 순서가 크기를 바꿉니다 (64비트, 8바이트 정렬)
+struct Bad                          // 24바이트
+{
+    byte A;    // 1 + 패딩 7
+    long B;    // 8
+    byte C;    // 1 + 패딩 7
+}
+
+struct Good                         // 16바이트
+{
+    long B;    // 8
+    byte A;    // 1
+    byte C;    // 1 + 패딩 6
+}
+
+// 확인: dotnet add package ObjectLayoutInspector
+TypeLayout.PrintLayout&lt;Bad&gt;();
+// Size: 24 bytes. Paddings: 14 bytes (%58 of empty space)
+
+// 큰 struct 를 복사 없이 넘기기
+static float Dist(in Matrix4x4 a, in Matrix4x4 b) { ... }   // 64바이트 × 2 복사 방지
+
+// readonly struct — 방어 복사(defensive copy)까지 없앱니다
+public readonly struct Vec3(float x, float y, float z)
+{
+    public readonly float X = x, Y = y, Z = z;
+    public float Length =&gt; MathF.Sqrt(X * X + Y * Y + Z * Z);
+}
+// readonly 가 아니면 in 매개변수에서 메서드를 부를 때마다 복사본이 생깁니다
+
+// ref struct — 스택에만 존재하도록 컴파일러가 강제
+ref struct Reader
+{
+    ReadOnlySpan&lt;byte&gt; _buf;        // 힙에 올라갈 수 없으니 안전
+}</code></pre>
+      <div class="tw">
+        <table>
+          <thead><tr><th>기법</th><th>없애는 것</th><th>대가</th></tr></thead>
+          <tbody>
+            <tr><td><code>readonly struct</code></td><td>방어 복사</td><td>불변이어야 함</td></tr>
+            <tr><td><code>in</code> 매개변수</td><td>인자 복사</td><td>readonly 아니면 역효과</td></tr>
+            <tr><td><code>ref struct</code></td><td>힙 승격 가능성</td><td>필드·async·컬렉션에 못 넣음</td></tr>
+            <tr><td><code>Span&lt;T&gt;</code></td><td>배열 복사·슬라이스 할당</td><td>수명 제약</td></tr>
+            <tr><td><code>ArrayPool&lt;T&gt;</code></td><td>큰 배열 반복 할당</td><td>반드시 <code>Return</code> · 내용 초기화 안 됨</td></tr>
+            <tr><td><code>stackalloc</code></td><td>작은 임시 버퍼 할당</td><td><b>크기 상한 필수</b>(스택 오버플로)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>85KB 를 넘는 배열은 LOH(대형 객체 힙)로 갑니다.</b>
+        LOH 는 <b>기본적으로 압축하지 않아</b> 단편화가 쌓이고,
+        수집이 Gen2 와 함께 일어나 <b>멈칫하는 시간이 깁니다</b>.
+        큰 버퍼는 <b><code>ArrayPool&lt;byte&gt;.Shared</code> 로 재사용</b>하는 것이
+        AOT·GC 튜닝 어느 쪽보다 효과가 큽니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -388,6 +547,145 @@ ThreadPool.SetMinThreads(workerThreads: 200, completionPortThreads: 200);</code>
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 218" role="img" aria-label="정상 상태에서는 요청이 스레드풀 스레드를 잠깐 쓰고 IO를 기다리는 동안 반납해 적은 스레드로 많은 요청을 처리한다. 기아 상태에서는 동기 블로킹 때문에 스레드가 반납되지 않아 큐가 쌓이고, 풀은 초당 한두 개씩만 스레드를 늘리므로 회복이 매우 느리다">
+      <text x="16" y="16" class="lbl">스레드 풀 기아 — 왜 "갑자기" 전부 느려지고 회복이 안 되는가</text>
+      <text x="16" y="36" class="lbl" font-size="10">정상 — await 로 스레드를 반납합니다</text>
+      <rect class="bx bx-ok" x="16" y="44" width="316" height="58"/>
+      <rect class="bx" x="28" y="54" width="70" height="38"/>
+      <text x="63" y="70" font-size="9" text-anchor="middle" class="lbl">요청 1000개</text>
+      <text x="63" y="83" font-size="9" text-anchor="middle" class="lbl">/초</text>
+      <path class="fl" d="M100 73 L124 73"/>
+      <rect class="bx" x="126" y="54" width="86" height="38"/>
+      <text x="169" y="70" font-size="9" text-anchor="middle" class="lbl">스레드 16개</text>
+      <text x="169" y="83" font-size="9" text-anchor="middle" class="lbl">돌려 쓰기</text>
+      <path class="fl" d="M214 73 L238 73"/>
+      <rect class="bx" x="240" y="54" width="80" height="38"/>
+      <text x="280" y="70" font-size="9" text-anchor="middle" class="lbl">큐 길이 0</text>
+      <text x="280" y="83" font-size="9" text-anchor="middle" class="lbl">p99 정상</text>
+      <text x="366" y="36" class="lbl" font-size="10">기아 — .Result 가 스레드를 붙잡습니다</text>
+      <rect class="bx bx-warn" x="366" y="44" width="298" height="58"/>
+      <rect class="bx" x="378" y="54" width="66" height="38"/>
+      <text x="411" y="70" font-size="9" text-anchor="middle" class="lbl">같은 요청</text>
+      <text x="411" y="83" font-size="9" text-anchor="middle" class="lbl">1000개</text>
+      <path class="ln" d="M446 73 L468 73"/>
+      <rect class="bx" x="470" y="54" width="88" height="38"/>
+      <text x="514" y="70" font-size="9" text-anchor="middle" class="lbl">16개 전부</text>
+      <text x="514" y="83" font-size="9" text-anchor="middle" class="lbl">대기로 묶임</text>
+      <path class="ln" d="M560 73 L580 73"/>
+      <rect class="bx bx-warn" x="582" y="54" width="70" height="38"/>
+      <text x="617" y="70" font-size="9" text-anchor="middle" class="lbl">큐 폭증</text>
+      <text x="617" y="83" font-size="9" text-anchor="middle" class="lbl">전부 지연</text>
+      <text x="16" y="128" class="lbl" font-size="10">풀은 스레드가 부족하다고 판단하면 늘려 주긴 합니다 — 다만 대략 초당 1~2개씩입니다.</text>
+      <text x="16" y="144" class="lbl" font-size="10">그래서 100개가 부족하면 회복에 1분 이상 걸리고, 그동안 들어온 요청이 또 스레드를 묶습니다.</text>
+      <text x="16" y="160" class="lbl" font-size="10">한 번 시작되면 스스로 악화되는 구조입니다 — CPU 는 한가한데 응답만 느린 것이 특징입니다.</text>
+      <text x="16" y="176" class="lbl" font-size="10">판별: CPU 20~40% + threadpool.queue.length 가 계속 증가 + p99 만 폭증이면 거의 확정입니다.</text>
+      <text x="16" y="192" class="lbl" font-size="10">SetMinThreads 는 증상만 늦춥니다. 동기 블로킹을 찾아 없애는 것이 유일한 해결입니다.</text>
+      <text x="16" y="208" class="lbl" font-size="10">게임 서버라면 원인이 다를 수 있습니다 — Task.Run 으로 띄운 장기 루프가 풀을 점유하는 경우입니다.</text>
+    </svg>
+    <div class="cap"><b>"CPU 는 놀고 있는데 응답이 느리다"</b> — 이 조합을 보면 가장 먼저 스레드 풀 기아를 의심하세요.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">기아를 만드는 코드 — 실제로 자주 보는 것들</h4>
+      <pre class="code" data-lang="csharp"><code>// ① 가장 흔함 — 동기 메서드 안에서 비동기 호출
+public User Get(int id) =&gt; _repo.GetAsync(id).Result;          // ✗
+public Task&lt;User&gt; GetAsync(int id) =&gt; _repo.GetAsync(id);      // ✓ 끝까지 async
+
+// ② 생성자·프로퍼티에서 — async 를 못 쓰니 여기서 막습니다
+public class Service
+{
+    private readonly Config _cfg;
+    public Service(IConfigLoader l) =&gt; _cfg = l.LoadAsync().GetAwaiter().GetResult();  // ✗
+}
+// ✓ 팩토리 메서드나 IHostedService 로 시작할 때 한 번 로드
+
+// ③ 이벤트 핸들러 — 인터페이스가 동기라서
+public void OnMessage(Message m) =&gt; HandleAsync(m).Wait();     // ✗
+public void OnMessage(Message m) =&gt; _channel.Writer.TryWrite(m); // ✓ 큐에 넣고 반환
+
+// ④ lock 안에서 IO — 스레드가 묶이고 다른 스레드도 막힙니다
+lock (_gate) { var r = _http.GetStringAsync(url).Result; }      // ✗
+await _semaphore.WaitAsync(ct);                                 // ✓ SemaphoreSlim
+try { var r = await _http.GetStringAsync(url, ct); }
+finally { _semaphore.Release(); }
+
+// ⑤ 동기 IO 를 요청 스레드에서
+var text = File.ReadAllText(path);                              // ✗ 디스크가 느리면 묶임
+var text = await File.ReadAllTextAsync(path, ct);               // ✓
+
+// ⑥ 병렬 처리에 Parallel.For 로 비동기를 섞기
+Parallel.For(0, 100, i =&gt; DoAsync(i).Wait());                   // ✗ 최악
+await Parallel.ForEachAsync(items, ct, async (x, t) =&gt; await DoAsync(x, t)); // ✓</code></pre>
+      <div class="note warn">
+        <b>레거시 라이브러리가 동기 API 만 제공한다면</b>
+        <code>.Result</code> 로 감싸지 말고 <b>전용 스레드나 별도 큐</b>로 격리하세요.
+        <code>Task.Run(() =&gt; SyncCall())</code> 도 스레드풀을 쓰므로
+        <b>동시 호출 수를 <code>SemaphoreSlim</code> 으로 제한</b>해야
+        풀 전체로 번지지 않습니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">진단과 격리</h4>
+      <pre class="code" data-lang="bash"><code># ① 실시간 확인 — 큐 길이가 계속 늘면 기아
+dotnet-counters monitor -p &lt;PID&gt; --counters \
+  System.Runtime[threadpool-thread-count,threadpool-queue-length,\
+threadpool-completed-items-count],Microsoft.AspNetCore.Hosting
+
+# 정상:  queue-length 0~5,  thread-count 안정
+# 기아:  queue-length 계속 증가,  thread-count 가 천천히 오름
+
+# ② 스레드들이 무엇을 기다리는지 — 원인 지점을 직접 봅니다
+dotnet-dump collect -p &lt;PID&gt;
+dotnet-dump analyze core_xxx
+&gt; clrthreads                  # 스레드 목록
+&gt; pstacks                     # 스택을 묶어서 — 같은 곳에 몰려 있으면 그게 범인
+&gt; syncblk                     # 락 경합
+&gt; dumpasync                   # 대기 중인 async 체인</code></pre>
+      <pre class="code" data-lang="csharp"><code>// ③ 코드 레벨에서 미리 막기 — 분석기를 켜세요
+// .editorconfig
+// dotnet_diagnostic.CA1849.severity = error   // 비동기 컨텍스트에서 동기 호출
+// dotnet_diagnostic.VSTHRD002.severity = error // .Result / .Wait() 금지
+//   (Microsoft.VisualStudio.Threading.Analyzers 패키지)
+
+// ④ 장기 루프는 스레드풀에 올리지 않습니다 (게임 서버)
+// ✗ 룸 200개 = 풀 스레드 200개 점유
+foreach (var room in rooms) _ = Task.Run(() =&gt; room.LoopForever());
+
+// ✓ 전용 스레드 — 풀과 무관하게 돕니다
+var t = new Thread(() =&gt; room.LoopForever())
+{
+    IsBackground = true,
+    Name = $"room-{room.Id}",
+    Priority = ThreadPriority.AboveNormal
+};
+t.Start();
+
+// ✓✓ 더 좋게 — 스레드 하나가 여러 룸의 틱을 돌립니다
+//    룸 1000개에 스레드 1000개는 컨텍스트 스위칭만으로 죽습니다
+var worker = new Thread(() =&gt;
+{
+    var sw = Stopwatch.StartNew();
+    while (!ct.IsCancellationRequested)
+    {
+        foreach (var r in myRooms) r.Tick();     // 코어 하나가 룸 수십~수백 개
+        var wait = 50 - (int)(sw.ElapsedMilliseconds % 50);
+        Thread.Sleep(wait);
+    }
+}) { IsBackground = true };</code></pre>
+      <div class="note tip">
+        <b>임시 완화가 필요할 때만 <code>SetMinThreads</code> 를 쓰세요.</b>
+        이것은 <b>"풀이 늘리기를 주저하는 구간"을 건너뛰는 것</b>이지
+        블로킹을 없애 주지 않습니다.
+        새벽에 급하게 서비스를 살릴 때는 유효하지만,
+        <b>다음 날 반드시 원인을 찾아야</b> 합니다 —
+        안 그러면 부하가 조금 더 늘었을 때 같은 일이 또 납니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -558,6 +856,118 @@ var json = JsonSerializer.Serialize(dto, AppJson.Default.PlayerDto);</code></pre
       </div>
     </div>
   </div>
+
+  <h3 class="sub rv">어느 게시 방식을 고를까 — 실측 비교</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>방식</th><th>시작</th><th>메모리</th><th>배포 크기</th><th>최대 성능</th><th>제약</th></tr></thead>
+      <tbody>
+        <tr><td><b>프레임워크 의존</b></td><td>~120ms</td><td>40MB</td><td><b>2MB</b></td><td>최고(JIT 최적화)</td><td>런타임 설치 필요</td></tr>
+        <tr><td><b>자체 포함</b></td><td>~120ms</td><td>40MB</td><td>70MB</td><td>최고</td><td>크기</td></tr>
+        <tr><td><b>+ 트리밍</b></td><td>~110ms</td><td>36MB</td><td>25MB</td><td>최고</td><td>리플렉션 주의</td></tr>
+        <tr><td><b>+ ReadyToRun</b></td><td><b>~40ms</b></td><td>45MB</td><td>40MB</td><td>최고<br><span class="sm">(핫 경로는 재JIT)</span></td><td>크기 증가</td></tr>
+        <tr><td><b>Native AOT</b></td><td><b>~8ms</b></td><td><b>14MB</b></td><td><b>12MB</b></td><td>약간 낮음<br><span class="sm">(동적 최적화 없음)</span></td><td><b>리플렉션·Emit 불가</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note tip rv">
+    <b>장시간 도는 서버라면 Native AOT 가 오히려 손해일 수 있습니다.</b>
+    JIT 는 실행되는 동안 <b>실제 호출 패턴을 보고 다시 최적화</b>합니다(계층형 컴파일).
+    24시간 도는 게임 API 는 <b>시작 8ms 가 아무 의미가 없고</b>, 최대 처리량이 중요합니다.
+    AOT 가 확실히 유리한 자리는 <b>서버리스 함수 · CLI 도구 · 짧게 뜨고 죽는 작업 · 컨테이너를 빽빽하게 채울 때</b> 입니다.
+    <b>ReadyToRun</b> 은 그 중간으로, 대부분의 서버에 무난한 선택입니다.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">AOT 로 가는 길 — 경고부터 없앱니다</h4>
+      <pre class="code" data-lang="xml"><code>&lt;PropertyGroup&gt;
+  &lt;!-- ★ 먼저 이것만 켜서 경고를 봅니다 (실제 AOT 게시 전에) --&gt;
+  &lt;IsAotCompatible&gt;true&lt;/IsAotCompatible&gt;
+  &lt;EnableTrimAnalyzer&gt;true&lt;/EnableTrimAnalyzer&gt;
+  &lt;EnableAotAnalyzer&gt;true&lt;/EnableAotAnalyzer&gt;
+  &lt;EnableSingleFileAnalyzer&gt;true&lt;/EnableSingleFileAnalyzer&gt;
+&lt;/PropertyGroup&gt;
+
+&lt;!-- 경고가 0 이 된 뒤에 --&gt;
+&lt;PropertyGroup&gt;
+  &lt;PublishAot&gt;true&lt;/PublishAot&gt;
+  &lt;InvariantGlobalization&gt;true&lt;/InvariantGlobalization&gt;
+  &lt;StripSymbols&gt;true&lt;/StripSymbols&gt;
+  &lt;OptimizationPreference&gt;Speed&lt;/OptimizationPreference&gt;
+&lt;/PropertyGroup&gt;</code></pre>
+      <pre class="code" data-lang="text"><code>자주 나오는 경고와 뜻
+
+IL2026  RequiresUnreferencedCode — 트리밍하면 깨질 수 있는 API
+IL2091  제네릭 인자에 필요한 멤버 정보가 없음
+IL3050  RequiresDynamicCode — AOT 에서 못 도는 API (Emit 계열)
+IL2104  어셈블리 전체에 트리밍 경고 → 그 패키지가 AOT 미지원
+
+→ 세 번째(IL3050)가 나오면 그 코드는 반드시 바꿔야 합니다.
+  첫 번째(IL2026)는 대개 소스 제너레이터로 대체할 수 있습니다.</code></pre>
+      <pre class="code" data-lang="csharp"><code>// JSON — 리플렉션 대신 소스 제너레이터
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(PlayerDto))]
+[JsonSerializable(typeof(List&lt;ItemDto&gt;))]
+internal partial class AppJson : JsonSerializerContext;
+
+var json = JsonSerializer.Serialize(dto, AppJson.Default.PlayerDto);
+var back = JsonSerializer.Deserialize(json, AppJson.Default.PlayerDto);
+
+// ASP.NET Core Minimal API 는 AOT 를 지원합니다
+var builder = WebApplication.CreateSlimBuilder(args);   // ★ Slim
+builder.Services.ConfigureHttpJsonOptions(o =&gt;
+    o.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJson.Default));
+
+var app = builder.Build();
+app.MapGet("/players/{id:int}", (int id) =&gt; new PlayerDto(id, "홍길동"));
+app.Run();</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">무엇이 되고 무엇이 안 되나</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>기능 · 패키지</th><th>AOT</th><th>대안</th></tr></thead>
+          <tbody>
+            <tr><td>Minimal API</td><td><b>✓</b></td><td><code>CreateSlimBuilder</code></td></tr>
+            <tr><td>MVC · Razor · Blazor Server</td><td>✗</td><td>—</td></tr>
+            <tr><td>gRPC 서버</td><td><b>✓</b></td><td>—</td></tr>
+            <tr><td>System.Text.Json</td><td>✓<span class="sm">(제너레이터 필요)</span></td><td><code>JsonSerializerContext</code></td></tr>
+            <tr><td>Newtonsoft.Json</td><td>✗</td><td>System.Text.Json 으로 이전</td></tr>
+            <tr><td>EF Core</td><td>부분<span class="sm">(컴파일된 모델)</span></td><td>Dapper · <code>EF Core 컴파일 모델</code></td></tr>
+            <tr><td>Dapper</td><td>✓<span class="sm">(AOT 버전)</span></td><td><code>Dapper.AOT</code></td></tr>
+            <tr><td>AutoMapper · Moq</td><td>✗</td><td>수동 매핑 · <code>NSubstitute</code> 도 제한</td></tr>
+            <tr><td>DI(Microsoft.Extensions)</td><td>✓</td><td>단, 문자열 기반 등록은 ✗</td></tr>
+            <tr><td>Serilog</td><td>✓</td><td>일부 싱크는 확인 필요</td></tr>
+            <tr><td><code>Assembly.LoadFrom</code> 플러그인</td><td>✗</td><td>구조를 바꿔야 합니다</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="csharp"><code>// 리플렉션이 꼭 필요하면 — 트리머에게 보존을 알립니다
+[DynamicDependency(DynamicallyAccessedMemberTypes.All, typeof(PluginA))]
+static void KeepTypes() { }
+
+// 또는 제네릭 인자에 요구사항을 명시
+static T Create&lt;[DynamicallyAccessedMembers(
+    DynamicallyAccessedMemberTypes.PublicConstructors)] T&gt;()
+    =&gt; Activator.CreateInstance&lt;T&gt;();
+
+// Unity IL2CPP 에서도 같은 문제 — link.xml 로 보존
+// &lt;linker&gt;&lt;assembly fullname="MyGame"&gt;
+//   &lt;type fullname="MyGame.SaveData" preserve="all"/&gt;
+// &lt;/assembly&gt;&lt;/linker&gt;</code></pre>
+      <div class="note warn">
+        <b>"에디터에서는 되는데 모바일 빌드에서만 터진다"</b> —
+        Unity IL2CPP 와 .NET Native AOT 는 <b>같은 계열의 문제</b>입니다.
+        JSON 역직렬화로 만든 클래스가 <b>스트리핑으로 사라져</b>
+        <code>NullReference</code> 나 <code>MissingMethodException</code> 이 납니다.
+        해결은 항상 같습니다 — <b>리플렉션을 소스 제너레이터로 바꾸거나,
+        보존할 타입을 명시</b>하는 것입니다.
+        AOT 를 안 쓰더라도 <b>이 방식으로 짜 두면</b> 나중에 선택지가 열립니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -617,6 +1027,118 @@ dotnet-gcdump collect -p &lt;PID&gt;</code></pre>
         <b>Unity Profiler + Deep Profile</b>,
         네이티브까지 보려면 <b>Superluminal·Xcode Instruments</b> 를 씁니다
         (🕹️ Unity 실전 탭 03).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub rv">메모리 누수를 실제로 잡는 절차</h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">두 시점을 비교해서 범인을 찾습니다</h4>
+      <pre class="code" data-lang="bash"><code># ① 기준점 — 서비스가 안정된 뒤
+dotnet-gcdump collect -p 1 -o base.gcdump
+
+# ② 30분~1시간 뒤 (메모리가 눈에 띄게 오른 시점)
+dotnet-gcdump collect -p 1 -o later.gcdump
+
+# ③ Visual Studio 나 PerfView 에서 두 파일을 열고 diff
+#    "무엇이 늘었는가"가 바로 보입니다
+#    gcdump 는 dump 보다 훨씬 가볍고 프로세스 정지도 짧습니다</code></pre>
+      <pre class="code" data-lang="text"><code># dotnet-dump 로 더 깊이 볼 때
+&gt; dumpheap -stat                       # 타입별 개수·총 바이트
+Statistics:
+      MT    Count  TotalSize Class Name
+7ff8..    482,133   38,570,640 MyGame.PlayerSession   ← 이상하게 많다
+7ff8..     12,004    1,920,640 System.Byte[]
+
+&gt; dumpheap -type MyGame.PlayerSession  # 인스턴스 주소 목록
+&gt; gcroot 00007f9c12345678              # ★ 왜 살아 있는가 — 참조 경로
+  -&gt; MyGame.SessionManager::_all       (static field)
+     -&gt; System.Collections.Generic.Dictionary
+        -&gt; MyGame.PlayerSession
+
+# 답이 나왔습니다: 정적 딕셔너리에서 안 지우고 있습니다</code></pre>
+      <div class="tw">
+        <table>
+          <thead><tr><th>누수의 전형</th><th>왜 안 죽나</th><th>고치는 법</th></tr></thead>
+          <tbody>
+            <tr><td><b>정적 컬렉션</b></td><td>루트에서 계속 참조</td><td>만료·크기 제한 · <code>MemoryCache</code></td></tr>
+            <tr><td><b>이벤트 핸들러</b></td><td>발행자가 구독자를 붙잡음</td><td><code>-=</code> 로 해제 · 약한 참조</td></tr>
+            <tr><td><b>타이머</b></td><td>콜백이 객체를 캡처</td><td><code>Dispose</code> · <code>PeriodicTimer</code></td></tr>
+            <tr><td><b>취소 토큰 등록</b></td><td>장수 토큰에 계속 등록</td><td>등록 반환값을 <code>Dispose</code></td></tr>
+            <tr><td><b>캐시 무제한</b></td><td>—</td><td><code>SizeLimit</code> + 만료</td></tr>
+            <tr><td><b>HttpClient 매번 생성</b></td><td>소켓·핸들러 누적</td><td><code>IHttpClientFactory</code></td></tr>
+            <tr><td>LOH 단편화</td><td>큰 배열이 흩어짐</td><td><code>ArrayPool</code> · 압축 모드</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>이벤트 핸들러 누수는 데스크탑·Unity 에서 압도적으로 흔합니다.</b>
+        <code>_service.DataChanged += OnChanged;</code> 만 하고 해제하지 않으면
+        <b>서비스가 살아 있는 한 창(ViewModel)도 못 죽습니다</b>.
+        창을 100번 열었다 닫으면 100개가 메모리에 남습니다.
+        <b>구독한 자리마다 해제할 자리를 함께 만드는 습관</b>이 유일한 예방책입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">운영 중 프로파일링 — 안전하게</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>도구</th><th>프로세스 정지</th><th>운영 사용</th><th>얻는 것</th></tr></thead>
+          <tbody>
+            <tr><td><code>dotnet-counters</code></td><td><b>없음</b></td><td><b>항상 안전</b></td><td>실시간 지표</td></tr>
+            <tr><td><code>dotnet-trace</code></td><td>거의 없음<span class="sm">(오버헤드 수%)</span></td><td>안전</td><td>CPU · 이벤트</td></tr>
+            <tr><td><code>dotnet-gcdump</code></td><td><b>수백 ms</b></td><td>조심</td><td>힙 그래프</td></tr>
+            <tr><td><code>dotnet-dump</code></td><td><b>수 초</b></td><td><b>LB 에서 빼고</b></td><td>전체 상태</td></tr>
+            <tr><td><code>dotnet-stack</code></td><td>짧음</td><td>조심</td><td>모든 스레드 스택</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="bash"><code># 컨테이너·k8s 에서 — 도구가 없는 이미지라면 사이드카로
+kubectl debug -it game-api-xxx --image=mcr.microsoft.com/dotnet/sdk:10.0 \
+  --target=api --share-processes -- bash
+# 안에서 dotnet-counters 설치 후 -p 1
+
+# 자동 덤프 — 사고 순간을 놓치지 않으려면 미리 걸어 둡니다
+export DOTNET_DbgEnableMiniDump=1
+export DOTNET_DbgMiniDumpType=4                 # 전체 힙 포함
+export DOTNET_DbgMiniDumpName=/dumps/crash.%p.dmp
+# 프로세스가 죽는 순간 자동으로 덤프가 남습니다
+
+# 조건부 덤프 — 메모리가 특정 선을 넘으면
+dotnet-dump collect -p 1 --type Full \
+  --diag                                        # 진단 로그도 함께</code></pre>
+      <pre class="code" data-lang="csharp"><code>// 코드로 진단 정보를 노출 — 운영 도구에서 바로 볼 수 있게
+app.MapGet("/admin/diag", () =&gt;
+{
+    ThreadPool.GetAvailableThreads(out var w, out var io);
+    ThreadPool.GetMaxThreads(out var mw, out var mio);
+    var gc = GC.GetGCMemoryInfo();
+
+    return Results.Ok(new
+    {
+        threadPool = new { busyWorker = mw - w, busyIo = mio - io,
+                           pending = ThreadPool.PendingWorkItemCount },
+        gc = new
+        {
+            heapMb  = GC.GetTotalMemory(false) / 1_048_576,
+            gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1),
+            gen2 = GC.CollectionCount(2),
+            pauseTimePercent = gc.PauseTimePercentage,
+            fragmentedMb = gc.FragmentedBytes / 1_048_576
+        },
+        uptime = Environment.TickCount64 / 1000,
+        version = Environment.GetEnvironmentVariable("APP_VERSION")
+    });
+}).RequireAuthorization("admin");</code></pre>
+      <div class="note warn">
+        <b>사고가 난 뒤에 도구를 설치하려 하면 이미 늦습니다.</b>
+        프로세스는 대개 <b>재시작되었거나 곧 재시작</b>됩니다.
+        <code>DOTNET_DbgEnableMiniDump</code> 를 <b>지금 켜 두면</b>
+        다음 크래시의 원인을 <b>단번에</b> 알 수 있습니다.
+        덤프 저장 경로는 <b>컨테이너 밖(볼륨)</b>으로 잡으세요 —
+        컨테이너와 함께 사라지면 아무 소용이 없습니다.
       </div>
     </div>
   </div>

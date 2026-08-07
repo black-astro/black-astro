@@ -87,6 +87,125 @@ app.MapPlayers().MapShop().MapRanking();</code></pre>
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 214" role="img" aria-label="HTTP 요청은 Kestrel에서 받아 예외 처리, HTTPS 전환, 인증·인가, 속도 제한 미들웨어를 순서대로 통과한 뒤 내 엔드포인트 코드에 닿고, 응답은 같은 미들웨어를 역순으로 되짚어 나간다. 그래서 등록 순서가 곧 동작 순서다">
+      <text x="16" y="16" class="lbl">요청 하나가 내 코드에 닿기까지 — 미들웨어 파이프라인</text>
+      <path class="fl" d="M16 34 L664 34"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="3.4s" repeatCount="indefinite" path="M16 34 L664 34 L664 142 L16 142"/></circle>
+      <text x="16" y="29" class="lbl" font-size="9">요청 →</text>
+      <rect class="bx" x="16" y="44" width="120" height="62"/>
+      <text x="76" y="68" font-size="11" text-anchor="middle">예외 처리</text>
+      <text x="76" y="84" font-size="10" text-anchor="middle" class="lbl">아래서 터진 것</text>
+      <text x="76" y="97" font-size="10" text-anchor="middle" class="lbl">을 500 으로</text>
+      <rect class="bx" x="148" y="44" width="120" height="62"/>
+      <text x="208" y="68" font-size="11" text-anchor="middle">HTTPS 전환</text>
+      <text x="208" y="84" font-size="10" text-anchor="middle" class="lbl">http 로 오면</text>
+      <text x="208" y="97" font-size="10" text-anchor="middle" class="lbl">돌려보냄</text>
+      <rect class="bx" x="280" y="44" width="120" height="62"/>
+      <text x="340" y="68" font-size="11" text-anchor="middle">인증 · 인가</text>
+      <text x="340" y="84" font-size="10" text-anchor="middle" class="lbl">누구인가 /</text>
+      <text x="340" y="97" font-size="10" text-anchor="middle" class="lbl">권한이 있나</text>
+      <rect class="bx" x="412" y="44" width="120" height="62"/>
+      <text x="472" y="68" font-size="11" text-anchor="middle">속도 제한</text>
+      <text x="472" y="84" font-size="10" text-anchor="middle" class="lbl">너무 잦으면</text>
+      <text x="472" y="97" font-size="10" text-anchor="middle" class="lbl">429 로 컷</text>
+      <rect class="bx bx-ok" x="544" y="44" width="120" height="62"/>
+      <text x="604" y="68" font-size="11" text-anchor="middle">엔드포인트</text>
+      <text x="604" y="84" font-size="10" text-anchor="middle" class="lbl">내가 쓴 코드</text>
+      <text x="604" y="97" font-size="10" text-anchor="middle" class="lbl">MapGet 본문</text>
+      <path class="ln" d="M664 142 L16 142"/>
+      <text x="474" y="136" class="lbl" font-size="9">← 응답은 역순으로 되짚어 나갑니다</text>
+      <text x="16" y="166" class="lbl" font-size="10">등록한 순서가 곧 실행 순서입니다 — 인증을 속도 제한보다 뒤에 두면 로그인 안 한 요청도 카운트를 먹습니다.</text>
+      <text x="16" y="182" class="lbl" font-size="10">예외 처리를 맨 앞에 두는 이유도 같습니다. 뒤에 두면 그 앞에서 터진 예외를 잡을 자리가 없습니다.</text>
+      <text x="16" y="198" class="lbl" font-size="10">"응답도 지나간다"가 핵심입니다 — 응답 헤더 추가·압축·로깅이 되돌아오는 길에서 일어납니다.</text>
+    </svg>
+    <div class="cap"><b>미들웨어는 줄이 아니라 터널입니다</b> — 요청이 들어갈 때 한 번, 응답이 나올 때 한 번, 같은 코드를 두 번 지납니다.</div>
+  </div>
+
+  <h3 class="sub rv">등록 순서 — 이 순서가 정답에 가깝습니다</h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">Program.cs 미들웨어 순서</h4>
+      <pre class="code" data-lang="csharp"><code>var app = builder.Build();
+
+app.UseExceptionHandler("/error");   // 1. 가장 바깥 — 아래 전부를 감싼다
+app.UseHsts();                       // 2. 브라우저에 "https 로만 와라"
+app.UseHttpsRedirection();           // 3. http → https
+app.UseStaticFiles();                // 4. 정적 파일은 여기서 끝 (뒤로 안 감)
+app.UseRouting();                    // 5. 어느 엔드포인트인지 결정
+app.UseCors("game");                 // 6. 라우팅 뒤, 인증 앞
+app.UseRateLimiter();                // 7. 인증 뒤가 더 좋을 때도 있다(아래 note)
+app.UseAuthentication();             // 8. 토큰을 읽어 User 를 채운다
+app.UseAuthorization();              // 9. 그 User 로 권한을 본다
+app.MapPlayers().MapShop();          // 10. 끝점
+
+app.Run();</code></pre>
+      <div class="note warn">
+        <b>UseAuthentication 이 UseAuthorization 보다 먼저.</b>
+        순서를 뒤집으면 <b>항상 401</b> 이 납니다 —
+        권한을 볼 시점에 <code>User</code> 가 아직 비어 있기 때문입니다.
+        증상은 "토큰이 맞는데 로그인이 안 돼요" 로 나타납니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">직접 만들어 보면 구조가 보입니다</h4>
+      <pre class="code" data-lang="csharp"><code>// 요청 하나에 걸린 시간을 재는 최소 미들웨어
+app.Use(async (ctx, next) =&gt;
+{
+    var sw = Stopwatch.StartNew();
+    await next(ctx);                       // ★ 여기서 안쪽 전부가 실행된다
+    sw.Stop();
+    // next() 가 돌아온 뒤 = 응답이 나가는 길
+    ctx.Response.Headers["X-Elapsed-ms"] = sw.ElapsedMilliseconds.ToString();
+});
+
+// next() 를 부르지 않으면 거기서 요청이 끝난다 — 이것이 "단락(short-circuit)"
+app.Use(async (ctx, next) =&gt;
+{
+    if (ctx.Request.Headers["X-Client-Ver"] != "1.4.2")
+    {
+        ctx.Response.StatusCode = 426;     // Upgrade Required
+        await ctx.Response.WriteAsJsonAsync(new { need = "1.4.2" });
+        return;                            // next 호출 없음 → 뒤로 안 감
+    }
+    await next(ctx);
+});</code></pre>
+      <div class="note tip">
+        <b>강제 업데이트가 이 한 조각으로 끝납니다.</b>
+        구버전 클라이언트를 <b>엔드포인트에 닿기 전에</b> 잘라 내면
+        DB 도 안 건드리고 로그도 안 더럽힙니다.
+        <b>점검 모드</b>도 같은 자리에 둡니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub rv">응답을 어떻게 돌려줄까 — Results 정리</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>상황</th><th>쓸 것</th><th>상태 코드</th><th>실수하기 쉬운 점</th></tr></thead>
+      <tbody>
+        <tr><td>조회 성공</td><td><code>Results.Ok(x)</code></td><td>200</td><td>—</td></tr>
+        <tr><td>없는 것 조회</td><td><code>Results.NotFound()</code></td><td>404</td><td><b>빈 배열은 404 가 아닙니다</b> — 200 + <code>[]</code></td></tr>
+        <tr><td>새로 만듦</td><td><code>Results.Created(uri, x)</code></td><td>201</td><td>Location 헤더를 빼먹으면 201 의 의미가 없습니다</td></tr>
+        <tr><td>입력이 잘못됨</td><td><code>Results.ValidationProblem(e)</code></td><td>400</td><td>어느 필드가 왜 틀렸는지 담아야 클라가 씁니다</td></tr>
+        <tr><td>돈·재화 부족</td><td><code>Results.Problem(...)</code></td><td>400 / 409</td><td><b>200 에 <code>success:false</code> 는 피하세요</b> — 모니터링이 에러율을 못 셉니다</td></tr>
+        <tr><td>토큰 없음·만료</td><td>자동</td><td>401</td><td>403(권한 없음)과 구분 — 클라 대응이 다릅니다</td></tr>
+        <tr><td>남의 자원</td><td><code>Results.Forbid()</code></td><td>403</td><td>404 로 감추는 것도 전략입니다(존재 여부 숨기기)</td></tr>
+        <tr><td>중복 요청</td><td><code>Results.Conflict()</code></td><td>409</td><td>멱등 키가 있으면 <b>원래 결과를 200 으로</b> 돌려주는 편이 낫습니다</td></tr>
+        <tr><td>너무 잦음</td><td>자동(RateLimiter)</td><td>429</td><td><code>Retry-After</code> 헤더를 같이 주세요</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note tip rv">
+    <b>에러 응답 모양을 하나로 고정하세요.</b>
+    .NET 은 <b>ProblemDetails</b>(RFC 9457)를 기본으로 씁니다 —
+    <code>builder.Services.AddProblemDetails()</code> 한 줄이면
+    던지지 않은 에러까지 <code>{ type, title, status, detail }</code> 로 통일됩니다.
+    클라이언트가 <b>에러 파싱 코드를 한 번만</b> 쓰게 되는 것이 실제 이득입니다.
+  </div>
 </section>
 
 
@@ -143,6 +262,92 @@ Game__MaxPartySize=6</code></pre>
       <div class="note tip">
         운영에서는 <b>Key Vault·Secrets Manager</b> 같은 비밀 저장소를 붙입니다.
         시작 시 한 번 읽어 오면 코드는 바뀌지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub rv">같은 키가 여러 곳에 있으면 — 나중에 읽은 것이 이깁니다</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>읽는 순서</th><th>출처</th><th>어디에 쓰나</th><th>저장소에 올라가나</th></tr></thead>
+      <tbody>
+        <tr><td>1 (가장 약함)</td><td><code>appsettings.json</code></td><td>모든 환경의 기본값</td><td>올라감</td></tr>
+        <tr><td>2</td><td><code>appsettings.{환경}.json</code></td><td>환경별 덮어쓰기</td><td>올라감</td></tr>
+        <tr><td>3</td><td>User Secrets</td><td><b>개발 PC 에서만</b></td><td>안 올라감</td></tr>
+        <tr><td>4</td><td>환경 변수</td><td><b>운영의 기본 수단</b></td><td>안 올라감</td></tr>
+        <tr><td>5 (가장 셈)</td><td>실행 인자 <code>--Game:MaxPartySize=6</code></td><td>임시 실험 · 컨테이너 오버라이드</td><td>안 올라감</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">환경은 이렇게 갈립니다</h4>
+      <pre class="code" data-lang="bash"><code># 환경 이름을 정하는 것은 이 변수 하나입니다
+ASPNETCORE_ENVIRONMENT=Development   # 기본값
+ASPNETCORE_ENVIRONMENT=Staging
+ASPNETCORE_ENVIRONMENT=Production
+
+# 컨테이너에서는 보통 이렇게
+docker run -e ASPNETCORE_ENVIRONMENT=Production \
+           -e ConnectionStrings__Db="Host=db;..." \
+           -e Game__MaxPartySize=6  gameapi:1.4.2</code></pre>
+      <pre class="code" data-lang="csharp"><code>// 코드에서 갈라야 할 때 — 최소한으로만
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();                  // 문서는 개발에서만
+    app.UseDeveloperExceptionPage();   // 스택 추적 노출 — 절대 운영 금지
+}
+else
+{
+    app.UseExceptionHandler("/error"); // 운영은 내용을 감춘다
+    app.UseHsts();
+}
+
+// 커스텀 환경도 됩니다
+if (app.Environment.IsEnvironment("LoadTest")) { /* 결제만 가짜로 */ }</code></pre>
+      <div class="note warn">
+        <b>운영에서 개발자 예외 페이지가 켜지는 사고가 흔합니다.</b>
+        커넥션 문자열·파일 경로·내부 클래스 이름이 그대로 노출됩니다.
+        배포 후 <b>일부러 500 을 한 번 내 보고</b> 응답 본문을 확인하세요 —
+        스택이 보이면 <code>ASPNETCORE_ENVIRONMENT</code> 가 안 걸린 것입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">설정을 안전하게 쓰는 세 가지 방법</h4>
+      <pre class="code" data-lang="csharp"><code>// ① IOptions — 대부분 이걸로. 시작 시 한 번 바인딩되고 안 바뀝니다
+public class PartyService(IOptions&lt;GameOptions&gt; opt)
+{
+    private readonly GameOptions _o = opt.Value;
+}
+
+// ② IOptionsSnapshot — 요청마다 다시 읽습니다 (Scoped 전용)
+//    appsettings 를 고치면 재시작 없이 반영됩니다
+public class ShopService(IOptionsSnapshot&lt;GameOptions&gt; opt) { ... }
+
+// ③ IOptionsMonitor — 싱글턴에서 변경을 감지할 때
+public class RewardScheduler(IOptionsMonitor&lt;GameOptions&gt; m)
+{
+    public RewardScheduler(IOptionsMonitor&lt;GameOptions&gt; m)
+        =&gt; m.OnChange(o =&gt; Reschedule(o.DailyRewardHourUtc));
+}</code></pre>
+      <div class="tw">
+        <table>
+          <thead><tr><th>쓸 것</th><th>언제</th><th>주의</th></tr></thead>
+          <tbody>
+            <tr><td><b>IOptions</b></td><td>거의 전부</td><td>바뀌어도 재시작 전엔 그대로</td></tr>
+            <tr><td><b>IOptionsSnapshot</b></td><td>운영 중 조절할 값<br>(이벤트 배율·확률)</td><td><b>싱글턴에 주입 못 합니다</b></td></tr>
+            <tr><td><b>IOptionsMonitor</b></td><td>싱글턴·백그라운드 작업</td><td>콜백이 <b>여러 번</b> 불릴 수 있습니다</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        <b><code>ValidateOnStart()</code> 는 반드시 켜세요.</b>
+        오타 난 설정 때문에 <b>배포 30분 뒤 첫 결제에서</b> 터지는 것보다,
+        <b>시작하다 죽는 것</b>이 훨씬 낫습니다.
+        무중단 배포에서는 새 인스턴스가 준비 실패로 잡히고
+        <b>기존 인스턴스가 그대로 트래픽을 받습니다</b> — 사고가 아예 안 납니다.
       </div>
     </div>
   </div>
@@ -429,6 +634,147 @@ builder.Services.AddSignalR()
       </div>
     </div>
   </div>
+
+  <h3 class="sub rv">서버가 먼저 말을 거는 방법 — 무엇을 고를까</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>방식</th><th>지연</th><th>방향</th><th>맞는 곳</th><th>대가</th></tr></thead>
+      <tbody>
+        <tr><td><b>폴링</b> (5초마다 GET)</td><td>~5초</td><td>클라 → 서버</td><td>우편함 뱃지 · 공지</td><td>가장 단순 · <b>서버 요청 수가 인원에 비례</b></td></tr>
+        <tr><td><b>롱 폴링</b></td><td>~1초</td><td>서버 → 클라(흉내)</td><td>구형 클라 호환</td><td>커넥션을 붙잡아 둠</td></tr>
+        <tr><td><b>SignalR</b> (WebSocket)</td><td>50~200ms</td><td>양방향</td><td><b>로비 · 채팅 · 알림 · 파티 초대</b></td><td>연결 유지 비용 · 서버 늘리면 백플레인 필요</td></tr>
+        <tr><td><b>푸시 알림</b> (FCM·APNs)</td><td>수 초</td><td>서버 → 앱</td><td><b>앱이 꺼져 있을 때</b></td><td>도착 보장 없음 · OS 정책에 좌우</td></tr>
+        <tr><td><b>UDP 커스텀</b></td><td>10~40ms</td><td>양방향</td><td>실시간 전투 · 위치 동기화</td><td>직접 다 만들어야 함 → 🌐 게임 서버 탭</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note tip rv">
+    <b>대부분의 게임은 SignalR + 푸시 알림 두 개면 충분합니다.</b>
+    앱이 켜져 있으면 SignalR 로, 꺼져 있으면 푸시로 —
+    <b>같은 이벤트를 두 경로로</b> 보내고 클라이언트가 중복을 걸러 냅니다.
+    "우편 도착"이 앱을 껐다 켜도 안 사라지는 것은 <b>서버에 우편 목록이 남아 있기</b> 때문이지
+    실시간 채널 덕분이 아닙니다 — <b>실시간은 항상 보조 수단</b>입니다.
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 208" role="img" aria-label="서버가 두 대로 늘면 1번 서버에 붙은 사용자가 2번 서버에 붙은 길드원에게 메시지를 못 보낸다. 레디스 백플레인을 붙이면 모든 서버가 같은 채널을 구독해 어느 서버에 붙어 있든 메시지가 전달된다">
+      <text x="16" y="16" class="lbl">서버가 2대가 되는 순간 생기는 문제 — 그리고 백플레인</text>
+      <text x="16" y="38" class="lbl" font-size="10">백플레인이 없으면</text>
+      <rect class="bx bx-warn" x="16" y="46" width="300" height="66"/>
+      <rect class="bx" x="30" y="58" width="80" height="42"/>
+      <text x="70" y="76" font-size="10" text-anchor="middle">서버 A</text>
+      <text x="70" y="91" font-size="9" text-anchor="middle" class="lbl">유저1 접속</text>
+      <rect class="bx" x="222" y="58" width="80" height="42"/>
+      <text x="262" y="76" font-size="10" text-anchor="middle">서버 B</text>
+      <text x="262" y="91" font-size="9" text-anchor="middle" class="lbl">유저2 접속</text>
+      <path class="ln" d="M112 79 L218 79" stroke-dasharray="4 4"/>
+      <text x="165" y="74" font-size="10" text-anchor="middle" class="lbl">✕ 전달 안 됨</text>
+      <text x="366" y="38" class="lbl" font-size="10">Redis 백플레인을 붙이면</text>
+      <rect class="bx bx-ok" x="366" y="46" width="298" height="66"/>
+      <rect class="bx" x="380" y="58" width="76" height="42"/>
+      <text x="418" y="76" font-size="10" text-anchor="middle">서버 A</text>
+      <text x="418" y="91" font-size="9" text-anchor="middle" class="lbl">유저1</text>
+      <rect class="bx" x="574" y="58" width="76" height="42"/>
+      <text x="612" y="76" font-size="10" text-anchor="middle">서버 B</text>
+      <text x="612" y="91" font-size="9" text-anchor="middle" class="lbl">유저2</text>
+      <rect class="bx" x="476" y="60" width="80" height="38"/>
+      <text x="516" y="76" font-size="10" text-anchor="middle">Redis</text>
+      <text x="516" y="90" font-size="9" text-anchor="middle" class="lbl">pub/sub</text>
+      <path class="fl" d="M458 79 L472 79"/>
+      <path class="fl" d="M560 79 L570 79"/>
+      <circle class="pk" r="3">
+        <animateMotion dur="2.2s" repeatCount="indefinite" path="M458 79 L472 79 L560 79 L570 79"/></circle>
+      <text x="16" y="138" class="lbl" font-size="10">한 대로 개발하면 절대 안 보이는 버그입니다 — "내 PC 에선 채팅이 되는데 운영에서 반만 와요".</text>
+      <text x="16" y="154" class="lbl" font-size="10">백플레인은 메시지를 옮겨 줄 뿐, 누가 어디 붙었는지 기억하지 않습니다. 그룹 정보는 접속할 때마다 다시 넣습니다.</text>
+      <text x="16" y="170" class="lbl" font-size="10">로드밸런서의 sticky 세션도 함께 필요합니다 — 협상(negotiate)과 실제 연결이 다른 서버로 가면 연결이 안 섭니다.</text>
+      <text x="16" y="186" class="lbl" font-size="10">인원이 아주 많아지면 Redis 가 병목이 됩니다. 그때는 채널을 길드·지역 단위로 쪼갭니다.</text>
+    </svg>
+    <div class="cap">SignalR 의 확장 문제는 대부분 <b>"메시지가 반만 도착한다"</b>는 증상으로 옵니다 — 서버 대수만큼 확률이 갈립니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">클라이언트 — 재연결과 놓친 것 당겨오기</h4>
+      <pre class="code" data-lang="csharp"><code>// Unity·콘솔 공통 (Microsoft.AspNetCore.SignalR.Client)
+var conn = new HubConnectionBuilder()
+    .WithUrl("https://api.game.com/hub/lobby", o =&gt;
+        o.AccessTokenProvider = () =&gt; Task.FromResult(_token)!)
+    .WithAutomaticReconnect(new[] {                 // 재시도 간격을 직접
+        TimeSpan.Zero, TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15) })
+    .Build();
+
+conn.On&lt;string, string&gt;("GuildChat", (who, text) =&gt; Ui.AddChat(who, text));
+conn.On&lt;MailDto&gt;("MailArrived", m =&gt; Ui.MailBadge(m));
+
+// ★ 재연결 직후가 핵심 — 끊겨 있던 동안의 것을 REST 로 당겨온다
+conn.Reconnected += async _ =&gt;
+{
+    var missed = await _http.GetFromJsonAsync&lt;MailDto[]&gt;(
+        $"/mail?since={_lastSeenUtc:o}");
+    foreach (var m in missed!) Ui.MailBadge(m);
+    _lastSeenUtc = DateTime.UtcNow;
+};
+
+conn.Closed += async _ =&gt;                            // 전부 실패하면 수동 재시도
+{
+    await Task.Delay(TimeSpan.FromSeconds(30));
+    await conn.StartAsync();
+};
+
+await conn.StartAsync();</code></pre>
+      <div class="note warn">
+        <b>실시간으로 온 것만 믿고 화면을 만들면 반드시 구멍이 납니다.</b>
+        지하철·엘리베이터에서 30초 끊기는 것이 정상입니다.
+        <b>화면의 진실은 REST 조회</b>, 실시간은 <b>"지금 다시 조회해라"는 신호</b>로 쓰는 것이
+        가장 튼튼한 설계입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">서버 — 실전에서 걸리는 것들</h4>
+      <pre class="code" data-lang="csharp"><code>builder.Services.AddSignalR(o =&gt;
+{
+    o.EnableDetailedErrors = builder.Environment.IsDevelopment();
+    o.MaximumReceiveMessageSize = 32 * 1024;    // 채팅에 32KB 면 충분
+    o.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+    o.KeepAliveInterval     = TimeSpan.FromSeconds(10);
+})
+.AddStackExchangeRedis(cfg.GetConnectionString("Redis")!,
+    o =&gt; o.Configuration.ChannelPrefix = RedisChannel.Literal("game"));
+
+// 쿼리스트링 토큰 — 웹소켓은 Authorization 헤더를 못 붙이는 클라가 있습니다
+builder.Services.Configure&lt;JwtBearerOptions&gt;(
+    JwtBearerDefaults.AuthenticationScheme, o =&gt;
+{
+    o.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = ctx =&gt;
+        {
+            var t = ctx.Request.Query["access_token"];
+            if (!string.IsNullOrEmpty(t) &amp;&amp;
+                ctx.HttpContext.Request.Path.StartsWithSegments("/hub"))
+                ctx.Token = t;
+            return Task.CompletedTask;
+        }
+    };
+});</code></pre>
+      <pre class="code" data-lang="csharp"><code>// 허브에서 무거운 일을 하지 마세요 — 큐에 넣고 바로 반환
+public async Task SendGuild(string text)
+{
+    if (text.Length &gt; 200) throw new HubException("너무 깁니다");
+    if (!_rate.TryAcquire(Context.UserIdentifier!))   // 도배 방지
+        throw new HubException("잠시 후 다시");
+
+    await _chatQueue.EnqueueAsync(new ChatMsg(Context.UserIdentifier!, text));
+}</code></pre>
+      <ul class="tx">
+        <li><b>연결 수 = 메모리</b>입니다 — 대략 <b>연결 하나에 수십 KB</b>. 10만 연결이면 인스턴스를 나눠야 합니다</li>
+        <li><b>HubException 만 클라에 문구가 전달</b>됩니다. 다른 예외는 "An unexpected error" 로 감춰집니다</li>
+        <li><b>OnDisconnectedAsync 는 안 불릴 수 있습니다</b> — 프로세스가 죽으면 그냥 사라집니다. 접속 상태를 DB 에 쓰려면 <b>TTL 있는 Redis 키</b>로</li>
+      </ul>
+    </div>
+  </div>
 </section>
 
 
@@ -672,6 +1018,112 @@ public class ShopTests(ApiFixture f) : IClassFixture&lt;ApiFixture&gt;
       </div>
     </div>
   </div>
+
+  <h3 class="sub rv">무엇을 어느 층에서 테스트할까</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>층</th><th>테스트할 것</th><th>속도</th><th>비율</th><th>가짜로 대체하는 것</th></tr></thead>
+      <tbody>
+        <tr><td><b>단위</b></td><td>데미지 공식 · 확률 · 레벨 곡선 · 인벤 규칙</td><td>ms</td><td>~70%</td><td>전부(순수 함수로 뽑아 두면 가짜조차 필요 없음)</td></tr>
+        <tr><td><b>통합</b></td><td>엔드포인트 + <b>진짜 DB</b> · 트랜잭션 · 동시성</td><td>초</td><td>~25%</td><td>결제 · 푸시 · 외부 API 만</td></tr>
+        <tr><td><b>E2E</b></td><td>로그인→상점→구매→인벤 반영 한 흐름</td><td>수십 초</td><td>~5%</td><td>없음</td></tr>
+        <tr><td><b>부하</b></td><td>동접 목표에서 p99 와 에러율</td><td>분</td><td>배포 전 1회</td><td>없음(운영과 같은 규모로)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note tip rv">
+    <b>게임 백엔드는 통합 테스트의 값어치가 유난히 큽니다.</b>
+    버그의 대부분이 <b>"DB 를 낀 상태에서만"</b> 드러나기 때문입니다 —
+    중복 구매 · 재화 마이너스 · 트랜잭션 범위 실수.
+    Testcontainers 로 <b>진짜 Postgres 를 띄우는 것</b>이 SQLite 인메모리로 때우는 것보다 훨씬 낫습니다.
+    인메모리는 <b>동시성·락·타입 차이를 못 재현</b>해서, 정작 잡아야 할 버그를 통과시킵니다.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">동시 요청 — 실제 사고를 재현하는 테스트</h4>
+      <pre class="code" data-lang="csharp"><code>[Fact]
+public async Task 한정_아이템은_재고만큼만_팔린다()
+{
+    await Seed.ItemAsync(id: 77, stock: 10);
+
+    // 100명이 동시에 산다
+    var clients = Enumerable.Range(0, 100)
+        .Select(i =&gt; f.CreateAuthedClient(playerId: 1000 + i));
+
+    var results = await Task.WhenAll(clients.Select(c =&gt;
+        c.PostAsJsonAsync("/shop/buy", new { itemId = 77, count = 1 })));
+
+    var ok = results.Count(r =&gt; r.IsSuccessStatusCode);
+    Assert.Equal(10, ok);                                   // ★ 정확히 10명
+    Assert.Equal(0, await Db.StockOfAsync(77));             // 마이너스 금지
+    Assert.Equal(10, await Db.PurchaseLogCountAsync(77));   // 로그도 정확히
+}
+
+[Fact]
+public async Task 같은_요청을_두_번_보내도_한_번만_처리된다()
+{
+    var key = Guid.NewGuid().ToString();
+    var body = new { itemId = 1, count = 1 };
+
+    var c = f.CreateAuthedClient(playerId: 7);
+    c.DefaultRequestHeaders.Add("Idempotency-Key", key);
+
+    var r1 = await c.PostAsJsonAsync("/shop/buy", body);
+    var r2 = await c.PostAsJsonAsync("/shop/buy", body);   // 재전송
+
+    Assert.True(r1.IsSuccessStatusCode &amp;&amp; r2.IsSuccessStatusCode);
+    Assert.Equal(await r1.Content.ReadAsStringAsync(),
+                 await r2.Content.ReadAsStringAsync());     // 같은 결과
+    Assert.Equal(1, await Db.PurchaseLogCountAsync(1));     // 차감은 한 번
+}</code></pre>
+      <div class="note warn">
+        <b>이 두 테스트가 통과하지 않는 서버는 반드시 사고가 납니다.</b>
+        모바일에서 <b>재전송은 버그가 아니라 일상</b>입니다 —
+        지하철에서 응답을 못 받은 클라이언트가 자동으로 다시 보냅니다.
+        <b>재고 없는 아이템이 200개 팔린 사고</b>는 대부분 위쪽 테스트가 없어서 생깁니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">외부 의존은 가짜로 — 그러나 DB 는 진짜로</h4>
+      <pre class="code" data-lang="csharp"><code>public class ApiFixture : WebApplicationFactory&lt;Program&gt;
+{
+    protected override void ConfigureWebHost(IWebHostBuilder b) =&gt;
+        b.ConfigureTestServices(s =&gt;
+        {
+            // 결제·푸시만 가짜로 바꾼다
+            s.RemoveAll&lt;IStoreVerifier&gt;();
+            s.AddSingleton&lt;IStoreVerifier, AlwaysValidVerifier&gt;();
+            s.RemoveAll&lt;IPushSender&gt;();
+            s.AddSingleton&lt;IPushSender, RecordingPushSender&gt;();
+
+            // 시간도 고정 — "매일 0시 보상" 같은 것을 테스트하려면 필수
+            s.AddSingleton&lt;TimeProvider&gt;(
+                new FakeTimeProvider(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
+        });
+}
+
+// 확률은 시드를 고정해서 검증합니다
+[Fact]
+public void 뽑기_확률이_표와_맞는다()
+{
+    var rng = new Random(42);
+    var box = new GachaBox(rng);
+    var counts = Enumerable.Range(0, 100_000)
+        .Select(_ =&gt; box.Draw().Grade)
+        .GroupBy(g =&gt; g).ToDictionary(g =&gt; g.Key, g =&gt; g.Count());
+
+    Assert.InRange(counts["SSR"] / 100_000.0, 0.028, 0.032);   // 표기 3%
+}</code></pre>
+      <ul class="tx">
+        <li><b><code>TimeProvider</code></b>(.NET 8+)를 쓰면 <code>DateTime.UtcNow</code> 를 테스트에서 갈아 끼울 수 있습니다 — <b>일일 보상·쿨타임·이벤트 기간</b> 테스트가 가능해집니다</li>
+        <li><b>확률 표기는 법적 고지 대상</b>인 나라가 많습니다. 표와 코드가 어긋나지 않는지 <b>테스트로 묶어 두세요</b></li>
+        <li>테스트마다 DB 를 <b>트랜잭션으로 감싸 롤백</b>하거나 <code>Respawn</code> 으로 비웁니다 — 순서 의존은 반드시 언젠가 깨집니다</li>
+        <li><code>dotnet test --collect:"XPlat Code Coverage"</code> 로 커버리지를 봅니다. <b>숫자를 목표로 삼지 말고</b>, 재화·결제 경로가 비어 있는지만 확인하세요</li>
+      </ul>
+    </div>
+  </div>
 </section>
 
 
@@ -727,6 +1179,117 @@ app.MapHealthChecks("/health/ready");   // 받을 준비가 됐나 (DB·캐시 �
       </div>
     </div>
   </div>
+
+  <h3 class="sub rv">헬스체크 두 개를 갈라야 하는 이유</h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 196" role="img" aria-label="배포 시 새 버전은 먼저 프로세스가 살아 있다는 live 체크를 통과하고, 그 다음 DB와 캐시 연결까지 확인하는 ready 체크를 통과해야 로드밸런서가 트래픽을 넣는다. ready만 실패하면 재시작 없이 트래픽만 빠지고, live가 실패하면 컨테이너가 재시작된다">
+      <text x="16" y="16" class="lbl">새 버전을 띄웠을 때 — 트래픽이 들어오기까지</text>
+      <rect class="bx" x="16" y="34" width="126" height="56"/>
+      <text x="79" y="56" font-size="11" text-anchor="middle">컨테이너 시작</text>
+      <text x="79" y="72" font-size="10" text-anchor="middle" class="lbl">프로세스 뜸</text>
+      <path class="fl" d="M144 62 L176 62"/>
+      <rect class="bx" x="178" y="34" width="140" height="56"/>
+      <text x="248" y="52" font-size="11" text-anchor="middle">/health/live</text>
+      <text x="248" y="68" font-size="10" text-anchor="middle" class="lbl">살아 있나?</text>
+      <text x="248" y="81" font-size="10" text-anchor="middle" class="lbl">실패 → 재시작</text>
+      <path class="fl" d="M320 62 L352 62"/>
+      <rect class="bx" x="354" y="34" width="146" height="56"/>
+      <text x="427" y="52" font-size="11" text-anchor="middle">/health/ready</text>
+      <text x="427" y="68" font-size="10" text-anchor="middle" class="lbl">DB · 캐시 붙었나?</text>
+      <text x="427" y="81" font-size="10" text-anchor="middle" class="lbl">실패 → 대기</text>
+      <path class="fl" d="M502 62 L534 62"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="3.2s" repeatCount="indefinite" path="M144 62 L176 62 L320 62 L352 62 L502 62 L534 62"/></circle>
+      <rect class="bx bx-ok" x="536" y="34" width="128" height="56"/>
+      <text x="600" y="56" font-size="11" text-anchor="middle">트래픽 투입</text>
+      <text x="600" y="72" font-size="10" text-anchor="middle" class="lbl">LB 가 넣기 시작</text>
+      <text x="16" y="118" class="lbl" font-size="10">둘을 하나로 합치면: DB 가 잠깐 끊긴 순간 live 도 실패 → 멀쩡한 서버가 통째로 재시작합니다.</text>
+      <text x="16" y="134" class="lbl" font-size="10">그 재시작이 남은 서버로 트래픽을 몰고, 그쪽 DB 커넥션도 말라붙어 연쇄로 무너집니다.</text>
+      <text x="16" y="150" class="lbl" font-size="10">ready 만 떨어지면 트래픽만 빠지고 프로세스는 살아 있다가, DB 가 돌아오면 스스로 복귀합니다.</text>
+      <text x="16" y="166" class="lbl" font-size="10">ready 는 의존성을 보고, live 는 절대 보지 않는다 — 이 한 줄이 규칙 전부입니다.</text>
+      <text x="16" y="182" class="lbl" font-size="10">기동에 오래 걸리면 startup 체크를 따로 둡니다(캐시 예열·마이그레이션 확인).</text>
+    </svg>
+    <div class="cap"><b>장애가 장애를 부르는 전형적인 경로</b>가 헬스체크를 하나로 합쳤을 때 생깁니다 — 재시작은 회복이 아니라 부하입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">배포 전략 — 무엇을 고를까</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>전략</th><th>동작</th><th>롤백</th><th>비용</th></tr></thead>
+          <tbody>
+            <tr><td><b>롤링</b></td><td>한 대씩 교체</td><td>느림(다시 롤링)</td><td>낮음 — <b>기본값</b></td></tr>
+            <tr><td><b>블루·그린</b></td><td>새 세트를 통째로 띄우고 <b>스위치 한 번</b></td><td><b>즉시</b>(스위치 되돌리기)</td><td>서버 2배(잠깐)</td></tr>
+            <tr><td><b>카나리</b></td><td>5% → 25% → 100%</td><td>빠름</td><td>지표 자동화 필요</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="csharp"><code>// 그레이스풀 셧다운 — 진행 중인 요청을 마치고 죽는다
+builder.Services.Configure&lt;HostOptions&gt;(o =&gt;
+{
+    o.ShutdownTimeout = TimeSpan.FromSeconds(30);
+    o.BackgroundServiceExceptionBehavior =
+        BackgroundServiceExceptionBehavior.StopHost;   // 조용히 죽는 것 방지
+});
+
+// 종료 신호가 오면 ready 를 먼저 내려 트래픽부터 끊는다
+public class DrainService(IHostApplicationLifetime life) : IHostedService
+{
+    public static volatile bool Draining;
+    public Task StartAsync(CancellationToken _)
+    {
+        life.ApplicationStopping.Register(() =&gt;
+        {
+            Draining = true;              // ready 가 503 을 뱉기 시작
+            Thread.Sleep(5000);           // LB 가 눈치챌 시간 (체크 주기의 2배)
+        });
+        return Task.CompletedTask;
+    }
+    public Task StopAsync(CancellationToken _) =&gt; Task.CompletedTask;
+}
+
+app.MapHealthChecks("/health/ready", new()
+{
+    Predicate = c =&gt; c.Tags.Contains("ready"),
+    ResultStatusCodes = { [HealthStatus.Unhealthy] = 503 }
+});</code></pre>
+      <div class="note warn">
+        <b>"종료 신호 → 즉시 종료" 면 무중단이 아닙니다.</b>
+        로드밸런서가 이 서버를 뺐다는 것을 알기까지 <b>헬스체크 주기만큼 시차</b>가 있습니다.
+        그 사이에 들어온 요청은 <b>연결이 끊긴 채</b> 사라집니다 —
+        결제 도중이었다면 <b>돈은 나갔는데 아이템이 없는</b> 상태가 됩니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">DB 마이그레이션 — 배포와 순서가 어긋나면 터집니다</h4>
+      <p>배포 중에는 <b>구버전과 신버전이 동시에</b> 같은 DB 를 봅니다.
+      그래서 스키마 변경은 <b>항상 두 번에 나눠</b> 배포합니다.</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>하고 싶은 것</th><th>1차 배포</th><th>2차 배포(다음 주)</th></tr></thead>
+          <tbody>
+            <tr><td>컬럼 추가</td><td><b>nullable 로</b> 추가 + 신버전이 씀</td><td>NOT NULL 로 조이기</td></tr>
+            <tr><td>컬럼 삭제</td><td>코드에서 <b>안 쓰게만</b> 바꾸기</td><td>실제 DROP</td></tr>
+            <tr><td>컬럼 이름 변경</td><td>새 컬럼 추가 + <b>양쪽에 쓰기</b></td><td>옛 컬럼 DROP</td></tr>
+            <tr><td>타입 변경</td><td>새 컬럼 + 백필</td><td>스위치 후 옛 컬럼 DROP</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="bash"><code># 마이그레이션은 앱 시작 시가 아니라 배포 파이프라인에서 따로
+dotnet ef migrations bundle -o migrate       # 실행 파일로 뽑아 두고
+./migrate --connection "$DB"                 # 배포 직전 한 번만 실행
+
+# 앱에서 자동 실행은 위험합니다 — 인스턴스 5대가 동시에 걸면 충돌
+# app.Services.GetRequiredService&lt;GameDb&gt;().Database.Migrate();  ← 하지 마세요</code></pre>
+      <ul class="tx">
+        <li>큰 테이블에 <b>인덱스를 그냥 걸면 테이블이 잠깁니다</b> — Postgres 는 <code>CREATE INDEX CONCURRENTLY</code>. 자세한 것은 🗄️ <b>DB 가이드</b></li>
+        <li><b>롤백 스크립트를 미리 써 두고</b>, 스테이징에서 <b>실제로 되돌려 보세요</b>. 안 해 본 롤백은 롤백이 아닙니다</li>
+        <li>배포 태그를 로그·메트릭에 심어 두면 <b>"언제부터 에러가 늘었나"</b>가 즉시 보입니다 — <code>ASPNETCORE_VERSION</code> 을 환경 변수로</li>
+      </ul>
+    </div>
+  </div>
 </section>
 
 
@@ -766,6 +1329,86 @@ app.MapHealthChecks("/health/ready");   // 받을 준비가 됐나 (DB·캐시 �
         <b>⚡ 대규모 트래픽</b> 탭에서 이어집니다.
         실시간 전투가 필요하면 <b>🌐 게임 서버</b>,
         DB 튜닝은 🗄️ <b>데이터베이스 가이드</b>로.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub rv">출시 첫날에 실제로 터지는 것들 — 증상 → 원인</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>증상</th><th>가장 흔한 원인</th><th>먼저 볼 것</th><th>미리 막는 법</th></tr></thead>
+      <tbody>
+        <tr><td>재화가 마이너스</td><td>차감을 <b>읽고-쓰기</b>로 함(동시 요청)</td><td>구매 로그의 같은 밀리초 중복</td><td>DB 에서 <code>UPDATE ... WHERE gold &gt;= @c</code> 한 문장으로</td></tr>
+        <tr><td>아이템이 두 배로 지급</td><td>클라 재전송 + 멱등 키 없음</td><td>같은 요청 본문 2건</td><td><b>Idempotency-Key</b> + 결과 캐시</td></tr>
+        <tr><td>응답이 갑자기 다 느려짐</td><td>DB 커넥션 풀 고갈</td><td>대기 중인 커넥션 수 · 느린 쿼리</td><td>풀 크기 &lt; DB 최대 접속, N+1 제거</td></tr>
+        <tr><td>메모리가 계속 오름</td><td>정적 컬렉션에 캐시를 쌓음</td><td>GC 후에도 안 줄어드는 힙</td><td><code>MemoryCache</code> + <b>크기 제한과 만료</b></td></tr>
+        <tr><td>간헐적 500</td><td><code>async void</code> · 잡히지 않은 백그라운드 예외</td><td>스택 없는 예외 로그</td><td><code>async Task</code> 로, <code>StopHost</code> 설정</td></tr>
+        <tr><td>로그인만 몰려서 죽음</td><td>토큰 검증에서 매번 DB 조회</td><td>로그인 엔드포인트 p99</td><td>JWT <b>자체 검증</b>(DB 안 감) + 짧은 만료</td></tr>
+        <tr><td>랭킹 조회가 서버를 먹음</td><td>매 요청마다 <code>ORDER BY</code> 전체 정렬</td><td>DB CPU</td><td>Redis <b>Sorted Set</b> · 결과 캐시 30초</td></tr>
+        <tr><td>배포하자 에러 폭증</td><td>설정 누락 · 마이그레이션 순서</td><td>배포 태그별 에러율</td><td><code>ValidateOnStart</code> + 카나리</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">출시 직전 — 이건 꼭 해 보고 여세요</h4>
+      <ul class="tx">
+        <li>☐ <b>목표 동접의 2배</b>로 부하 테스트 — p99 와 에러율을 숫자로 적어 둘 것</li>
+        <li>☐ <b>DB 를 일부러 끊어</b> 보기 — 앱이 죽는지, ready 만 떨어지는지</li>
+        <li>☐ <b>Redis 를 일부러 끊어</b> 보기 — 캐시가 없으면 <b>느려질 뿐</b>이어야 정상</li>
+        <li>☐ <b>백업에서 실제로 복구</b> — 새 인스턴스에 붓고 게임이 도는지</li>
+        <li>☐ <b>롤백을 실제로 실행</b> — 몇 분 걸리는지 재 볼 것</li>
+        <li>☐ <b>점검 모드 켜고 끄기</b> — 클라이언트 문구까지 확인</li>
+        <li>☐ <b>강제 업데이트</b> 스위치 — 구버전으로 접속해 확인</li>
+        <li>☐ 로그에 <b>토큰·주민번호·카드번호가 안 찍히는지</b> grep</li>
+        <li>☐ 알림이 <b>실제 담당자 휴대폰</b>까지 오는지 (테스트 알람 한 번)</li>
+      </ul>
+      <div class="note warn">
+        <b>가장 자주 빠뜨리는 것은 백업 복구 리허설입니다.</b>
+        백업이 <b>돌고 있는지</b>와 <b>복구가 되는지</b>는 다른 문제입니다.
+        스키마만 있고 데이터가 비어 있거나, 복구에 6시간이 걸린다는 사실을
+        <b>사고 당일에 알게 되는</b> 경우가 실제로 많습니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">첫 주에 볼 대시보드 — 이 여섯 줄이면 됩니다</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>지표</th><th>정상</th><th>이러면 대응</th></tr></thead>
+          <tbody>
+            <tr><td>에러율(5xx)</td><td>&lt; 0.1%</td><td><b>1% 넘으면 롤백 검토</b></td></tr>
+            <tr><td>p99 응답</td><td>&lt; 300ms</td><td>1초 넘으면 DB·캐시 확인</td></tr>
+            <tr><td>DB 커넥션 사용률</td><td>&lt; 70%</td><td>90% 넘으면 곧 고갈</td></tr>
+            <tr><td>CPU</td><td>&lt; 60%</td><td>80% 지속이면 증설</td></tr>
+            <tr><td>동시 접속</td><td>—</td><td>증설 판단의 기준선</td></tr>
+            <tr><td>결제 성공률</td><td>&gt; 98%</td><td><b>떨어지면 즉시 확인</b> — 돈 문제</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="csharp"><code>// OpenTelemetry 한 번 붙이면 위 지표가 거의 다 나옵니다
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r =&gt; r.AddService("game-api",
+        serviceVersion: Environment.GetEnvironmentVariable("APP_VERSION")))
+    .WithMetrics(m =&gt; m
+        .AddAspNetCoreInstrumentation()      // 요청 수 · 지연 · 상태 코드
+        .AddRuntimeInstrumentation()         // GC · 스레드풀 · 힙
+        .AddNpgsqlInstrumentation()          // DB 커넥션 · 쿼리 시간
+        .AddOtlpExporter())
+    .WithTracing(t =&gt; t
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddOtlpExporter());
+
+// 게임 고유 지표는 직접 셉니다
+var purchases = meter.CreateCounter&lt;long&gt;("game.purchase.count");
+purchases.Add(1, new KeyValuePair&lt;string, object?&gt;("result", "ok"));</code></pre>
+      <div class="note tip">
+        <b>알람은 적게, 대신 반드시 반응하도록.</b>
+        처음부터 알람을 스무 개 걸면 <b>전부 무시하게</b> 됩니다.
+        <b>에러율 · 결제 성공률 · 응답 지연</b> 세 개로 시작하고,
+        실제로 사고가 난 뒤에 <b>그 사고를 먼저 알려 줬을 지표</b>를 하나씩 더하세요.
       </div>
     </div>
   </div>

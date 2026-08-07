@@ -1,6 +1,6 @@
-# 학습 가이드 소스 (Python · Java · JS/TS · C#/Unity · C++ · Rust · Database · Web Server)
+# 학습 가이드 소스 (Python · Java · JS/TS · C#/Unity · C++ · Rust · Database · Web Server · CS 기술)
 
-`public/*-web/index.html` 여덟 개의 **원본**입니다.
+`public/*-web/index.html` 아홉 개의 **원본**입니다.
 편집은 여기서 하고, 빌드하면 조각들이 합쳐져 각각 단일 HTML로 나갑니다.
 
 > ⚠️ `public/*-web/index.html` 을 직접 고치지 마세요. 다음 빌드에서 덮어써집니다.
@@ -9,15 +9,16 @@
 |---|---|---|---|
 | 🐍 Python | `guide-src/python/` | `/python-web/` | 14탭 · 207섹션 |
 | ☕ Java | `guide-src/java/` | `/java-web/` | 11탭 · 166섹션 |
-| 🟨 JS · TS | `guide-src/js-ts/` | `/js-ts-web/` | 11탭 · 178섹션 |
+| 🟨 JS · TS | `guide-src/js-ts/` | `/js-ts-web/` | 15탭 · 233섹션 |
 | 🟣 C# · Unity | `guide-src/csharp/` | `/csharp-web/` | 10탭 · 120섹션 |
 | 🔵 C++ | `guide-src/cpp/` | `/cpp-web/` | 8탭 · 88섹션 |
 | 🦀 Rust | `guide-src/rust/` | `/rust-web/` | 8탭 · 88섹션 |
 | 🗄️ Database | `guide-src/db/` | `/db-web/` | 10탭 · 154섹션 |
 | 🌐 Web Server | `guide-src/server/` | `/server-web/` | 11탭 · 152섹션 |
+| 🎓 CS 기술 | `guide-src/cs/` | `/cs-web/` | 12탭 · 156섹션 |
 
-여덟 가이드는 **뼈대 CSS 5개와 사이드바 스크립트를 공유**합니다(테마 동일).
-공유 조각은 `guide-src/shared/` 한 곳에만 있습니다 — **한 번 고치면 여덟 가이드에 함께 반영됩니다.**
+아홉 가이드는 **뼈대 CSS 5개와 사이드바 스크립트를 공유**합니다(테마 동일).
+공유 조각은 `guide-src/shared/` 한 곳에만 있습니다 — **한 번 고치면 아홉 가이드에 함께 반영됩니다.**
 예전에는 가이드마다 복사본을 두고 `cp` 로 퍼뜨렸는데, 한두 곳이 빠져 서로 어긋나는 일이 반복됐습니다.
 
 ## 🔵 C++ · 🦀 Rust 가이드의 4층 구조
@@ -51,8 +52,8 @@
 
 | 명령 | 하는 일 |
 |---|---|
-| `npm run build:guide` | 조각 → 각 `index.html` 생성 (여덟 가이드 모두) |
-| `npm run build:guide -- java` | 특정 가이드만 (`python` · `java` · `js-ts` · `csharp` · `cpp` · `rust` · `db` · `server`) |
+| `npm run build:guide` | 조각 → 각 `index.html` 생성 (아홉 가이드 모두) |
+| `npm run build:guide -- java` | 특정 가이드만 (`python` · `java` · `js-ts` · `csharp` · `cpp` · `rust` · `db` · `server` · `cs`) |
 | `npm run dev:guide` | 조각이 바뀌면 자동 재빌드 (작업 중 켜두세요) |
 | `npm run check:guide` | 결과물이 조각과 일치하는지 검사만 (커밋 전 확인용) |
 | `npm run verify:guide` | 빌드 + **정합성 점검** — 사이드바 ↔ 섹션 · 탭 ↔ pane · SEC_LV/EZ/CAP 커버리지 |
@@ -61,17 +62,17 @@
 ## 구조
 
 빌드 순서는 각 가이드의 `parts.json` 에 적힌 배열 그대로입니다.
-여덟 가이드가 같은 뼈대를 씁니다. 조각을 추가·삭제하면
+아홉 가이드가 같은 뼈대를 씁니다. 조각을 추가·삭제하면
 **`parts.json` 도 함께 고쳐야 합니다** (누락·고아 파일은 빌드가 에러로 잡아 줍니다).
 
 ```
 guide-src/
-  build.mjs            빌더 (의존성 없음 · 여덟 가이드를 모두 처리)
+  build.mjs            빌더 (의존성 없음 · 아홉 가이드를 모두 처리)
   verify.mjs           결과물 정합성 · 회귀 점검
   README.md            이 문서
 
-  shared/              ★ 여덟 가이드가 글자 하나까지 같이 쓰는 조각
-    css/                 여기를 고치면 여덟 가이드가 함께 바뀝니다
+  shared/              ★ 아홉 가이드가 글자 하나까지 같이 쓰는 조각
+    css/                 여기를 고치면 아홉 가이드가 함께 바뀝니다
       01-tokens-base-layout.css    디자인 토큰 · 기본 · 레이아웃
       02-typography-components.css 히어로 · 섹션 · 카드 · 코드 · 표 · 컨트롤
       03-demo-stage.css            데모 스테이지 · 탭별 전용 위젯
@@ -80,7 +81,7 @@ guide-src/
     js/
       05-nav.js          사이드바 그룹 ↔ 헤더 탭 줄 · 목차 난이도 색 · 탭 ↔ 내용 연결
 
-  <가이드>/            python · java · js-ts · csharp · cpp · rust · db · server
+  <가이드>/            python · java · js-ts · csharp · cpp · rust · db · server · cs
     parts.json         조각 순서 = 최종 파일의 순서
                        ("shared/…" 로 시작하면 공용 폴더에서 읽습니다)
     parts/
@@ -101,8 +102,8 @@ guide-src/
       99-tail.html         </script> · </body>
 ```
 
-공용 조각을 고칠 때는 **여덟 가이드가 모두 바뀐다는 점**을 염두에 두세요.
-`npm run verify:guide` 가 여덟 개를 한꺼번에 점검하므로 어긋나면 바로 드러납니다.
+공용 조각을 고칠 때는 **아홉 가이드가 모두 바뀐다는 점**을 염두에 두세요.
+`npm run verify:guide` 가 아홉 개를 한꺼번에 점검하므로 어긋나면 바로 드러납니다.
 
 Python 가이드만 데모 스크립트가 많아 `js/` 가 13개로 더 잘게 쪼개져 있습니다
 (`10-pandas-demos.js`, `30-numpy.js`, `80-algo.js` 등).
@@ -117,6 +118,7 @@ Python 가이드만 데모 스크립트가 많아 `js/` 가 13개로 더 잘게 
 | 🗄️ Database | 시작·설치 · SQL 기초 · SQL 전문가 · Oracle · PostgreSQL · MySQL/MariaDB · SQLite3 · 설계·튜닝 · **전문가(내부)** · 앱 연동 |
 | 🟣 C# · Unity | C# 기초 · C# 고급 · **Unity 기초** · **Unity 실전** · **게임 서버** · ASP.NET Core · 대규모 트래픽 · 데스크탑 · 실전 도구 · **전문가(CLR)** |
 | 🌐 Web Server | 시작·개념 · Nginx · Apache · Tomcat · Caddy · HTTPS·인증서 · **로드밸런싱** · 언어별 연동 · 성능·튜닝 · 보안·운영 · **전문가(내부)** |
+| 🎓 CS 기술 | 이산수학 · 선형대수·확률 · 계산이론 · 자료구조 · 알고리즘 · 컴퓨터구조 · 운영체제 · 네트워크 · 컴파일러 · 보안·암호 · 분산·동시성 · 소프트웨어 공학 |
 
 언어 가이드 세 개는 마지막 두 탭이 **대규모 트래픽 + 전문가**입니다.
 전문가 탭은 각 언어의 런타임 내부(CPython / JVM / V8)와
@@ -159,7 +161,7 @@ npm run check:guide       # 결과물이 조각과 일치하는지
 사이드바 링크 ↔ 섹션 id 일치, `SEC_LV`/`EZ` 커버리지, 태그 균형은
 빌드 결과물(`public/*-web/index.html`)을 대상으로 확인하는 것이 가장 확실합니다.
 
-## 여덟 가이드의 관계
+## 아홉 가이드의 관계
 
 - 각 가이드의 **사이드바·탭바에서 서로를 오갈 수 있습니다**
 - 포트폴리오 진입점(헤더 · 홈 히어로 · 홈 카드 · 푸터)은
@@ -170,6 +172,7 @@ npm run check:guide       # 결과물이 조각과 일치하는지
     (🟣 C# 은 여기에 **게임 엔진 · 게임 서버 · 데스크탑**까지 한 언어로 이어 붙인 형태입니다)
   - 🗄️ Database — SQL 문법 · DB별 방언 · 설치 · 튜닝 · 내부 구조 (언어 무관)
   - 🌐 Web Server — 배포 · 프록시 · HTTPS · 운영 (언어 무관)
+  - 🎓 CS 기술 — 수학 · 이론 · 하드웨어 · 시스템 · 설계 (언어·도구 무관 · 모든 가이드의 바닥층)
   - 파이썬 가이드의 `DB 연동` · `웹 · API` 탭은 **파이썬 관점**만 다루고
     나머지는 위 두 가이드로 링크합니다
 - **대규모 트래픽** 탭은 언어 가이드 세 개에 있지만 관점이 다릅니다
@@ -240,7 +243,7 @@ npm run check:guide       # 결과물이 조각과 일치하는지
 </div>
 ```
 
-- 스타일은 각 가이드의 `css/06-*.css` 맨 아래 **`개념 그림` 블록**에 있습니다(여덟 가이드 동일)
+- 스타일은 각 가이드의 `css/06-*.css` 맨 아래 **`개념 그림` 블록**에 있습니다(아홉 가이드 동일)
 - `aria-label` 은 **필수** — 그림을 못 보는 사용자에게 이 문장이 그림입니다
 - `prefers-reduced-motion` 에서는 움직임이 꺼지도록 이미 처리돼 있습니다
 - **텍스트가 `viewBox` 밖으로 나가지 않게** 하세요(아래쪽 라벨은 높이에 여유를 두고 배치)

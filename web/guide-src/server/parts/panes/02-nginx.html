@@ -127,6 +127,91 @@ nginx -V</code></pre>
     <code>nginx.org</code> 의 공식 저장소를 등록하면 <b>mainline 또는 stable</b> 최신 버전을 쓸 수 있습니다.
     다만 배포판 패키지와 <b>경로 구조가 조금 다르므로</b> 문서를 확인하세요.
   </div>
+
+  <div class="diag rv d2">
+    <svg viewBox="0 0 680 226" role="img" aria-label="Nginx는 마스터 프로세스 하나가 설정을 읽고 포트를 열며, 실제 요청은 워커 프로세스들이 처리한다. 워커 하나가 이벤트 루프로 수천 개의 연결을 동시에 다루기 때문에 연결 수가 늘어도 프로세스가 늘지 않는다. reload는 새 워커를 띄우고 옛 워커가 남은 요청을 마치게 해 무중단이 된다">
+      <text x="16" y="16" class="lbl">Nginx 가 요청을 처리하는 구조 — 왜 연결이 많아도 가벼운가</text>
+      <rect class="bx" x="16" y="30" width="176" height="60"/>
+      <text x="104" y="50" font-size="11" text-anchor="middle">마스터 프로세스</text>
+      <text x="104" y="66" font-size="9" text-anchor="middle" class="lbl">root 로 실행 · 설정 읽기</text>
+      <text x="104" y="79" font-size="9" text-anchor="middle" class="lbl">80·443 포트 열기</text>
+      <path class="ln" d="M194 48 L226 48"/>
+      <path class="ln" d="M194 60 L226 60"/>
+      <path class="ln" d="M194 72 L226 72"/>
+      <rect class="bx bx-ok" x="228" y="30" width="180" height="18"/>
+      <text x="318" y="43" font-size="9" text-anchor="middle" class="lbl">워커 1 — 연결 수천 개</text>
+      <rect class="bx bx-ok" x="228" y="52" width="180" height="18"/>
+      <text x="318" y="65" font-size="9" text-anchor="middle" class="lbl">워커 2 — 연결 수천 개</text>
+      <rect class="bx bx-ok" x="228" y="74" width="180" height="18"/>
+      <text x="318" y="87" font-size="9" text-anchor="middle" class="lbl">워커 N (보통 CPU 코어 수)</text>
+      <path class="fl" d="M410 60 L440 60"/>
+      <circle class="pk" r="3">
+        <animateMotion dur="2.4s" repeatCount="indefinite" path="M410 60 L440 60"/></circle>
+      <rect class="bx" x="442" y="30" width="222" height="62"/>
+      <text x="553" y="48" font-size="10" text-anchor="middle">워커 하나 안에서</text>
+      <text x="553" y="64" font-size="9" text-anchor="middle" class="lbl">이벤트 루프가 준비된 소켓만 골라 처리</text>
+      <text x="553" y="80" font-size="9" text-anchor="middle" class="lbl">연결 하나에 스레드 하나를 쓰지 않습니다</text>
+      <text x="16" y="114" class="lbl" font-size="10">reload 를 하면 — 무중단의 원리</text>
+      <rect class="bx" x="16" y="122" width="204" height="38"/>
+      <text x="118" y="138" font-size="9" text-anchor="middle" class="lbl">마스터가 새 설정을 검증</text>
+      <text x="118" y="151" font-size="9" text-anchor="middle" class="lbl">틀리면 아무 일도 안 일어남</text>
+      <path class="fl" d="M222 141 L250 141"/>
+      <rect class="bx bx-ok" x="252" y="122" width="190" height="38"/>
+      <text x="347" y="138" font-size="9" text-anchor="middle" class="lbl">새 워커를 띄워 새 요청 받기</text>
+      <text x="347" y="151" font-size="9" text-anchor="middle" class="lbl">여기부터 새 설정 적용</text>
+      <path class="fl" d="M444 141 L472 141"/>
+      <rect class="bx" x="474" y="122" width="190" height="38"/>
+      <text x="569" y="138" font-size="9" text-anchor="middle" class="lbl">옛 워커는 남은 요청만 마치고</text>
+      <text x="569" y="151" font-size="9" text-anchor="middle" class="lbl">스스로 종료</text>
+      <text x="16" y="184" class="lbl" font-size="10">그래서 reload 는 연결을 하나도 끊지 않습니다 — restart 와 달리 다운타임이 0 입니다.</text>
+      <text x="16" y="200" class="lbl" font-size="10">설정이 틀리면 새 워커가 안 떠서 옛 워커가 그대로 서비스합니다. nginx -t 를 먼저 치는 이유가 여기 있습니다.</text>
+      <text x="16" y="216" class="lbl" font-size="10">"워커를 늘리면 빨라진다"는 오해입니다 — 코어 수를 넘기면 문맥 전환만 늘어납니다(auto 가 정답).</text>
+    </svg>
+    <div class="cap">Apache 의 prefork 가 <b>연결 하나에 프로세스 하나</b>였던 것과 대비됩니다 — 이것이 <b>같은 하드웨어에서 동시 연결 수가 다른</b> 이유입니다.</div>
+  </div>
+
+  <h3 class="sub">막혔을 때 먼저 칠 명령</h3>
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:36%">알고 싶은 것</th><th>명령</th></tr>
+      <tr><td>설정 문법이 맞나</td><td><code>sudo nginx -t</code></td></tr>
+      <tr><td><b>최종 설정이 어떻게 되나</b></td><td><code>sudo nginx -T</code> — include 를 전부 펼칩니다</td></tr>
+      <tr><td>어느 파일 몇 번째 줄인가</td><td><code>nginx -t</code> 의 오류 메시지에 그대로 나옵니다</td></tr>
+      <tr><td>이 모듈이 있나</td><td><code>nginx -V 2&gt;&amp;1 | tr ' ' '\n' | grep module</code></td></tr>
+      <tr><td>왜 404 인가</td><td><code>tail -f /var/log/nginx/error.log</code> — <b>찾으려던 실제 경로</b>가 찍힙니다</td></tr>
+      <tr><td>어느 server 블록이 처리했나</td><td>로그 포맷에 <code>$server_name</code> 을 추가</td></tr>
+      <tr><td>업스트림이 얼마나 걸렸나</td><td>로그에 <code>$upstream_response_time</code></td></tr>
+      <tr><td>지금 연결 수</td><td><code>curl localhost/nginx_status</code> (<code>stub_status</code> 필요)</td></tr>
+      <tr><td>포트를 누가 잡고 있나</td><td><code>sudo ss -tlnp | grep :80</code></td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d2" data-lang="conf"><code># 진단에 필요한 값을 로그에 미리 넣어 두세요 — 사고 뒤에 넣으면 늦습니다
+log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                  '$status $body_bytes_sent "$http_referer" "$http_user_agent" '
+                  'rt=$request_time urt=$upstream_response_time '        # ★ 어디가 느린가
+                  'us=$upstream_status ua=$upstream_addr '               # ★ 어느 백엔드
+                  'srv=$server_name host=$host';                          # ★ 어느 블록
+
+access_log /var/log/nginx/access.log main;
+
+# 상태 페이지 — 로컬에서만
+server {
+    listen 127.0.0.1:8080;
+    location /nginx_status {
+        stub_status;
+        access_log off;
+    }
+}</code></pre>
+
+  <div class="note tip rv d2">
+    <b><code>$request_time</code> 과 <code>$upstream_response_time</code> 을 같이 남기면
+    범인을 즉시 가릅니다.</b>
+    둘이 비슷하면 <b>백엔드가 느린 것</b>이고,
+    <code>$request_time</code> 만 크면 <b>클라이언트 쪽 네트워크나 큰 응답 전송</b>입니다.
+    이 두 값이 없으면 "Nginx 가 느린가 앱이 느린가"를 놓고
+    <b>몇 시간을 허비</b>하게 됩니다.
+  </div>
 </section>
 
 <!-- ==================== n03 ==================== -->
@@ -258,6 +343,97 @@ location /api/ {
     <b>같은 설정을 여러 사이트에 복붙하지 마세요.</b>
     <code>snippets/</code> 로 빼 두면 한 곳만 고쳐도 전부 반영됩니다.
     보안 헤더·프록시 헤더·SSL 설정이 대표적인 대상입니다.
+  </div>
+
+  <div class="diag rv d2">
+    <svg viewBox="0 0 680 228" role="img" aria-label="요청 하나가 처리되기까지 Nginx는 먼저 listen 주소와 포트로 후보를 좁히고, Host 헤더를 server_name과 맞춰 server 블록을 고른 다음, 그 안에서 location을 우선순위 규칙에 따라 고른다. location은 파일에 적힌 순서가 아니라 정확 일치, 우선 접두사, 정규식, 일반 접두사 순으로 결정된다">
+      <text x="16" y="16" class="lbl">요청 하나가 어느 설정에 걸리는가 — 세 단계로 좁혀집니다</text>
+      <rect class="bx" x="16" y="30" width="140" height="48"/>
+      <text x="86" y="48" font-size="10" text-anchor="middle">① listen</text>
+      <text x="86" y="64" font-size="9" text-anchor="middle" class="lbl">IP · 포트로 후보 추림</text>
+      <path class="fl" d="M158 54 L186 54"/>
+      <rect class="bx" x="188" y="30" width="164" height="48"/>
+      <text x="270" y="48" font-size="10" text-anchor="middle">② server_name</text>
+      <text x="270" y="64" font-size="9" text-anchor="middle" class="lbl">Host 헤더와 대조 → server</text>
+      <path class="fl" d="M354 54 L382 54"/>
+      <circle class="pk" r="3">
+        <animateMotion dur="2.6s" repeatCount="indefinite" path="M158 54 L186 54 L354 54 L382 54"/></circle>
+      <rect class="bx bx-ok" x="384" y="30" width="280" height="48"/>
+      <text x="524" y="48" font-size="10" text-anchor="middle">③ location — 우선순위로 하나 선택</text>
+      <text x="524" y="64" font-size="9" text-anchor="middle" class="lbl">파일에 적힌 순서가 아닙니다</text>
+      <text x="16" y="100" class="lbl" font-size="10">location 이 골라지는 실제 순서</text>
+      <rect class="bx bx-ok" x="16" y="108" width="648" height="20"/>
+      <text x="26" y="122" font-size="9" class="lbl">1위  location = /path   정확히 일치 — 찾으면 즉시 확정, 더 안 봅니다</text>
+      <rect class="bx" x="16" y="132" width="648" height="20"/>
+      <text x="26" y="146" font-size="9" class="lbl">2위  location ^~ /path  가장 긴 접두사가 이것이면 정규식을 건너뜁니다</text>
+      <rect class="bx" x="16" y="156" width="648" height="20"/>
+      <text x="26" y="170" font-size="9" class="lbl">3위  location ~ /re     정규식 — 여기서만 "파일에 적힌 순서"가 의미를 가집니다 (첫 일치 채택)</text>
+      <rect class="bx" x="16" y="180" width="648" height="20"/>
+      <text x="26" y="194" font-size="9" class="lbl">4위  location /path     일반 접두사 — 정규식이 하나도 안 맞으면 가장 긴 것이 채택됩니다</text>
+      <text x="16" y="222" class="lbl" font-size="10">"위에 썼는데 아래 블록이 먹는다"는 혼란은 전부 이 표를 몰라서 생깁니다 — 접두사는 길이로, 정규식만 순서로 결정됩니다.</text>
+    </svg>
+    <div class="cap"><code>^~</code> 는 <b>"여기서 멈춰라"</b> 라는 뜻입니다 — 정적 파일 경로에 붙여 두면 아래의 정규식 <code>location</code> 이 가로채는 것을 막습니다.</div>
+  </div>
+
+  <pre class="code rv d2" data-lang="conf"><code>server {
+    listen 443 ssl default_server;
+    http2 on;
+    server_name example.com;
+    root /var/www/example;
+
+    # ① 정확히 일치 — 가장 빠릅니다. 호출이 잦은 경로에
+    location = / {
+        try_files /index.html =404;
+    }
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location = /robots.txt  { access_log off; log_not_found off; }
+
+    # ② ^~ — 정적 자원을 정규식이 가로채지 못하게 막습니다
+    location ^~ /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    # ③ 정규식 — 여기서만 파일 순서가 중요합니다
+    location ~* \.(?:jpg|jpeg|png|gif|webp|svg|woff2)$ {
+        expires 30d;
+        add_header Cache-Control "public";
+    }
+
+    # 숨김 파일 차단 (.git · .env) — 반드시 넣으세요
+    location ~ /\.(?!well-known) {
+        deny all;
+        access_log off;
+    }
+
+    # ④ 일반 접두사 — 가장 긴 것이 이깁니다
+    location /api/ {
+        include /etc/nginx/snippets/proxy-common.conf;
+        proxy_pass http://app:3000;          # 끝 슬래시 주의 (아래 warn)
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;    # SPA 폴백
+    }
+}</code></pre>
+
+  <div class="note warn rv d2">
+    <b><code>proxy_pass</code> 의 끝 슬래시가 경로를 바꿉니다.</b>
+    <br><code>location /api/ { proxy_pass http://app:3000/; }</code>
+    → <code>/api/users</code> 가 <b><code>/users</code></b> 로 (접두사 제거)
+    <br><code>location /api/ { proxy_pass http://app:3000; }</code>
+    → <code>/api/users</code> 가 <b><code>/api/users</code></b> 로 (그대로)
+    <br>백엔드가 404 를 뱉는데 원인을 못 찾겠다면 <b>대부분 이 슬래시 하나</b>입니다.
+    <code>$upstream_addr</code> 과 백엔드 접근 로그를 함께 보면 즉시 확인됩니다.
+  </div>
+
+  <div class="note tip rv d2">
+    <b><code>try_files $uri $uri/ /index.html;</code> 을 API 가 있는 서버에 그대로 쓰면 위험합니다.</b>
+    존재하지 않는 API 경로가 <b>404 대신 index.html(200)</b> 을 돌려주게 되어,
+    클라이언트가 <b>JSON 을 기대하다 HTML 을 파싱</b>하며 이상한 에러를 냅니다.
+    <code>/api/</code> 는 <b>별도 <code>location</code> 으로 먼저 잡아</b> 프록시로 넘기세요 —
+    위 예시가 그 구조입니다.
   </div>
 </section>
 
@@ -1308,6 +1484,98 @@ server {
         grpc_pass grpc://app:50051;       # 평문
         # grpc_pass grpcs://app:50051;    # TLS
         grpc_read_timeout 3600s;
+    }
+}</code></pre>
+
+  <div class="diag rv d2">
+    <svg viewBox="0 0 680 216" role="img" aria-label="웹소켓은 일반 HTTP 요청으로 시작해 Upgrade 헤더로 프로토콜 전환을 요청하고, 서버가 101 응답을 주면 그 TCP 연결이 양방향 통로로 바뀐다. 프록시가 Upgrade와 Connection 헤더를 전달하지 않으면 이 전환이 일어나지 않아 연결이 실패한다">
+      <text x="16" y="16" class="lbl">WebSocket 이 프록시에서 자꾸 실패하는 이유 — 전환이 안 일어납니다</text>
+      <rect class="bx" x="16" y="30" width="140" height="52"/>
+      <text x="86" y="48" font-size="10" text-anchor="middle">브라우저</text>
+      <text x="86" y="63" font-size="9" text-anchor="middle" class="lbl">GET /ws</text>
+      <text x="86" y="75" font-size="9" text-anchor="middle" class="lbl">Upgrade: websocket</text>
+      <path class="fl" d="M158 56 L188 56"/>
+      <rect class="bx bx-warn" x="190" y="30" width="180" height="52"/>
+      <text x="280" y="48" font-size="10" text-anchor="middle">Nginx (기본 설정)</text>
+      <text x="280" y="63" font-size="9" text-anchor="middle" class="lbl">HTTP/1.0 으로 프록시하며</text>
+      <text x="280" y="75" font-size="9" text-anchor="middle" class="lbl">홉바이홉 헤더를 버립니다</text>
+      <path class="ln" d="M372 56 L402 56" stroke-dasharray="4 4"/>
+      <rect class="bx" x="404" y="30" width="150" height="52"/>
+      <text x="479" y="48" font-size="10" text-anchor="middle">백엔드</text>
+      <text x="479" y="63" font-size="9" text-anchor="middle" class="lbl">Upgrade 를 못 봄</text>
+      <text x="479" y="75" font-size="9" text-anchor="middle" class="lbl">→ 그냥 200 · 404</text>
+      <text x="566" y="52" class="lbl" font-size="10">결과: 연결 실패</text>
+      <text x="566" y="68" class="lbl" font-size="10">또는 즉시 끊김</text>
+      <text x="16" y="106" class="lbl" font-size="10">세 줄을 넣으면 — 같은 TCP 연결이 양방향 통로로 바뀝니다</text>
+      <rect class="bx bx-ok" x="16" y="114" width="196" height="44"/>
+      <text x="114" y="131" font-size="9" text-anchor="middle" class="lbl">proxy_http_version 1.1</text>
+      <text x="114" y="145" font-size="9" text-anchor="middle" class="lbl">Upgrade · Connection 전달</text>
+      <path class="fl" d="M214 136 L244 136"/>
+      <circle class="pk" r="3">
+        <animateMotion dur="2.4s" repeatCount="indefinite" path="M214 136 L244 136 L420 136 L450 136"/></circle>
+      <rect class="bx" x="246" y="114" width="172" height="44"/>
+      <text x="332" y="131" font-size="9" text-anchor="middle" class="lbl">101 Switching Protocols</text>
+      <text x="332" y="145" font-size="9" text-anchor="middle" class="lbl">여기서 HTTP 가 끝납니다</text>
+      <path class="fl" d="M420 136 L450 136"/>
+      <rect class="bx bx-ok" x="452" y="114" width="212" height="44"/>
+      <text x="558" y="131" font-size="9" text-anchor="middle" class="lbl">양방향 프레임 통신</text>
+      <text x="558" y="145" font-size="9" text-anchor="middle" class="lbl">연결이 유지되는 동안 계속</text>
+      <text x="16" y="186" class="lbl" font-size="10">101 이후에는 요청·응답이 없습니다 — 그래서 proxy_read_timeout 기본 60초에 유휴 연결이 잘립니다.</text>
+      <text x="16" y="202" class="lbl" font-size="10">앱에서 ping·pong 을 주기적으로 보내는 것이 근본 해결입니다. 타임아웃만 늘리면 죽은 연결이 쌓입니다.</text>
+    </svg>
+    <div class="cap">Caddy 가 이 설정 없이 동작하는 것은 <b>기본값이 다르기 때문</b>입니다 — 원리는 같습니다.</div>
+  </div>
+
+  <h3 class="sub">실시간 세 방식 — 무엇을 언제 쓰나</h3>
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:16%">방식</th><th style="width:14%">방향</th><th style="width:26%">프록시 설정</th><th>맞는 곳</th></tr>
+      <tr><td><b>WebSocket</b></td><td>양방향</td><td><code>Upgrade</code>·<code>Connection</code>·<code>http_version 1.1</code></td><td>채팅 · 협업 편집 · 게임 로비</td></tr>
+      <tr><td><b>SSE</b></td><td>서버 → 클라</td><td><code>proxy_buffering off</code></td><td><b>알림 · 진행률 · 실시간 대시보드</b> — 훨씬 단순합니다</td></tr>
+      <tr><td><b>롱 폴링</b></td><td>서버 → 클라(흉내)</td><td><code>proxy_read_timeout</code> 만 길게</td><td>구형 환경 호환</td></tr>
+      <tr><td><b>gRPC 스트림</b></td><td>양방향</td><td><code>grpc_pass</code> + HTTP/2</td><td>서비스 간 통신</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>서버가 일방적으로 밀어 주기만 하면 되는 경우, SSE 가 WebSocket 보다 낫습니다.</b>
+    <b>일반 HTTP 응답</b>이라 프록시·CDN·방화벽을 그대로 통과하고,
+    <b>브라우저가 자동으로 재연결</b>하며(<code>Last-Event-ID</code> 로 이어받기까지),
+    프록시 설정도 <code>proxy_buffering off</code> 한 줄이면 끝납니다.
+    <b>클라이언트가 서버에 자주 보내야 할 때만</b> WebSocket 을 고르세요.
+  </div>
+
+  <h3 class="sub">실시간 연결이 끊길 때 — 확인 순서</h3>
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:34%">증상</th><th>원인과 확인</th></tr>
+      <tr><td>연결 자체가 안 됨 (101 이 안 옴)</td><td><code>Upgrade</code> 헤더 3종 누락 — <code>curl -i -H "Upgrade: websocket" ...</code></td></tr>
+      <tr><td><b>정확히 60초마다</b> 끊김</td><td><code>proxy_read_timeout</code> 기본값</td></tr>
+      <tr><td>정확히 여러 분마다 끊김</td><td><b>앞단 클라우드 LB 의 유휴 타임아웃</b>(ALB 기본 60초 등)</td></tr>
+      <tr><td>메시지가 몰려서 한꺼번에 옴</td><td><code>proxy_buffering</code> 이 켜져 있음</td></tr>
+      <tr><td>일부 사용자만 실패</td><td>기업 프록시가 Upgrade 를 막음 → <b>SSE 로 폴백</b> 준비</td></tr>
+      <tr><td>서버 재시작 후 전원 재접속 폭주</td><td>클라이언트에 <b>지수 백오프 + 지터</b>를 넣으세요</td></tr>
+      <tr><td>연결 수가 계속 늘어남</td><td>죽은 연결 미정리 — <b>앱에서 ping 응답 없으면 끊기</b></td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d2" data-lang="conf"><code># 연결이 많아지면 워커 한계도 함께 올려야 합니다
+events {
+    worker_connections 10240;      # 워커당 동시 연결 (기본 512~1024)
+    use epoll;
+}
+worker_processes  auto;            # 코어 수
+worker_rlimit_nofile 65535;        # ★ 이것을 안 올리면 위 값이 의미 없습니다
+
+# 총 동시 연결 ≈ worker_processes × worker_connections
+# 단, 프록시는 연결 하나당 소켓 2개(클라·업스트림)를 씁니다 → 실제로는 절반
+
+http {
+    # 업스트림 keepalive — 백엔드로의 연결을 재사용합니다
+    upstream app {
+        server 127.0.0.1:3000;
+        keepalive 64;              # ★ 이것만으로 지연이 눈에 띄게 줄어듭니다
+        keepalive_timeout 60s;
     }
 }</code></pre>
 </section>

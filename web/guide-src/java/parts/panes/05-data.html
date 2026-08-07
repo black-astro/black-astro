@@ -485,6 +485,131 @@ Optional&lt;Order&gt; findWithUser(Long id);</code></pre>
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 238" role="img" aria-label="영속성 컨텍스트는 트랜잭션 안에서 조회한 엔티티를 보관하는 1차 캐시다. 같은 아이디를 다시 조회하면 DB에 가지 않고 캐시에서 준다. 엔티티 필드를 바꾸면 저장 메서드를 부르지 않아도 커밋 시점에 처음 상태와 비교해 달라진 것만 업데이트 쿼리로 내보낸다. 트랜잭션이 끝나면 엔티티는 준영속 상태가 되어 지연 로딩이 실패한다">
+      <text x="16" y="16" class="lbl">save() 를 안 불렀는데 UPDATE 가 나가는 이유 — 영속성 컨텍스트</text>
+      <rect class="bx bx-ok" x="16" y="30" width="416" height="104"/>
+      <text x="26" y="46" font-size="10" class="lbl">@Transactional 안 — 영속 상태</text>
+      <rect class="bx" x="28" y="54" width="180" height="34"/>
+      <text x="118" y="70" font-size="9" text-anchor="middle" class="lbl">findById(1) → DB 조회</text>
+      <text x="118" y="82" font-size="9" text-anchor="middle" class="lbl">엔티티 + 스냅샷 보관</text>
+      <path class="fl" d="M210 71 L232 71"/>
+      <rect class="bx" x="234" y="54" width="186" height="34"/>
+      <text x="327" y="70" font-size="9" text-anchor="middle" class="lbl">findById(1) 다시 → DB 안 감</text>
+      <text x="327" y="82" font-size="9" text-anchor="middle" class="lbl">1차 캐시에서 같은 인스턴스</text>
+      <rect class="bx" x="28" y="94" width="392" height="30"/>
+      <text x="224" y="107" font-size="9" text-anchor="middle" class="lbl">order.setStatus(PAID) — 그냥 필드만 바꿉니다</text>
+      <text x="224" y="119" font-size="9" text-anchor="middle" class="lbl">save() 호출 없음</text>
+      <path class="fl" d="M434 82 L458 82"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="3s" repeatCount="indefinite" path="M210 71 L232 71 L434 82 L458 82"/></circle>
+      <rect class="bx" x="460" y="30" width="204" height="104"/>
+      <text x="470" y="46" font-size="10" class="lbl">커밋 시점 (flush)</text>
+      <text x="562" y="66" font-size="9" text-anchor="middle" class="lbl">스냅샷과 현재를 비교</text>
+      <text x="562" y="80" font-size="9" text-anchor="middle" class="lbl">(더티 체킹)</text>
+      <text x="562" y="98" font-size="9" text-anchor="middle" class="lbl">달라진 컬럼만</text>
+      <text x="562" y="112" font-size="9" text-anchor="middle" class="lbl">UPDATE 쿼리 생성</text>
+      <rect class="bx bx-warn" x="16" y="146" width="648" height="34"/>
+      <text x="340" y="162" font-size="9" text-anchor="middle" class="lbl">트랜잭션이 끝나면 — 준영속(detached) 상태. 이제 변경해도 반영되지 않고, 지연 로딩은 예외가 납니다</text>
+      <text x="340" y="175" font-size="9" text-anchor="middle" class="lbl">LazyInitializationException 의 정체가 이것입니다</text>
+      <text x="16" y="202" class="lbl" font-size="10">"조회만 했는데 UPDATE 가 나가요" — 엔티티 필드를 어디선가 건드렸다는 뜻입니다(의도치 않은 세터 호출).</text>
+      <text x="16" y="218" class="lbl" font-size="10">"바꿨는데 반영이 안 돼요" — 트랜잭션 밖이거나, 영속 상태가 아닌 새 객체를 수정한 것입니다.</text>
+      <text x="16" y="234" class="lbl" font-size="10">둘 다 원인은 하나입니다 — 이 엔티티가 지금 영속인가 준영속인가.</text>
+    </svg>
+    <div class="cap">JPA 의 거의 모든 "이상한 동작"은 <b>지금 이 객체가 어느 상태인가</b>로 설명됩니다 — 비영속 · <b>영속</b> · 준영속 · 삭제.</div>
+  </div>
+
+  <h3 class="sub">엔티티의 네 가지 상태</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:18%">상태</th><th style="width:26%">언제</th><th>변경이 DB 에 반영되나</th></tr>
+      <tr><td><b>비영속</b><br><span class="sm">transient</span></td><td><code>new Order()</code> 직후</td><td>안 됨 — <code>persist</code>·<code>save</code> 로 영속화해야 합니다</td></tr>
+      <tr><td class="ok"><b>영속</b><br><span class="sm">managed</span></td><td>조회했거나 저장한 뒤<br><b>트랜잭션 안</b></td><td class="ok"><b>됩니다</b> — 세터만 불러도 커밋 때 UPDATE</td></tr>
+      <tr><td><b>준영속</b><br><span class="sm">detached</span></td><td>트랜잭션 종료 후 · <code>detach()</code></td><td class="warn">안 됨 — 지연 로딩도 실패합니다</td></tr>
+      <tr><td><b>삭제</b><br><span class="sm">removed</span></td><td><code>remove()</code> 호출 후</td><td>커밋 때 DELETE</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">더티 체킹을 제대로 쓰기</h4>
+      <pre class="code" data-lang="java"><code>// ✅ 영속 상태에서 필드만 바꿉니다 — save() 가 필요 없습니다
+@Transactional
+public void pay(Long orderId) {
+    Order order = orderRepository.findById(orderId)
+        .orElseThrow(() -&gt; new OrderNotFound(orderId));
+
+    order.pay();                    // 엔티티 안에서 상태를 바꾸는 메서드
+    // orderRepository.save(order); // ← 없어도 됩니다 (있어도 무해)
+}   // 커밋 시점에 UPDATE orders SET status=? WHERE id=?
+
+// ✗ 흔한 실수 ① — 트랜잭션이 없으면 아무 일도 안 일어납니다
+public void pay(Long orderId) {                 // @Transactional 없음
+    Order order = orderRepository.findById(orderId).orElseThrow();
+    order.pay();                                // 조용히 사라집니다
+}
+
+// ✗ 흔한 실수 ② — 같은 클래스 안에서 자기 메서드 호출은 프록시를 안 거칩니다
+public void process(Long id) {
+    this.pay(id);          // @Transactional 이 안 먹습니다
+}
+
+// ✗ 흔한 실수 ③ — 조회 전용인데 세터가 호출되어 UPDATE 가 나감
+@Transactional(readOnly = true)   // ★ 이걸 붙이면 스냅샷을 안 만들어
+public OrderRes find(Long id) {   //   메모리도 아끼고 실수도 막습니다
+    return OrderRes.from(orderRepository.findById(id).orElseThrow());
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>조회 메서드에는 <code>@Transactional(readOnly = true)</code> 를 습관적으로 붙이세요.</b>
+        스냅샷을 만들지 않아 <b>메모리를 절반 가까이</b> 아끼고,
+        <b>의도치 않은 UPDATE 를 구조적으로 막습니다</b>.
+        읽기 복제본으로 라우팅할 때의 기준으로도 그대로 쓰입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">flush 는 언제 일어나나</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:38%">시점</th><th>설명</th></tr>
+          <tr><td><b>트랜잭션 커밋 직전</b></td><td>가장 일반적</td></tr>
+          <tr><td><b>JPQL 실행 직전</b></td><td>★ 쿼리 결과의 정합성을 위해 먼저 내보냅니다</td></tr>
+          <tr><td><code>flush()</code> 직접 호출</td><td>ID 가 즉시 필요할 때</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java"><code>// 쓰기 지연 — INSERT 가 모였다가 한 번에 나갑니다
+@Transactional
+public void bulkCreate(List&lt;OrderReq&gt; reqs) {
+    for (var r : reqs) {
+        orderRepository.save(r.toEntity());    // 아직 DB 에 안 감
+        // 영속성 컨텍스트에 쌓입니다
+    }
+}   // 커밋 시점에 INSERT 들이 한꺼번에
+
+// ★ 대량 처리에서는 주기적으로 비워야 합니다
+@Transactional
+public void bulkCreate(List&lt;OrderReq&gt; reqs) {
+    for (int i = 0; i &lt; reqs.size(); i++) {
+        em.persist(reqs.get(i).toEntity());
+        if (i % 500 == 0) {
+            em.flush();     // DB 로 내보내고
+            em.clear();     // ★ 1차 캐시를 비웁니다 — 안 하면 OOM
+        }
+    }
+}
+// application.yml 에 배치 설정도 함께
+// spring.jpa.properties.hibernate.jdbc.batch_size: 500
+// spring.jpa.properties.hibernate.order_inserts: true</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>10만 건을 JPA 로 넣으면 힙이 터집니다.</b>
+        영속성 컨텍스트가 <b>엔티티와 스냅샷을 전부 들고 있기</b> 때문입니다.
+        <code>flush()</code> + <code>clear()</code> 로 주기적으로 비우거나,
+        <b>대량 작업은 JDBC 배치·<code>INSERT ... SELECT</code></b> 로 처리하는 편이
+        훨씬 빠르고 안전합니다 — <b>JPA 는 대량 처리 도구가 아닙니다</b>.
+      </div>
+    </div>
+  </div>
 </section>
 
 

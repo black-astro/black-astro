@@ -571,6 +571,35 @@ SELECT CONVERT_TZ(NOW(), '+09:00', '+00:00')  AS UTC로;</code></pre>
     </p>
   </div>
 
+  <div class="diag rv">
+    <svg viewBox="0 0 680 226" role="img" aria-label="InnoDB의 기본키 인덱스는 리프에 행 전체를 담고 있어 한 번에 데이터를 얻지만, 보조 인덱스는 리프에 기본키 값만 담고 있어 기본키 인덱스를 한 번 더 타야 한다. 그래서 기본키가 길거나 무작위면 모든 보조 인덱스가 함께 커지고 느려진다">
+      <text x="16" y="18" class="lbl">기본키 인덱스 = 데이터 그 자체 (클러스터드)</text>
+      <rect class="bx bx-ok" x="16" y="26" width="290" height="30"/>
+      <text x="161" y="46" font-size="11" text-anchor="middle">루트 · 브랜치</text>
+      <path class="fl" d="M161 58 L161 74"/>
+      <rect class="bx bx-ok" x="16" y="76" width="290" height="52"/>
+      <text x="161" y="98" font-size="11" text-anchor="middle">리프 — id 순서대로 <tspan fill="#34d399">행 전체</tspan>가 들어 있다</text>
+      <text x="161" y="115" font-size="10" text-anchor="middle" class="lbl">id 로 찾으면 여기서 끝난다 · 조회 1회</text>
+
+      <text x="374" y="18" class="lbl">보조 인덱스 — 리프에 PK 값만 있다</text>
+      <rect class="bx" x="374" y="26" width="290" height="30"/>
+      <text x="519" y="46" font-size="11" text-anchor="middle">email 순서로 정렬된 트리</text>
+      <path class="fl" d="M519 58 L519 74"/>
+      <rect class="bx" x="374" y="76" width="290" height="52"/>
+      <text x="519" y="98" font-size="11" text-anchor="middle">리프 — email → <tspan fill="#fb7185">id 값</tspan></text>
+      <text x="519" y="115" font-size="10" text-anchor="middle" class="lbl">행 내용은 없다</text>
+      <path class="fl" d="M374 102 L310 102"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="2.6s" repeatCount="indefinite" path="M519 74 L519 90 L374 102 L310 102"/></circle>
+      <text x="316" y="146" class="lbl">얻은 id 로 왼쪽 트리를 한 번 더 탄다 — 이것이 "북마크 조회"</text>
+
+      <rect class="bx bx-warn" x="16" y="160" width="648" height="52"/>
+      <text x="30" y="182" font-size="11">그래서 기본키가 <tspan fill="#fb7185">길거나 무작위</tspan>면 두 번 손해를 봅니다</text>
+      <text x="30" y="200" font-size="10" class="lbl">① 모든 보조 인덱스가 그 PK 값을 통째로 품어 함께 뚱뚱해진다 · ② 무작위 PK 는 삽입 위치가 흩어져 페이지가 계속 쪼개진다</text>
+    </svg>
+    <div class="cap">InnoDB 에서 기본키는 "행을 구분하는 번호"가 아니라 <b>데이터가 디스크에 놓이는 순서</b> 그 자체입니다.</div>
+  </div>
+
   <div class="pipe rv">
     <div class="prow"><span class="tagn">기본키 인덱스</span>
       <div><b>리프 노드에 데이터 전체가 들어 있습니다</b>
@@ -725,6 +754,48 @@ SELECT * FROM sys.statements_with_full_table_scans LIMIT 20;</code></pre>
       MySQL은 <b>없는 행에도 락을 겁니다.</b>
       InnoDB 데드락의 상당수가 여기서 나오며, 다른 DB에서 오면 반드시 당황하게 됩니다.
     </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 214" role="img" aria-label="갭 락은 인덱스에 존재하는 값 사이의 빈 구간까지 잠그기 때문에 아직 없는 행을 넣으려는 다른 트랜잭션이 대기한다. 데드락은 두 트랜잭션이 서로 상대가 쥔 행을 기다리며 원을 그리는 상태다">
+      <text x="16" y="18" class="lbl">갭 락 — 값이 아니라 <tspan fill="#e8f0ff">값과 값 사이</tspan>를 잠근다</text>
+      <path class="ln" d="M16 78 L306 78"/>
+      <g font-size="11">
+        <text x="30" y="70">10</text>
+        <text x="150" y="70">20</text>
+        <text x="272" y="70">30</text>
+      </g>
+      <rect class="bx bx-warn" x="44" y="52" width="100" height="32"/>
+      <rect class="bx bx-warn" x="168" y="52" width="98" height="32"/>
+      <text x="16" y="106" class="lbl">T1: SELECT … WHERE id BETWEEN 10 AND 30 FOR UPDATE</text>
+      <rect class="bx" x="16" y="118" width="290" height="46"/>
+      <text x="161" y="140" font-size="11" text-anchor="middle">T2: INSERT id = 15</text>
+      <text x="161" y="157" font-size="10" text-anchor="middle" class="lbl">아직 없는 행인데도 <tspan fill="#fb7185">대기</tspan>한다</text>
+      <text x="16" y="186" class="lbl">범위를 넓게 잡은 조회 하나가 그 구간 전체의 삽입을</text>
+      <text x="16" y="202" class="lbl">막습니다 — 팬텀 리드를 막는 대가입니다</text>
+
+      <path class="ln" d="M330 18 L330 202"/>
+
+      <text x="358" y="18" class="lbl">데드락 — 기다림이 원을 그리는 순간</text>
+      <rect class="bx" x="358" y="34" width="130" height="44"/>
+      <text x="423" y="54" font-size="11" text-anchor="middle">T1</text>
+      <text x="423" y="70" font-size="10" text-anchor="middle" class="lbl">A 를 쥐고 B 를 기다림</text>
+      <rect class="bx" x="534" y="34" width="130" height="44"/>
+      <text x="599" y="54" font-size="11" text-anchor="middle">T2</text>
+      <text x="599" y="70" font-size="10" text-anchor="middle" class="lbl">B 를 쥐고 A 를 기다림</text>
+      <path class="fl" d="M490 48 L532 48"/>
+      <path class="fl" d="M532 66 L490 66"/>
+      <rect class="bx" x="358" y="96" width="130" height="38"/>
+      <text x="423" y="120" font-size="11" text-anchor="middle">행 A</text>
+      <rect class="bx" x="534" y="96" width="130" height="38"/>
+      <text x="599" y="120" font-size="11" text-anchor="middle">행 B</text>
+      <path class="ln" d="M423 80 L423 94" stroke="#34d399"/>
+      <path class="ln" d="M599 80 L599 94" stroke="#34d399"/>
+      <rect class="bx bx-warn" x="358" y="146" width="306" height="40"/>
+      <text x="511" y="171" font-size="11" text-anchor="middle">InnoDB 가 한쪽을 죽인다 — 앱이 재시도해야 한다</text>
+      <text x="358" y="202" class="lbl">여러 행을 <tspan fill="#e8f0ff">항상 같은 순서</tspan>로 잠그면 원이 생기지 않습니다</text>
+    </svg>
+    <div class="cap">데드락은 버그가 아니라 <b>정상 동작</b>입니다. 없애는 게 아니라 <b>줄이고, 재시도로 받아내는 것</b>이 목표입니다.</div>
   </div>
 
   <div class="tw rv">

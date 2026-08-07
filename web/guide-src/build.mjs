@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 학습 가이드 빌더 (Python · Java · JS/TS · C#/Unity · Database · Web Server)
+ * 학습 가이드 빌더 (Python · Java · JS/TS · C#/Unity · C++ · Rust · Database · Web Server · CS 기술)
  *
  * guide-src/<가이드>/parts/** 조각들을 parts.json 순서대로 이어붙여
  * public/<출력경로>/index.html 을 만든다.
@@ -9,9 +9,9 @@
  * (가공을 하지 않으므로 결과물이 예상과 달라질 여지가 없다)
  *
  * parts.json 의 경로가 'shared/' 로 시작하면 guide-src/shared/ 에서 읽는다.
- * 뼈대 CSS 와 사이드바 스크립트처럼 여덟 가이드가 글자 하나까지 같이 쓰는
+ * 뼈대 CSS 와 사이드바 스크립트처럼 아홉 가이드가 글자 하나까지 같이 쓰는
  * 조각들이 거기 있다 — 예전엔 가이드마다 복사본이 있어서 한 줄을 고치려면
- * 여덟 번 고쳐야 했고, 실제로 한두 곳이 빠져 서로 어긋나곤 했다.
+ * 아홉 번 고쳐야 했고, 실제로 한두 곳이 빠져 서로 어긋나곤 했다.
  *
  *   node guide-src/build.mjs              전부 빌드
  *   node guide-src/build.mjs java         특정 가이드만
@@ -37,6 +37,7 @@ const GUIDES = [
   { name: 'csharp', out: 'csharp-web', label: '🟣 C# · Unity' },
   { name: 'cpp', out: 'cpp-web', label: '🔵 C++' },
   { name: 'rust', out: 'rust-web', label: '🦀 Rust' },
+  { name: 'cs', out: 'cs-web', label: '🎓 CS 기술' },
 ]
 
 const kb = (n) => `${(n / 1024).toFixed(0)} KB`
@@ -149,7 +150,7 @@ if (args.includes('--watch')) {
   await buildAll()
   console.log('👀 guide-src 감시 중… (Ctrl+C 로 종료)')
   let timer = null
-  // 공용 조각도 감시한다 — 여기를 고치면 여덟 가이드가 한꺼번에 바뀐다
+  // 공용 조각도 감시한다 — 여기를 고치면 아홉 가이드가 한꺼번에 바뀐다
   const watched = [...targets.map((g) => [g.name, join(HERE, g.name, 'parts')]), ['shared', join(HERE, 'shared')]]
   for (const [label, dir] of watched) {
     if (!existsSync(dir)) continue

@@ -69,6 +69,137 @@ DB
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 208" role="img" aria-label="규모가 커질 때 무너지는 순서는 정해져 있다. 먼저 DB 커넥션 풀이 마르고, 다음으로 캐시 없는 반복 조회가 DB CPU를 먹고, 그 다음 네트워크 대역폭이 한계에 닿고, CPU는 마지막이다. 각 단계마다 대응 수단이 다르다">
+      <text x="16" y="16" class="lbl">부하가 늘면 이 순서로 무너집니다 — 뒤에서부터 대비하면 늦습니다</text>
+      <rect class="bx bx-warn" x="16" y="30" width="156" height="70"/>
+      <text x="94" y="50" font-size="11" text-anchor="middle">① DB 커넥션</text>
+      <text x="94" y="66" font-size="9" text-anchor="middle" class="lbl">가장 먼저 마릅니다</text>
+      <text x="94" y="79" font-size="9" text-anchor="middle" class="lbl">증상: 전부 느려짐</text>
+      <text x="94" y="92" font-size="9" text-anchor="middle" class="lbl">→ 풀 크기 · N+1 제거</text>
+      <path class="fl" d="M174 65 L192 65"/>
+      <rect class="bx" x="194" y="30" width="156" height="70"/>
+      <text x="272" y="50" font-size="11" text-anchor="middle">② DB CPU</text>
+      <text x="272" y="66" font-size="9" text-anchor="middle" class="lbl">같은 조회를 반복</text>
+      <text x="272" y="79" font-size="9" text-anchor="middle" class="lbl">증상: DB 만 100%</text>
+      <text x="272" y="92" font-size="9" text-anchor="middle" class="lbl">→ 캐시 · 읽기 복제</text>
+      <path class="fl" d="M352 65 L370 65"/>
+      <rect class="bx" x="372" y="30" width="146" height="70"/>
+      <text x="445" y="50" font-size="11" text-anchor="middle">③ 대역폭</text>
+      <text x="445" y="66" font-size="9" text-anchor="middle" class="lbl">실시간이면 여기가</text>
+      <text x="445" y="79" font-size="9" text-anchor="middle" class="lbl">가장 먼저일 수도</text>
+      <text x="445" y="92" font-size="9" text-anchor="middle" class="lbl">→ 패킷 축소 · AOI</text>
+      <path class="fl" d="M520 65 L538 65"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="3.6s" repeatCount="indefinite" path="M174 65 L192 65 L352 65 L370 65 L520 65 L538 65"/></circle>
+      <rect class="bx bx-ok" x="540" y="30" width="124" height="70"/>
+      <text x="602" y="50" font-size="11" text-anchor="middle">④ CPU</text>
+      <text x="602" y="66" font-size="9" text-anchor="middle" class="lbl">보통 마지막</text>
+      <text x="602" y="79" font-size="9" text-anchor="middle" class="lbl">→ 서버 대수</text>
+      <text x="602" y="92" font-size="9" text-anchor="middle" class="lbl">늘리면 해결</text>
+      <text x="16" y="128" class="lbl" font-size="10">"서버를 늘렸는데 왜 안 빨라지죠?" — 병목이 ④가 아니라 ①이면 서버를 늘릴수록 DB 커넥션만 더 마릅니다.</text>
+      <text x="16" y="144" class="lbl" font-size="10">앱 서버 10대 × 풀 100 = DB 커넥션 1000 개 요구. Postgres 기본 max_connections 는 100 입니다.</text>
+      <text x="16" y="160" class="lbl" font-size="10">그래서 확장의 첫 단계는 대수 증설이 아니라 커넥션 풀러(PgBouncer)와 캐시입니다.</text>
+      <text x="16" y="176" class="lbl" font-size="10">④에 닿았다면 오히려 건강한 상태입니다 — 돈으로 해결되는 유일한 구간입니다.</text>
+      <text x="16" y="192" class="lbl" font-size="10">부하 테스트의 목적은 "몇 명까지 되나"가 아니라 "어디가 먼저 터지나"를 확인하는 것입니다.</text>
+    </svg>
+    <div class="cap">증설이 듣지 않는다면 <b>병목을 잘못 짚은 것</b>입니다 — 대수를 늘리기 전에 <b>무엇이 먼저 마르는지</b>부터 재세요.</div>
+  </div>
+
+  <h3 class="sub rv">규모별로 필요한 것 — 단계 표</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>CCU</th><th>구성</th><th>DB</th><th>이때 해야 할 일</th><th>대략 비용/월</th></tr></thead>
+      <tbody>
+        <tr><td><b>~500</b></td><td>서버 1대</td><td>같은 서버에 DB</td><td>백업 · 모니터링만</td><td>수만 원</td></tr>
+        <tr><td><b>~5,000</b></td><td>앱 2대 + LB</td><td>DB 분리 · Redis 캐시</td><td><b>무상태화</b> · 세션을 Redis 로</td><td>수십만 원</td></tr>
+        <tr><td><b>~30,000</b></td><td>앱 4~8대 · 오토스케일</td><td>읽기 복제본 1~2</td><td>캐시 전략 · 큐 도입 · 커넥션 풀러</td><td>수백만 원</td></tr>
+        <tr><td><b>~100,000</b></td><td>지역별 배치</td><td>복제 + 아카이빙</td><td>CDN · 배치 분리 · 비용 최적화</td><td>천만 원대</td></tr>
+        <tr><td><b>100,000+</b></td><td>멀티 리전</td><td><b>샤딩 검토</b></td><td>전담 인프라 인원이 필요합니다</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">직접 계산해 보기 — 우리 서비스의 숫자</h4>
+      <pre class="code" data-lang="text"><code>[1] RPS 구하기
+    RPS = CCU × (사용자당 분당 요청 수) / 60
+    예) CCU 30,000 · 분당 6요청 → 3,000 RPS
+
+[2] 서버 대수
+    한 대가 감당하는 RPS ≈ 코어수 × 1000 / 평균응답ms
+    예) 4코어 · 평균 20ms → 4 × 1000 / 20 = 200... 이 아니라
+        비동기 IO 라 실제로는 500~1,500 RPS (CPU 를 안 씀)
+    ※ 반드시 부하 테스트로 실측하세요. 계산은 자릿수 확인용입니다.
+    3,000 RPS ÷ 800 = 4대 → 여유 포함 6대
+
+[3] DB 커넥션
+    필요 커넥션 = 앱 대수 × 풀 크기
+    6대 × 20 = 120 개 → Postgres max_connections 확인
+    ※ 풀 크기는 (코어수 × 2 + 디스크수) 정도가 출발점.
+       크게 잡을수록 좋은 것이 절대 아닙니다.
+
+[4] 대역폭 (실시간이면 여기가 먼저)
+    초당 바이트 = 인원 × 틱레이트 × 패킷크기
+    30,000 × 20 × 200B = 120 MB/s = 960 Mbps
+    → 1Gbps 회선을 이미 넘습니다. 패킷을 줄이거나 서버를 나눠야 합니다.
+
+[5] 저장 용량
+    일일 로그 = RPS × 86,400 × 로그당 바이트
+    3,000 × 86,400 × 500B ≈ 130 GB/일 → 보관 14일이면 1.8TB
+    ※ 로그 비용이 서버 비용을 넘는 경우가 실제로 흔합니다.</code></pre>
+      <div class="note warn">
+        <b>계산 결과는 자릿수 확인용입니다.</b>
+        "5대냐 6대냐"를 계산으로 정하려 하지 마세요 —
+        <b>"5대냐 50대냐"를 틀리지 않는 것</b>이 이 계산의 목적입니다.
+        정확한 수는 <b>부하 테스트로만</b> 나옵니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">처음부터 지켜야 하는 세 가지</h4>
+      <pre class="code" data-lang="csharp"><code>// ① 무상태 — 어느 서버가 받아도 같은 결과
+// ✗ 메모리에 세션
+private static readonly Dictionary&lt;long, Session&gt; _sessions = new();
+
+// ✓ 외부 저장소에
+builder.Services.AddStackExchangeRedisCache(o =&gt;
+    o.Configuration = cfg.GetConnectionString("Redis"));
+// 또는 JWT 로 아예 상태를 두지 않기
+
+// ② 멱등성 — 같은 요청이 두 번 와도 안전하게
+public async Task&lt;Result&gt; BuyAsync(long pid, int itemId, string idemKey, CT ct)
+{
+    // 이미 처리한 키면 그때 결과를 그대로
+    if (await _cache.GetAsync&lt;Result&gt;($"idem:{idemKey}", ct) is { } cached)
+        return cached;
+
+    var r = await _shop.BuyAsync(pid, itemId, ct);
+    await _cache.SetAsync($"idem:{idemKey}", r, TimeSpan.FromHours(24), ct);
+    return r;
+}
+
+// ③ 원자적 차감 — 읽고-쓰기는 동시 요청에서 반드시 깨집니다
+// ✗ 이렇게 하면 골드가 마이너스가 됩니다
+var p = await _db.Players.FindAsync(pid);
+if (p.Gold &gt;= cost) { p.Gold -= cost; await _db.SaveChangesAsync(ct); }
+
+// ✓ DB 가 한 문장으로 판단하게
+var affected = await _db.Players
+    .Where(x =&gt; x.Id == pid &amp;&amp; x.Gold &gt;= cost)
+    .ExecuteUpdateAsync(s =&gt; s.SetProperty(x =&gt; x.Gold, x =&gt; x.Gold - cost), ct);
+if (affected == 0) return Result.NotEnoughGold;</code></pre>
+      <div class="note tip">
+        <b>이 셋은 규모와 무관하게 지키세요.</b>
+        서버가 한 대일 때도 <b>비용이 거의 0</b>이고,
+        나중에 늘릴 때 <b>아무것도 고칠 것이 없어집니다</b>.
+        반대로 나중에 도입하려면 인증·저장·비즈니스 로직을
+        <b>전부 다시 써야</b> 합니다 — 실질적으로 재작성입니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -338,6 +469,110 @@ var player = await db.Players.FindAsync(playerId);</code></pre>
       </div>
     </div>
   </div>
+
+  <h3 class="sub rv">이 순서대로 시도하세요 — 위로 갈수록 싸고 효과가 큽니다</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>순서</th><th>수단</th><th>효과</th><th>드는 노력</th><th>언제 한계</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><b>인덱스 · N+1 제거</b></td><td>수십 배</td><td>수 시간</td><td>거의 항상 여기서 큰 몫이 나옵니다</td></tr>
+        <tr><td>2</td><td><b>캐시</b>(Redis)</td><td>읽기 90% 흡수</td><td>1~2일</td><td>무효화 설계가 어려워질 때</td></tr>
+        <tr><td>3</td><td><b>커넥션 풀러</b>(PgBouncer)</td><td>커넥션 한계 해소</td><td>반나절</td><td>—</td></tr>
+        <tr><td>4</td><td><b>인스턴스 스케일업</b></td><td>2~4배</td><td>재시작 한 번</td><td>가장 큰 인스턴스에 닿을 때</td></tr>
+        <tr><td>5</td><td><b>읽기 복제본</b></td><td>읽기 부하 분산</td><td>2~3일</td><td>쓰기가 병목일 때</td></tr>
+        <tr><td>6</td><td><b>아카이빙</b>(옛 데이터 분리)</td><td>인덱스·백업이 빨라짐</td><td>1주</td><td>—</td></tr>
+        <tr><td>7</td><td><b>기능별 DB 분리</b></td><td>쓰기 분산</td><td>2~4주</td><td>한 기능이 여전히 넘칠 때</td></tr>
+        <tr><td>8</td><td><b>샤딩</b></td><td>사실상 무한</td><td><b>수개월 · 설계 변경</b></td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note warn rv">
+    <b>1번을 건너뛰고 8번을 하는 팀이 실제로 있습니다.</b>
+    인덱스 하나로 끝날 문제를 <b>샤딩으로 해결하려다 서비스를 다시 쓰게</b> 됩니다.
+    "DB 가 느리다" 는 진단이 아닙니다 —
+    <b>느린 쿼리 로그를 켜고 상위 10개를 보는 것</b>이 진단입니다.
+    거기서 대부분 답이 나옵니다.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">복제 지연을 안전하게 다루는 법</h4>
+      <pre class="code" data-lang="csharp"><code>// 문제: 산 직후 인벤토리를 복제본에서 읽으면 아직 없습니다
+// 해결: "방금 쓴 사용자"는 잠깐 주 DB 로 보냅니다
+
+public sealed class ReadPreference(IDistributedCache cache)
+{
+    private static readonly TimeSpan Window = TimeSpan.FromSeconds(3);
+
+    public Task MarkWrittenAsync(long playerId, CancellationToken ct) =&gt;
+        cache.SetStringAsync($"rw:{playerId}", "1",
+            new() { AbsoluteExpirationRelativeToNow = Window }, ct);
+
+    public async Task&lt;bool&gt; MustUsePrimaryAsync(long playerId, CancellationToken ct) =&gt;
+        await cache.GetStringAsync($"rw:{playerId}", ct) is not null;
+}
+
+// 쓰기 직후
+await _shop.BuyAsync(pid, itemId, ct);
+await _readPref.MarkWrittenAsync(pid, ct);
+
+// 읽을 때
+var db = await _readPref.MustUsePrimaryAsync(pid, ct) ? _primary : _replica;
+var inv = await db.Inventories.AsNoTracking()
+    .Where(i =&gt; i.PlayerId == pid).ToListAsync(ct);</code></pre>
+      <div class="tw">
+        <table>
+          <thead><tr><th>이 조회는</th><th>어디로</th><th>왜</th></tr></thead>
+          <tbody>
+            <tr><td>내 인벤토리 · 재화</td><td><b>주 DB</b></td><td>방금 바뀌었을 수 있음</td></tr>
+            <tr><td>결제 · 구매 이력</td><td><b>주 DB</b></td><td>돈 문제는 지연을 허용 못 함</td></tr>
+            <tr><td>랭킹 · 통계</td><td>복제본</td><td>몇 초 늦어도 아무도 모름</td></tr>
+            <tr><td>상점 목록 · 아이템 정보</td><td>복제본 + <b>캐시</b></td><td>거의 안 바뀜</td></tr>
+            <tr><td>친구 목록 · 길드원</td><td>복제본</td><td>—</td></tr>
+            <tr><td>운영 도구 조회</td><td>복제본</td><td>운영 쿼리가 서비스를 방해하지 않게</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>복제 지연을 모니터링에 반드시 넣으세요.</b>
+        평소 50ms 던 지연이 <b>수십 초로 벌어지는 순간</b>이 옵니다
+        (대량 업데이트·인덱스 생성·네트워크).
+        그때 복제본을 읽던 기능은 <b>과거를 보여 주기 시작</b>하는데,
+        지표가 없으면 원인을 절대 못 찾습니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">샤딩을 정말 한다면 — 미리 알아야 할 것</h4>
+      <pre class="code" data-lang="csharp"><code>// ✗ 나머지 연산 샤딩 — 샤드를 늘릴 때 거의 전부가 이사해야 합니다
+int ShardOf(long pid) =&gt; (int)(pid % 4);        // 4 → 8 로 늘리면 75% 이동
+
+// ✓ 논리 샤드를 넉넉히 만들고 물리 DB 에 매핑
+//   논리 샤드 1024 개를 만들어 두고, 물리 DB 4개에 256개씩 배정
+const int Logical = 1024;
+int LogicalOf(long pid) =&gt; (int)(pid % Logical);
+
+// 매핑 테이블(설정·Redis)만 바꾸면 물리 DB 를 늘릴 수 있습니다
+string PhysicalOf(long pid) =&gt; _map[LogicalOf(pid)];   // 4 → 8: 절반만 이동
+
+// 샤드 키는 "거의 모든 쿼리에 들어가는 것"으로 — 게임은 보통 playerId
+// 길드처럼 여러 명이 함께 보는 데이터는 guildId 로 샤딩하거나 별도 저장소로</code></pre>
+      <ul class="tx">
+        <li><b>샤드 간 조인·트랜잭션이 사라집니다</b> — 애플리케이션에서 합치거나, 애초에 그런 쿼리를 안 만드는 설계로</li>
+        <li><b>랭킹·길드·매칭</b> 처럼 가로지르는 데이터는 <b>Redis 나 별도 DB</b>로 빼는 것이 정석입니다</li>
+        <li><b>마이그레이션이 샤드 수만큼</b> 늘어납니다 — 자동화가 없으면 운영이 불가능해집니다</li>
+        <li><b>핫 샤드</b>가 생깁니다 — 인기 길드·이벤트 참여자가 한 샤드에 몰리면 그 샤드만 죽습니다</li>
+        <li><b>백업·복구가 N배</b> 복잡해집니다. 한 샤드만 복구하면 <b>데이터 시점이 어긋납니다</b></li>
+      </ul>
+      <div class="note warn">
+        <b>샤딩은 되돌리기가 사실상 불가능합니다.</b>
+        도입 전에 <b>1~7번을 전부 시도했는지</b> 확인하세요.
+        특히 <b>아카이빙</b>(1년 지난 전투 로그를 별도 저장소로)만으로도
+        테이블이 10분의 1이 되는 경우가 흔합니다 —
+        게임 데이터는 <b>대부분 오래된 것이고, 거의 조회되지 않습니다</b>.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -399,6 +634,174 @@ await _db.SaveChangesAsync(ct);      // 지급과 이벤트가 원자적으로 �
         초당 수만 건이면 <b>Kafka</b>. 처음부터 Kafka 를 도입하면
         <b>운영 부담이 이득보다 큽니다</b>.
       </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 210" role="img" aria-label="트랜잭션 커밋과 큐 발행을 따로 하면 둘 사이에서 프로세스가 죽었을 때 아이템은 지급됐는데 알림이 안 가거나 그 반대가 된다. 아웃박스 패턴은 이벤트를 같은 트랜잭션 안의 테이블에 저장하고 별도 워커가 그것을 읽어 큐로 보내 유실을 없앤다">
+      <text x="16" y="16" class="lbl">"저장하고 큐에 넣기"가 왜 위험한가 — 그리고 아웃박스</text>
+      <text x="16" y="36" class="lbl" font-size="10">순진한 방법 — 사이에서 죽으면 어긋납니다</text>
+      <rect class="bx" x="16" y="44" width="96" height="40"/>
+      <text x="64" y="60" font-size="10" text-anchor="middle">DB 커밋</text>
+      <text x="64" y="74" font-size="9" text-anchor="middle" class="lbl">아이템 지급</text>
+      <rect class="bx bx-warn" x="120" y="44" width="70" height="40"/>
+      <text x="155" y="62" font-size="9" text-anchor="middle" class="lbl">여기서</text>
+      <text x="155" y="75" font-size="9" text-anchor="middle" class="lbl">죽으면?</text>
+      <rect class="bx" x="198" y="44" width="96" height="40"/>
+      <text x="246" y="60" font-size="10" text-anchor="middle">큐 발행</text>
+      <text x="246" y="74" font-size="9" text-anchor="middle" class="lbl">푸시 · 통계</text>
+      <text x="310" y="60" class="lbl" font-size="10">→ 아이템은 있는데</text>
+      <text x="310" y="76" class="lbl" font-size="10">   알림이 영영 안 옵니다</text>
+      <text x="16" y="110" class="lbl" font-size="10">아웃박스 — 이벤트도 같은 트랜잭션 안에 저장합니다</text>
+      <rect class="bx bx-ok" x="16" y="118" width="230" height="46"/>
+      <text x="131" y="136" font-size="10" text-anchor="middle">한 트랜잭션</text>
+      <text x="131" y="152" font-size="9" text-anchor="middle" class="lbl">아이템 지급 + outbox 행 INSERT</text>
+      <path class="fl" d="M248 141 L280 141"/>
+      <rect class="bx" x="282" y="118" width="170" height="46"/>
+      <text x="367" y="136" font-size="10" text-anchor="middle">발행 워커</text>
+      <text x="367" y="152" font-size="9" text-anchor="middle" class="lbl">outbox 를 읽어 큐로</text>
+      <path class="fl" d="M454 141 L486 141"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="2.8s" repeatCount="indefinite" path="M248 141 L280 141 L454 141 L486 141"/></circle>
+      <rect class="bx bx-ok" x="488" y="118" width="176" height="46"/>
+      <text x="576" y="136" font-size="10" text-anchor="middle">큐 → 소비자</text>
+      <text x="576" y="152" font-size="9" text-anchor="middle" class="lbl">푸시 · 통계 · 우편</text>
+      <text x="16" y="186" class="lbl" font-size="10">발행 워커가 죽어도 outbox 행이 남아 있어 다음에 다시 보냅니다 — 유실이 원천적으로 없습니다.</text>
+      <text x="16" y="202" class="lbl" font-size="10">대신 같은 메시지가 두 번 갈 수 있습니다. 그래서 소비자는 반드시 멱등해야 합니다("최소 한 번" 보장).</text>
+    </svg>
+    <div class="cap">분산 시스템에서 <b>"정확히 한 번"은 거의 불가능</b>합니다 — <b>최소 한 번 + 멱등한 소비자</b>가 현실적인 정답입니다.</div>
+  </div>
+
+  <h3 class="sub rv">큐를 무엇으로 — 규모에 맞게</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>수단</th><th>처리량</th><th>순서 보장</th><th>운영 부담</th><th>맞는 곳</th></tr></thead>
+      <tbody>
+        <tr><td><b>DB 테이블</b></td><td>~수백/초</td><td>쉬움</td><td><b>없음</b>(이미 있는 DB)</td><td>시작은 여기 — 대부분 충분합니다</td></tr>
+        <tr><td><b>Redis Stream</b></td><td>~수만/초</td><td>스트림 단위</td><td>낮음</td><td>이미 Redis 를 쓰고 있다면</td></tr>
+        <tr><td><b>RabbitMQ</b></td><td>~수만/초</td><td>큐 단위</td><td>중간</td><td>복잡한 라우팅 · 재시도 정책</td></tr>
+        <tr><td><b>Kafka</b></td><td>수십만/초</td><td>파티션 단위</td><td><b>높음</b></td><td>로그·이벤트 스트림 · 재처리가 필요할 때</td></tr>
+        <tr><td>클라우드 관리형<br>(SQS·Pub/Sub)</td><td>높음</td><td>FIFO 옵션</td><td><b>낮음</b></td><td>운영 인력이 적을 때 <b>가장 현실적</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">DB 테이블 큐 — 이것부터 시작하세요</h4>
+      <pre class="code" data-lang="sql"><code>CREATE TABLE outbox (
+  id           BIGSERIAL PRIMARY KEY,
+  type         TEXT        NOT NULL,
+  payload      JSONB       NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  processed_at TIMESTAMPTZ,
+  attempts     INT         NOT NULL DEFAULT 0,
+  next_try_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- 아직 안 보낸 것만 인덱스에 (부분 인덱스 — 테이블이 커져도 인덱스는 작게)
+CREATE INDEX ix_outbox_pending ON outbox (next_try_at)
+  WHERE processed_at IS NULL;</code></pre>
+      <pre class="code" data-lang="csharp"><code>// 발행 워커 — SKIP LOCKED 로 여러 워커가 안전하게 나눠 처리
+public class OutboxPublisher(IServiceScopeFactory f, ILogger&lt;OutboxPublisher&gt; log)
+    : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        while (await timer.WaitForNextTickAsync(ct))
+        {
+            try
+            {
+                using var scope = f.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService&lt;GameDb&gt;();
+
+                var batch = await db.Database.SqlQuery&lt;OutboxRow&gt;($"""
+                    SELECT * FROM outbox
+                     WHERE processed_at IS NULL AND next_try_at &lt;= now()
+                     ORDER BY id
+                     LIMIT 100
+                     FOR UPDATE SKIP LOCKED
+                    """).ToListAsync(ct);
+
+                foreach (var m in batch)
+                {
+                    try
+                    {
+                        await _bus.PublishAsync(m.Type, m.Payload, ct);
+                        await db.Database.ExecuteSqlAsync(
+                            $"UPDATE outbox SET processed_at = now() WHERE id = {m.Id}", ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        // 지수 백오프로 다시 시도 — 8회 넘으면 사람이 봐야 합니다
+                        var delay = TimeSpan.FromSeconds(Math.Pow(2, m.Attempts));
+                        await db.Database.ExecuteSqlAsync($"""
+                            UPDATE outbox
+                               SET attempts = attempts + 1,
+                                   next_try_at = now() + {delay}
+                             WHERE id = {m.Id}
+                            """, ct);
+                        if (m.Attempts &gt;= 8)
+                            log.LogError(ex, "outbox 배달 실패 {Id} {Type}", m.Id, m.Type);
+                    }
+                }
+            }
+            catch (Exception ex) { log.LogError(ex, "outbox 루프 오류"); }
+        }
+    }
+}</code></pre>
+      <div class="note tip">
+        <b><code>FOR UPDATE SKIP LOCKED</code></b> 가 이 패턴의 핵심입니다 —
+        워커를 여러 대 띄워도 <b>같은 행을 두 번 집지 않고</b>,
+        느린 행 때문에 다른 워커가 막히지도 않습니다.
+        <b>처리 끝난 행은 주기적으로 지우거나 파티션을 잘라 내세요</b> —
+        안 그러면 이 테이블이 DB 에서 가장 커집니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">소비자 — 멱등하게 만드는 두 가지 방법</h4>
+      <pre class="code" data-lang="csharp"><code>// ① 처리한 메시지 ID 를 기록 (가장 단순하고 확실)
+public async Task HandleAsync(ItemPurchased e, string messageId, CT ct)
+{
+    await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+    var inserted = await _db.Database.ExecuteSqlAsync($"""
+        INSERT INTO processed_messages (id, at) VALUES ({messageId}, now())
+        ON CONFLICT (id) DO NOTHING
+        """, ct);
+
+    if (inserted == 0) return;          // ★ 이미 처리함 — 조용히 끝
+
+    await SendPushAsync(e, ct);
+    await _stats.RecordAsync(e, ct);
+    await tx.CommitAsync(ct);
+}
+
+// ② 연산 자체를 멱등하게 (더 좋습니다 — 기록이 필요 없음)
+// ✗ 누적: 두 번 오면 두 배
+await _db.Stats.Where(s =&gt; s.Day == d)
+    .ExecuteUpdateAsync(s =&gt; s.SetProperty(x =&gt; x.Sales, x =&gt; x.Sales + amt), ct);
+
+// ✓ 덮어쓰기: 몇 번 와도 같은 결과
+await _db.MailBox.Upsert(new Mail { Id = e.MailId, ... }, ct);</code></pre>
+      <div class="tw">
+        <table>
+          <thead><tr><th>운영 지표</th><th>정상</th><th>이러면</th></tr></thead>
+          <tbody>
+            <tr><td>미처리 메시지 수</td><td>수십</td><td><b>계속 늘면 소비자 증설</b></td></tr>
+            <tr><td>가장 오래된 미처리 나이</td><td>&lt; 30초</td><td>5분 넘으면 알람</td></tr>
+            <tr><td>DLQ 건수</td><td>0</td><td><b>1건이라도 사람이 확인</b></td></tr>
+            <tr><td>재시도 횟수 평균</td><td>&lt; 0.1</td><td>높으면 하위 시스템 장애</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="tx">
+        <li><b>DLQ(죽은 편지 큐)를 반드시 두세요</b> — 안 그러면 못 처리하는 메시지 하나가 큐 전체를 막습니다("독약 메시지")</li>
+        <li><b>순서가 필요한 것</b>(같은 플레이어의 재화 변동)은 <b>플레이어 ID 로 파티션</b>을 나눠야 순서가 지켜집니다</li>
+        <li><b>소비자는 짧게</b> — 한 메시지 처리에 10초가 걸리면 재시도·타임아웃 설계가 전부 어려워집니다. 길면 다시 쪼개세요</li>
+        <li>이벤트에는 <b>필요한 데이터를 다 담으세요</b>. "ID 만 보내고 소비자가 다시 조회"는 편하지만, <b>DB 부하를 큐로 옮긴 것</b>일 뿐입니다</li>
+      </ul>
     </div>
   </div>
 </section>
@@ -571,6 +974,125 @@ public sealed class NodeReporter(IRedis redis) : BackgroundService
       </div>
     </div>
   </div>
+
+  <h3 class="sub rv">점검 없이 갈 수 있는가 — 판단 기준</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>바꾸는 것</th><th>점검</th><th>방법</th></tr></thead>
+      <tbody>
+        <tr><td>API 로직 · 버그 수정</td><td><b>불필요</b></td><td>롤링 배포</td></tr>
+        <tr><td>컬럼 추가(nullable)</td><td><b>불필요</b></td><td>2단계 배포(추가 → 사용 → 조이기)</td></tr>
+        <tr><td>인덱스 추가</td><td>보통 불필요</td><td><code>CREATE INDEX CONCURRENTLY</code></td></tr>
+        <tr><td>클라이언트 필수 업데이트</td><td>불필요</td><td>426 응답 + 스토어 배포 대기</td></tr>
+        <tr><td>컬럼 타입 변경 · 이름 변경</td><td><b>불필요</b>(하기 나름)</td><td>새 컬럼 + 양쪽 쓰기 + 백필</td></tr>
+        <tr><td>테이블 구조 대변경 · 데이터 이관</td><td><b>필요</b></td><td>점검 · 또는 무중단 이관 도구</td></tr>
+        <tr><td>재화 · 밸런스 일괄 조정</td><td><b>필요</b></td><td>점검 중 배치 실행</td></tr>
+        <tr><td>DB 엔진 · 인프라 교체</td><td><b>필요</b></td><td>리허설을 반드시 먼저</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">점검 모드 — 스위치 하나로</h4>
+      <pre class="code" data-lang="csharp"><code>// 상태는 Redis 에 — 재배포 없이 켜고 끕니다
+public sealed class MaintenanceGate(IConnectionMultiplexer redis)
+{
+    private const string Key = "sys:maintenance";
+
+    public async Task&lt;MaintenanceInfo?&gt; GetAsync()
+    {
+        var v = await redis.GetDatabase().StringGetAsync(Key);
+        return v.HasValue ? JsonSerializer.Deserialize&lt;MaintenanceInfo&gt;(v!) : null;
+    }
+
+    public Task SetAsync(MaintenanceInfo i) =&gt;
+        redis.GetDatabase().StringSetAsync(Key, JsonSerializer.Serialize(i));
+
+    public Task ClearAsync() =&gt; redis.GetDatabase().KeyDeleteAsync(Key);
+}
+
+// 미들웨어 — 엔드포인트에 닿기 전에 자릅니다
+app.Use(async (ctx, next) =&gt;
+{
+    // 헬스체크와 운영 API 는 통과시켜야 합니다 (안 그러면 점검 해제도 못 함)
+    if (ctx.Request.Path.StartsWithSegments("/health") ||
+        ctx.Request.Path.StartsWithSegments("/admin"))
+    { await next(ctx); return; }
+
+    var m = await gate.GetAsync();
+    if (m is null) { await next(ctx); return; }
+
+    // 사내 IP · 테스터 계정은 통과 — 점검 중 검증에 필수입니다
+    if (m.AllowIps.Contains(ctx.Connection.RemoteIpAddress?.ToString()))
+    { await next(ctx); return; }
+
+    ctx.Response.StatusCode = 503;
+    ctx.Response.Headers.RetryAfter = ((int)(m.EndsAt - DateTimeOffset.UtcNow)
+                                       .TotalSeconds).ToString();
+    await ctx.Response.WriteAsJsonAsync(new
+    {
+        code = "MAINTENANCE",
+        title = m.Title,               // "정기 점검 중입니다"
+        endsAtUtc = m.EndsAt,          // ★ 클라가 남은 시간을 표시
+        notice = m.NoticeUrl
+    });
+});</code></pre>
+      <div class="note warn">
+        <b>점검 API 자체가 점검에 막히는 사고가 실제로 납니다.</b>
+        <code>/admin</code> 과 <code>/health</code> 는 <b>반드시 통과</b>시키세요.
+        그리고 <b>Redis 가 죽으면 어떻게 되는지</b> 정해 두세요 —
+        읽기 실패를 "점검 중"으로 처리하면 <b>Redis 장애가 전면 중단</b>이 됩니다.
+        기본값은 <b>통과</b>여야 합니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">점검 타임라인 — 실제로 이렇게 흘러갑니다</h4>
+      <pre class="code" data-lang="text"><code>D-3   공지 (게임 내 배너 · 커뮤니티 · 푸시)
+      점검 절차 문서 작성 · 담당자 배정
+      스테이징에서 전체 리허설 ★ 여기서 소요 시간을 잰다
+
+D-1   재공지 · 롤백 기준 합의
+      "몇 시까지 안 되면 되돌린다"를 숫자로 정합니다
+
+00:00 점검 시작
+      ① 신규 접속 차단 (점검 모드 ON)
+      ② 진행 중인 전투가 끝날 때까지 5~10분 대기
+      ③ 전체 세션 종료 · 저장 확인
+      ④ ★ DB 백업 (스냅샷) — 되돌릴 유일한 수단
+      ⑤ 마이그레이션 실행
+      ⑥ 새 버전 배포
+      ⑦ 스모크 테스트 (사내 IP 로 로그인 → 상점 → 전투)
+      ⑧ 점검 모드 OFF
+
+00:50 재접속 폭주 — 평소의 5~10배가 동시에 들어옵니다
+      ★ 이 순간을 대비해 인스턴스를 미리 늘려 두세요
+      로그인·초기 데이터 로드가 가장 큰 부하입니다
+
+01:30 안정화 확인 후 보상 우편 일괄 지급
+D+1   사후 기록 — 실제 소요 시간을 다음 점검 계획에 반영</code></pre>
+      <div class="tw">
+        <table>
+          <thead><tr><th>단계</th><th>흔한 사고</th><th>대비</th></tr></thead>
+          <tbody>
+            <tr><td>④ 백업</td><td>백업이 끝나기 전에 다음 단계 진행</td><td>완료 확인을 <b>절차에 명시</b></td></tr>
+            <tr><td>⑤ 마이그레이션</td><td>예상보다 10배 오래 걸림</td><td><b>리허설에서 실측</b>(운영과 같은 크기로)</td></tr>
+            <tr><td>⑦ 스모크</td><td>안 하고 열었다가 로그인 불가</td><td>체크리스트 5개 고정</td></tr>
+            <tr><td>재접속</td><td>열자마자 다시 죽음</td><td><b>미리 증설</b> · 로그인 속도 제한</td></tr>
+            <tr><td>보상 지급</td><td>중복 지급 · 누락</td><td>멱등 지급 도구 + 대상 수 먼저 확인</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>점검 종료 직후가 가장 위험합니다.</b>
+        기다리던 사용자가 <b>전원 동시에</b> 들어옵니다 —
+        평소 피크의 5~10배입니다.
+        점검 자체는 성공했는데 <b>여는 순간 다시 죽는</b> 사고가 정말 흔합니다.
+        <b>열기 30분 전에 인스턴스를 늘려 두고</b>, 안정된 뒤 다시 줄이세요.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -616,6 +1138,133 @@ Purchases.Add(1, new KeyValuePair&lt;string, object?&gt;("item", itemId));</code
         <b>경보 피로가 가장 위험합니다.</b>
         하루에 20번 울리면 <b>진짜일 때도 무시</b>합니다.
         울렸는데 조치할 것이 없었다면 <b>그 경보를 지우세요</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub rv">세 가지 신호를 구분하세요 — 지표 · 로그 · 추적</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>종류</th><th>답하는 질문</th><th>비용</th><th>보관</th><th>도구</th></tr></thead>
+      <tbody>
+        <tr><td><b>지표</b>(metric)</td><td><b>지금 이상한가?</b></td><td>매우 쌈</td><td>1년+</td><td>Prometheus · CloudWatch</td></tr>
+        <tr><td><b>추적</b>(trace)</td><td><b>이 요청의 어디가 느린가?</b></td><td>중간(샘플링)</td><td>7~30일</td><td>Jaeger · Tempo · X-Ray</td></tr>
+        <tr><td><b>로그</b>(log)</td><td><b>무슨 일이 있었나?</b></td><td><b>비쌈</b></td><td>14~30일</td><td>Loki · Seq · CloudWatch</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note tip rv">
+    <b>순서는 항상 지표 → 추적 → 로그</b> 입니다.
+    지표가 "결제 지연이 튀었다"고 알려 주면,
+    추적이 "외부 결제 API 호출에서 3초"라고 짚어 주고,
+    로그가 "그 시각 상대 서버가 503 을 냈다"는 증거를 줍니다.
+    <b>로그부터 뒤지기 시작하면</b> 몇 시간이 걸립니다 —
+    그리고 로그는 <b>가장 비싼 데이터</b>입니다. 지표로 답할 수 있는 것을 로그로 세지 마세요.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">경보를 이렇게 씁니다 — 실제 규칙</h4>
+      <pre class="code" data-lang="yaml"><code># Prometheus 알람 규칙 — 지속 시간과 심각도가 핵심입니다
+groups:
+- name: game-api
+  rules:
+  - alert: HighErrorRate
+    expr: |
+      sum(rate(http_server_request_duration_seconds_count{status=~"5.."}[5m]))
+      / sum(rate(http_server_request_duration_seconds_count[5m])) &gt; 0.01
+    for: 5m                      # ★ 5분 지속돼야 울림 (순간 스파이크 무시)
+    labels: { severity: page }   # page = 새벽에도 깨움
+    annotations:
+      summary: "5xx 비율 {{ $value | humanizePercentage }}"
+      runbook: "https://wiki/runbook/high-error-rate"    # ★ 조치 방법 링크
+
+  - alert: PaymentSuccessRateDrop
+    expr: |
+      sum(rate(game_purchase_total{result="ok"}[10m]))
+      / sum(rate(game_purchase_total[10m])) &lt; 0.95
+    for: 10m
+    labels: { severity: page }   # 돈 문제는 무조건 깨웁니다
+    annotations:
+      summary: "결제 성공률 {{ $value | humanizePercentage }}"
+
+  - alert: DbConnectionPoolHigh
+    expr: db_client_connections_usage / db_client_connections_max &gt; 0.8
+    for: 10m
+    labels: { severity: ticket } # ticket = 업무 시간에 처리
+    annotations:
+      summary: "DB 커넥션 풀 80% 초과 — 곧 고갈됩니다"
+
+  - alert: CcuSuddenDrop
+    expr: |
+      game_ccu &lt; 0.5 * avg_over_time(game_ccu[1h] offset 1h)
+    for: 5m
+    labels: { severity: page }   # 접속자 급감 = 대개 장애 신호
+</code></pre>
+      <div class="tw">
+        <table>
+          <thead><tr><th>심각도</th><th>뜻</th><th>예</th></tr></thead>
+          <tbody>
+            <tr><td><b>page</b></td><td>지금 사람을 깨운다</td><td>에러율 · 결제 실패 · 전면 다운</td></tr>
+            <tr><td><b>ticket</b></td><td>업무 시간에 처리</td><td>디스크 70% · 커넥션 80%</td></tr>
+            <tr><td><b>dashboard</b></td><td>알림 없음, 보기만</td><td>CPU · 요청 수 · 캐시 히트율</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>CPU 70% 는 경보가 아닙니다.</b>
+        경보의 기준은 <b>"사용자가 지금 불편한가"</b> 하나입니다.
+        CPU 가 90%여도 응답이 빠르면 아무 문제 없고,
+        CPU 가 20%여도 DB 가 막혀 있으면 서비스는 죽은 것입니다.
+        <b>원인이 아니라 증상에 경보를 거세요.</b>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">게임 고유 지표 — 기술 지표만으로는 부족합니다</h4>
+      <pre class="code" data-lang="csharp"><code>static readonly Meter M = new("Game.Api", "1.0");
+
+// ① 비즈니스 카운터 — 결과별로 태그를 나눠야 성공률이 나옵니다
+static readonly Counter&lt;long&gt; Purchases =
+    M.CreateCounter&lt;long&gt;("game.purchase", unit: "{count}");
+Purchases.Add(1,
+    new KeyValuePair&lt;string, object?&gt;("result", ok ? "ok" : "fail"),
+    new KeyValuePair&lt;string, object?&gt;("reason", reason ?? "-"),
+    new KeyValuePair&lt;string, object?&gt;("store", "google"));
+
+// ② 히스토그램 — 평균이 아니라 분포를 봐야 합니다
+static readonly Histogram&lt;double&gt; MatchWait =
+    M.CreateHistogram&lt;double&gt;("game.match.wait", unit: "s");
+MatchWait.Record(sw.Elapsed.TotalSeconds,
+    new KeyValuePair&lt;string, object?&gt;("mode", "ranked"));
+
+// ③ 게이지(관측 콜백) — 현재 상태
+M.CreateObservableGauge("game.ccu", () =&gt; _sessions.Count);
+M.CreateObservableGauge("game.rooms.active", () =&gt; _rooms.Count);
+
+// ④ 튜닝: 태그 카디널리티에 주의하세요
+// ✗ 플레이어 ID 를 태그로 → 시계열이 CCU 만큼 생겨 수집기가 죽습니다
+Purchases.Add(1, new KeyValuePair&lt;string, object?&gt;("playerId", pid));  // 금지
+// ✓ 값의 종류가 수십 개 이하인 것만 태그로 (아이템 등급, 스토어, 결과)</code></pre>
+      <div class="tw">
+        <table>
+          <thead><tr><th>지표</th><th>이상하면 의심할 것</th></tr></thead>
+          <tbody>
+            <tr><td>결제 성공률 급락</td><td>스토어 장애 · 우리 검증 로직 · 서킷 열림</td></tr>
+            <tr><td>매칭 대기 시간 증가</td><td>동접 감소 · 매칭 서버 · 티어 분포</td></tr>
+            <tr><td>튜토리얼 이탈률 증가</td><td>클라 버그 · 로딩 실패 · 특정 기기</td></tr>
+            <tr><td>CCU 급감</td><td><b>대개 장애입니다</b> — 서버는 멀쩡해 보여도</td></tr>
+            <tr><td>재화 지급량 급증</td><td><b>어뷰징 · 버그</b> — 즉시 확인</td></tr>
+            <tr><td>특정 아이템 구매 폭증</td><td>가격 오설정 · 확률 버그</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>"서버는 정상인데 사용자가 게임을 못 하는" 장애가 있습니다.</b>
+        CDN 이 죽어 리소스를 못 받거나, 스토어 검증이 막히거나,
+        클라이언트 업데이트가 잘못 나가거나 —
+        <b>기술 지표는 전부 초록인데 CCU 만 반토막</b>이 납니다.
+        그래서 <b>CCU 와 결제 성공률</b>이 어떤 서버 지표보다 중요한 경보입니다.
       </div>
     </div>
   </div>
@@ -669,6 +1318,119 @@ Purchases.Add(1, new KeyValuePair&lt;string, object?&gt;("item", itemId));</code
       </div>
     </div>
   </div>
+
+  <h3 class="sub rv">터졌을 때 — 처음 15분 절차</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>시각</th><th>할 일</th><th>하지 말 것</th></tr></thead>
+      <tbody>
+        <tr><td><b>0~2분</b></td><td><b>영향 범위 확인</b> — 전체인가 일부인가, 무엇이 안 되는가</td><td>원인부터 찾기</td></tr>
+        <tr><td><b>2~3분</b></td><td><b>지휘자 한 명 지정</b> · 상황 채널 개설 · 대응 시작 공지</td><td>여러 명이 각자 손대기</td></tr>
+        <tr><td><b>3~5분</b></td><td><b>최근 변경 확인</b> — 배포 · 설정 · 마이그레이션 · 외부 공지</td><td>—</td></tr>
+        <tr><td><b>5~10분</b></td><td><b>복구 우선</b> — 배포 직후면 <b>롤백</b>, 아니면 기능 차단·증설</td><td>근본 원인 분석</td></tr>
+        <tr><td><b>10~15분</b></td><td><b>덤프·로그 확보</b> 후 재시작 · 사용자 공지</td><td><b>증거 없이 재시작</b></td></tr>
+        <tr><td>복구 후</td><td>타임라인 기록 · 보상 검토 · 사후 분석 일정</td><td>바로 잊어버리기</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note warn rv">
+    <b>"원인을 알아야 고칠 수 있다"는 장애 대응에서는 틀린 말입니다.</b>
+    복구와 원인 분석은 <b>다른 일</b>이고, <b>복구가 먼저</b>입니다.
+    배포 직후 장애라면 <b>원인을 모르는 채로 롤백</b>하는 것이 정답입니다 —
+    되돌린 뒤에 얼마든지 분석할 수 있고, 그 사이 사용자는 게임을 합니다.
+    이 판단을 <b>사고 전에 팀이 합의</b>해 두지 않으면, 새벽 3시에 30분을 토론으로 씁니다.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">시나리오별 대응 — 무엇을 먼저 보고 무엇을 하나</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>증상</th><th>확인</th><th>즉시 조치</th></tr></thead>
+          <tbody>
+            <tr><td><b>전체가 느림</b></td><td>DB 커넥션 사용률 · 느린 쿼리 상위 10</td><td>무거운 기능 차단(랭킹·통계) · 커넥션 풀 조정</td></tr>
+            <tr><td><b>전체 500</b></td><td>최근 배포 · 설정 변경</td><td><b>롤백</b></td></tr>
+            <tr><td><b>일부만 느림</b></td><td>노드별 지표 · 핫 키 · 특정 방</td><td>해당 노드 격리(LB 에서 제외)</td></tr>
+            <tr><td><b>접속 실패 급증</b></td><td>인증서 만료 · LB 헬스체크 · 노드 수</td><td>인증서 갱신 · 헬스체크 기준 확인</td></tr>
+            <tr><td><b>메모리 계속 증가</b></td><td><code>dotnet-counters</code> Gen2 힙</td><td>덤프 확보 후 롤링 재시작</td></tr>
+            <tr><td><b>결제만 실패</b></td><td>외부 API 상태 페이지 · 서킷 상태</td><td>결제 기능만 점검 표시 · 재시도 큐에 적재</td></tr>
+            <tr><td><b>DB 가 다운</b></td><td>복제본 상태 · 백업 시점</td><td>복제본 승격 · 읽기 전용 모드로 축소 운영</td></tr>
+            <tr><td><b>Redis 다운</b></td><td>—</td><td><b>캐시 없이도 돌아야 정상</b> — 안 되면 그게 설계 결함</td></tr>
+            <tr><td><b>디스크 가득</b></td><td>로그 · 덤프 · 임시 파일</td><td>오래된 로그 삭제 → <b>보관 정책부터 고칠 것</b></td></tr>
+            <tr><td><b>어뷰징 폭주</b></td><td>같은 IP·계정의 요청 패턴</td><td>속도 제한 강화 · 해당 기능 일시 차단</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="csharp"><code>// 기능 차단 스위치를 미리 만들어 두세요 — 사고 중에는 코드를 못 고칩니다
+public sealed class FeatureFlags(IConnectionMultiplexer redis)
+{
+    public async Task&lt;bool&gt; IsEnabledAsync(string key) =&gt;
+        await redis.GetDatabase().StringGetAsync($"flag:{key}") != "off";
+}
+
+// 무거운 기능에 미리 걸어 둡니다
+app.MapGet("/ranking/global", async (FeatureFlags f, IRankRepo r) =&gt;
+    await f.IsEnabledAsync("ranking")
+        ? Results.Ok(await r.TopAsync(100))
+        : Results.Ok(Array.Empty&lt;RankRow&gt;()))          // 빈 값으로 우아하게 축소
+   .WithTags("Rank");</code></pre>
+      <div class="note tip">
+        <b>부하가 폭주할 때 무엇을 끌지 미리 정해 두세요.</b>
+        랭킹 · 상세 통계 · 친구 추천 같은 <b>없어도 게임은 되는 기능</b>을
+        스위치로 끌 수 있으면, <b>전면 중단 대신 축소 운영</b>이 가능합니다.
+        사고가 난 다음에 만들면 늦습니다 — <b>지금 30분이면 됩니다</b>.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">사후 분석 — 이 양식이면 충분합니다</h4>
+      <pre class="code" data-lang="text"><code>## 개요
+2026-08-05 02:14 ~ 03:02 (48분) 아이템 구매 실패
+영향: 전체 사용자의 구매 요청 약 12,000건 실패 (결제된 건 없음)
+
+## 타임라인 (전부 UTC)
+02:10  v1.4.2 배포 시작 (롤링)
+02:14  결제 성공률 경보 (page)          ← 인지까지 4분
+02:16  대응 시작 · 지휘자 지정
+02:19  최근 배포 확인 → 롤백 결정
+02:23  롤백 시작
+02:41  롤백 완료 · 성공률 회복 확인
+03:02  잔여 실패 건 재처리 완료
+
+## 직접 원인
+v1.4.2 에서 결제 검증 타임아웃을 10초 → 2초로 줄였는데,
+스토어 API 의 p99 가 3.5초라 대부분 타임아웃으로 실패.
+
+## 왜 막지 못했나 (사람이 아니라 시스템을 봅니다)
+1. 부하 테스트에 외부 스토어 API 가 가짜로 들어가 있어 실제 지연이 재현 안 됨
+2. 카나리 없이 전체 롤링 → 5%에서 발견할 기회를 놓침
+3. 타임아웃 값 변경이 코드 리뷰에서 "설정 조정"으로 가볍게 통과
+
+## 잘된 것
+- 경보가 4분 만에 울렸고 정확했다
+- 롤백 판단이 5분 만에 나왔다 (사전 합의 덕분)
+- 결제된 건이 없어 환불 처리가 불필요했다
+
+## 재발 방지 (담당자 · 기한)
+□ 외부 API 타임아웃 값을 실측 p99 기반으로 문서화   @kim  8/12
+□ 결제 경로에 카나리 배포 적용                      @lee  8/20
+□ 부하 테스트에 스토어 API 실제 지연 주입           @park 8/26
+□ 타임아웃·재시도 값 변경은 리뷰 필수 항목에 추가   @kim  8/9</code></pre>
+      <div class="note warn">
+        <b>"○○님이 실수했다"는 사후 분석에 쓰지 마세요.</b>
+        한 사람이 값을 잘못 넣어 서비스가 48분 멈췄다면,
+        문제는 그 사람이 아니라 <b>그 값이 검증 없이 운영까지 갈 수 있는 구조</b>입니다.
+        비난하는 문화에서는 다음번에 <b>아무도 사고를 먼저 말하지 않고</b>,
+        인지 시간이 4분에서 40분으로 늘어납니다.
+      </div>
+      <ul class="tx">
+        <li><b>인지 시간(MTTD)</b>과 <b>복구 시간(MTTR)</b>을 따로 기록하세요 — 개선 방향이 완전히 다릅니다</li>
+        <li>재발 방지 항목에 <b>담당자와 기한이 없으면</b> 실행되지 않습니다. 3개 이하로 줄이고 반드시 끝내는 편이 낫습니다</li>
+        <li><b>잘된 것도 적으세요</b> — 무엇을 계속할지 아는 것도 개선입니다</li>
+        <li>같은 유형이 두 번 나오면 <b>재발 방지가 실패한 것</b>입니다. 항목을 다시 여세요</li>
+      </ul>
+    </div>
+  </div>
 </section>
 
 
@@ -710,6 +1472,119 @@ Purchases.Add(1, new KeyValuePair&lt;string, object?&gt;("item", itemId));</code
         <b>다음 단계</b> — 서버 배포·프록시·HTTPS 운영은
         🌐 <b>웹서버 가이드</b>, DB 튜닝은 🗄️ <b>데이터베이스 가이드</b>,
         런타임 내부(GC·스레드풀)는 <b>🔬 전문가 · CLR 내부</b> 탭에서 이어집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub rv">비용이 어디로 나가는가 — 그리고 무엇부터 줄이나</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>항목</th><th>보통 비중</th><th>줄이는 법</th><th>절감폭</th><th>드는 노력</th></tr></thead>
+      <tbody>
+        <tr><td><b>컴퓨트</b>(서버)</td><td>30~50%</td><td>오토스케일 · 예약 인스턴스 · 스팟</td><td><b>30~70%</b></td><td>낮음</td></tr>
+        <tr><td><b>네트워크 아웃바운드</b></td><td>10~40%<br>(실시간 게임은 더)</td><td>패킷 축소 · AOI · CDN · 같은 리전 배치</td><td>20~50%</td><td>중간</td></tr>
+        <tr><td><b>로그 · 메트릭</b></td><td>10~30%</td><td><b>보관 기간 단축</b> · 샘플링 · 레벨 조정</td><td><b>50~80%</b></td><td><b>매우 낮음</b></td></tr>
+        <tr><td><b>DB</b></td><td>15~30%</td><td>아카이빙 · 인스턴스 적정화 · 예약</td><td>20~40%</td><td>중간</td></tr>
+        <tr><td><b>스토리지 · 스냅샷</b></td><td>5~15%</td><td>수명 주기 정책 · 옛 스냅샷 삭제</td><td><b>50%+</b></td><td>낮음</td></tr>
+        <tr><td><b>안 쓰는 리소스</b></td><td>5~20%</td><td>태그 강제 + 주기 점검</td><td><b>전액</b></td><td>낮음</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note tip rv">
+    <b>가장 먼저 볼 곳은 로그와 안 쓰는 리소스입니다.</b>
+    코드를 한 줄도 안 고치고 <b>수십 %가 줄어드는 경우</b>가 흔합니다 —
+    "일단 다 남기자"로 시작한 로그가 무기한 보관되고 있거나,
+    작년 부하 테스트용 인스턴스가 아직 돌고 있습니다.
+    <b>월 청구서를 항목별로 한 번 펼쳐 보는 것</b>이 어떤 최적화보다 효율이 좋습니다.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">새벽 시간대를 그냥 켜 두고 있지 않은지</h4>
+      <pre class="code" data-lang="text"><code>모바일 게임의 전형적인 CCU 곡선 (한국 기준)
+
+  피크 21~23시  ████████████████████  100%
+  낮  13~17시   ████████████          60%
+  새벽 03~07시  ███                   15%   ← 여기가 하루의 1/6
+
+고정 대수로 피크에 맞추면:
+  10대 × 24시간 = 240 서버·시간
+
+오토스케일(최소 3대, 최대 12대)이면:
+  대략 130 서버·시간 → 약 45% 절감
+
+★ 게임은 시간대별 편차가 큰 대표적인 워크로드입니다.
+  오토스케일이 가장 잘 듣는 종류의 서비스인데,
+  "복잡할 것 같아서" 안 켜 두는 경우가 많습니다.</code></pre>
+      <pre class="code" data-lang="yaml"><code># 예: Kubernetes HPA — 지표 기반 + 시간 기반을 함께
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+spec:
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+    - type: Pods
+      pods:
+        metric: { name: http_requests_per_second }
+        target: { type: AverageValue, averageValue: "600" }
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0      # 늘릴 때는 즉시
+      policies: [{ type: Percent, value: 100, periodSeconds: 30 }]
+    scaleDown:
+      stabilizationWindowSeconds: 600    # ★ 줄일 때는 천천히 (10분)
+      policies: [{ type: Percent, value: 20, periodSeconds: 60 }]</code></pre>
+      <div class="note warn">
+        <b>스케일 다운을 너무 빠르게 하면 진동합니다.</b>
+        줄였다가 부하가 다시 오면 늘리고, 또 줄이고 —
+        <b>인스턴스 기동 시간(30초~2분)</b> 동안 남은 서버가 부하를 다 받아
+        오히려 장애가 납니다.
+        <b>늘릴 때는 즉시, 줄일 때는 천천히</b>가 원칙입니다.
+        이벤트·점검 종료처럼 <b>예측되는 피크는 미리 늘려 두세요</b>(예약 스케일).
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">글로벌 — 지연은 협상 대상이 아닙니다</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>구간</th><th>왕복 지연(RTT)</th><th>실시간 대전</th></tr></thead>
+          <tbody>
+            <tr><td>서울 ↔ 서울</td><td>5~20ms</td><td>쾌적</td></tr>
+            <tr><td>서울 ↔ 도쿄</td><td>35~50ms</td><td>가능</td></tr>
+            <tr><td>서울 ↔ 싱가포르</td><td>70~90ms</td><td>장르에 따라</td></tr>
+            <tr><td>서울 ↔ 미국 서부</td><td>120~150ms</td><td><b>어려움</b></td></tr>
+            <tr><td>서울 ↔ 유럽</td><td>230~280ms</td><td><b>불가능</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="text"><code>일반적인 글로벌 구조 — 무엇을 나누고 무엇을 합치나
+
+  [글로벌 공통]                    [지역별]
+   계정 · 인증                      게임 서버 (전투 · 매칭)
+   결제 영수증 검증                 지역 DB (플레이어 데이터)
+   상점 상품 정의                   지역 캐시
+   운영 도구                        지역 랭킹
+   전역 랭킹(집계는 비동기)         CDN 엣지
+
+  원칙
+   ① 지연에 민감한 것은 사용자 근처로 (전투 · 조회)
+   ② 정합성이 중요한 것은 한 곳으로 (결제 · 계정)
+   ③ 리전 간 통신을 요청 경로에 넣지 말 것
+      → 로그인 한 번에 리전을 왕복하면 그것만 300ms 입니다</code></pre>
+      <ul class="tx">
+        <li><b>시간은 전부 UTC 로 저장</b>하고 표시할 때만 변환하세요. 서머타임·시간대 버그는 <b>이벤트 보상 사고</b>로 직결됩니다</li>
+        <li><b>확률 공시</b>는 한국·중국 등에서 <b>법적 의무</b>입니다. 표기와 실제 코드가 어긋나면 제재 대상입니다 — 테스트로 묶어 두세요</li>
+        <li><b>개인정보 국외 이전</b>은 나라마다 규정이 다릅니다(GDPR 등). 계정 DB 를 한 리전에 모을 때 반드시 확인하세요</li>
+        <li><b>리전 간 데이터 전송료</b>는 같은 리전 내부보다 훨씬 비쌉니다. 배치 집계를 리전 간에 돌리면 청구서에 바로 나타납니다</li>
+        <li>연령 등급·결제 한도·청소년 보호 시간대도 국가별로 다릅니다 — <b>기능 플래그로 국가별 분기</b>를 미리 만들어 두면 나중이 편합니다</li>
+      </ul>
+      <div class="note tip">
+        <b>글로벌 출시 전에 "지연이 얼마나 되는지" 실측하세요.</b>
+        대상 국가에서 실제 기기로 재 보면
+        <b>계산과 다른 숫자</b>가 나옵니다(모바일 망·ISP 경로).
+        그 숫자를 보고 <b>지역 서버를 둘지, 장르를 조정할지</b> 결정하는 것이
+        나중에 구조를 뒤집는 것보다 훨씬 쌉니다.
       </div>
     </div>
   </div>

@@ -74,6 +74,84 @@
     다음 요청이 다른 서버로 가는 순간 사라진 것처럼 보입니다.
     이 문제와 해법은 <b>b05</b>에서 자세히 다룹니다.
   </div>
+
+  <div class="diag rv d2">
+    <svg viewBox="0 0 680 224" role="img" aria-label="분배 알고리즘마다 결과가 다르다. 라운드 로빈은 순서대로 돌리므로 요청 처리 시간이 제각각이면 한 서버에 무거운 요청이 몰릴 수 있다. 최소 연결은 지금 처리 중인 요청이 가장 적은 서버로 보내 편차를 스스로 흡수한다. IP 해시는 같은 클라이언트를 항상 같은 서버로 보내지만 서버가 늘거나 줄면 배정이 뒤섞인다">
+      <text x="16" y="16" class="lbl">같은 요청 8개를 3대에 나눌 때 — 알고리즘이 만드는 차이</text>
+      <text x="16" y="36" class="lbl" font-size="10">라운드 로빈 — 순서대로</text>
+      <rect class="bx" x="16" y="44" width="200" height="48"/>
+      <text x="116" y="61" font-size="9" text-anchor="middle" class="lbl">A: 1,4,7   B: 2,5,8   C: 3,6</text>
+      <text x="116" y="76" font-size="9" text-anchor="middle" class="lbl">A 에 무거운 요청이 겹치면</text>
+      <text x="116" y="88" font-size="9" text-anchor="middle" class="lbl">A 만 밀립니다</text>
+      <text x="240" y="36" class="lbl" font-size="10">최소 연결 — 지금 한가한 곳으로</text>
+      <rect class="bx bx-ok" x="240" y="44" width="200" height="48"/>
+      <text x="340" y="61" font-size="9" text-anchor="middle" class="lbl">처리 중 개수를 보고 배정</text>
+      <text x="340" y="76" font-size="9" text-anchor="middle" class="lbl">무거운 요청이 어디로 가든</text>
+      <text x="340" y="88" font-size="9" text-anchor="middle" class="lbl">편차를 스스로 흡수합니다</text>
+      <text x="464" y="36" class="lbl" font-size="10">IP 해시 — 같은 사람은 같은 서버</text>
+      <rect class="bx" x="464" y="44" width="200" height="48"/>
+      <text x="564" y="61" font-size="9" text-anchor="middle" class="lbl">세션·캐시가 서버에 있을 때</text>
+      <text x="564" y="76" font-size="9" text-anchor="middle" class="lbl">대신 서버 대수가 바뀌면</text>
+      <text x="564" y="88" font-size="9" text-anchor="middle" class="lbl">배정이 뒤섞입니다</text>
+      <text x="16" y="118" class="lbl" font-size="10">IP 해시의 함정 — 서버를 3대에서 4대로 늘렸을 때</text>
+      <rect class="bx bx-warn" x="16" y="126" width="316" height="42"/>
+      <text x="174" y="143" font-size="9" text-anchor="middle" class="lbl">단순 해시(id % 서버수): 사용자의 약 75% 가 다른 서버로 이동</text>
+      <text x="174" y="157" font-size="9" text-anchor="middle" class="lbl">→ 세션 대량 소실 · 캐시 전부 미스</text>
+      <path class="fl" d="M334 147 L362 147"/>
+      <circle class="pk" r="3">
+        <animateMotion dur="2.4s" repeatCount="indefinite" path="M334 147 L362 147"/></circle>
+      <rect class="bx bx-ok" x="364" y="126" width="300" height="42"/>
+      <text x="514" y="143" font-size="9" text-anchor="middle" class="lbl">일관된 해싱(consistent hash): 약 25% 만 이동</text>
+      <text x="514" y="157" font-size="9" text-anchor="middle" class="lbl">→ Nginx 의 hash ... consistent 옵션</text>
+      <text x="16" y="192" class="lbl" font-size="10">기본은 최소 연결(least_conn)입니다 — 요청 시간이 제각각인 실제 웹에서 가장 무난하게 동작합니다.</text>
+      <text x="16" y="208" class="lbl" font-size="10">해시 계열은 "세션을 서버에 두고 있어서" 쓰는 경우가 대부분인데, 그 상태를 밖으로 빼는 편이 근본 해결입니다.</text>
+    </svg>
+    <div class="cap">알고리즘 선택으로 <b>상태 문제를 우회하려 하면</b> 서버를 늘리거나 줄일 때마다 대가를 치릅니다 — <b>무상태가 먼저</b>입니다.</div>
+  </div>
+
+  <h3 class="sub">알고리즘 고르기 — 판단표</h3>
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:22%">알고리즘</th><th style="width:34%">언제</th><th>주의</th></tr>
+      <tr><td><b>round_robin</b><br><span class="sm">(기본)</span></td><td>요청 처리 시간이 대체로 균일</td><td>느린 요청이 섞이면 기울어집니다</td></tr>
+      <tr><td class="ok"><b>least_conn</b></td><td><b>대부분의 웹·API — 기본 선택</b></td><td>서버 성능이 다르면 <code>weight</code> 를 함께</td></tr>
+      <tr><td><b>ip_hash</b></td><td>세션이 서버에 있을 때(임시방편)</td><td>NAT 뒤 사용자가 <b>한 서버로 몰립니다</b></td></tr>
+      <tr><td><b>hash ... consistent</b></td><td>캐시 서버 · 샤딩된 백엔드</td><td>키 선택이 중요합니다</td></tr>
+      <tr><td><b>random two</b></td><td>서버가 아주 많을 때(수십 대+)</td><td>둘을 뽑아 덜 바쁜 쪽 — 쏠림이 적습니다</td></tr>
+      <tr><td><b>least_time</b><br><span class="sm">(Plus·OpenResty)</span></td><td>응답 시간 편차가 클 때</td><td>오픈소스 Nginx 에는 없습니다</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d2" data-lang="conf"><code>upstream backend {
+    least_conn;                          # ★ 고민되면 이것
+
+    server 10.0.1.11:8080 weight=2;      # 사양이 두 배면 가중치도 두 배
+    server 10.0.1.12:8080;
+    server 10.0.1.13:8080;
+
+    server 10.0.1.14:8080 backup;        # 위가 전부 죽었을 때만
+    # server 10.0.1.15:8080 down;        # 점검 중 — 설정에서 지우지 말고 표시
+
+    keepalive 64;                        # 백엔드 연결 재사용
+}
+
+# 일관된 해싱 — 캐시 서버 앞이라면
+upstream cache_nodes {
+    hash $request_uri consistent;        # 같은 URL 은 항상 같은 노드로
+    server 10.0.2.11:6379;
+    server 10.0.2.12:6379;
+    server 10.0.2.13:6379;
+}</code></pre>
+
+  <div class="note warn rv d2">
+    <b><code>ip_hash</code> 로 세션 문제를 덮는 것은 부채를 미루는 것입니다.</b>
+    ① 모바일 사용자는 <b>IP 가 수시로 바뀌어</b> 로그아웃됩니다
+    ② 회사·통신사 NAT 뒤의 수백 명이 <b>한 서버에 몰립니다</b>
+    ③ 서버를 늘리거나 빼면 <b>세션이 대량으로 사라집니다</b>
+    ④ 무중단 배포에서 <b>드레인이 제 역할을 못 합니다</b>
+    <br>세션을 Redis 로 옮기는 작업은 대개 <b>반나절</b>이면 끝납니다(b05) —
+    그 뒤로는 이 네 가지가 전부 사라집니다.
+  </div>
 </section>
 
 <!-- ==================== b02 ==================== -->
@@ -795,6 +873,64 @@ vrrp_instance VI_1 {
     Ingress Controller 의 실체가 바로 <b>Nginx·HAProxy</b> 인 경우가 많아,
     여기서 배운 것이 그대로 통합니다 (🛡️ 운영 o11).
   </div>
+
+  <h3 class="sub">관리형 LB 에서 처음에 반드시 확인할 값</h3>
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:26%">설정</th><th style="width:16%">기본값</th><th>왜 봐야 하나</th></tr>
+      <tr><td><b>유휴 타임아웃</b></td><td>ALB 60초</td><td><b>WebSocket·SSE 가 정확히 60초마다 끊깁니다</b></td></tr>
+      <tr><td><b>드레인 지연</b></td><td>300초</td><td>배포가 느려집니다 — <b>30~60초</b>로 줄이세요</td></tr>
+      <tr><td><b>헬스체크 주기</b></td><td>30초</td><td>죽은 서버를 빼기까지 <b>주기 × 실패 횟수</b>가 걸립니다</td></tr>
+      <tr><td><b>정상 판정 횟수</b></td><td>5회</td><td>배포한 서버가 트래픽을 받기까지의 시간</td></tr>
+      <tr><td><b>헬스체크 경로</b></td><td><code>/</code></td><td><code>/</code> 는 무겁습니다 — <b>가벼운 <code>/health</code></b> 로</td></tr>
+      <tr><td><b>슬로 스타트</b></td><td>꺼짐</td><td>새 인스턴스에 트래픽을 서서히 — JIT·캐시 예열</td></tr>
+      <tr><td><b>교차 영역 분산</b></td><td>ALB 켜짐 / NLB 꺼짐</td><td>NLB 는 <b>AZ 별 인스턴스 수가 다르면 쏠립니다</b></td></tr>
+      <tr><td><b>액세스 로그</b></td><td><b>꺼짐</b></td><td>사고 조사에 필수 — S3 로 켜 두세요</td></tr>
+    </table>
+  </div>
+
+  <div class="note warn rv d2">
+    <b>기본 유휴 타임아웃이 실시간 기능을 조용히 망가뜨립니다.</b>
+    "Nginx 에서 <code>proxy_read_timeout</code> 을 3600초로 늘렸는데도 60초마다 끊긴다" —
+    앞단 ALB 가 자르고 있는 것입니다.
+    <b>경로가 여러 겹이면 가장 짧은 타임아웃이 이깁니다</b>.
+    클라이언트 → CDN → LB → Nginx → 앱, <b>이 다섯 곳의 값을 전부</b> 확인하세요.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>드레인 지연은 "가장 긴 요청 처리 시간 + 여유" 로 잡으면 됩니다.</b>
+    대부분의 웹 API 는 <b>30초면 충분</b>합니다.
+    기본값 300초를 그대로 두면 <b>10대를 배포하는 데 50분</b>이 걸리고,
+    그러면 팀이 <b>드레인을 꺼 버리게</b> 되어 무중단 배포 자체가 사라집니다.
+    파일 업로드나 리포트 생성처럼 긴 요청이 있다면
+    <b>그 경로만 별도 타깃 그룹</b>으로 분리하는 편이 낫습니다.
+  </div>
+
+  <h3 class="sub">직접 운영 vs 관리형 — 실제 비교</h3>
+  <div class="tw rv d2">
+    <table class="df">
+      <thead><tr><th>항목</th><th>Nginx·HAProxy 직접</th><th>관리형(ALB 등)</th></tr></thead>
+      <tbody>
+        <tr><td>비용</td><td>인스턴스 비용만</td><td><b>시간 + 처리량 과금</b> — 트래픽이 크면 무시 못 합니다</td></tr>
+        <tr><td>이중화</td><td><b>직접 구성</b>(keepalived VIP)</td><td>내장</td></tr>
+        <tr><td>고정 IP</td><td>가능</td><td>ALB 는 불가(NLB 는 가능)</td></tr>
+        <tr><td>세밀한 제어</td><td><b>매우 넓음</b></td><td>제공하는 옵션 안에서만</td></tr>
+        <tr><td>설정 반영</td><td>즉시(<code>reload</code>)</td><td>수십 초~수 분</td></tr>
+        <tr><td>패치·업그레이드</td><td>직접</td><td><b>자동</b></td></tr>
+        <tr><td>디버깅</td><td>로그·설정을 직접 봄</td><td><b>블랙박스</b> — 액세스 로그에 의존</td></tr>
+        <tr><td>WAF·인증 연동</td><td>모듈·별도 구축</td><td>클릭 몇 번</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note info rv d2">
+    <b>둘을 겹쳐 쓰는 구성이 실무에서 가장 흔합니다.</b>
+    앞에는 <b>관리형 LB</b>(이중화·TLS·WAF를 맡기고),
+    뒤에는 <b>Nginx</b>(경로 라우팅·캐시·헤더 조작)를 두는 방식입니다.
+    이때 <b>X-Forwarded-For 가 두 번 거쳐 오므로</b>
+    <code>set_real_ip_from</code> 에 <b>LB 대역을 반드시 등록</b>해야
+    앱 로그에 실제 방문자 IP 가 남습니다.
+  </div>
 </section>
 
 <!-- ==================== b12 ==================== -->
@@ -852,6 +988,93 @@ vrrp_instance VI_1 {
     알고리즘·일관된 해싱의 내부 원리는 <b>🧬 전문가 z11</b>,
     서킷 브레이킹·장애 전파 차단은 <b>🧬 전문가 z12</b>,
     성능 관점의 커널·커넥션 튜닝은 <b>⚡ 성능 탭</b>에서 이어집니다.
+  </div>
+
+  <h3 class="sub">2단계 구성 — 복사해서 쓰는 완성 설정</h3>
+  <pre class="code rv d2" data-lang="conf"><code># /etc/nginx/nginx.conf — 앱 3대를 받는 최소 완성형
+upstream app {
+    least_conn;
+    server 10.0.1.11:8080 max_fails=3 fail_timeout=10s;
+    server 10.0.1.12:8080 max_fails=3 fail_timeout=10s;
+    server 10.0.1.13:8080 max_fails=3 fail_timeout=10s;
+    keepalive 64;
+}
+
+server {
+    listen 443 ssl default_server;
+    http2 on;
+    server_name example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
+    # LB 자신의 헬스체크 (감시 도구용)
+    location = /lb-health { return 200 "ok\n"; access_log off; }
+
+    location / {
+        proxy_pass http://app;
+
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";              # ★ keepalive 유지
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 한 서버가 실패하면 다음 서버로 — 무중단의 핵심입니다
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+        proxy_next_upstream_tries 2;
+        proxy_next_upstream_timeout 5s;
+
+        proxy_connect_timeout 3s;
+        proxy_read_timeout   60s;
+        proxy_send_timeout   60s;
+    }
+}
+
+server {
+    listen 80 default_server;
+    return 301 https://$host$request_uri;
+}</code></pre>
+
+  <div class="note warn rv d2">
+    <b><code>proxy_next_upstream</code> 에 <code>non_idempotent</code> 를 함부로 넣지 마세요.</b>
+    기본적으로 Nginx 는 <b>POST·PATCH 를 재시도하지 않습니다</b> — 옳은 동작입니다.
+    이 옵션을 켜면 <b>결제나 주문이 두 번 처리</b>될 수 있습니다.
+    "가끔 주문이 두 건 들어온다"는 사고의 원인이 여기인 경우가 실제로 있습니다.
+    <b>재시도가 필요하면 앱에 멱등 키를 붙이는 것</b>이 정답입니다.
+  </div>
+
+  <h3 class="sub">확인 절차 — 정말 되는지 직접 봅니다</h3>
+  <pre class="code rv d2" data-lang="bash"><code># ① 분배가 실제로 되는가 — 백엔드별 카운트
+for i in $(seq 1 60); do curl -s https://example.com/whoami; done | sort | uniq -c
+
+# ② 한 대를 죽여도 서비스가 사는가 (가장 중요한 시험)
+ssh app-11 'sudo systemctl stop myapp'
+while true; do curl -s -o /dev/null -w "%{http_code} " https://example.com/; sleep 0.3; done
+#   → 200 이 계속 나와야 정상. 502 가 몇 번 섞이면 max_fails·헬스체크를 조정하세요.
+
+# ③ 배포가 무중단인가 — 배포하면서 이 루프를 돌려 두세요
+while true; do
+  curl -s -o /dev/null -w "%{http_code} %{time_total}\n" https://example.com/
+  sleep 0.2
+done | tee deploy-check.log
+#   끝난 뒤: grep -v "^200" deploy-check.log   ← 비어 있어야 무중단입니다
+
+# ④ 분배가 기울지 않는가 — 접근 로그 집계
+awk '{print $NF}' /var/log/nginx/access.log | sort | uniq -c | sort -rn | head
+#   (로그 포맷에 $upstream_addr 을 넣어 두어야 합니다)
+
+# ⑤ 실제 방문자 IP 가 앱까지 가는가
+curl -s https://example.com/debug/ip     # 앱이 X-Forwarded-For 를 읽어 반환하게</code></pre>
+
+  <div class="note tip rv d2">
+    <b>②번 시험을 실제로 해 본 팀과 안 해 본 팀의 차이가 큽니다.</b>
+    "로드밸런서를 세웠으니 한 대가 죽어도 괜찮겠지"는 <b>가정</b>이고,
+    <code>systemctl stop</code> 을 눌러 보는 것은 <b>확인</b>입니다.
+    헬스체크 경로가 틀렸거나, <code>max_fails</code> 가 너무 커서
+    <b>몇 분간 502 가 나가는</b> 구성이 의외로 많습니다.
+    운영에 올리기 전에 <b>스테이징에서 한 번</b>, 올린 뒤에 <b>한가한 시간에 한 번</b> 해 보세요.
   </div>
 </section>
 

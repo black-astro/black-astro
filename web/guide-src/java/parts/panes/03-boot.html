@@ -645,6 +645,92 @@ POST   /api/orders/1/pay         ← 상태 변경은 동사 허용</code></pre>
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 234" role="img" aria-label="요청은 톰캣이 받아 필터 체인을 지나고 디스패처 서블릿에 닿는다. 디스패처가 핸들러 매핑으로 어느 컨트롤러 메서드인지 찾고, 인터셉터를 거쳐 인자를 변환한 뒤 메서드를 호출한다. 반환값은 메시지 컨버터가 JSON으로 바꿔 응답이 되고, 예외가 나면 예외 핸들러가 대신 응답을 만든다">
+      <text x="16" y="16" class="lbl">@GetMapping 하나가 불리기까지 — 스프링이 실제로 거치는 길</text>
+      <rect class="bx" x="16" y="30" width="100" height="50"/>
+      <text x="66" y="49" font-size="10" text-anchor="middle">톰캣</text>
+      <text x="66" y="64" font-size="9" text-anchor="middle" class="lbl">스레드 하나 배정</text>
+      <path class="fl" d="M118 55 L142 55"/>
+      <rect class="bx" x="144" y="30" width="130" height="50"/>
+      <text x="209" y="46" font-size="10" text-anchor="middle">필터 체인</text>
+      <text x="209" y="61" font-size="9" text-anchor="middle" class="lbl">Security · CORS</text>
+      <text x="209" y="73" font-size="9" text-anchor="middle" class="lbl">인코딩 · 로깅</text>
+      <path class="fl" d="M276 55 L300 55"/>
+      <rect class="bx" x="302" y="30" width="146" height="50"/>
+      <text x="375" y="46" font-size="10" text-anchor="middle">DispatcherServlet</text>
+      <text x="375" y="61" font-size="9" text-anchor="middle" class="lbl">HandlerMapping 으로</text>
+      <text x="375" y="73" font-size="9" text-anchor="middle" class="lbl">담당 메서드 찾기</text>
+      <path class="fl" d="M450 55 L474 55"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="3.4s" repeatCount="indefinite" path="M118 55 L142 55 L276 55 L300 55 L450 55 L474 55"/></circle>
+      <rect class="bx bx-ok" x="476" y="30" width="188" height="50"/>
+      <text x="570" y="46" font-size="10" text-anchor="middle">@RestController</text>
+      <text x="570" y="61" font-size="9" text-anchor="middle" class="lbl">인자 변환 후 메서드 호출</text>
+      <text x="570" y="73" font-size="9" text-anchor="middle" class="lbl">— 내가 쓴 코드는 여기뿐</text>
+      <rect class="bx" x="476" y="92" width="188" height="42"/>
+      <text x="570" y="108" font-size="9" text-anchor="middle" class="lbl">반환 객체 → MessageConverter</text>
+      <text x="570" y="122" font-size="9" text-anchor="middle" class="lbl">Jackson 이 JSON 으로</text>
+      <path class="ln" d="M570 82 L570 90"/>
+      <rect class="bx bx-warn" x="302" y="92" width="146" height="42"/>
+      <text x="375" y="108" font-size="9" text-anchor="middle" class="lbl">예외가 나면</text>
+      <text x="375" y="122" font-size="9" text-anchor="middle" class="lbl">@ExceptionHandler 로</text>
+      <path class="ln" d="M474 113 L450 113"/>
+      <text x="16" y="158" class="lbl" font-size="10">필터는 서블릿 규격, 인터셉터는 스프링 규격입니다 — 그래서 필터에서 던진 예외는 @ExceptionHandler 가 못 잡습니다.</text>
+      <text x="16" y="174" class="lbl" font-size="10">Spring Security 는 필터로 동작합니다. 인증 실패가 전역 예외 처리에 안 걸리는 이유가 이것입니다.</text>
+      <text x="16" y="190" class="lbl" font-size="10">"404 인데 컨트롤러에 로그가 안 찍혀요" — HandlerMapping 단계에서 이미 끝난 것입니다(경로·메서드 불일치).</text>
+      <text x="16" y="206" class="lbl" font-size="10">"객체는 맞는데 JSON 필드가 비어요" — 마지막 상자의 문제입니다(getter 없음 · @JsonIgnore · 직렬화 설정).</text>
+      <text x="16" y="222" class="lbl" font-size="10">어느 상자에서 끊겼는지만 알아도 원인 후보가 열 개에서 두세 개로 줄어듭니다.</text>
+    </svg>
+    <div class="cap">디버깅의 첫 질문은 <b>"내 메서드까지 왔는가"</b> 입니다 — 브레이크포인트 하나로 앞뒤 절반이 갈립니다.</div>
+  </div>
+
+  <h3 class="sub">어디에 무엇을 끼울까 — 필터 · 인터셉터 · AOP</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:18%">수단</th><th style="width:24%">동작 시점</th><th>쓸 곳 · 주의</th></tr>
+      <tr><td><b>Filter</b></td><td>DispatcherServlet <b>앞</b></td><td>인증 · CORS · 요청 로깅 · 인코딩<br><span class="sm">스프링 예외 처리가 안 미칩니다</span></td></tr>
+      <tr><td><b>Interceptor</b></td><td>컨트롤러 <b>앞뒤</b></td><td>권한 확인 · 공통 파라미터 · 요청 시간 측정<br><span class="sm">어느 핸들러인지 알 수 있습니다</span></td></tr>
+      <tr><td><b>@ControllerAdvice</b></td><td>예외 발생 시</td><td><b>전역 예외 처리</b> · 공통 응답 포맷</td></tr>
+      <tr><td><b>AOP</b></td><td>임의의 빈 메서드</td><td>트랜잭션 · 캐시 · 감사 로그<br><span class="sm">같은 클래스 내부 호출은 안 걸립니다</span></td></tr>
+      <tr><td><b>ArgumentResolver</b></td><td>인자 바인딩</td><td><code>@LoginUser</code> 같은 커스텀 인자</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv d1" data-lang="java"><code>// 로그인 사용자를 인자로 바로 받기 — 컨트롤러가 훨씬 깨끗해집니다
+@Target(PARAMETER) @Retention(RUNTIME)
+public @interface LoginUser {}
+
+@Component
+public class LoginUserResolver implements HandlerMethodArgumentResolver {
+    @Override public boolean supportsParameter(MethodParameter p) {
+        return p.hasParameterAnnotation(LoginUser.class)
+            &amp;&amp; p.getParameterType() == Member.class;
+    }
+    @Override public Object resolveArgument(MethodParameter p, ModelAndViewContainer m,
+            NativeWebRequest req, WebDataBinderFactory f) {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        return memberRepository.findByEmail(auth.getName()).orElseThrow();
+    }
+}
+
+// 쓰는 쪽 — 매 컨트롤러에서 SecurityContext 를 뒤질 필요가 없습니다
+@GetMapping("/api/orders")
+public List&lt;OrderRes&gt; myOrders(@LoginUser Member me,
+                               @PageableDefault(size = 20) Pageable pageable) {
+    return orderService.findMine(me.getId(), pageable);
+}</code></pre>
+
+  <div class="note warn rv d2">
+    <b>필터에서 던진 예외는 <code>@ControllerAdvice</code> 가 못 잡습니다.</b>
+    필터는 <b>스프링 MVC 바깥</b>이라, 예외가 그대로 서블릿 컨테이너까지 올라가
+    <b>톰캣 기본 오류 페이지(HTML)</b>가 나갑니다.
+    JSON 을 기대하던 클라이언트는 <b>파싱 오류</b>를 냅니다.
+    <br>필터에서는 <b>예외를 던지지 말고</b> 응답을 직접 쓰거나
+    (<code>response.setStatus</code> + <code>getWriter().write(json)</code>),
+    Spring Security 의 <code>AuthenticationEntryPoint</code>·<code>AccessDeniedHandler</code> 를 쓰세요.
+  </div>
 </section>
 
 

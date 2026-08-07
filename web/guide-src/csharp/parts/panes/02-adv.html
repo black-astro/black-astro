@@ -120,6 +120,36 @@ await Parallel.ForEachAsync(ids,
       </div>
     </div>
   </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 180" role="img" aria-label="await는 스레드를 세워 두지 않는다. 요청을 보낸 뒤 메서드는 일단 반환되어 스레드가 다른 일을 하러 가고, 응답이 도착하면 남은 코드가 이어서 실행된다. 동기 대기는 스레드 하나를 응답이 올 때까지 통째로 묶어 둔다">
+      <text x="16" y="18" class="lbl">동기(.Result · Wait) — 스레드가 서서 기다린다</text>
+      <rect class="bx" x="16" y="28" width="112" height="34"/>
+      <text x="72" y="50" font-size="10" text-anchor="middle">DB 요청 전송</text>
+      <rect class="bx bx-warn" x="132" y="28" width="280" height="34"/>
+      <text x="272" y="50" font-size="10" text-anchor="middle">응답 대기 200ms — 스레드 정지 (일 못 함)</text>
+      <rect class="bx" x="416" y="28" width="110" height="34"/>
+      <text x="471" y="50" font-size="10" text-anchor="middle">이어서 처리</text>
+      <text x="540" y="50" font-size="9" class="lbl">요청 1개 = 스레드 1개 점유</text>
+
+      <text x="16" y="98" class="lbl">await — 기다리는 동안 스레드를 돌려준다</text>
+      <rect class="bx" x="16" y="108" width="112" height="34"/>
+      <text x="72" y="130" font-size="10" text-anchor="middle">DB 요청 전송</text>
+      <path class="fl" d="M130 125 L162 125"/>
+      <rect class="bx bx-ok" x="164" y="108" width="230" height="34"/>
+      <text x="279" y="123" font-size="10" text-anchor="middle">스레드 반납 → 그동안 다른 요청 처리</text>
+      <text x="279" y="136" font-size="9" text-anchor="middle" class="lbl">서 있는 사람이 없다</text>
+      <path class="fl" d="M396 125 L428 125"/>
+      <circle class="pk" r="3.5">
+        <animateMotion dur="2.6s" repeatCount="indefinite" path="M130 125 L162 125 L396 125 L428 125"/></circle>
+      <rect class="bx bx-ok" x="430" y="108" width="150" height="34"/>
+      <text x="505" y="123" font-size="10" text-anchor="middle">응답 도착 → 나머지 실행</text>
+      <text x="505" y="136" font-size="9" text-anchor="middle" class="lbl">await 아래 줄부터 재개</text>
+      <text x="16" y="166" class="lbl" font-size="10">이것이 async 서버가 같은 스레드 수로 수십 배의 동시 요청을 받는 원리입니다 — 빨라지는 게 아니라 기다림에 자원을 안 쓰는 것.</text>
+      <text x="16" y="180" class="lbl" font-size="10">.Result 로 async 를 동기처럼 쓰면 위 그림으로 되돌아갈 뿐 아니라, UI·ASP.NET 구맥락에선 데드락까지 만듭니다</text>
+    </svg>
+    <div class="cap">await 의 질문은 "몇 초 걸리나"가 아니라 <b>"기다리는 동안 이 스레드가 무엇을 하는가"</b>입니다.</div>
+  </div>
 </section>
 
 
@@ -449,6 +479,55 @@ public sealed class MatchService(
       </div>
     </div>
   </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">수명(Lifetime) 세 가지 — 잘못 고르면 버그가 됩니다</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>등록</th><th>만들어지는 횟수</th><th>맞는 것</th></tr></thead>
+          <tbody>
+            <tr><td><b>Singleton</b></td><td>앱 전체에 1개</td><td>설정 · 캐시 · HttpClient 팩토리</td></tr>
+            <tr><td><b>Scoped</b></td><td><b>요청마다</b> 1개</td><td>DbContext · 현재 사용자 정보</td></tr>
+            <tr><td><b>Transient</b></td><td>주입할 때마다 새로</td><td>가벼운 무상태 서비스</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>1순위 사고 — Singleton 이 Scoped 를 물고 있는 것.</b>
+        싱글턴 서비스에 <code>DbContext</code> 를 주입하면
+        <b>모든 요청이 하나의 DbContext 를 공유</b>해
+        동시성 예외와 데이터 오염이 납니다.
+        .NET 이 기본으로 이 조합을 감지해 던지는 예외가
+        "Cannot consume scoped service from singleton" 입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini">DI 가 있으면 테스트가 이렇게 됩니다</h4>
+      <pre class="code" data-lang="csharp"><code>// 결제 서비스 — 외부 PG 사를 인터페이스 뒤로
+public class OrderService(IPayGateway pay, IClock clock)
+{
+    public async Task&lt;Order&gt; Checkout(Cart cart)
+    {
+        var paid = await pay.ChargeAsync(cart.Total);
+        return new Order(cart, paid.TxId, clock.Now);
+    }
+}
+
+// 테스트 — 진짜 결제 없이 실패 상황까지 재현
+var fakePay  = new FakeGateway { FailWith = "한도 초과" };
+var fixedNow = new FixedClock(new DateTime(2026, 1, 1));
+var svc = new OrderService(fakePay, fixedNow);
+
+await Assert.ThrowsAsync&lt;PaymentException&gt;(
+    () =&gt; svc.Checkout(cart));</code></pre>
+      <div class="note tip">
+        <b>new 를 직접 쓰는 순간 그 클래스는 테스트에서 바꿔치기할 수 없습니다.</b>
+        "밖에서 받는다"는 규칙 하나가 시간(<code>IClock</code>)·랜덤·외부 API 를
+        전부 가짜로 갈아 끼울 수 있게 만듭니다 — DI 의 진짜 값어치입니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -684,6 +763,51 @@ public class ParseBench
       </div>
     </div>
   </div>
+
+  <div class="card rv">
+    <h4 class="mini">복사해 쓰는 벤치마크 — "어느 쪽이 빠른가" 논쟁을 끝내는 법</h4>
+    <pre class="code" data-lang="csharp"><code>// dotnet add package BenchmarkDotNet
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Running;
+
+[MemoryDiagnoser]                      // ★ 할당량까지 측정
+public class StringJoinBench
+{
+    private readonly int[] _nums = Enumerable.Range(0, 1_000).ToArray();
+
+    [Benchmark(Baseline = true)]
+    public string Concat()
+    {
+        var s = "";
+        foreach (var n in _nums) s += n + ",";
+        return s;
+    }
+
+    [Benchmark]
+    public string Builder()
+    {
+        var sb = new StringBuilder();
+        foreach (var n in _nums) sb.Append(n).Append(',');
+        return sb.ToString();
+    }
+
+    [Benchmark]
+    public string Join() =&gt; string.Join(',', _nums);
+}
+
+BenchmarkRunner.Run&lt;StringJoinBench&gt;();   // ★ Release 로 실행!</code></pre>
+    <pre class="code" data-lang="text"><code>| Method  |        Mean |   Ratio |  Allocated |
+|---------|------------:|--------:|-----------:|
+| Concat  | 1,213.42 us |    1.00 | 11,265 KB  |  ← 기준
+| Builder |    12.87 us |    0.01 |     33 KB  |  94배 빠르고
+| Join    |     9.21 us |    0.008|     15 KB  |  할당은 1/750</code></pre>
+    <div class="note warn">
+      <b>Stopwatch 로 한 번 돌려 보는 것은 측정이 아닙니다.</b>
+      JIT 워밍업·GC 타이밍·CPU 부스트에 따라 <b>결과가 매번 다릅니다.</b>
+      BenchmarkDotNet 은 워밍업 후 수백 번 반복해 통계를 내고,
+      Debug 빌드로 돌리면 <b>실행을 거부</b>합니다 — 그것이 정답인 이유입니다.
+    </div>
+  </div>
 </section>
 
 
@@ -787,6 +911,24 @@ public void 도메인은_인프라를_모른다()
         서버라면 <b>🌐 게임 서버</b> 또는 <b>🔷 ASP.NET Core</b>,
         런타임 내부가 궁금하면 <b>🔬 전문가 · CLR 내부</b>로 이어집니다.
       </div>
+    </div>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini">증상 → 원인 속답표</h4>
+    <div class="tw">
+      <table>
+        <thead><tr><th style="width:44%">증상</th><th>원인 · 처방</th></tr></thead>
+        <tbody>
+          <tr><td>async 메서드가 <b>UI 를 멈춤</b></td><td>어딘가의 <code>.Result</code>·<code>.Wait()</code> — 끝까지 await 로</td></tr>
+          <tr><td>가끔만 나는 <b>컬렉션 수정 예외</b></td><td>foreach 중 수정 또는 스레드 경합 — 스냅샷·Concurrent* 로</td></tr>
+          <tr><td>메모리가 계속 증가</td><td>이벤트 구독 해지 누락 · static 캐시 무한 증식 · Scoped 오용</td></tr>
+          <tr><td>배포하면 <b>시작이 수 초 느림</b></td><td>런타임 리플렉션 다량 — 소스 제너레이터·AOT 검토</td></tr>
+          <tr><td><code>DateTime.Now</code> 기준 버그가 새벽에만</td><td>서버 시간대 차이 — <b>UtcNow + 표시 시점 변환</b>으로 통일</td></tr>
+          <tr><td>lock 을 걸었는데도 값이 어긋남</td><td>lock 대상이 매번 새 객체 · 다른 lock 객체 — 하나의 readonly 객체로</td></tr>
+          <tr><td>HttpClient 를 쓸수록 느려지고 소켓 고갈</td><td>매번 new — <code>IHttpClientFactory</code> 또는 static 재사용</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </section>
