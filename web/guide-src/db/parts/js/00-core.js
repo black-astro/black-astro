@@ -275,7 +275,7 @@ $$(".stage-title").forEach(t => {
    "느린 쿼리" → 튜닝 탭,  "한글 깨짐" → MySQL 문자셋
    ============================================================ */
 const TAB_KW = {
-  start:"시작 설치 install 세팅 셋업 준비 입문 처음 왕초보 데이터베이스 db dbms 엑셀 도커 docker 컨테이너 접속 연결 계정 유저 권한 클라이언트 dbeaver datagrip workbench pgadmin 샘플 실습 예제데이터 포트 5432 3306 1521 방화벽 오류 로드맵 순서 무엇부터 고르기 선택 비교 차이",
+  start:"시작 설치 install 세팅 셋업 준비 입문 처음 기초 데이터베이스 db dbms 엑셀 도커 docker 컨테이너 접속 연결 계정 유저 권한 클라이언트 dbeaver datagrip workbench pgadmin 샘플 실습 예제데이터 포트 5432 3306 1521 방화벽 오류 로드맵 순서 무엇부터 고르기 선택 비교 차이",
   sql:"sql 쿼리 query 기초 기본 문법 select 조회 검색 where 조건 필터 order by 정렬 limit 페이징 null 널 자료형 타입 varchar int date insert 입력 삽입 update 수정 delete 삭제 create table 테이블 생성 제약 constraint 기본키 pk 외래키 fk join 조인 inner left outer group by 그룹 집계 count sum avg having 서브쿼리 subquery union 합치기 view 뷰 case coalesce 함수 문자열 날짜 트랜잭션 commit rollback 실행순서 치트시트",
   pro:"전문가 고급 심화 윈도우함수 window function over partition by rank dense_rank row_number lag lead 누적합 프레임 rows between cte with 공통테이블식 재귀 recursive 계층 트리 grouping sets rollup cube pivot 피벗 행열전환 merge upsert 있으면수정 lateral apply json 정규식 regexp 전문검색 집합기반 배치 대량 update delete 안티패턴 느린쿼리 튜닝 분석함수 순위 등수 이동평균",
   oracle:"오라클 oracle 오라클설치 xe free 21c 23ai dual rownum 페이징 nvl nvl2 decode 문자열 substr instr to_date to_char sysdate interval 시퀀스 sequence identity 트리거 connect by 계층쿼리 start with prior plsql pl/sql 프로시저 패키지 커서 벌크 bulk collect forall 힌트 hint 옵티마이저 실행계획 autotrace awr ash statspack 파티션 partition rac dataguard rman 백업 복구 tablespace cdb pdb sqlplus sql developer tnsnames listener ora-",

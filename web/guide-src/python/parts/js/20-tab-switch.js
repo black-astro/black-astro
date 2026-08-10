@@ -100,7 +100,7 @@ const SEC_LV = {
                t07:"b",t08:"i",t09:"b",t10:"i",t11:"i",t12:"i",t13:"i",t14:"i",
                t15:"i",t16:"a",t17:"a",t18:"a",
 };
-/* 🐣 '쉽게 말하면' — 섹션마다 붙는 왕초보 한 줄 번역 (항상 표시) */
+/* 🐣 '쉽게 말하면' — 섹션마다 붙는 기초 한 줄 번역 (항상 표시) */
 const EZ = {
  t00:"파이썬 표준 도구를 <b>목적별로</b> 늘어놓은 지도예요. 여기서 이름만 알아 두면 검색이 쉬워집니다.",
  tpick:"하려는 일을 고르면 <b>어떤 도구를 어떤 순서로</b> 쓸지 알려 줍니다.",
@@ -565,7 +565,7 @@ const CAP = {
       s.textContent = L[lv][0];
       h.appendChild(s);
     }
-    // 왕초보 요약 — sec-head 바로 뒤에
+    // 기초 요약 — sec-head 바로 뒤에
     const head = document.querySelector("#" + id + " .sec-head");
     if (head && EZ[id] && !head.nextElementSibling?.classList?.contains("ez")){
       const ez = document.createElement("div");
