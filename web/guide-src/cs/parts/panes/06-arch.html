@@ -1860,4 +1860,210 @@ perf script | stackcollapse-perf.pl | flamegraph.pl &gt; out.svg</code></pre>
   </div>
 </section>
 
+<!-- ==================== -->
+<section class="sec" id="h14">
+  <div class="sec-head rv">
+    <span class="no">ARCH 14</span>
+    <h2>캐시 일관성 — <span class="t">코어마다 캐시가 있는데 어떻게 값이 맞나</span></h2>
+    <p class="lead">
+      코어가 8개면 L1 캐시도 8개입니다. 같은 변수를 여러 코어가 캐시에 들고 있는데
+      한쪽이 값을 바꾸면 <b>나머지는 어떻게 아는가</b>.
+      이 질문의 답이 <b>MESI 프로토콜</b>이고, <b>거짓 공유</b>와
+      <b>메모리 배리어</b>가 왜 필요한지가 전부 여기서 나옵니다.
+    </p>
+  </div>
+
+  <div class="dep rv">
+    <b>캐시 일관성(cache coherence)</b> — 여러 캐시가 같은 메모리 주소의 사본을 가질 때,
+    <b>모든 코어가 그 주소에 대해 같은 값의 순서를 보도록</b> 보장하는 것.
+    하드웨어가 자동으로 해 주지만 <b>공짜가 아닙니다</b> — 이 비용이 곧 멀티스레드 성능의 상한입니다.
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 254" role="img" aria-label="캐시 라인은 네 가지 상태를 가진다. 수정됨은 나만 갖고 있고 메모리와 다른 상태, 배타는 나만 갖고 있고 메모리와 같은 상태, 공유는 여러 코어가 같은 값을 갖고 있는 상태, 무효는 쓸 수 없는 상태다. 한 코어가 쓰기를 하면 다른 코어의 사본을 전부 무효로 만든다">
+      <text x="16" y="16" class="lbl">MESI — 캐시 라인 하나가 가질 수 있는 네 가지 상태</text>
+      <rect class="bx bx-warn" x="16" y="30" width="156" height="62"/>
+      <text x="94" y="50" font-size="11" text-anchor="middle">M — Modified</text>
+      <text x="94" y="67" font-size="9" text-anchor="middle" class="lbl">나만 갖고 있고 고쳤음</text>
+      <text x="94" y="81" font-size="9" text-anchor="middle" class="lbl">메모리와 다름</text>
+      <rect class="bx bx-ok" x="180" y="30" width="156" height="62"/>
+      <text x="258" y="50" font-size="11" text-anchor="middle">E — Exclusive</text>
+      <text x="258" y="67" font-size="9" text-anchor="middle" class="lbl">나만 갖고 있고 안 고쳤음</text>
+      <text x="258" y="81" font-size="9" text-anchor="middle" class="lbl">통보 없이 바로 쓸 수 있음</text>
+      <rect class="bx" x="344" y="30" width="156" height="62"/>
+      <text x="422" y="50" font-size="11" text-anchor="middle">S — Shared</text>
+      <text x="422" y="67" font-size="9" text-anchor="middle" class="lbl">여러 코어가 같은 값 보유</text>
+      <text x="422" y="81" font-size="9" text-anchor="middle" class="lbl">읽기는 자유 · 쓰려면 통보</text>
+      <rect class="bx bx-warn" x="508" y="30" width="156" height="62"/>
+      <text x="586" y="50" font-size="11" text-anchor="middle">I — Invalid</text>
+      <text x="586" y="67" font-size="9" text-anchor="middle" class="lbl">남이 고쳐서 무효가 됨</text>
+      <text x="586" y="81" font-size="9" text-anchor="middle" class="lbl">다시 받아와야 함</text>
+      <text x="16" y="116" class="lbl" font-size="10">코어 0 이 x 에 쓰기를 할 때 벌어지는 일</text>
+      <rect class="bx" x="16" y="126" width="128" height="54"/>
+      <text x="80" y="145" font-size="10" text-anchor="middle">코어 0</text>
+      <text x="80" y="161" font-size="9" text-anchor="middle" class="lbl">x = 1 쓰기</text>
+      <text x="80" y="174" font-size="9" text-anchor="middle" class="lbl">S 에서 M 으로</text>
+      <path class="fl" d="M146 152 L176 152"/>
+      <circle class="pk" r="3">
+        <animateMotion dur="2.6s" repeatCount="indefinite" path="M146 152 L176 152 L340 152 L370 152"/></circle>
+      <rect class="bx" x="178" y="126" width="160" height="54"/>
+      <text x="258" y="145" font-size="10" text-anchor="middle">무효화 요청 방송</text>
+      <text x="258" y="161" font-size="9" text-anchor="middle" class="lbl">x 가진 코어는 버려라</text>
+      <text x="258" y="174" font-size="9" text-anchor="middle" class="lbl">인터커넥트 통신</text>
+      <path class="fl" d="M340 152 L370 152"/>
+      <rect class="bx bx-warn" x="372" y="126" width="292" height="54"/>
+      <text x="518" y="145" font-size="10" text-anchor="middle">코어 1~7 의 사본이 전부 I 로</text>
+      <text x="518" y="161" font-size="9" text-anchor="middle" class="lbl">다음에 x 를 읽으려면 코어 0 에서 받아옵니다</text>
+      <text x="518" y="174" font-size="9" text-anchor="middle" class="lbl">이 왕복이 수십~수백 사이클</text>
+      <text x="16" y="204" class="lbl" font-size="10">중요한 사실 — 무효화는 변수 단위가 아니라 캐시 라인(보통 64바이트) 단위로 일어납니다.</text>
+      <text x="16" y="220" class="lbl" font-size="10">그래서 전혀 다른 변수 둘이 같은 64바이트 안에 있으면 서로를 계속 무효화합니다(거짓 공유).</text>
+      <text x="16" y="236" class="lbl" font-size="10">여러 코어가 같은 변수를 계속 쓰면 라인이 코어 사이를 오갑니다 — 캐시 라인 핑퐁이라 부릅니다.</text>
+      <text x="16" y="252" class="lbl" font-size="10"></text>
+    </svg>
+    <div class="cap"><b>lock 이 느린 진짜 이유</b>가 여기 있습니다 — 경합 자체보다 <b>캐시 라인이 코어 사이를 오가는 비용</b>이 큽니다.</div>
+  </div>
+
+  <h3 class="sub">거짓 공유 — 코드에는 아무 문제가 없는데 8배 느린 경우</h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 재 보기</h4>
+      <pre class="code" data-lang="java"><code>// 스레드 4개가 '각자 다른' 카운터를 올립니다 — 공유하는 것이 없습니다
+
+// 나란히 두면 네 값이 같은 64바이트 라인에 들어갑니다
+static class Bad { volatile long value; }              // 8바이트
+
+// 패딩으로 라인을 분리합니다 (JDK 는 @Contended 도 제공)
+static class Good {
+    volatile long value;
+    long p1, p2, p3, p4, p5, p6, p7;                   // 56바이트 채우기
+}
+
+// 결과 (4코어 · 각 1억 회)
+//   나란히 : 3120ms
+//   패딩   :  410ms      같은 로직인데 7~8배</code></pre>
+      <div class="mth">
+        캐시 라인 = <b>64바이트</b> (대부분의 x86 · ARM)
+        <small>
+          <code>long</code> 8바이트 → <b>한 라인에 8개</b>가 들어갑니다<br>
+          코어 A 가 <code>arr[0]</code> 을 쓰면 <code>arr[1..7]</code> 까지 <b>통째로 무효화</b><br>
+          코어 B 가 <code>arr[1]</code> 을 쓰려면 라인을 <b>다시 받아와야</b> 합니다<br>
+          → 서로 상관없는 변수인데 <b>계속 서로를 방해</b>합니다
+        </small>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>스레드를 늘렸는데 오히려 느려지면</b> 가장 먼저 의심할 것이 이것입니다.
+        코드에는 공유하는 것이 하나도 없어 보이므로
+        <b>프로파일러도 원인을 알려 주지 않습니다</b>.
+        리눅스라면 <code>perf c2c record</code> 가
+        <b>어느 캐시 라인이 코어 사이를 오가는지</b> 정확히 짚어 줍니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언어별 해결 방법</h4>
+      <pre class="code" data-lang="text"><code>Java    @jdk.internal.vm.annotation.Contended
+        또는 수동 패딩 (long p1..p7)
+        LongAdder 가 이 문제를 이미 해결한 자료구조입니다
+
+C++     alignas(std::hardware_destructive_interference_size)
+        C++17 부터 캐시 라인 크기를 표준으로 알려 줍니다
+
+C#      [StructLayout(LayoutKind.Explicit, Size = 128)]
+
+Go      type Counter struct {
+            v int64
+            _ [56]byte      // 패딩
+        }
+
+Rust    #[repr(align(64))]
+        struct Padded(AtomicU64);
+
+Python  GIL 때문에 잘 드러나지 않습니다
+        (3.13+ free-threaded 빌드에서는 해당됩니다)</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">거짓 공유가 잘 생기는 곳</th><th>해결</th></tr>
+        <tr><td>스레드별 카운터 배열</td><td>패딩 · <code>LongAdder</code> 계열</td></tr>
+        <tr><td>워커별 통계 구조체</td><td>구조체를 64바이트 정렬</td></tr>
+        <tr><td>락프리 큐의 head / tail</td><td>두 필드를 <b>다른 라인</b>으로</td></tr>
+        <tr><td>이웃한 <code>volatile</code> 필드</td><td>순서 재배치 · 패딩</td></tr>
+        <tr><td class="ok">읽기만 하는 공유 데이터</td><td class="ok"><b>문제 없음</b> — S 상태로 함께 보유</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>패딩을 아무 데나 넣지는 마세요.</b>
+        객체 하나가 64바이트를 쓰게 되므로
+        <b>개수가 많으면 메모리와 캐시 용량을 그만큼 잡아먹습니다</b>.
+        <b>여러 코어가 동시에 쓰는 것이 확인된 자리</b>에만 적용하고,
+        적용 전후를 <b>반드시 측정</b>하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">여기서 이어지는 것 — 왜 메모리 배리어가 필요한가</h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">일관성만으로는 부족합니다</h4>
+      <pre class="code" data-lang="text"><code>MESI 는 '같은 주소'에 대한 순서만 보장합니다.
+'서로 다른 주소 사이의 순서'는 보장하지 않습니다.
+
+  코어 0            코어 1
+  ─────────────    ─────────────
+  data = 42;       if (ready)
+  ready = true;        print(data);   // 0 이 찍힐 수 있습니다
+
+왜?
+  · 무효화 요청을 바로 처리하지 않고 큐에 쌓아 둡니다
+  · 쓰기도 스토어 버퍼에 잠깐 모았다가 내보냅니다
+  · 컴파일러와 CPU 가 순서를 바꿔 실행하기도 합니다
+
+두 쓰기의 순서를 강제하려면 메모리 배리어가 필요합니다.</code></pre>
+      <div class="mth">
+        <b>일관성(coherence)</b> 과 <b>일치성(consistency)</b> 은 다릅니다
+        <small>
+          coherence — <b>한 주소</b>에 대해 모든 코어가 같은 순서를 본다 (하드웨어 보장)<br>
+          consistency — <b>여러 주소</b> 사이의 순서를 어디까지 보장하는가 (메모리 모델)<br><br>
+          x86 은 비교적 강한 모델(TSO), ARM · RISC-V 는 <b>약한 모델</b><br>
+          → <b>같은 코드가 x86 에서는 되고 ARM 에서 깨지는</b> 이유입니다
+        </small>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그래서 언어가 제공하는 것</h4>
+      <pre class="code" data-lang="java"><code>// Java — volatile 이 배리어 역할을 합니다
+volatile boolean ready = false;
+int data = 0;
+
+// 쓰는 쪽
+data = 42;
+ready = true;      // 이 앞의 쓰기들이 먼저 보이도록 보장
+
+// 읽는 쪽
+if (ready) {       // 이 뒤의 읽기들이 나중에 일어나도록 보장
+    print(data);   // 반드시 42
+}</code></pre>
+      <pre class="code" data-lang="cpp"><code>// C++ — 필요한 만큼만 고를 수 있습니다
+std::atomic&lt;bool&gt; ready{false};
+int data = 0;
+
+data = 42;
+ready.store(true, std::memory_order_release);   // 앞의 쓰기를 공개
+
+if (ready.load(std::memory_order_acquire))      // 그 뒤를 받아옴
+    print(data);                                 // 42 보장
+
+// seq_cst(기본값)는 가장 안전하지만 가장 비쌉니다.
+// acquire / release 로 충분한 경우가 대부분입니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>배리어를 직접 다루는 코드는 웬만하면 쓰지 마세요.</b>
+        <code>synchronized</code> · <code>Mutex</code> · <code>ConcurrentHashMap</code> 같은
+        <b>이미 검증된 도구</b>가 필요한 배리어를 전부 넣어 줍니다.
+        직접 락프리 자료구조를 쓰는 것은
+        <b>측정으로 병목이 확인됐고 검증할 방법이 있을 때</b>만입니다 —
+        이 영역의 버그는 <b>재현이 거의 불가능</b>합니다.
+        자세한 것은 <b>🕸️ 분산 · 동시성</b> 탭에서 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
 </div>
