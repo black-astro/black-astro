@@ -1,4 +1,4 @@
-# 핸드오프 — 학습 가이드 내용 보강 + 섹션별 시각화 (2026-08-07 갱신)
+# 핸드오프 — 학습 가이드 내용 보강 + 섹션별 시각화 (2026-08-10 갱신)
 
 ## 목표
 아홉 가이드(`web/guide-src/*` → `web/public/*-web/index.html`)를
@@ -15,21 +15,26 @@
 | `5000df7` | CS 기술 가이드 신설 + 아홉 가이드 보강·다이어그램 (114파일) |
 | `138bb43` | server 04-tomcat · python 08-toolbox · csharp 02-adv/01-lang |
 | `b0316d0` | js-ts 12-html · 13-css + 로딩 순서 다이어그램 |
-| (미커밋) | python 01-pandas 실무 보강 + diag 4개 ← **이번 작업분** |
+| `0f7dadc` | python 판다스 실무 보강 (컬럼 다루기 · merge 사고 · 배치 파이프라인) |
+| `376aa6d` | CS 학부 섹션 3개 (분할상환 · 네트워크 플로우 · 구간 질의) |
+| `a770ac8` | **"초보" 표현 전면 제거** + CS 시각화 (선형대수 3 · 컴파일러 · 보안) |
+| `f91418e` | CS 시스템 심화 2개 (캐시 일관성 MESI · Raft) + SW공학 시각화 |
+| `5453663` | CS 선형대수 마르코프 체인 · 엔트로피 |
+| `328719f` | CS 시각화 4개 (데드락 · TCP · 귀납법 · P·NP) |
 
 - `npm run verify:guide` **아홉 가이드 전부 통과**
 - 원격에 GitHub Action 커밋(`chore: update 3d contribution graph`)이 수시로 들어옵니다
   → push 거부되면 `git fetch && git rebase origin/main` 후 재시도 (충돌 없음)
 
-### 다이어그램 현황 (`.diag` 인라인 SVG)
+### 다이어그램 현황 (`.diag` 인라인 SVG) — 총 152개
 | 가이드 | 개수 | 실측 |
 |---|---|---|
-| csharp | 33 | ✅ 넘침·겹침 0 |
+| csharp | 32 | ✅ 넘침·겹침 0 |
+| db | 27 | ✅ |
+| **cs** | **26** | ✅ (12탭 전부 보유) |
 | python | 23 | ✅ |
 | js-ts | 22 | ✅ |
-| db | 27 | ✅ |
 | server | 15 | ✅ |
-| cs | 8 | 미실측 |
 | java | 7 | ✅ |
 | cpp · rust | 0 | 제외 대상 |
 
@@ -43,46 +48,46 @@
 ```
 초기 목표였던 2.0~3.1KB대 탭은 전부 해소됐습니다.
 
+## 사용자 지시로 확정된 기준
+
+1. **분량(바이트)이 아니라 실무 커버리지로 판단할 것.**
+   "이걸 하려면 어디를 봐야 하나"가 한자리에 없으면 그것이 구멍입니다.
+2. **"왕초보 · 초보 · 초보자" 표현 금지.** "기초 · 처음 · 입문" 을 씁니다.
+   (2026-08-10 에 19건 전부 제거, 잔여 0 — 새로 쓸 때 주의)
+3. **CS 가이드 목표 수준**
+   - 수학 · 이론 · 자료구조 · 알고리즘 → **기초부터 서울권 대학 학사 수준**
+   - 시스템 심화 설계 → **KAIST 학사 수준**
+   - 수식을 충분히 넣되 **유도 과정과 함께**, 시각화를 붙일 것
+
 ## 남은 일 (우선순위순)
 
-### 1. 시각화가 0인 탭 — **가장 큰 구멍**
-분량은 충분한데 그림이 없는 곳입니다. 실무 개념일수록 그림 하나가 큽니다.
+### 1. CS 섹션 추가 — 학부 수준 확장 (진행 중)
+현재 162 섹션. 지금까지 추가한 것: `a14` 분할상환 · `a15` 네트워크 플로우 ·
+`s14` 구간 질의 · `h14` 캐시 일관성 · `d14` Raft · `l14` 마르코프/엔트로피.
 
-| 탭 | 섹션 | diag | 후보 개념 |
-|---|---|---|---|
-| **python 02-numpy** | 13 | 0 | 브로드캐스팅 규칙 · 뷰 vs 복사 · 축(axis) · 메모리 레이아웃 |
-| **python 10-db** | 18 | 0 | 커넥션 풀 · 트랜잭션 경계 · ORM 세션 수명 |
-| **python 09-algo** | 14 | 0 | 시간복잡도 비교 · 자료구조 선택 |
-| **python 08-toolbox** | 20 | 0 | (mv 6개 있음 — 우선순위 낮음) |
-| **db 나머지** | — | — | 실측 필요 |
+**다음 후보**
+| 탭 | 섹션 후보 |
+|---|---|
+| 수학·이론 | 오일러/해밀턴 경로 · 생성함수 · 확률적 알고리즘 분석 |
+| 선형대수 | **SVD · 최소제곱법** · 수치 선형대수(조건수) |
+| 계산이론 | 근사 비율 증명 · 랜덤화 복잡도(BPP) |
+| 자료구조 | 스킵 리스트 · 지속 자료구조(persistent) |
+| 알고리즘 | 계산기하 기초 · 접미사 배열/자동완성 · 선형계획법 |
+| 컴퓨터구조 | 메모리 모델 상세(TSO vs 약한 모델) · SIMD 실전 |
+| 운영체제 | **락프리 자료구조** · 스케줄러 내부(CFS/EEVDF) |
+| 분산 | 분산 트랜잭션 심화(2PC vs Saga) · CRDT |
 
-### 2. python 01-pandas 잔여
-이번에 s03(컬럼 다루기)·s10(groupby)·s11(merge)·s15(뷰/복사) 넷을 넣었습니다. 남은 후보:
-- **s05 loc/iloc** — 인터랙티브 시뮬레이터는 있으나 `.diag` 없음
-- **s13 pivot ↔ melt** — 넓은 표 ↔ 긴 표 변환은 그림이 특히 효과적
-- **s14 시계열 rolling** — 창(window)이 미끄러지는 그림
-- **s09 결측치** — NaN 전파 방식
+### 2. 시각화 계속
+탭당 diag 1~5개. **탭당 3개 이상**을 목표로 하면 좋습니다.
+아직 1개뿐인 곳: `09-lang` · `10-sec` · `12-se`.
 
-### 3. 실무 묶음이 흩어진 곳 점검
-"이걸 하려면 어디를 봐야 하나"가 한자리에 없는 주제를 찾아 묶는 작업입니다.
-판다스에서 **컬럼 다루기**가 그 예였습니다(s04 `usecols` · s05 대괄호 · s08 연산에 흩어져 있었음).
-→ 각 가이드에서 비슷한 것을 찾아보세요.
-
-### 4. 커버리지 실측 방법 (바이트 수 말고)
-```bash
-cd web/guide-src
-# 특정 주제가 실제로 다뤄지는지
-for k in chunksize SettingWithCopy validate= select_dtypes; do
-  printf "%-18s %s\n" "$k" "$(grep -o "$k" python/parts/panes/01-pandas.html | wc -l)"
-done
-
-# 탭별 섹션·시각화 개수 (구멍 찾기)
-for f in python/parts/panes/*.html; do
-  printf "%-30s 섹션%3d diag%3d mv%3d\n" "$(basename $f)" \
-    "$(grep -o '<section class="sec"' $f|wc -l)" \
-    "$(grep -o 'diag rv' $f|wc -l)" "$(grep -o 'class="mv"' $f|wc -l)"
-done
+### 3. 다른 가이드 얇은 곳
 ```
+3.4KB  python 09-algo      3.5KB  python 05-img
+3.6KB  csharp 05-net       3.6KB  python 02-numpy
+3.7KB  js-ts 05-nest       3.8KB  db 05-pg · 06-mysql · 07-sqlite
+```
+python `02-numpy`(13섹션 diag 0) · `10-db`(18섹션 diag 0) 가 여전히 시각화 0 입니다.
 
 ## 조심할 것 (실제로 겪은 실패)
 
@@ -100,18 +105,23 @@ done
    .diag .bx-ok{fill:rgba(52,211,153,.07);stroke:rgba(52,211,153,.34)}
    ```
 
-4. **`git add` 를 하위 디렉터리에서 하지 말 것** — `guide-src` 에서 `git add -A -- .` 하면
+4. **섹션 추가는 5곳 동기화** — 이제 실제로 뚫어 놨습니다(금지 사항 아님).
+   `pane` · `sidebar navset` · `SEC_LV` · `EZ` · `CAP` 를 전부 맞추면
+   `verify:guide` 가 통과합니다. 스크립트로 처리하는 편이 안전합니다
+   (bash heredoc 은 긴 HTML 에서 깨지므로 **`.py` 파일로 써서 실행**하세요).
+
+5. **`git add` 를 하위 디렉터리에서 하지 말 것** — `guide-src` 에서 `git add -A -- .` 하면
    **`web/public/` 빌드 산출물이 빠집니다**(실제로 한 번 겪음 → amend 로 복구).
    반드시 저장소 루트에서 실행.
 
-5. **`public/*-web/index.html` 직접 수정 금지** — 빌드가 덮어씀. 소스는 `guide-src/`.
+6. **`public/*-web/index.html` 직접 수정 금지** — 빌드가 덮어씀. 소스는 `guide-src/`.
 
-6. **섹션을 새로 추가하지 말 것** — 사이드바·SEC_LV·EZ·CAP 5곳 동기화가 필요해집니다.
-   기존 섹션 안에 블록만 추가하는 것이 안전.
+7. **원격에 GitHub Action 커밋이 수시로 들어옵니다** — push 거부되면
+   `git fetch && git rebase origin/main` 후 재시도 (기여 그래프 SVG라 충돌 없음).
 
-7. **`file://` 은 Chrome MCP 가 거부** — 반드시 로컬 서버 경유.
+8. **`file://` 은 Chrome MCP 가 거부** — 반드시 로컬 서버 경유.
 
-8. **문체 유지** — 합니다체, `<b>` 포인트, note tip/warn/info, card/grid2/vs/tw 구조.
+9. **문체 유지** — 합니다체, `<b>` 포인트, note tip/warn/info, card/grid2/vs/tw 구조.
    가이드마다 컴포넌트가 조금씩 다릅니다(server 는 `table class="cheat"`,
    python 은 `note java` Spring 비유, csharp 은 `.tw > table`) — **해당 파일을 먼저 읽고 맞추세요.**
 
