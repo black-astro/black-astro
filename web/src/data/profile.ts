@@ -52,10 +52,10 @@ export interface Achievement {
 // 여러 프로젝트에서 방어 가능한 성과를 골고루 — 대용량 · 인증 · PASS · 카카오 · 레거시 현대화 · OSS · 인프라
 export const achievements: Achievement[] = [
   {
-    metric: '~2억',
-    unit: 'row',
-    label: '누적 StAX 스트리밍 적재 · 메모리 터짐(OOM) 0건',
-    detail: 'KT_BatchServer — 매월 명세서 약 100만 건(1GB+ XML)을 StAX 상태머신 + 파서 풀·단일 라이터로 힙 수십 MB에만 스트리밍 적재. 누적 파싱 약 2천만 건, 디테일 테이블 약 2억 row를 메모리 터짐 없이 운영.',
+    metric: '1,000만',
+    unit: 'row / 회차',
+    label: 'StAX 스트리밍 적재 · 메모리 터짐(OOM) 0건',
+    detail: 'KT_BatchServer — 매월 수신하는 명세서 약 100만 건(1GB+ XML)이 디테일 분해로 회차당 DB INSERT 약 1,000만 row. StAX 상태머신 + 파서 풀·단일 라이터로 힙 수십 MB에만 스트리밍 적재해 운영 OOM 0건(운영 명세·로그 기준).',
   },
   {
     metric: '3',

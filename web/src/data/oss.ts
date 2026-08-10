@@ -33,7 +33,7 @@ export const ossProjects: OssProject[] = [
     ],
     install: {
       lang: 'gradle',
-      code: 'implementation "io.github.black-astro:easy-quartz-spring-boot-starter:0.1.0"',
+      code: 'implementation "io.github.black-astro:easy-quartz-spring-boot-starter:0.0.2"',
     },
     featured: true,
   },
@@ -70,8 +70,9 @@ export const ossProjects: OssProject[] = [
     desc:
       'PySide6 기반 코딩 테스트 연습 데스크톱 앱. 문법→자료구조→알고리즘 단계 학습, 케이스별 실행 시간(ms)·최대 메모리까지 측정하는 자동 채점 엔진(Python · Java · C++ · JavaScript)을 직접 구현.',
     points: [
-      '4개 언어 자동 채점 엔진 — 테스트 케이스별 실행시간·최대 메모리 실측.',
-      '문법 강의 + 알고리즘 문제 다수 수록, PyInstaller 배포본 제공.',
+      '4개 언어 자동 채점 엔진 — 테스트 케이스별 실행시간·최대 메모리 실측. SQL은 내장 sqlite로 채점.',
+      '문제 357종(코딩테스트 326 · SQL 실전 50제 포함 / 데이터분석 31) · 강의 212종(문법 155 / 데이터분석 57) 수록.',
+      '데이터분석 트랙은 회귀·분류·군집·PCA·CNN·RNN·트랜스포머를 sklearn/torch 없이 numpy로 직접 구현. PyInstaller 배포본 제공.',
     ],
     featured: false,
   },

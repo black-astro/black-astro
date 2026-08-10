@@ -52,15 +52,15 @@
 
 | 구분 | 내용 |
 |------|------|
-| **대용량 처리** | StAX 스트리밍 파싱 · MyBatis `ExecutorType.BATCH`(청크 flush) · Java 21 Virtual Thread 병렬화로 대용량 XML을 OOM 없이 ETL |
+| **대용량 처리** | StAX 스트리밍 파싱 · MyBatis `ExecutorType.BATCH`(청크 flush) · 파서 풀 + 단일 라이터 파이프라인으로 1GB+ XML을 OOM 없이 ETL |
 | **인증/인가 설계** | 단일 백엔드에서 클라이언트 3종을 멀티 `SecurityFilterChain`으로 분리, JWT 발급·검증 분리, 클라이언트별 토큰 정책 운영 |
-| **외부 API 연동** | Spring 6 RestClient 기반 카카오 비즈톡·PASS 인증사 연동, 타임아웃 정밀 분기(504/500), 발송 상태머신 설계 |
+| **외부 API 연동** | Spring 6 RestClient 기반 카카오 전자문서 게이트웨이·SKT PASS지갑 IF 연동, 타임아웃 정밀 분기(504/500), 발송 상태머신 설계 |
 | **동시성 / 스케줄러** | `ThreadPoolTaskScheduler` N-스레드 분산 발송, MOD 기반 다중 스케줄러, `@PreDestroy` graceful shutdown |
 | **운영 안정성** | 발송 상태머신 · 스케줄러 race를 DB 원자성으로 차단, 운영 사고를 SQL로 재현·복구 후 문서화(재발 방지) |
 | **DB / SQL** | JPA · QueryDSL · MyBatis 혼용, Tibero·Oracle PL/SQL 프로시저·UDF, MERGE UPSERT, 동적 인덱스 제어, SQL 튜닝 |
 | **빌드/품질 자동화** | Jenkins Pipeline · SonarQube Quality Gate · JaCoCo · CycloneDX SBOM · WAR/JAR 동시 빌드 |
 | **인프라 직접 구축** | VMware OS 설치부터 Docker 기반 Gitea · Jenkins · SonarQube(Community) · Nginx + PostgreSQL 사내 CI/CD 환경을 단독 구축·운영 (CentOS / Ubuntu, Apache · Nginx) |
-| **Full-stack** | Vue3 · Nuxt · Electron 데스크톱까지, 백엔드 계약(엔드포인트·토큰) 기준으로 프론트를 직접 연동 |
+| **Full-stack** | 관리자 콘솔 JSP → Vue2 → Vue3 3세대 전환, Electron 데스크톱까지 — 백엔드 계약(엔드포인트·토큰) 기준으로 프론트를 직접 연동 |
 
 <br/>
 
@@ -73,7 +73,7 @@
 ![Java](https://img.shields.io/badge/Java_8~21-007396?style=for-the-badge&logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot_2.7~3.4-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)
 ![Spring](https://img.shields.io/badge/Spring_MVC_·_AOP-6DB33F?style=for-the-badge&logo=spring&logoColor=white)
-![Virtual Thread](https://img.shields.io/badge/Java_21_Virtual_Thread-007396?style=for-the-badge&logo=openjdk&logoColor=white)
+![Spring Security](https://img.shields.io/badge/Spring_Security_·_OAuth2-6DB33F?style=for-the-badge&logo=springsecurity&logoColor=white)
 
 **Data & Persistence**
 
@@ -83,15 +83,15 @@
 ![MariaDB](https://img.shields.io/badge/MariaDB-003545?style=for-the-badge&logo=mariadb&logoColor=white)
 ![Oracle](https://img.shields.io/badge/Oracle-F80000?style=for-the-badge&logo=oracle&logoColor=white)
 ![Tibero](https://img.shields.io/badge/Tibero_6-1F6FEB?style=for-the-badge&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-FF4438?style=for-the-badge&logo=redis&logoColor=white)
+![HikariCP](https://img.shields.io/badge/HikariCP_·_Caffeine-2C3E50?style=for-the-badge&logoColor=white)
 
-**Security · API · Resilience**
+**Security · API**
 
 ![Spring Security](https://img.shields.io/badge/Spring_Security-6DB33F?style=for-the-badge&logo=springsecurity&logoColor=white)
 ![JWT](https://img.shields.io/badge/OAuth2_·_JWT-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white)
 ![RestClient](https://img.shields.io/badge/RestClient-6DB33F?style=for-the-badge&logo=spring&logoColor=white)
 ![STOMP](https://img.shields.io/badge/WebSocket_STOMP-010101?style=for-the-badge&logoColor=white)
-![Resilience4j](https://img.shields.io/badge/Resilience4j-1C7C54?style=for-the-badge&logoColor=white)
+![Jasypt](https://img.shields.io/badge/Jasypt_·_AES--256--GCM-4B0082?style=for-the-badge&logoColor=white)
 
 **Batch · Concurrency · Quality**
 
@@ -105,7 +105,7 @@
 **Frontend**
 
 ![Vue3](https://img.shields.io/badge/Vue_3-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white)
-![Nuxt](https://img.shields.io/badge/Nuxt-00DC82?style=for-the-badge&logo=nuxtdotjs&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
 ![Electron](https://img.shields.io/badge/Electron-47848F?style=for-the-badge&logo=electron&logoColor=white)
@@ -131,6 +131,15 @@
 ![npm](https://img.shields.io/badge/npm-CB3837?style=for-the-badge&logo=npm&logoColor=white)
 ![Maven](https://img.shields.io/badge/Maven_Central-C71A36?style=for-the-badge&logo=apachemaven&logoColor=white)
 
+**학습 중** _(개인 프로젝트로 직접 구현하며 익히는 중 — 실무 적용 경험과 구분해 표기합니다)_
+
+![Kafka](https://img.shields.io/badge/Kafka-231F20?style=for-the-badge&logo=apachekafka&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-FF4438?style=for-the-badge&logo=redis&logoColor=white)
+![Resilience4j](https://img.shields.io/badge/Resilience4j-1C7C54?style=for-the-badge&logoColor=white)
+![Spring Cloud](https://img.shields.io/badge/Spring_Cloud_(Eureka·Gateway)-6DB33F?style=for-the-badge&logo=spring&logoColor=white)
+![k6](https://img.shields.io/badge/k6-7D64FF?style=for-the-badge&logo=k6&logoColor=white)
+![Testcontainers](https://img.shields.io/badge/Testcontainers-291A44?style=for-the-badge&logoColor=white)
+
 <br/>
 
 ---
@@ -140,7 +149,7 @@
 ### [`easy-quartz`](https://github.com/black-astro/easy-quartz) · Spring Boot Starter
 
 <img src="assets/badges/eq-lang.svg" alt="Java"/>&nbsp;
-<img src="assets/badges/eq-maven.svg" alt="Maven Central v0.1.0"/>&nbsp;
+<img src="assets/badges/eq-maven.svg" alt="Maven Central v0.0.2"/>&nbsp;
 <img src="assets/badges/eq-license.svg" alt="Apache-2.0"/>
 
 어노테이션(`@EasyQuartzScheduled`) 기반으로 **5종 스케줄 × 2엔진(Quartz / Spring TaskScheduler)**을 단일 추상화로 통합한 Spring Boot Starter. `Maven Central` 배포.
@@ -150,7 +159,7 @@
 - 태그 push → GPG 서명 → Sonatype Central 배포까지 릴리즈 파이프라인 무인 자동화
 
 ```gradle
-implementation "io.github.black-astro:easy-quartz-spring-boot-starter:0.1.0"
+implementation "io.github.black-astro:easy-quartz-spring-boot-starter:0.0.2"
 ```
 
 ### [`smart-msg`](https://github.com/black-astro/smart-msg) · AI Commit CLI
@@ -170,7 +179,7 @@ npm install -g smart-msg   # 사용: sm
 <img src="assets/badges/ct-lang.svg" alt="Python"/>&nbsp;
 <img src="assets/badges/ct-pyside.svg" alt="PySide6"/>
 
-**PySide6** 기반 코딩 테스트 연습 데스크톱 앱. 문법→자료구조→알고리즘 단계 학습, 문제 276·문법 강의 149 수록, **케이스별 실행 시간(ms)·최대 메모리까지 측정하는 자동 채점** (Python · Java · C++ · JS).
+**PySide6** 기반 코딩 테스트 연습 데스크톱 앱. 문법→자료구조→알고리즘 단계 학습, **문제 357**(코딩테스트 326 · SQL 실전 50제 포함 / 데이터분석 31) · **강의 212**(문법 155 / 데이터분석 57) 수록, **케이스별 실행 시간(ms)·최대 메모리까지 측정하는 자동 채점** (Python · Java · C++ · JS).
 
 > 그 외 — `shadowport` : 레거시 리버스 터널 도구를 Java 21 · Netty · AES-GCM / X25519 · JavaFX로 재설계한 네트워크·보안 사이드 프로젝트 (비공개)
 
@@ -183,19 +192,21 @@ npm install -g smart-msg   # 사용: sm
 > 비공개 사내/개인 저장소는 도메인 중심으로 요약했습니다.
 
 #### 실시간 상담·모니터링 백엔드
-`Java 21` · `Spring Boot 3.x` · `Spring Data JPA` · `QueryDSL` · `Resilience4j` · `WebSocket` · `MariaDB`
-- 도메인 패키지 구조(DDD 지향) 기반 계층 분리, JPA + QueryDSL로 동적 조회 구성
-- Resilience4j Circuit Breaker로 외부 연동 장애 격리, WebSocket 실시간 상태 전송
-- Caffeine 캐시 · 비동기 로깅(Log4j2 Disruptor) 적용
+`Java 21` · `Spring Boot 3.x` · `Spring Data JPA` · `QueryDSL` · `WebSocket` · `MariaDB` · `Tibero`
+- 도메인 패키지 구조(DDD 지향) 기반 계층 분리, JPA + QueryDSL 커스텀 리포지토리로 타입 안전한 동적 조회 구성
+- WebSocket 실시간 상태 전송에 인증 인터셉터를 붙여 비인가 구독 차단, 이기종 멀티 DataSource 분리
+- 메뉴 계층·권한 로직에 Mockito·AssertJ 단위 테스트 작성 — MyBatis 중심 조직에 테스트 관행 도입
 
-#### 대용량 명세서 배치 (ETL)
+#### 대용량 명세서 배치 (ETL) — 델파이 레거시 재구축
 `Java 21` · `Spring Boot 3.4` · `StAX / JAXB` · `MyBatis BATCH` · `Tibero PL/SQL` · `Spring Integration SFTP`
 - 규모별 파싱 전략 분리 — 텍스트(BufferedReader) / 중규모(JAXB) / 대규모(StAX 상태머신)
-- Virtual Thread + Semaphore로 병렬 상한 제어, MyBatis BATCH 청크 단위 flush
-- 적재 전 인덱스 `UNUSABLE` → 대량 적재 → `REBUILD` + `DBMS_STATS`로 실행계획 회복
+- 파서 스레드 풀 + `ArrayBlockingQueue` backpressure + 단일 라이터로 커밋 경합 제거(poison pill 종료 전파)
+- 적재 전 인덱스 `UNUSABLE` → BATCH 청크 적재 → `REBUILD` + `DBMS_STATS`로 실행계획 회복
+- 중복제거 프로시저를 커서 루프에서 집합 기반(`MERGE`)으로 재설계 — **INSERT 50분→25분, 프로시저 5시간→2시간**(운영 실측)
 
-#### 알림톡 발송 서버
+#### 카카오 전자문서 발송 서버
 `Java 21` · `Spring Boot 3.3` · `RestClient` · `MyBatis 동적 SQL` · `Tibero`
+> 카카오 전자문서(모바일 전자고지) 게이트웨이 연동 — 수신자는 카카오톡 알림으로 안내를 받고 링크로 열람
 - 발송/결과/정산을 단일 상태 컬럼(N→B→P→S) 상태머신으로 추적
 - 외부 API 호출을 트랜잭션 경계 밖으로 분리, `WHERE` 상태 조건으로 스케줄러 race를 DB 원자성으로 차단
 - 멱등 INSERT(`WHERE NOT EXISTS`), 무중단 Switch ON/OFF, 운영 사고 SQL 재현·복구 후 문서화
