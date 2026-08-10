@@ -39,7 +39,7 @@ function switchTab(name){
 const TAB_LABEL = {
   start:"🧭 시작 · 개념",
   nginx:"🟩 Nginx",
-  apache:"🪶 Apache",
+  apache:"🦅 Apache",
   tomcat:"🐱 Tomcat",
   caddy:"🔒 Caddy",
   tls:"🔐 HTTPS · 인증서",

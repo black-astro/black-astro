@@ -1,4 +1,4 @@
-# 학습 가이드 소스 (Python · Java · JS/TS · C#/Unity · C++ · Rust · Database · Web Server · CS 기술)
+# 학습 가이드 소스 (Python · Java · JS/TS · C#/Unity · C++ · Rust · Database · 서버기술 · CS 기술)
 
 `public/*-web/index.html` 아홉 개의 **원본**입니다.
 편집은 여기서 하고, 빌드하면 조각들이 합쳐져 각각 단일 HTML로 나갑니다.
@@ -14,7 +14,7 @@
 | 🔵 C++ | `guide-src/cpp/` | `/cpp-web/` | 8탭 · 88섹션 |
 | 🦀 Rust | `guide-src/rust/` | `/rust-web/` | 8탭 · 88섹션 |
 | 🗄️ Database | `guide-src/db/` | `/db-web/` | 10탭 · 154섹션 |
-| 🌐 Web Server | `guide-src/server/` | `/server-web/` | 11탭 · 152섹션 |
+| 🌐 서버기술 | `guide-src/server/` | `/server-web/` | 11탭 · 152섹션 |
 | 🎓 CS 기술 | `guide-src/cs/` | `/cs-web/` | 12탭 · 156섹션 |
 
 아홉 가이드는 **뼈대 CSS 5개와 사이드바 스크립트를 공유**합니다(테마 동일).
@@ -117,14 +117,14 @@ Python 가이드만 데모 스크립트가 많아 `js/` 가 13개로 더 잘게 
 | 🟨 JS · TS | JavaScript · TypeScript · Node.js · Express · NestJS · Electron · React Native · **네이티브 · 미디어** · **대규모 트래픽** · **전문가** · 실전 도구 |
 | 🗄️ Database | 시작·설치 · SQL 기초 · SQL 전문가 · Oracle · PostgreSQL · MySQL/MariaDB · SQLite3 · 설계·튜닝 · **전문가(내부)** · 앱 연동 |
 | 🟣 C# · Unity | C# 기초 · C# 고급 · **Unity 기초** · **Unity 실전** · **게임 서버** · ASP.NET Core · 대규모 트래픽 · 데스크탑 · 실전 도구 · **전문가(CLR)** |
-| 🌐 Web Server | 시작·개념 · Nginx · Apache · Tomcat · Caddy · HTTPS·인증서 · **로드밸런싱** · 언어별 연동 · 성능·튜닝 · 보안·운영 · **전문가(내부)** |
+| 🌐 서버기술 | 시작·개념 · Nginx · Apache · Tomcat · Caddy · HTTPS·인증서 · **로드밸런싱** · 언어별 연동 · 성능·튜닝 · 보안·운영 · **전문가(내부)** |
 | 🎓 CS 기술 | 이산수학 · 선형대수·확률 · 계산이론 · 자료구조 · 알고리즘 · 컴퓨터구조 · 운영체제 · 네트워크 · 컴파일러 · 보안·암호 · 분산·동시성 · 소프트웨어 공학 |
 
 언어 가이드 세 개는 마지막 두 탭이 **대규모 트래픽 + 전문가**입니다.
 전문가 탭은 각 언어의 런타임 내부(CPython / JVM / V8)와
 메모리·프로파일링·보안·아키텍처를 같은 뼈대로 다룹니다.
 
-DB·웹서버 가이드는 **언어에 종속되지 않는 주제**를 다루므로
+DB·서버기술 가이드는 **언어에 종속되지 않는 주제**를 다루므로
 언어 가이드에서 상호 링크로 이어집니다.
 
 ## 자주 하는 작업
@@ -171,7 +171,7 @@ npm run check:guide       # 결과물이 조각과 일치하는지
   - 언어 가이드(🐍 ☕ 🟨 🟣) — 그 언어로 코드를 쓰는 법
     (🟣 C# 은 여기에 **게임 엔진 · 게임 서버 · 데스크탑**까지 한 언어로 이어 붙인 형태입니다)
   - 🗄️ Database — SQL 문법 · DB별 방언 · 설치 · 튜닝 · 내부 구조 (언어 무관)
-  - 🌐 Web Server — 배포 · 프록시 · HTTPS · 운영 (언어 무관)
+  - 🌐 서버기술 — 배포 · 프록시 · HTTPS · 운영 (언어 무관)
   - 🎓 CS 기술 — 수학 · 이론 · 하드웨어 · 시스템 · 설계 (언어·도구 무관 · 모든 가이드의 바닥층)
   - 파이썬 가이드의 `DB 연동` · `웹 · API` 탭은 **파이썬 관점**만 다루고
     나머지는 위 두 가이드로 링크합니다

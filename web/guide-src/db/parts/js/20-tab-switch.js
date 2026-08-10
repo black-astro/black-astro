@@ -43,7 +43,7 @@ const TAB_LABEL = {
   oracle:"🅾️ Oracle",
   pg:"🐘 PostgreSQL",
   mysql:"🐬 MySQL · MariaDB",
-  sqlite:"🪶 SQLite3",
+  sqlite:"✒️ SQLite3",
   tune:"⚙️ 설계 · 튜닝",
   deep:"🧬 전문가 · DB 내부",
   app:"🔌 앱 연동 · Python·Java·Node",

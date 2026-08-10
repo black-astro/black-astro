@@ -173,17 +173,17 @@ export const guides: Guide[] = [
     label: 'Server Guide',
     emoji: '🌐',
     href: `${import.meta.env.BASE_URL}server-web/`,
-    title: '웹서버 · Nginx · Apache · Tomcat · Caddy 실전 가이드 (별도 페이지)',
-    heading: 'Web Server Visual Guide',
+    title: '서버기술 · 웹서버 · Kafka · MSA · 대규모 트래픽 실전 가이드 (별도 페이지)',
+    heading: 'Server Tech Visual Guide',
     desc:
-      '웹서버 설치부터 리버스 프록시·HTTPS 발급-적용 전 과정, 언어별(Java·Python·Node·PHP) ' +
-      '배포, 로드밸런싱·무중단 배포·LB 이중화, 성능 튜닝과 보안 운영, 그리고 ' +
-      'epoll·HTTP/3 내부 동작까지 Nginx·Apache·Tomcat·Caddy 를 한 페이지로 다룹니다.',
+      '웹서버(Nginx·Apache·Tomcat·Caddy) 설치·프록시·HTTPS부터 백엔드 서버 구조, ' +
+      'Kafka 로 하는 대규모 데이터 처리, MSA 설계, 로드밸런싱·무중단 배포, ' +
+      '대규모 트래픽 처리까지 — 언어와 무관한 서버 기술을 한 페이지로 다룹니다.',
     tags: [
       'Nginx',
-      'Apache',
-      'Tomcat',
-      'Caddy',
+      'Kafka',
+      'MSA',
+      '대규모 트래픽',
       'HTTPS · 인증서',
       '로드밸런싱',
       '무중단 배포',
