@@ -1,249 +1,88 @@
-# 핸드오프 — 학습 가이드 내용 보강 + 섹션별 시각화 (2026-08-10 갱신)
+# 핸드오프 — 서버기술 개편 + 시각화 공통화 완료 (2026-08-10 갱신)
 
 ## 목표
 아홉 가이드(`web/guide-src/*` → `web/public/*-web/index.html`)를
 **"기초부터 전문가까지 이 페이지만 보고 실서비스를 만들 수 있는"** 수준으로 끌어올린다.
+판단 기준은 분량(바이트)이 아니라 **실무 커버리지**다.
 
-**판단 기준이 바뀌었습니다.** 초기에는 "섹션 바이트 수가 얇은 곳"을 기준으로 채웠는데,
-사용자 피드백으로 기준이 **"실서비스 실무에서 중요한 것이 실제로 들어 있는가"**로 바뀌었습니다.
-→ 분량이 두터워도 **시각화가 없거나 실무 묶음이 빠진 곳**이 진짜 구멍입니다.
-
-## 현재 상태 (전부 커밋·푸시됨)
+## 이번 세션에서 끝낸 것 (전부 커밋됨)
 
 | 커밋 | 내용 |
 |---|---|
-| `5000df7` | CS 기술 가이드 신설 + 아홉 가이드 보강·다이어그램 (114파일) |
-| `138bb43` | server 04-tomcat · python 08-toolbox · csharp 02-adv/01-lang |
-| `b0316d0` | js-ts 12-html · 13-css + 로딩 순서 다이어그램 |
-| `0f7dadc` | python 판다스 실무 보강 (컬럼 다루기 · merge 사고 · 배치 파이프라인) |
-| `376aa6d` | CS 학부 섹션 3개 (분할상환 · 네트워크 플로우 · 구간 질의) |
-| `a770ac8` | **"초보" 표현 전면 제거** + CS 시각화 (선형대수 3 · 컴파일러 · 보안) |
-| `f91418e` | CS 시스템 심화 2개 (캐시 일관성 MESI · Raft) + SW공학 시각화 |
-| `5453663` | CS 선형대수 마르코프 체인 · 엔트로피 |
-| `328719f` | CS 시각화 4개 (데드락 · TCP · 귀납법 · P·NP) |
-| `c4c4892` | CS 섹션 3개(`l15` SVD·최소제곱 · `s15` 스킵리스트·지속자료구조 · `o14` 스케줄러 내부) + 시각화 12개 (26 → 38) |
-| `a9febee` | **알고리즘 탭 a01~a13 에 동작 시각화 13개** (algomaster 스타일 · 단계별 그림) |
-| `a0bc2ae` | **알고리즘 플래티넘 구간 5개 섹션** `a16` SCC·2-SAT · `a17` LCA·트리DP · `a18` 비트마스크·LIS · `a19` 계산기하 · `a20` Z·아호코라식 |
-| `1fa5c24` | **다이어그램 확대율 상한**(`max-width:1000px`) — 글씨가 본문보다 크던 문제 + pandas axis 레이아웃 재배치 |
-| `fe0261c` | **화살촉 도입**(`.ar` 119개) + 선 끝 경계 보정 + `guide-src/DIAGRAM-STYLE.md` 신설 |
-| `cc73977` | **코딩테스트 빈출 3절** `a21` 구현·시뮬레이션 · `a22` 투포인터·누적합 · `a23` 코테 정수론 |
+| `73eb139` | **DB 화살촉 88개** + DB 다이어그램 6개 (27→33) — SQL 실행 경로·윈도우 프레임·인덱스 6종·복제 지연·busy_timeout·실행계획 읽는 순서 |
+| `72a8c23` | **가이드 이름 "웹서버"→"서버기술"** (아홉 가이드 전환 버튼·허브·메타) + 🪶(Win10 미지원) 제거 — Apache 🦅 · SQLite ✒️ |
+| `d41a79d` | **시각화 공통화** — `shared/css/06-diag.css`(단일 기준) · `shared/js/06-diag-motion.js`(.pk 페이드) · paneIn 탭 전환 · SVG 상태 전환 0.45s · 마커 defs 아홉 가이드 전부 |
+| `d922c9e` | **서버기술 확장 그룹 신설** — 🧱 백엔드·MSA(11절) · 📨 Kafka·이벤트(11절) · 📈 대규모 트래픽(12절), diag 17개, 152→186섹션 |
+| `8273497` | 3관점 검수 — 이모지 2건(🪺🪙) 교체 · `.diag` 모바일 스크롤 힌트 |
 
 - `npm run verify:guide` **아홉 가이드 전부 통과**
-- 원격에 GitHub Action 커밋(`chore: update 3d contribution graph`)이 수시로 들어옵니다
-  → push 거부되면 `git fetch && git rebase origin/main` 후 재시도 (충돌 없음)
+- 시각화 스킬 등록: **`.claude/skills/diag/SKILL.md`** — 다이어그램 만들 때 `/diag` 로 호출
+- HANDOFF 이전 버전의 "DB 가이드 다음 차례" 항목은 **완료됨** (화살촉·얇은 탭 시각화·내용 구멍 확인).
+  ※ 내용 구멍이라던 "실행계획 읽는 법·B-Tree·커서 페이지네이션·무중단 마이그레이션"은
+  **표기 차이(띄어쓰기·영문) 때문에 grep 이 못 찾았을 뿐 대부분 이미 있었다** — 다음에도 grep 만 믿지 말 것.
 
-### 다이어그램 현황 (`.diag` 인라인 SVG) — 총 192개
-| 가이드 | 개수 | 실측 |
-|---|---|---|
-| **cs** | **65** | ✅ 넘침·겹침 0 (12탭 전부 2개 이상) |
-| csharp | 33 | ✅ |
-| db | 27 | ✅ |
-| python | 23 | ✅ |
-| js-ts | 22 | ✅ |
-| server | 15 | ✅ |
-| java | 7 | ✅ |
-| cpp · rust | 0 | 제외 대상 |
+### 다이어그램 현황 (`.diag` 인라인 SVG) — 총 226개 · 실측 넘침 0 · 겹침 0 · aria 누락 0
+| 가이드 | 개수 | | 가이드 | 개수 |
+|---|---|---|---|---|
+| cs | 65 | | js-ts | 22 |
+| **server** | **43** (26→43) | | java | 7 |
+| **db** | **33** (27→33) | | cpp·rust | 0 (제외 대상) |
+| csharp | 33 | | python | 23 |
 
-CS 탭별 diag: math 2 · la 7 · comp 2 · ds 4 · **algo 29** · arch 2 · os 4 ·
-net 3 · lang 3 · sec 3 · dist 3 · se 3 — 알고리즘 탭은 **전 섹션이 시각화를 갖췄습니다.**
+## 시각화 모델 — 공통 인프라 (2026-08-10 확정)
 
-### 탭 평균 분량 (얇은 순)
-```
-3.4KB  python 09-algo      ← 다음 후보
-3.5KB  python 05-img
-3.6KB  csharp 05-net · python 02-numpy
-3.7KB  js-ts 05-nest
-3.8KB  db 05-pg · 06-mysql · 07-sqlite
-```
-초기 목표였던 2.0~3.1KB대 탭은 전부 해소됐습니다.
+1. **스타일의 단일 기준은 `shared/css/06-diag.css`** — 아홉 parts.json 에서 가이드별
+   `css/06-*.css` **뒤에** 로드되어 항상 이긴다. 가이드 css 에 남은 .diag 블록은 옛 사본
+   (지우지 않았음 — 지울 거면 가이드별 고유 클래스가 섞여 있는지 먼저 확인).
+2. **모션** — `.pk` 흐름 점은 `shared/js/06-diag-motion.js` 가 같은 위상 opacity 를 붙여
+   순간이동 없이 스르륵. 탭 전환은 `paneIn` 페이드. SVG rect/circle/text 는 fill·opacity·
+   transform 0.45s 전환(클래스 갈아끼우면 색이 스르륵). reduced-motion 전부 존중.
+3. **마커 defs**(#ar-cy 등)는 아홉 가이드 `parts/10-body-open.html` 에 전부 있음.
+4. **작업 절차는 `.claude/skills/diag/SKILL.md`** + `web/guide-src/DIAGRAM-STYLE.md`.
+5. `.diag` 는 markScrollables 대상 — 좁은 화면에서 "옆으로 밀어보세요" 힌트가 붙는다.
+6. **Windows 10 은 Emoji 12까지만** 렌더한다. U+1FA70~1FAFF 대역(🪶🪙🪺 등)은 쓰지 말 것.
+   검사: `[\u{1FA70}-\u{1FAFF}]` 정규식 스캔 (이번에 3건 잡음).
 
-## 사용자 지시로 확정된 기준
+## 서버기술 가이드 구조 (탭 14개)
 
-1. **분량(바이트)이 아니라 실무 커버리지로 판단할 것.**
-   "이걸 하려면 어디를 봐야 하나"가 한자리에 없으면 그것이 구멍입니다.
-2. **"왕초보 · 초보 · 초보자" 표현 금지.** "기초 · 처음 · 입문" 을 씁니다.
-   (2026-08-10 에 19건 전부 제거 — 새로 쓸 때 주의)
-   본문에는 잔여 0 이지만 **shared 의 코드 주석 3건**이 남아 있습니다
-   (`shared/css/04-panels-beginner.css:68` · `shared/css/05-responsive.css:282` ·
-   `shared/js/05-nav.js:171`). 화면에 안 보이는 주석이고, 고치면 **아홉 가이드가 전부
-   재빌드**되어 디프가 커지므로 이번에는 두었습니다. 손볼 거면 **단독 커밋**으로 하세요.
-3. **CS 가이드 목표 수준**
-   - 수학 · 이론 · 자료구조 · 알고리즘 → **기초부터 서울권 대학 학사 수준**
-   - 시스템 심화 설계 → **KAIST 학사 수준**
-   - 수식을 충분히 넣되 **유도 과정과 함께**, 시각화를 붙일 것
+그룹: 시작(0) · 서버별(1: Nginx🟩 Apache🦅 Tomcat🐱 Caddy🔒) · 운영(2) · 심화(3) ·
+**확장(4: msa🧱 kafka📨 scale📈)**. 섹션 접두사 — msa=`m` · kafka=`k` · scale=`x`.
+섹션 추가 시 동기화 6곳: pane · `11-sidebar` navset · `20-tab-switch.js`(SEC_LV·EZ·CAP) ·
+`00-core.js`(TAB_KW·SEC_KW) · hero SECTIONS 숫자.
 
 ## 남은 일 (우선순위순)
 
-### 1. CS 섹션 추가 — 학부 수준 확장 (진행 중)
-현재 **173 섹션**. 지금까지 추가한 것: `a14` 분할상환 · `a15` 네트워크 플로우 ·
-`s14` 구간 질의 · `h14` 캐시 일관성 · `d14` Raft · `l14` 마르코프/엔트로피 ·
-`l15` SVD·최소제곱 · `s15` 스킵리스트·지속자료구조 · `o14` 스케줄러 내부(CFS/EEVDF) ·
-`a16` SCC·2-SAT · `a17` LCA·트리DP · `a18` 비트마스크·LIS · `a19` 계산기하 · `a20` Z·아호코라식 ·
-`a21` 구현·시뮬레이션 · `a22` 투포인터·누적합 · `a23` 코테 정수론.
+1. **python `02-numpy`(13섹션)·`10-db`(18섹션)가 여전히 diag 0** — 다음 시각화 후보.
+   java 도 7개로 얇다.
+2. **CS 얇은 탭** — `01-math`(2) · `03-comp`(2) · `06-arch`(2) 를 3개 이상으로.
+3. CS 학부 확장 후보(이전 HANDOFF 표 유지): 오일러/생성함수 · CG·GMRES · BPP ·
+   외부 메모리 모델 · LP·MCMF·HLD·매내커 · TSO/SIMD · io_uring · CRDT · 사이드채널·PQC.
+   **후보 선정 전 `11-sidebar.html` 목차 필독** (중복 선정 사고 4회 있었음).
+4. 가이드별 css 의 .diag 중복 블록 정리 (선택 — 공통 css 가 이기므로 급하지 않음).
+5. 탭 평균 분량 얇은 곳: python 09-algo(3.4KB) · 05-img(3.5) · csharp 05-net(3.6) · python 02-numpy(3.6).
 
-**다음 후보** (이미 다룬 것은 뺐습니다)
-| 탭 | 섹션 후보 |
-|---|---|
-| 수학·이론 | 오일러/해밀턴 경로 · 생성함수 · 확률적 알고리즘 분석 |
-| 선형대수 | 수치 선형대수 심화 — 반복법(CG·GMRES) · 희소 행렬 |
-| 계산이론 | 근사 비율 증명 · 랜덤화 복잡도(BPP) |
-| 자료구조 | 캐시 인지 자료구조 · 외부 메모리 모델 |
-| 알고리즘 | 선형계획법 · MCMF · HLD(무거운 간선 분해) · 매내커 |
-| 컴퓨터구조 | **메모리 모델 상세(TSO vs 약한 모델)** · SIMD 실전 |
-| 운영체제 | 페이지 캐시·io_uring 심화 |
-| 분산 | **CRDT** · 분산 추적/시계 동기화 심화 |
-| 보안 | 사이드채널 · 포스트양자 암호 개요 |
+## 조심할 것 (실제로 겪은 실패 — 누적)
 
-> **주의 — 후보를 고르기 전에 `11-sidebar.html` 의 해당 `navset` 목차를 반드시 읽으세요.**
-> 옛 후보 목록에 있던 “락프리 자료구조”(`d04`) · “2PC vs Saga”(`d11`) ·
-> “이분 매칭”(`a15` 안) · “세그먼트 트리 lazy”(`s14`) 는 **전부 이미 있었습니다.**
-
-### 1-b. 알고리즘 탭 — 사용자 확정 기준 (2026-08-10)
-- **시각화 디자인 기준은 `web/guide-src/DIAGRAM-STYLE.md` 에 따로 있습니다. 먼저 읽으세요.**
-  카드 배경·투명도·박스 색은 **파이썬 가이드가 기준**입니다(그라디언트·그림자·굵은 테두리 금지).
-- python 가이드의 알고리즘은 **파이썬으로 문제 푸는 쪽**, CS 가이드의 알고리즘은
-  **이론을 쉽게 설명하는 쪽**으로 역할이 갈립니다. 중복을 걱정하지 말 것.
-- **섹션마다 시각화가 있어야 합니다.** 참고 기준은 `algomaster.io` —
-  단계별 상태 변화 · 배열 셀 · 포인터 · 색으로 구분한 상태. 현재 테마에 맞춰
-  `.bx`(기본) · `.bx-ok`(확정·정답) · `.bx-warn`(버림·틀림) · `.bx-fw`(현재 대상) 로 씁니다.
-- **커버 범위는 백준 플래티넘까지.** 각 절 끝에 연습 문제를 난이도 등급과 함께 답니다.
-- **코드 설명이 필요한 곳은 파이썬으로.** 파이썬 특유의 함정(재귀 한도 ·
-  비트 연산 우선순위 · 메모리 · PyPy)을 함께 적습니다.
-
-### 2. ★ 다음 차례 — DB 가이드 (사용자가 순서를 지정했습니다)
-
-> 사용자 지시: **“cs쪽 알고리즘부터 시작하고 그다음 데이터베이스”**.
-> CS 알고리즘은 `cc73977` 로 끝났습니다. **여기서 멈춘 상태이고, 다음은 DB 입니다.**
-
-**DB 가이드 현황** (2026-08-10 실측)
-
-| 탭 | 섹션 | diag |
-|---|---|---|
-| 01-start | 10 | 2 |
-| 02-sql | 19 | 3 |
-| 03-pro | 15 | 2 |
-| 04-oracle | 17 | 3 |
-| 05-pg | 17 | 2 |
-| 06-mysql | 17 | 2 |
-| 07-sqlite | 14 | 2 |
-| 08-tune | 16 | 4 |
-| 09-deep | 16 | 4 |
-| 10-app | 13 | 3 |
-| **합계** | **154** | **27** |
-
-**2-1. 화살촉부터** — DB 는 `.fl` 88개가 **전부 화살촉 없음**입니다. CS 와 똑같이 하면 됩니다.
-1. `cs/parts/10-body-open.html` 의 `<svg><defs>` 마커 블록을 **`db/parts/10-body-open.html` 에 그대로 복사**
-   (마커 id 가 같아도 문서가 다르므로 충돌 없음)
-2. `cs/parts/css/06-cs.css` 의 “다이어그램 디자인 키트” 블록을 **`db/parts/css/06-db.css` 에 복사**
-   — 단 `.diag .bx` 는 **건드리지 마세요**(파이썬 기준 유지)
-3. `.fl` → `.fl ar` 일괄 치환. **긴 가로 구분선(2점 · |dy|<1 · |dx|>380)은 제외**
-4. **선 끝 경계 보정 스크립트를 반드시 돌릴 것** — 안 하면 화살촉이 노드 밑에 깔립니다.
-   로직: 같은 `<svg>` 안의 `<circle>`·`<rect>` 를 모아 두고, `.ar` 이 붙은
-   직선 경로의 **양 끝을 도형 밖 4px 까지** 이분/선형 탐색으로 물립니다
-   (`Z`·곡선이 있는 `d` 는 건너뜀). 이번 세션 스크립트는 일회성이라 다시 작성해야 합니다.
-5. 브라우저 실측(넘침·겹침) → 커밋
-
-**2-2. 시각화가 얇은 탭** — `01-start`(2) · `03-pro`(2) · `05-pg`(2) · `06-mysql`(2) · `07-sqlite`(2).
-DB 에서 그림이 특히 잘 먹히는 주제: **B+트리 인덱스 탐색 · 실행 계획 읽는 순서 ·
-MVCC 스냅숏 · 락 대기 그래프 · 복제 지연 타임라인 · 커서 기반 페이지네이션**.
-
-**2-3. 내용 구멍 후보** (용어 등장 횟수로 본 것이라 **실제 파일을 열어 확인 필요**)
-
-| 후보 | 근거 |
-|---|---|
-| **“실행 계획”이라는 표현 0회** | `EXPLAIN` 은 15회 나오는데 **읽는 법을 단계로 설명한 곳이 없을 가능성** |
-| **`B+트리` 0회** | 인덱스 내부 구조가 DB 가이드에 없음 (📚 자료구조 08 에는 있음) — 링크만이라도 |
-| **“커서 기반” 페이지네이션 0회** | OFFSET 페이지네이션의 실무 대안. 자주 묻는 주제 |
-| 무중단 마이그레이션 4회 | 확장 → 백필 → 읽기 전환 → 옛 컬럼 삭제 4단계가 있는지 확인 |
-
-MVCC(11) · 격리수준(11) · 데드락(24) · 커넥션풀(11) · N+1(14) · 파티셔닝(19) ·
-샤딩(14) · 복제지연(11) · 정규화(17) 은 **이미 충분히 나옵니다** — 중복 추가하지 마세요.
-
-### 2-b. 시각화 계속 (CS)
-CS 12탭 전부 2개 이상이고 알고리즘 탭은 29개입니다. 다음 목표를 잡는다면
-`01-math`(2) · `03-comp`(2) · `06-arch`(2) 를 3개 이상으로 올리는 쪽입니다.
-
-### 3. 다른 가이드 얇은 곳
-```
-3.4KB  python 09-algo      3.5KB  python 05-img
-3.6KB  csharp 05-net       3.6KB  python 02-numpy
-3.7KB  js-ts 05-nest       3.8KB  db 05-pg · 06-mysql · 07-sqlite
-```
-python `02-numpy`(13섹션 diag 0) · `10-db`(18섹션 diag 0) 가 여전히 시각화 0 입니다.
-
-## 조심할 것 (실제로 겪은 실패)
-
-1. **`</section>` 누락 사고** (이전 세션 9회). old_string 이 `</section>` 로 끝나면
-   new_string 도 반드시 그렇게 끝나는지 확인. `verify:guide` 의 "section 태그 불균형"이 잡아 줍니다.
-   일괄 복구: `perl -0777 -pi -e 's/  <\/div>\n(\n+<!-- ==================== )/  <\/div>\n<\/section>\n$1/g' <파일>`
-
-2. **SVG 텍스트 넘침** — viewBox 680 기준, 한글 `.lbl`(10.5px)은 x=16 시작 시 약 60자,
-   x=366 시작 시 약 28자가 한계. **감으로 쓰면 15~20%가 넘칩니다.**
-   반드시 브라우저 실측(아래)으로 확인하고 **문구를 줄여** 해결 (x 이동은 겹침을 만듦).
-   **가로만 보지 말고 세로도 보세요** — 마지막 텍스트의 baseline 이 viewBox 높이와
-   같으면 1~3px 잘립니다. **마지막 baseline + 8 이상**을 viewBox 높이로 잡으세요.
-
-2-b. **다이어그램 확대율 — `.diag svg{max-width:1000px}`** (2026-08-10 확정)
-   전에는 `width:100%` 라 컬럼 폭(1384px)까지 늘어나 **viewBox 680 이 2.04배로 확대**됐고,
-   그 결과 `.lbl` 이 화면에서 **21.4px** 로 본문(17.5px)보다 커 보였습니다.
-   이제 1000px 로 잘라 **확대율 1.47** 고정입니다. 화면 실측 크기는:
-   ```
-   font-size  9  → 13.2px      font-size 11 → 16.2px
-   font-size 10  → 14.7px      .lbl (10.5) → 15.4px      본문 17.5px
-   ```
-   **font-size 9 미만은 쓰지 마세요** — 13px 아래로 내려갑니다.
-   글씨가 크다는 지적이 또 나오면 이 값을 줄이면 됩니다(아홉 가이드 `css/06-*.css` 공통).
-
-3. **`.bx-ok` CSS 누락** — csharp·server·java·js-ts 네 곳에서 diag 가 쓰는데 정의가 없었습니다(수정 완료).
-   **새 가이드에 diag 를 넣을 때 해당 `css/06-*.css` 에 있는지 먼저 확인하세요.**
-   ```css
-   .diag .bx-ok{fill:rgba(52,211,153,.07);stroke:rgba(52,211,153,.34)}
-   ```
-
-4. **섹션 추가는 5곳 동기화** — 이제 실제로 뚫어 놨습니다(금지 사항 아님).
-   `pane` · `sidebar navset` · `SEC_LV` · `EZ` · `CAP` 를 전부 맞추면
-   `verify:guide` 가 통과합니다. Edit 도구로 앵커를 잡아 넣어도 잘 됩니다
-   (긴 HTML 은 bash heredoc 에서 깨지므로 heredoc 만 피하세요).
-
-4-b. **`verify:guide` 가 안 잡는 여섯 번째 자리 — hero 의 `SECTIONS` 숫자.**
-   각 pane 맨 위 `<div><b>13</b><span>SECTIONS</span></div>` 는 수동입니다.
-   실제로 la·ds 가 14섹션인데 13으로 남아 있었습니다(이번에 15/15/14 로 정정).
-   섹션을 넣었으면 **그 pane 의 이 숫자도 같이 고치세요.**
-
-5. **`git add` 를 하위 디렉터리에서 하지 말 것** — `guide-src` 에서 `git add -A -- .` 하면
-   **`web/public/` 빌드 산출물이 빠집니다**(실제로 한 번 겪음 → amend 로 복구).
-   반드시 저장소 루트에서 실행.
-
-6. **`public/*-web/index.html` 직접 수정 금지** — 빌드가 덮어씀. 소스는 `guide-src/`.
-
-7. **원격에 GitHub Action 커밋이 수시로 들어옵니다** — push 거부되면
-   `git fetch && git rebase origin/main` 후 재시도 (기여 그래프 SVG라 충돌 없음).
-
-8. **`file://` 은 Chrome MCP 가 거부** — 반드시 로컬 서버 경유.
-   8899 포트에 **이전 세션 서버가 살아 있는 경우가 많습니다**(EADDRINUSE).
-   그대로 쓰면 됩니다 — 같은 `public` 폴더를 서빙합니다.
-
-8-b. **`content-visibility:auto` 때문에 스크린샷용 스크롤이 안 먹습니다.**
-   섹션에 `contain-intrinsic-size: auto 900px` 가 걸려 있어
-   `scrollIntoView` 가 엉뚱한 곳으로 갑니다. 눈으로 확인하려면 먼저:
-   ```js
-   document.querySelectorAll('.pane, .sec').forEach(e=>e.style.contentVisibility='visible')
-   document.documentElement.style.scrollBehavior='auto'
-   // 그 뒤 window.scrollTo 를 5~8회 반복해야 자리에 멈춥니다
-   ```
-   **실측 스크립트에도 이 처리가 반드시 먼저 필요합니다.** `content-visibility` 로 렌더가
-   생략된 SVG 는 `getBBox()` 가 0 을 돌려주고, 스크립트가 그것을 **조용히 건너뜁니다** —
-   실제로 이것 때문에 넘침 6건이 “none” 으로 보고되고 있었습니다(2026-08-10 발견).
-
-9. **문체 유지** — 합니다체, `<b>` 포인트, note tip/warn/info, card/grid2/vs/tw 구조.
-   가이드마다 컴포넌트가 조금씩 다릅니다(server 는 `table class="cheat"`,
-   python 은 `note java` Spring 비유, csharp 은 `.tw > table`) — **해당 파일을 먼저 읽고 맞추세요.**
+1. **`</section>` 누락** — old_string 이 `</section>` 로 끝나면 new_string 도. `verify:guide` 가 잡아 줌.
+2. **SVG 텍스트 넘침** — viewBox 680 기준 한글 `.lbl` x=16 → 약 60자 · x=366 → 약 28자.
+   감으로 쓰면 15~20% 넘침. 높이는 마지막 baseline+8 이상. **반드시 브라우저 실측**.
+   이번에도 신규 43개 중 2개(k02 겹침·k03 넘침)가 실측에서 잡혔다.
+3. **`.lbl` 에 font-size 속성을 얹어도 CSS 가 이긴다** — 9px 곁주석은 `.ann` 클래스를 쓸 것.
+4. **perl -pi 는 Windows 에서 CRLF 를 심는다** — 일괄 치환은 node 스크립트로 할 것
+   (이번에 5개 파일 CRLF 오염 → LF 복구했음).
+5. **`git add` 는 저장소 루트에서** · **`public/*-web/index.html` 직접 수정 금지**(빌드가 덮음).
+6. **원격에 GitHub Action 커밋이 수시로 들어옴** — push 거부되면 `git fetch && git rebase origin/main`.
+7. **`file://` 은 Chrome MCP 거부** — 8899 로컬 서버 경유 (이전 세션 서버가 살아 있는 경우 많음).
+8. **`content-visibility` 를 풀지 않으면 `getBBox()` 가 0** → 실측 스크립트가 조용히 통과됨.
+   반드시 먼저: `document.querySelectorAll('.pane, .sec').forEach(e=>e.style.contentVisibility='visible')`
+9. **문체** — 합니다체 · `<b>` 포인트 · note tip/warn/info · 가이드별 컴포넌트가 조금 다르니 해당 파일 먼저 읽기.
+10. Chrome MCP `resize_window` 는 최대화 창에서 안 먹힌다 — 모바일 실측이 필요하면 창을 먼저 복원할 것.
 
 ## 관련 파일/명령어
 ```bash
 cd D:/gibis/workTool/astro/black-astro/web
 npm run verify:guide          # 빌드 + 정합성 (커밋 전 필수)
-npm run build:guide -- python # 특정 가이드만
+npm run build:guide -- server # 특정 가이드만
 
 # 로컬 서버 (public 폴더, 8899)
 cd public && node -e "const http=require('http'),fs=require('fs'),p=require('path');http.createServer((q,r)=>{let f=p.join(process.cwd(),decodeURIComponent(q.url.split('?')[0]));try{if(fs.statSync(f).isDirectory())f=p.join(f,'index.html');r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});r.end(fs.readFileSync(f));}catch(e){r.writeHead(404);r.end('nf')}}).listen(8899)"
@@ -252,6 +91,8 @@ cd public && node -e "const http=require('http'),fs=require('fs'),p=require('pat
 **SVG 실측** (Chrome MCP): `http://localhost:8899/<가이드>-web/index.html` 열고 실행 →
 OVER/LAP 가 none 이 될 때까지 문구 축약:
 ```js
+document.querySelectorAll('.pane, .sec').forEach(e=>e.style.contentVisibility='visible');
+document.documentElement.style.scrollBehavior='auto';
 const panes=[...document.querySelectorAll('.pane')];const prev=panes.map(p=>p.className);panes.forEach(p=>p.classList.add('on'));
 const over=[],lap=[];
 document.querySelectorAll('.diag svg').forEach(svg=>{
