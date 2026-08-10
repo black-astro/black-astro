@@ -24,16 +24,17 @@
 | `c4c4892` | CS 섹션 3개(`l15` SVD·최소제곱 · `s15` 스킵리스트·지속자료구조 · `o14` 스케줄러 내부) + 시각화 12개 (26 → 38) |
 | `a9febee` | **알고리즘 탭 a01~a13 에 동작 시각화 13개** (algomaster 스타일 · 단계별 그림) |
 | `a0bc2ae` | **알고리즘 플래티넘 구간 5개 섹션** `a16` SCC·2-SAT · `a17` LCA·트리DP · `a18` 비트마스크·LIS · `a19` 계산기하 · `a20` Z·아호코라식 |
+| `1fa5c24` | **다이어그램 확대율 상한**(`max-width:1000px`) — 글씨가 본문보다 크던 문제 + pandas axis 레이아웃 재배치 |
 
 - `npm run verify:guide` **아홉 가이드 전부 통과**
 - 원격에 GitHub Action 커밋(`chore: update 3d contribution graph`)이 수시로 들어옵니다
   → push 거부되면 `git fetch && git rebase origin/main` 후 재시도 (충돌 없음)
 
-### 다이어그램 현황 (`.diag` 인라인 SVG) — 총 186개
+### 다이어그램 현황 (`.diag` 인라인 SVG) — 총 187개
 | 가이드 | 개수 | 실측 |
 |---|---|---|
 | **cs** | **60** | ✅ 넘침·겹침 0 (12탭 전부 2개 이상) |
-| csharp | 32 | ✅ |
+| csharp | 33 | ✅ |
 | db | 27 | ✅ |
 | python | 23 | ✅ |
 | js-ts | 22 | ✅ |
@@ -125,6 +126,19 @@ python `02-numpy`(13섹션 diag 0) · `10-db`(18섹션 diag 0) 가 여전히 시
 2. **SVG 텍스트 넘침** — viewBox 680 기준, 한글 `.lbl`(10.5px)은 x=16 시작 시 약 60자,
    x=366 시작 시 약 28자가 한계. **감으로 쓰면 15~20%가 넘칩니다.**
    반드시 브라우저 실측(아래)으로 확인하고 **문구를 줄여** 해결 (x 이동은 겹침을 만듦).
+   **가로만 보지 말고 세로도 보세요** — 마지막 텍스트의 baseline 이 viewBox 높이와
+   같으면 1~3px 잘립니다. **마지막 baseline + 8 이상**을 viewBox 높이로 잡으세요.
+
+2-b. **다이어그램 확대율 — `.diag svg{max-width:1000px}`** (2026-08-10 확정)
+   전에는 `width:100%` 라 컬럼 폭(1384px)까지 늘어나 **viewBox 680 이 2.04배로 확대**됐고,
+   그 결과 `.lbl` 이 화면에서 **21.4px** 로 본문(17.5px)보다 커 보였습니다.
+   이제 1000px 로 잘라 **확대율 1.47** 고정입니다. 화면 실측 크기는:
+   ```
+   font-size  9  → 13.2px      font-size 11 → 16.2px
+   font-size 10  → 14.7px      .lbl (10.5) → 15.4px      본문 17.5px
+   ```
+   **font-size 9 미만은 쓰지 마세요** — 13px 아래로 내려갑니다.
+   글씨가 크다는 지적이 또 나오면 이 값을 줄이면 됩니다(아홉 가이드 `css/06-*.css` 공통).
 
 3. **`.bx-ok` CSS 누락** — csharp·server·java·js-ts 네 곳에서 diag 가 쓰는데 정의가 없었습니다(수정 완료).
    **새 가이드에 diag 를 넣을 때 해당 `css/06-*.css` 에 있는지 먼저 확인하세요.**
@@ -163,7 +177,9 @@ python `02-numpy`(13섹션 diag 0) · `10-db`(18섹션 diag 0) 가 여전히 시
    document.documentElement.style.scrollBehavior='auto'
    // 그 뒤 window.scrollTo 를 5~8회 반복해야 자리에 멈춥니다
    ```
-   **텍스트 넘침·겹침 실측(아래 스크립트)은 이 처리 없이도 정확합니다** — `getBBox` 기준이라서.
+   **실측 스크립트에도 이 처리가 반드시 먼저 필요합니다.** `content-visibility` 로 렌더가
+   생략된 SVG 는 `getBBox()` 가 0 을 돌려주고, 스크립트가 그것을 **조용히 건너뜁니다** —
+   실제로 이것 때문에 넘침 6건이 “none” 으로 보고되고 있었습니다(2026-08-10 발견).
 
 9. **문체 유지** — 합니다체, `<b>` 포인트, note tip/warn/info, card/grid2/vs/tw 구조.
    가이드마다 컴포넌트가 조금씩 다릅니다(server 는 `table class="cheat"`,
