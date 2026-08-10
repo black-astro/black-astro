@@ -1,0 +1,696 @@
+<!-- ============================================================
+     Kafka · 이벤트 PANE
+     ============================================================ -->
+<div class="pane" id="pane-kafka">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> KAFKA · TOPIC · PARTITION · CONSUMER GROUP · EXACTLY-ONCE · CDC</div>
+  <h1>Kafka —<br>대규모 데이터가<br>흐르는 길</h1>
+  <p class="tx">
+    초당 수만 건의 주문·클릭·로그를 <b>잃어버리지 않고</b> 여러 시스템에 전달하는 일 —
+    그것이 Kafka 가 하는 일입니다. 국내 대기업 백엔드에서 사실상 표준이 된 기술이고,
+    면접에서도 <b>파티션·컨슈머 그룹·정확히 한 번 처리</b>는 단골 주제입니다.
+    핵심 구조부터 운영·실전 패턴까지 순서대로 갑니다.
+  </p>
+  <div class="stats">
+    <div><b>11</b><span>SECTIONS</span></div>
+    <div><b>N만/s</b><span>메시지 처리</span></div>
+    <div><b>0건</b><span>유실 목표</span></div>
+  </div>
+</header>
+
+<!-- ==================== k01 ==================== -->
+<section class="sec" id="k01">
+  <div class="sec-head rv">
+    <span class="no">SECTION 01</span>
+    <h2>왜 <span class="t">Kafka</span> 인가</h2>
+    <p class="lead">
+      직접 호출로 버티던 시스템이 무너지는 순간이 있습니다 — <b>받는 쪽이 못 따라올 때</b>입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 224" role="img" aria-label="직접 호출 구조에서는 초당 만 건의 주문이 초당 이천 건밖에 처리 못 하는 정산 시스템을 직접 때려 함께 무너진다. Kafka 를 사이에 두면 주문은 브로커에 초당 만 건을 써 두고 즉시 응답하며, 정산은 자기 속도인 초당 이천 건으로 밀린 것을 꺼내 처리한다. 피크가 지나면 따라잡는다">
+      <text x="16" y="20" class="ttl">직접 호출 — 받는 쪽 속도가 전체 속도</text>
+      <rect class="bx" x="16" y="34" width="110" height="44"/>
+      <text x="71" y="52" font-size="10" text-anchor="middle">주문 서비스</text>
+      <text x="71" y="68" font-size="9" text-anchor="middle" class="lbl">피크 10,000/s</text>
+      <path class="fl ar" d="M130 56 L186 56"/>
+      <rect class="bx bx-warn" x="190" y="34" width="110" height="44"/>
+      <text x="245" y="52" font-size="10" text-anchor="middle">정산 시스템</text>
+      <text x="245" y="68" font-size="9" text-anchor="middle" class="lbl">한계 2,000/s</text>
+      <text x="16" y="102" class="lbl">타임아웃 · 요청 유실 · 같이 죽음</text>
+      <text x="16" y="118" class="lbl">— 피크마다 반복됩니다</text>
+
+      <path class="ln" d="M330 14 L330 210"/>
+
+      <text x="360" y="20" class="ttl">Kafka — 버퍼가 속도 차를 흡수</text>
+      <rect class="bx" x="360" y="34" width="100" height="44"/>
+      <text x="410" y="52" font-size="10" text-anchor="middle">주문 서비스</text>
+      <text x="410" y="68" font-size="9" text-anchor="middle" class="lbl">10,000/s 발행</text>
+      <path class="fl ar" d="M464 56 L500 56"/>
+      <rect class="bx bx-fw" x="504" y="30" width="76" height="52"/>
+      <text x="542" y="50" font-size="10" text-anchor="middle">Kafka</text>
+      <text x="542" y="66" font-size="9" text-anchor="middle" class="lbl">디스크에 보관</text>
+      <path class="fl ar" d="M584 56 L620 56"/>
+      <rect class="bx bx-ok" x="624" y="34" width="40" height="44"/>
+      <text x="644" y="60" font-size="9" text-anchor="middle" class="lbl">정산</text>
+      <text x="360" y="106" class="lbl">주문은 써 두고 즉시 응답 · 정산은</text>
+      <text x="360" y="122" class="lbl">자기 속도(2,000/s)로 꺼내 처리</text>
+      <text x="360" y="138" class="lbl">→ 밀렸다가(랙) 피크 후 따라잡음</text>
+
+      <text x="16" y="170" class="lbl">Kafka 는 메시지를 메모리가 아니라 디스크 로그에 쌓습니다 — 컨슈머가 죽어도 남아 있고,</text>
+      <text x="16" y="188" class="lbl">읽어도 지워지지 않아 여러 시스템(정산·통계·검색색인)이 같은 데이터를 각자 읽습니다</text>
+      <text x="16" y="206" class="lbl">국내 사례 — 커머스 주문 파이프라인 · 결제 이벤트 · 로그 수집 · 데이터 레이크 적재가 대부분 이 구조입니다</text>
+    </svg>
+    <div class="cap">Kafka 의 한 줄 정의 — <b>생산 속도와 소비 속도를 분리해 주는, 지워지지 않는 로그.</b></div>
+  </div>
+
+  <h3 class="sub">언제 필요한가 — 신호 세 가지</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:36%">신호</th><th>Kafka 가 해 주는 것</th></tr>
+      <tr><td><b>피크 때 하위 시스템이 밀림</b></td><td>버퍼로 흡수 — 받는 쪽은 자기 속도로 (📈 대규모 트래픽 x06)</td></tr>
+      <tr><td><b>같은 데이터를 여러 곳이 원함</b></td><td>한 번 발행 → 각자 구독. 발행자는 소비자를 모릅니다 (🧱 MSA m07)</td></tr>
+      <tr><td><b>이벤트 순서·재처리가 중요</b></td><td>로그라서 <b>과거로 되감아 다시 읽기</b>가 됩니다 — 버그 수정 후 재처리</td></tr>
+    </table>
+  </div>
+
+  <div class="note info rv d2">
+    <b>메시지 "큐"와 무엇이 다른가.</b>
+    RabbitMQ 같은 전통 큐는 <b>꺼내면 사라집니다</b> — 일감 분배에 알맞습니다.
+    Kafka 는 <b>읽어도 남는 로그</b>라 구독자가 몇이든, 언제 들어오든 처음부터 읽을 수 있습니다.
+    상세 비교는 k11 에서 다룹니다.
+  </div>
+</section>
+
+<!-- ==================== k02 ==================== -->
+<section class="sec" id="k02">
+  <div class="sec-head rv">
+    <span class="no">SECTION 02</span>
+    <h2>핵심 구조 — <span class="t">토픽 · 파티션 · 오프셋</span></h2>
+    <p class="lead">
+      Kafka 를 안다는 것은 <b>이 그림 하나를 안다</b>는 뜻입니다. 나머지는 전부 여기서 나옵니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 232" role="img" aria-label="orders 토픽은 파티션 세 개로 나뉜다. 각 파티션은 뒤에만 추가되는 로그이며 메시지마다 오프셋 번호가 붙는다. 프로듀서는 키의 해시로 파티션을 고르므로 같은 회원의 주문은 항상 같은 파티션에 순서대로 쌓인다. 컨슈머는 파티션마다 어디까지 읽었는지 오프셋을 기억한다">
+      <text x="16" y="18" class="lbl">토픽 "orders" = 파티션 여러 개 · 파티션 = 뒤에만 추가되는 번호 붙은 로그</text>
+
+      <rect class="bx" x="16" y="40" width="96" height="40"/>
+      <text x="64" y="58" font-size="11" text-anchor="middle">프로듀서</text>
+      <text x="64" y="73" font-size="9" text-anchor="middle" class="lbl">key=회원ID</text>
+      <path class="fl ar" d="M116 52 L168 52"/>
+      <path class="fl ar" d="M116 60 L168 106"/>
+      <path class="fl ar" d="M116 68 L168 160"/>
+      <text x="16" y="94" class="ann">hash(key) % 3</text>
+
+      <text x="172" y="46" class="lbl">P0</text>
+      <rect class="bx" x="196" y="34" width="52" height="26"/>
+      <text x="222" y="52" font-size="10" text-anchor="middle">0</text>
+      <rect class="bx" x="252" y="34" width="52" height="26"/>
+      <text x="278" y="52" font-size="10" text-anchor="middle">1</text>
+      <rect class="bx" x="308" y="34" width="52" height="26"/>
+      <text x="334" y="52" font-size="10" text-anchor="middle">2</text>
+      <rect class="bx bx-ok" x="364" y="34" width="52" height="26"/>
+      <text x="390" y="52" font-size="10" text-anchor="middle">3 ←새</text>
+
+      <text x="172" y="100" class="lbl">P1</text>
+      <rect class="bx" x="196" y="88" width="52" height="26"/>
+      <text x="222" y="106" font-size="10" text-anchor="middle">0</text>
+      <rect class="bx" x="252" y="88" width="52" height="26"/>
+      <text x="278" y="106" font-size="10" text-anchor="middle">1</text>
+      <rect class="bx bx-ok" x="308" y="88" width="52" height="26"/>
+      <text x="334" y="106" font-size="10" text-anchor="middle">2 ←새</text>
+
+      <text x="172" y="154" class="lbl">P2</text>
+      <rect class="bx" x="196" y="142" width="52" height="26"/>
+      <text x="222" y="160" font-size="10" text-anchor="middle">0</text>
+      <rect class="bx" x="252" y="142" width="52" height="26"/>
+      <text x="278" y="160" font-size="10" text-anchor="middle">1</text>
+      <rect class="bx" x="308" y="142" width="52" height="26"/>
+      <text x="334" y="160" font-size="10" text-anchor="middle">2</text>
+      <rect class="bx" x="364" y="142" width="52" height="26"/>
+      <text x="390" y="160" font-size="10" text-anchor="middle">3</text>
+      <rect class="bx bx-ok" x="420" y="142" width="52" height="26"/>
+      <text x="446" y="160" font-size="10" text-anchor="middle">4 ←새</text>
+
+      <path class="ln ar" d="M488 101 L536 101"/>
+      <text x="492" y="90" class="ann">P1은 2까지 읽음</text>
+      <rect class="bx" x="540" y="80" width="124" height="42"/>
+      <text x="602" y="98" font-size="11" text-anchor="middle">컨슈머</text>
+      <text x="602" y="113" font-size="9" text-anchor="middle" class="lbl">오프셋 기억 · 재시작 OK</text>
+
+      <text x="16" y="196" class="lbl">순서 보장은 파티션 안에서만 — 같은 키(회원ID)는 같은 파티션 = 그 회원의 주문은 순서 유지</text>
+      <text x="16" y="212" class="lbl">파티션 수 = 동시에 읽을 수 있는 컨슈머 수의 상한 = 병렬성의 단위 (k03 · k09)</text>
+    </svg>
+    <div class="cap">외울 것은 세 문장 — <b>토픽은 파티션으로 나뉜다 · 순서는 파티션 안에서만 · 오프셋은 컨슈머가 기억한다.</b></div>
+  </div>
+
+  <h3 class="sub">용어 한 벌</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:20%">용어</th><th>뜻</th></tr>
+      <tr><td><b>브로커</b></td><td>Kafka 서버 한 대. 보통 3대 이상 클러스터로 묶습니다</td></tr>
+      <tr><td><b>토픽</b></td><td>메시지의 분류 채널 — <code>orders</code> · <code>payments</code> · <code>click-logs</code></td></tr>
+      <tr><td><b>파티션</b></td><td>토픽을 나눈 조각. <b>추가만 되는 로그</b>이며 병렬성·순서의 단위</td></tr>
+      <tr><td><b>오프셋</b></td><td>파티션 안에서 메시지의 번호. 컨슈머가 "어디까지 읽었나"를 이 번호로 저장</td></tr>
+      <tr><td><b>보존 기간</b></td><td>읽든 안 읽든 <b>설정한 기간(예: 7일)</b> 보관 후 삭제 — 소비와 무관합니다</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>면접 단골 — "Kafka 는 왜 빠른가요?"</b>
+    ① <b>순차 쓰기</b> — 로그 끝에 붙이기만 해서 디스크에서도 빠릅니다
+    ② <b>제로카피</b> — 파일 → 소켓으로 커널이 직접 복사 (🧬 전문가 z05)
+    ③ <b>배치·압축</b> — 메시지를 묶어서 보내고 저장합니다.
+    "디스크라서 느리다"는 직관을 뒤집는 것이 포인트입니다.
+  </div>
+</section>
+
+<!-- ==================== k03 ==================== -->
+<section class="sec" id="k03">
+  <div class="sec-head rv">
+    <span class="no">SECTION 03</span>
+    <h2><span class="t">컨슈머 그룹</span> · 리밸런싱</h2>
+    <p class="lead">
+      "처리를 여러 대로 나누고 싶다"와 "같은 데이터를 여러 팀이 읽고 싶다"를 <b>한 구조</b>가 해결합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 226" role="img" aria-label="파티션 네 개인 토픽을 정산 그룹의 컨슈머 두 대가 두 개씩 나눠 읽고, 통계 그룹의 컨슈머 한 대는 네 파티션을 혼자 다 읽는다. 그룹이 다르면 같은 데이터를 각자 처음부터 읽는다. 그룹 안에서 파티션 하나는 컨슈머 하나에게만 배정된다">
+      <text x="16" y="18" class="lbl">같은 토픽 — 그룹 안에서는 나눠 읽고, 그룹끼리는 각자 다 읽습니다</text>
+
+      <rect class="bx" x="16" y="40" width="70" height="26"/>
+      <text x="51" y="58" font-size="10" text-anchor="middle">P0</text>
+      <rect class="bx" x="16" y="76" width="70" height="26"/>
+      <text x="51" y="94" font-size="10" text-anchor="middle">P1</text>
+      <rect class="bx" x="16" y="112" width="70" height="26"/>
+      <text x="51" y="130" font-size="10" text-anchor="middle">P2</text>
+      <rect class="bx" x="16" y="148" width="70" height="26"/>
+      <text x="51" y="166" font-size="10" text-anchor="middle">P3</text>
+      <text x="16" y="196" class="lbl">orders 토픽 · 파티션 4</text>
+
+      <text x="240" y="40" class="ttl">정산 그룹 (같은 일을 나눔)</text>
+      <path class="fl ar" d="M90 51 L236 71"/>
+      <path class="fl ar" d="M90 87 L236 79"/>
+      <rect class="bx bx-ok" x="240" y="58" width="150" height="34"/>
+      <text x="315" y="79" font-size="10" text-anchor="middle">컨슈머 A — P0·P1</text>
+      <path class="fl ar" d="M90 123 L236 115"/>
+      <path class="fl ar" d="M90 159 L236 125"/>
+      <rect class="bx bx-ok" x="240" y="102" width="150" height="34"/>
+      <text x="315" y="123" font-size="10" text-anchor="middle">컨슈머 B — P2·P3</text>
+
+      <text x="470" y="40" class="ttl">통계 그룹 (따로 다 읽음)</text>
+      <path class="fl ar" d="M394 90 L466 106"/>
+      <rect class="bx" x="470" y="92" width="176" height="34"/>
+      <text x="558" y="113" font-size="10" text-anchor="middle">컨슈머 C — P0~P3 전부</text>
+
+      <text x="240" y="166" class="lbl">그룹에 컨슈머를 더하면 파티션을 다시 나눔</text>
+      <text x="240" y="182" class="lbl">단, 컨슈머 수 &gt; 파티션 수면 남는 컨슈머는 놉니다</text>
+      <text x="16" y="216" class="lbl">리밸런싱 — 컨슈머가 들고나면 배정을 다시 섞습니다. 그 순간 그룹이 잠깐 멈춥니다</text>
+    </svg>
+    <div class="cap">확장 공식 — <b>처리량이 부족하면 파티션과 컨슈머를 함께</b> 늘립니다. 컨슈머만 늘리면 노는 놈이 생깁니다.</div>
+  </div>
+
+  <h3 class="sub">랙(Lag) — 가장 중요한 운영 지표</h3>
+  <p class="tx rv d1">
+    <b>랙 = 마지막 오프셋 − 컨슈머가 커밋한 오프셋</b>, 즉 "밀린 메시지 수"입니다.
+    랙이 0 근처를 유지하면 실시간으로 따라가는 것이고, <b>계속 증가하면 소비가 생산을 못
+    따라가는 것</b>입니다 — 파티션·컨슈머 증설이나 처리 로직 최적화가 필요한 신호입니다.
+    피크 때 잠깐 쌓였다가 줄어드는 것은 정상입니다(그러라고 쓰는 버퍼입니다).
+  </p>
+
+  <div class="note warn rv d2">
+    <b>리밸런싱 폭풍.</b> 컨슈머가 <code>max.poll.interval.ms</code>(기본 5분) 안에
+    다음 poll 을 못 하면 죽은 것으로 간주되어 쫓겨나고 리밸런싱이 돕니다.
+    <b>한 배치 처리가 5분을 넘는 무거운 로직</b>이 흔한 원인 —
+    처리 후 리밸런싱 → 재배정 후 또 초과 → 무한 반복으로 <b>소비가 0</b>이 됩니다.
+    해법: 배치 크기(<code>max.poll.records</code>)를 줄이거나 처리를 비동기로 나눕니다.
+  </div>
+</section>
+
+<!-- ==================== k04 ==================== -->
+<section class="sec" id="k04">
+  <div class="sec-head rv">
+    <span class="no">SECTION 04</span>
+    <h2><span class="t">설치</span> · 첫 메시지</h2>
+    <p class="lead">
+      KRaft 모드(ZooKeeper 불필요) 기준으로 <b>10분 안에</b> 첫 메시지를 보냅니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="yaml"><code># docker-compose.yml — 개발용 단일 브로커 (KRaft 모드)
+services:
+  kafka:
+    image: apache/kafka:3.8.0
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller          # KRaft — ZooKeeper 없음
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1       # 단일 브로커라서 1</code></pre>
+
+  <pre class="code rv d1" data-lang="bash"><code>docker compose up -d
+
+# ① 토픽 만들기 — 파티션 3
+docker exec -it kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 \
+  --create --topic orders --partitions 3 --replication-factor 1
+
+# ② 보내기 (콘솔 프로듀서 · key:value 형식)
+docker exec -it kafka /opt/kafka/bin/kafka-console-producer.sh \
+  --bootstrap-server localhost:9092 --topic orders \
+  --property parse.key=true --property key.separator=:
+&gt; user-7:주문 1건 15000원
+&gt; user-3:주문 1건 42000원
+
+# ③ 받기 (콘솔 컨슈머 · 그룹 지정)
+docker exec -it kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 --topic orders \
+  --group settle --from-beginning
+
+# ④ 랙 확인 — 운영에서 가장 자주 치는 명령
+docker exec -it kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group settle</code></pre>
+
+  <div class="note tip rv d1">
+    <b>실험 두 가지를 꼭 해 보세요.</b>
+    ① 컨슈머를 <b>같은 그룹으로 두 개</b> 띄우기 → 파티션이 나뉘어 절반씩 받습니다.
+    ② <b>다른 그룹 이름</b>으로 하나 더 띄우기 → 처음부터 전부 다시 받습니다.
+    k03 의 그림이 눈앞에서 재현됩니다.
+  </div>
+
+  <div class="note info rv d2">
+    <b>운영 최소 구성은 브로커 3대 · 복제 3</b>입니다(k08).
+    단일 브로커는 개발·학습 전용입니다. 운영에서는 MSK(AWS)·Confluent Cloud 같은
+    관리형을 쓰는 회사도 많습니다 — 구조 이해는 똑같이 필요합니다.
+  </div>
+</section>
+
+<!-- ==================== k05 ==================== -->
+<section class="sec" id="k05">
+  <div class="sec-head rv">
+    <span class="no">SECTION 05</span>
+    <h2>프로듀서 제대로 — <span class="t">acks · 멱등성 · 키</span></h2>
+    <p class="lead">
+      기본 설정으로 보내면 <b>유실도 중복도</b> 생깁니다. 설정 네 개가 방어선입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 204" role="img" aria-label="acks 설정에 따라 프로듀서가 언제 성공으로 치는지가 달라진다. acks 0 은 보내고 확인 안 함이라 유실될 수 있다. acks 1 은 리더에 쓰이면 성공이지만 리더가 복제 전에 죽으면 유실된다. acks all 은 동기화된 복제본까지 쓰여야 성공이라 유실이 없다">
+      <text x="16" y="18" class="lbl">acks — "언제 성공으로 칠 것인가"가 유실 가능성을 정합니다</text>
+
+      <rect class="bx" x="16" y="40" width="96" height="40"/>
+      <text x="64" y="64" font-size="11" text-anchor="middle">프로듀서</text>
+
+      <path class="fl ar" d="M116 60 L196 60"/>
+      <rect class="bx bx-fw" x="200" y="40" width="120" height="40"/>
+      <text x="260" y="58" font-size="11" text-anchor="middle">리더 파티션</text>
+      <text x="260" y="73" font-size="9" text-anchor="middle" class="lbl">브로커 1</text>
+
+      <path class="fl ar" d="M324 54 L404 44"/>
+      <path class="fl ar" d="M324 68 L404 92"/>
+      <rect class="bx bx-ok" x="408" y="28" width="120" height="34"/>
+      <text x="468" y="49" font-size="10" text-anchor="middle">팔로워 (브로커 2)</text>
+      <rect class="bx bx-ok" x="408" y="80" width="120" height="34"/>
+      <text x="468" y="101" font-size="10" text-anchor="middle">팔로워 (브로커 3)</text>
+
+      <text x="548" y="40" class="ann">acks=all 은</text>
+      <text x="548" y="54" class="ann">여기까지 쓰여야</text>
+      <text x="548" y="68" class="ann">"성공"</text>
+
+      <text x="16" y="118" class="lbl">acks=0 — 확인 안 함 · 가장 빠름 · 유실 감수 (클릭 로그 정도만)</text>
+      <text x="16" y="136" class="lbl">acks=1 — 리더에 쓰이면 성공 · 리더가 복제 전에 죽으면 유실</text>
+      <text x="16" y="154" class="lbl">acks=all + min.insync.replicas=2 — 복제본까지 확인 · 유실 없음 · 주문·결제는 무조건 이것</text>
+      <text x="16" y="182" class="lbl">enable.idempotence=true — 재시도로 같은 메시지가 두 번 저장되는 것을 브로커가 걸러 줍니다</text>
+    </svg>
+    <div class="cap">돈이 걸린 토픽의 공식 — <b>acks=all · 멱등성 켜기 · 키 지정</b>. 성능이 필요한 로그만 느슨하게 갑니다.</div>
+  </div>
+
+  <pre class="code rv d1" data-lang="java"><code>// Spring Kafka 프로듀서 설정 감각
+spring:
+  kafka:
+    producer:
+      acks: all                       # 유실 방지
+      properties:
+        enable.idempotence: true      # 재시도 중복 방지 (acks=all 필요)
+        max.in.flight.requests.per.connection: 5   # 멱등성 켜면 순서도 유지
+      compression-type: lz4           # 배치 압축 — 처리량↑ 비용↓
+
+// 보내기 — 키를 반드시 지정 (같은 회원 = 같은 파티션 = 순서 보장)
+kafkaTemplate.send("orders", String.valueOf(memberId), orderJson);</code></pre>
+
+  <div class="note warn rv d2">
+    <b>키 없이 보내면 라운드로빈</b>으로 파티션에 흩어집니다 —
+    같은 주문의 "생성 → 취소" 이벤트가 <b>다른 파티션에 들어가 순서가 뒤집힐 수 있습니다.</b>
+    "취소가 먼저 처리되고 생성이 나중에" — 실제로 나는 사고입니다.
+    <b>엔티티 ID 를 키로</b> 쓰는 것이 기본기입니다.
+    단, 특정 키에 트래픽이 몰리면(연예인 계정) 그 파티션만 뜨거워집니다 — 핫 파티션(k09).
+  </div>
+</section>
+
+<!-- ==================== k06 ==================== -->
+<section class="sec" id="k06">
+  <div class="sec-head rv">
+    <span class="no">SECTION 06</span>
+    <h2>컨슈머 제대로 — <span class="t">커밋 · 중복 · 멱등</span></h2>
+    <p class="lead">
+      "언제 <b>읽었다고 기록</b>하느냐"가 유실과 중복을 가릅니다. 공짜 정답은 없습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 212" role="img" aria-label="처리 전에 커밋하면 처리 중 죽었을 때 그 메시지를 다시 읽지 않아 유실된다. 처리 후에 커밋하면 커밋 직전에 죽었을 때 같은 메시지를 다시 읽어 중복 처리된다. 실무는 처리 후 커밋을 선택하고 처리를 멱등하게 만들어 중복을 무해하게 만든다">
+      <text x="16" y="18" class="lbl">커밋 시점의 딜레마 — 유실이냐 중복이냐, 둘 중 하나는 감수해야 합니다</text>
+
+      <text x="16" y="46" class="ttl">① 먼저 커밋, 나중 처리</text>
+      <rect class="bx" x="16" y="56" width="86" height="28"/>
+      <text x="59" y="75" font-size="10" text-anchor="middle">커밋 ✓</text>
+      <path class="fl ar" d="M106 70 L142 70"/>
+      <rect class="bx bx-warn" x="146" y="56" width="120" height="28"/>
+      <text x="206" y="75" font-size="10" text-anchor="middle">처리 중 💥 죽음</text>
+      <text x="16" y="106" class="lbl">재시작하면 다음 메시지부터 —</text>
+      <text x="16" y="122" class="lbl">이 메시지는 영영 유실 (at-most-once)</text>
+
+      <text x="360" y="46" class="ttl">② 먼저 처리, 나중 커밋 ★</text>
+      <rect class="bx bx-ok" x="360" y="56" width="86" height="28"/>
+      <text x="403" y="75" font-size="10" text-anchor="middle">처리 ✓</text>
+      <path class="fl ar" d="M450 70 L486 70"/>
+      <rect class="bx bx-warn" x="490" y="56" width="130" height="28"/>
+      <text x="555" y="75" font-size="10" text-anchor="middle">커밋 직전 💥 죽음</text>
+      <text x="360" y="106" class="lbl">재시작하면 같은 메시지를 또 읽음 —</text>
+      <text x="360" y="122" class="lbl">중복 처리 (at-least-once)</text>
+
+      <rect class="bx bx-ok" x="16" y="146" width="648" height="52"/>
+      <text x="340" y="168" font-size="10" text-anchor="middle">실무 표준 — ② 를 고르고, 처리를 멱등하게 만들어 "중복이 와도 무해"하게</text>
+      <text x="340" y="186" font-size="9" text-anchor="middle" class="lbl">방법: 이벤트 ID 를 유니크 키로 INSERT (중복이면 무시) · 처리 이력 테이블 · UPSERT</text>
+    </svg>
+    <div class="cap">외울 문장 — <b>"정확히 한 번 전달"은 없다. "최소 한 번 + 멱등 처리 = 사실상 정확히 한 번"</b>이 실무의 답입니다.</div>
+  </div>
+
+  <pre class="code rv d1" data-lang="java"><code>// Spring Kafka — 처리 성공 후 자동 커밋 (기본 동작이 이미 ②입니다)
+@KafkaListener(topics = "orders", groupId = "settle")
+public void handle(ConsumerRecord&lt;String, String&gt; rec) {
+    settleService.process(rec);        // 여기서 예외가 나면 커밋되지 않고 재시도
+}
+
+// 멱등 처리의 전형 — 이벤트 ID 유니크 제약
+INSERT INTO processed_events (event_id) VALUES (?)   -- 중복이면 여기서 실패
+ON CONFLICT DO NOTHING;                              -- 이미 처리한 것 → 조용히 스킵</code></pre>
+
+  <div class="note warn rv d2">
+    <b>독약 메시지(poison pill)</b> — 파싱조차 안 되는 메시지가 오면
+    "실패 → 재시도 → 실패"로 <b>그 파티션 소비가 영원히 멈춥니다.</b>
+    N번 실패한 메시지는 <b>DLQ(Dead Letter Queue) 토픽으로 치우고 넘어가도록</b>
+    처음부터 설계하세요 (Spring Kafka: <code>DefaultErrorHandler</code> + <code>DeadLetterPublishingRecoverer</code>).
+    DLQ 는 모니터링 대상입니다 — 쌓이는데 아무도 안 보면 조용한 데이터 유실입니다.
+  </div>
+</section>
+
+<!-- ==================== k07 ==================== -->
+<section class="sec" id="k07">
+  <div class="sec-head rv">
+    <span class="no">SECTION 07</span>
+    <h2>DB 와 Kafka 를 함께 — <span class="t">아웃박스 · CDC</span></h2>
+    <p class="lead">
+      "DB 커밋과 이벤트 발행, <b>둘 중 하나만 성공하면?</b>" — MSA 면접의 최고 빈출 문제입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 226" role="img" aria-label="주문 저장과 이벤트 발행을 따로 하면 저장은 됐는데 발행 직전에 죽는 경우 이벤트가 사라진다. 아웃박스 패턴은 주문과 이벤트를 같은 DB 트랜잭션으로 함께 저장하고, 릴레이가 아웃박스 테이블을 읽어 Kafka 로 발행한다. 릴레이가 죽어도 테이블에 남아 있으므로 다시 발행된다">
+      <text x="16" y="20" class="ttl">이중 쓰기 — 틈이 있다</text>
+      <rect class="bx" x="16" y="32" width="110" height="34"/>
+      <text x="71" y="53" font-size="10" text-anchor="middle">① DB 커밋 ✓</text>
+      <path class="fl ar" d="M71 70 L71 96"/>
+      <rect class="bx bx-warn" x="16" y="100" width="110" height="34"/>
+      <text x="71" y="115" font-size="10" text-anchor="middle">② 발행 직전</text>
+      <text x="71" y="129" font-size="10" text-anchor="middle">💥 죽음</text>
+      <text x="16" y="160" class="lbl">주문은 있는데 이벤트는</text>
+      <text x="16" y="176" class="lbl">영영 없음 — 적립·알림 유실</text>
+
+      <path class="ln" d="M160 14 L160 212"/>
+
+      <text x="180" y="20" class="ttl">아웃박스 — 한 트랜잭션에 함께 저장</text>
+      <rect class="bx bx-ok" x="180" y="32" width="200" height="72"/>
+      <text x="280" y="50" font-size="10" text-anchor="middle">하나의 DB 트랜잭션</text>
+      <rect class="bx" x="196" y="58" width="168" height="18"/>
+      <text x="280" y="71" font-size="9" text-anchor="middle" class="lbl">INSERT orders</text>
+      <rect class="bx" x="196" y="80" width="168" height="18"/>
+      <text x="280" y="93" font-size="9" text-anchor="middle" class="lbl">INSERT outbox (이벤트)</text>
+
+      <path class="fl ar" d="M384 68 L424 68"/>
+      <text x="386" y="56" class="ann">폴링/CDC</text>
+      <rect class="bx" x="428" y="48" width="96" height="40"/>
+      <text x="476" y="66" font-size="10" text-anchor="middle">릴레이</text>
+      <text x="476" y="81" font-size="9" text-anchor="middle" class="lbl">Debezium 등</text>
+      <path class="fl ar" d="M528 68 L566 68"/>
+      <rect class="bx bx-fw" x="570" y="48" width="94" height="40"/>
+      <text x="617" y="72" font-size="10" text-anchor="middle">Kafka</text>
+
+      <text x="180" y="130" class="lbl">둘 다 저장되거나 둘 다 롤백 — 틈이 없습니다</text>
+      <text x="180" y="148" class="lbl">릴레이가 죽어도 outbox 에 남아 있어 재발행됩니다 (최소 한 번 → 소비 측 멱등으로 마무리)</text>
+
+      <text x="16" y="200" class="lbl">CDC(Change Data Capture) — DB 의 변경 로그(binlog·WAL)를 Debezium 이 읽어 Kafka 로 흘리는 기술.</text>
+      <text x="16" y="216" class="lbl">아웃박스의 릴레이로도, 검색색인·캐시·데이터 레이크 동기화의 표준 파이프라인으로도 쓰입니다</text>
+    </svg>
+    <div class="cap">기억할 구조 — <b>비즈니스 데이터와 이벤트를 같은 트랜잭션으로 남기고, 발행은 뒤에서 따라간다.</b></div>
+  </div>
+
+  <h3 class="sub">Kafka 트랜잭션(EOS)은 언제 쓰나</h3>
+  <p class="tx rv d1">
+    Kafka 자체 트랜잭션은 <b>"Kafka 에서 읽어 → 가공 → Kafka 로 쓰는"</b> 스트림 구간을
+    정확히 한 번으로 만들어 줍니다(Kafka Streams <code>exactly_once_v2</code>).
+    하지만 <b>외부 세계(DB 저장·메일 발송·결제 API)까지는 묶지 못합니다.</b>
+    그래서 경계의 답은 결국 — DB 와의 원자성은 <b>아웃박스</b>, 소비 측은 <b>멱등 처리</b>입니다.
+  </p>
+
+  <div class="note tip rv d2">
+    <b>면접 모범 답안 골격</b> — "DB 커밋과 발행 사이 유실은 <b>아웃박스 패턴</b>으로 막고,
+    그 대가로 생기는 재발행 중복은 <b>소비 측 멱등 처리</b>로 무해하게 만듭니다.
+    Kafka 트랜잭션은 Kafka 안 스트림 처리에만 적용됩니다" — 이 세 문장이면 충분합니다.
+  </div>
+</section>
+
+<!-- ==================== k08 ==================== -->
+<section class="sec" id="k08">
+  <div class="sec-head rv">
+    <span class="no">SECTION 08</span>
+    <h2><span class="t">복제 · ISR</span> — 브로커가 죽어도</h2>
+    <p class="lead">
+      "브로커 한 대가 내려가면 어떻게 되나요?" — 운영 면접의 단골이자, 실제 새벽의 일입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 216" role="img" aria-label="파티션마다 리더 하나와 팔로워 복제본들이 있다. 쓰기와 읽기는 리더가 받고 팔로워는 따라 적는다. 잘 따라오는 복제본의 집합이 ISR 이다. 리더가 죽으면 컨트롤러가 ISR 중 하나를 새 리더로 승격한다. min.insync.replicas 2 이면 ISR 이 두 개 밑으로 떨어질 때 쓰기를 거절해 유실을 막는다">
+      <text x="16" y="18" class="lbl">파티션 P0 의 복제 — 리더가 죽으면 ISR 에서 새 리더가 나옵니다</text>
+
+      <rect class="bx bx-warn" x="16" y="46" width="150" height="52"/>
+      <text x="91" y="66" font-size="11" text-anchor="middle">리더 (브로커 1)</text>
+      <text x="91" y="84" font-size="9" text-anchor="middle" class="lbl">💥 다운!</text>
+
+      <rect class="bx bx-ok" x="240" y="34" width="170" height="40"/>
+      <text x="325" y="52" font-size="10" text-anchor="middle">팔로워 (브로커 2)</text>
+      <text x="325" y="66" font-size="9" text-anchor="middle" class="lbl">완전히 따라옴 — ISR ✓</text>
+      <rect class="bx bx-mut" x="240" y="86" width="170" height="40"/>
+      <text x="325" y="104" font-size="10" text-anchor="middle">팔로워 (브로커 3)</text>
+      <text x="325" y="118" font-size="9" text-anchor="middle" class="lbl">10초 뒤처짐 — ISR ✗</text>
+
+      <path class="fl ar-gn" d="M414 54 L486 76" style="stroke:#34d399"/>
+      <rect class="bx bx-ok" x="490" y="58" width="174" height="44"/>
+      <text x="577" y="76" font-size="10" text-anchor="middle">브로커 2 가 새 리더로</text>
+      <text x="577" y="92" font-size="9" text-anchor="middle" class="lbl">ISR 안에서만 승격 — 유실 없음</text>
+
+      <text x="16" y="140" class="lbl">ISR(In-Sync Replicas) = 리더를 제때 따라오는 복제본 집합 (리더 포함)</text>
+      <text x="16" y="158" class="lbl">acks=all 은 "ISR 전부에 쓰였을 때" 성공 — 그래서 acks=all + 복제 3 + min.insync.replicas=2 가 한 세트</text>
+      <text x="16" y="176" class="lbl">ISR 이 1개로 줄면? min.insync.replicas=2 가 쓰기를 거절합니다 — 유실보다 일시 정지를 택하는 것</text>
+      <text x="16" y="194" class="lbl">unclean.leader.election=false(기본) — 뒤처진 복제본(브로커 3)의 리더 승격 금지. 켜면 유실 감수</text>
+    </svg>
+    <div class="cap">가용성과 유실 방지는 트레이드오프입니다 — <b>Kafka 의 기본값은 "유실 방지 우선"</b>이고, 대개 그게 맞습니다.</div>
+  </div>
+
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:38%">운영 표준 설정</th><th>의미</th></tr>
+      <tr><td><code>replication.factor=3</code></td><td>파티션마다 복제본 3개 — 브로커 3대 이상</td></tr>
+      <tr><td><code>min.insync.replicas=2</code></td><td>최소 2곳에 쓰여야 성공 — 1대 다운까지는 무중단·무유실</td></tr>
+      <tr><td><code>acks=all</code> (프로듀서)</td><td>위 둘과 한 세트 — 하나라도 빠지면 구멍이 생깁니다</td></tr>
+    </table>
+  </div>
+
+  <div class="note info rv d2">
+    <b>컨트롤러</b> — 클러스터에서 "누가 리더인가"를 결정하는 브로커입니다.
+    KRaft 모드(3.x 표준)에서는 컨트롤러들이 Raft 합의로 메타데이터를 관리합니다 —
+    ZooKeeper 는 더 이상 없습니다. Raft 자체가 궁금하면 🎓 CS 가이드 분산 탭(d14)으로.
+  </div>
+</section>
+
+<!-- ==================== k09 ==================== -->
+<section class="sec" id="k09">
+  <div class="sec-head rv">
+    <span class="no">SECTION 09</span>
+    <h2><span class="t">운영</span> — 파티션 수 · 랙 · 보존</h2>
+    <p class="lead">
+      Kafka 운영의 세 가지 상시 질문 — <b>파티션 몇 개? 랙 왜 늘어? 디스크 왜 차?</b>
+    </p>
+  </div>
+
+  <h3 class="sub">파티션 수 정하기 — 실전 산식</h3>
+  <pre class="code rv" data-lang="text"><code>필요 파티션 수 ≥ 목표 처리량 ÷ 컨슈머 1대의 처리량
+
+예) 피크 10,000건/s, 컨슈머 1대가 1,000건/s 처리
+    → 최소 10개. 성장 여유를 두어 12~15개로 시작
+
+원칙
+· 파티션은 늘릴 수는 있지만 줄일 수 없습니다
+· 늘리면 key → 파티션 배정이 바뀝니다 (기존 키의 순서 연속성 끊김!)
+  → 처음부터 여유 있게 잡는 이유
+· 너무 많으면(수천 개) 리더 선출·메타데이터 부담 — 무한정 늘리는 것도 답이 아님</code></pre>
+
+  <h3 class="sub">운영 체크 항목</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:30%">항목</th><th>내용</th></tr>
+      <tr><td><b>컨슈머 랙</b></td><td>그룹별 랙 추이를 대시보드에 — <b>"계속 증가"가 경보 조건</b>입니다 (Burrow · kafka_exporter + Grafana)</td></tr>
+      <tr><td><b>보존 정책</b></td><td><code>retention.ms</code>(기간) · <code>retention.bytes</code>(용량). 디스크가 차는 것은 대부분 보존 과다</td></tr>
+      <tr><td><b>컴팩션</b></td><td><code>cleanup.policy=compact</code> — 키별 <b>최신 값만</b> 유지. 상태 스냅숏 토픽(재고 현황 등)에</td></tr>
+      <tr><td><b>핫 파티션</b></td><td>특정 키 폭주로 한 파티션만 랙 증가 — 키 설계 변경(키에 버킷 붙이기)으로 해소</td></tr>
+      <tr><td><b>브로커 디스크·네트워크</b></td><td>디스크 80% 경보 · 네트워크 포화 — 브로커 증설·파티션 재배치(reassign)</td></tr>
+    </table>
+  </div>
+
+  <div class="note warn rv d1">
+    <b>토픽·스키마는 계약입니다.</b> 발행 측이 필드 하나 빼는 순간 소비 측이 줄줄이 깨집니다.
+    Avro/Protobuf + <b>스키마 레지스트리</b>로 하위 호환을 강제(BACKWARD)하는 것이
+    조직이 커졌을 때의 표준 장치입니다. JSON 을 쓰더라도 <b>"필드는 더하기만 한다"</b> 규칙은 지키세요.
+  </div>
+
+  <div class="note tip rv d2">
+    <b>재처리는 Kafka 의 특권입니다.</b>
+    소비 로직 버그를 고친 뒤 <code>kafka-consumer-groups.sh --reset-offsets --to-datetime …</code> 으로
+    오프셋을 되감아 다시 읽으면 됩니다 — 단, <b>소비가 멱등해야</b> 안전한 재처리가 됩니다(k06).
+    이 되감기가 필요해서라도 멱등 설계는 필수입니다.
+  </div>
+</section>
+
+<!-- ==================== k10 ==================== -->
+<section class="sec" id="k10">
+  <div class="sec-head rv">
+    <span class="no">SECTION 10</span>
+    <h2>실전 파이프라인 — <span class="t">스트림 · 데이터 흐름</span></h2>
+    <p class="lead">
+      Kafka 가 회사의 <b>중앙 신경계</b>가 되는 그림 — 대규모 데이터 처리의 표준 구도입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 238" role="img" aria-label="주문 서비스와 결제 서비스, CDC 가 Kafka 로 이벤트를 흘리고, Kafka 에서 정산 서비스, 실시간 집계 스트림, 검색 색인, 데이터 레이크가 각자 구독해 간다. 모든 시스템이 서로를 모른 채 Kafka 만 바라보는 허브 앤 스포크 구조다">
+      <text x="16" y="18" class="lbl">중앙 신경계 구도 — 만드는 쪽도 쓰는 쪽도 서로를 모릅니다. Kafka 만 압니다</text>
+
+      <rect class="bx" x="16" y="40" width="120" height="34"/>
+      <text x="76" y="61" font-size="10" text-anchor="middle">주문 서비스</text>
+      <rect class="bx" x="16" y="86" width="120" height="34"/>
+      <text x="76" y="107" font-size="10" text-anchor="middle">결제 서비스</text>
+      <rect class="bx" x="16" y="132" width="120" height="34"/>
+      <text x="76" y="147" font-size="10" text-anchor="middle">DB 변경분</text>
+      <text x="76" y="160" font-size="9" text-anchor="middle" class="lbl">CDC · Debezium</text>
+
+      <path class="fl ar" d="M140 57 L256 92"/>
+      <path class="fl ar" d="M140 103 L256 103"/>
+      <path class="fl ar" d="M140 149 L256 114"/>
+
+      <rect class="bx bx-fw" x="260" y="76" width="140" height="56"/>
+      <text x="330" y="99" font-size="11" text-anchor="middle">Kafka</text>
+      <text x="330" y="117" font-size="9" text-anchor="middle" class="lbl">orders · payments · cdc.*</text>
+
+      <path class="fl ar" d="M404 88 L520 52"/>
+      <path class="fl ar" d="M404 98 L520 96"/>
+      <path class="fl ar" d="M404 112 L520 142"/>
+      <path class="fl ar" d="M404 122 L520 188"/>
+
+      <rect class="bx bx-ok" x="524" y="36" width="140" height="32"/>
+      <text x="594" y="56" font-size="10" text-anchor="middle">정산 서비스</text>
+      <rect class="bx bx-ok" x="524" y="82" width="140" height="32"/>
+      <text x="594" y="96" font-size="10" text-anchor="middle">실시간 집계</text>
+      <text x="594" y="109" font-size="9" text-anchor="middle" class="lbl">Streams · Flink</text>
+      <rect class="bx bx-ok" x="524" y="128" width="140" height="32"/>
+      <text x="594" y="148" font-size="10" text-anchor="middle">검색 색인 (ES)</text>
+      <rect class="bx bx-ok" x="524" y="174" width="140" height="32"/>
+      <text x="594" y="188" font-size="10" text-anchor="middle">데이터 레이크</text>
+      <text x="594" y="201" font-size="9" text-anchor="middle" class="lbl">S3 · 분석용</text>
+
+      <text x="16" y="230" class="lbl">새 소비자(추천 팀·ML 파이프라인)가 생겨도 — 구독만 추가하면 끝. 기존 시스템은 아무것도 안 바꿉니다</text>
+    </svg>
+    <div class="cap">이 그림이 "대규모 데이터 처리에 Kafka 를 쓴다"의 실체입니다 — <b>모든 데이터가 한 번은 Kafka 를 지나갑니다.</b></div>
+  </div>
+
+  <h3 class="sub">스트림 처리 — 흘러가면서 계산</h3>
+  <pre class="code rv d1" data-lang="java"><code>// Kafka Streams — "최근 1분간 주문 금액 합계"를 흘러가면서 집계
+KStream&lt;String, Order&gt; orders = builder.stream("orders");
+orders
+  .groupBy((k, v) -&gt; v.category())
+  .windowedBy(TimeWindows.ofSizeWithNoGrace(Duration.ofMinutes(1)))
+  .aggregate(() -&gt; 0L, (k, v, sum) -&gt; sum + v.amount())
+  .toStream().to("orders-per-minute");   // 결과도 토픽으로 — 대시보드가 구독
+
+// 배치와의 차이 — "다 모아서 밤에 계산"이 아니라 "지나갈 때 바로 계산"
+// 더 큰 규모·복잡한 처리는 Flink 를 씁니다 (별도 클러스터)</code></pre>
+
+  <div class="note info rv d2">
+    <b>이벤트 소싱과는 구분하세요.</b>
+    이벤트 소싱은 "상태 대신 <b>이벤트 전체를 진실의 원본</b>으로 저장"하는 설계 패턴으로,
+    난도가 높아 정산·회계처럼 이력이 곧 가치인 도메인에서만 씁니다.
+    Kafka 파이프라인(위 그림)은 이벤트 소싱 없이도 충분히 성립합니다 — 섞어 말하면 감점입니다.
+  </div>
+</section>
+
+<!-- ==================== k11 ==================== -->
+<section class="sec" id="k11">
+  <div class="sec-head rv">
+    <span class="no">SECTION 11</span>
+    <h2>Kafka vs <span class="t">RabbitMQ · Redis</span> — 선택 기준</h2>
+    <p class="lead">
+      "왜 Kafka 를 썼나요?" 에 <b>비교 근거</b>로 답할 수 있어야 합니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:18%"></th><th>Kafka</th><th>RabbitMQ</th><th>Redis (Streams·Pub/Sub)</th></tr>
+      <tr><td><b>모델</b></td><td>지워지지 않는 로그</td><td>꺼내면 사라지는 큐</td><td>인메모리 — 가볍고 빠름</td></tr>
+      <tr><td><b>처리량</b></td><td class="ok">초당 수십만~수백만</td><td>초당 수만</td><td>초당 수만~수십만</td></tr>
+      <tr><td><b>재읽기</b></td><td class="ok">가능 — 오프셋 되감기</td><td class="no">불가 (기본)</td><td>Streams 는 제한적 가능</td></tr>
+      <tr><td><b>다중 구독</b></td><td class="ok">그룹마다 독립</td><td>익스체인지 구성 필요</td><td>Pub/Sub 은 접속 중일 때만</td></tr>
+      <tr><td><b>라우팅</b></td><td>토픽 단위 (단순)</td><td class="ok">정교 — 패턴·헤더·우선순위·지연</td><td>단순</td></tr>
+      <tr><td><b>운영 부담</b></td><td>큼 — 클러스터·파티션 관리</td><td>중간</td><td class="ok">작음 (이미 있는 경우 多)</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">고르는 규칙</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:52%">상황</th><th>선택</th></tr>
+      <tr><td>이벤트 파이프라인 · 대용량 로그 · 여러 팀이 같은 데이터 구독 · 재처리 필요</td><td class="ok"><b>Kafka</b></td></tr>
+      <tr><td>작업 큐(이메일 발송·이미지 변환) · 복잡한 라우팅 · 지연 큐·우선순위</td><td><b>RabbitMQ</b></td></tr>
+      <tr><td>소규모 비동기 · 이미 Redis 가 있고 유실 약간 감수 · 실시간 알림 팬아웃</td><td><b>Redis</b></td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>규모의 정직함도 답입니다.</b>
+    하루 수십만 건 수준이면 RabbitMQ 나 Redis Streams, 심지어 DB 테이블 큐로도 충분합니다.
+    "재처리·다중 구독·수십만 TPS 요구가 생겨 Kafka 로 갔다"처럼
+    <b>규모와 요구가 도구를 정한다</b>는 서사가 면접에서 가장 설득력 있습니다.
+  </div>
+</section>
+
+</div>

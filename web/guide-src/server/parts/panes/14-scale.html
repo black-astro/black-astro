@@ -1,0 +1,747 @@
+<!-- ============================================================
+     대규모 트래픽 PANE
+     ============================================================ -->
+<div class="pane" id="pane-scale">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> HIGH TRAFFIC · CACHE · SHARDING · RATE LIMIT · AUTOSCALING · CAPACITY</div>
+  <h1>대규모 트래픽 —<br>백만 동시 접속을<br>버티는 설계</h1>
+  <p class="tx">
+    선착순 쿠폰 오픈, 티켓팅, 이벤트 페이지 — <b>평소의 100배 트래픽</b>이 몰리는 순간
+    무엇이 먼저 무너지고, 어떻게 버티게 만드는가.
+    무상태 설계·캐시 계층·DB 확장·큐·유량 제어·오토스케일링까지,
+    대기업 시스템 설계 면접의 <b>단골 주제 전부</b>를 실전 순서로 다룹니다.
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>×100</b><span>피크 배수 대응</span></div>
+    <div><b>p99</b><span>지연 관리 기준</span></div>
+  </div>
+</header>
+
+<!-- ==================== x01 ==================== -->
+<section class="sec" id="x01">
+  <div class="sec-head rv">
+    <span class="no">SECTION 01</span>
+    <h2>대규모의 기준 — <span class="t">숫자 감각</span></h2>
+    <p class="lead">
+      "대규모 트래픽 경험"을 말하려면 먼저 <b>숫자로 환산하는 감각</b>이 필요합니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="text"><code>DAU(하루 사용자)  →  평균 RPS 환산 감각
+
+DAU 100만 · 1인당 하루 요청 50개
+= 5,000만 요청/일 ÷ 86,400초 ≈ 평균 580 RPS
+
+피크는 평균의 5~10배               →  3,000~6,000 RPS
+이벤트(쿠폰 오픈)는 평균의 100배+  →  수만~수십만 RPS 가 몇 분에 집중
+
+서버 한 대의 감각 (충분히 튜닝했을 때)
+· Nginx 정적 파일        수만 RPS
+· 백엔드 앱 (가벼운 API)  수백~수천 RPS
+· DB 단순 조회            수천~수만 QPS · 쓰기는 훨씬 작음</code></pre>
+
+  <div class="diag rv d1">
+    <svg viewBox="0 0 680 204" role="img" aria-label="요청은 CDN, 로드밸런서, 앱 서버, 캐시, DB 순서로 흐른다. 앱 서버는 대수를 늘리면 되지만 DB 는 늘리기 어렵다. 그래서 대규모 장애의 대부분은 가장 안쪽의 DB 에서 시작된다. 이 여정의 각 층이 이 탭의 목차다">
+      <text x="16" y="18" class="lbl">요청의 여정 — 바깥은 늘리기 쉽고, 안쪽으로 갈수록 늘리기 어렵습니다</text>
+
+      <rect class="bx" x="16" y="44" width="88" height="40"/>
+      <text x="60" y="62" font-size="11" text-anchor="middle">CDN</text>
+      <text x="60" y="77" font-size="9" text-anchor="middle" class="lbl">x03</text>
+      <path class="fl ar" d="M108 64 L130 64"/>
+      <rect class="bx" x="134" y="44" width="88" height="40"/>
+      <text x="178" y="62" font-size="11" text-anchor="middle">LB</text>
+      <text x="178" y="77" font-size="9" text-anchor="middle" class="lbl">⚖️ 탭</text>
+      <path class="fl ar" d="M226 64 L248 64"/>
+      <rect class="bx bx-ok" x="252" y="44" width="110" height="40"/>
+      <text x="307" y="62" font-size="11" text-anchor="middle">앱 ×N</text>
+      <text x="307" y="77" font-size="9" text-anchor="middle" class="lbl">x02 · x08</text>
+      <path class="fl ar" d="M366 64 L388 64"/>
+      <rect class="bx" x="392" y="44" width="110" height="40"/>
+      <text x="447" y="62" font-size="11" text-anchor="middle">캐시</text>
+      <text x="447" y="77" font-size="9" text-anchor="middle" class="lbl">x04</text>
+      <path class="fl ar" d="M506 64 L528 64"/>
+      <rect class="bx bx-fw" x="532" y="44" width="132" height="40"/>
+      <text x="598" y="62" font-size="11" text-anchor="middle">DB</text>
+      <text x="598" y="77" font-size="9" text-anchor="middle" class="lbl">x05 — 최후의 병목</text>
+
+      <path class="ln ar" d="M600 108 L120 108"/>
+      <text x="140" y="128" class="lbl">← 안쪽일수록 확장이 어렵다 — 그래서 전략은 하나입니다:</text>
+      <text x="140" y="146" class="lbl">요청을 최대한 바깥쪽에서 끝내서 안쪽에 도달하는 수를 줄인다</text>
+
+      <text x="16" y="180" class="lbl">CDN 에서 70% 끝내고 · 캐시에서 25% 끝내면 · DB 에는 5%만 — 이것이 100배를 버티는 원리입니다</text>
+      <text x="16" y="196" class="lbl">병목은 언제나 "한 곳"입니다 — 재기 전에는 모릅니다. 그래서 부하 테스트(x10)가 마지막에 있습니다</text>
+    </svg>
+    <div class="cap">대규모 설계의 제1원칙 — <b>안쪽(DB)을 지키기 위해 바깥(CDN·캐시)에서 끝낸다.</b></div>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>면접에서 숫자를 먼저 물으세요.</b> "대규모 트래픽 처리 설계해 보세요"가 나오면
+    <b>DAU·피크 RPS·읽기/쓰기 비율·응답 목표(p99)</b>부터 확인하는 것이 시작입니다.
+    숫자 없이 아키텍처부터 그리면 과잉 설계로 흐릅니다 — 그 자체가 감점 포인트입니다.
+  </div>
+</section>
+
+<!-- ==================== x02 ==================== -->
+<section class="sec" id="x02">
+  <div class="sec-head rv">
+    <span class="no">SECTION 02</span>
+    <h2><span class="t">무상태</span> 설계 — 확장의 전제</h2>
+    <p class="lead">
+      서버를 100대로 늘리려면 먼저 <b>어느 대에 요청이 가도 같게</b> 만들어야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 216" role="img" aria-label="상태를 서버 메모리에 두면 로그인 세션이 1번 서버에만 있어 2번 서버로 간 요청은 로그아웃된다. 상태를 Redis 와 오브젝트 스토리지로 빼내면 어느 서버로 가도 같은 상태를 읽으므로 서버를 마음껏 늘리고 줄일 수 있다">
+      <text x="16" y="20" class="ttl">상태가 서버 안에 — 못 늘림</text>
+      <rect class="bx bx-warn" x="16" y="34" width="130" height="52"/>
+      <text x="81" y="54" font-size="10" text-anchor="middle">서버 1</text>
+      <text x="81" y="71" font-size="9" text-anchor="middle" class="lbl">세션 · 업로드 파일</text>
+      <rect class="bx" x="16" y="100" width="130" height="52"/>
+      <text x="81" y="120" font-size="10" text-anchor="middle">서버 2</text>
+      <text x="81" y="137" font-size="9" text-anchor="middle" class="lbl">(아무것도 모름)</text>
+      <text x="16" y="180" class="lbl">다음 요청이 서버 2로 가면 —</text>
+      <text x="16" y="196" class="lbl">로그아웃 · 파일 404</text>
+
+      <path class="ln" d="M200 14 L200 202"/>
+
+      <text x="228" y="20" class="ttl">상태를 밖으로 — 마음껏 늘림</text>
+      <rect class="bx bx-ok" x="228" y="34" width="96" height="36"/>
+      <text x="276" y="56" font-size="10" text-anchor="middle">서버 1</text>
+      <rect class="bx bx-ok" x="228" y="80" width="96" height="36"/>
+      <text x="276" y="102" font-size="10" text-anchor="middle">서버 2</text>
+      <rect class="bx bx-ok" x="228" y="126" width="96" height="36"/>
+      <text x="276" y="141" font-size="10" text-anchor="middle">서버 N…</text>
+      <text x="276" y="155" font-size="9" text-anchor="middle" class="lbl">늘리고 줄이고 자유</text>
+
+      <path class="fl ar" d="M328 52 L416 84"/>
+      <path class="fl ar" d="M328 98 L416 98"/>
+      <path class="fl ar" d="M328 144 L416 112"/>
+
+      <rect class="bx bx-fw" x="420" y="78" width="110" height="40"/>
+      <text x="475" y="96" font-size="10" text-anchor="middle">Redis</text>
+      <text x="475" y="111" font-size="9" text-anchor="middle" class="lbl">세션 · 카운터</text>
+
+      <rect class="bx" x="552" y="78" width="112" height="40"/>
+      <text x="608" y="96" font-size="10" text-anchor="middle">S3 · NAS</text>
+      <text x="608" y="111" font-size="9" text-anchor="middle" class="lbl">업로드 파일</text>
+
+      <text x="228" y="196" class="lbl">서버는 언제 죽고 새로 떠도 되는 소모품이 됩니다 — 오토스케일링(x08)의 전제</text>
+    </svg>
+    <div class="cap">스티키 세션은 임시방편입니다 — 서버가 죽으면 그 세션은 끝. <b>상태 외부화가 정공법</b>입니다.</div>
+  </div>
+
+  <h3 class="sub">서버 밖으로 빼야 하는 것들</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">상태</th><th>보내는 곳</th></tr>
+      <tr><td><b>로그인 세션</b></td><td>Redis (세션 스토어) — 또는 JWT 로 상태 자체를 토큰에</td></tr>
+      <tr><td><b>업로드 파일</b></td><td>S3 · 오브젝트 스토리지 — 로컬 디스크 금지</td></tr>
+      <tr><td><b>캐시</b></td><td>Redis — 로컬 캐시는 서버마다 달라져 정합성 문제 (x04)</td></tr>
+      <tr><td><b>스케줄 작업</b></td><td>분산 락 또는 전용 워커 — 안 하면 N대가 같은 배치를 N번 돌립니다</td></tr>
+      <tr><td><b>순번·카운터</b></td><td>Redis INCR · DB — 메모리 변수는 서버마다 따로 셉니다</td></tr>
+    </table>
+  </div>
+
+  <div class="note info rv d2">
+    <b>세션 vs JWT</b> — 세션(Redis)은 즉시 강제 로그아웃이 되지만 매 요청 조회가 필요하고,
+    JWT 는 조회가 없지만 <b>만료 전 무효화가 어렵습니다</b>.
+    실무 절충: <b>수명 짧은 액세스 토큰(JWT) + 리프레시 토큰(서버 저장)</b>.
+    "JWT 로그아웃 어떻게 처리하나요?"는 면접 단골입니다 — 블랙리스트 또는 짧은 만료가 답의 골격.
+  </div>
+</section>
+
+<!-- ==================== x03 ==================== -->
+<section class="sec" id="x03">
+  <div class="sec-head rv">
+    <span class="no">SECTION 03</span>
+    <h2>캐시 계층 ① — <span class="t">브라우저 · CDN</span></h2>
+    <p class="lead">
+      가장 빠른 요청은 <b>서버에 도착하지 않는 요청</b>입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 208" role="img" aria-label="요청 만 건 중 브라우저 캐시가 삼천 건을 자기 안에서 끝내고, CDN 엣지가 오천 건을 끝내서, 서버에는 이천 건만 도달한다. 층마다 요청을 걸러내는 깔때기 구조다">
+      <text x="16" y="18" class="lbl">캐시 깔때기 — 10,000 요청이 층마다 걸러져 서버엔 2,000만 도달합니다</text>
+
+      <rect class="bx" x="16" y="44" width="140" height="52"/>
+      <text x="86" y="64" font-size="11" text-anchor="middle">브라우저 캐시</text>
+      <text x="86" y="82" font-size="9" text-anchor="middle" class="lbl">Cache-Control</text>
+      <text x="86" y="118" class="lbl" text-anchor="middle">3,000건 여기서 끝</text>
+
+      <path class="fl ar" d="M160 70 L232 70"/>
+      <text x="170" y="58" class="ann">7,000</text>
+
+      <rect class="bx bx-ok" x="236" y="44" width="140" height="52"/>
+      <text x="306" y="64" font-size="11" text-anchor="middle">CDN 엣지</text>
+      <text x="306" y="82" font-size="9" text-anchor="middle" class="lbl">전국·전 세계 분산</text>
+      <text x="306" y="118" class="lbl" text-anchor="middle">5,000건 여기서 끝</text>
+
+      <path class="fl ar" d="M380 70 L452 70"/>
+      <text x="392" y="58" class="ann">2,000</text>
+
+      <rect class="bx bx-fw" x="456" y="44" width="140" height="52"/>
+      <text x="526" y="64" font-size="11" text-anchor="middle">원본 서버</text>
+      <text x="526" y="82" font-size="9" text-anchor="middle" class="lbl">진짜 일은 여기만</text>
+
+      <text x="16" y="152" class="lbl">CDN 이 끝내는 것 — 이미지 · JS/CSS · 폰트 · 동영상 · (설정하면) API 응답까지</text>
+      <text x="16" y="170" class="lbl">정적 자산 전략 — 파일명에 해시(app.3f2a.js) + max-age=31536000, immutable → 갱신 걱정 없는 영구 캐시</text>
+      <text x="16" y="188" class="lbl">HTML 은 no-cache(재검증) 또는 짧은 s-maxage — "배포했는데 옛 화면"의 대부분은 HTML 캐시 실수입니다</text>
+    </svg>
+    <div class="cap">이벤트 페이지의 정답 — <b>페이지 전체를 정적으로 만들어 CDN 에 얹는 것.</b> 서버는 열리는 순간의 API 만 받습니다.</div>
+  </div>
+
+  <pre class="code rv d1" data-lang="nginx"><code># 원본(Nginx)에서 캐시 헤더 지정 — CDN 과 브라우저가 이것을 따릅니다
+location /static/ {
+    add_header Cache-Control "public, max-age=31536000, immutable";
+}
+location = /index.html {
+    add_header Cache-Control "no-cache";          # 매번 재검증 (ETag 로 304)
+}
+location /api/products {
+    add_header Cache-Control "public, s-maxage=30, stale-while-revalidate=60";
+    # CDN 이 30초 캐시 — 상품 목록 API 부하가 1/N 로
+}</code></pre>
+
+  <div class="note warn rv d2">
+    <b>개인화 응답을 CDN 에 태우면 사고입니다.</b>
+    <code>Cache-Control: private</code> 없는 "내 주문 목록"이 CDN 에 캐시되면
+    <b>남의 주문이 보입니다</b> — 실제로 반복되는 유형의 사고입니다.
+    쿠키·Authorization 이 붙는 응답은 기본 <code>private, no-store</code> 로 두고,
+    캐시할 것만 명시적으로 여세요.
+  </div>
+</section>
+
+<!-- ==================== x04 ==================== -->
+<section class="sec" id="x04">
+  <div class="sec-head rv">
+    <span class="no">SECTION 04</span>
+    <h2>캐시 계층 ② — <span class="t">Redis 패턴과 함정</span></h2>
+    <p class="lead">
+      DB 앞의 마지막 방패. 그리고 <b>대규모 장애의 단골 출발점</b>이기도 합니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="python"><code># Cache-Aside — 실무 표준 패턴
+def get_product(pid):
+    data = redis.get(f"product:{pid}")
+    if data:                     # 히트 — DB 안 감
+        return json.loads(data)
+    row = db.query(...)          # 미스 — DB 조회
+    redis.setex(f"product:{pid}", 300, json.dumps(row))   # TTL 필수!
+    return row
+
+# 쓰기 시 — 갱신하지 말고 지우세요 (다음 조회가 다시 채움)
+def update_product(pid, ...):
+    db.update(...)
+    redis.delete(f"product:{pid}")   # 갱신(set)은 동시성 순서 꼬임 위험</code></pre>
+
+  <div class="diag rv d1">
+    <svg viewBox="0 0 680 218" role="img" aria-label="캐시 스탬피드는 인기 상품 키가 만료되는 순간 대기하던 요청 천 개가 동시에 미스를 내고 다 같이 DB 로 몰려가 DB 를 쓰러뜨리는 현상이다. 해법은 락으로 한 요청만 DB 에 보내고 나머지는 잠깐 기다리게 하거나, 만료 전에 미리 갱신하는 것이다">
+      <text x="16" y="18" class="lbl">캐시 스탬피드 — 인기 키 만료의 순간, 미스 1,000개가 동시에 DB 로</text>
+
+      <rect class="bx" x="16" y="40" width="110" height="40"/>
+      <text x="71" y="58" font-size="10" text-anchor="middle">요청 1,000/s</text>
+      <text x="71" y="73" font-size="9" text-anchor="middle" class="lbl">같은 인기 상품</text>
+
+      <path class="fl ar" d="M130 60 L202 60"/>
+      <rect class="bx bx-warn" x="206" y="40" width="130" height="40"/>
+      <text x="271" y="58" font-size="10" text-anchor="middle">캐시 키 만료!</text>
+      <text x="271" y="73" font-size="9" text-anchor="middle" class="lbl">전부 미스</text>
+
+      <path class="fl ar-rs" d="M340 60 L412 60" style="stroke:#fb7185"/>
+      <text x="346" y="48" class="ann rs-t">×1,000</text>
+      <rect class="bx bx-warn" x="416" y="40" width="110" height="40"/>
+      <text x="471" y="58" font-size="10" text-anchor="middle">DB 💥</text>
+      <text x="471" y="73" font-size="9" text-anchor="middle" class="lbl">같은 쿼리 폭탄</text>
+
+      <rect class="bx bx-ok" x="16" y="112" width="648" height="88"/>
+      <text x="340" y="134" font-size="10" text-anchor="middle">해법 — 한 명만 보내고, 나머지는 기다리거나 헌 값을 씁니다</text>
+      <text x="32" y="158" font-size="9" class="lbl">① 뮤텍스 락 — 미스 시 락을 잡은 한 요청만 DB 조회, 나머지는 잠깐 대기 후 캐시 재확인</text>
+      <text x="32" y="176" font-size="9" class="lbl">② 조기 갱신 — TTL 남은 시간이 짧으면 확률적으로 미리 갱신 · 배치로 인기 키 선갱신</text>
+      <text x="32" y="192" font-size="9" class="lbl">③ 헌 값 허용 — 논리 만료(soft TTL): 만료 뒤에도 잠깐은 옛 값을 주고 뒤에서 갱신</text>
+    </svg>
+    <div class="cap">TTL 에 <b>지터(무작위 ±10%)</b>를 더하는 것도 기본기 — 같은 시각 일괄 만료를 애초에 막습니다.</div>
+  </div>
+
+  <h3 class="sub">그 밖의 함정들</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:24%">함정</th><th>내용 · 해법</th></tr>
+      <tr><td><b>캐시 관통</b></td><td>존재하지 않는 키(악의적 무작위 ID) 조회는 매번 DB 로 — <b>"없음"도 짧게 캐시</b> · 블룸 필터</td></tr>
+      <tr><td><b>핫 키</b></td><td>단일 키에 초당 수십만 조회 → Redis 한 노드 한계 — <b>로컬 캐시 1~2초</b>를 앞에 겹칩니다</td></tr>
+      <tr><td><b>빅 키</b></td><td>수 MB 값·수십만 원소 컬렉션 — 조회·삭제가 Redis 를 블로킹. 쪼개 두세요</td></tr>
+      <tr><td><b>전멸 대비</b></td><td>Redis 가 통째로 죽으면 전 요청이 DB 로 — <b>그 순간의 DB 보호가 x07(유량 제어)</b>입니다</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>무엇을 캐시하나 — 우선순위 공식.</b>
+    <b>조회 빈도 × 생성 비용 ÷ 변경 빈도</b>가 큰 것부터.
+    상품 상세·랭킹·설정처럼 "많이 읽고, 만들기 비싸고, 가끔 변하는" 데이터가 1순위입니다.
+    잔액처럼 틀리면 안 되는 데이터는 캐시 대상이 아니라 <b>DB 가 진실</b>입니다.
+  </div>
+</section>
+
+<!-- ==================== x05 ==================== -->
+<section class="sec" id="x05">
+  <div class="sec-head rv">
+    <span class="no">SECTION 05</span>
+    <h2>DB 확장 — <span class="t">레플리카 · 샤딩</span></h2>
+    <p class="lead">
+      캐시로도 막을 수 없는 트래픽이 오면, 마지막 병목 <b>DB 자체</b>를 늘려야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 232" role="img" aria-label="읽기 확장은 리드 레플리카 복제로 한다. 쓰기는 프라이머리 한 대가 받고 읽기는 레플리카 여러 대로 분산한다. 쓰기 확장은 샤딩으로 한다. 회원 ID 해시에 따라 다른 DB 샤드로 라우팅해 쓰기 자체를 나눈다">
+      <text x="16" y="20" class="ttl">읽기 확장 — 리드 레플리카</text>
+      <rect class="bx" x="16" y="34" width="96" height="36"/>
+      <text x="64" y="56" font-size="10" text-anchor="middle">앱</text>
+      <path class="fl ar" d="M116 46 L186 46"/>
+      <text x="122" y="36" class="ann">쓰기 전부</text>
+      <rect class="bx bx-fw" x="190" y="30" width="110" height="36"/>
+      <text x="245" y="52" font-size="10" text-anchor="middle">프라이머리</text>
+      <path class="fl ar" d="M116 62 L186 96"/>
+      <text x="100" y="92" class="ann">읽기</text>
+      <rect class="bx bx-ok" x="190" y="82" width="110" height="30"/>
+      <text x="245" y="102" font-size="10" text-anchor="middle">레플리카 1</text>
+      <rect class="bx bx-ok" x="190" y="120" width="110" height="30"/>
+      <text x="245" y="140" font-size="10" text-anchor="middle">레플리카 2</text>
+      <path class="fl ar" d="M245 70 L245 78"/>
+      <text x="16" y="178" class="lbl">읽기:쓰기 = 9:1 인 보통 서비스에</text>
+      <text x="16" y="194" class="lbl">즉효 — 단, 복제 지연 주의</text>
+      <text x="16" y="210" class="lbl">(쓰기 직후 조회는 프라이머리로)</text>
+
+      <path class="ln" d="M340 14 L340 222"/>
+
+      <text x="366" y="20" class="ttl">쓰기 확장 — 샤딩 (마지막 수단)</text>
+      <rect class="bx" x="366" y="34" width="96" height="36"/>
+      <text x="414" y="56" font-size="10" text-anchor="middle">앱</text>
+      <path class="fl ar" d="M466 52 L522 52"/>
+      <rect class="bx bx-hi" x="526" y="34" width="138" height="36"/>
+      <text x="595" y="50" font-size="10" text-anchor="middle">라우터</text>
+      <text x="595" y="64" font-size="9" text-anchor="middle" class="lbl">hash(회원ID) % 3</text>
+      <path class="fl ar" d="M560 74 L436 110"/>
+      <path class="fl ar" d="M590 74 L560 110"/>
+      <path class="fl ar" d="M620 74 L640 110"/>
+      <rect class="bx bx-ok" x="366" y="114" width="130" height="34"/>
+      <text x="431" y="129" font-size="10" text-anchor="middle">샤드 0</text>
+      <text x="431" y="143" font-size="9" text-anchor="middle" class="lbl">회원 0~33%</text>
+      <rect class="bx bx-ok" x="506" y="114" width="90" height="34"/>
+      <text x="551" y="129" font-size="10" text-anchor="middle">샤드 1</text>
+      <text x="551" y="143" font-size="9" text-anchor="middle" class="lbl">33~66%</text>
+      <rect class="bx bx-ok" x="606" y="114" width="58" height="34"/>
+      <text x="635" y="129" font-size="10" text-anchor="middle">샤드 2</text>
+      <text x="635" y="143" font-size="9" text-anchor="middle" class="lbl">66~</text>
+      <text x="366" y="178" class="lbl">쓰기 자체가 나뉩니다 — 대신</text>
+      <text x="366" y="194" class="lbl">샤드 간 JOIN·트랜잭션 불가,</text>
+      <text x="366" y="210" class="lbl">재분배(리샤딩) 대공사</text>
+    </svg>
+    <div class="cap">순서를 지키세요 — <b>인덱스·쿼리 튜닝 → 캐시 → 레플리카 → 파티셔닝 → 샤딩.</b> 샤딩은 마지막입니다.</div>
+  </div>
+
+  <h3 class="sub">샤딩 전에 알아야 할 것</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:28%">주제</th><th>내용</th></tr>
+      <tr><td><b>샤드 키 선택</b></td><td>대부분의 쿼리에 포함되는 키(회원ID·주문ID). 잘못 고르면 <b>모든 샤드를 뒤지는 쿼리</b>가 됩니다</td></tr>
+      <tr><td><b>해시 vs 범위</b></td><td>해시 — 균등 분산·범위 조회 불리 / 범위 — 시계열 유리·최신 샤드 과열</td></tr>
+      <tr><td><b>크로스 샤드</b></td><td>전체 집계·검색은 <b>별도 경로</b>로 — 통계 DB·검색 엔진에 CDC 로 복제해 처리 (📨 k07)</td></tr>
+      <tr><td><b>대안 먼저</b></td><td>Vitess·Citus 같은 샤딩 미들웨어, 또는 처음부터 분산 DB — 직접 구현은 최후입니다</td></tr>
+    </table>
+  </div>
+
+  <div class="note info rv d2">
+    <b>더 깊게</b> — 복제 지연의 원리와 대처는 🗄️ <b>DB 가이드</b>(MySQL 복제·심화 탭),
+    파티셔닝 vs 샤딩 구분도 그쪽에서 다룹니다. 여기서는 <b>"언제 무엇을 꺼내 드는가"의 순서</b>가 핵심입니다.
+  </div>
+</section>
+
+<!-- ==================== x06 ==================== -->
+<section class="sec" id="x06">
+  <div class="sec-head rv">
+    <span class="no">SECTION 06</span>
+    <h2><span class="t">큐</span>로 피크 흡수 — 비동기 전환</h2>
+    <p class="lead">
+      "지금 다 처리"를 포기하면 <b>10배의 피크</b>가 평지가 됩니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 220" role="img" aria-label="쿠폰 오픈 순간 초당 오만 건이 몰리지만 큐가 받아 두고, 워커들은 초당 오천 건씩 꾸준히 꺼내 처리한다. 몰린 요청은 몇 분에 걸쳐 소화된다. 사용자에게는 접수됨을 먼저 알리고 완료는 나중에 알린다">
+      <text x="16" y="18" class="lbl">피크 흡수 — 뾰족한 유입을 큐가 받고, 워커는 평평하게 처리합니다</text>
+
+      <path class="ln" d="M16 96 L200 96"/>
+      <path class="fl" d="M16 92 L60 92 L76 40 L92 92 L200 92"/>
+      <text x="60" y="30" class="ann rs-t">50,000/s 스파이크</text>
+      <text x="16" y="114" class="lbl">유입 트래픽</text>
+
+      <path class="fl ar" d="M204 80 L248 80"/>
+      <rect class="bx bx-fw" x="252" y="56" width="120" height="48"/>
+      <text x="312" y="76" font-size="11" text-anchor="middle">큐</text>
+      <text x="312" y="93" font-size="9" text-anchor="middle" class="lbl">Kafka · SQS — 쌓아 둠</text>
+
+      <path class="fl ar" d="M376 80 L420 80"/>
+      <rect class="bx bx-ok" x="424" y="34" width="110" height="30"/>
+      <text x="479" y="54" font-size="10" text-anchor="middle">워커 1</text>
+      <rect class="bx bx-ok" x="424" y="72" width="110" height="30"/>
+      <text x="479" y="92" font-size="10" text-anchor="middle">워커 2</text>
+      <rect class="bx bx-ok" x="424" y="110" width="110" height="30"/>
+      <text x="479" y="130" font-size="10" text-anchor="middle">워커 N</text>
+
+      <path class="ln" d="M560 96 L664 96"/>
+      <path class="fl" d="M560 88 L664 88"/>
+      <text x="560" y="76" class="ann ok-t">5,000/s 일정하게</text>
+      <text x="560" y="114" class="lbl">처리 속도</text>
+
+      <text x="16" y="152" class="lbl">사용자 경험 설계가 함께 갑니다 — "접수되었습니다(즉시)" → 처리 → "발급 완료(푸시·폴링)"</text>
+      <text x="16" y="170" class="lbl">적용 대상 — 쿠폰 발급 · 주문 후처리 · 알림 발송 · 정산 · 이미지 처리 · 대량 등록</text>
+      <text x="16" y="188" class="lbl">동기로 남길 것 — 결제 승인처럼 응답에 결과가 꼭 필요한 것 (🧱 MSA m07 의 판단 기준)</text>
+      <text x="16" y="206" class="lbl">큐 깊이(랙)가 곧 대기 시간입니다 — 랙 모니터링과 워커 오토스케일링(x08)을 함께 두세요</text>
+    </svg>
+    <div class="cap">면접 표현 — <b>"쓰기 피크는 큐로 평탄화(leveling)하고, 사용자에게는 접수·완료를 나눠 알립니다."</b></div>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>선착순의 진실</b> — 선착순 쿠폰 1만 장의 정답 구조는
+    ① Redis 원자 연산(INCR·Lua)으로 <b>순번만 즉시 판정</b> ②
+    당첨 요청만 큐로 넘겨 <b>발급은 비동기</b> ③ DB 에는 워커가 차분히 기록.
+    "DB 로 1만 동시 UPDATE" 를 피하는 것이 설계의 전부입니다. (x12 에서 전체 답안)
+  </div>
+</section>
+
+<!-- ==================== x07 ==================== -->
+<section class="sec" id="x07">
+  <div class="sec-head rv">
+    <span class="no">SECTION 07</span>
+    <h2>유량 제어 — <span class="t">Rate Limit · 셰딩</span></h2>
+    <p class="lead">
+      한계는 반드시 옵니다. <b>전부 죽는 것과 일부를 거절하는 것</b> 중에 골라야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 210" role="img" aria-label="토큰 버킷은 일정 속도로 토큰이 채워지는 통이다. 요청은 토큰을 하나 꺼내야 통과하고, 통이 비면 429 로 거절된다. 통 크기만큼의 순간 버스트는 허용하면서 평균 속도를 제한한다">
+      <text x="16" y="18" class="lbl">토큰 버킷 — 평균 속도는 제한하되, 순간 버스트는 통 크기만큼 허용</text>
+
+      <text x="70" y="46" class="ann">초당 100개 리필</text>
+      <path class="fl ar" d="M120 52 L120 74"/>
+      <rect class="bx bx-hi" x="60" y="78" width="120" height="66"/>
+      <text x="120" y="100" font-size="10" text-anchor="middle">🪙 토큰 통</text>
+      <text x="120" y="118" font-size="9" text-anchor="middle" class="lbl">용량 200 (버스트 허용)</text>
+      <text x="120" y="133" font-size="9" text-anchor="middle" class="lbl">현재 3개</text>
+
+      <rect class="bx" x="250" y="84" width="100" height="40"/>
+      <text x="300" y="102" font-size="10" text-anchor="middle">요청</text>
+      <text x="300" y="117" font-size="9" text-anchor="middle" class="lbl">토큰 1개 필요</text>
+      <path class="fl ar" d="M246 104 L184 104"/>
+
+      <path class="fl ar-gn" d="M354 96 L438 74" style="stroke:#34d399"/>
+      <text x="360" y="70" class="ann ok-t">토큰 있음 → 통과</text>
+      <rect class="bx bx-ok" x="442" y="52" width="120" height="36"/>
+      <text x="502" y="74" font-size="10" text-anchor="middle">처리</text>
+
+      <path class="fl ar-rs" d="M354 116 L438 140" style="stroke:#fb7185"/>
+      <text x="360" y="156" class="ann rs-t">통 비었음 → 429</text>
+      <rect class="bx bx-warn" x="442" y="126" width="180" height="36"/>
+      <text x="532" y="144" font-size="10" text-anchor="middle">429 Too Many Requests</text>
+      <text x="532" y="158" font-size="9" text-anchor="middle" class="lbl">Retry-After 헤더와 함께</text>
+
+      <text x="16" y="186" class="lbl">거는 위치 — 게이트웨이/Nginx(limit_req)에서 IP·사용자·API별로. 안쪽 서비스 간에도 겁니다</text>
+      <text x="16" y="202" class="lbl">분산 환경 — 서버 N대가 카운터를 공유해야 하므로 Redis 기반(INCR + EXPIRE · Lua)으로 구현합니다</text>
+    </svg>
+    <div class="cap">429 는 실패가 아니라 <b>시스템을 지키는 설계된 응답</b>입니다 — 전면 장애보다 백 배 낫습니다.</div>
+  </div>
+
+  <h3 class="sub">함께 쓰는 방어 도구</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">도구</th><th>내용</th></tr>
+      <tr><td><b>부하 셰딩</b></td><td>과부하 신호(큐 길이·p99)가 뜨면 <b>덜 중요한 요청부터 즉시 거절</b> — 추천은 버리고 주문은 지킵니다</td></tr>
+      <tr><td><b>백프레셔</b></td><td>"밀린다"는 신호를 <b>상류로 전파</b>해 유입 자체를 늦춥니다 — 무한 버퍼는 지연 폭탄일 뿐입니다 (🧬 z09)</td></tr>
+      <tr><td><b>대기열 시스템</b></td><td>티켓팅의 "대기표" — 초과 유입을 <b>순번 페이지</b>에 세워 두고 처리량만큼만 입장시킵니다</td></tr>
+      <tr><td><b>기능 플래그</b></td><td>비상시 무거운 기능(실시간 랭킹·추천)을 <b>스위치로 끕니다</b> — 성능 예산을 핵심에 몰아주기</td></tr>
+    </table>
+  </div>
+
+  <div class="note warn rv d2">
+    <b>클라이언트 재시도까지 설계에 넣으세요.</b>
+    429·503 을 받은 클라이언트가 <b>즉시 재시도하면 부하는 배가</b> 됩니다.
+    응답에 <code>Retry-After</code> 를 담고, 앱·웹 클라이언트는 <b>지수 백오프 + 지터</b>로
+    재시도하게 합니다 — 서버와 클라이언트가 한 팀으로 움직여야 진짜 방어입니다.
+  </div>
+</section>
+
+<!-- ==================== x08 ==================== -->
+<section class="sec" id="x08">
+  <div class="sec-head rv">
+    <span class="no">SECTION 08</span>
+    <h2><span class="t">오토스케일링</span> — 늘어나는 인프라</h2>
+    <p class="lead">
+      "미리 넉넉히"는 비용 낭비, "부족하면 수동 증설"은 새벽 호출입니다. <b>자동</b>이 답입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 202" role="img" aria-label="오토스케일링 루프는 메트릭 수집, 목표값과 비교, 대수 조정, 새 서버 투입의 순환이다. CPU 사용률이 목표 60% 를 넘으면 파드를 늘리고, 낮아지면 천천히 줄인다. 새 파드는 준비 검사를 통과해야 로드밸런서에 연결된다">
+      <text x="16" y="18" class="lbl">오토스케일링 루프 (k8s HPA 기준) — 재고, 비교하고, 늘리고, 검사 후 투입</text>
+
+      <rect class="bx" x="16" y="44" width="140" height="44"/>
+      <text x="86" y="62" font-size="10" text-anchor="middle">① 메트릭 수집</text>
+      <text x="86" y="78" font-size="9" text-anchor="middle" class="lbl">CPU 85% · RPS · 큐 랙</text>
+      <path class="fl ar" d="M160 66 L202 66"/>
+      <rect class="bx bx-hi" x="206" y="44" width="140" height="44"/>
+      <text x="276" y="62" font-size="10" text-anchor="middle">② 목표와 비교</text>
+      <text x="276" y="78" font-size="9" text-anchor="middle" class="lbl">목표 CPU 60%</text>
+      <path class="fl ar" d="M350 66 L392 66"/>
+      <rect class="bx bx-ok" x="396" y="44" width="130" height="44"/>
+      <text x="461" y="62" font-size="10" text-anchor="middle">③ 4대 → 6대</text>
+      <text x="461" y="78" font-size="9" text-anchor="middle" class="lbl">replicas 조정</text>
+      <path class="fl ar" d="M530 66 L572 66"/>
+      <rect class="bx" x="576" y="44" width="88" height="44"/>
+      <text x="620" y="62" font-size="10" text-anchor="middle">④ 준비 검사</text>
+      <text x="620" y="78" font-size="9" text-anchor="middle" class="lbl">통과 → LB 투입</text>
+
+      <path class="fl ar" d="M620 92 L620 120 L90 120 L86 92"/>
+      <text x="300" y="136" class="ann">30초~수 분 주기로 반복 · 줄일 때는 천천히 (안정화 창)</text>
+
+      <text x="16" y="166" class="lbl">전제 셋 — 무상태(x02) · 빠른 기동(이미지 슬림 · 워밍업) · 준비/생존 프로브 정직하게</text>
+      <text x="16" y="184" class="lbl">축소의 예의 — 빼기 전 드레인(새 요청 차단 + 진행 중 요청 완료)은 ⚖️ 로드밸런싱 탭의 무중단 배포와 같은 원리</text>
+    </svg>
+    <div class="cap">스케일링 신호는 CPU 만이 아닙니다 — <b>워커라면 큐 랙 기준(KEDA)</b>이 훨씬 정확합니다 (x06).</div>
+  </div>
+
+  <h3 class="sub">현실 체크리스트</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:34%">항목</th><th>내용</th></tr>
+      <tr><td><b>급증은 못 따라갑니다</b></td><td>새 파드 뜨는 데 수십 초~수 분 — <b>예고된 이벤트는 사전 증설(스케줄 스케일링)</b>이 정답</td></tr>
+      <tr><td><b>하한을 두세요</b></td><td>min replicas 를 피크 직전 수준으로 — 0→100 은 자동화로도 못 버팁니다</td></tr>
+      <tr><td><b>아래층도 함께</b></td><td>앱만 늘면 <b>DB 커넥션 풀이 곱해집니다</b> — 커넥션 수·캐시·DB 용량을 같이 계산</td></tr>
+      <tr><td><b>비용 상한</b></td><td>max replicas + 비용 알람 — 오토스케일링 사고는 요금 고지서로 옵니다</td></tr>
+    </table>
+  </div>
+
+  <div class="note info rv d2">
+    <b>서버리스(람다)는?</b> 트래픽이 0↔폭증을 오가는 보조 기능(썸네일 생성·웹훅)에 좋습니다.
+    상시 대량 트래픽의 코어 API 는 <b>컨테이너 + HPA</b> 가 비용·지연 면에서 무난한 표준입니다.
+    콜드 스타트와 DB 커넥션 문제(프록시 필요)가 서버리스의 대표 함정입니다.
+  </div>
+</section>
+
+<!-- ==================== x09 ==================== -->
+<section class="sec" id="x09">
+  <div class="sec-head rv">
+    <span class="no">SECTION 09</span>
+    <h2>규모별 <span class="t">아키텍처 견본</span> — 1만 · 10만 · 100만</h2>
+    <p class="lead">
+      동시 접속 규모마다 <b>꺼내 드는 도구가 다릅니다.</b> 한 장으로 정리합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 252" role="img" aria-label="동시 만 명은 로드밸런서 뒤 앱 서버 두세 대와 DB 프라이머리, 레플리카, Redis 하나면 충분하다. 동시 십만 명은 CDN 을 앞세우고 앱을 오토스케일링하며 Redis 클러스터, DB 레플리카 여러 대, 큐와 워커가 붙는다. 동시 백만 명은 멀티 리전과 DB 샤딩, Kafka 파이프라인, 대기열 시스템까지 동원된다">
+      <text x="16" y="18" class="lbl">규모가 한 단계 오를 때마다 — 이전 단계 구성에 아래 도구가 "추가"됩니다</text>
+
+      <text x="16" y="44" class="ttl">동시 1만 · 수백 RPS</text>
+      <rect class="bx bx-ok" x="16" y="54" width="200" height="120"/>
+      <text x="32" y="78" font-size="9" class="lbl">LB (Nginx) 1쌍</text>
+      <text x="32" y="96" font-size="9" class="lbl">앱 서버 2~3대 (무상태)</text>
+      <text x="32" y="114" font-size="9" class="lbl">DB 프라이머리 + 레플리카 1</text>
+      <text x="32" y="132" font-size="9" class="lbl">Redis 1 (세션·캐시)</text>
+      <text x="32" y="150" font-size="9" class="lbl">모니터링 기본 세트</text>
+      <text x="16" y="196" class="lbl">여기까지로 대부분의</text>
+      <text x="16" y="212" class="lbl">서비스가 충분합니다</text>
+
+      <path class="fl ar" d="M220 114 L242 114"/>
+
+      <text x="246" y="44" class="ttl">동시 10만 · 수천 RPS</text>
+      <rect class="bx bx-hi" x="246" y="54" width="200" height="140"/>
+      <text x="262" y="78" font-size="9" class="lbl">+ CDN (정적 전부 오프로드)</text>
+      <text x="262" y="96" font-size="9" class="lbl">+ 앱 오토스케일 5~20대</text>
+      <text x="262" y="114" font-size="9" class="lbl">+ Redis 복제·센티널/클러스터</text>
+      <text x="262" y="132" font-size="9" class="lbl">+ 레플리카 2~3 · 커넥션풀 산정</text>
+      <text x="262" y="150" font-size="9" class="lbl">+ 큐·워커 (쓰기 비동기화)</text>
+      <text x="262" y="168" font-size="9" class="lbl">+ Rate Limit · APM 필수</text>
+      <text x="246" y="212" class="lbl">병목이 앱 → DB 로 이동,</text>
+      <text x="246" y="228" class="lbl">캐시 적중률이 생명선</text>
+
+      <path class="fl ar" d="M450 114 L472 114"/>
+
+      <text x="476" y="44" class="ttl">동시 100만 · 수만 RPS+</text>
+      <rect class="bx bx-fw" x="476" y="54" width="188" height="140"/>
+      <text x="490" y="78" font-size="9" class="lbl">+ DB 샤딩 · 분산 DB</text>
+      <text x="490" y="96" font-size="9" class="lbl">+ Kafka 중앙 파이프라인</text>
+      <text x="490" y="114" font-size="9" class="lbl">+ 대기열 (티켓팅 진입 제어)</text>
+      <text x="490" y="132" font-size="9" class="lbl">+ 멀티 AZ/리전 · DR 훈련</text>
+      <text x="490" y="150" font-size="9" class="lbl">+ 서비스 분리 (MSA 탭)</text>
+      <text x="490" y="168" font-size="9" class="lbl">+ 전담 SRE · 카오스 테스트</text>
+      <text x="476" y="212" class="lbl">기술보다 조직·운영 체계가</text>
+      <text x="476" y="228" class="lbl">병목이 되는 구간</text>
+    </svg>
+    <div class="cap">중요한 것은 <b>순서</b>입니다 — 1만 규모에 샤딩·MSA 를 꺼내는 것은 설계가 아니라 낭비입니다.</div>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>면접에서 이 그림을 쓰는 법</b> — 요구 숫자를 확인하고(x01),
+    해당 열의 구성으로 시작해 <b>"병목이 관측되면 다음 도구를 추가한다"</b>는
+    진화 서사로 설명하세요. 처음부터 100만 아키텍처를 그리는 것보다
+    <b>단계별 확장 근거</b>를 말하는 쪽이 항상 높은 평가를 받습니다.
+  </div>
+</section>
+
+<!-- ==================== x10 ==================== -->
+<section class="sec" id="x10">
+  <div class="sec-head rv">
+    <span class="no">SECTION 10</span>
+    <h2><span class="t">부하 테스트</span> — 한계를 미리 잰다</h2>
+    <p class="lead">
+      "몇 RPS 까지 버티나요?"에 <b>측정값으로</b> 답하는 사람과 감으로 답하는 사람의 차이입니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="javascript"><code>// k6 — 코드로 쓰는 부하 테스트 (설치: brew/choco install k6)
+import http from "k6/http";
+import { check, sleep } from "k6";
+
+export const options = {
+  stages: [
+    { duration: "2m", target: 200 },    // 2분에 걸쳐 200 VU 까지 증가
+    { duration: "5m", target: 200 },    // 5분 유지 — 안정 구간 관측
+    { duration: "2m", target: 1000 },   // 피크 시나리오
+    { duration: "2m", target: 0 },      // 회복 관측 (이것도 중요!)
+  ],
+  thresholds: {
+    http_req_duration: ["p(99)&lt;500"],   // p99 500ms 넘으면 실패 처리
+    http_req_failed:   ["rate&lt;0.01"],   // 에러율 1% 미만
+  },
+};
+
+export default function () {
+  const res = http.get("https://stage.example.com/api/products?page=1");
+  check(res, { "200": (r) =&gt; r.status === 200 });
+  sleep(1);   // 실제 사용자처럼 간격 — 없으면 비현실적 최대치만 나옵니다
+}</code></pre>
+
+  <h3 class="sub">읽는 법 — 평균은 버리고 꼬리를 봅니다</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">지표</th><th>의미</th></tr>
+      <tr><td><b>p50 / p99</b></td><td>평균 80ms 여도 p99 가 3초면 <b>100명 중 1명은 3초</b> — 사용자 경험은 꼬리가 정합니다</td></tr>
+      <tr><td><b>무릎점</b></td><td>부하를 올리다 지연이 <b>급격히 꺾이는 지점</b> — 그 직전이 실용 한계 용량입니다</td></tr>
+      <tr><td><b>에러율 변화</b></td><td>어느 RPS 부터 5xx·타임아웃이 시작되나 — 그때 <b>어느 자원(CPU·풀·DB)이 먼저 소진</b>됐는지가 병목</td></tr>
+      <tr><td><b>회복</b></td><td>부하를 내렸을 때 정상으로 돌아오나 — 못 돌아오면(풀 고갈·좀비 커넥션) 더 심각한 문제입니다</td></tr>
+    </table>
+  </div>
+
+  <div class="note warn rv d1">
+    <b>테스트의 3원칙.</b>
+    ① <b>운영과 같은 구성의 스테이징</b>에서 (캐시 끈 로컬 테스트는 무의미)
+    ② 시나리오는 <b>실제 트래픽 믹스</b>로 (조회 90 : 쓰기 10, 로그인 흐름 포함)
+    ③ 병목을 하나 고치면 <b>다음 병목이 나타납니다</b> — 측정→개선→재측정의 반복이 튜닝입니다 (⚡ 성능 탭 p13).
+  </div>
+
+  <div class="note tip rv d2">
+    <b>도구 선택</b> — <b>k6</b>(코드 기반·CI 통합, 추천) · JMeter(GUI·레거시 표준) ·
+    nGrinder(네이버 오픈소스, 국내 기업 채용공고 단골) · wrk(단일 URL 최대치 측정).
+    이력서에는 도구 이름보다 <b>"p99 를 몇에서 몇으로, 무엇을 고쳐서"</b>가 백 배 강합니다.
+  </div>
+</section>
+
+<!-- ==================== x11 ==================== -->
+<section class="sec" id="x11">
+  <div class="sec-head rv">
+    <span class="no">SECTION 11</span>
+    <h2>폭주 당일 — <span class="t">운영 시나리오</span></h2>
+    <p class="lead">
+      설계가 끝이 아닙니다. <b>이벤트 D-day 를 어떻게 준비하고 넘기는가</b>가 진짜 경험입니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:22%">시점</th><th>할 일</th></tr>
+      <tr><td><b>D-7</b></td><td>예상 피크 산정(x01) → 부하 테스트로 검증(x10) → 부족분 증설 계획</td></tr>
+      <tr><td><b>D-1</b></td><td><b>사전 증설</b>(오토스케일링 하한 상향 · DB/Redis 스펙업) · 배포 동결 · 대기열 리허설</td></tr>
+      <tr><td><b>D-day 직전</b></td><td>대시보드 한 화면에(골든 시그널 · 큐 랙 · DB) · 온콜 집합 · 기능 플래그 손에</td></tr>
+      <tr><td><b>오픈 순간</b></td><td>p99 · 에러율 · 큐 랙 응시 — 이상 시 <b>준비된 순서로</b>: 무거운 기능 off → 셰딩 강화 → 대기열 조이기</td></tr>
+      <tr><td><b>종료 후</b></td><td>증설분 축소 · 회고(무엇이 먼저 아팠나) → 다음 이벤트의 설계 입력값으로</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">그날 터지는 단골 장애</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:36%">장애</th><th>원인 · 예방</th></tr>
+      <tr><td>오픈 0초, 앱은 멀쩡한데 DB 급사</td><td>캐시가 비어 있었음 — <b>캐시 예열(warm-up)</b>을 오픈 전에</td></tr>
+      <tr><td>커넥션 풀 고갈 → 전 API 타임아웃</td><td>앱 증설로 커넥션이 곱해짐 — <b>풀 수 × 대수 ≤ DB 한계</b> 재계산 (⚡ p11 · 🗄️ DB)</td></tr>
+      <tr><td>재시도 폭풍으로 2차 붕괴</td><td>클라이언트 백오프 미비 — x07 의 Retry-After 설계</td></tr>
+      <tr><td>로그 폭증으로 디스크 풀</td><td>피크 때 로그량은 수십 배 — 샘플링·레벨 조정 스위치 준비</td></tr>
+      <tr><td>배포 직후 이벤트와 겹침</td><td>이벤트 전 <b>배포 동결 창</b> — 변수를 하나라도 줄입니다</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>런북(runbook)을 미리 쓰세요.</b>
+    "p99 1초 초과 시 → ① 추천 off ② 셰딩 레벨 2 ③ 대기열 유입 50%로" —
+    <b>새벽 3시의 판단을 대낮에 미리 해 두는 문서</b>입니다.
+    장애 중에 생각하는 팀과 실행만 하는 팀의 차이가 복구 시간의 차이입니다.
+  </div>
+</section>
+
+<!-- ==================== x12 ==================== -->
+<section class="sec" id="x12">
+  <div class="sec-head rv">
+    <span class="no">SECTION 12</span>
+    <h2>설계 면접 — <span class="t">단골 문제 풀이 골격</span></h2>
+    <p class="lead">
+      이 탭 전체를 <b>면접 답안 형태</b>로 압축합니다. 골격을 외우면 응용이 됩니다.
+    </p>
+  </div>
+
+  <h3 class="sub">공통 진행 순서 — 어떤 문제든 이 순서로</h3>
+  <div class="pipe rv">
+    <div class="prow"><span class="tagn">1</span>
+      <div><b>요구 숫자 확인</b><span>DAU · 피크 RPS · 읽기/쓰기 비율 · 지연 목표 · 정합성 요구 (x01)</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">2</span>
+      <div><b>기본 뼈대</b><span>CDN → LB → 무상태 앱 → 캐시 → DB(레플리카) — 규모별 견본에서 시작 (x09)</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">3</span>
+      <div><b>읽기 경로 최적화</b><span>캐시 전략·TTL·스탬피드 대책 (x03·x04)</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">4</span>
+      <div><b>쓰기 경로 최적화</b><span>큐로 평탄화·멱등성·순서 (x06 · 📨 Kafka)</span></div></div>
+    <div class="parrow">▼</div>
+    <div class="prow"><span class="tagn">5</span>
+      <div><b>병목·장애 시나리오</b><span>"여기가 죽으면?"을 스스로 먼저 — 유량 제어·폴백·모니터링 (x07 · 🧱 m09)</span></div></div>
+  </div>
+
+  <h3 class="sub">단골 문제 3제 — 핵심 답 구조</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:30%">문제</th><th>답의 골격</th></tr>
+      <tr><td><b>선착순 쿠폰 1만 장</b></td>
+        <td>페이지는 CDN 정적화 → 진입 Rate Limit → <b>Redis 원자 감소로 순번 판정</b> →
+            당첨만 큐 → 워커가 DB 기록 · 결과는 폴링/푸시. DB 직행 금지가 핵심</td></tr>
+      <tr><td><b>타임라인/피드</b></td>
+        <td>읽기 폭발 문제 — <b>팬아웃 온 라이트</b>(쓸 때 팔로워 타임라인 캐시에 밀어 넣기) 기본,
+            연예인(팔로워 수백만)은 <b>팬아웃 온 리드</b>로 혼합. 캐시가 사실상 저장소</td></tr>
+      <tr><td><b>실시간 랭킹</b></td>
+        <td>Redis Sorted Set(ZINCRBY·ZREVRANGE)으로 실시간 집계 ·
+            영속화는 이벤트를 Kafka 로 흘려 배치 정산 — <b>실시간과 정확성의 이원화</b></td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>마지막 한 문장.</b> 대규모 처리의 모든 기법은 결국 세 가지입니다 —
+    <b>① 요청을 줄인다(캐시) ② 나눈다(분산·샤딩) ③ 미룬다(큐·비동기).</b>
+    어떤 신기술이 나와도 이 세 동사 중 하나입니다. 설계가 막히면 이 셋 중 무엇을 안 썼는지 보세요.
+  </div>
+</section>
+
+</div>

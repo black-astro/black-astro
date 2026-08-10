@@ -190,9 +190,9 @@ export const guides: Guide[] = [
       '보안 운영',
     ],
     stats: [
-      { value: '11', label: '주제 탭' },
-      { value: '151', label: '섹션' },
-      { value: '4', label: '서버 전용 탭' },
+      { value: '14', label: '주제 탭' },
+      { value: '186', label: '섹션' },
+      { value: '3', label: 'MSA·Kafka·대규모' },
     ],
   },
   {
