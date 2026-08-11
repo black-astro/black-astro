@@ -3,11 +3,8 @@
    ============================================================ */
 highlightLazy($("#pane-start"));
 dbGo("pg", $('#dbPick button[data-db="pg"]'));
-(function restoreTab(){
-  let t = null;
-  try { t = sessionStorage.getItem("dbg-tab"); } catch(e) {}
-  if (!t) t = "start";                   // 첫 방문 기본 탭 = 시작·설치
-  if (t !== "start" && $("#pane-" + t)) switchTab(t);
+(function initTab(){
+  // 이전 탭 복원은 하지 않는다 — 언제 열어도 첫 탭에서 시작 (예측 가능하게)
   markScrollables($(".pane.on"));
   highlightLazy($(".pane.on"));
 })();

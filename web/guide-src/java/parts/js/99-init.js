@@ -2,11 +2,8 @@
    3. 초기화
    ============================================================ */
 highlightLazy($("#pane-core"));
-(function restoreTab(){
-  let t = null;
-  try { t = sessionStorage.getItem("jvg-tab"); } catch(e) {}
-  if (!t) t = "core";                    // 첫 방문 기본 탭
-  if (t !== "core" && $("#pane-" + t)) switchTab(t);
+(function initTab(){
+  // 이전 탭 복원은 하지 않는다 — 언제 열어도 첫 탭에서 시작 (예측 가능하게)
   markScrollables($(".pane.on"));
   highlightLazy($(".pane.on"));
 })();

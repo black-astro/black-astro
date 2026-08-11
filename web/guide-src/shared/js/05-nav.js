@@ -25,14 +25,15 @@
     row.scrollLeft = 0;
   }
 
-  /* 그룹 클릭 — 그 그룹의 첫 탭으로 옮긴다 (헤더 줄과 목차가 함께 바뀐다) */
+  /* 그룹 클릭 — 언제나 그 그룹의 첫 탭으로 옮긴다 (헤더 줄과 목차가 함께 바뀐다).
+     같은 그룹을 다시 눌러도 첫 탭으로 — "그룹을 고르면 항상 맨 위 탭"이라는
+     예측 가능한 규칙 하나만 남긴다. */
   window.pickGroup = function(i){
     const g = String(i);
     const first = btns.find(b => b.dataset.g === g);
     if (!first) return;
-    const cur = btns.find(b => b.classList.contains("on"));
     show(g);
-    if (!cur || cur.dataset.g !== g) switchTab(first.dataset.t);
+    switchTab(first.dataset.t);
   };
 
   /* ── 모바일 드롭다운도 같은 2단(그룹 → 탭) ──

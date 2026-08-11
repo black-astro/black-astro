@@ -29,7 +29,6 @@ function switchTab(name){
   const tc = $("#tabcurTxt");
   if (tc && TAB_LABEL[name]) tc.textContent = TAB_LABEL[name];
   tabDrop(false);
-  try { sessionStorage.setItem("csg-tab", name); } catch(e) {}
 
   // 새로 보이는 pane 에서 화면에 걸린 것은 즉시 드러낸다 (읽기·쓰기를 가른 판)
   requestAnimationFrame(revealIn);
