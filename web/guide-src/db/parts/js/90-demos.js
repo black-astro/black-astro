@@ -39,6 +39,24 @@ const DB_INFO = {
     use: "모바일 앱, 데스크톱 프로그램, 로컬 캐시, 테스트, 엣지·임베디드",
     cost: "완전 무료 — 만든 사람들이 저작권을 아예 풀어놓아(퍼블릭 도메인) 어디에 쓰든 조건이 없음",
   },
+  redis: {
+    t: "Redis",
+    d: "데이터를 전부 <b>메모리에 두는 키-값 저장소</b>입니다. 마이크로초 단위로 답해서 " +
+       "<b>RDBMS 앞의 캐시</b>·세션·순위표로 쓰입니다. 표도 SQL도 없습니다.",
+    good: "<b>강점</b> — 압도적인 속도, 자료구조(리스트·집합·순위표) 내장, 설치·운영이 단순, 캐시·세션·분산 락의 사실상 표준",
+    bad: "<b>주의</b> — 메모리 크기 = 용량 한계, 기본 설정은 재시작 시 유실 가능, 복잡한 조회·조인 불가, 돈 데이터의 원본으로는 부적합",
+    use: "캐시, 세션 저장소, 실시간 순위표, 처리량 제한, 분산 락, 가벼운 큐",
+    cost: "무료 — 2024년 라이선스 변경으로, 완전 오픈소스가 필요하면 호환 제품 Valkey를 쓰면 됨",
+  },
+  mongo: {
+    t: "MongoDB",
+    d: "표 대신 <b>JSON 문서</b>를 저장하는 문서형 DB입니다. 문서마다 구조가 달라도 되고, " +
+       "관련 데이터를 <b>한 문서에 통째로</b> 담아 조인 없이 꺼냅니다.",
+    good: "<b>강점</b> — 스키마 변경이 자유로움(ALTER 없음), 구조가 제각각인 데이터에 강함, 수평 분산(샤딩)을 처음부터 설계, Atlas 무료 티어",
+    bad: "<b>주의</b> — 여러 문서에 걸친 정합성은 RDBMS보다 약함, 설계를 못 하면 조회마다 $lookup 잔치, 문서 16MB 상한",
+    use: "로그·이벤트, 상품 카탈로그(옵션 제각각), 사용자 생성 콘텐츠, 구조가 자주 바뀌는 초기 서비스",
+    cost: "무료 (SSPL — 서비스 백엔드로 쓰는 건 자유, 'MongoDB 자체를 클라우드 상품으로 팔' 때만 제약)",
+  },
 };
 const DB_CODE = {
   oracle: `-- Oracle : 상위 10건
@@ -61,6 +79,15 @@ SELECT id, name
 FROM   member
 ORDER  BY joined_at DESC
 LIMIT  10;`,
+  redis: `# Redis : SQL이 아니라 명령어입니다
+# 최근 가입 순위표(Sorted Set)에서 상위 10명
+ZADD  recent 1755000000 "u:1001"   # (가입시각, 회원) 기록
+ZREVRANGE recent 0 9               # 상위 10명 조회`,
+  mongo: `// MongoDB : JSON으로 묻습니다
+// 최근 가입 10명
+db.member.find({}, { name: 1 })
+         .sort({ joinedAt: -1 })
+         .limit(10)`,
 };
 function dbGo(k, el){
   const i = DB_INFO[k];
@@ -71,6 +98,8 @@ function dbGo(k, el){
   $("#dbGood").innerHTML = i.good;
   $("#dbBad").innerHTML = i.bad;
   $("#dbUse").innerHTML = "<b>주로 쓰는 곳</b> — " + i.use + "<br><b>비용</b> — " + i.cost;
+  // NoSQL 은 SQL 이 아니므로 코드 상자 언어 라벨도 함께 바꾼다
+  $("#dbCode").dataset.lang = k === "redis" ? "bash" : k === "mongo" ? "js" : "sql";
   setCode("#dbCode", DB_CODE[k]);
 }
 

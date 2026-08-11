@@ -295,11 +295,11 @@ const FIND_CHIPS = ["설치부터 하고 싶어요","도커로 DB 띄우기","JO
 const SEC_KW = {
   /* 하려는 일을 한글로 쳤을 때 걸리게 하는 보강 키워드 */
   c01:"데이터베이스란 왜쓰나 엑셀차이 파일저장 동시접속 무결성 dbms rdbms",
-  c02:"어떤db 고르기 선택 비교 오라클vs mysqlvs postgresqlvs sqlite 라이선스 비용 무료",
+  c02:"어떤db 고르기 선택 비교 오라클vs mysqlvs postgresqlvs sqlite redis 레디스 mongodb 몽고 6대 nosql 관계형 라이선스 비용 무료",
   c03:"윈도우설치 windows 인스톨러 msi exe 서비스등록 환경변수 path 포트충돌",
   c04:"맥설치 macos homebrew brew 리눅스 ubuntu centos rocky apt yum dnf 데비안",
   c05:"도커 docker compose 컨테이너 볼륨 포트매핑 환경변수 가장쉬운설치 초기화스크립트",
-  c06:"접속 클라이언트 dbeaver datagrip workbench pgadmin 터미널 cli 연결테스트",
+  c06:"접속 클라이언트 dbeaver datagrip workbench pgadmin redisinsight compass tableplus 가격 유료 무료 터미널 cli redis-cli mongosh 연결테스트",
   c07:"계정만들기 유저생성 create user 권한 grant 데이터베이스생성 스키마 소유자",
   c08:"샘플데이터 실습 예제 더미데이터 seed 스키마 쇼핑몰 주문 회원",
   c09:"접속오류 connection refused 인증실패 password authentication failed ora-12541 access denied 포트 방화벽 bind-address",
