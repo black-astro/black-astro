@@ -12,7 +12,7 @@
     <b>여기까지 마치면 실시간 대전이 가능한 서버를 설계하고 치트를 막을 수 있습니다.</b>
   </p>
   <div class="stats">
-    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>15</b><span>SECTIONS</span></div>
     <div><b>60~100ms</b><span>현실적 왕복</span></div>
     <div><b>서버</b><span>가 진실</span></div>
     <div><b>UDP</b><span>실시간의 기본</span></div>
@@ -961,6 +961,367 @@ TickMs.Record(sw.Elapsed.TotalMilliseconds,
         모든 것에 알림을 걸면 <b>아무도 안 봅니다</b>.
         <b>사용자가 실제로 겪는 문제</b>(접속 실패·틱 지연)에만 걸고
         나머지는 대시보드로 두세요 — 자세한 운영은 <b>⚡ 대규모 트래픽</b> 탭에서.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== n13 ==================== -->
+<section class="sec" id="n13">
+  <div class="sec-head rv">
+    <span class="no">SERVER 13</span>
+    <h2>WebSocket 서버 — <span class="t">웹 · 캐주얼 게임의 표준</span></h2>
+    <p class="lead">브라우저에서도, 회사 방화벽 뒤에서도 <b>그냥 연결됩니다.</b> raw TCP 를 열기 전에 이것부터 검토하세요.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">왜 raw TCP 가 아니라 WebSocket 인가</h4>
+      <ul class="tx">
+        <li><b>브라우저에서 쓸 수 있는 유일한 소켓</b>입니다 — 웹 게임·WebGL 빌드는 raw TCP/UDP 를 열 방법 자체가 없습니다</li>
+        <li><b>방화벽·프록시를 통과합니다</b> — 443 포트의 HTTPS 로 시작해 업그레이드되므로 회사·학교 망에서도 막히지 않습니다</li>
+        <li><b>메시지 경계를 프로토콜이 지켜 줍니다</b> — raw TCP 처럼 길이 헤더로 직접 자르는 코드(03 섹션)가 필요 없습니다</li>
+        <li><b>TLS 가 공짜에 가깝습니다</b> — <code>wss://</code> 는 기존 HTTPS 인증서·인프라를 그대로 씁니다</li>
+      </ul>
+      <div class="tw">
+        <table>
+          <thead><tr><th></th><th>raw TCP/UDP</th><th>WebSocket</th></tr></thead>
+          <tbody>
+            <tr><td>브라우저</td><td>불가</td><td><b>가능</b></td></tr>
+            <tr><td>방화벽 통과</td><td>포트 열어야 함</td><td><b>443 그대로</b></td></tr>
+            <tr><td>메시지 경계</td><td>직접 구현</td><td><b>내장</b></td></tr>
+            <tr><td>지연 특성</td><td><b>UDP 가 유리</b></td><td>TCP 기반 — 재전송 대기 있음</td></tr>
+            <tr><td>인프라</td><td>전용 포트 · LB 설정</td><td><b>기존 HTTP 인프라 재사용</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">ASP.NET Core 최소 구현</h4>
+      <pre class="code" data-lang="csharp"><code>var app = WebApplication.CreateBuilder(args).Build();
+
+app.UseWebSockets(new WebSocketOptions
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(15),   // 프로토콜 핑을 대신 보내 줌
+});
+
+app.Map("/ws", async (HttpContext ctx) =&gt;
+{
+    if (!ctx.WebSockets.IsWebSocketRequest)
+    { ctx.Response.StatusCode = 400; return; }
+
+    // ★ 업그레이드 전에 인증 — 헤더를 못 붙이는 클라가 있어 쿼리스트링으로
+    var player = await AuthAsync(ctx.Request.Query["access_token"]);
+    if (player is null) { ctx.Response.StatusCode = 401; return; }
+
+    using var ws = await ctx.WebSockets.AcceptWebSocketAsync();
+    var buf = new byte[16 * 1024];
+
+    while (ws.State == WebSocketState.Open)
+    {
+        var r = await ws.ReceiveAsync(buf.AsMemory(), ctx.RequestAborted);
+        if (r.MessageType == WebSocketMessageType.Close) break;
+        if (!r.EndOfMessage)                 // ★ 큰 메시지는 조각나서 온다
+            throw new InvalidDataException("메시지 상한 초과");
+
+        await _room.PushAsync(player, buf.AsMemory(0, r.Count));
+    }
+    await _room.LeaveAsync(player);          // 어떻게 끊겨도 반드시 정리
+});
+
+app.Run();</code></pre>
+      <div class="note tip">
+        룸·게임 루프 구조(05 섹션)는 <b>그대로 재사용</b>합니다 —
+        전송 계층만 소켓에서 WebSocket 으로 바뀔 뿐,
+        입력을 Channel 에 넣고 룸 루프가 처리하는 뼈대는 동일합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">메시지 프레이밍 — 텍스트로 시작</h4>
+      <pre class="code" data-lang="csharp"><code>// ① 텍스트(JSON) — 디버깅이 쉽다. 캐주얼 게임은 대부분 이걸로 충분
+await ws.SendAsync(JsonSerializer.SerializeToUtf8Bytes(
+        new { type = "move", x, y, tick }),
+    WebSocketMessageType.Text, endOfMessage: true, ct);
+
+// ② 바이너리(MessagePack) — 같은 내용이 1/3 크기. 트래픽이 커지면 전환
+await ws.SendAsync(MessagePackSerializer.Serialize(new MovePacket(x, y, tick)),
+    WebSocketMessageType.Binary, true, ct);</code></pre>
+      <ul class="tx">
+        <li><b><code>type</code> 필드를 반드시</b> — 메시지 종류를 구분할 유일한 수단입니다. 04 섹션의 PacketId 와 같은 역할입니다</li>
+        <li>텍스트 프레임은 <b>브라우저 개발자 도구에 내용이 그대로 보입니다</b> — 개발 속도가 완전히 다릅니다</li>
+        <li>전환 기준은 감이 아니라 <b>대역폭 청구서</b>입니다 — 인당 KB/s × CCU 를 계산해 보고 바꾸세요</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">하트비트 · 재접속</h4>
+      <pre class="code" data-lang="csharp"><code>// 프로토콜 핑만 믿지 말고 앱 레벨 하트비트를 따로 둡니다
+// (중간 장비가 핑에 대신 응답해 '죽은 연결'이 살아 보일 수 있습니다)
+if (now - s.LastMsgAt &gt; TimeSpan.FromSeconds(30))
+    await s.CloseAsync(WebSocketCloseStatus.NormalClosure, "timeout", ct);
+
+// 재접속 — 새 연결에 이전 세션을 이어 붙인다
+var resume = ctx.Request.Query["session"];
+var session = _sessions.TryResume(resume, out var old)
+    ? old                          // ★ 60초 안에 돌아오면 방·상태 그대로
+    : _sessions.Create(player);</code></pre>
+      <ul class="tx">
+        <li><b>모바일에서 끊김은 일상</b>입니다 — 화면 잠금·지하철. 재접속 유예 없이 방에서 빼면 항의가 옵니다</li>
+        <li>재접속 직후 <b>전체 상태 스냅샷</b>을 한 번 보내고 그 뒤부터 증분으로 — 놓친 것 복구를 클라가 고민하지 않게</li>
+        <li>클라이언트 재시도는 <b>지수 백오프</b>(1·2·4·8초)로 — 서버 복구 순간의 재접속 폭풍(11 섹션)을 줄입니다</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 class="sub rv">raw TCP/UDP 대신 WebSocket 으로 충분한가</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>게임</th><th>판단</th><th>이유</th></tr></thead>
+      <tbody>
+        <tr><td>턴제 · 보드 · 퍼즐</td><td><b>충분</b></td><td>지연 요구가 느슨 — 사실 HTTP + SignalR 로도 됩니다</td></tr>
+        <tr><td>캐주얼 실시간 (.io 류 · 파티 게임)</td><td><b>충분</b></td><td>10~20Hz 동기화는 TCP 지연으로도 감당 — 수많은 웹 게임이 증명</td></tr>
+        <tr><td>웹 · WebGL 빌드</td><td><b>사실상 유일</b></td><td>브라우저는 raw 소켓 불가</td></tr>
+        <tr><td>FPS · 격투 · 레이싱</td><td>부족</td><td>패킷 하나의 재전송이 뒤 전부를 막음 — 02 섹션의 UDP 로</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note warn rv">
+    <b>WebSocket 은 결국 TCP 입니다.</b>
+    유실된 패킷의 재전송을 기다리는 동안 뒤 메시지가 전부 막힙니다.
+    "옛 위치는 버리고 최신만"이 필요한 빠른 액션이라면 처음부터 UDP 로 가세요.
+    반대로 그 수준의 반응성이 필요 없다면 — <b>운영 편의가 압도적인 WebSocket 이 정답</b>입니다.
+  </div>
+</section>
+
+
+<!-- ==================== n14 ==================== -->
+<section class="sec" id="n14">
+  <div class="sec-head rv">
+    <span class="no">SERVER 14</span>
+    <h2>시간 동기화 · <span class="t">틱레이트 설계</span></h2>
+    <p class="lead">클라와 서버의 시계는 <b>항상 다릅니다.</b> 그 차이를 재는 법과, 서버의 심장 박동을 정하는 기준입니다.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">고정 시간 스텝 — 서버 틱의 표준형</h4>
+      <pre class="code" data-lang="csharp"><code>// 시뮬레이션 dt 를 항상 같게 — 같은 입력이면 같은 결과가 됩니다
+const double FixedDt = 1.0 / 20;                  // 20Hz = 50ms
+var acc  = 0.0;
+var prev = Stopwatch.GetTimestamp();
+
+while (!ct.IsCancellationRequested)
+{
+    var now = Stopwatch.GetTimestamp();
+    acc += Stopwatch.GetElapsedTime(prev, now).TotalSeconds;
+    prev = now;
+
+    while (acc &gt;= FixedDt)                        // 밀린 만큼 따라잡는다
+    {
+        Simulate(FixedDt);  _tick++;              // ★ dt 는 절대 변하지 않음
+        acc -= FixedDt;
+
+        if (acc &gt;= FixedDt * 5)                   // ★ 죽음의 나선 방지
+        { acc = 0; _log.Warn("틱 5개 이상 밀림 — 버림"); break; }
+    }
+
+    Broadcast();
+    await Task.Delay(1, ct);                      // CPU 양보
+}</code></pre>
+      <div class="note tip">
+        <b>시뮬레이션과 전송을 분리하세요.</b>
+        시뮬레이션은 60Hz 로 돌리고 <b>상태 방송은 20Hz</b> 로만 해도 됩니다 —
+        판정은 정밀하게, 대역폭은 아끼는 조합입니다. 클라이언트도 같은 원리로
+        <b>수신 20Hz + 렌더 60fps</b> 를 보간(07 섹션)으로 잇습니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">클라 - 서버 시간 오프셋 — 핑퐁으로</h4>
+      <pre class="code" data-lang="csharp"><code>// 클라이언트 — 여러 번 재서 중앙값을 쓴다
+async Task SyncClockAsync()
+{
+    var samples = new List&lt;double&gt;();
+    for (var i = 0; i &lt; 8; i++)
+    {
+        var t0 = LocalMs();
+        var serverMs = await PingAsync();      // 서버가 자기 시각을 돌려줌
+        var t1 = LocalMs();
+
+        var rtt = t1 - t0;
+        // ★ 편도 ≈ RTT / 2 로 가정 — 서버 시각 + 편도 = 지금의 서버 시각
+        samples.Add(serverMs + rtt / 2 - t1);
+        await Task.Delay(50);
+    }
+    samples.Sort();
+    _offset = samples[samples.Count / 2];      // 중앙값 — 튄 표본 제거
+}
+
+double ServerNowMs() =&gt; LocalMs() + _offset;   // 이후 모든 시간 판정에 이것을</code></pre>
+      <ul class="tx">
+        <li><b>기기 시계를 신뢰하지 마세요</b> — 사용자 폰의 <code>DateTime.Now</code> 는 몇 분씩 틀립니다. 항상 <b>오프셋 보정값</b>을 씁니다</li>
+        <li><b>주기적으로 다시 잽니다</b> — 기기 시계는 흐르면서 조금씩 어긋납니다. 접속 시 + 몇 분마다 한 번이면 충분합니다</li>
+        <li>회선이 비대칭이면 RTT/2 가정이 틀어집니다 — <b>RTT 가 가장 작은 표본</b>이 가장 정확한 표본입니다</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 class="sub rv">틱레이트 선택 — 장르가 정합니다</h3>
+  <div class="tw rv">
+    <table>
+      <thead><tr><th>틱레이트</th><th>틱 예산</th><th>장르</th><th>비고</th></tr></thead>
+      <tbody>
+        <tr><td><b>10Hz</b></td><td>100ms</td><td>수집형 RPG 실시간 요소 · 캐주얼 협동</td><td>서버비 최소</td></tr>
+        <tr><td><b>20Hz</b></td><td>50ms</td><td>MOBA · 배틀로얄 · 대부분의 액션</td><td><b>업계 기본값</b></td></tr>
+        <tr><td><b>30Hz</b></td><td>33ms</td><td>빠른 슈터</td><td>대역폭 · CPU 1.5배</td></tr>
+        <tr><td><b>60Hz</b></td><td>16ms</td><td>격투 · 경쟁 FPS</td><td>서버비·최적화 부담 급증</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">지연 시간 예산 — 키 입력이 화면에 오기까지</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>구간</th><th>전형값</th><th>줄일 수 있나</th></tr></thead>
+          <tbody>
+            <tr><td>입력 → 클라 송신</td><td>~16ms</td><td>프레임에 묶임</td></tr>
+            <tr><td>네트워크 상행 편도</td><td>20~50ms</td><td><b>지역 서버 배치</b>가 유일</td></tr>
+            <tr><td>서버 틱 대기</td><td>0~50ms (평균 주기÷2)</td><td>틱레이트 올리기</td></tr>
+            <tr><td>서버 처리</td><td>1~10ms</td><td>로직 최적화</td></tr>
+            <tr><td>네트워크 하행 편도</td><td>20~50ms</td><td>지역 서버</td></tr>
+            <tr><td>클라 보간 버퍼</td><td>~100ms</td><td>줄이면 끊김과 교환</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        합계 <b>체감 150~250ms</b> 가 현실입니다.
+        틱레이트를 20 → 60Hz 로 올려도 줄어드는 것은 <b>틱 대기 한 줄(평균 17ms)</b>뿐인데
+        서버 비용은 3배가 됩니다 — 지역 서버 배치·보간 버퍼 조정이 훨씬 쌉니다.
+        <b>비싼 항목부터 올리지 마세요.</b>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">틱이 밀릴 때 (오버런)</h4>
+      <ul class="tx">
+        <li><b>증상</b> — 한 틱 처리가 주기(50ms)를 넘으면 다음 틱이 늦고, 밀린 틱을 따라잡느라 더 밀리는 <b>죽음의 나선</b>이 시작됩니다</li>
+        <li><b>1차 방어</b> — 위 코드처럼 <b>밀린 틱 상한(5개)</b>을 두고 넘으면 버립니다. 게임이 잠깐 느려지는 쪽이 서버가 영원히 못 따라잡는 쪽보다 낫습니다</li>
+        <li><b>원인 추적</b> — 틱 시간 p99 를 상시 기록(11 섹션). 범인은 대부분 <b>루프 안의 할당(GC)과 동기 I/O</b> 입니다</li>
+        <li><b>구조적 해법</b> — 룸당 인원 상한 · AOI(04 섹션) · 무거운 계산을 여러 틱에 나눠 실행</li>
+      </ul>
+      <div class="note warn">
+        <b><code>Task.Delay</code> 는 정확하지 않습니다.</b>
+        Windows 의 기본 타이머 해상도는 <b>15.6ms</b> 라 "50ms 대기"가 60ms 를 넘기도 합니다.
+        위처럼 <b>누적기(acc) 방식</b>이면 개별 오차가 쌓이지 않아 평균 틱레이트는 정확히 유지됩니다 —
+        "대기 시간을 믿지 말고 경과 시간을 재라"가 핵심입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== n15 ==================== -->
+<section class="sec" id="n15">
+  <div class="sec-head rv">
+    <span class="no">SERVER 15</span>
+    <h2>서버 아키텍처 <span class="t">사례 연구</span></h2>
+    <p class="lead">코드가 아니라 <b>구조 수준</b>에서 장르별 정답을 봅니다. 우리 게임이 어디인지부터 정하세요.</p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">① 턴제 · 비동기 — 수집형 RPG</h4>
+      <div class="layer">
+        <div class="lrow l-web"><span class="tagn">클라</span>
+          <div><b>전투는 클라에서 연출만</b>
+          <span>시드·스탯을 서버가 주고, 결과를 서버가 검증합니다</span></div></div>
+        <div class="lrow l-svc"><span class="tagn">API</span>
+          <div><b>ASP.NET Core HTTP API 하나로 전부</b>
+          <span>로그인·스테이지·전투 결과·뽑기·상점 — <b>소켓 서버가 없습니다</b></span></div></div>
+        <div class="lrow l-repo"><span class="tagn">저장</span>
+          <div><b>PostgreSQL + Redis</b>
+          <span>랭킹·캐시는 Redis, 나머지는 전부 RDB</span></div></div>
+      </div>
+      <ul class="tx">
+        <li>다른 플레이어와 <b>같은 순간에 있을 필요가 없는</b> 게임 전부 — 수집형 RPG · 방치형 · 퍼즐</li>
+        <li>비동기 PvP(방어덱 침공)도 <b>상대 데이터를 읽어 올 뿐</b>입니다 — 실시간이 아닙니다</li>
+        <li>국내 매출 상위권의 <b>상당수가 이 구조</b>입니다. 실시간 서버 없이도 대작이 됩니다</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">② 실시간 룸 기반 — 대전 · 파티</h4>
+      <div class="layer">
+        <div class="lrow l-web"><span class="tagn">API</span>
+          <div><b>계정 · 상점 · 전적은 그대로 HTTP</b>
+          <span>① 의 구조를 그대로 두고 그 옆에 얹습니다</span></div></div>
+        <div class="lrow l-svc"><span class="tagn">매치</span>
+          <div><b>매치메이커가 룸을 배정</b>
+          <span>큐(08 섹션) → 성사되면 게임 서버 주소를 클라에 알림</span></div></div>
+        <div class="lrow l-repo"><span class="tagn">룸</span>
+          <div><b>소켓 서버 + 룸 루프(05 섹션)</b>
+          <span>한 판 = 룸 하나. 끝나면 <b>결과만</b> API 로 저장하고 룸은 버림</span></div></div>
+      </div>
+      <ul class="tx">
+        <li>MOBA · 대전 액션 · 배틀로얄 · 파티 게임 — <b>판(세션)의 시작과 끝이 명확한</b> 게임</li>
+        <li>룸 상태는 <b>메모리에만</b> 있다 사라집니다 — 저장할 게 없어서 수평 확장이 쉽습니다</li>
+        <li>룸 서버의 증설·회수는 오케스트레이터에 맡깁니다(09 섹션)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini">③ MMO형 — 영속 세계</h4>
+      <div class="layer">
+        <div class="lrow l-web"><span class="tagn">게이트</span>
+          <div><b>게이트웨이가 연결을 받고</b>
+          <span>인증·라우팅만 — 뒤의 존 서버로 전달합니다</span></div></div>
+        <div class="lrow l-svc"><span class="tagn">존</span>
+          <div><b>세계를 구역(존)으로 나눠 서버마다 하나씩</b>
+          <span>존 이동 = <b>서버 간 캐릭터 이관</b> — 여기가 가장 어렵습니다</span></div></div>
+        <div class="lrow l-repo"><span class="tagn">공용</span>
+          <div><b>채팅 · 길드 · 경매장은 별도 서비스</b>
+          <span>존과 무관한 기능은 분리 — 서버 사이는 gRPC·메시지 큐로</span></div></div>
+      </div>
+      <ul class="tx">
+        <li>룸과 달리 <b>세계가 끝나지 않습니다</b> — 상태를 계속 저장해야 하고, 함부로 내릴 수도 없습니다</li>
+        <li>존 경계에서의 전투, 이관 도중의 <b>아이템 복사 버그</b>가 이 구조의 악명 높은 함정입니다</li>
+        <li><b>전담 서버팀 없이 시도하지 마세요</b> — ①②와는 난이도의 차원이 다릅니다</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4 class="mini">우리 게임은 어디인가 — 판정 기준</h4>
+      <ul class="tx">
+        <li><b>상대의 행동을 언제 봐야 하나?</b> — 다음 접속 때 → ①, 1초 안에 → ②, 같은 공간에 수백 명 → ③</li>
+        <li><b>"한 판"이 있는가?</b> — 시작과 끝이 있으면 ②, 세계가 계속 흐르면 ③</li>
+        <li><b>끊겼다 들어와도 되는가?</b> — 된다면 ① 쪽으로 당길 수 있습니다</li>
+        <li>애매하면 <b>낮은 번호로</b> — ① 에서 ② 로 넓히기는 되지만, 반대는 재설계입니다</li>
+      </ul>
+      <div class="tw">
+        <table>
+          <thead><tr><th></th><th>① 턴제·비동기</th><th>② 룸 기반</th><th>③ MMO형</th></tr></thead>
+          <tbody>
+            <tr><td>통신</td><td>HTTPS</td><td>HTTP + UDP/WS</td><td>UDP + 서버 간 gRPC</td></tr>
+            <tr><td>서버 구성</td><td><b>API 서버만</b></td><td>API + 매치 + 룸</td><td>게이트 + 존 + 공용 서비스</td></tr>
+            <tr><td>상태 위치</td><td>전부 DB</td><td>판 동안만 메모리</td><td>메모리 + 상시 저장</td></tr>
+            <tr><td>서버 인력</td><td>백엔드 1명~</td><td>+ 게임서버 1~2명</td><td><b>전담팀</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>과설계가 실패 원인 1순위입니다.</b>
+        수집형 RPG 에 소켓 서버를, 룸 게임에 존 분할을 만드는 팀이 정말 많습니다.
+        실시간 서버는 <b>기획서에 "실시간 대전"이 적혀 있을 때만</b> 만드세요 —
+        ① 구조는 이 가이드의 💠 ASP.NET 탭 지식만으로 완성됩니다.
       </div>
     </div>
   </div>
