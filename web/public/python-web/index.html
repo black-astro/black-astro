@@ -2579,6 +2579,7 @@ body.fs-lg .reach{font-size:16px}
 
   <a href="#w11"><em>11</em>CORS · HTTPS · 보안 ★</a>
   <a href="#w12"><em>12</em>Django · Flask · FastAPI</a>
+  <a href="#w13"><em>13</em>실시간 — WebSocket · SSE ★</a>
 </div>
 
 <div class="navset" data-nav="test">
@@ -24250,7 +24251,7 @@ class Order:
     여기까지 하면 <b>로그인이 붙은 API 서버를 혼자 만들어 띄우는</b> 데까지 갑니다.
   </p>
   <div class="stats">
-    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>13</b><span>SECTIONS</span></div>
     <div><b>HTTP</b><span>모든 것의 바닥</span></div>
     <div><b>FastAPI</b><span>실습 기준</span></div>
     <div><b>JWT</b><span>로그인 표준</span></div>
@@ -25813,6 +25814,136 @@ urlpatterns = router.urls</code></pre>
         (<code>TestClient</code> 로 이 탭의 코드를 그대로 검증합니다).
         트래픽이 늘기 시작하면 <b>⚡ 대규모 트래픽 탭</b> —
         비동기 함정 · 커넥션 풀 · 캐시 · 배포가 거기서 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== w13 ==================== -->
+<section class="sec" id="w13">
+  <div class="sec-head rv">
+    <span class="no">WEB 13</span>
+    <h2>실시간 — <span class="t">WebSocket · SSE</span></h2>
+    <p class="lead">
+      채팅·알림·진행률처럼 <b>서버가 먼저 말을 걸어야 하는</b> 기능은 요청-응답(HTTP)만으로는 안 됩니다.
+      FastAPI 는 WebSocket 을 프레임워크 차원에서 지원합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WebSocket 엔드포인트 — 최소 완결형</h4>
+      <pre class="code" data-lang="python"><code>from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+
+app = FastAPI()
+
+class ConnectionManager:
+    """접속 목록 관리 + 브로드캐스트 — 실무의 기본 뼈대"""
+    def __init__(self):
+        self.active: list[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()                  # ★ 핸드셰이크 수락 (빠뜨리면 무한 대기)
+        self.active.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        self.active.remove(ws)             # ★ 정리 안 하면 죽은 소켓에 계속 전송
+
+    async def broadcast(self, data: dict):
+        for ws in self.active:
+            await ws.send_json(data)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/chat")
+async def chat(ws: WebSocket):
+    await manager.connect(ws)
+    try:
+        while True:
+            msg = await ws.receive_json()          # 클라이언트 → 서버
+            await manager.broadcast(msg)           # 전원에게 중계
+    except WebSocketDisconnect:
+        manager.disconnect(ws)</code></pre>
+      <pre class="code" data-lang="js"><code>// 브라우저 쪽 — 내장 WebSocket 이면 충분합니다
+const ws = new WebSocket("wss://api.example.com/ws/chat");
+ws.onmessage = e =&gt; render(JSON.parse(e.data));
+ws.onopen    = () =&gt; ws.send(JSON.stringify({ text: "안녕하세요" }));
+// 재접속은 내장이 아닙니다 — onclose 에서 지수 백오프로 직접</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인증 · 하트비트 · 검증</h4>
+      <pre class="code" data-lang="python"><code>import asyncio
+from fastapi import Query, status
+
+@app.websocket("/ws/notify")
+async def notify(ws: WebSocket, token: str = Query()):
+    # ① 인증 — 핸드셰이크는 HTTP 라 헤더·쿼리로 토큰을 받는다
+    user = verify_jwt(token)               # w10 의 JWT 검증 그대로
+    if user is None:
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    await ws.accept()
+
+    try:
+        while True:
+            # ② 하트비트 — 30초 동안 소식 없으면 죽은 연결로 판정
+            try:
+                msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
+            except asyncio.TimeoutError:
+                await ws.send_json({"type": "ping"})   # 살아 있니?
+                continue
+            # ③ 받은 값은 REST 와 똑같이 검증 (Pydantic 재사용)
+            data = ChatMsg.model_validate(msg)
+            await handle(user, data)
+    except WebSocketDisconnect:
+        pass</code></pre>
+      <div class="note warn">
+        <b>루프 안에서 블로킹 호출 금지</b> — WebSocket 핸들러는 이벤트 루프 위에서 돕니다.
+        <code>time.sleep</code>·동기 DB 호출 하나가 <b>접속자 전원</b>의 메시지를 멈춥니다.
+        규칙은 ⚡ 대규모 트래픽 탭 k03(비동기 사고)과 완전히 같습니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>워커를 2개 이상 띄우는 순간</b> 접속 목록이 워커마다 따로 생겨
+        브로드캐스트가 반쪽 납니다 — <b>Redis pub/sub</b> 로 워커끼리 중계하세요
+        (<code>broadcaster</code> 라이브러리가 이 패턴을 감싸 줍니다).
+        구조는 🗄️ DB 가이드 Redis 탭 r10과 같습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">SSE — 한 방향이면 이걸로 충분</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <pre class="code" data-lang="python"><code># pip install sse-starlette — 서버 → 클라이언트 단방향 스트림
+from sse_starlette.sse import EventSourceResponse
+
+@app.get("/events")
+async def events():
+    async def stream():
+        while True:
+            data = await next_notification()       # 새 알림을 기다렸다가
+            yield {"event": "notice", "data": data}
+    return EventSourceResponse(stream())</code></pre>
+      <pre class="code" data-lang="js"><code>// 브라우저 — 재접속이 "내장"이라 코드가 이게 전부입니다
+const es = new EventSource("/events");
+es.addEventListener("notice", e =&gt; show(JSON.parse(e.data)));</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 쓸까 — 판정표</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:38%">기능</th><th>선택</th></tr>
+          <tr><td>알림 · 진행률 · 시세 표시</td><td><b>SSE</b> — HTTP 그대로, 자동 재접속, 프록시 무사통과</td></tr>
+          <tr><td>채팅 · 협업 편집 · 게임 조작</td><td><b>WebSocket</b> — 클라이언트도 계속 보내야 할 때</td></tr>
+          <tr><td>몇 초 늦어도 되는 갱신</td><td>그냥 <b>주기적 폴링</b> — 가장 단순한 답을 먼저 검토</td></tr>
+        </table>
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>배포 시 프록시 설정 한 줄</b> — Nginx 뒤에 두면
+        <code>proxy_read_timeout</code>(기본 60초)이 조용한 연결을 끊습니다.
+        하트비트 주기를 그보다 짧게 잡거나 타임아웃을 올리세요.
+        업그레이드 헤더 설정은 🌐 서버기술 가이드에 있습니다.
+        같은 기능을 자바로는 ☕ 자바 가이드 f18(STOMP), JS 로는 🟨 JS·TS 가이드에서 다룹니다.
       </div>
     </div>
   </div>
@@ -30421,6 +30552,7 @@ const SEC_KW = {
   w10:"jwt 발급 검증 리프레시 refresh 회전 rotation pyjwt access_token bearer oauth2passwordbearer depends 현재사용자 권한 admin 로그아웃 쿠키",
   w11:"cors 크로스오리진 동일출처 preflight options origin allow_origins https tls 인증서 letsencrypt sql인젝션 xss csrf 보안헤더 hsts 시크릿 env",
   w12:"django 장고 flask 플라스크 fastapi 비교 선택기준 orm 관리자 admin drf 최소앱 streamlit gradio 프레임워크선택",
+  w13:"websocket 웹소켓 실시간 채팅 알림 sse eventsource server sent events 브로드캐스트 connectionmanager 하트비트 ping 재접속 인증 토큰 close broadcaster redis pubsub 워커 sse-starlette 폴링 양방향",
   x01:"테스트왜 회귀 regression 리팩터링 자신감 수동확인 테스트피라미드 단위 통합 e2e 문서",
   x02:"pytest 설치 실행 assert 파일규칙 test_ 네이밍 -k -x --lf 마커 marker skip xfail pyproject 설정 modulenotfound",
   x03:"fixture 픽스처 conftest yield 정리 teardown scope session function autouse tmp_path monkeypatch caplog capsys 의존",
@@ -32030,7 +32162,7 @@ const SEC_LV = {
                d09:"a",d10:"i",d11:"a",d12:"i",d13:"i",d14:"i",d15:"a",d16:"b",
                d17:"i",d18:"i",
   /* web */    w01:"b",w02:"b",w03:"b",w04:"b",w05:"b",w06:"b",w07:"i",w08:"i",
-               w09:"i",w10:"a",w11:"i",w12:"b",
+               w09:"i",w10:"a",w11:"i",w12:"b",w13:"i",
   /* test */   x01:"b",x02:"b",x03:"b",x04:"b",x05:"i",x06:"i",x07:"i",x08:"a",
                x09:"i",x10:"b",x11:"a",x12:"a",
   /* scale */  k01:"i",k02:"i",k03:"a",k04:"a",k05:"a",k06:"i",k07:"a",k08:"i",
@@ -32214,6 +32346,7 @@ const EZ = {
  w10:"로그인하면 <b>짧은 출입증(액세스)</b>과 <b>재발급표(리프레시)</b>를 줍니다. 만료되면 재발급표로 새로 받아요.",
  w11:"“CORS 에러”는 서버가 막은 게 아니라 <b>브라우저가 보호 중</b>이라는 뜻이에요. 허용할 주소를 서버가 알려 주면 됩니다.",
  w12:"관리자 화면까지 필요하면 <b>Django</b>, API만 만들면 <b>FastAPI</b>, 아주 작으면 <b>Flask</b>. 이게 거의 전부예요.",
+ w13:"서버가 먼저 말을 걸어야 하는 기능(채팅·알림)은 <b>WebSocket·SSE</b>로 만들어요. 밀기만 하면 SSE, 주고받으면 WebSocket이에요.",
 
  x01:"“고칠 때마다 손으로 다시 확인하던 일”을 <b>코드로 적어 두는 것</b>이에요. 한 번 적으면 3초에 100번 확인됩니다.",
  x02:"파일 이름을 <code>test_</code>로 시작하고 <b><code>assert</code> 한 줄</b>만 쓰면 끝. 외울 문법이 거의 없어요.",
@@ -32501,6 +32634,7 @@ const CAP = {
   w10:["p","액세스·리프레시 토큰 발급부터 검증·갱신까지 직접 구현해, 실제 서비스에 붙는 로그인 기능을 혼자 완성합니다."],
   w11:["p","CORS·HTTPS·기본 보안 설정을 이해해, 프론트 연동에서 하루씩 잡아먹던 차단 문제를 30분 만에 해결합니다."],
   w12:["s","Django·Flask·FastAPI를 만들 것에 맞춰 골라, 프레임워크 선택으로 프로젝트 초반을 낭비하지 않습니다."],
+  w13:["p","FastAPI WebSocket으로 인증·하트비트·브로드캐스트를 갖춘 실시간 기능을 만들고, 다중 워커에서는 Redis pub/sub으로 확장합니다."],
 
   /* 🧪 테스트 */
   x01:["s","손으로 반복하던 동작 확인을 코드로 옮겨, 코드를 고칠 때마다 3초 만에 100가지를 다시 검증할 수 있습니다."],

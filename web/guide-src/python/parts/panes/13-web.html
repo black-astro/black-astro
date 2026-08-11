@@ -14,7 +14,7 @@
     여기까지 하면 <b>로그인이 붙은 API 서버를 혼자 만들어 띄우는</b> 데까지 갑니다.
   </p>
   <div class="stats">
-    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>13</b><span>SECTIONS</span></div>
     <div><b>HTTP</b><span>모든 것의 바닥</span></div>
     <div><b>FastAPI</b><span>실습 기준</span></div>
     <div><b>JWT</b><span>로그인 표준</span></div>
@@ -1577,6 +1577,136 @@ urlpatterns = router.urls</code></pre>
         (<code>TestClient</code> 로 이 탭의 코드를 그대로 검증합니다).
         트래픽이 늘기 시작하면 <b>⚡ 대규모 트래픽 탭</b> —
         비동기 함정 · 커넥션 풀 · 캐시 · 배포가 거기서 이어집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== w13 ==================== -->
+<section class="sec" id="w13">
+  <div class="sec-head rv">
+    <span class="no">WEB 13</span>
+    <h2>실시간 — <span class="t">WebSocket · SSE</span></h2>
+    <p class="lead">
+      채팅·알림·진행률처럼 <b>서버가 먼저 말을 걸어야 하는</b> 기능은 요청-응답(HTTP)만으로는 안 됩니다.
+      FastAPI 는 WebSocket 을 프레임워크 차원에서 지원합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WebSocket 엔드포인트 — 최소 완결형</h4>
+      <pre class="code" data-lang="python"><code>from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+
+app = FastAPI()
+
+class ConnectionManager:
+    """접속 목록 관리 + 브로드캐스트 — 실무의 기본 뼈대"""
+    def __init__(self):
+        self.active: list[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()                  # ★ 핸드셰이크 수락 (빠뜨리면 무한 대기)
+        self.active.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        self.active.remove(ws)             # ★ 정리 안 하면 죽은 소켓에 계속 전송
+
+    async def broadcast(self, data: dict):
+        for ws in self.active:
+            await ws.send_json(data)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/chat")
+async def chat(ws: WebSocket):
+    await manager.connect(ws)
+    try:
+        while True:
+            msg = await ws.receive_json()          # 클라이언트 → 서버
+            await manager.broadcast(msg)           # 전원에게 중계
+    except WebSocketDisconnect:
+        manager.disconnect(ws)</code></pre>
+      <pre class="code" data-lang="js"><code>// 브라우저 쪽 — 내장 WebSocket 이면 충분합니다
+const ws = new WebSocket("wss://api.example.com/ws/chat");
+ws.onmessage = e =&gt; render(JSON.parse(e.data));
+ws.onopen    = () =&gt; ws.send(JSON.stringify({ text: "안녕하세요" }));
+// 재접속은 내장이 아닙니다 — onclose 에서 지수 백오프로 직접</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인증 · 하트비트 · 검증</h4>
+      <pre class="code" data-lang="python"><code>import asyncio
+from fastapi import Query, status
+
+@app.websocket("/ws/notify")
+async def notify(ws: WebSocket, token: str = Query()):
+    # ① 인증 — 핸드셰이크는 HTTP 라 헤더·쿼리로 토큰을 받는다
+    user = verify_jwt(token)               # w10 의 JWT 검증 그대로
+    if user is None:
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    await ws.accept()
+
+    try:
+        while True:
+            # ② 하트비트 — 30초 동안 소식 없으면 죽은 연결로 판정
+            try:
+                msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
+            except asyncio.TimeoutError:
+                await ws.send_json({"type": "ping"})   # 살아 있니?
+                continue
+            # ③ 받은 값은 REST 와 똑같이 검증 (Pydantic 재사용)
+            data = ChatMsg.model_validate(msg)
+            await handle(user, data)
+    except WebSocketDisconnect:
+        pass</code></pre>
+      <div class="note warn">
+        <b>루프 안에서 블로킹 호출 금지</b> — WebSocket 핸들러는 이벤트 루프 위에서 돕니다.
+        <code>time.sleep</code>·동기 DB 호출 하나가 <b>접속자 전원</b>의 메시지를 멈춥니다.
+        규칙은 ⚡ 대규모 트래픽 탭 k03(비동기 사고)과 완전히 같습니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>워커를 2개 이상 띄우는 순간</b> 접속 목록이 워커마다 따로 생겨
+        브로드캐스트가 반쪽 납니다 — <b>Redis pub/sub</b> 로 워커끼리 중계하세요
+        (<code>broadcaster</code> 라이브러리가 이 패턴을 감싸 줍니다).
+        구조는 🗄️ DB 가이드 Redis 탭 r10과 같습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">SSE — 한 방향이면 이걸로 충분</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <pre class="code" data-lang="python"><code># pip install sse-starlette — 서버 → 클라이언트 단방향 스트림
+from sse_starlette.sse import EventSourceResponse
+
+@app.get("/events")
+async def events():
+    async def stream():
+        while True:
+            data = await next_notification()       # 새 알림을 기다렸다가
+            yield {"event": "notice", "data": data}
+    return EventSourceResponse(stream())</code></pre>
+      <pre class="code" data-lang="js"><code>// 브라우저 — 재접속이 "내장"이라 코드가 이게 전부입니다
+const es = new EventSource("/events");
+es.addEventListener("notice", e =&gt; show(JSON.parse(e.data)));</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 쓸까 — 판정표</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:38%">기능</th><th>선택</th></tr>
+          <tr><td>알림 · 진행률 · 시세 표시</td><td><b>SSE</b> — HTTP 그대로, 자동 재접속, 프록시 무사통과</td></tr>
+          <tr><td>채팅 · 협업 편집 · 게임 조작</td><td><b>WebSocket</b> — 클라이언트도 계속 보내야 할 때</td></tr>
+          <tr><td>몇 초 늦어도 되는 갱신</td><td>그냥 <b>주기적 폴링</b> — 가장 단순한 답을 먼저 검토</td></tr>
+        </table>
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>배포 시 프록시 설정 한 줄</b> — Nginx 뒤에 두면
+        <code>proxy_read_timeout</code>(기본 60초)이 조용한 연결을 끊습니다.
+        하트비트 주기를 그보다 짧게 잡거나 타임아웃을 올리세요.
+        업그레이드 헤더 설정은 🌐 서버기술 가이드에 있습니다.
+        같은 기능을 자바로는 ☕ 자바 가이드 f18(STOMP), JS 로는 🟨 JS·TS 가이드에서 다룹니다.
       </div>
     </div>
   </div>

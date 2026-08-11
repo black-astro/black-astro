@@ -196,6 +196,7 @@ const SEC_KW = {
   f15:"이벤트루프블로킹 블로킹 blockhound 처리량붕괴 publishon subscribeon boundedelastic eventexecutorgroup 스레드덤프 jcmd 장애 지연 p99",
   f16:"reactornetty httpclient 커넥션풀 connectionprovider maxconnections pendingacquiretimeout maxidletime keepalive prematurecloseexception 502 responsetimeout readtimeouthandler 메트릭 micrometer wiretap 풀고갈 커넥션누수",
   f17:"네이티브트랜스포트 epoll iouring 다이렉트메모리 maxdirectmemorysize oom oomkilled 파일디스크립터 ulimit nofile bytebuf누수 leakdetection webflux vs 가상스레드 선택기준 체크리스트",
+  f18:"websocket 웹소켓 양방향 실시간 채팅 stomp 구독 발행 topic queue messagemapping simpmessagingtemplate sockjs stompjs 브로커릴레이 rabbitmq redis pubsub 브로드캐스트 하트비트 재접속 핸드셰이크 인증 connect 세션 sendmessage concurrentwebsocketsessiondecorator",
   a13:"jvm튜닝 힙 컨테이너 도커 메모리 oom 힙덤프 gc옵션 zgc 기동시간",
   b17:"쿠버네티스 k8s 무중단배포 롤링업데이트 프로브 헬스체크 graceful preStop hpa 오토스케일 502",
   b18:"마이그레이션 업그레이드 부트3 부트4 eol 지원종료 starter-webmvc 스타터개명 mockbean mockitobean jackson3 undertow spock properties-migrator openrewrite",

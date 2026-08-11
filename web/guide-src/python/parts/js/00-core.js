@@ -195,6 +195,7 @@ const SEC_KW = {
   w10:"jwt 발급 검증 리프레시 refresh 회전 rotation pyjwt access_token bearer oauth2passwordbearer depends 현재사용자 권한 admin 로그아웃 쿠키",
   w11:"cors 크로스오리진 동일출처 preflight options origin allow_origins https tls 인증서 letsencrypt sql인젝션 xss csrf 보안헤더 hsts 시크릿 env",
   w12:"django 장고 flask 플라스크 fastapi 비교 선택기준 orm 관리자 admin drf 최소앱 streamlit gradio 프레임워크선택",
+  w13:"websocket 웹소켓 실시간 채팅 알림 sse eventsource server sent events 브로드캐스트 connectionmanager 하트비트 ping 재접속 인증 토큰 close broadcaster redis pubsub 워커 sse-starlette 폴링 양방향",
   x01:"테스트왜 회귀 regression 리팩터링 자신감 수동확인 테스트피라미드 단위 통합 e2e 문서",
   x02:"pytest 설치 실행 assert 파일규칙 test_ 네이밍 -k -x --lf 마커 marker skip xfail pyproject 설정 modulenotfound",
   x03:"fixture 픽스처 conftest yield 정리 teardown scope session function autouse tmp_path monkeypatch caplog capsys 의존",

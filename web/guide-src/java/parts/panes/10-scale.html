@@ -1284,6 +1284,64 @@ class RateLimitInterceptor implements HandlerInterceptor {
     </div>
   </div>
 
+  <h3 class="sub">라이브러리로 세팅하기 — 코드 몇 줄로 "초당 N건"</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Bucket4j — 토큰 버킷 표준 구현</h4>
+      <pre class="code" data-lang="java"><code>// build.gradle: com.bucket4j:bucket4j-core
+// "초당 100건, 순간 버스트 200건까지" 를 코드로 그대로
+Bucket bucket = Bucket.builder()
+    .addLimit(l -&gt; l.capacity(200)                        // 버킷 크기 = 버스트 허용량
+                    .refillGreedy(100, Duration.ofSeconds(1)))  // 초당 100 토큰 리필
+    .build();
+
+if (bucket.tryConsume(1)) {
+    // 처리
+} else {
+    // 429 — 다음 토큰까지 남은 시간도 계산해 준다
+    long waitNanos = bucket.estimateAbilityToConsume(1).getNanosToWaitForRefill();
+    res.setHeader("Retry-After", String.valueOf(waitNanos / 1_000_000_000 + 1));
+}
+
+// 사용자별 버킷 — 캐시에 담아 키마다 하나씩
+LoadingCache&lt;String, Bucket&gt; buckets = Caffeine.newBuilder()
+    .expireAfterAccess(Duration.ofMinutes(10))
+    .build(k -&gt; newBucket());
+
+// 서버 여러 대라면: bucket4j-redis 모듈로 같은 API 그대로 분산 버킷
+// (원리는 왼쪽 Lua 스크립트와 동일 — 구현을 라이브러리에 맡기는 것)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Resilience4j — 설정 파일로 거는 방식</h4>
+      <pre class="code" data-lang="yaml"><code># application.yml — 코드 수정 없이 API 별 TPS 조정
+resilience4j:
+  ratelimiter:
+    instances:
+      orderApi:
+        limit-for-period: 50          # 주기당 허용 건수
+        limit-refresh-period: 1s      # ★ 이 두 줄이 곧 "초당 50건"
+        timeout-duration: 0           # 0 = 초과분 즉시 거절 (대기 없음)
+      searchApi:
+        limit-for-period: 200
+        limit-refresh-period: 1s
+        timeout-duration: 500ms       # 500ms 까지는 줄 서서 기다림</code></pre>
+      <pre class="code" data-lang="java"><code><span class="t-ann">@RateLimiter(name = "orderApi", fallbackMethod = "tooMany")</span>
+<span class="t-ann">@PostMapping("/orders")</span>
+OrderRes create(<span class="t-ann">@RequestBody</span> OrderReq req) { ... }
+
+ResponseEntity&lt;?&gt; tooMany(OrderReq req, RequestNotPermitted e) {
+    return ResponseEntity.status(429)
+        .header("Retry-After", "1").build();
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>고르는 기준</b> — 사용자별·키별 세밀 제어와 분산 버킷은 <b>Bucket4j</b>,
+        서킷 브레이커(k11)와 한 세트로 API 단위 보호를 설정 파일로 관리하려면 <b>Resilience4j</b>.
+        둘 다 한 프로세스 기준이므로 <b>서버 대수를 곱해서 생각</b>하는 것을 잊지 마세요
+        (10대 × 초당 50 = 뒷단엔 초당 500).
+      </div>
+    </div>
+  </div>
+
   <h3 class="sub">그 밖의 부하 차단 장치</h3>
   <div class="grid2 rv d1">
     <div class="card">

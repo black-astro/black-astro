@@ -2460,6 +2460,7 @@ nav.side .navtab button[data-t="flux"]{grid-column:1/-1}
   <a href="#f15"><em>15</em>이벤트 루프를 막지 마라 ★</a>
   <a href="#f16"><em>16</em>Reactor Netty · 커넥션 풀 ★</a>
   <a href="#f17"><em>17</em>운영 · 튜닝 종합 ★</a>
+  <a href="#f18"><em>18</em>WebSocket 실전 ★</a>
 </div>
 
 <div class="navset" data-nav="data">
@@ -7906,7 +7907,7 @@ java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }</code></pre>
     그래서 <b>언제 쓰지 말아야 하는지</b>부터 시작합니다.
   </p>
   <div class="stats">
-    <div><b>17</b><span>SECTIONS</span></div>
+    <div><b>18</b><span>SECTIONS</span></div>
     <div><b>N개</b><span>스레드 (CPU 코어 수)</span></div>
     <div><b>수만</b><span>동시 연결</span></div>
     <div><b>0</b><span>블로킹 허용</span></div>
@@ -9636,6 +9637,141 @@ jcmd &lt;pid&gt; GC.heap_info
 □ URI 태그에 정규화 함수를 넣었다 (카디널리티)
 □ wiretap 은 운영에서 꺼져 있다</code></pre>
     </div>
+  </div>
+</section>
+
+<!-- ==================== f18 ==================== -->
+<section class="sec" id="f18">
+  <div class="sec-head rv">
+    <span class="no">FLUX 18</span>
+    <h2>WebSocket 실전 — <span class="t">양방향 실시간</span></h2>
+    <p class="lead">
+      SSE(f08)가 <b>서버 → 클라이언트 한 방향</b>이라면, WebSocket 은 <b>양방향</b>입니다.
+      채팅·협업 편집·게임처럼 <b>클라이언트도 계속 말을 거는</b> 기능은 여기서 시작합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 순수 WebSocket — 프로토콜 그대로</h4>
+      <pre class="code" data-lang="java"><code>// build.gradle: spring-boot-starter-websocket
+<span class="t-ann">@Configuration @EnableWebSocket</span>
+class WsConfig implements WebSocketConfigurer {
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry reg) {
+        reg.addHandler(new ChatHandler(), "/ws/chat")
+           .setAllowedOrigins("https://app.example.com");   // ★ CORS 별도!
+    }
+}
+
+class ChatHandler extends TextWebSocketHandler {
+    // 세션 목록은 반드시 동시성 컬렉션으로
+    private final Set&lt;WebSocketSession&gt; sessions = ConcurrentHashMap.newKeySet();
+
+    public void afterConnectionEstablished(WebSocketSession s) {
+        sessions.add(s);
+    }
+    protected void handleTextMessage(WebSocketSession s, TextMessage m)
+            throws IOException {
+        for (WebSocketSession peer : sessions)          // 브로드캐스트
+            if (peer.isOpen()) peer.sendMessage(m);
+    }
+    public void afterConnectionClosed(WebSocketSession s, CloseStatus st) {
+        sessions.remove(s);                             // ★ 정리 안 하면 누수
+    }
+}</code></pre>
+      <div class="note warn">
+        <b><code>WebSocketSession.sendMessage</code> 는 동시 호출에 안전하지 않습니다.</b>
+        여러 스레드가 같은 세션에 보내면 <code>IllegalStateException</code> 이 납니다 —
+        <code>ConcurrentWebSocketSessionDecorator</code> 로 감싸거나(전송 버퍼·타임아웃 지정),
+        세션마다 전송 큐를 하나 두는 것이 실무 패턴입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② STOMP — 구독·발행으로 올라서기</h4>
+      <pre class="code" data-lang="java"><code>// 채팅방·알림처럼 "채널" 개념이 생기면 STOMP 가 코드를 줄여 줍니다
+<span class="t-ann">@Configuration @EnableWebSocketMessageBroker</span>
+class StompConfig implements WebSocketMessageBrokerConfigurer {
+    public void registerStompEndpoints(StompEndpointRegistry r) {
+        r.addEndpoint("/ws").setAllowedOriginPatterns("https://*.example.com");
+    }
+    public void configureMessageBroker(MessageBrokerRegistry r) {
+        r.enableSimpleBroker("/topic", "/queue");   // 구독 채널
+        r.setApplicationDestinationPrefixes("/app"); // 클라 → 서버 접두사
+    }
+}
+
+<span class="t-ann">@Controller</span>
+class ChatController {
+    <span class="t-ann">@MessageMapping("/chat/{room}")</span>          // 클라가 /app/chat/1 로 발행
+    <span class="t-ann">@SendTo("/topic/chat/{room}")</span>            // 구독자 전원에게
+    ChatMsg relay(<span class="t-ann">@DestinationVariable</span> long room, ChatMsg msg) {
+        return msg;
+    }
+}
+
+// 서버가 먼저 말 걸기 — 어디서든 주입해서
+messagingTemplate.convertAndSend("/topic/notice", payload);
+messagingTemplate.convertAndSendToUser(userId, "/queue/dm", dm);  // 1:1</code></pre>
+      <pre class="code" data-lang="js"><code>// 브라우저 쪽 (@stomp/stompjs)
+const c = new StompJs.Client({ brokerURL: "wss://api.example.com/ws" });
+c.onConnect = () =&gt; {
+  c.subscribe("/topic/chat/1", m =&gt; render(JSON.parse(m.body)));
+  c.publish({ destination: "/app/chat/1",
+              body: JSON.stringify({ text: "안녕하세요" }) });
+};
+c.activate();   // 재접속·하트비트 내장</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">서버가 2대가 되는 순간 — 브로드캐스트가 반쪽 난다</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <pre class="code" data-lang="java"><code>// 문제: A서버에 붙은 유저에게 보낸 메시지는
+//       B서버에 붙은 유저에게 안 간다 (세션이 서버 메모리에 있으므로)
+
+// 해법 1 — Redis pub/sub 로 서버끼리 중계 (직접 구현·수 대 규모)
+<span class="t-ann">@Component</span>
+class RedisRelay implements MessageListener {
+    public void publish(String channel, String json) {
+        redis.convertAndSend(channel, json);        // 모든 서버가 받는다
+    }
+    public void onMessage(Message m, byte[] p) {    // 각 서버: 자기 세션에만 전달
+        messagingTemplate.convertAndSend("/topic/chat",
+                                         new String(m.getBody()));
+    }
+}
+
+// 해법 2 — STOMP 브로커 릴레이 (표준·운영 권장)
+r.enableStompBrokerRelay("/topic", "/queue")        // SimpleBroker 대신
+ .setRelayHost("rabbitmq.internal")                 // RabbitMQ(STOMP 플러그인)
+ .setRelayPort(61613);
+// 구독 정보가 브로커에 모이므로 서버 몇 대든 동일하게 동작</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영 체크리스트</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:32%">항목</th><th>기준</th></tr>
+          <tr><td>인증</td><td>핸드셰이크는 <b>HTTP 이므로 쿠키·세션이 그대로 통과</b>. 토큰 방식은 CONNECT 프레임 헤더로 받아 <code>ChannelInterceptor</code> 에서 검증</td></tr>
+          <tr><td>하트비트</td><td>STOMP 기본 10초. 프록시(Nginx) <code>proxy_read_timeout</code> 보다 <b>짧게</b> — 안 그러면 조용히 끊깁니다</td></tr>
+          <tr><td>재접속</td><td>클라이언트 책임 — stompjs 는 내장, 순수 WS 는 지수 백오프로 직접. <b>끊긴 동안 메시지</b>는 재접속 후 REST 로 따라잡기</td></tr>
+          <tr><td>메시지 크기·버퍼</td><td><code>setMessageSizeLimit</code>·<code>setSendBufferSizeLimit</code> 명시 — 느린 클라이언트 하나가 메모리를 먹는 사고 방지</td></tr>
+          <tr><td>수평 확장</td><td>세션은 서버에 붙박이 — LB 는 그대로 두고 <b>브로커 릴레이로 메시지만 공유</b>가 정석</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>WebFlux 에서는</b> <code>WebSocketHandler</code> 가 <code>Flux&lt;WebSocketMessage&gt;</code> 를
+        주고받는 리액티브 API 입니다 — 백프레셔(f07)가 소켓까지 이어져
+        <b>수만 동시 접속</b>에 유리합니다. STOMP 편의 기능은 MVC 쪽이 성숙하니,
+        접속 수가 수천 이하라면 MVC + STOMP 조합이 개발 속도 면에서 낫습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="note info rv d1">
+    <b>SSE 로 충분한지 먼저 물어보세요</b> — 알림·시세·진행률처럼 <b>서버가 밀기만 하면 되는</b> 기능은
+    SSE(f08)가 훨씬 단순합니다(HTTP 그대로 · 자동 재접속 내장).
+    WebSocket 은 <b>클라이언트도 초당 여러 번 말을 걸 때</b>(채팅 입력·커서 공유·게임 조작) 꺼내는 카드입니다.
   </div>
 </section>
 
@@ -17807,6 +17943,64 @@ class RateLimitInterceptor implements HandlerInterceptor {
     </div>
   </div>
 
+  <h3 class="sub">라이브러리로 세팅하기 — 코드 몇 줄로 "초당 N건"</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Bucket4j — 토큰 버킷 표준 구현</h4>
+      <pre class="code" data-lang="java"><code>// build.gradle: com.bucket4j:bucket4j-core
+// "초당 100건, 순간 버스트 200건까지" 를 코드로 그대로
+Bucket bucket = Bucket.builder()
+    .addLimit(l -&gt; l.capacity(200)                        // 버킷 크기 = 버스트 허용량
+                    .refillGreedy(100, Duration.ofSeconds(1)))  // 초당 100 토큰 리필
+    .build();
+
+if (bucket.tryConsume(1)) {
+    // 처리
+} else {
+    // 429 — 다음 토큰까지 남은 시간도 계산해 준다
+    long waitNanos = bucket.estimateAbilityToConsume(1).getNanosToWaitForRefill();
+    res.setHeader("Retry-After", String.valueOf(waitNanos / 1_000_000_000 + 1));
+}
+
+// 사용자별 버킷 — 캐시에 담아 키마다 하나씩
+LoadingCache&lt;String, Bucket&gt; buckets = Caffeine.newBuilder()
+    .expireAfterAccess(Duration.ofMinutes(10))
+    .build(k -&gt; newBucket());
+
+// 서버 여러 대라면: bucket4j-redis 모듈로 같은 API 그대로 분산 버킷
+// (원리는 왼쪽 Lua 스크립트와 동일 — 구현을 라이브러리에 맡기는 것)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Resilience4j — 설정 파일로 거는 방식</h4>
+      <pre class="code" data-lang="yaml"><code># application.yml — 코드 수정 없이 API 별 TPS 조정
+resilience4j:
+  ratelimiter:
+    instances:
+      orderApi:
+        limit-for-period: 50          # 주기당 허용 건수
+        limit-refresh-period: 1s      # ★ 이 두 줄이 곧 "초당 50건"
+        timeout-duration: 0           # 0 = 초과분 즉시 거절 (대기 없음)
+      searchApi:
+        limit-for-period: 200
+        limit-refresh-period: 1s
+        timeout-duration: 500ms       # 500ms 까지는 줄 서서 기다림</code></pre>
+      <pre class="code" data-lang="java"><code><span class="t-ann">@RateLimiter(name = "orderApi", fallbackMethod = "tooMany")</span>
+<span class="t-ann">@PostMapping("/orders")</span>
+OrderRes create(<span class="t-ann">@RequestBody</span> OrderReq req) { ... }
+
+ResponseEntity&lt;?&gt; tooMany(OrderReq req, RequestNotPermitted e) {
+    return ResponseEntity.status(429)
+        .header("Retry-After", "1").build();
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>고르는 기준</b> — 사용자별·키별 세밀 제어와 분산 버킷은 <b>Bucket4j</b>,
+        서킷 브레이커(k11)와 한 세트로 API 단위 보호를 설정 파일로 관리하려면 <b>Resilience4j</b>.
+        둘 다 한 프로세스 기준이므로 <b>서버 대수를 곱해서 생각</b>하는 것을 잊지 마세요
+        (10대 × 초당 50 = 뒷단엔 초당 500).
+      </div>
+    </div>
+  </div>
+
   <h3 class="sub">그 밖의 부하 차단 장치</h3>
   <div class="grid2 rv d1">
     <div class="card">
@@ -20203,6 +20397,7 @@ const SEC_KW = {
   f15:"이벤트루프블로킹 블로킹 blockhound 처리량붕괴 publishon subscribeon boundedelastic eventexecutorgroup 스레드덤프 jcmd 장애 지연 p99",
   f16:"reactornetty httpclient 커넥션풀 connectionprovider maxconnections pendingacquiretimeout maxidletime keepalive prematurecloseexception 502 responsetimeout readtimeouthandler 메트릭 micrometer wiretap 풀고갈 커넥션누수",
   f17:"네이티브트랜스포트 epoll iouring 다이렉트메모리 maxdirectmemorysize oom oomkilled 파일디스크립터 ulimit nofile bytebuf누수 leakdetection webflux vs 가상스레드 선택기준 체크리스트",
+  f18:"websocket 웹소켓 양방향 실시간 채팅 stomp 구독 발행 topic queue messagemapping simpmessagingtemplate sockjs stompjs 브로커릴레이 rabbitmq redis pubsub 브로드캐스트 하트비트 재접속 핸드셰이크 인증 connect 세션 sendmessage concurrentwebsocketsessiondecorator",
   a13:"jvm튜닝 힙 컨테이너 도커 메모리 oom 힙덤프 gc옵션 zgc 기동시간",
   b17:"쿠버네티스 k8s 무중단배포 롤링업데이트 프로브 헬스체크 graceful preStop hpa 오토스케일 502",
   b18:"마이그레이션 업그레이드 부트3 부트4 eol 지원종료 starter-webmvc 스타터개명 mockbean mockitobean jackson3 undertow spock properties-migrator openrewrite",
@@ -20957,7 +21152,7 @@ const SEC_LV = {
              b18:"i",
   /* flux */ f01:"b",f02:"i",f03:"i",f04:"a",f05:"i",f06:"i",f07:"a",f08:"a",
              f09:"a",f10:"a",f11:"i",f12:"a",
-             f13:"a",f14:"a",f15:"a",f16:"a",f17:"a",
+             f13:"a",f14:"a",f15:"a",f16:"a",f17:"a",f18:"i",
   /* data */ d01:"b",d02:"i",d03:"b",d04:"b",d05:"i",d06:"i",d07:"i",d08:"a",
              d09:"i",d10:"a",d11:"i",d12:"i",d13:"i",d14:"a",d15:"i",d16:"i",d17:"a",
   /* sec  */ s01:"b",s02:"b",s03:"b",s04:"b",s05:"a",s06:"a",s07:"i",s08:"i",
@@ -21045,6 +21240,7 @@ const EZ = {
  f15:"WebFlux 장애의 <b>절반이 이것</b>이에요. 블로킹 한 줄이 수천 연결을 같이 세웁니다. BlockHound로 잡으세요.",
  f16:"<code>WebClient</code>는 <b>커넥션 풀</b>을 씁니다. <b>maxIdleTime</b>을 상대 서버보다 짧게 안 잡으면 간헐적으로 터져요.",
  f17:"다이렉트 메모리·FD 한계·ByteBuf 누수까지. 그리고 <b>언제 WebFlux를 버리고 가상 스레드로 갈지</b> 판단 기준입니다.",
+ f18:"SSE 가 한 방향이라면 WebSocket 은 <b>양방향</b>이에요. 채팅·협업처럼 클라이언트도 계속 말을 거는 기능은 이걸로 만듭니다.",
 
  d01:"보통 <b>JPA + QueryDSL</b>을 기본으로 두고, 복잡한 통계만 MyBatis로 빼요. 섞어 써도 전혀 이상하지 않습니다.",
  d02:"DB 연결은 <b>개수가 정해진 자원</b>이에요. 풀은 크게 잡을수록 오히려 느려집니다.",
@@ -21230,6 +21426,7 @@ const CAP = {
   f15:["e","블로킹 한 줄로 p99가 40ms에서 8초로 튄 장애를 BlockHound와 스레드 덤프 3회로 잡아냅니다."],
   f16:["e","maxIdleTime을 상대 keep-alive보다 짧게 맞춰 하루 수천 건씩 나던 간헐적 커넥션 종료 오류를 0으로 만듭니다."],
   f17:["e","다이렉트 메모리 OOM과 FD 고갈을 진단하고, WebFlux를 접고 가상 스레드로 갈 시점까지 판단합니다."],
+  f18:["p","STOMP 구독·발행과 브로커 릴레이로 채팅·알림을 구현하고, 다중 서버 브로드캐스트와 하트비트·재접속까지 운영 수준으로 만듭니다."],
 
   /* ── data ── */
   d01:["p","JPA·QueryDSL·MyBatis를 한 프로젝트에서 목적별로 섞어 씁니다 — 통계 쿼리만 MyBatis로 빼는 실무 조합입니다."],

@@ -13,7 +13,7 @@
     그래서 <b>언제 쓰지 말아야 하는지</b>부터 시작합니다.
   </p>
   <div class="stats">
-    <div><b>17</b><span>SECTIONS</span></div>
+    <div><b>18</b><span>SECTIONS</span></div>
     <div><b>N개</b><span>스레드 (CPU 코어 수)</span></div>
     <div><b>수만</b><span>동시 연결</span></div>
     <div><b>0</b><span>블로킹 허용</span></div>
@@ -1743,6 +1743,141 @@ jcmd &lt;pid&gt; GC.heap_info
 □ URI 태그에 정규화 함수를 넣었다 (카디널리티)
 □ wiretap 은 운영에서 꺼져 있다</code></pre>
     </div>
+  </div>
+</section>
+
+<!-- ==================== f18 ==================== -->
+<section class="sec" id="f18">
+  <div class="sec-head rv">
+    <span class="no">FLUX 18</span>
+    <h2>WebSocket 실전 — <span class="t">양방향 실시간</span></h2>
+    <p class="lead">
+      SSE(f08)가 <b>서버 → 클라이언트 한 방향</b>이라면, WebSocket 은 <b>양방향</b>입니다.
+      채팅·협업 편집·게임처럼 <b>클라이언트도 계속 말을 거는</b> 기능은 여기서 시작합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 순수 WebSocket — 프로토콜 그대로</h4>
+      <pre class="code" data-lang="java"><code>// build.gradle: spring-boot-starter-websocket
+<span class="t-ann">@Configuration @EnableWebSocket</span>
+class WsConfig implements WebSocketConfigurer {
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry reg) {
+        reg.addHandler(new ChatHandler(), "/ws/chat")
+           .setAllowedOrigins("https://app.example.com");   // ★ CORS 별도!
+    }
+}
+
+class ChatHandler extends TextWebSocketHandler {
+    // 세션 목록은 반드시 동시성 컬렉션으로
+    private final Set&lt;WebSocketSession&gt; sessions = ConcurrentHashMap.newKeySet();
+
+    public void afterConnectionEstablished(WebSocketSession s) {
+        sessions.add(s);
+    }
+    protected void handleTextMessage(WebSocketSession s, TextMessage m)
+            throws IOException {
+        for (WebSocketSession peer : sessions)          // 브로드캐스트
+            if (peer.isOpen()) peer.sendMessage(m);
+    }
+    public void afterConnectionClosed(WebSocketSession s, CloseStatus st) {
+        sessions.remove(s);                             // ★ 정리 안 하면 누수
+    }
+}</code></pre>
+      <div class="note warn">
+        <b><code>WebSocketSession.sendMessage</code> 는 동시 호출에 안전하지 않습니다.</b>
+        여러 스레드가 같은 세션에 보내면 <code>IllegalStateException</code> 이 납니다 —
+        <code>ConcurrentWebSocketSessionDecorator</code> 로 감싸거나(전송 버퍼·타임아웃 지정),
+        세션마다 전송 큐를 하나 두는 것이 실무 패턴입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② STOMP — 구독·발행으로 올라서기</h4>
+      <pre class="code" data-lang="java"><code>// 채팅방·알림처럼 "채널" 개념이 생기면 STOMP 가 코드를 줄여 줍니다
+<span class="t-ann">@Configuration @EnableWebSocketMessageBroker</span>
+class StompConfig implements WebSocketMessageBrokerConfigurer {
+    public void registerStompEndpoints(StompEndpointRegistry r) {
+        r.addEndpoint("/ws").setAllowedOriginPatterns("https://*.example.com");
+    }
+    public void configureMessageBroker(MessageBrokerRegistry r) {
+        r.enableSimpleBroker("/topic", "/queue");   // 구독 채널
+        r.setApplicationDestinationPrefixes("/app"); // 클라 → 서버 접두사
+    }
+}
+
+<span class="t-ann">@Controller</span>
+class ChatController {
+    <span class="t-ann">@MessageMapping("/chat/{room}")</span>          // 클라가 /app/chat/1 로 발행
+    <span class="t-ann">@SendTo("/topic/chat/{room}")</span>            // 구독자 전원에게
+    ChatMsg relay(<span class="t-ann">@DestinationVariable</span> long room, ChatMsg msg) {
+        return msg;
+    }
+}
+
+// 서버가 먼저 말 걸기 — 어디서든 주입해서
+messagingTemplate.convertAndSend("/topic/notice", payload);
+messagingTemplate.convertAndSendToUser(userId, "/queue/dm", dm);  // 1:1</code></pre>
+      <pre class="code" data-lang="js"><code>// 브라우저 쪽 (@stomp/stompjs)
+const c = new StompJs.Client({ brokerURL: "wss://api.example.com/ws" });
+c.onConnect = () =&gt; {
+  c.subscribe("/topic/chat/1", m =&gt; render(JSON.parse(m.body)));
+  c.publish({ destination: "/app/chat/1",
+              body: JSON.stringify({ text: "안녕하세요" }) });
+};
+c.activate();   // 재접속·하트비트 내장</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">서버가 2대가 되는 순간 — 브로드캐스트가 반쪽 난다</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <pre class="code" data-lang="java"><code>// 문제: A서버에 붙은 유저에게 보낸 메시지는
+//       B서버에 붙은 유저에게 안 간다 (세션이 서버 메모리에 있으므로)
+
+// 해법 1 — Redis pub/sub 로 서버끼리 중계 (직접 구현·수 대 규모)
+<span class="t-ann">@Component</span>
+class RedisRelay implements MessageListener {
+    public void publish(String channel, String json) {
+        redis.convertAndSend(channel, json);        // 모든 서버가 받는다
+    }
+    public void onMessage(Message m, byte[] p) {    // 각 서버: 자기 세션에만 전달
+        messagingTemplate.convertAndSend("/topic/chat",
+                                         new String(m.getBody()));
+    }
+}
+
+// 해법 2 — STOMP 브로커 릴레이 (표준·운영 권장)
+r.enableStompBrokerRelay("/topic", "/queue")        // SimpleBroker 대신
+ .setRelayHost("rabbitmq.internal")                 // RabbitMQ(STOMP 플러그인)
+ .setRelayPort(61613);
+// 구독 정보가 브로커에 모이므로 서버 몇 대든 동일하게 동작</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영 체크리스트</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:32%">항목</th><th>기준</th></tr>
+          <tr><td>인증</td><td>핸드셰이크는 <b>HTTP 이므로 쿠키·세션이 그대로 통과</b>. 토큰 방식은 CONNECT 프레임 헤더로 받아 <code>ChannelInterceptor</code> 에서 검증</td></tr>
+          <tr><td>하트비트</td><td>STOMP 기본 10초. 프록시(Nginx) <code>proxy_read_timeout</code> 보다 <b>짧게</b> — 안 그러면 조용히 끊깁니다</td></tr>
+          <tr><td>재접속</td><td>클라이언트 책임 — stompjs 는 내장, 순수 WS 는 지수 백오프로 직접. <b>끊긴 동안 메시지</b>는 재접속 후 REST 로 따라잡기</td></tr>
+          <tr><td>메시지 크기·버퍼</td><td><code>setMessageSizeLimit</code>·<code>setSendBufferSizeLimit</code> 명시 — 느린 클라이언트 하나가 메모리를 먹는 사고 방지</td></tr>
+          <tr><td>수평 확장</td><td>세션은 서버에 붙박이 — LB 는 그대로 두고 <b>브로커 릴레이로 메시지만 공유</b>가 정석</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>WebFlux 에서는</b> <code>WebSocketHandler</code> 가 <code>Flux&lt;WebSocketMessage&gt;</code> 를
+        주고받는 리액티브 API 입니다 — 백프레셔(f07)가 소켓까지 이어져
+        <b>수만 동시 접속</b>에 유리합니다. STOMP 편의 기능은 MVC 쪽이 성숙하니,
+        접속 수가 수천 이하라면 MVC + STOMP 조합이 개발 속도 면에서 낫습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="note info rv d1">
+    <b>SSE 로 충분한지 먼저 물어보세요</b> — 알림·시세·진행률처럼 <b>서버가 밀기만 하면 되는</b> 기능은
+    SSE(f08)가 훨씬 단순합니다(HTTP 그대로 · 자동 재접속 내장).
+    WebSocket 은 <b>클라이언트도 초당 여러 번 말을 걸 때</b>(채팅 입력·커서 공유·게임 조작) 꺼내는 카드입니다.
   </div>
 </section>
 
