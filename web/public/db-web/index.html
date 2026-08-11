@@ -12286,6 +12286,27 @@ PERSIST session:9f2a71      # 수명 제거 (무기한으로)</code></pre>
     "이 키는 최악의 경우 언제까지 낡은 값이어도 되는가"를 초로 적는 것이 TTL 설계입니다.
   </div>
 
+  <h3 class="sub">실무 키 사전 — 용도별 이름·수명 견본</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:34%">키 패턴</th><th>담는 것 · TTL 기준</th></tr>
+      <tr><td><code>cache:product:{id}</code></td><td>DB 조회 결과 캐시 — TTL 30초~5분 (낡아도 되는 시간만큼)</td></tr>
+      <tr><td><code>session:{sid}</code></td><td>로그인 세션 — TTL 30분, 요청마다 EXPIRE 로 연장</td></tr>
+      <tr><td><code>lock:{자원이름}</code></td><td>분산 락 — TTL 수십 초 (작업 최장 시간 + 여유)</td></tr>
+      <tr><td><code>rate:{userId}:{분단위시각}</code></td><td>처리량 카운터 — TTL 60초 (창 크기만큼)</td></tr>
+      <tr><td><code>rank:{기간}</code></td><td>순위표 Sorted Set — 기간 끝나면 통째로 UNLINK</td></tr>
+      <tr><td><code>otp:{전화번호}</code></td><td>인증번호 — TTL 3분, 검증 성공 시 즉시 DEL</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">키를 훑어야 할 때 — SCAN (KEYS 대신)</h3>
+  <pre class="code rv d1" data-lang="bash"><code># 접두사로 순회 — 조금씩 잘라 가져와서 서버를 안 멈춥니다
+SCAN 0 MATCH cache:product:* COUNT 500
+# → 다음 커서 번호와 키 묶음이 옵니다. 커서가 0이 될 때까지 반복
+
+# 접두사 일괄 삭제 (운영에서 FLUSHALL 대신 쓰는 방법)
+redis-cli --scan --pattern "cache:v1:*" | xargs -L 500 redis-cli UNLINK</code></pre>
+
   <div class="note info rv d2">
     <b>데이터베이스 번호</b> — Redis 안에는 db0~db15 라는 논리 공간이 있지만
     (<code>SELECT 1</code>로 전환), 실무에서는 <b>번호 구분 대신 키 접두사</b>를 쓰고
@@ -12348,12 +12369,34 @@ ZINCRBY rank:weekly 50 "김하늘"        # 점수 가산</code></pre>
     꺼내는 모양대로 넣어 두면 조회가 O(1)~O(logN)으로 끝납니다.
   </div>
 
+  <h3 class="sub">String(JSON) vs Hash — 객체는 어느 쪽에</h3>
+  <div class="tw rv d2">
+    <table class="df">
+      <thead><tr><th>기준</th><th class="c-rd">String + JSON</th><th class="c-mg">Hash</th></tr></thead>
+      <tbody>
+        <tr><td>꺼내는 단위</td><td class="rd">항상 <b>통째로</b> (직렬화/역직렬화)</td><td class="mg"><b>필드 하나씩</b> 읽고 고칠 수 있음</td></tr>
+        <tr><td>부분 수정</td><td class="rd">전체를 읽어 고쳐 다시 저장</td><td class="mg"><code>HSET user:1 grade GOLD</code> 한 방</td></tr>
+        <tr><td>숫자 증가</td><td class="rd">불가 (읽고-고치고-쓰기 경합)</td><td class="mg"><code>HINCRBY user:1 points 100</code> 원자적</td></tr>
+        <tr><td>TTL</td><td class="rd">키 단위 ✓</td><td class="mg">키 단위만 — <b>필드별 TTL 없음</b></td></tr>
+        <tr><td>어울리는 곳</td><td class="rd">캐시 응답처럼 통으로 쓰고 버리는 것</td><td class="mg">계속 갱신되는 상태(유저 프로필·장바구니)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
   <div class="note info rv d2">
     <b>더 있는 것들</b> — 비트 단위 출석 체크(<b>Bitmap</b>),
     오차 0.8%로 유니크 수 세기(<b>HyperLogLog</b> — 수억 명도 12KB),
     위치 기반 반경 검색(<b>Geo</b>), 스트림(r10)까지 내장돼 있습니다.
-    필요할 때 이름만 기억해 두면 됩니다.
   </div>
+  <pre class="code rv d2" data-lang="bash"><code># Bitmap — 8월 출석 체크 (유저ID를 비트 위치로)
+SETBIT attend:2026-08-11 1001 1     # 1001번 유저 오늘 출석
+BITCOUNT attend:2026-08-11          # 오늘 출석자 수
+# 한 달 개근: BITOP AND 로 31일치를 겹치면 끝
+
+# HyperLogLog — 일간 순방문자(UV)를 12KB 로
+PFADD uv:2026-08-11 "u:1001" "u:1002"
+PFCOUNT uv:2026-08-11               # 오차 ±0.8% 의 유니크 수
+PFMERGE uv:aug uv:2026-08-01 uv:2026-08-02   # 월간 합산</code></pre>
 </section>
 
 <!-- ==================== r06 ==================== -->
@@ -12418,6 +12461,22 @@ def get_product(pid: int) -&gt; dict:
       다음 조회가 새 값을 다시 채웁니다. <b>"고쳐 넣기"보다 "지우기"가 정답</b>입니다 —
       고쳐 넣기는 동시 요청과 얽혀 낡은 값이 남는 경합이 생깁니다.</li>
   </ul>
+
+  <h3 class="sub">실무 디테일 세 가지 — 여기서 급이 갈립니다</h3>
+  <pre class="code rv d1" data-lang="python"><code># ① TTL 지터 — 같은 시각 대량 만료(스탬피드)를 흩뜨린다
+ttl = 60 + random.randint(-10, 10)
+r.set(key, val, ex=ttl)
+
+# ② 네거티브 캐시 — "없음"도 잠깐 캐시한다
+#    없는 상품 ID 로 계속 두드리는 트래픽(오타·악의적)이 DB 를 뚫는 것 방지
+row = db_query(...)
+if row is None:
+    r.set(key, "__NONE__", ex=30)      # 짧게!
+    return None
+
+# ③ 키 버전 — 배포로 응답 구조가 바뀌면 접두사 버전을 올린다
+KEY_V = "cache:v2:product:{}"          # 옛 v1 키는 TTL 로 알아서 소멸
+#    구조 다른 캐시를 역직렬화하다 터지는 배포 사고를 원천 차단</code></pre>
 
   <div class="note warn rv d2">
     <b>캐시 스탬피드(stampede)</b> — 인기 키의 TTL이 만료되는 순간,
@@ -12632,10 +12691,27 @@ XACK orders:events workers 1691740800000-0</code></pre>
     </table>
   </div>
 
+  <h3 class="sub">명령을 묶는 세 가지 — 헷갈리기 쉬운 구분</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">방법</th><th>보장하는 것 · 쓰는 곳</th></tr>
+      <tr><td><b>파이프라인</b></td><td>왕복(RTT)만 아낀다 — 원자성 없음. <b>대량 쓰기 속도 수십 배</b> (r13 예제)</td></tr>
+      <tr><td><b>MULTI / EXEC</b></td><td>묶음이 <b>끼어들기 없이 순서대로</b> 실행. 단 <b>롤백은 없음</b> — 중간 명령이 실패해도 나머지는 실행됨</td></tr>
+      <tr><td><b>Lua 스크립트</b></td><td>읽고-판단하고-쓰는 <b>복합 로직이 통째로 원자적</b>. 분산 락 해제(r07)·재고 차감 같은 "확인 후 변경"의 정답</td></tr>
+    </table>
+  </div>
+  <pre class="code rv d1" data-lang="bash"><code># Lua 예 — "재고가 있으면 1 차감" 을 경쟁 없이
+EVAL "local s = tonumber(redis.call('GET', KEYS[1]))
+      if s and s > 0 then return redis.call('DECR', KEYS[1]) end
+      return -1" 1 stock:p15
+# GET 과 DECR 사이에 다른 요청이 못 끼어든다 — 앱에서 하면 반드시 낀다</code></pre>
+
   <pre class="code rv d1" data-lang="bash"><code># 느린 명령 찾기
 SLOWLOG GET 10           # 최근 느린 명령 10개 (기본: 10ms 초과 기록)
 LATENCY LATEST           # 지연 이벤트 요약
-INFO stats               # keyspace_hits / misses → 캐시 히트율 계산</code></pre>
+INFO stats               # keyspace_hits / misses → 캐시 히트율 계산
+MEMORY USAGE rank:weekly # 이 키가 먹는 바이트 — 빅 키 조사
+redis-cli --bigkeys      # 전체에서 큰 키 후보 훑기 (SCAN 기반이라 안전)</code></pre>
 
   <div class="note tip rv d1">
     <b>히트율이 성적표입니다</b> — <code>hits/(hits+misses)</code> 가 캐시 히트율.
@@ -12868,6 +12944,29 @@ db.member.updateOne({ name: "김하늘" }, {
 // upsert — 있으면 수정, 없으면 삽입
 db.counter.updateOne({ _id: "visits" }, { $inc: { n: 1 } }, { upsert: true })</code></pre>
 
+  <h3 class="sub">배열 다루기 — 문서형의 핵심 근육</h3>
+  <pre class="code rv d1" data-lang="js"><code>// 배열 연산자 — 내장 설계(n05)와 한 세트입니다
+db.member.updateOne({ _id: 1 }, {
+  $addToSet: { tags: "vip" }         // 중복 없이 추가 (있으면 무시)
+})
+db.member.updateOne({ _id: 1 }, {
+  $pull: { tags: "black" }           // 값으로 제거
+})
+db.member.updateOne({ _id: 1 }, {
+  $push: { logins: { $each: [now], $slice: -10 } }   // 최근 10개만 유지
+})
+
+// 배열 "안의" 문서 수정 — 위치 연산자 $
+db.orders.updateOne(
+  { _id: 1001, "items.productId": 15 },   // 조건에 걸린 그 원소를
+  { $set: { "items.$.qty": 3 } }          // $ 가 가리킨다
+)
+
+// 배열 원소를 조건으로 찾기 — $elemMatch (두 조건이 같은 원소에!)
+db.orders.find({ items: { $elemMatch: { productId: 15, qty: { $gte: 2 } } } })
+// items.productId:15, items.qty:{$gte:2} 로 나눠 쓰면
+// "서로 다른 원소가 하나씩 만족" 해도 걸립니다 — 단골 버그</code></pre>
+
   <div class="note warn rv d1">
     <b>updateOne vs updateMany</b> — SQL의 UPDATE는 조건에 맞는 <b>전부</b>를 바꾸지만,
     MongoDB의 <code>updateOne</code>은 <b>첫 한 건만</b> 바꿉니다.
@@ -13021,6 +13120,27 @@ db.orders.aggregate([
     </table>
   </div>
 
+  <h3 class="sub">실전 리포트 한 판 — 일별 매출</h3>
+  <pre class="code rv d1" data-lang="js"><code>// SQL: SELECT DATE(orderedAt) d, SUM(amount) total, COUNT(*) cnt
+//      FROM orders WHERE orderedAt >= '2026-08-01'
+//      GROUP BY DATE(orderedAt) ORDER BY d
+db.orders.aggregate([
+  { $match: { orderedAt: { $gte: ISODate("2026-08-01") } } },
+  { $group: {
+      _id: { $dateToString: { format: "%Y-%m-%d", date: "$orderedAt",
+                              timezone: "Asia/Seoul" } },   // ★ 타임존!
+      total: { $sum: "$amount" },
+      cnt:   { $sum: 1 }
+  }},
+  { $sort: { _id: 1 } }
+])
+// 결과를 컬렉션으로 저장해 두려면 마지막에
+// { $merge: "daily_sales" }   ← 매일 갱신되는 집계 테이블처럼 씁니다</code></pre>
+  <div class="note warn rv d2">
+    <b>날짜 집계에서 timezone 을 빼먹으면</b> UTC 기준으로 잘려서
+    <b>한국 시간 오전 9시 이전 주문이 전날 매출</b>로 들어갑니다 — 정산이 안 맞는 단골 원인입니다.
+  </div>
+
   <div class="note tip rv d2">
     <b>$lookup이 매 쿼리마다 나온다면 설계 신호</b>입니다 —
     그 데이터는 애초에 내장(n05)했어야 하거나, 애초에 RDBMS 일이었을 수 있습니다(n12).
@@ -13056,6 +13176,19 @@ db.orders.find({ memberId: 1 }).explain("executionStats")   // 실행계획</cod
       <tr><td><code>totalDocsExamined</code> vs <code>nReturned</code></td><td>살펴본 문서 수 vs 돌려준 수 — <b>차이가 크면 인덱스가 엉성</b>한 것</td></tr>
     </table>
   </div>
+
+  <h3 class="sub">아껴 쓰는 인덱스 — 부분 · 커버드</h3>
+  <pre class="code rv d1" data-lang="js"><code>// 부분 인덱스 — 조건에 맞는 문서만 색인 (크기·쓰기 비용 절감)
+db.orders.createIndex(
+  { orderedAt: -1 },
+  { partialFilterExpression: { status: "PAID" } }   // 결제 완료만
+)
+// 단, 쿼리에도 같은 조건이 있어야 이 인덱스를 탑니다
+
+// 커버드 쿼리 — 필요한 필드가 전부 인덱스 안에 있으면 문서를 안 읽습니다
+db.member.createIndex({ city: 1, name: 1 })
+db.member.find({ city: "서울" }, { name: 1, _id: 0 })   // 인덱스만으로 응답
+// explain 에서 totalDocsExamined: 0 이면 성공 — t05 커버링과 같은 원리</code></pre>
 
   <div class="note tip rv d1">
     <b>TTL 인덱스는 Redis의 EXPIRE에 해당하는 기능</b>입니다 —
@@ -13126,6 +13259,22 @@ try {
       한 대의 디스크·쓰기 처리량을 넘어설 때의 카드이고, <b>샤드 키는 한번 정하면 바꾸기 어렵습니다</b> —
       🧬 전문가 탭 z09의 샤딩 원칙이 그대로 적용됩니다.</li>
   </ul>
+
+  <h3 class="sub">백업 — mongodump · mongorestore</h3>
+  <pre class="code rv d1" data-lang="bash"><code># 논리 백업 (BSON 덤프) — 소규모의 기본기
+mongodump --uri="mongodb://admin:devpass@localhost:27017" \
+          --db=shop --gzip --archive=shop_2026-08-11.gz
+
+# 복원 — 새 서버·다른 DB 이름으로도 가능
+mongorestore --uri="mongodb://..." --gzip --archive=shop_2026-08-11.gz
+
+# 특정 컬렉션만 JSON 으로 (데이터 이관·검수용)
+mongoexport --db=shop --collection=member --out=member.json</code></pre>
+  <div class="note warn rv d1">
+    <b>RDBMS와 같은 원칙이 적용됩니다</b> — 복원을 실제로 해 본 적 없는 백업은 백업이 아닙니다.
+    규모가 커지면 mongodump 는 느려지므로 <b>스냅샷(파일시스템·클라우드) + oplog</b> 기반으로 넘어가고,
+    Atlas 라면 자동 백업 + 시점 복구(PITR)를 켜는 것으로 끝납니다.
+  </div>
 
   <div class="note info rv d1">
     <b>Atlas를 쓰면 이 절이 버튼 몇 개가 됩니다</b> — 복제 셋 기본 제공, 백업·업그레이드·샤딩 자동화.
@@ -14330,15 +14479,15 @@ BEGIN IMMEDIATE;    -- 쓰기 트랜잭션은 처음부터
       <rect class="bx" x="384" y="56" width="140" height="64"/>
       <text x="454" y="80" font-size="11" text-anchor="middle">DB 서버</text>
       <text x="454" y="97" font-size="10" text-anchor="middle" class="lbl">코어 8 · 디스크 몇 대</text>
-      <text x="454" y="112" font-size="10" text-anchor="middle" class="lbl">동시에 할 수 있는 일은 정해져 있다</text>
+      <text x="454" y="112" font-size="10" text-anchor="middle" class="lbl">동시 처리량은 정해져 있다</text>
 
       <rect class="bx bx-warn" x="542" y="34" width="122" height="60"/>
       <text x="603" y="56" font-size="11" text-anchor="middle">풀 = 300 이면</text>
-      <text x="603" y="73" font-size="10" text-anchor="middle" class="lbl">락 경합 · 컨텍스트 스위칭</text>
+      <text x="603" y="73" font-size="10" text-anchor="middle" class="lbl">락 경합·문맥 교환에</text>
       <text x="603" y="88" font-size="10" text-anchor="middle" class="lbl">전부 같이 느려진다</text>
       <rect class="bx bx-ok" x="542" y="104" width="122" height="56"/>
       <text x="603" y="126" font-size="11" text-anchor="middle">풀 = 15 이면</text>
-      <text x="603" y="143" font-size="10" text-anchor="middle" class="lbl">잠깐 기다렸다 빨리 끝난다</text>
+      <text x="603" y="143" font-size="10" text-anchor="middle" class="lbl">기다려도 금방 끝난다</text>
 
       <text x="16" y="186" class="lbl">시작값은 <tspan fill="#e8f0ff">코어 수 × 2 + 디스크 수</tspan> 정도입니다 — 늘리기 전에 슬로우 쿼리부터 잡으세요. 대개 풀이 아니라 쿼리가 원인입니다</text>
     </svg>
@@ -17393,26 +17542,26 @@ const SEC_KW = {
   r01:"nosql이란 rdbms차이 비교 관계형차이 스키마리스 조인없음 수평확장 키값 문서형 와이드컬럼 그래프 cassandra neo4j 언제쓰나 역할분담",
   r02:"redis특징 인메모리 빠른이유 싱글스레드 자료구조서버 마이크로초 지연 캐시왜",
   r03:"redis설치 도커 redis-cli ping 6379 비밀번호 requirepass protected-mode 노출사고 valkey redisinsight",
-  r04:"키설계 네이밍 콜론 접두사 ttl expire 유효기간 수명 persist db번호 select",
-  r05:"자료구조 string hash list set sorted set zset incr 카운터 최근본상품 ltrim 좋아요 유니크방문자 순위표 zadd zrange bitmap hyperloglog geo",
-  r06:"캐시 cache aside 패턴 히트 미스 무효화 invalidation ttl 지터 스탬피드 stampede 낡은값 del",
+  r04:"키설계 네이밍 콜론 접두사 ttl expire 유효기간 수명 persist db번호 select scan 순회 일괄삭제 키사전 otp 인증번호",
+  r05:"자료구조 string hash list set sorted set zset incr 카운터 최근본상품 ltrim 좋아요 유니크방문자 순위표 zadd zrange bitmap hyperloglog geo hash vs string 선택 부분수정 hincrby setbit bitcount 출석 pfadd pfcount uv 순방문자",
+  r06:"캐시 cache aside 패턴 히트 미스 무효화 invalidation ttl 지터 스탬피드 stampede 낡은값 del 네거티브캐시 없음캐시 키버전 지터 jitter",
   r07:"세션저장소 세션공유 순위표 리더보드 rate limit 처리량제한 분산락 set nx px lua redisson",
   r08:"영속성 persistence rdb aof 스냅샷 append only everysec 유실 재시작 백업",
   r09:"maxmemory 메모리한도 축출 eviction lru lfu noeviction 정책 info memory 단편화 fragmentation",
   r10:"pubsub publish subscribe 발행구독 채팅 알림 stream xadd xread 소비자그룹 consumer group ack 큐 kafka대체",
   r11:"복제 replica replicaof sentinel 센티널 자동승격 페일오버 cluster 클러스터 슬롯 16384 고가용성 ha elasticache",
-  r12:"keys금지 scan slowlog 빅키 bigkey 핫키 hotkey unlink flushall multi exec 트랜잭션 lua 원자성 히트율 모니터링",
+  r12:"keys금지 scan slowlog 빅키 bigkey 핫키 hotkey unlink flushall multi exec 트랜잭션 lua 원자성 히트율 모니터링 pipeline 파이프라인 multi exec lua 원자 재고차감 bigkeys memory usage",
   r13:"redis python redis-py java lettuce jedis spring cacheable node ioredis 파이프라인 타임아웃 폴백",
 
   n01:"mongodb란 문서형 도큐먼트 컬렉션 필드 _id objectid bson 용어대응 테이블대응 조인대신 내장 언제쓰나",
   n02:"mongodb설치 도커 atlas 아틀라스 무료 mongosh compass 컴퍼스 인증 sspl 라이선스 27017",
-  n03:"crud insertone insertmany find updateone updatemany deleteone set inc push unset upsert sql대조",
+  n03:"crud insertone insertmany find updateone updatemany deleteone set inc push unset upsert sql대조 배열 push pull addtoset slice elemmatch 위치연산자 positional",
   n04:"쿼리연산자 gt gte lt lte in or exists 배열검색 점표기법 내장문서 sort skip limit 페이징 countdocuments",
   n05:"문서설계 내장 embed 참조 reference 모델링 16mb 배열 비정규화 화면단위 설계기준",
-  n06:"집계 aggregate 파이프라인 match group sum avg having lookup 조인 unwind project group by대응",
-  n07:"인덱스 createindex 복합인덱스 유니크 ttl인덱스 텍스트인덱스 explain collscan ixscan 실행계획 풀스캔",
+  n06:"집계 aggregate 파이프라인 match group sum avg having lookup 조인 unwind project group by대응 일별매출 리포트 datetostring 타임존 timezone merge out",
+  n07:"인덱스 createindex 복합인덱스 유니크 ttl인덱스 텍스트인덱스 explain collscan ixscan 실행계획 풀스캔 부분인덱스 partialfilterexpression 커버드 covered totaldocsexamined",
   n08:"트랜잭션 원자성 단일문서 멀티도큐먼트 세션 commit abort write concern majority 유실",
-  n09:"복제셋 replica set 프라이머리 세컨더리 자동승격 선거 읽기분산 readpreference 샤딩 샤드키",
+  n09:"복제셋 replica set 프라이머리 세컨더리 자동승격 선거 읽기분산 readpreference 샤딩 샤드키 백업 mongodump mongorestore mongoexport 복원 pitr 스냅샷",
   n10:"스키마검증 validator jsonschema 필수필드 enum 안티패턴 무한배열 16mb 필드명데이터 스키마버전",
   n11:"pymongo beanie mongoengine spring data mongodb mongorepository node 드라이버 mongoose nosql인젝션 sanitize",
   n12:"폴리글랏 같이쓰기 병행 역할분담 jsonb비교 postgresql대신 언제mongodb 언제rdbms 선택기준",

@@ -10,17 +10,21 @@
 | **DB 기초 보강** | c01 에 초보 용어 사전 10개(스키마·쿼리·PK·FK·인덱스·트랜잭션·커밋롤백·CRUD·서버클라·마이그레이션). m01 에 MySQL 유료/MariaDB 완전무료 구분 블록. '퍼블릭 도메인' → "완전 무료(저작권 자체가 없음)" (c02 표 + 90-demos.js) |
 | **C# 대확장 120→141** | lang c13~c16(튜플·확장메서드·DateTime·enum) · adv a13~a15(Parallel·정규식·암호화) · unity u13~u17(코루틴·Cinemachine·2D·NavMesh·이펙트) · ugame g13~g16(SafeArea·로컬라이제이션·시드·게임필) · net n13~n15(WebSocket·틱레이트·아키텍처 사례) · api w13~w14(gRPC·어드민 API). EZ·CAP·SEC_LV·SEC_KW·navset 전부 동기화 |
 | **박스 넘침 소탕** | 신규 검사(텍스트 vs **rect 박스** 넘침)로 아홉 가이드 실측 — db c05(+163!)·z11, csharp g04, cs a08, server m07, python k01·z10·w08×3·x06, java g11×2 수정. 최종 **전 가이드 OVER/BOX/LAP 0** (js-ts c08 2건은 z-index 데모의 의도된 겹침 = 오탐) |
+| **후속 요청 반영** | pandas 옵션 사전(dayfirst·타임존·read_csv/excel), java·python WebSocket 필수 섹션(f18·w13)+k12 TPS 라이브러리, java 실전 도구 t14~t17, DB 6대 개편(c02 픽커·비교표에 Redis·Mongo, 도커=선택, GUI 가격표), redis/mongo 탭 실무 보강(키 사전·SCAN·Lua·배열 연산자·일별매출·부분/커버드 인덱스·mongodump) |
+| **BOX v2 (중앙정렬 잡는 판)** | 기존 BOX 검사는 "박스 안에서 시작한" 텍스트만 잡아 **가운데 정렬 넘침을 놓쳤다**(사용자가 c01 'DB 엔진' 발견). 중심점 기준으로 바꿔 재소탕: db c01·t13×3, cs c01(09-lang), csharp u02·g08·g11, python a09, js-ts u08·u11 수정 → **전 가이드 0** |
 
 - `npm run verify:guide` 아홉 가이드 전부 통과. 탭 전환 스모크(switchTab 전 탭 + pickGroup) db·csharp·python 통과
 - ⚠️ 실측 시 **브라우저 캐시 주의** — 재빌드 후 같은 URL 재방문은 옛 파일을 읽을 수 있다. `?v=2` 캐시버스터를 붙일 것 (이번에 한 번 헛측정)
 - ⚠️ 측정 스크립트가 `contentVisibility='visible'` 을 남기면 페이지가 무거워져 **스크린샷 주입이 타임아웃**난다. 측정 후 새로고침하고 볼 것
 
-### 새 실측 스크립트 (기존 OVER/LAP + BOX 넘침)
-기존 HANDOFF 스크립트에 추가된 BOX 검사 — 텍스트가 자기 박스(rect) 오른쪽으로 3px 이상 삐져나가면 잡는다:
+### 새 실측 스크립트 (기존 OVER/LAP + BOX v2)
+BOX 검사 최종판 — **텍스트 중심점이 박스 안**이면 그 박스 소속으로 보고, 좌/우 어느 쪽이든 3px 넘게 삐져나오면 잡는다
+(시작점 기준이던 v1 은 text-anchor:middle 넘침을 놓쳤다):
 ```js
 // svg 마다: rects=[...svg.querySelectorAll('rect')].map(getBBox)
-// 각 text bbox b 에 대해: cy=b.y+b.height/2 가 rect 세로 범위 안이고 b.x 가 rect 안에서 시작하면
-// b.x+b.width-(r.x+r.width) > 2 → BOX 넘침 (의도적 겹침 다이어그램은 눈으로 확인)
+// 각 text bbox b: cx=b.x+b.width/2, cy=b.y+b.height/2 가 rect 안이면
+//   ovR=b.x+b.width-(r.x+r.width), ovL=r.x-b.x → 어느 쪽이든 >3 이면 BOX 넘침
+// (여러 박스를 가로지르는 의도적 라벨은 중심이 걸린 박스만 보므로 오탐이 크게 줄었다)
 ```
 
 ## 목표

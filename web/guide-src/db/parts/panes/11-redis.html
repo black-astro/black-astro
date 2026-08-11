@@ -236,6 +236,27 @@ PERSIST session:9f2a71      # 수명 제거 (무기한으로)</code></pre>
     "이 키는 최악의 경우 언제까지 낡은 값이어도 되는가"를 초로 적는 것이 TTL 설계입니다.
   </div>
 
+  <h3 class="sub">실무 키 사전 — 용도별 이름·수명 견본</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:34%">키 패턴</th><th>담는 것 · TTL 기준</th></tr>
+      <tr><td><code>cache:product:{id}</code></td><td>DB 조회 결과 캐시 — TTL 30초~5분 (낡아도 되는 시간만큼)</td></tr>
+      <tr><td><code>session:{sid}</code></td><td>로그인 세션 — TTL 30분, 요청마다 EXPIRE 로 연장</td></tr>
+      <tr><td><code>lock:{자원이름}</code></td><td>분산 락 — TTL 수십 초 (작업 최장 시간 + 여유)</td></tr>
+      <tr><td><code>rate:{userId}:{분단위시각}</code></td><td>처리량 카운터 — TTL 60초 (창 크기만큼)</td></tr>
+      <tr><td><code>rank:{기간}</code></td><td>순위표 Sorted Set — 기간 끝나면 통째로 UNLINK</td></tr>
+      <tr><td><code>otp:{전화번호}</code></td><td>인증번호 — TTL 3분, 검증 성공 시 즉시 DEL</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">키를 훑어야 할 때 — SCAN (KEYS 대신)</h3>
+  <pre class="code rv d1" data-lang="bash"><code># 접두사로 순회 — 조금씩 잘라 가져와서 서버를 안 멈춥니다
+SCAN 0 MATCH cache:product:* COUNT 500
+# → 다음 커서 번호와 키 묶음이 옵니다. 커서가 0이 될 때까지 반복
+
+# 접두사 일괄 삭제 (운영에서 FLUSHALL 대신 쓰는 방법)
+redis-cli --scan --pattern "cache:v1:*" | xargs -L 500 redis-cli UNLINK</code></pre>
+
   <div class="note info rv d2">
     <b>데이터베이스 번호</b> — Redis 안에는 db0~db15 라는 논리 공간이 있지만
     (<code>SELECT 1</code>로 전환), 실무에서는 <b>번호 구분 대신 키 접두사</b>를 쓰고
@@ -298,12 +319,34 @@ ZINCRBY rank:weekly 50 "김하늘"        # 점수 가산</code></pre>
     꺼내는 모양대로 넣어 두면 조회가 O(1)~O(logN)으로 끝납니다.
   </div>
 
+  <h3 class="sub">String(JSON) vs Hash — 객체는 어느 쪽에</h3>
+  <div class="tw rv d2">
+    <table class="df">
+      <thead><tr><th>기준</th><th class="c-rd">String + JSON</th><th class="c-mg">Hash</th></tr></thead>
+      <tbody>
+        <tr><td>꺼내는 단위</td><td class="rd">항상 <b>통째로</b> (직렬화/역직렬화)</td><td class="mg"><b>필드 하나씩</b> 읽고 고칠 수 있음</td></tr>
+        <tr><td>부분 수정</td><td class="rd">전체를 읽어 고쳐 다시 저장</td><td class="mg"><code>HSET user:1 grade GOLD</code> 한 방</td></tr>
+        <tr><td>숫자 증가</td><td class="rd">불가 (읽고-고치고-쓰기 경합)</td><td class="mg"><code>HINCRBY user:1 points 100</code> 원자적</td></tr>
+        <tr><td>TTL</td><td class="rd">키 단위 ✓</td><td class="mg">키 단위만 — <b>필드별 TTL 없음</b></td></tr>
+        <tr><td>어울리는 곳</td><td class="rd">캐시 응답처럼 통으로 쓰고 버리는 것</td><td class="mg">계속 갱신되는 상태(유저 프로필·장바구니)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
   <div class="note info rv d2">
     <b>더 있는 것들</b> — 비트 단위 출석 체크(<b>Bitmap</b>),
     오차 0.8%로 유니크 수 세기(<b>HyperLogLog</b> — 수억 명도 12KB),
     위치 기반 반경 검색(<b>Geo</b>), 스트림(r10)까지 내장돼 있습니다.
-    필요할 때 이름만 기억해 두면 됩니다.
   </div>
+  <pre class="code rv d2" data-lang="bash"><code># Bitmap — 8월 출석 체크 (유저ID를 비트 위치로)
+SETBIT attend:2026-08-11 1001 1     # 1001번 유저 오늘 출석
+BITCOUNT attend:2026-08-11          # 오늘 출석자 수
+# 한 달 개근: BITOP AND 로 31일치를 겹치면 끝
+
+# HyperLogLog — 일간 순방문자(UV)를 12KB 로
+PFADD uv:2026-08-11 "u:1001" "u:1002"
+PFCOUNT uv:2026-08-11               # 오차 ±0.8% 의 유니크 수
+PFMERGE uv:aug uv:2026-08-01 uv:2026-08-02   # 월간 합산</code></pre>
 </section>
 
 <!-- ==================== r06 ==================== -->
@@ -368,6 +411,22 @@ def get_product(pid: int) -&gt; dict:
       다음 조회가 새 값을 다시 채웁니다. <b>"고쳐 넣기"보다 "지우기"가 정답</b>입니다 —
       고쳐 넣기는 동시 요청과 얽혀 낡은 값이 남는 경합이 생깁니다.</li>
   </ul>
+
+  <h3 class="sub">실무 디테일 세 가지 — 여기서 급이 갈립니다</h3>
+  <pre class="code rv d1" data-lang="python"><code># ① TTL 지터 — 같은 시각 대량 만료(스탬피드)를 흩뜨린다
+ttl = 60 + random.randint(-10, 10)
+r.set(key, val, ex=ttl)
+
+# ② 네거티브 캐시 — "없음"도 잠깐 캐시한다
+#    없는 상품 ID 로 계속 두드리는 트래픽(오타·악의적)이 DB 를 뚫는 것 방지
+row = db_query(...)
+if row is None:
+    r.set(key, "__NONE__", ex=30)      # 짧게!
+    return None
+
+# ③ 키 버전 — 배포로 응답 구조가 바뀌면 접두사 버전을 올린다
+KEY_V = "cache:v2:product:{}"          # 옛 v1 키는 TTL 로 알아서 소멸
+#    구조 다른 캐시를 역직렬화하다 터지는 배포 사고를 원천 차단</code></pre>
 
   <div class="note warn rv d2">
     <b>캐시 스탬피드(stampede)</b> — 인기 키의 TTL이 만료되는 순간,
@@ -582,10 +641,27 @@ XACK orders:events workers 1691740800000-0</code></pre>
     </table>
   </div>
 
+  <h3 class="sub">명령을 묶는 세 가지 — 헷갈리기 쉬운 구분</h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:26%">방법</th><th>보장하는 것 · 쓰는 곳</th></tr>
+      <tr><td><b>파이프라인</b></td><td>왕복(RTT)만 아낀다 — 원자성 없음. <b>대량 쓰기 속도 수십 배</b> (r13 예제)</td></tr>
+      <tr><td><b>MULTI / EXEC</b></td><td>묶음이 <b>끼어들기 없이 순서대로</b> 실행. 단 <b>롤백은 없음</b> — 중간 명령이 실패해도 나머지는 실행됨</td></tr>
+      <tr><td><b>Lua 스크립트</b></td><td>읽고-판단하고-쓰는 <b>복합 로직이 통째로 원자적</b>. 분산 락 해제(r07)·재고 차감 같은 "확인 후 변경"의 정답</td></tr>
+    </table>
+  </div>
+  <pre class="code rv d1" data-lang="bash"><code># Lua 예 — "재고가 있으면 1 차감" 을 경쟁 없이
+EVAL "local s = tonumber(redis.call('GET', KEYS[1]))
+      if s and s > 0 then return redis.call('DECR', KEYS[1]) end
+      return -1" 1 stock:p15
+# GET 과 DECR 사이에 다른 요청이 못 끼어든다 — 앱에서 하면 반드시 낀다</code></pre>
+
   <pre class="code rv d1" data-lang="bash"><code># 느린 명령 찾기
 SLOWLOG GET 10           # 최근 느린 명령 10개 (기본: 10ms 초과 기록)
 LATENCY LATEST           # 지연 이벤트 요약
-INFO stats               # keyspace_hits / misses → 캐시 히트율 계산</code></pre>
+INFO stats               # keyspace_hits / misses → 캐시 히트율 계산
+MEMORY USAGE rank:weekly # 이 키가 먹는 바이트 — 빅 키 조사
+redis-cli --bigkeys      # 전체에서 큰 키 후보 훑기 (SCAN 기반이라 안전)</code></pre>
 
   <div class="note tip rv d1">
     <b>히트율이 성적표입니다</b> — <code>hits/(hits+misses)</code> 가 캐시 히트율.

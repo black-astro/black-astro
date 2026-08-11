@@ -156,6 +156,29 @@ db.member.updateOne({ name: "김하늘" }, {
 // upsert — 있으면 수정, 없으면 삽입
 db.counter.updateOne({ _id: "visits" }, { $inc: { n: 1 } }, { upsert: true })</code></pre>
 
+  <h3 class="sub">배열 다루기 — 문서형의 핵심 근육</h3>
+  <pre class="code rv d1" data-lang="js"><code>// 배열 연산자 — 내장 설계(n05)와 한 세트입니다
+db.member.updateOne({ _id: 1 }, {
+  $addToSet: { tags: "vip" }         // 중복 없이 추가 (있으면 무시)
+})
+db.member.updateOne({ _id: 1 }, {
+  $pull: { tags: "black" }           // 값으로 제거
+})
+db.member.updateOne({ _id: 1 }, {
+  $push: { logins: { $each: [now], $slice: -10 } }   // 최근 10개만 유지
+})
+
+// 배열 "안의" 문서 수정 — 위치 연산자 $
+db.orders.updateOne(
+  { _id: 1001, "items.productId": 15 },   // 조건에 걸린 그 원소를
+  { $set: { "items.$.qty": 3 } }          // $ 가 가리킨다
+)
+
+// 배열 원소를 조건으로 찾기 — $elemMatch (두 조건이 같은 원소에!)
+db.orders.find({ items: { $elemMatch: { productId: 15, qty: { $gte: 2 } } } })
+// items.productId:15, items.qty:{$gte:2} 로 나눠 쓰면
+// "서로 다른 원소가 하나씩 만족" 해도 걸립니다 — 단골 버그</code></pre>
+
   <div class="note warn rv d1">
     <b>updateOne vs updateMany</b> — SQL의 UPDATE는 조건에 맞는 <b>전부</b>를 바꾸지만,
     MongoDB의 <code>updateOne</code>은 <b>첫 한 건만</b> 바꿉니다.
@@ -309,6 +332,27 @@ db.orders.aggregate([
     </table>
   </div>
 
+  <h3 class="sub">실전 리포트 한 판 — 일별 매출</h3>
+  <pre class="code rv d1" data-lang="js"><code>// SQL: SELECT DATE(orderedAt) d, SUM(amount) total, COUNT(*) cnt
+//      FROM orders WHERE orderedAt >= '2026-08-01'
+//      GROUP BY DATE(orderedAt) ORDER BY d
+db.orders.aggregate([
+  { $match: { orderedAt: { $gte: ISODate("2026-08-01") } } },
+  { $group: {
+      _id: { $dateToString: { format: "%Y-%m-%d", date: "$orderedAt",
+                              timezone: "Asia/Seoul" } },   // ★ 타임존!
+      total: { $sum: "$amount" },
+      cnt:   { $sum: 1 }
+  }},
+  { $sort: { _id: 1 } }
+])
+// 결과를 컬렉션으로 저장해 두려면 마지막에
+// { $merge: "daily_sales" }   ← 매일 갱신되는 집계 테이블처럼 씁니다</code></pre>
+  <div class="note warn rv d2">
+    <b>날짜 집계에서 timezone 을 빼먹으면</b> UTC 기준으로 잘려서
+    <b>한국 시간 오전 9시 이전 주문이 전날 매출</b>로 들어갑니다 — 정산이 안 맞는 단골 원인입니다.
+  </div>
+
   <div class="note tip rv d2">
     <b>$lookup이 매 쿼리마다 나온다면 설계 신호</b>입니다 —
     그 데이터는 애초에 내장(n05)했어야 하거나, 애초에 RDBMS 일이었을 수 있습니다(n12).
@@ -344,6 +388,19 @@ db.orders.find({ memberId: 1 }).explain("executionStats")   // 실행계획</cod
       <tr><td><code>totalDocsExamined</code> vs <code>nReturned</code></td><td>살펴본 문서 수 vs 돌려준 수 — <b>차이가 크면 인덱스가 엉성</b>한 것</td></tr>
     </table>
   </div>
+
+  <h3 class="sub">아껴 쓰는 인덱스 — 부분 · 커버드</h3>
+  <pre class="code rv d1" data-lang="js"><code>// 부분 인덱스 — 조건에 맞는 문서만 색인 (크기·쓰기 비용 절감)
+db.orders.createIndex(
+  { orderedAt: -1 },
+  { partialFilterExpression: { status: "PAID" } }   // 결제 완료만
+)
+// 단, 쿼리에도 같은 조건이 있어야 이 인덱스를 탑니다
+
+// 커버드 쿼리 — 필요한 필드가 전부 인덱스 안에 있으면 문서를 안 읽습니다
+db.member.createIndex({ city: 1, name: 1 })
+db.member.find({ city: "서울" }, { name: 1, _id: 0 })   // 인덱스만으로 응답
+// explain 에서 totalDocsExamined: 0 이면 성공 — t05 커버링과 같은 원리</code></pre>
 
   <div class="note tip rv d1">
     <b>TTL 인덱스는 Redis의 EXPIRE에 해당하는 기능</b>입니다 —
@@ -414,6 +471,22 @@ try {
       한 대의 디스크·쓰기 처리량을 넘어설 때의 카드이고, <b>샤드 키는 한번 정하면 바꾸기 어렵습니다</b> —
       🧬 전문가 탭 z09의 샤딩 원칙이 그대로 적용됩니다.</li>
   </ul>
+
+  <h3 class="sub">백업 — mongodump · mongorestore</h3>
+  <pre class="code rv d1" data-lang="bash"><code># 논리 백업 (BSON 덤프) — 소규모의 기본기
+mongodump --uri="mongodb://admin:devpass@localhost:27017" \
+          --db=shop --gzip --archive=shop_2026-08-11.gz
+
+# 복원 — 새 서버·다른 DB 이름으로도 가능
+mongorestore --uri="mongodb://..." --gzip --archive=shop_2026-08-11.gz
+
+# 특정 컬렉션만 JSON 으로 (데이터 이관·검수용)
+mongoexport --db=shop --collection=member --out=member.json</code></pre>
+  <div class="note warn rv d1">
+    <b>RDBMS와 같은 원칙이 적용됩니다</b> — 복원을 실제로 해 본 적 없는 백업은 백업이 아닙니다.
+    규모가 커지면 mongodump 는 느려지므로 <b>스냅샷(파일시스템·클라우드) + oplog</b> 기반으로 넘어가고,
+    Atlas 라면 자동 백업 + 시점 복구(PITR)를 켜는 것으로 끝납니다.
+  </div>
 
   <div class="note info rv d1">
     <b>Atlas를 쓰면 이 절이 버튼 몇 개가 됩니다</b> — 복제 셋 기본 제공, 백업·업그레이드·샤딩 자동화.
