@@ -167,10 +167,14 @@ const TAB_KW = {
   test:"테스트 test testing pytest 파이테스트 단위테스트 유닛테스트 unit 통합테스트 integration e2e assert 어서트 검증 fixture 픽스처 conftest scope parametrize 파라미터화 매개변수화 raises 예외테스트 approx 근사 경계값 mock 목 모킹 patch monkeypatch 몽키패치 magicmock 가짜 스텁 stub respx responses 시간고정 time-machine testclient 에이피아이테스트 httpx asgi pytest-asyncio 비동기테스트 db테스트 롤백 rollback 트랜잭션 testcontainers 커버리지 coverage pytest-cov 회귀 regression 리팩터링 ci 지속적통합 github actions 워크플로 자동화 pre-commit xdist 병렬 aaa given when then tdd 플레이키 flaky 안티패턴 좋은테스트",
   deep:"전문가 초고급 고급 심화 내부동작 cpython 바이트코드 dis 인터프리터 객체모델 pyobject 참조카운팅 refcount 메모리 gc 가비지컬렉션 순환참조 weakref 누수 leak tracemalloc memray objgraph slots 디스크립터 descriptor property 메타클래스 metaclass 데코레이터 functools wraps 제너레이터 코루틴 yield asyncio 이벤트루프 취소 cancel taskgroup contextvars gil free-threading 멀티프로세싱 c확장 cython numba rust pyo3 maturin 타입 protocol typevar generic overload paramspec typeddict mypy pyright 함수형 불변 frozen dataclass 디자인패턴 어댑터 리포지토리 보안 pickle 역직렬화 공급망 supply chain bandit pip-audit 아키텍처 계층 헥사고날 ddd 의존성역전",
   scale:"대규모 트래픽 서버 백엔드 웹 api fastapi 비동기 async await asyncio gil 멀티프로세싱 프로세스 스레드 동시성 uvicorn gunicorn asgi wsgi django flask sqlalchemy 커넥션풀 캐시 redis 레디스 분산락 멱등 중복결제 celery 셀러리 큐 워커 배치 airflow 스케줄 대용량 polars duckdb parquet 배포 도커 docker 쿠버네티스 k8s 무중단 관측 모니터링 로깅 structlog 프로메테우스 prometheus 부하테스트 locust py-spy 프로파일링 성능 최적화 p99 rps 병목 확장",
+  ml:"머신러닝 machine learning ml 인공지능 ai 모델 학습 예측 분류 회귀 지도학습 비지도학습 sklearn scikit-learn 사이킷런 랜덤포레스트 random forest 부스팅 xgboost lightgbm 결정트리 로지스틱 svm knn kmeans 군집 클러스터링 pca 이상탐지 과적합 교차검증 하이퍼파라미터 튜닝 gridsearch optuna 정확도 정밀도 재현율 f1 auc 혼동행렬 피처 feature 전처리 스케일링 인코딩 데이터누수 shap 중요도 파이프라인 pipeline joblib 서빙",
+  dl:"딥러닝 deep learning dl 신경망 뉴럴넷 neural network 파이토치 pytorch torch 텐서 tensor gpu cuda 뉴런 층 레이어 활성화 relu 역전파 backpropagation 경사하강 gradient 옵티마이저 adam adamw 학습률 손실함수 loss 에포크 배치 cnn 합성곱 convolution 이미지분류 rnn lstm 시계열 어텐션 attention 트랜스포머 transformer 전이학습 미세조정 finetuning 파인튜닝 허깅페이스 huggingface transformers 드롭아웃 정규화 batchnorm mnist onnx 양자화 임베딩",
+  llm:"llm 대규모언어모델 생성형 ai gpt chatgpt 클로드 claude anthropic openai gemini api 챗봇 프롬프트 prompt 프롬프트엔지니어링 토큰 token 컨텍스트 context 스트리밍 streaming sse 구조화출력 json pydantic tool use 툴 함수호출 function calling 에이전트 agent mcp 임베딩 embedding 벡터 vector 유사도 rag 검색증강 벡터db 챗 요약 번역 추출 분류 환각 hallucination 파인튜닝 lora 올라마 ollama 로컬llm 양자화 평가 eval 비용 캐시 프롬프트캐시 인젝션 보안",
 };
 const FIND_CHIPS = ["데스크탑 프로그램","엑셀","자동화","이미지 리사이즈","가상환경",
                     "리스트 정렬","클래스","SQL 조인","코딩테스트","정규식",
-                    "FastAPI 비동기","GIL","Celery 큐","대용량 처리","부하 테스트"];
+                    "FastAPI 비동기","GIL","Celery 큐","대용량 처리","부하 테스트",
+                    "머신러닝","랜덤포레스트","PyTorch","RAG 챗봇","프롬프트"];
 const SEC_KW = {
   u09:"uv 워크스페이스 모노레포 락파일 uvlock locked ci 캐시 도커 멀티스테이지 재현성",
   i11:"이미지 배치 대량처리 썸네일 webp exif 회전 프로세스풀 멀티프로세싱 libvips 디컴프레션폭탄",
@@ -256,6 +260,40 @@ const SEC_KW = {
   a01:"매크로 좌표 컨트롤 pywinauto pyautogui 선택 비교",
   q01:"설치 시작 데스크탑 프로그램 첫걸음",
   q02:"첫창 윈도우 창만들기 실행",
+  m01:"ai ml dl llm 차이 구분 용어 인공지능 지도 포함관계 언제 뭘",
+  m03:"첫모델 fit predict score 붓꽃 iris 랜덤포레스트 10줄 시작",
+  m04:"train test split 분할 데이터누수 leakage stratify 시험용 학습용",
+  m05:"전처리 pipeline columntransformer 스케일링 standardscaler onehot 인코딩 결측치 imputer",
+  m08:"랜덤포레스트 부스팅 xgboost lightgbm catboost 앙상블 결정트리 표데이터",
+  m09:"평가 정확도 정밀도 재현율 recall precision f1 auc roc 혼동행렬 불균형",
+  m10:"교차검증 crossval kfold gridsearch randomizedsearch optuna 튜닝 하이퍼파라미터",
+  m13:"피처엔지니어링 파생변수 집계 날짜 불균형 smote class_weight 오버샘플링",
+  m14:"해석 설명 중요도 feature importance permutation shap xai",
+  m15:"저장 배포 joblib pickle 서빙 fastapi 예측api 드리프트 재학습",
+  l02:"뉴런 퍼셉트론 층 레이어 활성화함수 relu sigmoid softmax 가중치 편향",
+  l04:"autograd 자동미분 역전파 backward 기울기 gradient 경사하강 학습률",
+  l05:"학습루프 training loop 순전파 forward loss zero_grad optimizer step 에포크 배치",
+  l09:"cnn 합성곱 컨볼루션 풀링 pooling 필터 이미지분류 conv2d",
+  l10:"전이학습 transfer learning 사전학습 pretrained resnet 미세조정 finetuning 얼리기 freeze",
+  l12:"어텐션 attention 트랜스포머 transformer 셀프어텐션 qkv 멀티헤드 위치인코딩 gpt bert",
+  l13:"체크포인트 저장 재개 amp 혼합정밀도 cuda oom 메모리부족 디버깅 nan",
+  l14:"허깅페이스 huggingface transformers pipeline trainer 사전학습모델 한국어 bert",
+  l15:"추론 배포 최적화 compile 양자화 quantization onnx torchscript 서빙",
+  c01:"llm 원리 다음토큰 예측 환각 hallucination 한계 생성형",
+  c02:"토큰 token 컨텍스트 윈도우 비용 가격 요금 계산 count_tokens",
+  c03:"api 호출 시작 anthropic openai sdk 키 환경변수 에러처리",
+  c04:"대화 이력 히스토리 무상태 stateless system 시스템프롬프트 역할 role 멀티턴 기억",
+  c05:"프롬프트 엔지니어링 작성법 few-shot 예시 구분자 지시 형식",
+  c06:"구조화출력 structured output json 스키마 pydantic parse 추출 파싱",
+  c07:"스트리밍 streaming sse text_stream 실시간 타자 fastapi 중계 ttft",
+  c08:"tool use 도구 함수호출 function calling beta_tool tool_runner 실행",
+  c09:"임베딩 embedding 벡터 vector 유사도 코사인 의미검색 sentence-transformers",
+  c10:"rag 검색증강생성 벡터db 청크 chunk 문서챗봇 사내문서 retrieval 리랭킹",
+  c11:"에이전트 agent 루프 자율 mcp 안전장치 승인 워크플로",
+  c12:"로컬 llm ollama 올라마 오픈모델 양자화 오프라인 프라이버시",
+  c13:"파인튜닝 fine-tuning lora qlora peft 미세조정 언제 판단",
+  c14:"평가 eval 테스트 골든셋 llm judge 채점 회귀 프롬프트테스트",
+  c15:"운영 비용절감 프롬프트캐시 cache 배치api 라우팅 보안 프롬프트인젝션 injection 개인정보",
 };
 let FIDX = null;
 
@@ -499,7 +537,7 @@ document.addEventListener("visibilitychange", () => {
    표가 80개면 콜백도 80개, 강제 레이아웃도 80번이었다.
    한 프레임에 모아서 재고, 그다음에 모아서 고친다. */
 function markScrollables(root){
-  const list = $(".tw, .scw, .diag", root || document).filter(tw => {
+  const list = $$(".tw, .scw, .diag", root || document).filter(tw => {
     if (tw.dataset.sc) return false;
     tw.dataset.sc = "1";
     return true;
