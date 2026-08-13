@@ -241,7 +241,7 @@ const SEC_KW = {
   p02:"변수 자료형 타입 int str float bool 형변환 캐스팅 타입힌트 연산자 나눗셈 몫 나머지",
   p03:"문자열 텍스트 글자 f-string 포맷 서식 자르기 붙이기 split join replace strip 정규식 re 치환 슬라이싱 슬라이스 slice 인덱스 마스킹 뒤집기 encode decode ord chr endswith startswith",
   p04:"리스트 list 딕셔너리 dict 세트 set 튜플 tuple 배열 자료구조 중복제거 정렬 sort 카운터 counter defaultdict deque heapq bisect 슬라이싱 인덱스 언패킹",
-  p05:"반복문 루프 for while 조건문 if else 분기 enumerate zip itertools match break continue 순회 and or not 논리 연산자 복합 조건 단락평가 우선순위 all any 검증 guard 드모르간",
+  p05:"반복문 루프 for while 조건문 if else 분기 enumerate zip itertools match break continue 순회 and or not 논리 연산자 복합 조건 단락평가 우선순위 all any 검증 guard 드모르간 삼항 walrus 바다코끼리 eafp try 다중비교 연쇄비교 none is 비교 dict매핑 switch 스위치 안티패턴 elif",
   p06:"컴프리헨션 한줄 축약 리스트컴프리헨션 제너레이터식 필터 map",
   p07:"함수 def 인자 파라미터 매개변수 반환 return 람다 lambda 클로저 기본값 가변인자 데코레이터 캐시 functools 재사용",
   p08:"복사 참조 얕은복사 깊은복사 deepcopy 가변 불변 원본 주소 공유",
