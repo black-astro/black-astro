@@ -635,6 +635,71 @@ sem.acquire();  try { ... } finally { sem.release(); }</code></pre>
       </div>
     </div>
   </div>
+
+  <h3 class="sub">풀을 직접 설계할 때 — ThreadPoolExecutor 의 손잡이 전부</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동작 순서 — 대부분이 잘못 알고 있습니다 ★</h4>
+      <pre class="code" data-lang="java"><code>var pool = new ThreadPoolExecutor(
+        10,                              // corePoolSize
+        50,                              // maximumPoolSize
+        60, TimeUnit.SECONDS,            // 초과분 유휴 회수 시간
+        new ArrayBlockingQueue&lt;&gt;(1000),  // 작업 큐 (유한!)
+        new ThreadFactoryBuilder().setNameFormat("api-%d").build(),
+        new ThreadPoolExecutor.CallerRunsPolicy());   // 거부 정책
+
+// 작업이 들어오면 이 순서입니다:
+//   ① core 가 안 찼다  → 새 스레드
+//   ② core 가 찼다     → '큐에' 넣는다          ← 여기가 함정
+//   ③ 큐까지 찼다      → max 까지 스레드 추가
+//   ④ max 도 찼다      → 거부 정책 실행
+//
+// ★ 즉 무한 큐(LinkedBlockingQueue 기본)를 쓰면
+//   max=50 은 '영원히' 안 만들어집니다 — 큐가 안 차니까.
+//   "max 를 올렸는데 왜 안 늘지?" 의 답이 이겁니다.
+
+// 거부 정책 4종
+//   AbortPolicy(기본)     : RejectedExecutionException
+//   CallerRunsPolicy ★   : 제출한 스레드가 직접 실행 → 자연 백프레셔
+//   DiscardPolicy         : 조용히 버림 (사고의 씨앗)
+//   DiscardOldestPolicy   : 큐의 제일 오래된 것을 버림</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크기 공식 · 읽기 많은 곳의 락 업그레이드</h4>
+      <pre class="code" data-lang="java"><code>// 풀 크기의 출발점 (리틀의 법칙 근사)
+//   CPU 작업  : 코어 수 (그 이상은 컨텍스트 스위칭 손해)
+//   I/O 작업  : 코어 수 × (1 + 대기시간/계산시간)
+//   예) 계산 5ms + DB 대기 45ms, 8코어 → 8 × (1+9) = 80
+// 공식은 출발점일 뿐 — 부하 테스트로 큐 길이·지연을 보고 조정합니다
+
+// 읽기 95% 인 자료에는 StampedLock 낙관적 읽기
+private final StampedLock sl = new StampedLock();
+
+double read() {
+    long stamp = sl.tryOptimisticRead();     // 락 없이 일단 읽고
+    double x = this.value;
+    if (!sl.validate(stamp)) {               // 그 사이 쓰기가 있었나?
+        stamp = sl.readLock();               // 있었다면 그때만 진짜 락
+        try { x = this.value; }
+        finally { sl.unlockRead(stamp); }
+    }
+    return x;
+}
+// ReadWriteLock 보다 읽기 처리량이 크게 높습니다.
+// 단, 재진입 불가 · Condition 없음 — 용도를 좁게 잡으세요.
+
+// 단계별 합류가 필요하면 Phaser (CountDownLatch 의 재사용 버전)
+var phaser = new Phaser(3);                  // 참가자 3
+phaser.arriveAndAwaitAdvance();              // 라운드 1 합류
+phaser.arriveAndAwaitAdvance();              // 라운드 2 — 재사용 ✅</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>튜닝의 관측 지점</b> — <code>pool.getQueue().size()</code> ·
+        <code>getActiveCount()</code> · <code>getCompletedTaskCount()</code> 를
+        메트릭으로 내보내세요. <b>큐 길이가 우상향</b>이면 처리량 부족,
+        <b>active 가 항상 max</b> 면 풀이 아니라 다운스트림이 병목입니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -684,6 +749,69 @@ userF.exceptionally(e -&gt; {                       // 실패하면 대체값
       <b>공용 ForkJoinPool</b>을 씁니다. 여기서 DB·HTTP 같은 <b>블로킹 작업</b>을 하면
       애플리케이션 전체의 병렬 스트림까지 함께 굶습니다.
       <b>반드시 전용 풀을 두 번째 인자로 넘기세요.</b>
+    </div>
+  </div>
+
+  <h3 class="sub">여기서 실력이 갈립니다 — 5년차가 놓치는 네 가지</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 실행 스레드의 진실 · ② 예외의 정체</h4>
+      <pre class="code" data-lang="java"><code>// ① thenApply 는 "어느 스레드에서" 도는가? — 답: 그때그때 다릅니다
+f.thenApply(x -&gt; heavy(x));
+//   future 가 '아직 미완료'  → 완료시키는 스레드(풀 스레드)가 실행
+//   future 가 '이미 완료'    → thenApply 를 '부른 스레드'가 실행 ★
+// 톰캣 요청 스레드에서 완료된 future 에 무거운 변환을 붙이면
+// 그 변환이 '요청 스레드에서' 돕니다 — 지연의 단골 원인.
+// 실행 위치를 보장하려면 항상 thenApplyAsync(fn, pool).
+
+// ② 꺼낼 때 예외 타입이 바뀝니다
+f.get()    // ExecutionException 로 감싸서 (checked)
+f.join()   // CompletionException 로 감싸서 (unchecked)
+// 원인 판정은 반드시 e.getCause() 로:
+.exceptionally(e -&gt; {
+    Throwable cause = (e instanceof CompletionException) ? e.getCause() : e;
+    if (cause instanceof TimeoutException) return fallback();
+    throw new CompletionException(cause);       // 모르는 건 다시 던지기
+})
+
+// handle vs whenComplete — 자주 헷갈리는 차이
+.handle((val, err) -&gt; err == null ? val : fallback())  // 결과를 '바꿈'
+.whenComplete((val, err) -&gt; log(val, err))             // 관찰만, 예외는 그대로 흐름</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ allOf 부분 실패 수집 · ④ 취소와 타임아웃의 배신</h4>
+      <pre class="code" data-lang="java"><code>// ③ allOf 는 하나만 실패해도 통째로 실패합니다.
+//    "성공한 것만 모으고 실패는 따로" 가 실무 요구 — 이렇게 만듭니다
+List&lt;CompletableFuture&lt;Item&gt;&gt; fs = ids.stream()
+        .map(id -&gt; fetch(id).handle((v, e) -&gt;
+                e == null ? Result.ok(v) : Result.fail(id, e)))  // 실패를 값으로
+        .toList();
+CompletableFuture.allOf(fs.toArray(CompletableFuture[]::new)).join();
+Map&lt;Boolean, List&lt;Result&gt;&gt; byOk = fs.stream()
+        .map(CompletableFuture::join)
+        .collect(Collectors.partitioningBy(Result::isOk));
+
+// ④ cancel() 은 '체인 아래로만' 알려집니다
+CompletableFuture&lt;A&gt; up = supplyAsync(...);
+CompletableFuture&lt;B&gt; down = up.thenApply(...);
+down.cancel(true);
+//   up 은 계속 돕니다! 실행 중인 스레드에 인터럽트도 안 갑니다 ★
+//   orTimeout(3, SECONDS) 도 같습니다 — future 만 실패시키고
+//   뒤에서 원래 작업은 끝까지 돕니다 (자원은 계속 소모)
+//   → 진짜 취소가 필요하면: Future.cancel(true)(ExecutorService 제출분)
+//     또는 구조적 동시성(다음 섹션)으로 스코프째 취소
+
+// 보너스: MDC·SecurityContext 는 풀 스레드로 안 따라갑니다
+Supplier&lt;Map&lt;String,String&gt;&gt; ctx = MDC::getCopyOfContextMap;
+var saved = ctx.get();
+supplyAsync(() -&gt; { MDC.setContextMap(saved); return work(); }, pool);
+// 스프링이면 TaskDecorator 한 번 등록으로 전 지점 해결</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>면접 압축</b> — “<code>thenApply</code> 실행 스레드는 완료 시점에 따라 다르다” ·
+        “<code>join</code> 은 CompletionException” · “<code>allOf</code> 는 fail-fast 라 부분 수집은
+        <code>handle</code> 로 실패를 값으로 바꾼다” · “<code>cancel</code>·<code>orTimeout</code> 은
+        업스트림을 못 세운다”. 이 네 문장이면 깊이가 전달됩니다.
+      </div>
     </div>
   </div>
 </section>
@@ -785,6 +913,137 @@ public AsyncTaskExecutor applicationTaskExecutor() {
       </ul>
       <pre class="code" data-lang="bash"><code># 고정(pinning) 발생 지점 찾기
 java -Djdk.tracePinnedThreads=full -jar app.jar</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">가상 스레드를 자유롭게 — 이름 · 개수 제한 · 예외까지 손에 넣기</h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌더와 팩토리 — “풀 없이” 통제하는 법</h4>
+      <pre class="code" data-lang="java"><code>// 이름을 붙이세요 — 붙이지 않으면 스택트레이스에 "" 로 나옵니다 ★
+Thread t = Thread.ofVirtual()
+        .name("order-worker-", 0)        // order-worker-0, 1, 2 …
+        .uncaughtExceptionHandler((th, e) -&gt;
+                log.error("작업 실패 {}", th.getName(), e))
+        .start(() -&gt; process());
+
+// 팩토리로 만들어 실행자에 꽂기 — 팀 표준으로 삼기 좋은 형태
+ThreadFactory tf = Thread.ofVirtual().name("api-call-", 0).factory();
+try (var ex = Executors.newThreadPerTaskExecutor(tf)) { ... }
+
+// 가상 스레드에는 '풀'이 없습니다. 그럼 동시 개수는 어떻게 막나?
+// → 세마포어가 풀의 자리를 대신합니다 ★★
+private final Semaphore limit = new Semaphore(100);   // 외부 API 동시 100
+
+Callable&lt;Res&gt; guarded(Callable&lt;Res&gt; task) {
+    return () -&gt; {
+        limit.acquire();                 // 101번째부터는 여기서 대기
+        try { return task.call(); }      //   (가상 스레드라 대기가 공짜)
+        finally { limit.release(); }
+    };
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“무제한 생성”이 진짜 함정입니다</b> — 가상 스레드 100만 개는 공짜지만,
+        그 100만 개가 동시에 때리는 <b>DB·외부 API 는 공짜가 아닙니다.</b>
+        스레드를 아끼는 시대에서 <b>다운스트림을 보호하는 시대</b>로 바뀐 것뿐입니다.
+        경계마다 세마포어 하나 — 이게 가상 스레드 시대의 스레드 풀 크기 튜닝입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">알아두면 자유로워지는 것들</h4>
+      <pre class="code" data-lang="java"><code>// 지금 가상 스레드 위인가? (라이브러리 분기 작성 시)
+Thread.currentThread().isVirtual()
+
+// 인터럽트·취소·타임아웃 — 전부 '그대로' 동작합니다
+Future&lt;String&gt; f = ex.submit(() -&gt; slowCall());
+f.get(3, TimeUnit.SECONDS);        // 타임아웃
+f.cancel(true);                    // 인터럽트로 취소
+
+// 데몬 여부·우선순위는 못 바꿉니다 (항상 데몬 · NORM 고정)
+// → main 이 끝나면 가상 스레드도 끝 — 배치라면 join 을 잊지 마세요
+
+// CompletableFuture 와 조합 — 실행자만 갈아끼우면 됩니다
+var vex = Executors.newVirtualThreadPerTaskExecutor();
+CompletableFuture.supplyAsync(() -&gt; userClient.find(id), vex)
+                 .orTimeout(2, TimeUnit.SECONDS);
+
+// 관측 — 개수가 수십만이라 jstack 은 못 씁니다
+// JFR 이벤트: jdk.VirtualThreadStart / End / Pinned / SubmitFailed
+// jcmd &lt;pid&gt; Thread.dump_to_file -format=json dump.json  (전체 덤프)</code></pre>
+      <p class="tx" style="font-size:13.6px;margin-bottom:0">
+        요약 — <b>이름 · 예외 핸들러 · 세마포어 · JFR</b> 네 가지를 챙기면
+        가상 스레드는 “켜 보는 기능”에서 <b>“설계에 쓰는 도구”</b>가 됩니다.
+      </p>
+    </div>
+  </div>
+
+  <h3 class="sub">DB가 가상 스레드와 안 친할 때 — 고정(pinning) 진단과 우회 4단계</h3>
+  <p class="tx">
+    가상 스레드의 마법은 “블로킹하면 캐리어(OS 스레드)를 반납한다”입니다.
+    그런데 <b>반납하지 못하는 자리</b>가 있습니다 — 이것이 <b>고정(pinning)</b>이고,
+    옛날 JDBC 드라이버가 대표적인 범인입니다. 고정된 만큼 캐리어가 잠기면
+    <b>스레드 풀 시절보다 오히려 느려질 수도</b> 있습니다.
+  </p>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어디서 나고, 어떻게 찾나</h4>
+      <pre class="code" data-lang="java"><code>// 고정이 생기는 자리 (Java 21~23 기준)
+// ① synchronized 블록 '안에서' 블로킹      ← 옛 JDBC 드라이버의 주범
+// ② Object.wait() · 네이티브 코드(JNI) 안에서 블로킹
+// ③ 파일 I/O 일부 (OS 에 논블로킹 API 가 없어 내부 오프로딩)
+
+// 오래된 드라이버 내부가 대략 이렇습니다
+synchronized (connectionMutex) {          // ← 락을 쥔 채
+    sendQueryPacket(sql);
+    readResultPacket();                   // ← 소켓 대기 = 캐리어 고정 ❌
+}
+
+// 진단 ① 실행 플래그 — 고정될 때마다 스택을 찍어 줍니다
+java -Djdk.tracePinnedThreads=full -jar app.jar
+
+// 진단 ② JFR — 운영에서는 이쪽 (오버헤드 낮음)
+jcmd &lt;pid&gt; JFR.start settings=profile
+// 이벤트 jdk.VirtualThreadPinned 를 Mission Control 로 확인
+// '20ms 이상 고정' 이 반복되는 스택이 수리 대상입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Java 24 부터 (JEP 491)</b> — synchronized 안에서 블로킹해도
+        <b>캐리어를 반납하도록 JVM 자체가 바뀌었습니다.</b> ①번 고정은 런타임 업그레이드로
+        사라집니다. 남는 것은 ② 네이티브 경계뿐 — 그래서 아래 우회는
+        “Java 24 로 못 올리는 동안”과 “JNI 드라이버”를 위한 기술입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">우회 — 위에서부터 차례로 시도하세요</h4>
+      <pre class="code" data-lang="java"><code>// ① 드라이버·런타임 업그레이드 (제일 싸고 확실)
+//    MySQL Connector/J 9.x · PostgreSQL 42.6+ 는 synchronized 를
+//    ReentrantLock 으로 바꿨습니다. Java 24+ 면 그것만으로도 해결.
+
+// ② 업그레이드 불가 → 블로킹 구간만 '플랫폼 스레드 섬'으로 격리 ★
+//    고정될 코드는 어차피 고정되니, 전용 풀에 가두고
+//    가상 스레드는 결과만 기다리게 합니다 (기다림은 반납 가능)
+private static final ExecutorService JDBC_ISLAND =
+        Executors.newFixedThreadPool(20);        // = 커넥션 풀 크기
+
+Order findOrder(long id) throws Exception {
+    return JDBC_ISLAND.submit(() -&gt; jdbc.query(...)).get();
+    //     ↑ 플랫폼 스레드가 고정을 대신 떠안고
+    //     ↑ .get() 대기 중인 가상 스레드는 캐리어를 반납합니다 ✅
+}
+
+// ③ 커넥션 수 = 진짜 동시성 한계 — 입구에서 미리 자르기
+//    (커넥션 20개에 가상 스레드 1만 개가 몰리면 대기 폭주 + 타임아웃)
+private final Semaphore db = new Semaphore(20);  // HikariCP max 와 동일
+// + HikariCP: maximumPoolSize=20, connectionTimeout 은 짧게(1~3s)
+
+// ④ 그래도 부족하면 논블로킹 드라이버로 (R2DBC · Vert.x SQL)
+//    단, 코드 스타일이 리액티브로 바뀝니다 — 🌊 WebFlux 탭 09번</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>순서가 중요합니다</b> — ②의 “섬 패턴”은 코드 전체가 아니라
+        <b>고정이 실측된 경계 하나</b>에만 씁니다. JFR 로 찾기 전에 여기저기
+        <code>submit().get()</code> 을 감으면 스레드 풀 시절로 되돌아갈 뿐입니다.
+        그리고 섬의 크기는 반드시 <b>커넥션 풀 크기와 같게</b> — 더 크면 의미가 없고
+        더 작으면 커넥션을 놀립니다.
+      </div>
     </div>
   </div>
 

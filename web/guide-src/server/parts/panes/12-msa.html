@@ -90,6 +90,93 @@
     이벤트 루프(Node)는 기다림 없이 다음 요청을 받지만 <b>CPU 작업 하나가 전체를 멈춥니다</b>.
     이 차이가 ⚡ 성능 탭과 🧬 전문가 탭(z02·z03)의 주제입니다.
   </div>
+
+  <h3 class="sub">백엔드 서버의 세 갈래 — 웹 서버 · 게임 서버 · 처리 엔진 서버</h3>
+  <p class="tx">
+    “백엔드”라고 다 같은 구조가 아닙니다. <b>시간을 다루는 방식</b>이 다르면 설계가 통째로 달라집니다 —
+    웹 서버는 <b>요청이 올 때만</b> 일하고, 게임 서버는 <b>요청이 없어도 시간이 흐르며</b>,
+    엔진 서버는 <b>큐에서 꺼낸 작업을 계속</b> 갈아 냅니다.
+  </p>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:16%"></th><th>웹 · API 서버</th><th>게임 · 실시간 서버</th><th>엔진 · 워커 서버</th></tr>
+      <tr><td><b>시간 축</b></td><td>요청-응답 단위</td><td><b>틱 루프</b> (10~60Hz 로 세상이 흐름)</td><td>작업(job) 단위 — 큐에서 소비</td></tr>
+      <tr><td><b>통신</b></td><td>HTTP · 짧은 연결</td><td>TCP/UDP·WebSocket <b>상시 연결</b></td><td>큐(Kafka·Rabbit) · gRPC</td></tr>
+      <tr><td><b>상태</b></td><td><b>무상태</b> — 상태는 DB·Redis 로</td><td><b>상태ful</b> — 방·월드가 메모리에 산다</td><td>작업 안에서만 상태 유지</td></tr>
+      <tr><td><b>확장</b></td><td>LB 뒤에 복제 (아무 서버나 OK)</td><td><b>방 단위 배치</b> — 한 방은 반드시 한 서버</td><td>워커 수만 늘리면 됨</td></tr>
+      <tr><td><b>장애</b></td><td>재시도로 흡수</td><td>방 전체 소실 — 스냅숏·재접속 설계 필수</td><td>미완료 작업 재큐잉 (멱등 필수)</td></tr>
+      <tr><td><b>지표</b></td><td>p99 응답시간 · RPS</td><td><b>틱 예산 초과율</b> · RTT · 동시접속</td><td>큐 대기 길이 · 처리율</td></tr>
+      <tr><td><b>예시</b></td><td>쇼핑몰 API · 관리자</td><td>MMO·FPS·채팅·화이트보드·시세</td><td>인코딩 · 렌더 팜 · ML 추론 · 정산 배치</td></tr>
+    </table>
+  </div>
+
+  <div class="diag rv d1">
+    <svg viewBox="0 0 680 190" role="img" aria-label="게임 서버의 틱 루프는 입력 수집, 시뮬레이션 갱신, 상태 전송의 세 단계를 초당 30회 돌린다. 한 바퀴 예산은 33ms 이고, 이 예산을 넘기는 순간 모든 접속자의 게임이 늦어진다. 웹 서버와 달리 요청이 없어도 루프는 계속 돈다">
+      <text x="16" y="18" class="lbl">게임 서버의 심장 — 틱 루프 (30Hz = 한 바퀴 예산 33ms)</text>
+
+      <rect class="bx" x="40" y="44" width="160" height="44"/>
+      <text x="120" y="63" font-size="11" text-anchor="middle">① 입력 수집</text>
+      <text x="120" y="79" font-size="9" text-anchor="middle" class="lbl">이동·공격 패킷을 큐에서</text>
+      <path class="fl ar" d="M204 66 L246 66"/>
+      <rect class="bx bx-fw" x="250" y="44" width="160" height="44"/>
+      <text x="330" y="63" font-size="11" text-anchor="middle">② 시뮬레이션 갱신</text>
+      <text x="330" y="79" font-size="9" text-anchor="middle" class="lbl">물리·판정·AI — CPU 예산의 몸통</text>
+      <path class="fl ar" d="M414 66 L456 66"/>
+      <rect class="bx" x="460" y="44" width="160" height="44"/>
+      <text x="540" y="63" font-size="11" text-anchor="middle">③ 상태 전송</text>
+      <text x="540" y="79" font-size="9" text-anchor="middle" class="lbl">바뀐 것만 · 관심 영역만</text>
+
+      <path class="fl" d="M540 92 L540 116 L120 116 L120 96"/>
+      <text x="330" y="110" class="ann" text-anchor="middle">33ms 안에 한 바퀴 — 남으면 sleep, 넘치면 전원 랙</text>
+      <circle class="pk" r="3.5"><animateMotion dur="2.4s" repeatCount="indefinite" path="M40 66 L330 66 L540 66 L540 116 L120 116 L120 66"/></circle>
+
+      <text x="16" y="152" class="lbl">웹 서버: 요청이 없으면 아무 일도 없다 ↔ 게임 서버: 아무도 안 움직여도 루프는 돈다</text>
+      <text x="16" y="168" class="lbl">그래서 게임 서버의 튜닝은 "응답을 빨리"가 아니라 "②를 예산 안에" — 프로파일링 대상이 다릅니다</text>
+    </svg>
+    <div class="cap">틱 예산을 넘기면 <b>한 명이 아니라 그 방 전원이</b> 느려집니다 — 게임 서버 성능 문제의 단위는 요청이 아니라 <b>방</b>입니다.</div>
+  </div>
+
+  <div class="grid2 rv d2">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">게임 · 실시간 서버 설계의 다섯 기둥</h4>
+      <ul class="tx" style="margin:0">
+        <li><b>① 프로토콜</b> — 위치처럼 <b>최신값만 중요한 데이터는 UDP</b>(잃어도 다음 틱이 덮음),
+            인벤토리·결제처럼 <b>빠지면 안 되는 것은 TCP/신뢰 채널</b>. 웹 기반이면 WebSocket + 델타 압축.</li>
+        <li><b>② 권위(authority)는 서버에</b> — 클라이언트가 보낸 “나 여기로 이동”은
+            <b>요청이지 사실이 아닙니다.</b> 서버가 판정하고 클라이언트는 예측·보간으로 숨깁니다(치트 방어의 뿌리).</li>
+        <li><b>③ 관심 영역(AOI)</b> — 1,000명 방에서 전원에게 전원 상태를 보내면
+            패킷이 n² 으로 폭발합니다. <b>보이는 범위만</b> 구독시키는 격자·그리드가 필수.</li>
+        <li><b>④ 상태 저장의 두 층</b> — 매 틱 바뀌는 것은 메모리에만,
+            <b>잃으면 안 되는 것(레벨·아이템)만 주기 스냅숏 + 이벤트 로그</b>로 DB에.
+            매 틱 DB 를 치는 순간 게임 서버는 죽습니다.</li>
+        <li><b>⑤ 재접속 프로토콜</b> — 모바일은 반드시 끊깁니다. “세션 토큰으로 방 찾기 →
+            스냅숏 재전송 → 이후 델타”가 처음부터 설계에 있어야 합니다.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전체 그림 — 게임도 결국 MSA 로 갑니다</h4>
+      <pre class="code" data-lang="text"><code>[클라이언트]
+   │ HTTP (로그인·상점·랭킹 — 그냥 웹 서버입니다)
+   ▼
+[API 서버 (무상태)] ──── [DB · Redis]
+   │ "게임 시작" 요청
+   ▼
+[매치메이커] ── 방 배정 · 서버 선택 (Redis 큐)
+   │ 접속 티켓 (서버 주소 + 토큰)
+   ▼
+[게임 서버 #17 (상태ful)] ← 상시 연결 · 틱 루프
+   │ 경기 종료 → 결과 이벤트
+   ▼
+[정산 워커 (엔진 서버)] ── 보상 지급 · 통계 (Kafka)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>핵심 통찰</b> — 게임 백엔드의 대부분(로그인·상점·랭킹·우편)은
+        <b>그냥 웹 서버</b>이고, 상태ful 틱 루프가 필요한 건 <b>전투 그 자체뿐</b>입니다.
+        “어디까지가 웹이고 어디부터가 실시간인가”를 먼저 긋는 것이
+        게임 서버 설계의 첫 단추입니다. 실시간 채팅·알림 정도면 게임 서버가 아니라
+        <b>WebSocket + Redis Pub/Sub</b>(📈 대규모 탭)로 충분합니다.
+      </div>
+    </div>
+  </div>
 </section>
 
 <!-- ==================== m02 ==================== -->

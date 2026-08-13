@@ -458,7 +458,7 @@ const SEC_KW = {
   z13:"관측 추적id request_id opentelemetry 분산추적 로그연계",
   z14:"아키텍처 정리 전체그림 체크리스트 면접",
 
-  m01:"백엔드란 was 계층 컨트롤러 서비스 리포지토리 스레드풀 이벤트루프",
+  m01:"백엔드란 was 계층 컨트롤러 서비스 리포지토리 스레드풀 이벤트루프 게임서버 실시간 틱 tick 루프 udp tcp 상태ful stateful 매치메이커 aoi 워커 엔진서버",
   m02:"모놀리스 한덩어리 모듈러 경계 장점 언제충분",
   m03:"msa 마이크로서비스 쪼개기 기준 바운디드컨텍스트 ddd db분리 분산모놀리스",
   m04:"api게이트웨이 gateway bff 인증 라우팅 kong spring cloud",
