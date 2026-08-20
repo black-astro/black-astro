@@ -1,0 +1,2016 @@
+<div class="pane" id="pane-co">
+
+<!-- ---------- HERO ---------- -->
+<header class="hero">
+  <div class="eyebrow"><i></i> SUSPEND · 구조적 동시성 · FLOW · 채널 · 취소</div>
+  <h1>코루틴은<br>“가벼운 스레드”가<br>아니다</h1>
+  <p class="tx">
+    코루틴을 스레드의 값싼 대체품으로만 이해하면 취소·예외·스코프에서 반드시 막힙니다.
+    본질은 <b>“함수를 중간에 멈췄다가 이어서 실행하는 능력”</b>과
+    <b>“작업의 수명을 트리로 묶는 규칙”</b> 두 가지입니다.
+    이 탭은 그 두 가지를 <b>컴파일 결과와 실행 순서까지</b> 보면서 익힙니다.
+  </p>
+  <div class="stats">
+    <div><b>20</b><span>SECTIONS</span></div>
+    <div><b>10만</b><span>동시 코루틴도 가능</span></div>
+    <div><b>0</b><span>콜백 중첩</span></div>
+    <div><b>1</b><span>취소 규칙 (협조적)</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== co01 ==================== -->
+<section class="sec" id="co01">
+  <div class="sec-head rv">
+    <span class="no">CORO 01</span>
+    <h2>왜 <span class="t">코루틴</span>인가</h2>
+    <p class="lead">
+      서버가 느려지는 가장 흔한 이유는 계산이 아니라 <b>기다림</b>입니다 — DB 응답, 외부 API, 파일.
+      스레드는 기다리는 동안 <b>통째로 묶여 있고</b>, 코루틴은 <b>그 자리를 비워 줍니다.</b>
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 254" role="img" aria-label="스레드 방식과 코루틴 방식을 비교한 그림. 스레드는 DB 응답을 기다리는 동안 스레드 전체가 대기 상태로 묶여 있어 동시 처리 수가 스레드 수로 제한되지만, 코루틴은 기다리는 동안 스레드를 반납해 같은 스레드가 다른 요청을 처리하고 응답이 오면 이어서 실행한다.">
+      <text x="16" y="18" class="lbl">같은 스레드 8개로 요청을 처리할 때 — 기다리는 시간에 무슨 일이 일어나나</text>
+
+      <text x="16" y="46" class="ttl rs-t">스레드 (블로킹)</text>
+      <rect class="bx" x="16" y="56" width="120" height="34"/>
+      <text x="76" y="78" class="val" text-anchor="middle">요청 도착</text>
+      <path class="fl ar" d="M140 73 L170 73"/>
+      <rect class="bx bx-warn" x="174" y="56" width="300" height="34"/>
+      <text x="324" y="78" class="val rs-t" text-anchor="middle">DB 응답 대기 — 스레드가 묶여 있다 (50ms)</text>
+      <path class="fl ar" d="M478 73 L508 73"/>
+      <rect class="bx" x="512" y="56" width="152" height="34"/>
+      <text x="588" y="78" class="val" text-anchor="middle">응답 반환</text>
+      <text x="16" y="108" class="ann rs-t">스레드 8개 = 동시 8건. 9번째 요청은 큐에서 대기 — 톰캣 스레드 고갈이 이것이다</text>
+
+      <path class="ln-t" d="M16 126 L664 126"/>
+
+      <text x="16" y="154" class="ttl ok-t">코루틴 (논블로킹)</text>
+      <rect class="bx bx-ok" x="16" y="164" width="120" height="34"/>
+      <text x="76" y="186" class="val ok-t" text-anchor="middle">요청 도착</text>
+      <path class="fl ar ar-gn" style="stroke:#34d399" d="M140 181 L170 181"/>
+      <rect class="bx bx-hi" x="174" y="164" width="140" height="34"/>
+      <text x="244" y="186" class="val am-t" text-anchor="middle">suspend — 반납</text>
+      <rect class="bx bx-mut" x="322" y="164" width="152" height="34"/>
+      <text x="398" y="186" class="ann" text-anchor="middle">그 스레드는 다른 요청 처리</text>
+      <path class="fl ar ar-gn" style="stroke:#34d399" d="M478 181 L508 181"/>
+      <rect class="bx bx-ok" x="512" y="164" width="152" height="34"/>
+      <text x="588" y="186" class="val ok-t" text-anchor="middle">재개 → 응답</text>
+      <text x="16" y="216" class="ann ok-t">스레드 8개로 동시 수천 건 — 기다리는 코루틴은 힙에 객체로만 남는다</text>
+      <text x="16" y="238" class="ann">코루틴 하나의 비용 ≈ 수백 바이트 · 스레드 하나 ≈ 1MB 스택</text>
+    </svg>
+    <div class="cap">핵심은 “빠르다”가 아니라 <b>기다리는 동안 스레드를 붙잡지 않는다</b>입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">콜백 지옥에서 나오는 길</h4>
+      <pre class="code" data-lang="kotlin"><code>// 콜백 — 세 단계만 되어도 읽기 어렵다
+fun loadProfile(id: Long, cb: (Profile?) -&gt; Unit) {
+    api.getUser(id) { user -&gt;
+        if (user == null) { cb(null); return@getUser }
+        api.getOrders(user.id) { orders -&gt;
+            api.getPoint(user.id) { point -&gt;
+                cb(Profile(user, orders, point))   // 에러 처리는 어디에?
+            }
+        }
+    }
+}
+
+// 코루틴 — 동기 코드처럼 읽힌다
+suspend fun loadProfile(id: Long): Profile {
+    val user = api.getUser(id) ?: error("사용자 없음")
+    val orders = api.getOrders(user.id)     // 여기서 '기다린다' (스레드는 안 묶임)
+    val point = api.getPoint(user.id)
+    return Profile(user, orders, point)
+}
+// try-catch 도 그냥 통한다. 취소도 자동으로 전파된다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다른 방식과의 비교</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:150px">방식</th><th>특징</th></tr>
+          <tr><td>스레드</td><td>직관적이지만 개수가 곧 한계. 컨텍스트 스위칭 비용</td></tr>
+          <tr><td>CompletableFuture</td><td>논블로킹이지만 <code>thenCompose</code> 체인이 길어지고 취소·예외가 어렵다</td></tr>
+          <tr><td>Reactor (WebFlux)</td><td>강력하지만 <b>연산자를 배워야</b> 하고 디버깅이 어렵다</td></tr>
+          <tr><td><b>코루틴</b></td><td>순차 코드 모양 유지 · 취소가 구조적 · 스택 트레이스가 읽힌다</td></tr>
+          <tr><td>가상 스레드(Java 21)</td><td>기존 블로킹 코드를 그대로 쓴다. 대신 <b>구조적 동시성·Flow가 없다</b></td></tr>
+        </table>
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>가상 스레드가 나왔는데 코루틴이 필요한가</b> — 필요합니다.
+        가상 스레드는 “블로킹을 싸게” 만들지만, 코루틴이 주는
+        <b>취소 전파 · 스코프 · Flow(백프레셔 있는 스트림)</b>는 대체하지 못합니다.
+        안드로이드에는 애초에 가상 스레드가 없습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="dep rv"><b>의존성</b> —
+    <code>implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")</code> ·
+    안드로이드는 <code>-android</code>, 스프링은 <code>-reactor</code>를 추가로 씁니다.</div>
+</section>
+
+
+<!-- ==================== co02 ==================== -->
+<section class="sec" id="co02">
+  <div class="sec-head rv">
+    <span class="no">CORO 02</span>
+    <h2><span class="t">suspend</span> 함수</h2>
+    <p class="lead">
+      <code>suspend</code>는 “이 함수는 <b>중간에 멈췄다가 이어서 실행될 수 있다</b>”는 표시입니다.
+      멈추는 동안 <b>스레드를 점유하지 않는 것</b>이 전부이고, 나머지는 컴파일러가 처리합니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// suspend 를 붙이면 세 가지가 달라진다
+suspend fun fetchUser(id: Long): User {
+    delay(100)                    // ① suspend 함수를 부를 수 있다
+    return api.get("/users/$id")  // ② 기다리는 동안 스레드를 반납한다
+}                                 // ③ 코루틴 안에서만 부를 수 있다
+
+fun main() {
+    // fetchUser(1)               // ❌ Suspend function should be called only from a coroutine body
+    runBlocking {                 // 코루틴을 시작하는 다리 (main 함수·테스트에서만)
+        val u = fetchUser(1)      // ✅
+        println(u)
+    }
+}
+
+// main 자체를 suspend 로 만들 수도 있다
+suspend fun main() {
+    println(fetchUser(1))
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">delay 와 Thread.sleep 의 차이</h4>
+      <pre class="code" data-lang="kotlin"><code>runBlocking {
+    val t = System.currentTimeMillis()
+    // 코루틴 10만 개가 1초씩 기다린다
+    val jobs = List(100_000) {
+        launch { delay(1000) }        // 스레드를 반납하고 대기
+    }
+    jobs.joinAll()
+    println("${System.currentTimeMillis() - t}ms")   // 약 1초대
+}
+
+// Thread.sleep(1000) 이었다면?
+// 스레드가 묶이므로 기본 디스패처의 스레드 수(=CPU 코어 수)만큼만 동시에 자고,
+// 나머지는 줄을 서서 기다린다 → 수십 초 이상 걸린다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>suspend 함수 안에서 블로킹 호출을 하면 이득이 통째로 사라집니다.</b>
+        JDBC·파일 IO·<code>Thread.sleep</code>은 <code>withContext(Dispatchers.IO)</code>로 감싸야 합니다
+        (<a href="#co17">17 · 블로킹 코드와 섞기</a>).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 “중단점(suspension point)”인가</h4>
+      <pre class="code" data-lang="kotlin"><code>suspend fun work() {
+    println("A")            // 여기까지 스레드 T1
+    delay(100)              // ← 중단점. 여기서 반납
+    println("B")            // 재개 — T1 이 아닐 수도 있다!
+    val x = fetch()         // ← 중단점 (suspend 함수 호출)
+    println("C $x")
+}
+
+// 중단점이 되는 것
+// · delay() · yield()
+// · 다른 suspend 함수 호출
+// · Channel.send/receive · Flow.collect
+// · Job.join() · Deferred.await() · Mutex.lock()
+
+// 중단점이 아닌 것 (그냥 실행된다)
+// · 일반 함수 호출 · 반복문 · 계산</code></pre>
+      <p class="tx" style="font-size:13.2px;margin-bottom:0">
+        <b>재개될 때 다른 스레드일 수 있다</b>는 점이 중요합니다 —
+        <code>ThreadLocal</code>에 담아 둔 값(MDC·시큐리티 컨텍스트)이 사라지는 원인입니다
+        (<a href="#co11">11 · 코루틴 컨텍스트</a>).
+      </p>
+    </div>
+  </div>
+
+  <h3 class="sub">suspend 함수를 만드는 원칙</h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:250px">원칙</th><th>이유</th></tr>
+      <tr><td><b>메인 세이프하게 만든다</b></td><td>어느 스레드에서 불러도 안전해야 한다 — 무거운 일은 함수 <b>안에서</b> <code>withContext</code>로 옮긴다</td></tr>
+      <tr><td>호출부에 스레드 전환을 요구하지 않는다</td><td><code>withContext(IO) { repo.find() }</code>를 호출부마다 쓰게 하면 실수가 난다</td></tr>
+      <tr><td>취소를 존중한다</td><td>긴 루프에는 <code>ensureActive()</code>를 넣는다 (<a href="#co07">07</a>)</td></tr>
+      <tr><td>결과를 돌려준다</td><td>콜백을 인자로 받지 않는다 — 그럴 거면 suspend 로 만든 의미가 없다</td></tr>
+      <tr><td><code>Deferred</code> 를 반환하지 않는다</td><td>공개 API 는 <code>suspend fun f(): T</code> 가 자연스럽다. 병렬은 호출부가 정한다</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// ❌ 호출부가 스레드를 신경 써야 한다
+suspend fun loadFile(path: String): String = File(path).readText()   // 블로킹!
+
+// ✅ 함수가 스스로 안전하다 (main-safe)
+suspend fun loadFile(path: String): String = withContext(Dispatchers.IO) {
+    File(path).readText()
+}
+
+// 호출부는 아무 데서나 편하게 부른다
+viewModelScope.launch {           // 안드로이드 메인 스레드
+    val text = loadFile(path)     // 알아서 IO 로 갔다 돌아온다
+    textView.text = text          // 다시 메인 스레드
+}</code></pre>
+</section>
+
+
+<!-- ==================== co03 ==================== -->
+<section class="sec" id="co03">
+  <div class="sec-head rv">
+    <span class="no">CORO 03</span>
+    <h2>코루틴 <span class="t">빌더</span> — launch · async · runBlocking</h2>
+    <p class="lead">
+      코루틴을 <b>시작하는</b> 함수들입니다. 넷만 알면 되고, <b>언제 어느 것을 쓰는지</b>가
+      실무에서 갈리는 지점입니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:150px">빌더</th><th style="width:130px">반환</th><th>쓰는 자리</th></tr>
+      <tr><td><code>launch</code></td><td>Job</td><td><b>결과가 필요 없는</b> 작업 시작 (발사 후 잊기)</td></tr>
+      <tr><td><code>async</code></td><td>Deferred&lt;T&gt;</td><td><b>결과가 필요한</b> 병렬 작업 — <code>await()</code>로 받는다</td></tr>
+      <tr><td><code>runBlocking</code></td><td>T</td><td><b>다리</b> — main 함수·테스트·레거시 진입점에서만</td></tr>
+      <tr><td><code>coroutineScope</code></td><td>T</td><td>suspend 함수 안에서 <b>자식들을 묶어 기다린다</b></td></tr>
+      <tr><td><code>withContext</code></td><td>T</td><td>스레드(디스패처)를 바꿔서 실행하고 결과를 받는다</td></tr>
+      <tr><td><code>supervisorScope</code></td><td>T</td><td>자식 하나가 실패해도 형제를 죽이지 않는다 (<a href="#co09">09</a>)</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>fun main() = runBlocking {          // ① 진입점: 코루틴 세계로 들어가는 다리
+    println("시작")
+
+    // ② launch — 결과가 필요 없다. 즉시 반환하고 백그라운드로 진행
+    val job = launch {
+        delay(500)
+        println("알림 전송 완료")
+    }
+
+    // ③ async — 결과를 받는다. 둘을 '동시에' 실행
+    val userDeferred = async { fetchUser(1) }       // 여기서 바로 시작된다
+    val ordersDeferred = async { fetchOrders(1) }
+    val user = userDeferred.await()                 // 여기서 기다린다
+    val orders = ordersDeferred.await()
+    println("${user.name}: ${orders.size}건")
+
+    job.join()                                       // launch 가 끝나기를 기다림
+    println("끝")
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">순차 vs 병렬 — 실행 시간이 갈린다</h4>
+      <pre class="code" data-lang="kotlin"><code>suspend fun a(): Int { delay(1000); return 1 }
+suspend fun b(): Int { delay(1000); return 2 }
+
+// 순차 — 2초
+suspend fun sequential(): Int {
+    val x = a()      // 1초 기다림
+    val y = b()      // 또 1초
+    return x + y
+}
+
+// 병렬 — 1초
+suspend fun parallel(): Int = coroutineScope {
+    val x = async { a() }      // 시작만 하고 넘어간다
+    val y = async { b() }
+    x.await() + y.await()
+}
+
+// ⚠️ 흔한 실수 — 이건 여전히 2초다
+suspend fun wrong(): Int = coroutineScope {
+    val x = async { a() }.await()   // 시작하자마자 기다린다
+    val y = async { b() }.await()
+    x + y
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">runBlocking — 쓰면 안 되는 자리</h4>
+      <pre class="code" data-lang="kotlin"><code>// ❌ 컨트롤러·서비스 안에서 runBlocking
+@GetMapping("/users/{id}")
+fun get(@PathVariable id: Long): User = runBlocking {   // 스레드를 묶어 버린다
+    service.find(id)
+}
+
+// ✅ 스프링에서는 컨트롤러 함수 자체를 suspend 로
+@GetMapping("/users/{id}")
+suspend fun get(@PathVariable id: Long): User = service.find(id)
+
+// runBlocking 이 맞는 자리
+// · fun main() = runBlocking { }
+// · 테스트 (지금은 runTest 가 더 낫다)
+// · 코루틴을 모르는 레거시 프레임워크와의 경계 (배치 잡 등)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>runBlocking</code>은 현재 스레드를 막습니다.</b>
+        웹 요청 처리 스레드에서 부르면 코루틴을 쓰는 의미가 완전히 사라집니다 —
+        오히려 스레드 풀이 더 빨리 고갈됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">시작 방식 — CoroutineStart</h3>
+  <pre class="code rv" data-lang="kotlin"><code>// 기본: DEFAULT — 즉시 스케줄된다
+val j1 = launch { work() }
+
+// LAZY — start() 나 await() 를 부를 때까지 시작하지 않는다
+val j2 = launch(start = CoroutineStart.LAZY) { work() }
+j2.start()
+
+// ATOMIC — 시작 전에는 취소되지 않는다 (자원 정리를 보장해야 할 때)
+val j3 = launch(start = CoroutineStart.ATOMIC) { openAndClose() }
+
+// UNDISPATCHED — 첫 중단점까지는 현재 스레드에서 즉시 실행
+val j4 = launch(start = CoroutineStart.UNDISPATCHED) { println("바로 찍힘") }</code></pre>
+</section>
+
+
+<!-- ==================== co04 ==================== -->
+<section class="sec" id="co04">
+  <div class="sec-head rv">
+    <span class="no">CORO 04</span>
+    <h2>구조적 <span class="t">동시성</span></h2>
+    <p class="lead">
+      코루틴의 진짜 발명품입니다. <b>모든 코루틴은 부모를 가지고</b>,
+      <b>부모는 자식이 다 끝날 때까지 끝나지 않으며</b>, <b>부모가 취소되면 자식도 전부 취소됩니다.</b>
+      “실행 중인지 아무도 모르는 작업”이 원천적으로 생기지 않습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 250" role="img" aria-label="구조적 동시성의 부모 자식 관계 그림. 스코프가 만든 부모 Job 아래 세 개의 자식 코루틴이 달려 있고, 부모는 모든 자식이 끝나야 완료된다. 부모가 취소되면 취소 신호가 모든 자식으로 내려가고, 자식 하나가 실패하면 부모를 통해 형제들도 취소된다.">
+      <text x="16" y="18" class="lbl">Job 트리 — 수명이 부모에 묶인다</text>
+
+      <rect class="bx bx-hi" x="252" y="34" width="176" height="42"/>
+      <text x="340" y="54" class="val am-t" text-anchor="middle">부모 Job (스코프)</text>
+      <text x="340" y="70" class="ann" text-anchor="middle">자식이 다 끝나야 완료</text>
+
+      <path class="ln ar" d="M290 80 L120 118"/>
+      <path class="ln ar" d="M340 80 L340 118"/>
+      <path class="ln ar" d="M390 80 L560 118"/>
+
+      <rect class="bx bx-ok" x="40" y="122" width="160" height="42"/>
+      <text x="120" y="142" class="val ok-t" text-anchor="middle">자식 1</text>
+      <text x="120" y="158" class="ann" text-anchor="middle">완료</text>
+
+      <rect class="bx bx-warn" x="260" y="122" width="160" height="42"/>
+      <text x="340" y="142" class="val rs-t" text-anchor="middle">자식 2 — 예외 발생</text>
+      <text x="340" y="158" class="ann" text-anchor="middle">부모로 전파</text>
+
+      <rect class="bx bx-mut" x="480" y="122" width="160" height="42"/>
+      <text x="560" y="142" class="val" text-anchor="middle">자식 3</text>
+      <text x="560" y="158" class="ann" text-anchor="middle">진행 중</text>
+
+      <path class="fl ar ar-rs" style="stroke:#fb7185" d="M340 118 L340 88"/>
+      <path class="fl ar ar-rs" style="stroke:#fb7185" d="M400 100 C 480 100 520 104 556 118"/>
+
+      <rect class="bx bx-warn" x="440" y="182" width="224" height="42"/>
+      <text x="552" y="202" class="val rs-t" text-anchor="middle">자식 3도 취소된다</text>
+      <text x="552" y="218" class="ann" text-anchor="middle">CancellationException</text>
+      <path class="ln ar" d="M560 164 L556 178"/>
+
+      <text x="16" y="196" class="ann">① 자식 2의 예외가 부모로 올라간다</text>
+      <text x="16" y="214" class="ann">② 부모가 나머지 자식을 전부 취소한다</text>
+      <text x="16" y="232" class="ann ok-t">③ 그래서 “아무도 모르게 살아남은 작업”이 없다 — 이것이 구조적 동시성</text>
+    </svg>
+    <div class="cap">형제를 죽이고 싶지 않다면 <b>supervisorScope</b>를 씁니다 — <a href="#co09">09 · 예외 처리</a>에서 다룹니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">coroutineScope — 다 끝나야 반환한다</h4>
+      <pre class="code" data-lang="kotlin"><code>suspend fun loadDashboard(): Dashboard = coroutineScope {
+    val users = async { userApi.count() }
+    val orders = async { orderApi.today() }
+    val alerts = async { alertApi.pending() }
+
+    // 셋이 모두 끝나야 이 줄이 실행된다
+    Dashboard(users.await(), orders.await(), alerts.await())
+}
+// 이 함수가 반환되는 순간 '이 안에서 시작한 코루틴은 하나도 남아 있지 않다'
+// 하나가 실패하면 나머지도 취소되고 예외가 위로 던져진다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 보장이 왜 중요한가</b> — 함수가 반환됐는데 백그라운드에서 작업이 계속 도는 상황이 없어집니다.
+        자원 정리·로그 순서·테스트 안정성이 전부 여기서 나옵니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Job — 코루틴의 손잡이</h4>
+      <pre class="code" data-lang="kotlin"><code>val job = scope.launch { work() }
+
+job.isActive       // 실행 중인가
+job.isCompleted    // 끝났는가 (성공·실패·취소 모두)
+job.isCancelled    // 취소됐는가
+job.cancel()       // 취소 요청
+job.join()         // 끝날 때까지 기다림 (suspend)
+job.cancelAndJoin()// 취소하고 정리까지 기다림
+
+job.invokeOnCompletion { cause -&gt;
+    if (cause != null) log.warn("실패/취소: $cause")
+    else log.info("정상 완료")
+}
+
+// 자식 목록도 볼 수 있다
+job.children.forEach { println(it) }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">GlobalScope — 왜 쓰지 말라고 하나</h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>GlobalScope — 부모가 없다</h5>
+      <pre class="code" data-lang="kotlin"><code>fun onButtonClick() {
+    GlobalScope.launch {         // ⚠️ @DelicateCoroutinesApi
+        val data = api.load()    // 화면이 닫혀도 계속 돈다
+        textView.text = data     // 💥 사라진 뷰에 접근
+    }
+}
+
+// 문제
+// · 취소할 방법이 없다 (누수)
+// · 예외가 어디로도 안 간다
+// · 테스트에서 끝날 때까지 기다릴 수 없다</code></pre>
+    </div>
+    <div class="good">
+      <h5>수명이 있는 스코프를 쓴다</h5>
+      <pre class="code" data-lang="kotlin"><code>// 안드로이드 — 화면이 사라지면 자동 취소
+viewModelScope.launch { load() }
+lifecycleScope.launch { load() }
+
+// 서버 — 컴포넌트 수명에 묶는다
+@Service
+class Worker : DisposableBean {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    fun start() = scope.launch { loop() }
+    override fun destroy() = scope.cancel()   // 종료 시 전부 취소
+}
+
+// suspend 함수 안에서는 coroutineScope 를 쓴다</code></pre>
+    </div>
+  </div>
+
+  <div class="note warn rv">
+    <b>예외적으로 GlobalScope 가 맞는 경우</b> — 애플리케이션 전체 수명과 같은
+    진짜 전역 작업(캐시 예열 · 백그라운드 로그 전송)뿐입니다.
+    그마저도 <b>이름 붙인 애플리케이션 스코프</b>를 하나 만들어 쓰는 편이 낫습니다 —
+    종료할 때 정리할 방법이 생기기 때문입니다.
+  </div>
+</section>
+
+
+<!-- ==================== co05 ==================== -->
+<section class="sec" id="co05">
+  <div class="sec-head rv">
+    <span class="no">CORO 05</span>
+    <h2>CoroutineScope · <span class="t">생명주기</span></h2>
+    <p class="lead">
+      스코프는 <b>“이 코루틴들이 언제 죽어야 하는가”</b>를 정하는 그릇입니다.
+      화면이 닫히면, 요청이 끝나면, 서버가 내려가면 — 그 시점에 스코프를 취소하면 전부 정리됩니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 스코프 = Job + 디스패처(+ 이름 · 예외 핸들러 …)
+val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("worker"))
+
+scope.launch { work1() }
+scope.launch { work2() }
+
+scope.cancel()          // 안에서 시작한 코루틴이 전부 취소된다
+
+// ⚠️ 한 번 cancel 한 스코프는 재사용할 수 없다 — 다시 만들어야 한다</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">플랫폼이 주는 스코프</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:170px">스코프</th><th>수명</th></tr>
+          <tr><td><code>viewModelScope</code></td><td>ViewModel 이 사라질 때 취소 (안드로이드 · <b>가장 많이 씀</b>)</td></tr>
+          <tr><td><code>lifecycleScope</code></td><td>액티비티·프래그먼트 파괴 시</td></tr>
+          <tr><td><code>rememberCoroutineScope()</code></td><td>Compose — 컴포저블이 화면을 떠날 때</td></tr>
+          <tr><td>스프링 <code>suspend</code> 컨트롤러</td><td>요청 하나 — 클라이언트가 끊으면 취소된다</td></tr>
+          <tr><td><code>runTest</code></td><td>테스트 하나</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>대부분의 앱 코드에서는 스코프를 직접 만들 일이 없습니다.</b>
+        플랫폼이 주는 스코프를 쓰거나, suspend 함수 안에서 <code>coroutineScope</code>를 쓰면 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 만들어야 할 때 — 서버 컴포넌트</h4>
+      <pre class="code" data-lang="kotlin"><code>@Component
+class OutboxPublisher(
+    private val repo: OutboxRepo,
+) : DisposableBean {
+
+    // SupervisorJob: 작업 하나가 실패해도 다른 작업이 죽지 않게
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineName("outbox")
+    )
+
+    @PostConstruct
+    fun start() {
+        scope.launch {
+            while (isActive) {                  // 취소되면 루프가 끝난다
+                runCatching { publishBatch() }
+                    .onFailure { log.error("발행 실패", it) }
+                delay(1000)
+            }
+        }
+    }
+
+    override fun destroy() {
+        scope.cancel()      // 애플리케이션 종료 시 정리
+    }
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="note warn rv">
+    <b>클래스가 <code>CoroutineScope</code>를 구현(<code>: CoroutineScope</code>)하는 방식은 권하지 않습니다.</b>
+    그 클래스의 모든 공개 메서드에서 <code>launch</code>가 보이게 되어, 밖에서 임의로 코루틴을 띄울 수 있습니다.
+    <b>스코프는 private 필드</b>로 갖는 편이 안전합니다.
+  </div>
+</section>
+
+
+<!-- ==================== co06 ==================== -->
+<section class="sec" id="co06">
+  <div class="sec-head rv">
+    <span class="no">CORO 06</span>
+    <h2><span class="t">디스패처</span> — 어느 스레드에서 돌 것인가</h2>
+    <p class="lead">
+      코루틴은 스레드가 아니지만 <b>결국 어떤 스레드 위에서</b> 돕니다.
+      그 스레드를 고르는 것이 디스패처이고, <b>잘못 고르면 성능이 통째로 무너집니다.</b>
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:190px">디스패처</th><th style="width:150px">스레드 수</th><th>쓰는 일</th></tr>
+      <tr><td><code>Dispatchers.Default</code></td><td>CPU 코어 수 (최소 2)</td><td><b>CPU 작업</b> — 정렬·파싱·이미지 처리·암호화</td></tr>
+      <tr><td><code>Dispatchers.IO</code></td><td>기본 64개까지 확장</td><td><b>블로킹 IO</b> — JDBC·파일·레거시 HTTP 클라이언트</td></tr>
+      <tr><td><code>Dispatchers.Main</code></td><td>1 (UI 스레드)</td><td>안드로이드 UI 갱신 (별도 의존성 필요)</td></tr>
+      <tr><td><code>Dispatchers.Unconfined</code></td><td>고정 없음</td><td>거의 쓰지 않는다 — 테스트·특수 상황</td></tr>
+      <tr><td><code>newFixedThreadPoolContext</code></td><td>지정</td><td>전용 풀이 필요할 때 (닫아 줘야 한다)</td></tr>
+      <tr><td><code>asCoroutineDispatcher()</code></td><td>—</td><td>기존 <code>ExecutorService</code>를 디스패처로 변환</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>suspend fun processImage(file: File): Result {
+    // ① 파일 읽기 — 블로킹 IO
+    val bytes = withContext(Dispatchers.IO) { file.readBytes() }
+
+    // ② 이미지 변환 — CPU
+    val resized = withContext(Dispatchers.Default) { resize(bytes) }
+
+    // ③ 업로드 — 논블로킹 HTTP 라면 디스패처를 안 바꿔도 된다
+    val url = uploadClient.put(resized)
+
+    return Result(url)
+}
+
+// withContext 는 '그 블록만' 스레드를 바꾸고 결과를 돌려준다.
+// 블록이 끝나면 원래 디스패처로 돌아온다.</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">IO 와 Default 는 스레드를 공유한다</h4>
+      <p class="tx" style="font-size:13.8px">
+        둘은 <b>같은 스레드 풀</b>을 쓰고 한도만 다릅니다.
+        그래서 <code>Default → IO</code> 전환은 <b>스레드 교체 없이</b> 일어나는 경우가 많아 비용이 작습니다.
+      </p>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// IO 한도를 늘리려면 (기본 64)
+// JVM 옵션: -Dkotlinx.coroutines.io.parallelism=200
+
+// 특정 작업만 동시 실행 수를 제한하고 싶을 때
+val limitedIo = Dispatchers.IO.limitedParallelism(10)
+withContext(limitedIo) { legacyJdbcCall() }
+// ↑ DB 커넥션 풀 크기에 맞추는 용도로 아주 유용하다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">잘못 고르면 생기는 일</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>Default 에서 블로킹 IO</b> — 코어 수만큼(예: 8개)만 스레드가 있으므로
+          <b>전체 CPU 작업이 함께 멈춥니다.</b> 가장 흔하고 치명적인 실수</li>
+        <li><b>IO 에서 무거운 CPU 작업</b> — 64개 스레드가 CPU를 두고 경쟁해
+          컨텍스트 스위칭만 늘어납니다</li>
+        <li><b>Main 에서 무거운 작업</b>(안드로이드) — 화면이 멈추고 ANR</li>
+        <li><b>디스패처를 계속 왕복</b> — 전환마다 스케줄링 비용.
+          한 번에 묶어서 <code>withContext</code>로 감싸세요</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>판단 기준 한 줄</b> — <b>“이 코드가 스레드를 붙잡고 있는가?”</b>
+    붙잡으면(JDBC · 파일 · <code>Thread.sleep</code> · 동기 HTTP) <b>IO</b>,
+    계산만 하면 <b>Default</b>, UI 를 만지면 <b>Main</b>입니다.
+  </div>
+</section>
+
+
+<!-- ==================== co07 ==================== -->
+<section class="sec" id="co07">
+  <div class="sec-head rv">
+    <span class="no">CORO 07</span>
+    <h2><span class="t">취소</span> — 협조적이다</h2>
+    <p class="lead">
+      코루틴 취소는 <b>강제 종료가 아닙니다.</b> “그만하라”는 표시를 남길 뿐이고,
+      <b>코루틴 쪽이 그것을 확인해 줘야</b> 실제로 멈춥니다. 이 성질을 모르면
+      “취소했는데 계속 도는” 상황을 만나게 됩니다.
+    </p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>취소가 안 되는 코드</h5>
+      <pre class="code" data-lang="kotlin"><code>val job = launch(Dispatchers.Default) {
+    var i = 0
+    while (i &lt; 1_000_000_000) {    // 중단점이 없다
+        i++                         // 계산만 한다
+    }
+    println("끝")
+}
+delay(10)
+job.cancelAndJoin()   // 요청은 갔지만…
+// 루프는 끝까지 돈다. 취소 상태를 아무도 확인하지 않기 때문</code></pre>
+    </div>
+    <div class="good">
+      <h5>취소를 확인하는 코드</h5>
+      <pre class="code" data-lang="kotlin"><code>val job = launch(Dispatchers.Default) {
+    var i = 0
+    while (i &lt; 1_000_000_000) {
+        ensureActive()        // 취소됐으면 여기서 예외를 던진다
+        i++
+    }
+}
+
+// 또는
+while (isActive) { /* ... */ }        // 조건으로 확인
+// 또는 중간에 yield() 를 넣는다 (다른 코루틴에 양보 + 취소 확인)</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">취소를 알아채는 세 가지 방법</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:150px">방법</th><th>동작</th></tr>
+          <tr><td><code>ensureActive()</code></td><td>취소됐으면 <code>CancellationException</code>을 던진다 (권장)</td></tr>
+          <tr><td><code>isActive</code></td><td>Boolean 검사 — 정리 후 정상 종료하고 싶을 때</td></tr>
+          <tr><td><code>yield()</code></td><td>양보 + 취소 확인. 계산 루프에 넣기 좋다</td></tr>
+          <tr><td>모든 <code>suspend</code> 함수</td><td><code>delay</code>·<code>await</code> 등은 <b>이미 취소를 확인</b>한다</td></tr>
+        </table>
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>kotlinx.coroutines 의 suspend 함수는 전부 취소를 확인합니다.</b>
+        그래서 IO 위주 코드는 <b>따로 신경 쓸 필요가 없습니다</b> —
+        문제가 되는 건 <b>중단점 없는 긴 계산 루프</b>뿐입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자원 정리 — finally 와 NonCancellable</h4>
+      <pre class="code" data-lang="kotlin"><code>val job = launch {
+    val conn = openConnection()
+    try {
+        while (isActive) { process(conn) }
+    } finally {
+        // ⚠️ 취소된 코루틴에서는 suspend 함수를 부를 수 없다
+        // conn.closeAsync()      // 즉시 CancellationException
+
+        withContext(NonCancellable) {   // 이 블록만 취소를 무시한다
+            conn.closeAsync()           // 정리는 반드시 끝내게
+        }
+    }
+}
+
+// use { } 도 그대로 통한다 (finally 기반)
+suspend fun read() = File("a.txt").bufferedReader().use { it.readText() }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">CancellationException — 잡으면 안 되는 예외</h3>
+  <pre class="code rv" data-lang="kotlin"><code>// ❌ 취소를 삼켜 버린다 — 취소가 먹지 않는 코드가 된다
+launch {
+    try {
+        delay(1000)
+    } catch (e: Exception) {          // CancellationException 도 여기 걸린다
+        log.error("에러", e)          // 취소인데 에러로 기록되고, 아래로 계속 진행
+    }
+}
+
+// ✅ 취소는 다시 던진다
+launch {
+    try {
+        delay(1000)
+    } catch (e: CancellationException) {
+        throw e                        // 반드시 다시 던진다
+    } catch (e: Exception) {
+        log.error("진짜 에러", e)
+    }
+}
+
+// runCatching 도 같은 문제가 있다 (17장·runCatching 주의 참고)
+// coroutineContext.ensureActive() 를 catch 안에서 부르는 방법도 쓴다</code></pre>
+
+  <div class="note warn rv">
+    <b>실전에서 이 실수는 매우 흔합니다.</b> 안드로이드에서 “화면을 나갔는데 네트워크 호출이 계속되는”
+    현상, 서버에서 “클라이언트가 끊었는데 쿼리가 계속 도는” 현상의 대부분이
+    <b><code>catch (e: Exception)</code>로 취소를 삼킨 것</b>입니다.
+    detekt 의 <code>SwallowedException</code>·<code>TooGenericExceptionCaught</code> 규칙으로 잡을 수 있습니다.
+  </div>
+</section>
+
+
+<!-- ==================== co08 ==================== -->
+<section class="sec" id="co08">
+  <div class="sec-head rv">
+    <span class="no">CORO 08</span>
+    <h2><span class="t">타임아웃</span> · 재시도</h2>
+    <p class="lead">
+      외부 시스템을 부르는 코드에 타임아웃이 없으면 <b>장애가 그대로 전파</b>됩니다.
+      코루틴은 타임아웃을 <b>취소로 구현</b>하기 때문에, 시간이 지나면 진짜로 작업이 멈춥니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 시간이 지나면 TimeoutCancellationException 을 던진다
+val result = withTimeout(3.seconds) {
+    api.slowCall()
+}
+
+// 예외 대신 null 을 받는다 — 실무에서 더 자주 쓴다
+val result2: Data? = withTimeoutOrNull(3.seconds) {
+    api.slowCall()
+}
+val data = result2 ?: fallbackData()
+
+// 여러 단계에 예산을 나눠 준다 (타임아웃 예산 배분)
+suspend fun handle(): Response = withTimeout(5.seconds) {   // 전체 예산
+    val user = withTimeout(1.seconds) { userApi.get() }     // 단계별 예산
+    val items = withTimeout(2.seconds) { itemApi.list() }
+    Response(user, items)
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">재시도 — 지수 백오프</h4>
+      <pre class="code" data-lang="kotlin"><code>suspend fun &lt;T&gt; retry(
+    times: Int = 3,
+    initialDelay: Duration = 200.milliseconds,
+    maxDelay: Duration = 5.seconds,
+    factor: Double = 2.0,
+    retryOn: (Throwable) -&gt; Boolean = { it is IOException },
+    block: suspend () -&gt; T,
+): T {
+    var delayTime = initialDelay
+    repeat(times - 1) {
+        try {
+            return block()
+        } catch (e: CancellationException) {
+            throw e                          // 취소는 재시도하지 않는다
+        } catch (e: Throwable) {
+            if (!retryOn(e)) throw e         // 재시도해도 소용없는 에러는 즉시 던진다
+            log.warn("재시도 예정 {}ms: {}", delayTime, e.message)
+        }
+        delay(delayTime)
+        delayTime = (delayTime * factor).coerceAtMost(maxDelay)
+    }
+    return block()                           // 마지막 시도는 예외를 그대로 전파
+}
+
+// 사용
+val user = retry(times = 3) { api.getUser(id) }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">주의할 점</h4>
+      <ul class="tx">
+        <li><b>타임아웃은 취소로 동작합니다</b> — 블록 안에 중단점이 없으면
+          시간이 지나도 안 멈춥니다(07 참고)</li>
+        <li><b><code>withTimeout</code>의 예외는 <code>CancellationException</code>의 자식</b>입니다.
+          바깥에서 <code>catch (e: Exception)</code>으로 잡으면 취소와 구분되지 않습니다</li>
+        <li><b>재시도에 지터(무작위 흔들림)를 넣으세요</b> —
+          모든 클라이언트가 같은 간격으로 재시도하면 <b>동시에 다시 몰립니다</b></li>
+        <li>결제·주문처럼 <b>부작용이 있는 호출</b>은 재시도 전에
+          <b>멱등키</b>가 있는지 확인해야 합니다</li>
+      </ul>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// 지터 추가
+val jitter = Random.nextLong(0, delayTime.inWholeMilliseconds / 2)
+delay(delayTime.inWholeMilliseconds + jitter)</code></pre>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>서버라면 서킷 브레이커까지</b> — 재시도만 넣으면 장애 시 트래픽이 오히려 늘어납니다.
+    실패율이 높아지면 아예 호출을 끊는 서킷 브레이커(resilience4j)와 함께 써야 합니다 —
+    <b>대규모 트래픽 탭</b>에서 코루틴과 함께 쓰는 방법을 다룹니다.
+  </div>
+</section>
+
+
+<!-- ==================== co09 ==================== -->
+<section class="sec" id="co09">
+  <div class="sec-head rv">
+    <span class="no">CORO 09</span>
+    <h2>예외 <span class="t">처리</span></h2>
+    <p class="lead">
+      코루틴에서 예외는 <b>부모로 올라가면서 형제를 취소</b>합니다.
+      이 규칙과 <b><code>launch</code>·<code>async</code>의 차이</b>를 모르면
+      “예외가 안 잡힌다” 또는 “왜 다른 작업까지 죽었지”를 겪습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="Job과 SupervisorJob의 예외 전파 차이를 비교한 그림. 일반 Job에서는 자식의 예외가 부모로 올라가 형제 코루틴까지 모두 취소되지만, SupervisorJob에서는 실패가 위로 올라가지 않아 형제가 계속 실행된다.">
+      <text x="16" y="18" class="lbl">Job vs SupervisorJob — 자식 하나가 실패했을 때</text>
+
+      <text x="16" y="46" class="ttl rs-t">Job (기본)</text>
+      <rect class="bx" x="120" y="30" width="150" height="34"/>
+      <text x="195" y="52" class="val" text-anchor="middle">부모</text>
+      <path class="ln ar" d="M160 68 L120 92"/>
+      <path class="ln ar" d="M230 68 L270 92"/>
+      <rect class="bx bx-warn" x="40" y="96" width="150" height="34"/>
+      <text x="115" y="118" class="val rs-t" text-anchor="middle">자식 A 실패 💥</text>
+      <rect class="bx bx-warn" x="210" y="96" width="150" height="34"/>
+      <text x="285" y="118" class="val rs-t" text-anchor="middle">자식 B — 취소됨</text>
+      <path class="fl ar ar-rs" style="stroke:#fb7185" d="M150 92 L185 68"/>
+      <path class="fl ar ar-rs" style="stroke:#fb7185" d="M215 62 C 250 62 270 76 282 90"/>
+      <text x="16" y="152" class="ann rs-t">실패가 위로 → 부모가 나머지를 전부 취소 → 부모도 실패</text>
+
+      <path class="ln-t" d="M380 24 L380 220"/>
+
+      <text x="400" y="46" class="ttl ok-t">SupervisorJob</text>
+      <rect class="bx bx-ok" x="490" y="30" width="150" height="34"/>
+      <text x="565" y="52" class="val ok-t" text-anchor="middle">감독 부모</text>
+      <path class="ln ar" d="M530 68 L490 92"/>
+      <path class="ln ar" d="M600 68 L640 92"/>
+      <rect class="bx bx-warn" x="404" y="96" width="150" height="34"/>
+      <text x="479" y="118" class="val rs-t" text-anchor="middle">자식 A 실패 💥</text>
+      <rect class="bx bx-ok" x="576" y="96" width="88" height="34"/>
+      <text x="620" y="118" class="val ok-t" text-anchor="middle">자식 B ✅</text>
+      <text x="400" y="152" class="ann ok-t">실패가 위로 가지 않는다 → 형제는 계속 실행</text>
+      <text x="400" y="170" class="ann">대신 A 의 예외는 누군가 처리해야 한다 (핸들러 · try-catch)</text>
+
+      <rect class="bx bx-hi" x="16" y="186" width="648" height="34"/>
+      <text x="340" y="208" class="ann am-t" text-anchor="middle">화면 여러 개를 동시에 불러올 때처럼 “하나가 실패해도 나머지는 보여 줘야” 하면 supervisorScope</text>
+    </svg>
+    <div class="cap"><code>supervisorScope</code>는 <b>부분 실패를 허용</b>하는 자리에 씁니다 — 대시보드·목록 화면이 대표적입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">launch — 예외가 즉시 위로 간다</h4>
+      <pre class="code" data-lang="kotlin"><code>// 예외는 launch 블록 '안'에서 잡아야 한다
+scope.launch {
+    try {
+        risky()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        log.error("실패", e)
+    }
+}
+
+// ❌ 이렇게는 못 잡는다 — launch 는 즉시 반환하기 때문
+try {
+    scope.launch { risky() }
+} catch (e: Exception) { }      // 절대 안 걸린다
+
+// 스코프 전체의 최후 방어선
+val handler = CoroutineExceptionHandler { ctx, e -&gt;
+    log.error("처리되지 않은 예외 [${ctx[CoroutineName]}]", e)
+}
+val scope = CoroutineScope(SupervisorJob() + handler)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">async — await 할 때 던져진다</h4>
+      <pre class="code" data-lang="kotlin"><code>val deferred = scope.async { risky() }   // 여기서는 안 터진다
+
+try {
+    deferred.await()                      // 여기서 던져진다
+} catch (e: Exception) {
+    log.error("실패", e)
+}
+
+// ⚠️ 함정 — async 의 예외는 '부모에게도' 전파된다
+// await 를 감싸도 부모 스코프가 취소될 수 있다
+coroutineScope {
+    val a = async { error("실패") }
+    try { a.await() } catch (e: Exception) { }   // 잡았지만
+    delay(100)                                    // 여기서 이미 취소되어 있다
+}
+
+// 부분 실패를 허용하려면 supervisorScope 안에서 async 를 쓴다
+supervisorScope {
+    val a = async { error("실패") }
+    val b = async { ok() }
+    val ra = runCatching { a.await() }.getOrNull()   // null
+    val rb = b.await()                               // 정상
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">실전 — 부분 실패를 허용하는 대시보드</h3>
+  <pre class="code rv" data-lang="kotlin"><code>data class Dashboard(val user: User?, val orders: List&lt;Order&gt;, val ads: List&lt;Ad&gt;)
+
+suspend fun loadDashboard(id: Long): Dashboard = supervisorScope {
+    // 필수 데이터 — 실패하면 전체 실패가 맞다
+    val userD = async { userApi.get(id) }
+
+    // 부가 데이터 — 실패해도 화면은 떠야 한다
+    val ordersD = async { orderApi.list(id) }
+    val adsD = async { adApi.list() }
+
+    Dashboard(
+        user = userD.await(),                                   // 실패 시 예외 전파
+        orders = runCatching { ordersD.await() }.getOrDefault(emptyList()),
+        ads = runCatching { adsD.await() }
+            .onFailure { log.warn("광고 로딩 실패", it) }
+            .getOrDefault(emptyList()),
+    )
+}</code></pre>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:220px">규칙</th><th>내용</th></tr>
+      <tr><td>launch 의 예외</td><td>즉시 부모로 전파 → 형제 취소 → 최상위 핸들러</td></tr>
+      <tr><td>async 의 예외</td><td><code>await()</code> 시점에 던져짐 + <b>부모에게도 전파</b></td></tr>
+      <tr><td>CancellationException</td><td>특별 취급 — 부모로 전파되지 않고 정상 취소로 처리</td></tr>
+      <tr><td>CoroutineExceptionHandler</td><td><b>최상위 코루틴에만</b> 동작. 자식에 달면 무시된다</td></tr>
+      <tr><td>supervisorScope</td><td>자식 실패가 위로 안 감. 단 <b>스코프 자체가 실패하면</b> 자식은 취소</td></tr>
+      <tr><td>try-catch</td><td>가장 확실하다 — <b>코루틴 블록 안에서</b> 감싸기</td></tr>
+    </table>
+  </div>
+</section>
+
+
+<!-- ==================== co10 ==================== -->
+<section class="sec" id="co10">
+  <div class="sec-head rv">
+    <span class="no">CORO 10</span>
+    <h2>병렬 <span class="t">패턴</span> — async 활용</h2>
+    <p class="lead">
+      실무에서 코루틴으로 얻는 가장 즉각적인 이득은 <b>N개의 외부 호출을 동시에</b> 보내는 것입니다.
+      응답 시간이 <b>합계에서 최댓값으로</b> 바뀝니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 1) 고정된 개수 병렬
+suspend fun profile(id: Long): Profile = coroutineScope {
+    val user = async { userApi.get(id) }
+    val orders = async { orderApi.list(id) }
+    val point = async { pointApi.get(id) }
+    Profile(user.await(), orders.await(), point.await())
+}
+
+// 2) 목록을 병렬 처리 — map + async + awaitAll
+suspend fun fetchAll(ids: List&lt;Long&gt;): List&lt;User&gt; = coroutineScope {
+    ids.map { id -&gt; async { userApi.get(id) } }.awaitAll()
+}
+
+// 3) 동시 실행 수 제한 — Semaphore (외부 API 가 429 를 주는 경우 필수)
+suspend fun fetchLimited(ids: List&lt;Long&gt;, concurrency: Int = 10): List&lt;User&gt; = coroutineScope {
+    val sem = Semaphore(concurrency)
+    ids.map { id -&gt;
+        async { sem.withPermit { userApi.get(id) } }
+    }.awaitAll()
+}
+
+// 4) 청크 단위로 나눠 처리 — 순서·부하를 함께 통제
+suspend fun fetchChunked(ids: List&lt;Long&gt;): List&lt;User&gt; =
+    ids.chunked(100).flatMap { chunk -&gt;
+        coroutineScope { chunk.map { async { userApi.get(it) } }.awaitAll() }
+    }
+
+// 5) 가장 먼저 오는 하나만 — select
+suspend fun fastest(): String = coroutineScope {
+    val a = async { mirrorA.fetch() }
+    val b = async { mirrorB.fetch() }
+    select {
+        a.onAwait { it.also { b.cancel() } }
+        b.onAwait { it.also { a.cancel() } }
+    }
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">부분 실패를 담아 돌려주기</h4>
+      <pre class="code" data-lang="kotlin"><code>suspend fun fetchAllSafe(ids: List&lt;Long&gt;): Map&lt;Long, Result&lt;User&gt;&gt; =
+    supervisorScope {
+        ids.associateWith { id -&gt;
+            async {
+                runCatching { userApi.get(id) }
+            }
+        }.mapValues { (_, d) -&gt; d.await() }
+    }
+
+val results = fetchAllSafe(ids)
+val ok = results.values.mapNotNull { it.getOrNull() }
+val failed = results.filterValues { it.isFailure }.keys
+log.warn("실패한 id: {}", failed)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">병렬로 만들면 안 되는 것</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>DB 커넥션을 쓰는 작업</b> — 커넥션 풀 크기를 넘는 동시 실행은
+          풀 고갈로 이어집니다. <code>limitedParallelism</code>이나 세마포어로 제한하세요</li>
+        <li><b>순서가 있는 작업</b> — 재고 차감 후 결제처럼 <b>앞이 성공해야 뒤가 의미 있는</b> 흐름</li>
+        <li><b>같은 트랜잭션 안</b> — 스프링 트랜잭션은 스레드에 묶여 있어
+          다른 코루틴으로 넘어가면 <b>같은 트랜잭션이 아닙니다</b>
+          (자세한 내용은 <b>Spring Boot 탭</b>)</li>
+        <li><b>상대 API 의 rate limit 을 넘는 호출</b> — 병렬로 보내면 429 폭탄</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>체감 효과</b> — 외부 API 3개를 각각 200ms에 부르던 화면이 <b>600ms → 200ms</b>가 됩니다.
+    코루틴 도입 초기에 가장 먼저 얻는 성과이고, 코드 변경량도 작습니다
+    (<code>coroutineScope { async … await }</code>로 감싸는 정도).
+  </div>
+</section>
+
+
+<!-- ==================== co11 ==================== -->
+<section class="sec" id="co11">
+  <div class="sec-head rv">
+    <span class="no">CORO 11</span>
+    <h2>코루틴 <span class="t">컨텍스트</span> — 값 전파</h2>
+    <p class="lead">
+      코루틴은 실행 중 <b>스레드가 바뀔 수 있습니다.</b> 그래서 <code>ThreadLocal</code>에 담아 둔
+      traceId·사용자 정보가 사라집니다. 코루틴에는 그 자리를 대신하는 <b>컨텍스트</b>가 있습니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// CoroutineContext = 요소들의 집합 (Map 과 비슷하고 + 로 합친다)
+val ctx = Dispatchers.IO + CoroutineName("worker") + SupervisorJob() + exceptionHandler
+
+launch(ctx) {
+    println(coroutineContext[CoroutineName]?.name)     // worker
+    println(coroutineContext[Job])                     // 현재 Job
+    println(Thread.currentThread().name)               // DefaultDispatcher-worker-1
+
+    // 자식은 부모 컨텍스트를 상속하고 필요한 것만 덮어쓴다
+    launch(Dispatchers.Default) {
+        println(coroutineContext[CoroutineName]?.name) // worker (그대로 상속)
+    }
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 만드는 컨텍스트 요소</h4>
+      <pre class="code" data-lang="kotlin"><code>// 요청 단위 정보를 코루틴 전체에 흘려보낸다
+data class RequestContext(val traceId: String, val userId: Long?) :
+    AbstractCoroutineContextElement(Key) {
+    companion object Key : CoroutineContext.Key&lt;RequestContext&gt;
+}
+
+// 심는 쪽
+suspend fun handle(req: Request) = withContext(RequestContext(req.traceId, req.userId)) {
+    service.process()
+}
+
+// 읽는 쪽 — 어디서든
+suspend fun currentTraceId(): String? =
+    coroutineContext[RequestContext]?.traceId
+
+suspend fun audit(action: String) {
+    log.info("[{}] {} by {}", currentTraceId(), action, coroutineContext[RequestContext]?.userId)
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ThreadLocal 을 코루틴으로 잇기</h4>
+      <pre class="code" data-lang="kotlin"><code>// MDC(로그 컨텍스트)를 코루틴에 따라다니게 만든다
+// implementation("org.jetbrains.kotlinx:kotlinx-coroutines-slf4j")
+
+withContext(MDCContext()) {          // 현재 MDC 를 코루틴 컨텍스트로 복사
+    log.info("여기서도 traceId 가 찍힌다")
+    launch { log.info("자식에서도 유지") }
+}
+
+// 일반 ThreadLocal 도 이을 수 있다
+val userThreadLocal = ThreadLocal&lt;String&gt;()
+launch(userThreadLocal.asContextElement("김현우")) {
+    println(userThreadLocal.get())   // 김현우
+    delay(100)                        // 스레드가 바뀌어도
+    println(userThreadLocal.get())   // 김현우 — 재개할 때 다시 심어 준다
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>스프링 시큐리티 컨텍스트도 같은 문제를 겪습니다.</b>
+        <code>SecurityContextHolder</code>가 ThreadLocal 기반이라
+        코루틴 안에서 사라집니다 — <b>Spring Boot 탭</b>에서 해결 방법을 다룹니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="note info rv">
+    <b>디버깅 팁</b> — JVM 옵션 <code>-Dkotlinx.coroutines.debug</code>를 켜면
+    스레드 이름 뒤에 <code>@coroutine#3</code> 같은 식별자가 붙습니다.
+    <code>CoroutineName("주문처리")</code>를 함께 주면 로그에서
+    <b>어느 코루틴의 로그인지</b>가 바로 보입니다. 운영 진단에서 큰 차이를 만듭니다.
+  </div>
+</section>
+
+
+<!-- ==================== co12 ==================== -->
+<section class="sec" id="co12">
+  <div class="sec-head rv">
+    <span class="no">CORO 12</span>
+    <h2><span class="t">Flow</span> 기초 — 여러 값을 시간에 걸쳐</h2>
+    <p class="lead">
+      <code>suspend</code> 함수는 <b>값을 하나</b> 돌려줍니다. <code>Flow</code>는
+      <b>값을 여러 개, 시간을 두고</b> 흘려보냅니다 —
+      DB 커서, 서버 이벤트, 사용자 입력, 센서 값이 전부 이 모양입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">만들기</h4>
+      <pre class="code" data-lang="kotlin"><code>// flow 빌더 — 가장 기본
+val f1: Flow&lt;Int&gt; = flow {
+    for (i in 1..3) {
+        delay(100)         // suspend 가 된다 (Sequence 와의 결정적 차이)
+        emit(i)            // 값을 흘려보낸다
+    }
+}
+
+// 이미 있는 값에서
+val f2 = flowOf(1, 2, 3)
+val f3 = listOf(1, 2, 3).asFlow()
+
+// 콜백 API 를 Flow 로 감싸기 (안드로이드·소켓에서 매우 자주 쓴다)
+fun locationFlow(): Flow&lt;Location&gt; = callbackFlow {
+    val listener = LocationListener { loc -&gt; trySend(loc) }
+    manager.register(listener)
+    awaitClose { manager.unregister(listener) }   // 수집이 끝나면 정리
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">수집하기 — collect 하기 전엔 아무 일도 없다</h4>
+      <pre class="code" data-lang="kotlin"><code>val nums = flow {
+    println("시작")            // collect 할 때 실행된다
+    emit(1); emit(2)
+}
+
+println("아직 아무 일 없음")
+
+runBlocking {
+    nums.collect { println("받음: $it") }   // 여기서 비로소 실행
+}
+
+// 수집 방법들
+nums.toList()                        // 전부 모아서 리스트로
+nums.first()                          // 첫 값만 (그 뒤 취소)
+nums.single()                         // 딱 하나여야 한다
+nums.collect { }                      // 하나씩 처리
+nums.onEach { log(it) }.collect()     // 중간 처리 후 수집
+
+// 코루틴 스코프에서 백그라운드 수집
+scope.launch { nums.collect { update(it) } }
+// 또는 축약형
+nums.onEach { update(it) }.launchIn(scope)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">Cold vs Hot — 가장 중요한 구분</h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 224" role="img" aria-label="콜드 플로우와 핫 플로우의 차이 그림. 콜드 플로우는 수집자마다 별도로 실행되어 각자 처음부터 값을 받고, 핫 플로우는 하나의 흐름을 여러 수집자가 함께 보며 늦게 들어온 수집자는 그 시점 이후의 값만 받는다.">
+      <text x="16" y="18" class="lbl">Cold(flow)와 Hot(StateFlow · SharedFlow)의 차이 — 수집자가 둘일 때</text>
+
+      <text x="16" y="46" class="ttl cy-t">Cold — flow { }</text>
+      <rect class="bx" x="150" y="30" width="130" height="34"/>
+      <text x="215" y="52" class="val" text-anchor="middle">수집자 A</text>
+      <path class="fl ar" d="M284 47 L318 47"/>
+      <rect class="bx bx-ok" x="322" y="30" width="180" height="34"/>
+      <text x="412" y="52" class="val ok-t" text-anchor="middle">A 전용 실행 1,2,3</text>
+
+      <rect class="bx" x="150" y="72" width="130" height="34"/>
+      <text x="215" y="94" class="val" text-anchor="middle">수집자 B</text>
+      <path class="fl ar" d="M284 89 L318 89"/>
+      <rect class="bx bx-ok" x="322" y="72" width="180" height="34"/>
+      <text x="412" y="94" class="val ok-t" text-anchor="middle">B 전용 실행 1,2,3</text>
+      <text x="516" y="76" class="ann">각자 처음부터</text>
+      <text x="516" y="94" class="ann">DB 쿼리도 두 번</text>
+
+      <path class="ln-t" d="M16 122 L664 122"/>
+
+      <text x="16" y="150" class="ttl am-t">Hot — SharedFlow</text>
+      <rect class="bx bx-hi" x="150" y="134" width="180" height="34"/>
+      <text x="240" y="156" class="val am-t" text-anchor="middle">하나의 흐름 1,2,3…</text>
+      <path class="fl ar ar-am" style="stroke:#fbbf24" d="M334 151 C 368 151 372 156 396 168"/>
+      <path class="fl ar ar-am" style="stroke:#fbbf24" d="M334 151 C 368 151 372 176 396 194"/>
+      <rect class="bx" x="400" y="152" width="150" height="32"/>
+      <text x="475" y="173" class="val" text-anchor="middle">수집자 A — 1,2,3</text>
+      <rect class="bx bx-mut" x="400" y="188" width="264" height="32"/>
+      <text x="532" y="209" class="val" text-anchor="middle">늦게 붙은 B — 3부터 (앞은 못 봄)</text>
+      <text x="16" y="176" class="ann">생산은 한 번, 여럿이 나눠 본다</text>
+      <text x="16" y="196" class="ann">수집자가 없어도 흐른다</text>
+    </svg>
+    <div class="cap"><b>데이터를 만들어 오는 흐름은 Cold</b>(API·DB), <b>상태·이벤트를 알리는 흐름은 Hot</b>(UI 상태·알림)입니다.</div>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// Cold 의 성질 — 수집할 때마다 처음부터 다시 실행된다
+val users: Flow&lt;User&gt; = flow {
+    println("DB 조회 실행")
+    repo.findAll().forEach { emit(it) }
+}
+
+users.collect { }     // "DB 조회 실행"
+users.collect { }     // "DB 조회 실행"  ← 또 실행된다
+
+// 결과를 공유하고 싶으면 Hot 으로 바꾼다
+val shared = users.shareIn(scope, SharingStarted.WhileSubscribed(5000), replay = 1)
+
+// suspend 함수와 Flow 중 무엇을 반환할까
+// · 값이 하나 · 끝이 있다      → suspend fun f(): T
+// · 값이 여럿 · 계속 온다      → fun f(): Flow&lt;T&gt;
+// · 목록이지만 한 번에 다 온다 → suspend fun f(): List&lt;T&gt;  (Flow 로 만들 필요 없다)</code></pre>
+</section>
+
+
+<!-- ==================== co13 ==================== -->
+<section class="sec" id="co13">
+  <div class="sec-head rv">
+    <span class="no">CORO 13</span>
+    <h2>Flow <span class="t">연산자</span></h2>
+    <p class="lead">
+      컬렉션과 이름이 같은 것이 많지만 <b>결정적 차이</b>가 있습니다 —
+      Flow 연산자 안에서는 <b><code>suspend</code> 함수를 부를 수 있습니다.</b>
+      map 안에서 DB를 조회하고 API를 호출할 수 있다는 뜻입니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>flow.map { it * 2 }                      // 변환 (안에서 suspend 가능)
+    .filter { it &gt; 10 }                  // 거르기
+    .transform { emit(it); emit(it * 2) } // 하나를 여러 개로
+    .take(5)                              // 앞에서 n 개 (그 뒤 취소)
+    .drop(2)
+    .distinctUntilChanged()               // 연속 중복 제거 (상태 흐름에서 필수)
+    .onEach { log.debug("값 {}", it) }    // 곁다리 처리
+    .onStart { emit(0) }                  // 시작할 때 (로딩 상태 방출)
+    .onCompletion { e -&gt; log.info("완료 {}", e) }
+    .catch { e -&gt; emit(fallback) }        // 위쪽 예외를 잡는다
+    .flowOn(Dispatchers.IO)               // 위쪽 연산을 IO 에서 실행
+    .collect { render(it) }</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">flatMap 삼형제 — 이름이 곧 동작</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:170px">연산자</th><th>동작</th></tr>
+          <tr><td><code>flatMapConcat</code></td><td>앞 것이 <b>끝나야</b> 다음 것 시작 (순서 보장)</td></tr>
+          <tr><td><code>flatMapMerge</code></td><td><b>동시에</b> 실행하고 오는 대로 방출 (순서 없음)</td></tr>
+          <tr><td><code>flatMapLatest</code></td><td>새 값이 오면 <b>이전 것을 취소</b> — 검색어 자동완성의 정답</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// 검색어가 바뀌면 이전 요청을 버린다
+searchQueryFlow
+    .debounce(300)                       // 입력이 멎고 300ms 뒤
+    .filter { it.length &gt;= 2 }
+    .distinctUntilChanged()
+    .flatMapLatest { q -&gt; api.search(q) } // 이전 검색은 취소
+    .catch { emit(emptyList()) }
+    .collect { showResults(it) }
+
+// 이 다섯 줄이 '입력 debounce + 중복 제거 + 이전 요청 취소'를 전부 처리한다.
+// 콜백으로 짜면 상태 변수가 세 개는 필요하다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">여러 Flow 합치기</h4>
+      <pre class="code" data-lang="kotlin"><code>// combine — 어느 쪽이든 바뀌면 최신값끼리 합친다 (UI 상태 조합의 기본)
+combine(userFlow, settingsFlow) { user, settings -&gt;
+    ScreenState(user, settings)
+}.collect { render(it) }
+
+// zip — 양쪽에서 하나씩 짝을 맞춘다 (개수가 맞아야 한다)
+flowA.zip(flowB) { a, b -&gt; a to b }
+
+// merge — 두 흐름을 그냥 하나로 섞는다
+merge(clickFlow, keyFlow).collect { handle(it) }
+
+// 실전: 목록 + 검색어 + 필터를 합쳐 화면 상태 만들기
+combine(items, query, filter) { list, q, f -&gt;
+    list.filter { q in it.name &amp;&amp; f.matches(it) }
+}.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">백프레셔 — 생산이 소비보다 빠를 때</h3>
+  <pre class="code rv" data-lang="kotlin"><code>// 기본은 '순차'다 — emit 이 collect 를 기다린다 (자연스러운 백프레셔)
+flow {
+    repeat(3) { emit(it); println("보냄 $it") }
+}.collect { delay(1000); println("처리 $it") }
+// 보냄0 처리0 보냄1 처리1 … (총 3초)
+
+// buffer — 생산과 소비를 분리해 겹쳐 돌린다
+    .buffer(capacity = 64)              // 총 1초대로 줄어든다
+
+// conflate — 처리 중에 온 값은 버리고 '최신값만' (UI 갱신에 적합)
+    .conflate()
+
+// collectLatest — 새 값이 오면 이전 처리를 취소하고 다시 시작
+    .collectLatest { render(it) }
+
+// 넘칠 때 정책을 고르기
+    .buffer(64, onBufferOverflow = BufferOverflow.DROP_OLDEST)</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">flowOn — 위쪽만 스레드를 바꾼다</h4>
+      <pre class="code" data-lang="kotlin"><code>flow { emit(repo.heavyQuery()) }    // ← IO 에서 실행
+    .map { transform(it) }          // ← IO 에서 실행
+    .flowOn(Dispatchers.IO)         // 여기부터 '위쪽'에 적용
+    .collect { updateUi(it) }       // ← 수집자의 컨텍스트 (Main)
+
+// ⚠️ collect 안에서 withContext 로 바꾸지 마세요 — 컨텍스트 보존 규칙 위반
+// flow { withContext(IO) { emit(x) } }  → IllegalStateException
+// 반드시 flowOn 을 쓴다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">예외 처리 — catch 는 위쪽만 잡는다</h4>
+      <pre class="code" data-lang="kotlin"><code>flow { emit(risky()) }
+    .catch { e -&gt; emit(fallback) }     // 위쪽(flow·map) 예외만 잡는다
+    .collect { render(it) }             // ← 여기 예외는 못 잡는다
+
+// collect 의 예외까지 잡으려면 try-catch 로 감싼다
+try {
+    f.collect { render(it) }
+} catch (e: Exception) { }
+
+// 재시도도 연산자로
+flow { emit(api.get()) }
+    .retry(3) { e -&gt; e is IOException }        // 조건부 재시도
+    .retryWhen { cause, attempt -&gt;
+        delay(1000L * (attempt + 1)); attempt &lt; 3
+    }</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== co14 ==================== -->
+<section class="sec" id="co14">
+  <div class="sec-head rv">
+    <span class="no">CORO 14</span>
+    <h2>StateFlow · <span class="t">SharedFlow</span></h2>
+    <p class="lead">
+      화면 상태와 일회성 이벤트를 다루는 표준 도구입니다.
+      안드로이드 MVVM의 뼈대이고, 서버에서도 <b>실시간 브로드캐스트</b>에 씁니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:160px">타입</th><th style="width:130px">성격</th><th>쓰는 자리</th></tr>
+      <tr><td><code>StateFlow</code></td><td>Hot · 값 1개 유지</td><td><b>상태</b> — 화면에 보이는 현재 값 (항상 값이 있다)</td></tr>
+      <tr><td><code>SharedFlow</code></td><td>Hot · replay 설정</td><td><b>이벤트</b> — 토스트·화면 이동처럼 한 번만 처리할 것</td></tr>
+      <tr><td><code>Channel</code></td><td>Hot · 1:1 소비</td><td>한 수신자만 받아야 하는 작업 큐 (<a href="#co15">15</a>)</td></tr>
+      <tr><td><code>flow { }</code></td><td>Cold</td><td>요청할 때마다 새로 만들어지는 데이터 흐름</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">StateFlow — 화면 상태</h4>
+      <pre class="code" data-lang="kotlin"><code>class UserViewModel(private val repo: UserRepo) : ViewModel() {
+
+    // 쓰기는 안에서만, 읽기는 밖에서
+    private val _state = MutableStateFlow&lt;UiState&gt;(UiState.Loading)
+    val state: StateFlow&lt;UiState&gt; = _state.asStateFlow()
+
+    fun load(id: Long) {
+        viewModelScope.launch {
+            _state.value = UiState.Loading
+            _state.value = runCatching { repo.find(id) }
+                .fold(
+                    onSuccess = { UiState.Success(it) },
+                    onFailure = { UiState.Error(it.message ?: "오류") },
+                )
+        }
+    }
+
+    // 상태 갱신은 update 로 (원자적)
+    fun toggleFavorite() = _state.update { s -&gt;
+        if (s is UiState.Success) s.copy(user = s.user.copy(fav = !s.user.fav)) else s
+    }
+}
+
+// 성질
+// · 항상 값이 있다 (초기값 필수)
+// · 같은 값을 넣으면 방출하지 않는다 (distinctUntilChanged 내장)
+// · 늦게 구독해도 '현재 값'을 즉시 받는다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SharedFlow — 일회성 이벤트</h4>
+      <pre class="code" data-lang="kotlin"><code>class OrderViewModel : ViewModel() {
+    // replay = 0 : 늦게 온 구독자는 지난 이벤트를 못 본다 (이벤트에 맞는 성질)
+    private val _events = MutableSharedFlow&lt;Event&gt;(
+        replay = 0,
+        extraBufferCapacity = 8,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val events: SharedFlow&lt;Event&gt; = _events.asSharedFlow()
+
+    fun submit() = viewModelScope.launch {
+        runCatching { repo.submit() }
+            .onSuccess { _events.emit(Event.NavigateToDone(it.id)) }
+            .onFailure { _events.emit(Event.ShowToast("실패: ${it.message}")) }
+    }
+}
+
+// ⚠️ StateFlow 로 이벤트를 다루면 화면 회전 때 토스트가 다시 뜬다
+//    (마지막 값을 다시 받기 때문) — 이벤트는 SharedFlow 나 Channel 로</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">Cold → Hot 바꾸기 — stateIn · shareIn</h3>
+  <pre class="code rv" data-lang="kotlin"><code>class FeedViewModel(repo: FeedRepo) : ViewModel() {
+
+    // DB Flow(cold)를 화면 상태(hot)로 바꾼다
+    val feed: StateFlow&lt;List&lt;Post&gt;&gt; = repo.observeFeed()      // Flow&lt;List&lt;Post&gt;&gt;
+        .map { it.sortedByDescending(Post::createdAt) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),   // 구독자 0이면 5초 뒤 정지
+            initialValue = emptyList(),
+        )
+}
+
+// SharingStarted 세 가지
+// · Eagerly            : 즉시 시작, 스코프가 끝날 때까지 유지
+// · Lazily             : 첫 구독자가 오면 시작, 이후 계속 유지
+// · WhileSubscribed(t) : 구독자가 있을 때만 — 화면 회전(짧은 재구독)을 견디게 t=5000 을 쓴다 ★</code></pre>
+
+  <div class="note tip rv">
+    <b>서버에서도 씁니다</b> — 실시간 알림·시세 브로드캐스트를 <code>MutableSharedFlow</code>로 두고
+    각 WebSocket 세션이 구독하는 구조가 흔합니다. Redis Pub/Sub 을 <code>SharedFlow</code>로 감싸면
+    <b>여러 서버 인스턴스</b>로도 확장됩니다 — <b>대규모 트래픽 탭</b>에서 다룹니다.
+  </div>
+</section>
+
+
+<!-- ==================== co15 ==================== -->
+<section class="sec" id="co15">
+  <div class="sec-head rv">
+    <span class="no">CORO 15</span>
+    <h2><span class="t">채널</span> — 코루틴 사이의 파이프</h2>
+    <p class="lead">
+      Flow가 “한 흐름을 여럿이 본다”면, Channel은 <b>“보낸 값을 하나가 가져간다”</b>입니다.
+      작업 큐, 생산자-소비자, 워커 풀이 전형적인 쓰임입니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>val channel = Channel&lt;Task&gt;(capacity = 100)
+
+// 생산자
+launch {
+    repeat(1000) { channel.send(Task(it)) }    // 버퍼가 차면 여기서 대기 (백프레셔)
+    channel.close()                             // 끝났음을 알린다
+}
+
+// 소비자 여럿 — 하나의 작업은 한 명만 가져간다 (팬아웃)
+repeat(4) { worker -&gt;
+    launch {
+        for (task in channel) {                 // 채널이 닫히면 루프가 끝난다
+            process(task)
+        }
+        println("워커 $worker 종료")
+    }
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버퍼 종류</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:170px">capacity</th><th>동작</th></tr>
+          <tr><td><code>RENDEZVOUS</code>(0, 기본)</td><td>받는 사람이 있어야 보낼 수 있다 — 가장 엄격한 백프레셔</td></tr>
+          <tr><td>숫자 (예: 100)</td><td>버퍼가 찰 때까지 논블로킹, 차면 <code>send</code>가 대기</td></tr>
+          <tr><td><code>UNLIMITED</code></td><td>무한 버퍼 — <b>메모리 폭발 위험</b>, 신중히</td></tr>
+          <tr><td><code>CONFLATED</code></td><td>최신값만 유지 (이전 값 버림)</td></tr>
+          <tr><td><code>BUFFERED</code></td><td>기본 64</td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>채널은 반드시 닫아야 합니다.</b> 닫지 않으면 소비자의 <code>for</code> 루프가
+        영원히 대기해 코루틴이 누수됩니다. <code>produce { }</code> 빌더를 쓰면
+        <b>블록이 끝날 때 자동으로 닫힙니다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">produce · actor · select</h4>
+      <pre class="code" data-lang="kotlin"><code>// produce — 채널을 만들면서 생산 코루틴을 함께 시작 (자동 close)
+fun CoroutineScope.pages(): ReceiveChannel&lt;Page&gt; = produce {
+    var cursor: String? = null
+    do {
+        val page = api.list(cursor)
+        send(page)
+        cursor = page.next
+    } while (cursor != null)
+}
+
+// 상태를 한 코루틴에 가두는 액터 패턴 — 락 없이 동시성 해결
+sealed interface Msg
+data class Add(val n: Int) : Msg
+data class Get(val reply: CompletableDeferred&lt;Int&gt;) : Msg
+
+fun CoroutineScope.counter() = actor&lt;Msg&gt; {      // 실험적 API
+    var sum = 0
+    for (msg in channel) when (msg) {
+        is Add -&gt; sum += msg.n
+        is Get -&gt; msg.reply.complete(sum)
+    }
+}
+
+// select — 여러 채널 중 먼저 준비된 것 처리
+select&lt;Unit&gt; {
+    ch1.onReceive { handle(it) }
+    ch2.onReceive { handle(it) }
+    onTimeout(1000) { println("둘 다 조용함") }
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="note info rv">
+    <b>Channel 과 Flow 중 무엇을 쓸까</b> —
+    <b>“하나가 가져가야 하면 Channel, 여럿이 봐야 하면 SharedFlow”</b>입니다.
+    작업 분배·워커 풀은 Channel, 상태·알림 브로드캐스트는 Flow가 맞습니다.
+    외부에 노출하는 API 는 대개 <code>Flow</code>로 감싸는 편이 안전합니다
+    (<code>receiveAsFlow()</code> · <code>consumeAsFlow()</code>).
+  </div>
+</section>
+
+
+<!-- ==================== co16 ==================== -->
+<section class="sec" id="co16">
+  <div class="sec-head rv">
+    <span class="no">CORO 16</span>
+    <h2>공유 상태 · <span class="t">동기화</span></h2>
+    <p class="lead">
+      코루틴도 <b>여러 스레드에서 돕니다.</b> <code>var count++</code>는 여전히 위험합니다.
+      다만 코루틴에서는 <b>락 대신 다른 선택지</b>가 먼저입니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// ❌ 문제 — 100_000 이 안 나온다
+var counter = 0
+coroutineScope {
+    repeat(100_000) { launch(Dispatchers.Default) { counter++ } }
+}
+println(counter)     // 매번 다른 값
+
+// ✅ ① 원자 타입 — 가장 가볍다
+val atomic = AtomicInteger()
+atomic.incrementAndGet()
+
+// ✅ ② Mutex — 코루틴용 락 (블로킹하지 않는다)
+val mutex = Mutex()
+var shared = 0
+mutex.withLock { shared++ }
+
+// ✅ ③ 단일 스레드에 가둔다 — 락이 아예 없다
+val single = Dispatchers.Default.limitedParallelism(1)
+withContext(single) { shared++ }
+
+// ✅ ④ 애초에 공유하지 않는다 — 각자 계산하고 마지막에 합친다 (가장 좋다)
+val total = (1..100).map { async { compute(it) } }.awaitAll().sum()</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Mutex — synchronized 를 쓰면 안 되는 이유</h4>
+      <pre class="code" data-lang="kotlin"><code>// ❌ synchronized 블록 안에서는 suspend 함수를 부를 수 없다
+// synchronized(lock) { delay(100) }   // 컴파일 에러
+
+// 그리고 synchronized 는 '스레드'를 막는다 —
+// 코루틴이 스레드를 반납하지 못해 코루틴의 이점이 사라진다
+
+// ✅ Mutex 는 코루틴을 '중단'시킬 뿐 스레드는 놓아 준다
+val mutex = Mutex()
+suspend fun transfer(from: Account, to: Account, amount: Long) {
+    mutex.withLock {
+        from.balance -= amount
+        to.balance += amount
+        repo.saveAll(from, to)      // suspend 호출도 가능
+    }
+}
+
+// ⚠️ Mutex 는 재진입(reentrant)이 아니다 — 중첩해서 잠그면 데드락</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Semaphore — 동시 실행 수 제한</h4>
+      <pre class="code" data-lang="kotlin"><code>// 외부 API 를 동시에 10개까지만
+val sem = Semaphore(10)
+
+suspend fun callApi(id: Long): Response =
+    sem.withPermit { httpClient.get("/items/$id") }
+
+// DB 커넥션 풀 크기에 맞추기
+val dbSem = Semaphore(20)      // 풀 크기와 동일하게
+suspend fun query(sql: String) = dbSem.withPermit {
+    withContext(Dispatchers.IO) { jdbc.query(sql) }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무에서 가장 자주 쓰는 동기화 도구가 Semaphore 입니다.</b>
+        “동시에 몇 개까지”라는 제약이 외부 API·DB·파일 시스템 어디에나 있기 때문입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn rv">
+    <b>단일 스레드 디스패처는 만병통치약이 아닙니다.</b>
+    <code>limitedParallelism(1)</code>로 가두면 락은 없어지지만 <b>처리량이 1로 제한</b>됩니다.
+    상태 갱신이 아주 짧을 때만 이득이고, 그 안에서 <b>IO 를 하면 전체가 줄을 섭니다.</b>
+  </div>
+</section>
+
+
+<!-- ==================== co17 ==================== -->
+<section class="sec" id="co17">
+  <div class="sec-head rv">
+    <span class="no">CORO 17</span>
+    <h2>블로킹 코드와 <span class="t">섞기</span></h2>
+    <p class="lead">
+      현실의 코드베이스에는 JDBC·레거시 SDK·콜백 API가 섞여 있습니다.
+      코루틴은 이들을 <b>버리지 않고 감싸서</b> 쓸 수 있게 설계돼 있습니다 — 그 경계 만드는 법입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 블로킹 함수 감싸기</h4>
+      <pre class="code" data-lang="kotlin"><code>// JDBC · 파일 · 동기 HTTP — 전부 IO 디스패처로
+suspend fun findUser(id: Long): User? = withContext(Dispatchers.IO) {
+    jdbcTemplate.queryForObject(SQL, User::class.java, id)
+}
+
+// 커넥션 풀 크기를 넘지 않게 제한하면 더 좋다
+private val dbDispatcher = Dispatchers.IO.limitedParallelism(20)
+suspend fun findAll(): List&lt;User&gt; = withContext(dbDispatcher) {
+    jdbcTemplate.query(SQL, rowMapper)
+}
+
+// 취소를 지원하려면 인터럽트를 연결해 준다
+suspend fun longQuery(): List&lt;Row&gt; = withContext(Dispatchers.IO) {
+    runInterruptible { jdbc.query(HEAVY_SQL) }   // 취소 시 스레드 인터럽트
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 콜백 API → suspend</h4>
+      <pre class="code" data-lang="kotlin"><code>// 레거시 SDK 가 콜백을 준다면
+suspend fun getLocation(): Location = suspendCancellableCoroutine { cont -&gt;
+    val callback = object : LocationCallback {
+        override fun onSuccess(loc: Location) = cont.resume(loc)
+        override fun onError(e: Throwable) = cont.resumeWithException(e)
+    }
+    manager.requestLocation(callback)
+
+    // 코루틴이 취소되면 요청도 취소한다 — 이 줄이 핵심이다
+    cont.invokeOnCancellation { manager.cancelRequest(callback) }
+}
+
+// OkHttp 예시
+suspend fun Call.await(): Response = suspendCancellableCoroutine { cont -&gt;
+    enqueue(object : Callback {
+        override fun onResponse(call: Call, res: Response) = cont.resume(res)
+        override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)
+    })
+    cont.invokeOnCancellation { cancel() }
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ Future · Reactor 와 상호 변환</h4>
+      <pre class="code" data-lang="kotlin"><code>// CompletableFuture → suspend
+// implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8")
+val result = someFuture.await()
+
+// suspend → CompletableFuture (자바 호출자에게 줄 때)
+fun getUserAsync(id: Long): CompletableFuture&lt;User&gt; =
+    scope.future { getUser(id) }
+
+// Reactor(Mono/Flux) ↔ 코루틴
+// implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
+val user: User = userMono.awaitSingle()
+val userOrNull: User? = userMono.awaitSingleOrNull()
+val users: Flow&lt;User&gt; = userFlux.asFlow()
+val mono: Mono&lt;User&gt; = mono { getUser(id) }
+val flux: Flux&lt;User&gt; = flow.asFlux()
+
+// RxJava 도 같은 방식 (-rx3 모듈)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">경계는 얇게 — 실무 구조</h4>
+      <div class="layer">
+        <div class="lrow l-web"><span class="tagn">API</span>
+          <div><b>suspend 컨트롤러</b><span>요청 하나가 코루틴 하나</span></div></div>
+        <div class="larrow">▼</div>
+        <div class="lrow l-svc"><span class="tagn">SERVICE</span>
+          <div><b>suspend 함수로 조합</b><span>coroutineScope · async 병렬</span></div></div>
+        <div class="larrow">▼</div>
+        <div class="lrow l-repo"><span class="tagn">ADAPTER</span>
+          <div><b>여기서만 withContext(IO)</b><span>블로킹 SDK 를 감싸는 얇은 층</span></div></div>
+        <div class="larrow">▼</div>
+        <div class="lrow l-db"><span class="tagn">LEGACY</span>
+          <div><b>JDBC · 콜백 SDK</b><span>고치지 않는다</span></div></div>
+      </div>
+      <p class="tx" style="font-size:13.4px;margin-bottom:0">
+        <b>블로킹은 가장 아래층에 가둡니다.</b> 위로 올라올수록 suspend 만 보이게 하면,
+        나중에 논블로킹 드라이버(R2DBC)로 바꿔도 <b>위층 코드는 그대로</b>입니다.
+      </p>
+    </div>
+  </div>
+
+  <div class="note warn rv">
+    <b>가상 스레드와 함께 쓸 때</b> — JDK 21+ 에서는
+    <code>Executors.newVirtualThreadPerTaskExecutor().asCoroutineDispatcher()</code>로
+    블로킹 작업용 디스패처를 만들 수 있습니다. 스레드 수 제한이 사실상 사라지지만,
+    <b>DB 커넥션 풀은 여전히 유한</b>하므로 <b>동시 실행 제한은 반드시 남겨</b> 두세요.
+  </div>
+</section>
+
+
+<!-- ==================== co18 ==================== -->
+<section class="sec" id="co18">
+  <div class="sec-head rv">
+    <span class="no">CORO 18</span>
+    <h2>코루틴 <span class="t">테스트</span></h2>
+    <p class="lead">
+      코루틴 테스트의 핵심은 <b>가상 시간</b>입니다. <code>delay(10.minutes)</code>가 있어도
+      테스트는 <b>즉시</b> 끝납니다 — 시간을 실제로 기다리지 않고 앞으로 감기 때문입니다.
+    </p>
+  </div>
+
+  <div class="dep rv"><b>의존성</b> —
+    <code>testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")</code> ·
+    Flow 테스트에는 <code>app.cash.turbine:turbine</code>이 편합니다.</div>
+
+  <pre class="code rv" data-lang="kotlin"><code>@Test
+fun `재시도는 3번까지 한다`() = runTest {        // ← runBlocking 대신 runTest
+    var calls = 0
+    val result = retry(times = 3, initialDelay = 1.seconds) {
+        calls++
+        if (calls &lt; 3) throw IOException("실패") else "성공"
+    }
+    assertEquals("성공", result)
+    assertEquals(3, calls)
+    // delay 가 총 3초였지만 테스트는 수 ms 만에 끝난다 (가상 시간)
+}
+
+@Test
+fun `가상 시간을 직접 제어`() = runTest {
+    val job = launch {
+        delay(1000); println("1초 뒤")
+        delay(1000); println("2초 뒤")
+    }
+    advanceTimeBy(1000)      // 1초 앞으로
+    runCurrent()             // 지금 실행 가능한 것 실행
+    advanceUntilIdle()       // 할 일이 없어질 때까지 전부 진행
+    assertTrue(job.isCompleted)
+    println(currentTime)     // 가상 시계 값
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">디스패처 주입 — 테스트 가능한 설계</h4>
+      <pre class="code" data-lang="kotlin"><code>// ❌ 하드코딩하면 테스트에서 제어할 수 없다
+class Repo {
+    suspend fun load() = withContext(Dispatchers.IO) { /* ... */ }
+}
+
+// ✅ 주입한다
+class Repo(private val io: CoroutineDispatcher = Dispatchers.IO) {
+    suspend fun load() = withContext(io) { /* ... */ }
+}
+
+@Test
+fun test() = runTest {
+    val repo = Repo(StandardTestDispatcher(testScheduler))   // 가상 시간 공유
+    // ...
+}
+
+// 안드로이드 ViewModel — Main 디스패처 교체
+@Before fun setUp() = Dispatchers.setMain(StandardTestDispatcher())
+@After fun tearDown() = Dispatchers.resetMain()</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Flow 테스트 — Turbine</h4>
+      <pre class="code" data-lang="kotlin"><code>@Test
+fun `상태가 로딩에서 성공으로 바뀐다`() = runTest {
+    val vm = UserViewModel(fakeRepo)
+
+    vm.state.test {                       // Turbine
+        assertEquals(UiState.Loading, awaitItem())
+        vm.load(1)
+        val success = awaitItem()
+        assertTrue(success is UiState.Success)
+        cancelAndIgnoreRemainingEvents()
+    }
+}
+
+// Turbine 없이도 가능하지만 장황하다
+@Test
+fun withoutTurbine() = runTest {
+    val values = mutableListOf&lt;UiState&gt;()
+    val job = launch(UnconfinedTestDispatcher()) { vm.state.toList(values) }
+    vm.load(1)
+    advanceUntilIdle()
+    assertEquals(2, values.size)
+    job.cancel()
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:230px">도구</th><th>쓰임</th></tr>
+      <tr><td><code>runTest { }</code></td><td>코루틴 테스트의 진입점 — 가상 시간 + 자동 대기</td></tr>
+      <tr><td><code>StandardTestDispatcher</code></td><td>기본 — 명시적으로 <code>advanceUntilIdle()</code> 해야 진행</td></tr>
+      <tr><td><code>UnconfinedTestDispatcher</code></td><td>즉시 실행 — 순서를 신경 쓰지 않을 때 편하다</td></tr>
+      <tr><td><code>advanceTimeBy</code> / <code>advanceUntilIdle</code></td><td>가상 시계 조작</td></tr>
+      <tr><td><code>backgroundScope</code></td><td>테스트가 끝나면 자동 취소되는 스코프 (무한 수집에 필수)</td></tr>
+      <tr><td><code>Turbine</code></td><td>Flow 방출을 순서대로 검증</td></tr>
+    </table>
+  </div>
+
+  <div class="note tip rv">
+    <b>가장 흔한 테스트 실패 원인</b> — <code>StateFlow</code>를 <code>collect</code>하는 코루틴은
+    <b>끝나지 않습니다.</b> <code>runTest</code>가 그것을 기다리다 타임아웃이 납니다.
+    <b><code>backgroundScope.launch { flow.collect { } }</code></b>를 쓰거나 Turbine 을 쓰세요.
+  </div>
+</section>
+
+
+<!-- ==================== co19 ==================== -->
+<section class="sec" id="co19">
+  <div class="sec-head rv">
+    <span class="no">CORO 19</span>
+    <h2>내부 동작 — <span class="t">CPS와 상태 기계</span></h2>
+    <p class="lead">
+      <code>suspend</code>는 마법이 아닙니다. 컴파일러가 함수를 <b>상태 기계로 다시 씁니다.</b>
+      이 변환을 이해하면 <b>스레드가 바뀌는 이유</b>, <b>스택 트레이스가 잘리는 이유</b>,
+      <b>Continuation 이 무엇인지</b>가 한 번에 풀립니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 244" role="img" aria-label="suspend 함수가 상태 기계로 변환되는 과정 그림. 원본 함수는 세 구간으로 나뉘고, 각 중단점에서 현재 상태 번호와 지역 변수를 Continuation 객체에 저장한 뒤 스레드를 반납한다. 재개될 때 저장된 상태 번호로 점프해 다음 구간부터 실행한다.">
+      <text x="16" y="18" class="lbl">suspend 함수 → 상태 기계 — 중단점마다 라벨이 생긴다</text>
+
+      <rect class="bx" x="16" y="34" width="200" height="106"/>
+      <text x="116" y="54" class="ttl" text-anchor="middle">원본 코드</text>
+      <text x="30" y="76" class="ann">val a = load()   ← 중단점</text>
+      <text x="30" y="96" class="ann">val b = calc(a)  ← 중단점</text>
+      <text x="30" y="116" class="ann">return a + b</text>
+
+      <path class="fl ar" d="M220 87 L254 87"/>
+      <text x="237" y="76" class="ann cy-t" text-anchor="middle">컴파일</text>
+
+      <rect class="bx bx-hi" x="258" y="34" width="406" height="106"/>
+      <text x="461" y="54" class="ttl am-t" text-anchor="middle">switch (continuation.label)</text>
+      <text x="272" y="76" class="ann">case 0: label=1; load(cont) → 반납</text>
+      <text x="272" y="96" class="ann">case 1: a=결과 복원; label=2; calc(cont) → 반납</text>
+      <text x="272" y="116" class="ann">case 2: b=결과 복원; return a+b</text>
+
+      <rect class="bx bx-ok" x="16" y="158" width="304" height="70"/>
+      <text x="168" y="180" class="val ok-t" text-anchor="middle">Continuation 객체 (힙)</text>
+      <text x="30" y="200" class="ann">label = 현재 어디까지 실행했나</text>
+      <text x="30" y="218" class="ann">지역 변수 a, b 를 필드로 보관</text>
+
+      <path class="fl ar" d="M324 193 L358 193"/>
+
+      <rect class="bx" x="362" y="158" width="302" height="70"/>
+      <text x="513" y="180" class="val" text-anchor="middle">그래서 이런 일이 가능하다</text>
+      <text x="376" y="200" class="ann">· 스레드를 반납해도 상태가 남는다</text>
+      <text x="376" y="218" class="ann">· 재개할 때 다른 스레드여도 이어서 실행된다</text>
+    </svg>
+    <div class="cap">코루틴의 “상태”는 스레드 스택이 아니라 <b>힙의 Continuation 객체</b>에 있습니다 — 그래서 가볍습니다.</div>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 내가 쓴 코드
+suspend fun getUser(id: Long): User
+
+// 컴파일된 시그니처 (자바에서 본 모습)
+// Object getUser(long id, Continuation&lt;? super User&gt; $completion)
+//
+// ① suspend 함수에는 Continuation 인자가 하나 몰래 붙는다 (CPS 변환)
+// ② 반환 타입이 Object 인 이유 — 값을 바로 못 주면 COROUTINE_SUSPENDED 를 돌려준다
+// ③ 자바에서 suspend 함수를 부르기 어려운 이유가 이것이다
+
+// Continuation 인터페이스는 이게 전부다
+public interface Continuation&lt;in T&gt; {
+    val context: CoroutineContext
+    fun resumeWith(result: Result&lt;T&gt;)     // 결과를 들고 '이어서 실행해'
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 확인해 보기</h4>
+      <pre class="code" data-lang="text"><code>IntelliJ → Tools → Kotlin → Show Kotlin Bytecode → [Decompile]
+
+suspend 함수를 하나 만들고 디컴파일하면
+  · ContinuationImpl 을 상속한 익명 클래스
+  · switch (this.label) 로 시작하는 거대한 메서드
+  · 지역 변수가 필드(L$0, L$1)로 저장되는 코드
+가 그대로 보입니다.
+
+"코루틴이 왜 스레드보다 가벼운가"의 답이 여기 있습니다 —
+스택 1MB 대신 필드 몇 개짜리 객체 하나면 되기 때문입니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이 변환이 설명해 주는 것들</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>재개 후 스레드가 바뀔 수 있다</b> — 스택이 아니라 힙에 상태가 있으니 어느 스레드든 이어받을 수 있습니다</li>
+        <li><b>ThreadLocal 이 사라진다</b> — 위와 같은 이유</li>
+        <li><b>스택 트레이스가 짧다</b> — 호출 스택이 아니라 상태 기계 점프이기 때문.
+          <code>-Dkotlinx.coroutines.debug</code>를 켜면 코루틴 경로가 복원됩니다</li>
+        <li><b>suspend 함수는 자바에서 부르기 어렵다</b> — Continuation 을 직접 만들어야 합니다.
+          자바용 API 는 <code>CompletableFuture</code>로 감싸 제공하세요</li>
+        <li><b>inline 함수 안의 suspend 는 비용이 없다</b> — 상태 기계가 호출 자리에 합쳐집니다</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note info rv">
+    <b>더 깊은 이야기</b>는 <b>전문가 탭</b>에서 다룹니다 —
+    디스패처의 작업 훔치기(work-stealing) 스케줄러, <code>DispatchedTask</code>의 실행 경로,
+    <code>suspendCoroutineUninterceptedOrReturn</code> 같은 저수준 API, 그리고
+    코루틴 성능을 측정하는 방법까지.
+  </div>
+</section>
+
+
+<!-- ==================== co20 ==================== -->
+<section class="sec" id="co20">
+  <div class="sec-head rv">
+    <span class="no">CORO 20</span>
+    <h2>실전 <span class="t">체크리스트</span></h2>
+    <p class="lead">
+      코드 리뷰와 장애 회고에서 반복적으로 나오는 항목들입니다.
+      이 목록만 지켜도 코루틴 관련 사고의 대부분이 예방됩니다.
+    </p>
+  </div>
+
+  <h3 class="sub">하지 말아야 할 것</h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:290px">안티패턴</th><th>왜 · 무엇을 대신</th></tr>
+      <tr><td><code>GlobalScope.launch</code></td><td>취소 불가 · 누수 → 수명 있는 스코프 (<a href="#co04">04</a>)</td></tr>
+      <tr><td>요청 처리 중 <code>runBlocking</code></td><td>스레드를 막아 이점 소멸 → <code>suspend</code> 컨트롤러 (<a href="#co03">03</a>)</td></tr>
+      <tr><td><code>catch (e: Exception)</code>로 취소 삼킴</td><td>취소가 안 먹는다 → <code>CancellationException</code> 재던지기 (<a href="#co07">07</a>)</td></tr>
+      <tr><td><code>Dispatchers.Default</code>에서 블로킹 IO</td><td>CPU 풀 고갈 → <code>IO</code> 또는 <code>limitedParallelism</code> (<a href="#co06">06</a>)</td></tr>
+      <tr><td>이벤트를 <code>StateFlow</code>로</td><td>화면 회전 시 재실행 → <code>SharedFlow</code>·<code>Channel</code> (<a href="#co14">14</a>)</td></tr>
+      <tr><td><code>async</code> 뒤에 바로 <code>await</code></td><td>병렬이 아니다 → 둘 다 시작한 뒤 await (<a href="#co03">03</a>)</td></tr>
+      <tr><td>공개 API 가 <code>Deferred</code> 반환</td><td>호출부가 취소·예외를 떠안는다 → <code>suspend fun</code></td></tr>
+      <tr><td>무제한 병렬 호출</td><td>상대 서버 429 · 커넥션 고갈 → <code>Semaphore</code> (<a href="#co16">16</a>)</td></tr>
+      <tr><td><code>synchronized</code> 안에서 suspend</td><td>컴파일 불가 · 스레드 블로킹 → <code>Mutex</code></td></tr>
+      <tr><td><code>Channel</code>을 닫지 않음</td><td>소비자 영구 대기 → <code>produce</code> 또는 명시적 <code>close()</code></td></tr>
+      <tr><td>타임아웃 없는 외부 호출</td><td>장애 전파 → <code>withTimeout</code> (<a href="#co08">08</a>)</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub">설계 규칙</h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">함수를 만들 때</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li>공개 API 는 <code>suspend fun f(): T</code> 또는 <code>fun f(): Flow&lt;T&gt;</code></li>
+        <li><b>메인 세이프</b>하게 — 디스패처 전환은 함수 <b>안에서</b></li>
+        <li>디스패처는 <b>인자로 주입</b>(기본값 제공) — 테스트를 위해</li>
+        <li>긴 계산 루프에는 <code>ensureActive()</code></li>
+        <li>자원은 <code>use</code>·<code>finally</code>+<code>NonCancellable</code>로 반드시 정리</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영에서 볼 것</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><code>-Dkotlinx.coroutines.debug</code> + <code>CoroutineName</code>으로 로그 추적</li>
+        <li>MDC 전파(<code>MDCContext</code>)로 traceId 유지 (<a href="#co11">11</a>)</li>
+        <li>디스패처별 <b>스레드 수와 큐 길이</b>를 지표로 노출</li>
+        <li>블로킹 호출이 섞여 있는지 주기적으로 점검
+          (개발 환경에서 <b>BlockHound</b>로 탐지 가능)</li>
+        <li>취소가 실제로 하위 시스템까지 전달되는지 확인 (DB 쿼리 취소 등)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note info rv">
+    <b>다음 단계</b> — <b>Spring Boot Web</b> 탭에서는 이 코루틴을 스프링 컨트롤러·서비스·트랜잭션과
+    어떻게 연결하는지, <b>WebFlux</b> 탭에서는 Reactor 와 코루틴을 오가는 방법을,
+    <b>Android</b> 탭에서는 ViewModel·Compose 와 결합하는 실전 구조를 다룹니다.
+    코루틴은 이 가이드 나머지 전부의 <b>공통 언어</b>입니다.
+  </div>
+</section>
+
+</div>

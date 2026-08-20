@@ -1,0 +1,1759 @@
+<div class="pane" id="pane-adv">
+
+<!-- ---------- HERO ---------- -->
+<header class="hero">
+  <div class="eyebrow"><i></i> 제네릭 · INLINE · 위임 · DSL · 리플렉션</div>
+  <h1>여기서부터는<br>“쓰는 쪽”이 아니라<br>“만드는 쪽”이다</h1>
+  <p class="tx">
+    기초 탭의 문법으로 <b>코드를 쓸 수</b> 있게 됐다면, 이 탭은 <b>남이 쓸 것을 만드는</b> 단계입니다.
+    변성(<code>in</code>/<code>out</code>), <code>reified</code>, 위임 프로퍼티, 연산자 규약, DSL —
+    Gradle KTS·Compose·Ktor가 그렇게 생긴 이유가 전부 여기 있습니다.
+  </p>
+  <div class="stats">
+    <div><b>16</b><span>SECTIONS</span></div>
+    <div><b>0</b><span>런타임 비용 (inline)</span></div>
+    <div><b>3</b><span>DSL 만드는 재료</span></div>
+    <div><b>100%</b><span>표준 라이브러리 실제 코드</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== ka01 ==================== -->
+<section class="sec" id="ka01">
+  <div class="sec-head rv">
+    <span class="no">ADV 01</span>
+    <h2><span class="t">제네릭</span> — 타입을 인자로 받기</h2>
+    <p class="lead">
+      <code>List&lt;String&gt;</code>의 꺾쇠가 제네릭입니다. “여기엔 String만 들어간다”를
+      컴파일러에게 알려 주는 장치이고, <b>캐스팅 코드를 지우는 것</b>이 목적입니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 타입 파라미터 T 를 받는 클래스
+class Box&lt;T&gt;(private var item: T) {
+    fun get(): T = item
+    fun set(v: T) { item = v }
+}
+
+val b = Box("hello")     // Box&lt;String&gt; 으로 추론
+val s: String = b.get()  // 캐스팅이 필요 없다
+
+// 제네릭 함수 — 함수 이름 '앞'에 &lt;T&gt; 를 적는다
+fun &lt;T&gt; firstOrDefault(list: List&lt;T&gt;, default: T): T =
+    list.firstOrNull() ?: default
+
+// 여러 개
+fun &lt;K, V&gt; Map&lt;K, V&gt;.reverse(): Map&lt;V, K&gt; =
+    entries.associate { (k, v) -&gt; v to k }
+
+// 확장 함수의 제네릭
+fun &lt;T : Comparable&lt;T&gt;&gt; List&lt;T&gt;.secondLargest(): T? =
+    distinct().sortedDescending().getOrNull(1)</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">제약(bound) — 아무 타입이나 받지 않기</h4>
+      <pre class="code" data-lang="kotlin"><code>// 상한 하나
+fun &lt;T : Number&gt; sum(list: List&lt;T&gt;): Double =
+    list.sumOf { it.toDouble() }
+
+// 여러 제약은 where 로
+fun &lt;T&gt; process(items: List&lt;T&gt;): List&lt;T&gt;
+        where T : Comparable&lt;T&gt;,
+              T : CharSequence =
+    items.filter { it.isNotEmpty() }.sorted()
+
+// 기본 상한은 Any? — null 을 막으려면 Any 를 적는다
+fun &lt;T : Any&gt; requireAll(list: List&lt;T?&gt;): List&lt;T&gt; =
+    list.map { it ?: error("null 원소 발견") }</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>제약을 붙이면 그 타입의 멤버를 쓸 수 있게 됩니다.</b>
+        <code>T : Number</code>라고 적었기 때문에 <code>toDouble()</code>을 부를 수 있는 것입니다 —
+        제약이 없으면 <code>Any?</code>의 멤버(equals·hashCode·toString)만 보입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무 형태 — 공통 리포지터리</h4>
+      <pre class="code" data-lang="kotlin"><code>interface Entity { val id: Long }
+
+interface CrudRepository&lt;T : Entity&gt; {
+    fun findById(id: Long): T?
+    fun save(entity: T): T
+    fun findAll(): List&lt;T&gt;
+}
+
+// 공통 동작을 기본 구현으로
+fun &lt;T : Entity&gt; CrudRepository&lt;T&gt;.findOrThrow(id: Long): T =
+    findById(id) ?: throw NoSuchElementException("없음: $id")
+
+// 사용
+class UserRepo : CrudRepository&lt;User&gt; { /* ... */ }
+val user: User = userRepo.findOrThrow(1)   // 타입이 User 로 그대로</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">타입 파라미터의 기본값은 없습니다 — 대신 쓰는 방법</h3>
+  <pre class="code rv" data-lang="kotlin"><code>// 코틀린에는 타입 파라미터 기본값이 없다. 오버로딩이나 typealias 로 푼다
+typealias StringBox = Box&lt;String&gt;
+
+// 팩토리 함수로 기본형을 제공하는 방식이 더 흔하다
+class Cache&lt;K, V&gt;(private val max: Int) { /* ... */ }
+fun defaultCache() = Cache&lt;String, Any&gt;(max = 1000)
+
+// 타입 추론이 안 되는 자리에서는 명시적으로 적어 준다
+val empty = emptyList&lt;User&gt;()          // 타입을 못 정하므로 필요
+val map = mutableMapOf&lt;Long, User&gt;()</code></pre>
+</section>
+
+
+<!-- ==================== ka02 ==================== -->
+<section class="sec" id="ka02">
+  <div class="sec-head rv">
+    <span class="no">ADV 02</span>
+    <h2>변성 — <span class="t">in · out</span></h2>
+    <p class="lead">
+      <code>List&lt;Dog&gt;</code>를 <code>List&lt;Animal&gt;</code> 자리에 넣어도 될까요?
+      이 질문의 답이 <b>변성(variance)</b>입니다. 코틀린은 이것을
+      <b>선언하는 쪽에서 한 번</b> 정하게 합니다 — 자바의 와일드카드가 호출부마다 등장하던 것과 다릅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 244" role="img" aria-label="변성 개념 그림. out은 생산자로 타입을 꺼내기만 하므로 Dog 리스트를 Animal 리스트 자리에 넣을 수 있고, in은 소비자로 타입을 넣기만 하므로 Animal 비교기를 Dog 비교기 자리에 넣을 수 있다. 아무 표시가 없으면 불변이라 서로 대입할 수 없다.">
+      <text x="16" y="18" class="lbl">변성 — 꺼내기만 하면 out, 넣기만 하면 in, 둘 다면 불변</text>
+
+      <rect class="bx bx-ok" x="16" y="34" width="200" height="88"/>
+      <text x="116" y="58" class="val ok-t" text-anchor="middle">out T (공변)</text>
+      <text x="116" y="78" class="ann" text-anchor="middle">생산자 — 꺼내기만</text>
+      <text x="116" y="96" class="ann" text-anchor="middle">List&lt;Dog&gt; → List&lt;Animal&gt; ✅</text>
+      <text x="116" y="114" class="ann" text-anchor="middle">자바: ? extends T</text>
+
+      <rect class="bx bx-hi" x="240" y="34" width="200" height="88"/>
+      <text x="340" y="58" class="val am-t" text-anchor="middle">in T (반공변)</text>
+      <text x="340" y="78" class="ann" text-anchor="middle">소비자 — 넣기만</text>
+      <text x="340" y="96" class="ann" text-anchor="middle">Cmp&lt;Animal&gt; → Cmp&lt;Dog&gt; ✅</text>
+      <text x="340" y="114" class="ann" text-anchor="middle">자바: ? super T</text>
+
+      <rect class="bx bx-warn" x="464" y="34" width="200" height="88"/>
+      <text x="564" y="58" class="val rs-t" text-anchor="middle">T (불변)</text>
+      <text x="564" y="78" class="ann" text-anchor="middle">넣고 꺼내기 둘 다</text>
+      <text x="564" y="96" class="ann" text-anchor="middle">MutableList 는 서로 대입 불가</text>
+      <text x="564" y="114" class="ann" text-anchor="middle">기본값</text>
+
+      <text x="16" y="152" class="ttl">왜 MutableList 는 불변인가 — 허용했다면 이런 일이 난다</text>
+
+      <rect class="bx" x="16" y="164" width="192" height="34"/>
+      <text x="112" y="186" class="val" text-anchor="middle">MutableList&lt;Dog&gt;</text>
+      <path class="fl ar ar-rs" style="stroke:#fb7185" d="M212 181 L246 181"/>
+      <rect class="bx bx-warn" x="250" y="164" width="214" height="34"/>
+      <text x="357" y="186" class="val rs-t" text-anchor="middle">MutableList&lt;Animal&gt; 로 취급</text>
+      <path class="fl ar ar-rs" style="stroke:#fb7185" d="M468 181 L502 181"/>
+      <rect class="bx bx-warn" x="506" y="164" width="158" height="34"/>
+      <text x="585" y="186" class="val rs-t" text-anchor="middle">add(Cat()) 💥</text>
+      <text x="16" y="222" class="ann">개 목록에 고양이가 들어간다 — 그래서 '넣을 수 있는' 타입은 공변이 될 수 없다</text>
+      <text x="16" y="238" class="ann ok-t">읽기 전용 List 는 add 가 없으므로 안전하게 공변(out)이다</text>
+    </svg>
+    <div class="cap">외우는 법 — <b>PECS</b>: Producer는 <code>out</code>(extends), Consumer는 <code>in</code>(super).</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">out — 꺼내기만 하는 타입</h4>
+      <pre class="code" data-lang="kotlin"><code>open class Animal(val name: String)
+class Dog(name: String) : Animal(name)
+
+// 코틀린 표준 List 선언: public interface List&lt;out E&gt;
+val dogs: List&lt;Dog&gt; = listOf(Dog("바둑이"))
+val animals: List&lt;Animal&gt; = dogs      // ✅ out 이라 대입된다
+
+// 내가 만드는 생산자 타입에도 붙인다
+interface Producer&lt;out T&gt; {
+    fun produce(): T
+    // fun consume(item: T)   // ❌ 컴파일 에러 — out 은 '인자'로 못 쓴다
+}
+
+// 반환 위치에만 T 가 나타나면 out 을 붙일 수 있다
+class Repo&lt;out T&gt;(private val items: List&lt;T&gt;) {
+    fun all(): List&lt;T&gt; = items
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">in — 넣기만 하는 타입</h4>
+      <pre class="code" data-lang="kotlin"><code>// Comparator 선언: public interface Comparator&lt;in T&gt;
+val animalCmp = Comparator&lt;Animal&gt; { a, b -&gt; a.name.compareTo(b.name) }
+val dogCmp: Comparator&lt;Dog&gt; = animalCmp   // ✅ in 이라 대입된다
+// 동물을 비교할 줄 알면 개도 비교할 수 있다 — 당연한 이야기다
+
+interface Consumer&lt;in T&gt; {
+    fun consume(item: T)
+    // fun produce(): T      // ❌ in 은 '반환'에 못 쓴다
+}
+
+// 함수 타입이 대표적 — (in P) -&gt; (out R)
+// public interface Function1&lt;in P1, out R&gt;
+val f: (Animal) -&gt; String = { it.name }
+val g: (Dog) -&gt; Any = f              // ✅ 인자는 넓게, 반환은 좁게</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">사용 지점 변성과 스타 프로젝션</h3>
+  <pre class="code rv" data-lang="kotlin"><code>// 선언 지점에 변성을 못 붙이는 타입(MutableList)은 '쓰는 자리'에서 지정한다
+fun copy(from: MutableList&lt;out Any&gt;, to: MutableList&lt;Any&gt;) {
+    // from 에서는 꺼내기만 가능 (자바의 List&lt;? extends Object&gt;)
+    to.addAll(from)
+}
+
+fun fill(dest: MutableList&lt;in Dog&gt;, value: Dog) {
+    dest.add(value)     // Dog 또는 그 조상 리스트에 넣을 수 있다
+}
+
+// 스타 프로젝션 — 타입 인자를 모를 때
+fun printSize(list: List&lt;*&gt;) {         // List&lt;out Any?&gt; 와 비슷
+    println(list.size)                 // 크기는 알 수 있다
+    val first: Any? = list.firstOrNull()  // 꺼내면 Any?
+    // list.add(...)  ← 애초에 List 라 없다. MutableList&lt;*&gt; 면 넣기가 막힌다
+}
+
+// 실무에서 자주 만나는 자리 — 리플렉션 · 제네릭 컨테이너 검사
+fun isEmptyCollection(c: Collection&lt;*&gt;) = c.isEmpty()</code></pre>
+
+  <div class="note tip rv">
+    <b>실전에서 기억할 한 줄</b> — 내가 만든 제네릭 타입에서 <b>T가 반환에만 나오면 <code>out</code></b>,
+    <b>인자에만 나오면 <code>in</code></b>을 붙이세요. 컴파일러가 위치를 검사해 주므로
+    잘못 붙이면 바로 에러가 납니다. 둘 다 나오면 그냥 두면 됩니다 — 대부분의 클래스가 그렇습니다.
+  </div>
+</section>
+
+
+<!-- ==================== ka03 ==================== -->
+<section class="sec" id="ka03">
+  <div class="sec-head rv">
+    <span class="no">ADV 03</span>
+    <h2>타입 소거와 <span class="t">reified</span></h2>
+    <p class="lead">
+      JVM에서는 실행 시점에 <code>List&lt;String&gt;</code>과 <code>List&lt;Int&gt;</code>가 <b>구분되지 않습니다</b>(타입 소거).
+      코틀린은 <code>inline</code> + <code>reified</code>로 <b>이 한계를 우회</b>하는 유일한 실용적 방법을 제공합니다.
+    </p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>소거 때문에 안 되는 것들</h5>
+      <pre class="code" data-lang="kotlin"><code>fun &lt;T&gt; check(x: Any): Boolean {
+    // return x is T      // ❌ Cannot check for instance of erased type
+    return false
+}
+
+fun &lt;T&gt; create(): T {
+    // return T()         // ❌ 생성자를 부를 수 없다
+    TODO()
+}
+
+// 실행 시점에는 이렇게 보인다
+val a: List&lt;String&gt; = listOf("a")
+val b: List&lt;Int&gt; = listOf(1)
+println(a.javaClass == b.javaClass)   // true — 둘 다 그냥 ArrayList</code></pre>
+    </div>
+    <div class="good">
+      <h5>inline + reified 로 해결</h5>
+      <pre class="code" data-lang="kotlin"><code>inline fun &lt;reified T&gt; check(x: Any): Boolean = x is T   // ✅
+
+println(check&lt;String&gt;("hi"))   // true
+println(check&lt;Int&gt;("hi"))      // false
+
+// 왜 되나: inline 이라 호출 자리에 코드가 '펼쳐지고',
+// 그때 T 가 실제 타입(String)으로 치환된다.
+// 즉 컴파일러가 x is String 을 그 자리에 써 넣는 것과 같다
+
+inline fun &lt;reified T&gt; List&lt;*&gt;.filterIsInstance2(): List&lt;T&gt; =
+    filter { it is T }.map { it as T }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">실무에서 reified 가 빛나는 자리</h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JSON 역직렬화 · API 클라이언트</h4>
+      <pre class="code" data-lang="kotlin"><code>// 자바 스타일 — Class 를 인자로 받아야 했다
+fun &lt;T&gt; parse(json: String, clazz: Class&lt;T&gt;): T = mapper.readValue(json, clazz)
+val u1 = parse(json, User::class.java)
+
+// 코틀린 — 타입만 적으면 된다
+inline fun &lt;reified T&gt; parse(json: String): T =
+    mapper.readValue(json, object : TypeReference&lt;T&gt;() {})
+
+val u2: User = parse(json)                 // 추론까지 된다
+val list = parse&lt;List&lt;User&gt;&gt;(json)         // 제네릭 중첩도 가능
+
+// 실제 라이브러리들이 전부 이 방식이다
+// kotlinx.serialization: Json.decodeFromString&lt;User&gt;(text)
+// Ktor Client:           client.get(url).body&lt;User&gt;()
+// Spring 6:              restClient.get().retrieve().body&lt;User&gt;()</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">안드로이드 · DI · 로거</h4>
+      <pre class="code" data-lang="kotlin"><code>// 화면 이동 (안드로이드)
+inline fun &lt;reified T : Activity&gt; Context.start() =
+    startActivity(Intent(this, T::class.java))
+start&lt;DetailActivity&gt;()
+
+// 의존성 조회
+inline fun &lt;reified T&gt; Injector.get(): T = get(T::class)
+val repo: UserRepo = injector.get()
+
+// 클래스별 로거 — 자바에서 늘 쓰던 상용구가 사라진다
+inline fun &lt;reified T&gt; T.logger(): Logger =
+    LoggerFactory.getLogger(T::class.java)
+
+class OrderService {
+    private val log = logger()
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="note warn rv">
+    <b>제약</b> — <code>reified</code>는 <b><code>inline</code> 함수에서만</b> 쓸 수 있습니다.
+    그래서 <b>클래스의 타입 파라미터에는 붙일 수 없고</b>(<code>class Box&lt;reified T&gt;</code> 불가),
+    자바에서는 이 함수를 부를 수 없습니다. 또 inline 이라 <b>private 멤버에 접근하는 코드</b>를
+    공개 inline 함수 안에 둘 수 없습니다.
+  </div>
+</section>
+
+
+<!-- ==================== ka04 ==================== -->
+<section class="sec" id="ka04">
+  <div class="sec-head rv">
+    <span class="no">ADV 04</span>
+    <h2>inline · noinline · <span class="t">crossinline</span></h2>
+    <p class="lead">
+      람다를 인자로 받으면 보통 <b>객체가 하나 생깁니다.</b> 반복문 안이라면 수만 개가 생기죠.
+      <code>inline</code>은 그 비용을 <b>0으로 만드는</b> 대신, 몇 가지 규칙을 따라오게 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 208" role="img" aria-label="inline 함수의 동작 그림. 일반 고차 함수는 호출할 때마다 람다 객체를 만들어 함수 호출을 거치지만, inline 함수는 컴파일 시점에 함수 본문과 람다 본문이 호출 위치에 그대로 펼쳐져 객체 생성과 호출이 사라진다.">
+      <text x="16" y="18" class="lbl">inline 이 하는 일 — 컴파일 시점에 코드를 호출 자리로 옮긴다</text>
+
+      <text x="16" y="46" class="ttl rs-t">일반 고차 함수</text>
+      <rect class="bx" x="16" y="56" width="150" height="42"/>
+      <text x="91" y="76" class="val" text-anchor="middle">호출부</text>
+      <text x="91" y="92" class="ann" text-anchor="middle">forEach { ... }</text>
+      <path class="fl ar" d="M170 77 L204 77"/>
+      <rect class="bx bx-warn" x="208" y="56" width="170" height="42"/>
+      <text x="293" y="76" class="val rs-t" text-anchor="middle">Function 객체 생성</text>
+      <text x="293" y="92" class="ann" text-anchor="middle">람다마다 인스턴스</text>
+      <path class="fl ar" d="M382 77 L416 77"/>
+      <rect class="bx" x="420" y="56" width="244" height="42"/>
+      <text x="542" y="76" class="val" text-anchor="middle">함수 호출 + invoke()</text>
+      <text x="542" y="92" class="ann" text-anchor="middle">호출 스택 두 단계</text>
+
+      <path class="ln-t" d="M16 116 L664 116"/>
+
+      <text x="16" y="146" class="ttl ok-t">inline 함수</text>
+      <rect class="bx bx-ok" x="16" y="156" width="150" height="42"/>
+      <text x="91" y="176" class="val ok-t" text-anchor="middle">호출부</text>
+      <text x="91" y="192" class="ann" text-anchor="middle">forEach { ... }</text>
+      <path class="fl ar ar-gn" style="stroke:#34d399" d="M170 177 L204 177"/>
+      <rect class="bx bx-ok" x="208" y="156" width="456" height="42"/>
+      <text x="436" y="176" class="val ok-t" text-anchor="middle">본문 + 람다가 그 자리에 펼쳐진다 (그냥 for 루프가 된다)</text>
+      <text x="436" y="192" class="ann" text-anchor="middle">객체 생성 0 · 호출 0 — 대신 바이트코드 크기가 커진다</text>
+    </svg>
+    <div class="cap">표준 라이브러리의 <b>let · run · apply · forEach · filter</b>가 전부 inline 입니다 — 그래서 공짜로 쓸 수 있습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 붙이나 · 언제 안 붙이나</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:130px">상황</th><th>판단</th></tr>
+          <tr><td>람다를 받는 작은 함수</td><td>✅ 붙인다 (이게 inline 의 존재 이유)</td></tr>
+          <tr><td>reified 가 필요</td><td>✅ 필수</td></tr>
+          <tr><td>람다를 안 받는 함수</td><td>❌ 이득이 거의 없다 — IDE 도 경고한다</td></tr>
+          <tr><td>본문이 긴 함수</td><td>❌ 호출 지점마다 복제되어 코드가 부푼다</td></tr>
+          <tr><td>공개 API + private 접근</td><td>❌ 컴파일 에러 (펼쳐진 코드가 private 에 접근 불가)</td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>inline 은 바이너리 호환성에 영향을 줍니다.</b> 라이브러리를 배포한 뒤
+        inline 함수의 본문을 고치면, <b>쓰는 쪽을 다시 컴파일해야</b> 반영됩니다 —
+        이미 펼쳐진 옛 코드가 남아 있기 때문입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">noinline · crossinline</h4>
+      <pre class="code" data-lang="kotlin"><code>// noinline — 이 람다만 펼치지 않는다 (객체로 남겨 저장·전달해야 할 때)
+inline fun run2(
+    before: () -&gt; Unit,
+    noinline after: () -&gt; Unit,     // 나중에 쓰려고 보관해야 한다
+) {
+    before()
+    handlers += after               // 펼쳐진 코드는 저장할 수 없다
+}
+
+// crossinline — 펼치되 '비지역 반환'만 금지한다
+inline fun async2(crossinline block: () -&gt; Unit) {
+    Thread {
+        block()      // 다른 실행 흐름 안에서 부른다
+        // 여기서 return 이 허용되면 어디로 돌아가야 하나? → 그래서 금지
+    }.start()
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">비지역 반환 — inline 만 되는 일</h3>
+  <pre class="code rv" data-lang="kotlin"><code>fun findAdmin(users: List&lt;User&gt;): User? {
+    users.forEach {                      // forEach 는 inline 이다
+        if (it.isAdmin) return it        // ✅ findAdmin 자체를 종료 (비지역 반환)
+    }
+    return null
+}
+
+// inline 이 아니었다면 이 return 은 컴파일 에러다
+// (일반 람다에서는 자기 자신만 빠져나올 수 있다)
+
+// 라벨로 람다만 빠져나오기
+fun f(users: List&lt;User&gt;) {
+    users.forEach {
+        if (it.isBanned) return@forEach  // 이번 항목만 건너뛴다
+        send(it)
+    }
+}</code></pre>
+
+  <h3 class="sub">성능 — 실제로 얼마나 차이 나나</h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">측정 없이 믿지 마세요</h4>
+      <p class="tx" style="font-size:13.8px">
+        JIT는 대부분의 작은 람다 호출을 인라이닝해 버립니다.
+        <b>수억 번 도는 루프가 아니면 체감 차이가 없는</b> 경우가 많습니다.
+        <code>inline</code>의 진짜 가치는 세 가지입니다.
+      </p>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>reified</b>를 쓸 수 있다</li>
+        <li><b>비지역 반환</b>이 된다 (제어 흐름 표현력)</li>
+        <li>안드로이드처럼 <b>객체 생성이 곧 GC 압력</b>인 환경에서 이득</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">확인하는 법 — 바이트코드 보기</h4>
+      <pre class="code" data-lang="text"><code>IntelliJ 메뉴
+  Tools → Kotlin → Show Kotlin Bytecode
+  → [Decompile] 버튼을 누르면 '자바로 치면 이런 코드'가 나온다
+
+무엇을 보나
+  · 람다가 클래스로 만들어졌는지 (Function0 · Function1)
+  · inline 함수가 정말 펼쳐졌는지
+  · data class 가 어떤 equals 를 만들었는지
+  · suspend 함수가 어떤 상태 기계로 바뀌었는지  ← 코루틴 탭에서 다시 봅니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>코틀린을 깊이 이해하는 가장 빠른 길</b>이 이 디컴파일 화면입니다.
+        “이 문법이 실제로 무엇으로 바뀌는가”를 눈으로 보면 성능 이야기가 추측에서 사실로 바뀝니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== ka05 ==================== -->
+<section class="sec" id="ka05">
+  <div class="sec-head rv">
+    <span class="no">ADV 05</span>
+    <h2>위임 <span class="t">프로퍼티</span></h2>
+    <p class="lead">
+      <code>by lazy</code>의 <code>by</code>가 위임입니다. <b>“이 프로퍼티의 읽기·쓰기를 다른 객체에게 맡긴다”</b>는 선언으로,
+      캐싱·검증·변경 감지·설정 읽기 같은 <b>반복되는 접근자 코드</b>를 한 번만 쓰게 만듭니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">표준 위임 넷</h4>
+      <pre class="code" data-lang="kotlin"><code>import kotlin.properties.Delegates
+
+class Config(map: Map&lt;String, Any&gt;) {
+    // 1) lazy — 처음 읽을 때 한 번만 계산
+    val heavy: String by lazy { loadFromDisk() }
+
+    // 2) observable — 바뀔 때마다 알림
+    var status: String by Delegates.observable("NEW") { _, old, new -&gt;
+        log.info("상태 변경 {} → {}", old, new)
+    }
+
+    // 3) vetoable — 조건을 통과할 때만 반영
+    var age: Int by Delegates.vetoable(0) { _, _, new -&gt; new in 0..150 }
+
+    // 4) 맵 위임 — 키 이름으로 값을 꺼낸다
+    val name: String by map
+    val port: Int by map
+}
+
+val c = Config(mapOf("name" to "서버1", "port" to 8080))
+println(c.name)         // 서버1  (map["name"] 를 읽는다)
+c.age = 200             // 무시된다 (vetoable 이 거부)
+println(c.age)          // 0</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">notNull · 다른 프로퍼티에 위임</h4>
+      <pre class="code" data-lang="kotlin"><code>class Service {
+    // lateinit 을 못 쓰는 기본 타입에 쓴다
+    var port: Int by Delegates.notNull()
+}
+
+// 이름을 바꿀 때 — 옛 이름을 남기며 새 이름으로 위임 (2.0+)
+class User(val fullName: String) {
+    @Deprecated("name 대신 fullName")
+    val name: String by this::fullName
+}
+
+// 최상위 프로퍼티에도 쓸 수 있다
+val version: String by lazy {
+    javaClass.getResource("/version.txt")?.readText() ?: "dev"
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>lazy 의 세 가지 모드</b> — 기본은 <code>SYNCHRONIZED</code>(잠금 사용),
+        <code>PUBLICATION</code>(여러 번 계산될 수 있으나 하나만 채택),
+        <code>NONE</code>(잠금 없음 · 단일 스레드 확실할 때만).
+        안드로이드 UI 스레드 전용 값이라면 <code>NONE</code>이 가장 빠릅니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">직접 만들기 — 두 개의 연산자만 있으면 된다</h3>
+  <pre class="code rv" data-lang="kotlin"><code>import kotlin.reflect.KProperty
+
+// 읽기 전용이면 getValue 하나, 쓰기까지면 setValue 도
+class TrimDelegate {
+    private var value: String = ""
+
+    operator fun getValue(thisRef: Any?, property: KProperty&lt;*&gt;): String = value
+
+    operator fun setValue(thisRef: Any?, property: KProperty&lt;*&gt;, newValue: String) {
+        value = newValue.trim()
+        println("[${property.name}] 저장: '$value'")
+    }
+}
+
+class Form {
+    var title: String by TrimDelegate()
+}
+
+val f = Form()
+f.title = "   제목  "     // [title] 저장: '제목'
+println("'${f.title}'")    // '제목'
+
+// 실무 예 — 환경변수 읽기 위임
+class EnvDelegate(private val key: String, private val default: String? = null) {
+    operator fun getValue(thisRef: Any?, property: KProperty&lt;*&gt;): String =
+        System.getenv(key) ?: default ?: error("환경변수 없음: $key")
+}
+fun env(key: String, default: String? = null) = EnvDelegate(key, default)
+
+object AppConfig {
+    val dbUrl: String by env("DB_URL")
+    val port: String by env("PORT", "8080")
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">provideDelegate — 만들 때 검증하기</h4>
+      <pre class="code" data-lang="kotlin"><code>// 프로퍼티가 '만들어지는 시점'에 개입한다
+class RequiredEnv(private val key: String) {
+    operator fun provideDelegate(thisRef: Any?, prop: KProperty&lt;*&gt;): EnvDelegate {
+        // 앱이 뜰 때 바로 검증 — 나중에 처음 읽을 때가 아니라
+        require(System.getenv(key) != null) {
+            "환경변수 $key 가 없습니다 (프로퍼티 ${prop.name})"
+        }
+        return EnvDelegate(key)
+    }
+}</code></pre>
+      <p class="tx" style="font-size:13.4px;margin-bottom:0">
+        설정 누락을 <b>기동 시점에</b> 잡을 수 있습니다 —
+        운영에서 특정 API가 호출될 때야 터지는 것보다 훨씬 낫습니다.
+      </p>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무에서 만나는 위임들</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:190px">코드</th><th>어디서</th></tr>
+          <tr><td><code>by lazy</code></td><td>어디서나 — 가장 많이 쓴다</td></tr>
+          <tr><td><code>by viewModels()</code></td><td>안드로이드 — ViewModel 주입</td></tr>
+          <tr><td><code>by remember { }</code></td><td>Compose — 상태 기억 (규약은 같다)</td></tr>
+          <tr><td><code>by inject()</code></td><td>Koin — DI 조회</td></tr>
+          <tr><td><code>by Delegates.observable</code></td><td>상태 변경 로깅 · 디버깅</td></tr>
+          <tr><td><code>by savedStateHandle</code></td><td>안드로이드 — 화면 회전 복구</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>낯선 <code>by</code>를 만나면</b> 그 오른쪽 객체의 <code>getValue</code>를 찾아 보세요.
+        규약이 단순해서 라이브러리 동작을 금방 파악할 수 있습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== ka06 ==================== -->
+<section class="sec" id="ka06">
+  <div class="sec-head rv">
+    <span class="no">ADV 06</span>
+    <h2>연산자 <span class="t">오버로딩</span> · 규약 함수</h2>
+    <p class="lead">
+      <code>a + b</code>는 <code>a.plus(b)</code>를 부릅니다. 코틀린은 이런 <b>규약(convention)</b>을
+      정해 두고, 정해진 이름의 함수를 만들면 <b>문법이 그 타입에 열리게</b> 합니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:170px">쓰는 모양</th><th style="width:210px">불리는 함수</th><th>비고</th></tr>
+      <tr><td><code>a + b</code></td><td><code>a.plus(b)</code></td><td>minus · times · div · rem</td></tr>
+      <tr><td><code>a += b</code></td><td><code>a.plusAssign(b)</code></td><td>없으면 <code>a = a + b</code>로 처리</td></tr>
+      <tr><td><code>-a</code></td><td><code>a.unaryMinus()</code></td><td>unaryPlus · not</td></tr>
+      <tr><td><code>a[i]</code></td><td><code>a.get(i)</code></td><td>인자 여러 개도 가능</td></tr>
+      <tr><td><code>a[i] = v</code></td><td><code>a.set(i, v)</code></td><td></td></tr>
+      <tr><td><code>a(x)</code></td><td><code>a.invoke(x)</code></td><td>객체를 함수처럼</td></tr>
+      <tr><td><code>a in b</code></td><td><code>b.contains(a)</code></td><td></td></tr>
+      <tr><td><code>a..b</code></td><td><code>a.rangeTo(b)</code></td><td><code>a..&lt;b</code>는 <code>rangeUntil</code></td></tr>
+      <tr><td><code>a &lt; b</code></td><td><code>a.compareTo(b)</code></td><td>Comparable 구현이면 자동</td></tr>
+      <tr><td><code>a == b</code></td><td><code>a?.equals(b) ?: (b === null)</code></td><td>null 검사가 포함된다</td></tr>
+      <tr><td><code>for (x in a)</code></td><td><code>a.iterator()</code></td><td>확장 함수로도 가능</td></tr>
+      <tr><td><code>val (x, y) = a</code></td><td><code>a.component1()</code>, <code>component2()</code></td><td>data class 는 자동</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">값 객체에 연산 열기</h4>
+      <pre class="code" data-lang="kotlin"><code>@JvmInline
+value class Money(val won: Long) : Comparable&lt;Money&gt; {
+    operator fun plus(o: Money) = Money(won + o.won)
+    operator fun minus(o: Money) = Money(won - o.won)
+    operator fun times(n: Int) = Money(won * n)
+    operator fun unaryMinus() = Money(-won)
+    override fun compareTo(other: Money) = won.compareTo(other.won)
+    override fun toString() = "%,d원".format(won)
+}
+
+val total = Money(10_000) + Money(2_500) * 2
+println(total)                    // 15,000원
+println(Money(100) &lt; Money(200))  // true
+println(listOf(Money(300), Money(100)).sorted())   // Comparable 이라 정렬된다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">get · invoke · contains</h4>
+      <pre class="code" data-lang="kotlin"><code>class Matrix(private val rows: Int, private val cols: Int) {
+    private val data = DoubleArray(rows * cols)
+    operator fun get(r: Int, c: Int) = data[r * cols + c]
+    operator fun set(r: Int, c: Int, v: Double) { data[r * cols + c] = v }
+}
+val m = Matrix(3, 3)
+m[0, 0] = 1.5
+println(m[0, 0])
+
+// invoke — 객체를 함수처럼 부른다 (전략·유스케이스 패턴에서 흔하다)
+class GetUser(private val repo: UserRepo) {
+    operator fun invoke(id: Long): User? = repo.find(id)
+}
+val getUser = GetUser(repo)
+val u = getUser(1)          // getUser.invoke(1)
+
+// contains — 도메인 표현을 자연스럽게
+class DateRange(val start: LocalDate, val end: LocalDate) {
+    operator fun contains(d: LocalDate) = d &gt;= start &amp;&amp; d &lt;= end
+}
+if (today in eventPeriod) { /* ... */ }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">구조 분해를 내 클래스에도</h3>
+  <pre class="code rv" data-lang="kotlin"><code>// data class 가 아니어도 componentN 을 만들면 분해된다
+class Rgb(val r: Int, val g: Int, val b: Int) {
+    operator fun component1() = r
+    operator fun component2() = g
+    operator fun component3() = b
+}
+val (r, g, b) = Rgb(255, 128, 0)
+
+// 확장 함수로도 열 수 있다 — 남의 클래스에!
+operator fun LocalDate.component1() = year
+operator fun LocalDate.component2() = monthValue
+operator fun LocalDate.component3() = dayOfMonth
+
+val (y, mo, d) = LocalDate.now()
+println("$y-$mo-$d")
+
+// 람다 인자에서도 쓰인다
+mapOf("a" to 1).forEach { (key, value) -&gt; println("$key=$value") }</code></pre>
+
+  <div class="note warn rv">
+    <b>과용하면 읽기 어려워집니다.</b> 기준은 <b>“수학적·자연적 의미가 명백한가”</b>입니다.
+    <code>Money + Money</code>는 명백하지만 <code>User + Order</code>는 아닙니다.
+    의미가 애매하면 <b>이름 있는 함수</b>(<code>user.placeOrder(order)</code>)가 언제나 낫습니다.
+  </div>
+</section>
+
+
+<!-- ==================== ka07 ==================== -->
+<section class="sec" id="ka07">
+  <div class="sec-head rv">
+    <span class="no">ADV 07</span>
+    <h2>DSL <span class="t">만들기</span></h2>
+    <p class="lead">
+      Gradle KTS, Compose, Ktor 라우팅, kotest — 문법처럼 보이는 이 코드들은 전부
+      <b>수신 객체 람다 + 확장 함수 + 후행 람다</b> 세 재료로 만들어집니다. 원리를 알면 직접 만들 수 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 196" role="img" aria-label="DSL을 이루는 세 가지 재료 그림. 첫째 후행 람다로 괄호를 없애고, 둘째 수신 객체 람다로 블록 안에서 this를 생략하며, 셋째 확장 함수로 타입에 문법을 더한다. 이 셋이 합쳐져 설정 블록처럼 보이는 코드가 된다.">
+      <text x="16" y="18" class="lbl">DSL 의 재료 셋 — 이 조합이 '문법처럼 보이는 코드'를 만든다</text>
+
+      <rect class="bx" x="16" y="34" width="204" height="72"/>
+      <text x="118" y="58" class="val cy-t" text-anchor="middle">① 후행 람다</text>
+      <text x="118" y="78" class="ann" text-anchor="middle">f(x) { } → f(x) { }</text>
+      <text x="118" y="96" class="ann" text-anchor="middle">괄호가 사라진다</text>
+
+      <rect class="bx" x="238" y="34" width="204" height="72"/>
+      <text x="340" y="58" class="val cy-t" text-anchor="middle">② 수신 객체 람다</text>
+      <text x="340" y="78" class="ann" text-anchor="middle">T.() -&gt; Unit</text>
+      <text x="340" y="96" class="ann" text-anchor="middle">블록 안에서 this 생략</text>
+
+      <rect class="bx" x="460" y="34" width="204" height="72"/>
+      <text x="562" y="58" class="val cy-t" text-anchor="middle">③ 확장 함수</text>
+      <text x="562" y="78" class="ann" text-anchor="middle">타입에 문법을 더한다</text>
+      <text x="562" y="96" class="ann" text-anchor="middle">infix · operator 도 함께</text>
+
+      <path class="fl ar" d="M118 110 C 118 140 340 130 340 148"/>
+      <path class="fl ar" d="M340 110 L340 148"/>
+      <path class="fl ar" d="M562 110 C 562 140 340 130 340 148"/>
+
+      <rect class="bx bx-ok" x="128" y="152" width="424" height="38"/>
+      <text x="340" y="176" class="val ok-t" text-anchor="middle">html { body { p { +"안녕" } } } 같은 코드가 나온다</text>
+    </svg>
+    <div class="cap">Gradle의 <code>dependencies { }</code>도 결국 <b>수신 객체 람다를 받는 평범한 함수</b>입니다.</div>
+  </div>
+
+  <h3 class="sub">단계별로 만들어 보기 — HTML 빌더</h3>
+  <pre class="code rv" data-lang="kotlin"><code>// 1단계: 노드 구조
+@DslMarker
+annotation class HtmlDsl                      // 스코프 섞임 방지 (아래 설명)
+
+@HtmlDsl
+open class Tag(private val name: String) {
+    private val children = mutableListOf&lt;Any&gt;()
+    private val attrs = mutableMapOf&lt;String, String&gt;()
+
+    protected fun &lt;T : Tag&gt; add(child: T, block: T.() -&gt; Unit): T {
+        child.block()                          // ← 수신 객체 람다 실행
+        children += child
+        return child
+    }
+
+    // 텍스트 노드를 단항 연산자로 (+"안녕")
+    operator fun String.unaryPlus() { children += this }
+
+    fun attr(k: String, v: String) { attrs[k] = v }
+
+    override fun toString(): String {
+        val a = attrs.entries.joinToString("") { " ${it.key}=\"${it.value}\"" }
+        return "&lt;$name$a&gt;${children.joinToString("")}&lt;/$name&gt;"
+    }
+}
+
+class Html : Tag("html") { fun body(block: Body.() -&gt; Unit) = add(Body(), block) }
+class Body : Tag("body") {
+    fun p(block: P.() -&gt; Unit) = add(P(), block)
+    fun ul(block: Ul.() -&gt; Unit) = add(Ul(), block)
+}
+class P : Tag("p")
+class Ul : Tag("ul") { fun li(block: Li.() -&gt; Unit) = add(Li(), block) }
+class Li : Tag("li")
+
+// 2단계: 진입점
+fun html(block: Html.() -&gt; Unit): Html = Html().apply(block)
+
+// 3단계: 쓰는 쪽 — 문법처럼 보인다
+val page = html {
+    body {
+        p {
+            attr("class", "lead")
+            +"코틀린 DSL 입니다"
+        }
+        ul {
+            listOf("하나", "둘", "셋").forEach { item -&gt;
+                li { +item }               // 반복문도 그냥 쓸 수 있다 (템플릿 엔진과 다른 점)
+            }
+        }
+    }
+}
+println(page)
+// &lt;html&gt;&lt;body&gt;&lt;p class="lead"&gt;코틀린 DSL 입니다&lt;/p&gt;&lt;ul&gt;&lt;li&gt;하나&lt;/li&gt;…&lt;/ul&gt;&lt;/body&gt;&lt;/html&gt;</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">@DslMarker — 바깥 스코프가 새는 것을 막는다</h4>
+      <pre class="code" data-lang="kotlin"><code>// @DslMarker 가 없으면 이런 코드가 컴파일된다
+html {
+    body {
+        body { }      // ❌ 말이 안 되는데 바깥 this 가 보여서 가능했다
+    }
+}
+
+// @DslMarker 를 붙이면
+// "암시적 수신 객체가 두 개면 가장 안쪽만 쓸 수 있다"는 규칙이 켜진다
+// → 위 코드는 컴파일 에러가 된다
+
+// 정말 바깥을 써야 하면 이름을 붙여 쓴다
+html {
+    val outer = this
+    body { outer.attr("lang", "ko") }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실무에서 쓸 만한 작은 DSL</h4>
+      <pre class="code" data-lang="kotlin"><code>// 테스트 픽스처 빌더
+class UserBuilder {
+    var id: Long = 1
+    var name: String = "테스트"
+    var roles: MutableList&lt;String&gt; = mutableListOf()
+    fun role(r: String) { roles += r }
+    fun build() = User(id, name, roles.toList())
+}
+fun user(block: UserBuilder.() -&gt; Unit) = UserBuilder().apply(block).build()
+
+val u = user {
+    name = "김현우"
+    role("ADMIN")
+    role("USER")
+}
+
+// 검증 DSL
+class Validation(private val errors: MutableList&lt;String&gt; = mutableListOf()) {
+    fun check(cond: Boolean, msg: String) { if (!cond) errors += msg }
+    fun result() = errors.toList()
+}
+fun validate(block: Validation.() -&gt; Unit) = Validation().apply(block).result()
+
+val errs = validate {
+    check(order.amount &gt; 0, "금액 오류")
+    check(order.items.isNotEmpty(), "빈 주문")
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>DSL 을 만들기 전에 물어볼 것</b> — “같은 구조를 <b>여러 번</b> 쓰는가?”
+    한두 번 쓰는 설정이라면 <code>data class</code> + 이름붙인 인자가 더 명확하고 디버깅도 쉽습니다.
+    DSL 은 <b>중첩 구조가 반복될 때</b>(HTML · 라우팅 · UI 트리) 값을 합니다.
+  </div>
+</section>
+
+
+<!-- ==================== ka08 ==================== -->
+<section class="sec" id="ka08">
+  <div class="sec-head rv">
+    <span class="no">ADV 08</span>
+    <h2>시퀀스 — <span class="t">지연 평가</span></h2>
+    <p class="lead">
+      리스트 연산은 단계마다 새 리스트를 만듭니다. <code>Sequence</code>는 <b>원소 하나를 끝까지 흘려보낸 뒤</b>
+      다음 원소로 갑니다 — 자바 Stream과 같은 방식이고, <b>무한 수열</b>도 다룰 수 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 244" role="img" aria-label="리스트와 시퀀스의 처리 순서를 비교한 그림. 리스트는 map 단계에서 모든 원소를 처리해 새 리스트를 만들고 filter 단계에서 다시 전체를 처리하지만, 시퀀스는 원소 하나가 map과 filter를 차례로 통과한 뒤 다음 원소로 넘어가며 take로 필요한 개수만 채우면 나머지는 계산하지 않는다.">
+      <text x="16" y="18" class="lbl">처리 순서 — 리스트는 단계별로 전부, 시퀀스는 원소별로 끝까지</text>
+
+      <text x="16" y="46" class="ttl rs-t">List (즉시 평가)</text>
+      <rect class="bx" x="16" y="56" width="196" height="34"/>
+      <text x="114" y="78" class="val" text-anchor="middle">원본 100만 건</text>
+      <path class="fl ar" d="M216 73 L246 73"/>
+      <rect class="bx bx-warn" x="250" y="56" width="196" height="34"/>
+      <text x="348" y="78" class="val rs-t" text-anchor="middle">map → 새 리스트 100만</text>
+      <path class="fl ar" d="M450 73 L480 73"/>
+      <rect class="bx bx-warn" x="484" y="56" width="180" height="34"/>
+      <text x="574" y="78" class="val rs-t" text-anchor="middle">filter → 또 새 리스트</text>
+      <text x="16" y="106" class="ann">take(5) 를 마지막에 붙여도 앞 단계는 이미 100만 번 다 돌았다</text>
+
+      <path class="ln-t" d="M16 124 L664 124"/>
+
+      <text x="16" y="152" class="ttl ok-t">Sequence (지연 평가)</text>
+      <rect class="bx bx-ok" x="16" y="162" width="130" height="34"/>
+      <text x="81" y="184" class="val ok-t" text-anchor="middle">원소 1</text>
+      <path class="fl ar ar-gn" style="stroke:#34d399" d="M150 179 L180 179"/>
+      <rect class="bx bx-ok" x="184" y="162" width="110" height="34"/>
+      <text x="239" y="184" class="val ok-t" text-anchor="middle">map</text>
+      <path class="fl ar ar-gn" style="stroke:#34d399" d="M298 179 L328 179"/>
+      <rect class="bx bx-ok" x="332" y="162" width="110" height="34"/>
+      <text x="387" y="184" class="val ok-t" text-anchor="middle">filter</text>
+      <path class="fl ar ar-gn" style="stroke:#34d399" d="M446 179 L476 179"/>
+      <rect class="bx bx-ok" x="480" y="162" width="184" height="34"/>
+      <text x="572" y="184" class="val ok-t" text-anchor="middle">take — 5개 차면 중단</text>
+      <text x="16" y="212" class="ann">원소 1이 끝까지 간 다음 원소 2가 출발한다 — 중간 리스트가 없다</text>
+      <text x="16" y="232" class="ann ok-t">5개를 채우는 순간 나머지 99만9995건은 계산조차 하지 않는다</text>
+    </svg>
+    <div class="cap"><b>앞에서 끊는 연산</b>(take · first · any)이 있을 때 시퀀스의 이득이 가장 큽니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">만들기 · 무한 수열</h4>
+      <pre class="code" data-lang="kotlin"><code>// 컬렉션에서
+val s1 = listOf(1, 2, 3).asSequence()
+
+// 원소 나열
+val s2 = sequenceOf(1, 2, 3)
+
+// 규칙으로 무한 생성 — null 을 돌려주면 끝난다
+val powers = generateSequence(1) { it * 2 }
+println(powers.take(10).toList())   // [1,2,4,...,512]
+
+// 파일 한 줄씩 (메모리에 다 올리지 않는다)
+File("big.log").useLines { lines -&gt;
+    lines.filter { "ERROR" in it }.take(100).toList()
+}
+
+// yield 로 직접 만들기 — 코루틴 문법을 쓴다
+val fib = sequence {
+    var (a, b) = 0 to 1
+    while (true) {
+        yield(a)                 // 여기서 멈췄다가 다음에 이어서 실행된다
+        a = b.also { b = a + b }
+    }
+}
+println(fib.take(8).toList())     // [0,1,1,2,3,5,8,13]</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">중간 연산과 종단 연산</h4>
+      <pre class="code" data-lang="kotlin"><code>// 중간(Intermediate) — 시퀀스를 돌려준다. 아직 아무 일도 안 한다
+// map · filter · take · drop · distinct · sortedBy(예외) · flatMap · onEach
+
+// 종단(Terminal) — 여기서 비로소 실행된다
+// toList · first · sum · count · any · all · forEach · fold · joinToString
+
+val seq = (1..10).asSequence()
+    .onEach { println("보는 중: $it") }    // 아직 출력 안 됨
+    .filter { it % 2 == 0 }
+
+println("아직 실행 전")
+println(seq.toList())                      // 여기서 한꺼번에 실행
+
+// ⚠️ sorted 계열은 '상태를 모아야' 하므로 전부 읽는다 (지연의 이점이 사라진다)
+// ⚠️ 시퀀스는 기본적으로 '한 번만' 소비할 수 있는 것이 많다 (constrainOnce)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">언제 쓰나 — 판단표</h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:230px">상황</th><th>선택</th></tr>
+      <tr><td>원소 수천 개 이하</td><td><b>List</b> — 시퀀스는 객체 오버헤드가 있어 오히려 느립니다</td></tr>
+      <tr><td>수십만 건 + 단계 3개 이상</td><td><b>Sequence</b></td></tr>
+      <tr><td><code>first</code>·<code>take(n)</code>으로 앞에서 끊는다</td><td><b>Sequence</b> — 이득이 가장 크다</td></tr>
+      <tr><td>파일·네트워크 스트림</td><td><b>Sequence</b> (<code>useLines</code>)</td></tr>
+      <tr><td>무한 수열</td><td><b>Sequence</b> 만 가능</td></tr>
+      <tr><td>병렬 처리가 필요</td><td>시퀀스는 병렬이 없습니다 → 자바 <code>parallelStream</code> 또는 <b>코루틴</b></td></tr>
+      <tr><td>비동기 스트림 (DB · API)</td><td><b>Flow</b> — 코루틴 탭에서 다룹니다</td></tr>
+    </table>
+  </div>
+
+  <div class="note info rv">
+    <b>Sequence 와 Flow 의 관계</b> — 둘 다 “원소를 하나씩 흘려보내는” 모델입니다.
+    차이는 <b>중간에 기다릴 수 있느냐</b>입니다. Sequence 는 동기(블로킹),
+    <code>Flow</code>는 <code>suspend</code>가 가능해 <b>DB 조회·HTTP 호출을 사이에 넣을 수 있습니다.</b>
+    “동기면 Sequence, 비동기면 Flow”로 외워 두면 됩니다.
+  </div>
+</section>
+
+
+<!-- ==================== ka09 ==================== -->
+<section class="sec" id="ka09">
+  <div class="sec-head rv">
+    <span class="no">ADV 09</span>
+    <h2>컬렉션 <span class="t">고급</span> — 정렬 · 집계 · 성능</h2>
+    <p class="lead">
+      기초 탭의 <code>map</code>·<code>filter</code> 다음 단계입니다.
+      <b>다중 정렬</b>, <b>한 번 순회로 여러 집계</b>, <b>객체 생성을 줄이는 법</b> —
+      데이터가 커졌을 때 차이가 나는 부분들입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">정렬 — Comparator 조립</h4>
+      <pre class="code" data-lang="kotlin"><code>data class Emp(val dept: String, val level: Int, val name: String, val joined: LocalDate?)
+
+// 부서 오름차순 → 직급 내림차순 → 이름 오름차순
+val sorted = emps.sortedWith(
+    compareBy&lt;Emp&gt; { it.dept }
+        .thenByDescending { it.level }
+        .thenBy { it.name }
+)
+
+// null 을 뒤로 (또는 앞으로)
+val byJoined = emps.sortedWith(compareBy(nullsLast()) { it.joined })
+
+// 한글 정렬 — 로케일을 명시해야 자모 순서가 맞는다
+val ko = Collator.getInstance(Locale.KOREAN)
+val names = emps.map { it.name }.sortedWith(ko)
+
+// 사용자 정의 순서 (등급표 순서대로)
+val order = listOf("VIP", "GOLD", "SILVER")
+val byGrade = users.sortedBy { order.indexOf(it.grade) }
+
+// 안정 정렬이다 — 같은 키면 원래 순서가 유지된다 (자바 List.sort 와 동일)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한 번 순회로 여러 값 얻기</h4>
+      <pre class="code" data-lang="kotlin"><code>// ❌ 세 번 순회
+val cnt = orders.count { it.paid }
+val sum = orders.filter { it.paid }.sumOf { it.amount }
+val max = orders.filter { it.paid }.maxOfOrNull { it.amount }
+
+// ✅ 한 번에 — fold 로 누산기를 굴린다
+data class Agg(val count: Int = 0, val sum: Long = 0, val max: Long = 0)
+
+val agg = orders.asSequence().filter { it.paid }.fold(Agg()) { a, o -&gt;
+    Agg(a.count + 1, a.sum + o.amount, maxOf(a.max, o.amount))
+}
+
+// 그룹별 집계는 groupingBy + aggregate 가 가장 빠르다 (중간 리스트를 안 만든다)
+val sumByCity: Map&lt;String, Long&gt; = orders
+    .groupingBy { it.city }
+    .fold(0L) { acc, o -&gt; acc + o.amount }
+
+val countByCity = orders.groupingBy { it.city }.eachCount()</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">성능 — 무엇이 실제로 비싼가</h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:250px">패턴</th><th>비용과 대안</th></tr>
+      <tr><td><code>list.contains(x)</code>를 루프 안에서</td><td>O(n²) → <b><code>toSet()</code> 한 번</b> 만들고 검사</td></tr>
+      <tr><td><code>map { }.filter { }.map { }</code></td><td>단계마다 리스트 생성 → 수십만 건이면 <code>asSequence()</code></td></tr>
+      <tr><td><code>+</code> 로 리스트 이어붙이기 (루프 안)</td><td>매번 전체 복사 → <code>buildList</code>나 <code>MutableList</code></td></tr>
+      <tr><td><code>sortedBy</code> 를 여러 번</td><td>정렬은 O(n log n) → <code>compareBy().thenBy()</code>로 한 번에</td></tr>
+      <tr><td><code>Int</code> 컬렉션의 박싱</td><td>수치 계산 루프면 <code>IntArray</code>가 몇 배 빠르다</td></tr>
+      <tr><td><code>first()</code> 를 큰 리스트에서 반복</td><td><code>associateBy</code>로 <b>Map 인덱스</b>를 한 번 만들기</td></tr>
+      <tr><td>매번 <code>Regex("...")</code> 생성</td><td>정규식 컴파일이 비싸다 → 최상위 <code>val</code>로 한 번만</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 실전 예 — 10만 건 주문에서 사용자 이름 붙이기
+// ❌ O(n·m) — 주문마다 사용자 리스트를 훑는다
+val bad = orders.map { o -&gt;
+    val u = users.first { it.id == o.userId }      // 매번 전체 탐색
+    o to u.name
+}
+
+// ✅ O(n+m) — 인덱스를 한 번 만든다
+val userById = users.associateBy { it.id }         // Map&lt;Long, User&gt;
+val good = orders.map { o -&gt;
+    o to (userById[o.userId]?.name ?: "탈퇴회원")
+}
+
+// 10만 × 1만 기준으로 수 초 → 수십 ms 수준의 차이가 난다</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">알아 두면 좋은 함수들</h4>
+      <pre class="code" data-lang="kotlin"><code>listOf(1,2,3,4).zipWithNext()          // [(1,2),(2,3),(3,4)] 연속 비교
+listOf(1,2,3).runningFold(0) { a,b -&gt; a+b }  // [0,1,3,6] 누적 합
+listOf(3,1,2).sortedDescending()
+listOf("a","b").withIndex()
+listOf(1,2,3).sumOf { it.toLong() }    // 오버플로 방지 (Long 으로 누적)
+listOf(1,2,2,3).groupingBy { it }.eachCount()   // 빈도수
+list.chunked(1000) { batch -&gt; repo.saveAll(batch) }  // 배치 저장
+list.windowed(3, step = 1, partialWindows = false)   // 이동 평균
+list.distinctBy { it.email }           // 특정 키로 중복 제거
+list.ifEmpty { listOf(default) }       // 비었으면 대체
+list.requireNoNulls()                  // null 있으면 예외</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동시성 컬렉션 — 코틀린엔 따로 없다</h4>
+      <pre class="code" data-lang="kotlin"><code>// 자바 것을 그대로 쓴다
+val cache = ConcurrentHashMap&lt;Long, User&gt;()
+val queue = ConcurrentLinkedQueue&lt;Task&gt;()
+val counter = AtomicLong()
+
+// getOrPut 은 원자적이지 않다! (읽고-없으면-쓰기 사이에 틈이 있다)
+// ❌ cache.getOrPut(id) { load(id) }
+// ✅ 자바 API 를 쓴다
+val u = cache.computeIfAbsent(id) { load(it) }
+
+// 코루틴 환경이라면 Mutex 나 채널이 더 자연스럽다 — 코루틴 탭 참고
+</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>mutableListOf()</code>는 스레드 안전이 아닙니다.</b>
+        여러 스레드가 함께 쓰면 <code>ConcurrentModificationException</code>이 나거나
+        조용히 원소가 사라집니다. 공유되는 순간 자바 동시성 컬렉션이나 코루틴 도구로 바꾸세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== ka10 ==================== -->
+<section class="sec" id="ka10">
+  <div class="sec-head rv">
+    <span class="no">ADV 10</span>
+    <h2>typealias · <span class="t">value class</span></h2>
+    <p class="lead">
+      <code>Long</code> 두 개를 인자로 받는 함수는 <b>언젠가 반드시 뒤바뀝니다.</b>
+      <code>value class</code>는 그 사고를 <b>런타임 비용 없이</b> 컴파일 단계에서 막습니다.
+    </p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>원시 타입 집착 (primitive obsession)</h5>
+      <pre class="code" data-lang="kotlin"><code>fun transfer(fromId: Long, toId: Long, amount: Long) { }
+
+// 6개월 뒤 어느 날
+transfer(toId, fromId, amount)   // 컴파일 통과. 돈이 반대로 간다 💥
+
+fun send(email: String, name: String) { }
+send(name, email)                // 역시 통과</code></pre>
+    </div>
+    <div class="good">
+      <h5>value class — 타입으로 구분</h5>
+      <pre class="code" data-lang="kotlin"><code>@JvmInline value class AccountId(val value: Long)
+@JvmInline value class Money(val won: Long)
+
+fun transfer(from: AccountId, to: AccountId, amount: Money) { }
+
+// transfer(money, from, to)   // ❌ 컴파일 에러
+transfer(AccountId(1), AccountId(2), Money(10_000))
+
+// 바이트코드에서는 그냥 long 이다 — 래퍼 객체가 생기지 않는다</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">value class 의 규칙과 한계</h4>
+      <ul class="tx">
+        <li><b>프로퍼티는 하나</b>(val)만. <code>@JvmInline</code>이 필요합니다</li>
+        <li>함수·계산 프로퍼티는 가질 수 있습니다 (검증 로직도 <code>init</code>에)</li>
+        <li><b>박싱되는 경우가 있습니다</b> — 컬렉션에 담거나(<code>List&lt;Money&gt;</code>),
+          제네릭·nullable(<code>Money?</code>)로 쓰거나, 인터페이스로 다룰 때</li>
+        <li>자바에서는 <b>이름이 뒤틀립니다</b>(맹글링) — 자바에서 부를 API 라면 주의</li>
+      </ul>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>@JvmInline
+value class Email(val value: String) {
+    init { require("@" in value) { "이메일 형식 오류: $value" } }
+    val domain: String get() = value.substringAfter("@")
+}
+println(Email("a@b.com").domain)   // b.com</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">typealias — 이름만 바꾼다 (타입 안전 아님)</h4>
+      <pre class="code" data-lang="kotlin"><code>typealias UserId = Long
+typealias Handler = (Request) -&gt; Response
+typealias UserCache = MutableMap&lt;UserId, User&gt;
+
+fun find(id: UserId) { }
+find(123L)          // ✅ 그냥 Long 이라 통과 — 안전장치가 아니다
+
+// 쓰는 자리
+// · 긴 제네릭 타입에 이름 붙이기 (가독성)
+// · 함수 타입에 이름 붙이기
+// · 이름 충돌 회피 (import 별칭)
+import java.util.Date as JavaDate
+import kotlinx.datetime.Instant as KtInstant</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>구분</b> — <code>typealias</code>는 <b>가독성</b>, <code>value class</code>는 <b>타입 안전</b>.
+        “실수로 뒤바뀌면 사고”라면 반드시 <code>value class</code>를 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>어디까지 감쌀 것인가</b> — 도메인의 <b>식별자</b>(UserId · OrderId)와
+    <b>단위가 있는 값</b>(Money · Percent · Millis)만 감싸도 사고의 대부분이 막힙니다.
+    모든 String 을 감싸면 변환 코드가 늘어 오히려 손해입니다.
+  </div>
+</section>
+
+
+<!-- ==================== ka11 ==================== -->
+<section class="sec" id="ka11">
+  <div class="sec-head rv">
+    <span class="no">ADV 11</span>
+    <h2>계약 — <span class="t">contracts</span></h2>
+    <p class="lead">
+      <code>if (s.isNullOrBlank()) return</code> 다음 줄에서 <code>s</code>가 <b>non-null로 스마트 캐스트</b>되는 이유가 뭘까요?
+      컴파일러가 그 함수의 <b>계약</b>을 알고 있기 때문입니다. 이 계약은 <b>직접 선언할 수도</b> 있습니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>import kotlin.contracts.*
+
+// 문제: 내가 만든 검사 함수는 스마트 캐스트를 못 만든다
+fun isValid(s: String?): Boolean = !s.isNullOrBlank()
+
+fun f(s: String?) {
+    if (isValid(s)) {
+        // println(s.length)   // ❌ 컴파일러는 s 가 non-null 인지 모른다
+    }
+}
+
+// 해결: 계약을 선언한다
+@OptIn(ExperimentalContracts::class)
+fun isValid2(s: String?): Boolean {
+    contract { returns(true) implies (s != null) }   // "true 를 돌려주면 s 는 null 이 아니다"
+    return !s.isNullOrBlank()
+}
+
+fun g(s: String?) {
+    if (isValid2(s)) {
+        println(s.length)     // ✅ 스마트 캐스트가 된다
+    }
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 종류의 계약</h4>
+      <pre class="code" data-lang="kotlin"><code>// 1) returns(...) implies (...) — 반환값이 알려 주는 사실
+@OptIn(ExperimentalContracts::class)
+fun Any?.isUser(): Boolean {
+    contract { returns(true) implies (this@isUser is User) }
+    return this is User
+}
+
+// 2) callsInPlace — 람다가 언제 몇 번 불리는지
+@OptIn(ExperimentalContracts::class)
+inline fun &lt;T&gt; measure(block: () -&gt; T): T {
+    contract { callsInPlace(block, InvocationKind.EXACTLY_ONCE) }
+    val t = System.nanoTime()
+    return block().also { println("${System.nanoTime() - t}ns") }
+}
+
+// EXACTLY_ONCE 를 선언했기 때문에 이게 컴파일된다
+val name: String
+measure { name = loadName() }     // val 을 람다 안에서 초기화
+println(name)                     // '반드시 한 번' 실행됨을 컴파일러가 안다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">표준 라이브러리가 쓰는 곳</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:180px">함수</th><th>계약</th></tr>
+          <tr><td><code>isNullOrEmpty()</code></td><td>false 면 non-null</td></tr>
+          <tr><td><code>isNullOrBlank()</code></td><td>false 면 non-null</td></tr>
+          <tr><td><code>requireNotNull()</code></td><td>반환 후 non-null</td></tr>
+          <tr><td><code>checkNotNull()</code></td><td>반환 후 non-null</td></tr>
+          <tr><td><code>let·run·apply·also</code></td><td>람다가 정확히 한 번 실행</td></tr>
+          <tr><td><code>require()</code>·<code>check()</code></td><td>반환하면 조건이 참</td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>아직 실험 기능입니다</b>(<code>@OptIn(ExperimentalContracts::class)</code> 필요).
+        그리고 <b>컴파일러가 계약의 진위를 검증하지 않습니다</b> —
+        거짓말을 적으면 잘못된 스마트 캐스트가 만들어져 런타임에 터집니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>실무에서 쓰는 자리</b> — 팀 공용 검증 유틸(<code>isBlankOrNull</code>, <code>hasValue</code>)에
+    계약을 달아 두면 <b>호출부 전부에서 <code>!!</code>가 사라집니다.</b>
+    라이브러리를 만들 때 특히 값을 합니다.
+  </div>
+</section>
+
+
+<!-- ==================== ka12 ==================== -->
+<section class="sec" id="ka12">
+  <div class="sec-head rv">
+    <span class="no">ADV 12</span>
+    <h2><span class="t">리플렉션</span> — 실행 중에 타입 들여다보기</h2>
+    <p class="lead">
+      스프링의 <code>@Autowired</code>, Jackson의 JSON 매핑, JPA의 엔티티 스캔 —
+      전부 리플렉션입니다. 코틀린은 <b>KClass</b>라는 자체 API를 두고 자바 리플렉션과 오갈 수 있게 했습니다.
+    </p>
+  </div>
+
+  <div class="dep rv"><b>의존성</b> — 코틀린 리플렉션은 별도 라이브러리입니다:
+    <code>implementation(kotlin("reflect"))</code> (약 2.8MB — 안드로이드에서는 신중히)</div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">KClass · 자바 Class 오가기</h4>
+      <pre class="code" data-lang="kotlin"><code>import kotlin.reflect.full.*
+
+data class User(val id: Long, val name: String, val email: String?)
+
+val kc = User::class                 // KClass&lt;User&gt;
+val jc = User::class.java            // Class&lt;User&gt;   ← 자바 API 에 넘길 때
+val back = jc.kotlin                 // 다시 KClass
+
+println(kc.simpleName)               // User
+println(kc.qualifiedName)            // com.example.User
+println(kc.isData)                   // true
+println(kc.memberProperties.map { it.name })   // [email, id, name]
+
+// 인스턴스에서
+val u = User(1, "김", null)
+println(u::class.simpleName)         // User
+
+// 프로퍼티 값 읽기
+kc.memberProperties.forEach { p -&gt;
+    println("${p.name} = ${p.get(u)}")
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로퍼티 참조 · 애너테이션</h4>
+      <pre class="code" data-lang="kotlin"><code>// 프로퍼티 참조 — 리플렉션 없이도 이름을 얻는다
+val ref = User::name
+println(ref.name)                    // name
+println(ref.get(u))                  // 김
+
+// 커스텀 애너테이션 만들고 읽기
+@Target(AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)     // ← 런타임에 읽으려면 필수
+annotation class Masked(val keep: Int = 2)
+
+data class Account(
+    @Masked(keep = 4) val cardNo: String,
+    val owner: String,
+)
+
+fun mask(obj: Any): Map&lt;String, Any?&gt; =
+    obj::class.memberProperties.associate { p -&gt;
+        val ann = p.annotations.filterIsInstance&lt;Masked&gt;().firstOrNull()
+        val v = p.getter.call(obj)
+        p.name to if (ann != null &amp;&amp; v is String)
+            v.takeLast(ann.keep).padStart(v.length, '*') else v
+    }
+
+println(mask(Account("1234567812345678", "김현우")))
+// {cardNo=************5678, owner=김현우}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">쓰기 전에 알아야 할 세 가지</h3>
+  <div class="grid3 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 느리다</h4>
+      <p class="tx" style="font-size:13.4px;margin-bottom:0">
+        직접 호출 대비 <b>수십~수백 배</b> 느립니다.
+        요청마다 도는 경로에서는 결과를 <b>캐시</b>하세요
+        (스프링·Jackson도 전부 캐시합니다).
+      </p>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 컴파일러가 못 지킨다</h4>
+      <p class="tx" style="font-size:13.4px;margin-bottom:0">
+        이름으로 접근하므로 <b>이름을 바꾸면 런타임에 터집니다.</b>
+        가능하면 <code>User::name</code> 같은 <b>참조</b>를 쓰세요 —
+        리네임 리팩터링이 따라옵니다.
+      </p>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ 네이티브에서 막힌다</h4>
+      <p class="tx" style="font-size:13.4px;margin-bottom:0">
+        GraalVM 네이티브 이미지·안드로이드 R8에서는
+        <b>리플렉션 대상을 미리 등록</b>해야 합니다.
+        빌드 시점 생성(<b>KSP</b>)이 대안입니다 — 다음 섹션.
+      </p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== ka13 ==================== -->
+<section class="sec" id="ka13">
+  <div class="sec-head rv">
+    <span class="no">ADV 13</span>
+    <h2>애너테이션 · <span class="t">KSP</span> — 빌드 때 코드 만들기</h2>
+    <p class="lead">
+      Room·Hilt·Moshi·kotlinx.serialization은 전부 <b>빌드 시점에 코드를 생성</b>합니다.
+      리플렉션 대신 <b>실제 코드가 생기므로</b> 빠르고, 네이티브 빌드에서도 안전합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 214" role="img" aria-label="리플렉션 방식과 KSP 코드 생성 방식을 비교한 그림. 리플렉션은 실행 시점에 클래스 정보를 읽어 느리고 네이티브 빌드에서 등록이 필요하지만, KSP는 빌드 시점에 소스를 분석해 실제 코드를 생성하므로 실행 시점 비용이 없고 컴파일러가 검증한다.">
+      <text x="16" y="18" class="lbl">두 가지 메타프로그래밍 — 언제 일을 하느냐가 다르다</text>
+
+      <text x="16" y="46" class="ttl rs-t">리플렉션 (실행 시점)</text>
+      <rect class="bx" x="16" y="56" width="140" height="38"/>
+      <text x="86" y="80" class="val" text-anchor="middle">앱 기동</text>
+      <path class="fl ar" d="M160 75 L192 75"/>
+      <rect class="bx bx-warn" x="196" y="56" width="196" height="38"/>
+      <text x="294" y="80" class="val rs-t" text-anchor="middle">클래스 정보 읽고 분석</text>
+      <path class="fl ar" d="M396 75 L428 75"/>
+      <rect class="bx bx-warn" x="432" y="56" width="232" height="38"/>
+      <text x="548" y="80" class="val rs-t" text-anchor="middle">느림 · 네이티브에서 등록 필요</text>
+
+      <path class="ln-t" d="M16 110 L664 110"/>
+
+      <text x="16" y="138" class="ttl ok-t">KSP (빌드 시점)</text>
+      <rect class="bx bx-ok" x="16" y="148" width="140" height="38"/>
+      <text x="86" y="172" class="val ok-t" text-anchor="middle">컴파일</text>
+      <path class="fl ar ar-gn" style="stroke:#34d399" d="M160 167 L192 167"/>
+      <rect class="bx bx-ok" x="196" y="148" width="196" height="38"/>
+      <text x="294" y="172" class="val ok-t" text-anchor="middle">소스 분석 → .kt 생성</text>
+      <path class="fl ar ar-gn" style="stroke:#34d399" d="M396 167 L428 167"/>
+      <rect class="bx bx-ok" x="432" y="148" width="232" height="38"/>
+      <text x="548" y="172" class="val ok-t" text-anchor="middle">실행 비용 0 · 컴파일러가 검증</text>
+      <text x="16" y="206" class="ann">Room · Hilt · Moshi · kotlinx.serialization 이 이 방식이다</text>
+    </svg>
+    <div class="cap">KSP는 <b>KAPT의 후계자</b>입니다 — 자바 스텁을 만들지 않아 빌드가 대략 두 배 빠릅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">애너테이션 정의 — 세 가지를 정한다</h4>
+      <pre class="code" data-lang="kotlin"><code>@Target(                            // ① 어디에 붙일 수 있나
+    AnnotationTarget.CLASS,
+    AnnotationTarget.FUNCTION,
+    AnnotationTarget.PROPERTY,
+)
+@Retention(AnnotationRetention.RUNTIME)  // ② 언제까지 남나
+// SOURCE: 컴파일하면 사라짐 (린트용)
+// BINARY: 클래스 파일에 남지만 리플렉션 불가
+// RUNTIME: 리플렉션으로 읽을 수 있음 (기본값)
+@MustBeDocumented
+annotation class Audited(val action: String = "")
+
+@Audited("주문생성")
+fun createOrder() { }
+
+// ③ 사용 지점 지정 — 코틀린은 프로퍼티가 여러 요소로 컴파일된다
+class Dto(
+    @field:NotNull       // 필드에
+    @get:JsonProperty    // getter 에
+    @param:JsonProperty  // 생성자 파라미터에
+    val name: String,
+)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>사용 지점(<code>@field:</code> · <code>@get:</code>)은 실무에서 자주 문제가 됩니다.</b>
+        검증 애너테이션이 안 먹거나 Jackson 매핑이 어긋나면 대개 여기가 원인입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">KSP 설정과 실제 프로세서</h4>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts
+plugins {
+    kotlin("jvm") version "2.2.0"
+    id("com.google.devtools.ksp") version "2.2.0-2.0.2"
+}
+dependencies {
+    implementation("androidx.room:room-runtime:2.7.0")
+    ksp("androidx.room:room-compiler:2.7.0")   // ← annotationProcessor 대신 ksp
+}
+
+// 프로세서를 직접 만드는 뼈대 (라이브러리 제작자용)
+class MyProcessor(private val gen: CodeGenerator) : SymbolProcessor {
+    override fun process(resolver: Resolver): List&lt;KSAnnotated&gt; {
+        resolver.getSymbolsWithAnnotation("com.example.Audited")
+            .filterIsInstance&lt;KSFunctionDeclaration&gt;()
+            .forEach { fn -&gt;
+                gen.createNewFile(Dependencies(false), "gen", "${fn.simpleName.asString()}Log")
+                    .writer().use { it.write("// 생성된 코드") }
+            }
+        return emptyList()
+    }
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:150px">방식</th><th>특징 · 언제</th></tr>
+      <tr><td><b>KSP</b></td><td>코틀린 전용 · 빠름 · <b>새 프로젝트의 기본 선택</b></td></tr>
+      <tr><td>KAPT</td><td>자바 애너테이션 프로세서 재사용 · 느림 · <b>레거시</b>(유지보수 모드)</td></tr>
+      <tr><td>컴파일러 플러그인</td><td>allopen · noarg · serialization · Compose — <b>문법 자체를 바꾼다</b></td></tr>
+      <tr><td>리플렉션</td><td>동적이지만 느리고 네이티브에 약함</td></tr>
+    </table>
+  </div>
+</section>
+
+
+<!-- ==================== ka14 ==================== -->
+<section class="sec" id="ka14">
+  <div class="sec-head rv">
+    <span class="no">ADV 14</span>
+    <h2><span class="t">함수형</span> 스타일</h2>
+    <p class="lead">
+      코틀린은 순수 함수형 언어가 아니지만, <b>불변 데이터 + 함수 합성 + 값으로서의 실패</b>라는
+      핵심 도구는 전부 갖고 있습니다. 실무에서 <b>어디까지 가져다 쓰면 이득인지</b>가 이 절의 주제입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">함수 합성 · 부분 적용 · 커링</h4>
+      <pre class="code" data-lang="kotlin"><code>// 합성 — 표준 라이브러리에는 없으니 직접 만든다 (두 줄이면 된다)
+infix fun &lt;A, B, C&gt; ((A) -&gt; B).then(g: (B) -&gt; C): (A) -&gt; C = { a -&gt; g(this(a)) }
+
+val trim: (String) -&gt; String = String::trim
+val upper: (String) -&gt; String = String::uppercase
+val clean = trim then upper
+println(clean("  hi  "))        // HI
+
+// 부분 적용 — 인자를 미리 채운 새 함수
+fun log(level: String, tag: String, msg: String) = println("[$level][$tag] $msg")
+val debug: (String, String) -&gt; Unit = { tag, msg -&gt; log("DEBUG", tag, msg) }
+debug("Order", "생성됨")
+
+// 커링
+fun sum3(a: Int) = { b: Int -&gt; { c: Int -&gt; a + b + c } }
+println(sum3(1)(2)(3))          // 6
+
+// 메모이제이션
+fun &lt;A, R&gt; ((A) -&gt; R).memoize(): (A) -&gt; R {
+    val cache = mutableMapOf&lt;A, R&gt;()
+    return { a -&gt; cache.getOrPut(a) { this(a) } }
+}
+val slowSquare = { n: Int -&gt; Thread.sleep(100); n * n }.memoize()</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">불변 데이터 다루기</h4>
+      <pre class="code" data-lang="kotlin"><code>data class Address(val city: String, val zip: String)
+data class User(val name: String, val address: Address, val tags: List&lt;String&gt;)
+
+val u = User("김", Address("서울", "01234"), listOf("vip"))
+
+// 중첩 객체 수정 — copy 를 겹쳐 쓴다
+val moved = u.copy(address = u.address.copy(city = "부산"))
+
+// 리스트 수정도 새 리스트로
+val tagged = u.copy(tags = u.tags + "신규")
+val untagged = u.copy(tags = u.tags - "vip")
+
+// 깊이가 3단을 넘어가면 확장 함수로 렌즈를 만든다
+fun User.withCity(city: String) = copy(address = address.copy(city = city))
+val m2 = u.withCity("대구")</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>불변이 느리지 않나요</b> — 대부분의 서버 코드에서 객체 하나 더 만드는 비용은
+        DB 왕복 하나에 비하면 없는 것과 같습니다. <b>동시성 버그가 사라지는 이득</b>이 훨씬 큽니다.
+        정말 뜨거운 루프에서만 가변을 국소적으로 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">실패를 값으로 — 세 가지 선택지</h3>
+  <div class="grid3 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① nullable</h4>
+      <pre class="code" data-lang="kotlin"><code>fun find(id: Long): User? = repo.get(id)
+
+val name = find(1)?.name ?: "없음"</code></pre>
+      <p class="tx" style="font-size:13.2px;margin-bottom:0">
+        <b>실패 이유가 하나뿐</b>일 때. 가장 가볍고 코틀린답습니다.
+      </p>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② sealed 결과 타입</h4>
+      <pre class="code" data-lang="kotlin"><code>sealed interface Res&lt;out T&gt; {
+    data class Ok&lt;T&gt;(val v: T) : Res&lt;T&gt;
+    data class Err(val e: AppError) : Res&lt;Nothing&gt;
+}</code></pre>
+      <p class="tx" style="font-size:13.2px;margin-bottom:0">
+        <b>실패 종류가 여럿</b>이고 호출부가 구분해야 할 때. <b>실무 기본값</b>입니다.
+      </p>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ Arrow Either</h4>
+      <pre class="code" data-lang="kotlin"><code>// arrow-kt 라이브러리
+val r: Either&lt;Err, User&gt; = either {
+    val u = find(id).bind()
+    validate(u).bind()
+    u
+}</code></pre>
+      <p class="tx" style="font-size:13.2px;margin-bottom:0">
+        연산을 <b>여러 번 이어 붙일 때</b> 편합니다. 팀 학습 비용을 고려해 도입하세요.
+      </p>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>실무에서 권하는 선</b> — ① <b>불변 데이터</b>(val · data class · 읽기 전용 컬렉션)와
+    ② <b>순수 함수로 도메인 로직 분리</b>(입출력은 바깥에서)까지는 거의 언제나 이득입니다.
+    모나드·타입클래스까지 밀어붙이는 것은 <b>팀 전체가 합의했을 때만</b> —
+    혼자 쓰면 리뷰가 멈춥니다.
+  </div>
+</section>
+
+
+<!-- ==================== ka15 ==================== -->
+<section class="sec" id="ka15">
+  <div class="sec-head rv">
+    <span class="no">ADV 15</span>
+    <h2>표준 라이브러리 <span class="t">지도</span></h2>
+    <p class="lead">
+      “이거 이미 있지 않을까?”의 답은 대개 <b>있습니다</b>.
+      직접 만들기 전에 여기서 한 번 찾아보세요 — 패키지별로 무엇이 있는지 정리했습니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:230px">패키지 · 모듈</th><th>들어 있는 것</th></tr>
+      <tr><td><code>kotlin</code></td><td>기본 타입 · <code>let/run/apply</code> · <code>require/check</code> · <code>Result</code> · <code>TODO()</code> · <code>repeat</code></td></tr>
+      <tr><td><code>kotlin.collections</code></td><td>List·Set·Map 과 그 위의 <b>수백 개 확장 함수</b></td></tr>
+      <tr><td><code>kotlin.text</code></td><td>문자열 · <code>Regex</code> · <code>StringBuilder</code> · <code>Charsets</code></td></tr>
+      <tr><td><code>kotlin.io</code></td><td><code>File.readText</code> · <code>useLines</code> · <code>println</code> · <code>readln</code></td></tr>
+      <tr><td><code>kotlin.sequences</code></td><td><code>Sequence</code> · <code>generateSequence</code> · <code>sequence { yield }</code></td></tr>
+      <tr><td><code>kotlin.math</code></td><td><code>abs</code>·<code>pow</code>·<code>sqrt</code>·<code>roundToInt</code>·<code>PI</code></td></tr>
+      <tr><td><code>kotlin.random</code></td><td><code>Random.nextInt</code> · <code>list.random()</code> · <code>shuffled()</code></td></tr>
+      <tr><td><code>kotlin.time</code></td><td><code>Duration</code> · <code>3.seconds</code> · <code>measureTime</code> · <code>TimeSource</code></td></tr>
+      <tr><td><code>kotlin.properties</code></td><td><code>Delegates.observable</code> · <code>vetoable</code> · <code>notNull</code></td></tr>
+      <tr><td><code>kotlin.reflect</code></td><td><code>KClass</code> · <code>KProperty</code> (별도 의존성 필요)</td></tr>
+      <tr><td><code>kotlinx.coroutines</code></td><td>코루틴 · Flow (별도 라이브러리 — <b>코루틴 탭</b>)</td></tr>
+      <tr><td><code>kotlinx.serialization</code></td><td>JSON 직렬화 (컴파일러 플러그인 — <b>실전 도구 탭</b>)</td></tr>
+      <tr><td><code>kotlinx.datetime</code></td><td>멀티플랫폼 날짜·시간 (JVM 전용이면 <code>java.time</code>이 낫다)</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">알아 두면 편한 것들</h4>
+      <pre class="code" data-lang="kotlin"><code>// 시간 재기 (kotlin.time)
+val elapsed = measureTime { heavyWork() }
+println(elapsed)                       // 1.234s
+val (result, t) = measureTimedValue { compute() }
+
+// Duration
+val timeout = 3.seconds + 500.milliseconds
+delay(timeout)                         // 코루틴에서
+
+// 랜덤
+val pick = listOf("a","b","c").random()
+val shuffled = (1..10).shuffled()
+Random(42).nextInt(1, 100)             // 시드 고정 (테스트에 유용)
+
+// 범위 보정
+val page = input.coerceIn(1, 100)
+val safe = value.coerceAtLeast(0)
+
+// 반복
+repeat(3) { i -&gt; println(i) }
+
+// 아직 안 만든 자리 — 컴파일은 되고 실행하면 예외
+fun todo(): String = TODO("나중에 구현")</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 만들기 전에 찾는 요령</h4>
+      <ul class="tx">
+        <li>IntelliJ에서 <b>타입 뒤에 점을 찍고 기다리세요</b> — 그 타입의 확장 함수가 전부 나옵니다</li>
+        <li><b><code>xxxOrNull</code></b>, <b><code>xxxIndexed</code></b>,
+          <b><code>xxxNotNull</code></b>, <b><code>xxxTo</code></b> 접미사 규칙을 알면 이름을 추측할 수 있습니다</li>
+        <li><code>mapTo(destination)</code>처럼 <b><code>To</code></b>로 끝나는 것은
+          <b>결과를 기존 컬렉션에 담는</b> 버전입니다 (할당을 줄일 때)</li>
+        <li>표준 라이브러리 소스는 IntelliJ에서 <kbd>Ctrl+B</kbd>로 바로 읽힙니다 —
+          <b>가장 좋은 코틀린 교재</b>입니다</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>자바의 Apache Commons·Guava가 하던 일의 8할</b>이 코틀린 표준 라이브러리에 있습니다.
+        <code>StringUtils.isEmpty</code> 같은 걸 찾기 전에 <code>isEmpty()</code>·<code>isBlank()</code>를 보세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== ka16 ==================== -->
+<section class="sec" id="ka16">
+  <div class="sec-head rv">
+    <span class="no">ADV 16</span>
+    <h2>관용구 · <span class="t">흔한 실수</span></h2>
+    <p class="lead">
+      코드 리뷰에서 반복적으로 지적되는 것들을 모았습니다.
+      문법을 아는 것과 <b>“코틀린답게” 쓰는 것</b>은 다른 문제입니다.
+    </p>
+  </div>
+
+  <h3 class="sub">자주 쓰는 관용구</h3>
+  <pre class="code rv" data-lang="kotlin"><code>// 1) 엘비스 + return / throw — 이른 종료
+val user = repo.find(id) ?: return null
+val order = repo.find(id) ?: throw NotFoundException(id)
+
+// 2) 널 안전 체인 + 기본값
+val city = user?.address?.city ?: "미상"
+
+// 3) when 을 함수 본문으로
+fun toLabel(s: Status) = when (s) { ... }
+
+// 4) apply 로 만들면서 설정
+val client = HttpClient().apply { timeout = 3000 }
+
+// 5) also 로 로그를 끼우기
+return repo.save(o).also { log.info("저장 {}", it.id) }
+
+// 6) takeIf 로 조건부 값
+val discount = amount.takeIf { it &gt; 100_000 }?.times(0.1) ?: 0.0
+
+// 7) 구조 분해로 두 값 받기
+val (min, max) = list.min() to list.max()
+
+// 8) 컬렉션이 비었을 때 처리
+val first = list.firstOrNull() ?: return emptyList()
+
+// 9) 문자열 비었는지 — isBlank 를 쓰자 (공백만 있는 경우 포함)
+if (input.isNotBlank()) { }
+
+// 10) 범위 검사
+if (age in 0..150) { }
+if (status in setOf("NEW", "PAID")) { }</code></pre>
+
+  <h3 class="sub">흔한 실수 — 자바 습관에서 오는 것들</h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:290px">이렇게 쓰고 있다면</th><th>이렇게 바꾸세요</th></tr>
+      <tr><td><code>if (s != null &amp;&amp; s.isNotEmpty())</code></td><td><code>if (!s.isNullOrEmpty())</code></td></tr>
+      <tr><td><code>list.size &gt; 0</code></td><td><code>list.isNotEmpty()</code></td></tr>
+      <tr><td><code>list.filter { }.size</code></td><td><code>list.count { }</code></td></tr>
+      <tr><td><code>list.filter { }.firstOrNull()</code></td><td><code>list.firstOrNull { }</code></td></tr>
+      <tr><td><code>list.map { }.filterNotNull()</code></td><td><code>list.mapNotNull { }</code></td></tr>
+      <tr><td><code>map.containsKey(k) &amp;&amp; map[k]!!</code></td><td><code>map[k]?.let { }</code></td></tr>
+      <tr><td><code>StringBuilder()</code> 직접 조립</td><td><code>buildString { }</code> · <code>joinToString()</code></td></tr>
+      <tr><td>getter/setter 를 손으로</td><td>프로퍼티 · <code>private set</code></td></tr>
+      <tr><td><code>Optional&lt;T&gt;</code> 반환</td><td><code>T?</code></td></tr>
+      <tr><td>유틸 클래스 <code>object Utils</code></td><td>최상위 함수 · 확장 함수</td></tr>
+      <tr><td><code>!!</code> 로 컴파일 에러 지우기</td><td><code>?:</code> · <code>?.let</code> · 이른 return</td></tr>
+      <tr><td>모든 클래스에 <code>data</code></td><td>동등성 의미가 있을 때만 (엔티티는 제외)</td></tr>
+      <tr><td>모든 곳에 <code>lateinit var</code></td><td>생성자 주입 · <code>by lazy</code></td></tr>
+      <tr><td>JPA 엔티티를 <code>data class</code>로</td><td>일반 class + id 기반 equals</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">성능 관련 오해 셋</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>“코틀린은 자바보다 느리다”</b> — 같은 바이트코드로 갑니다.
+          차이가 나는 곳은 <b>람다 객체·박싱·컬렉션 복사</b>이고, 전부 피할 수 있습니다</li>
+        <li><b>“data class 는 무겁다”</b> — 자바에서 손으로 쓰던 equals·hashCode와 같은 코드입니다</li>
+        <li><b>“전부 asSequence 로 바꾸면 빠르다”</b> — 작은 컬렉션에서는 오히려 느립니다.
+          <b>측정하고 바꾸세요</b></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">팀 규칙으로 정해 두면 좋은 것</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><code>!!</code> 금지 (detekt 규칙으로 강제 가능)</li>
+        <li>public API 는 <b>반환 타입 명시</b></li>
+        <li>Boolean 인자는 <b>이름 붙여 호출</b></li>
+        <li>컬렉션 반환은 <b>읽기 전용 타입</b>으로</li>
+        <li>도메인 식별자는 <b>value class</b></li>
+        <li><b>ktlint + detekt</b>를 CI 에 넣기 — <b>실전 도구 탭</b>에서 설정 방법을 다룹니다</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note info rv">
+    <b>다음 탭 예고</b> — <b>코루틴</b>에서는 <code>suspend</code>가 실제로 무엇으로 컴파일되는지부터
+    구조적 동시성, Flow, 채널, 디스패처, 취소와 예외 처리, 테스트까지 다룹니다.
+    이 탭에서 본 <b>inline·수신 객체 람다·시퀀스</b>가 그대로 재료로 쓰입니다.
+  </div>
+</section>
+
+</div>

@@ -1,0 +1,1253 @@
+<div class="pane" id="pane-scale">
+
+<!-- ---------- HERO ---------- -->
+<header class="hero">
+  <div class="eyebrow"><i></i> 코루틴 서버의 병목 · 캐시 · 분산 락 · KAFKA</div>
+  <h1>코루틴은<br>병목을 옮길 뿐<br>없애지 않는다</h1>
+  <p class="tx">
+    스레드 제약이 풀리면 병목은 <b>DB 커넥션·외부 API·락</b>으로 옮겨갑니다.
+    이 탭은 <b>어디가 먼저 터지는지</b>를 순서대로 짚고,
+    캐시·분산 락·멱등성·이벤트 처리를 <b>코틀린 코드</b>로 다룹니다.
+  </p>
+  <div class="stats">
+    <div><b>14</b><span>SECTIONS</span></div>
+    <div><b>3</b><span>캐시 재난 유형</span></div>
+    <div><b>1</b><span>원칙 — 측정하고 고친다</span></div>
+    <div><b>100%</b><span>운영에서 실제로 겪는 문제</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== sc01 ==================== -->
+<section class="sec" id="sc01">
+  <div class="sec-head rv">
+    <span class="no">SCALE 01</span>
+    <h2>트래픽을 <span class="t">숫자로</span> 읽기</h2>
+    <p class="lead">
+      “트래픽이 많다”는 말로는 아무것도 결정할 수 없습니다.
+      <b>RPS · 지연 · 동시성</b> 세 숫자로 바꿔야 <b>서버를 몇 대 둘지</b>가 나옵니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 계산 — 리틀의 법칙</h4>
+      <pre class="code" data-lang="text"><code>동시 처리 수 = RPS × 평균 응답 시간(초)
+
+예) 초당 2,000 요청 · 평균 응답 200ms
+    → 동시에 처리 중인 요청 = 2000 × 0.2 = 400개
+
+이 400 을 무엇으로 감당하는가?
+  · MVC 블로킹     : 톰캣 스레드 400개 필요 (메모리 400MB+)
+  · MVC + 가상스레드: 가상 스레드 400개 (가볍다) — 단 DB 커넥션은 별개
+  · 코루틴/WebFlux : 코루틴 400개 (수백 KB)
+
+그런데 진짜 한계는 대개 여기다
+  · DB 커넥션 풀 50개 → DB 쿼리가 50ms 라면 초당 1,000 쿼리가 한계
+  · 외부 API rate limit 100 RPS
+  · Redis 커넥션 · 파일 디스크립터</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">봐야 할 지표</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:120px">지표</th><th>의미</th></tr>
+          <tr><td>RPS/TPS</td><td>초당 요청·트랜잭션 수 — <b>피크 기준</b>으로 산정</td></tr>
+          <tr><td>p50 / p95 / p99</td><td>평균이 아니라 <b>꼬리 지연</b>을 본다</td></tr>
+          <tr><td>동시 접속</td><td>WebSocket·SSE 라면 이게 핵심</td></tr>
+          <tr><td>에러율</td><td>5xx + 타임아웃 비율</td></tr>
+          <tr><td>포화도</td><td>커넥션 풀·큐·CPU 사용률</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>평균 응답 시간은 거짓말을 합니다.</b>
+        평균 100ms 인데 p99 가 3초면 <b>100명 중 1명은 3초를 기다립니다.</b>
+        SLO 는 언제나 <b>p95·p99 기준</b>으로 정하세요.
+      </div>
+    </div>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 스프링에서 지표 노출 — 이것부터 하고 시작한다
+@Configuration
+class MetricsConfig {
+    @Bean
+    fun commonTags(): MeterRegistryCustomizer&lt;MeterRegistry&gt; =
+        MeterRegistryCustomizer { it.config().commonTags("app", "order-service", "env", activeProfile) }
+}
+
+// 커스텀 지표 — 도메인 사건을 센다
+@Service
+class OrderService(registry: MeterRegistry) {
+    private val placed = registry.counter("orders.placed")
+    private val failed = registry.counter("orders.failed", "reason", "stock")
+    private val latency = Timer.builder("orders.place.latency")
+        .publishPercentiles(0.5, 0.95, 0.99)      // ★ 백분위 노출
+        .register(registry)
+
+    suspend fun place(cmd: PlaceOrderCommand): Order {
+        val sample = Timer.start()
+        return try {
+            doPlace(cmd).also { placed.increment() }
+        } finally {
+            sample.stop(latency)
+        }
+    }
+}</code></pre>
+</section>
+
+
+<!-- ==================== sc02 ==================== -->
+<section class="sec" id="sc02">
+  <div class="sec-head rv">
+    <span class="no">SCALE 02</span>
+    <h2>병목 <span class="t">지도</span> — 어디가 먼저 터지나</h2>
+    <p class="lead">
+      코루틴을 도입하면 스레드 병목이 사라집니다. 그러면 <b>다음 병목이 드러납니다.</b>
+      순서를 알고 있으면 <b>장애 때 30분을 아낍니다.</b>
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="요청 처리 경로의 병목 지점 그림. 요청이 들어와 웹 서버 스레드, 애플리케이션 코루틴, DB 커넥션 풀, 데이터베이스, 외부 API를 차례로 거치며 각 지점마다 한계 수치가 있다. 코루틴을 쓰면 스레드 병목은 사라지지만 커넥션 풀과 외부 API 한계는 그대로 남는다.">
+      <text x="16" y="18" class="lbl">요청이 지나가는 길과 각 구간의 한계</text>
+
+      <rect class="bx" x="16" y="36" width="126" height="46"/>
+      <text x="79" y="58" class="val" text-anchor="middle">요청 수신</text>
+      <text x="79" y="74" class="ann" text-anchor="middle">FD · 백로그</text>
+      <path class="fl ar" d="M146 59 L176 59"/>
+
+      <rect class="bx bx-ok" x="180" y="36" width="146" height="46"/>
+      <text x="253" y="58" class="val ok-t" text-anchor="middle">코루틴 처리</text>
+      <text x="253" y="74" class="ann" text-anchor="middle">여기는 이제 여유롭다</text>
+      <path class="fl ar" d="M330 59 L360 59"/>
+
+      <rect class="bx bx-warn" x="364" y="36" width="146" height="46"/>
+      <text x="437" y="58" class="val rs-t" text-anchor="middle">커넥션 풀</text>
+      <text x="437" y="74" class="ann" text-anchor="middle">보통 여기서 막힌다</text>
+      <path class="fl ar" d="M514 59 L544 59"/>
+
+      <rect class="bx bx-warn" x="548" y="36" width="116" height="46"/>
+      <text x="606" y="58" class="val rs-t" text-anchor="middle">DB · 외부 API</text>
+      <text x="606" y="74" class="ann" text-anchor="middle">진짜 한계</text>
+
+      <text x="16" y="112" class="ttl">병목이 옮겨가는 순서</text>
+
+      <rect class="bx bx-mut" x="16" y="122" width="648" height="30"/>
+      <text x="30" y="142" class="ann">① 스레드 풀 고갈 — 코루틴/가상 스레드로 해결됨 (톰캣 200 스레드 벽)</text>
+      <rect class="bx bx-warn" x="16" y="156" width="648" height="30"/>
+      <text x="30" y="176" class="ann rs-t">② DB 커넥션 풀 대기 — 코루틴이 아무리 많아도 커넥션은 유한하다 ★ 가장 흔함</text>
+      <rect class="bx bx-warn" x="16" y="190" width="648" height="30"/>
+      <text x="30" y="210" class="ann rs-t">③ DB 자체 — 슬로우 쿼리 · 락 경합 · 인덱스 부재</text>
+      <rect class="bx bx-hi" x="16" y="224" width="648" height="30"/>
+      <text x="30" y="244" class="ann am-t">④ 외부 API rate limit · 네트워크 대역 · 캐시 노드 CPU</text>
+    </svg>
+    <div class="cap">코루틴 도입 후 <b>커넥션 풀 크기를 조정하지 않으면</b> 대기만 길어집니다 — 반드시 함께 봐야 합니다.</div>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 커넥션 풀과 코루틴 동시성을 '맞춘다'
+// application.yml
+// spring.datasource.hikari.maximum-pool-size: 30
+
+@Configuration
+class DbConfig {
+    // 커넥션 풀 크기와 같은 수로 제한한 디스패처
+    @Bean
+    fun dbDispatcher(): CoroutineDispatcher = Dispatchers.IO.limitedParallelism(30)
+}
+
+@Repository
+class OrderRepository(
+    private val jdbc: JdbcTemplate,
+    private val dbDispatcher: CoroutineDispatcher,
+) {
+    suspend fun find(id: Long): Order? = withContext(dbDispatcher) {
+        jdbc.queryForObject(SQL, mapper, id)
+    }
+}
+
+// 이렇게 하면
+// · 커넥션 풀 대기가 코루틴 대기로 바뀐다 (스레드를 안 붙잡는다)
+// · 풀 고갈로 인한 타임아웃 폭발 대신 자연스러운 백프레셔가 걸린다
+
+// 풀 크기 공식 (참고) — 코어 수 × 2 + 디스크 수 정도에서 시작해 측정으로 조정
+// 무작정 키우면 DB 쪽 컨텍스트 스위칭이 늘어 오히려 느려진다</code></pre>
+</section>
+
+
+<!-- ==================== sc03 ==================== -->
+<section class="sec" id="sc03">
+  <div class="sec-head rv">
+    <span class="no">SCALE 03</span>
+    <h2><span class="t">캐시</span> 전략 — 2단 구성</h2>
+    <p class="lead">
+      가장 효과가 큰 최적화입니다. <b>로컬 캐시(Caffeine)</b>와 <b>분산 캐시(Redis)</b>를
+      함께 쓰면 각각의 약점을 서로 메웁니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 216" role="img" aria-label="2단 캐시 구조 그림. 요청이 오면 먼저 서버 메모리의 로컬 캐시를 확인하고, 없으면 Redis를 확인하며, 그래도 없으면 DB를 조회한 뒤 두 캐시를 모두 채운다. 로컬 캐시는 가장 빠르지만 서버마다 다르고, Redis는 모든 서버가 공유하지만 네트워크 왕복이 있다.">
+      <text x="16" y="18" class="lbl">2단 캐시 — 위로 갈수록 빠르고, 아래로 갈수록 정확하다</text>
+
+      <rect class="bx" x="16" y="36" width="120" height="44"/>
+      <text x="76" y="58" class="val" text-anchor="middle">요청</text>
+      <path class="fl ar" d="M140 58 L172 58"/>
+
+      <rect class="bx bx-ok" x="176" y="36" width="150" height="44"/>
+      <text x="251" y="56" class="val ok-t" text-anchor="middle">① 로컬 Caffeine</text>
+      <text x="251" y="72" class="ann" text-anchor="middle">~100ns · 서버마다 다름</text>
+      <path class="fl ar" d="M330 58 L362 58"/>
+
+      <rect class="bx bx-hi" x="366" y="36" width="150" height="44"/>
+      <text x="441" y="56" class="val am-t" text-anchor="middle">② Redis</text>
+      <text x="441" y="72" class="ann" text-anchor="middle">~1ms · 전 서버 공유</text>
+      <path class="fl ar" d="M520 58 L552 58"/>
+
+      <rect class="bx bx-warn" x="556" y="36" width="108" height="44"/>
+      <text x="610" y="56" class="val rs-t" text-anchor="middle">③ DB</text>
+      <text x="610" y="72" class="ann" text-anchor="middle">~10ms+</text>
+
+      <path class="fl ar ar-gn" style="stroke:#34d399" d="M610 84 C 610 116 300 116 251 92"/>
+      <text x="420" y="112" class="ann ok-t" text-anchor="middle">조회 결과로 ①②를 함께 채운다</text>
+
+      <rect class="bx" x="16" y="130" width="316" height="72"/>
+      <text x="174" y="152" class="val ok-t" text-anchor="middle">로컬 캐시가 맞는 것</text>
+      <text x="174" y="172" class="ann" text-anchor="middle">거의 안 바뀌는 설정 · 코드 테이블</text>
+      <text x="174" y="190" class="ann" text-anchor="middle">짧은 TTL 로 두면 갱신 지연도 감수 가능</text>
+
+      <rect class="bx" x="348" y="130" width="316" height="72"/>
+      <text x="506" y="152" class="val am-t" text-anchor="middle">Redis 가 맞는 것</text>
+      <text x="506" y="172" class="ann" text-anchor="middle">세션 · 재고 · 랭킹 · 분산 락</text>
+      <text x="506" y="190" class="ann" text-anchor="middle">모든 서버가 같은 값을 봐야 하는 것</text>
+    </svg>
+    <div class="cap">로컬 캐시는 <b>서버마다 값이 다를 수 있다</b>는 점을 감수할 수 있는 데이터에만 씁니다.</div>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>@Component
+class ProductCache(
+    private val redis: RedisCoroutinesCommands&lt;String, String&gt;,
+    private val repo: ProductRepository,
+    private val json: Json,
+) {
+    // 1단: 로컬 — 짧은 TTL (서버 간 불일치를 감수할 수 있는 시간)
+    private val local: Cache&lt;Long, Product&gt; = Caffeine.newBuilder()
+        .maximumSize(10_000)
+        .expireAfterWrite(30.seconds.toJavaDuration())
+        .recordStats()
+        .build()
+
+    suspend fun get(id: Long): Product? {
+        local.getIfPresent(id)?.let { return it }                       // ① 로컬
+
+        redis.get("product:$id")?.let { raw -&gt;                          // ② Redis
+            val p = json.decodeFromString&lt;Product&gt;(raw)
+            local.put(id, p)
+            return p
+        }
+
+        val p = repo.findAsync(id) ?: return null                       // ③ DB
+        redis.setex("product:$id", 300, json.encodeToString(p))         // 5분
+        local.put(id, p)
+        return p
+    }
+
+    // 무효화 — Redis 삭제 + 다른 서버의 로컬 캐시도 비워야 한다
+    suspend fun evict(id: Long) {
+        redis.del("product:$id")
+        local.invalidate(id)
+        redis.publish("cache:evict", "product:$id")     // Pub/Sub 으로 전파
+    }
+}
+
+// 다른 서버들은 구독해서 로컬 캐시를 비운다
+@Component
+class CacheEvictSubscriber(private val cache: ProductCache) {
+    // Redis Pub/Sub 을 Flow 로 받아 처리
+}</code></pre>
+
+  <div class="note warn rv">
+    <b>캐시는 정합성을 포기하는 대가로 속도를 얻는 것</b>입니다.
+    <b>TTL 을 정하는 것 = 얼마나 오래된 데이터를 허용할지 정하는 것</b>입니다.
+    가격·재고처럼 <b>틀리면 사고인 데이터</b>는 캐시하지 않거나 TTL 을 아주 짧게,
+    또는 <b>변경 시 즉시 무효화</b> 경로를 반드시 만드세요.
+  </div>
+</section>
+
+
+<!-- ==================== sc04 ==================== -->
+<section class="sec" id="sc04">
+  <div class="sec-head rv">
+    <span class="no">SCALE 04</span>
+    <h2>Redis — <span class="t">코루틴으로</span></h2>
+    <p class="lead">
+      단순 캐시를 넘어 <b>랭킹·중복 제거·큐·분산 락</b>까지 담당합니다.
+      Lettuce 의 코루틴 API 를 쓰면 <b>논블로킹으로</b> 다룰 수 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자료구조별 쓰임</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:130px">타입</th><th>실전 용도</th></tr>
+          <tr><td>String</td><td>캐시 · 카운터(<code>INCR</code>) · 분산 락</td></tr>
+          <tr><td>Hash</td><td>객체 필드 단위 갱신 (세션·프로필)</td></tr>
+          <tr><td>List</td><td>간단한 큐 · 최근 목록</td></tr>
+          <tr><td>Set</td><td>중복 제거 · 태그 · 참여자</td></tr>
+          <tr><td>Sorted Set</td><td><b>랭킹</b> · 시간순 인덱스 · 지연 큐</td></tr>
+          <tr><td>HyperLogLog</td><td>대략적인 방문자 수 (메모리 12KB)</td></tr>
+          <tr><td>Stream</td><td>이벤트 로그 · 소비자 그룹</td></tr>
+          <tr><td>Bitmap</td><td>출석 체크 · 플래그 (1비트/사용자)</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코틀린 코드</h4>
+      <pre class="code" data-lang="kotlin"><code>// Lettuce 코루틴 API
+val conn = RedisClient.create("redis://localhost").connect()
+val redis = conn.coroutines()          // RedisCoroutinesCommands
+
+// 랭킹 — 실시간 인기 상품
+suspend fun addScore(productId: Long, score: Double) {
+    redis.zincrby("ranking:today", score, productId.toString())
+}
+suspend fun top10(): List&lt;Long&gt; =
+    redis.zrevrange("ranking:today", 0, 9).map { it.toLong() }.toList()
+
+// 카운터 — 조회수
+suspend fun increaseView(id: Long): Long = redis.incr("view:$id") ?: 0
+
+// 중복 방지 — 오늘 이미 본 사람인가
+suspend fun markViewed(userId: Long, id: Long): Boolean =
+    redis.sadd("viewed:$id:${today()}", userId.toString()) == 1L
+
+// 파이프라인 — 왕복을 줄인다
+suspend fun getMany(ids: List&lt;Long&gt;): List&lt;String?&gt; =
+    redis.mget(*ids.map { "product:$it" }.toTypedArray()).map { it.value }.toList()</code></pre>
+    </div>
+  </div>
+
+  <div class="note warn rv">
+    <b>운영에서 조심할 것</b> —
+    ① <b><code>KEYS *</code> 금지</b>(전체 스캔으로 Redis 가 멈춥니다 — <code>SCAN</code> 사용),
+    ② <b>빅키</b>(수십 MB 값·수백만 원소 컬렉션)는 삭제할 때도 멈춤을 유발,
+    ③ <b>TTL 없는 키</b>가 쌓이면 메모리가 찹니다(<code>maxmemory-policy</code> 설정),
+    ④ <b>Redis 는 단일 스레드</b>라 무거운 명령 하나가 전체를 막습니다.
+  </div>
+</section>
+
+
+<!-- ==================== sc05 ==================== -->
+<section class="sec" id="sc05">
+  <div class="sec-head rv">
+    <span class="no">SCALE 05</span>
+    <h2>캐시 <span class="t">3대 재난</span></h2>
+    <p class="lead">
+      캐시는 잘 돌 때는 조용하다가, <b>무너질 때 한꺼번에</b> 무너집니다.
+      세 가지 유형을 알고 대비하면 <b>DB 가 캐시 때문에 죽는 사고</b>를 막을 수 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 234" role="img" aria-label="캐시 장애 세 가지 유형 그림. 스탬피드는 인기 키가 만료되는 순간 수천 요청이 동시에 DB로 몰리는 것이고, 관통은 존재하지 않는 키를 계속 조회해 캐시가 무용지물이 되는 것이며, 눈사태는 많은 키가 같은 시각에 만료되어 DB가 한꺼번에 부하를 받는 것이다.">
+      <text x="16" y="18" class="lbl">세 가지 유형 — 증상은 같다: DB 가 갑자기 죽는다</text>
+
+      <rect class="bx bx-warn" x="16" y="34" width="210" height="88"/>
+      <text x="121" y="56" class="val rs-t" text-anchor="middle">① 스탬피드</text>
+      <text x="121" y="76" class="ann" text-anchor="middle">인기 키 하나가 만료되는 순간</text>
+      <text x="121" y="94" class="ann" text-anchor="middle">수천 요청이 동시에 DB 로</text>
+      <text x="121" y="112" class="ann ok-t" text-anchor="middle">해결: 락 + 단일 갱신</text>
+
+      <rect class="bx bx-warn" x="236" y="34" width="210" height="88"/>
+      <text x="341" y="56" class="val rs-t" text-anchor="middle">② 관통</text>
+      <text x="341" y="76" class="ann" text-anchor="middle">없는 키를 계속 조회</text>
+      <text x="341" y="94" class="ann" text-anchor="middle">캐시가 아무 역할을 못 한다</text>
+      <text x="341" y="112" class="ann ok-t" text-anchor="middle">해결: null 도 캐시 · 블룸 필터</text>
+
+      <rect class="bx bx-warn" x="456" y="34" width="208" height="88"/>
+      <text x="560" y="56" class="val rs-t" text-anchor="middle">③ 눈사태</text>
+      <text x="560" y="76" class="ann" text-anchor="middle">많은 키가 동시에 만료</text>
+      <text x="560" y="94" class="ann" text-anchor="middle">(배포 직후 · 일괄 적재 후)</text>
+      <text x="560" y="112" class="ann ok-t" text-anchor="middle">해결: TTL 에 무작위 지터</text>
+
+      <text x="16" y="150" class="ttl">스탬피드가 일어나는 순간</text>
+      <rect class="bx" x="16" y="160" width="150" height="34"/>
+      <text x="91" y="182" class="val" text-anchor="middle">캐시 만료</text>
+      <path class="fl ar ar-rs" style="stroke:#fb7185" d="M170 177 L202 177"/>
+      <rect class="bx bx-warn" x="206" y="160" width="230" height="34"/>
+      <text x="321" y="182" class="val rs-t" text-anchor="middle">동시 요청 3,000개가 전부 미스</text>
+      <path class="fl ar ar-rs" style="stroke:#fb7185" d="M440 177 L472 177"/>
+      <rect class="bx bx-warn" x="476" y="160" width="188" height="34"/>
+      <text x="570" y="182" class="val rs-t" text-anchor="middle">DB 에 3,000 쿼리 💥</text>
+      <text x="16" y="216" class="ann ok-t">해결의 핵심 — 같은 키는 <tspan class="val">한 스레드만</tspan> 갱신하고 나머지는 기다리게 한다</text>
+    </svg>
+    <div class="cap">세 가지 모두 <b>정상일 때는 안 보이다가</b> 트래픽이 늘면 한꺼번에 터집니다.</div>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>@Component
+class SafeCache(
+    private val redis: RedisCoroutinesCommands&lt;String, String&gt;,
+    private val json: Json,
+) {
+    private val locks = ConcurrentHashMap&lt;String, Mutex&gt;()
+
+    // ① 스탬피드 방지 — 같은 키는 한 코루틴만 갱신
+    suspend fun &lt;T&gt; get(
+        key: String,
+        ttl: Duration = 5.minutes,
+        deserializer: KSerializer&lt;T&gt;,
+        loader: suspend () -&gt; T?,
+    ): T? {
+        redis.get(key)?.let { return decodeOrNull(it, deserializer) }
+
+        val mutex = locks.computeIfAbsent(key) { Mutex() }
+        return try {
+            mutex.withLock {
+                // 이중 검사 — 기다리는 동안 다른 코루틴이 채웠을 수 있다
+                redis.get(key)?.let { return@withLock decodeOrNull(it, deserializer) }
+
+                val value = loader()
+                // ② 관통 방지 — null 도 짧게 캐시한다
+                val ttlSec = if (value == null) 30 else jitter(ttl)
+                redis.setex(key, ttlSec, value?.let { json.encodeToString(deserializer, it) } ?: NULL_MARK)
+                value
+            }
+        } finally {
+            locks.remove(key)
+        }
+    }
+
+    // ③ 눈사태 방지 — TTL 에 ±20% 무작위를 섞는다
+    private fun jitter(ttl: Duration): Long {
+        val base = ttl.inWholeSeconds
+        return base + Random.nextLong(-base / 5, base / 5)
+    }
+
+    // 캐시에서 꺼낸 문자열 → 값. "없음"으로 저장해 둔 표식이면 null 을 돌려준다
+    private fun &lt;T&gt; decodeOrNull(raw: String, deserializer: KSerializer&lt;T&gt;): T? =
+        if (raw == NULL_MARK) null else json.decodeFromString(deserializer, raw)
+
+    companion object {
+        // 값이 없다는 사실 자체를 캐시할 때 넣는 표식.
+        // 실제 JSON 과 절대 겹치지 않도록 일부러 이상한 문자열을 씁니다
+        private const val NULL_MARK = "__NULL__"
+    }
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">더 나은 방법 — 미리 갱신</h4>
+      <pre class="code" data-lang="kotlin"><code>// TTL 이 끝나기 전에 백그라운드로 갱신 (사용자는 항상 캐시 히트)
+data class Cached&lt;T&gt;(val value: T, val refreshAt: Instant, val expireAt: Instant)
+
+suspend fun &lt;T&gt; getWithRefreshAhead(key: String, loader: suspend () -&gt; T): T {
+    val cached = load&lt;T&gt;(key)
+    if (cached != null) {
+        if (Clock.System.now() &gt; cached.refreshAt) {
+            appScope.launch { runCatching { store(key, loader()) } }   // 비동기 갱신
+        }
+        return cached.value                                            // 즉시 반환
+    }
+    return loader().also { store(key, it) }
+}
+// Caffeine 은 refreshAfterWrite 로 이 동작을 기본 제공한다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">핫키 — 특정 키에 트래픽 집중</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>증상</b> — Redis 노드 하나의 CPU 만 100%. 이벤트 상품·인기 게시물에서 발생</li>
+        <li><b>대응 ①</b> — 그 키만 <b>로컬 캐시</b>에 짧게 (네트워크 왕복 자체를 없앤다)</li>
+        <li><b>대응 ②</b> — 키를 <b>여러 개로 쪼갠다</b>(<code>hot:1</code>~<code>hot:10</code> 무작위 선택)</li>
+        <li><b>대응 ③</b> — 읽기 복제본으로 분산</li>
+        <li><b>탐지</b> — <code>redis-cli --hotkeys</code> · 모니터링에서 키별 QPS</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== sc06 ==================== -->
+<section class="sec" id="sc06">
+  <div class="sec-head rv">
+    <span class="no">SCALE 06</span>
+    <h2>동시성 제어 · <span class="t">분산 락</span></h2>
+    <p class="lead">
+      선착순 쿠폰, 재고 차감, 좌석 예약 — <b>서버가 여러 대일 때</b>
+      단일 JVM 의 <code>Mutex</code>로는 막을 수 없습니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:200px">방법</th><th>특징 · 언제</th></tr>
+      <tr><td><b>원자적 UPDATE</b></td><td><code>update ... set qty = qty - 1 where qty &gt;= 1</code> — <b>가장 싸고 확실</b>. 가능하면 이걸로</td></tr>
+      <tr><td><b>낙관적 락</b></td><td>버전 컬럼 + 재시도. 충돌이 드물 때</td></tr>
+      <tr><td><b>비관적 락</b></td><td><code>SELECT FOR UPDATE</code>. 경합이 심하면 DB 부하가 커진다</td></tr>
+      <tr><td><b>Redis 분산 락</b></td><td>DB 밖의 자원까지 보호. Redisson 권장</td></tr>
+      <tr><td><b>Redis 원자 연산</b></td><td><code>DECR</code>·Lua 스크립트 — 재고 카운터에 매우 빠르다</td></tr>
+      <tr><td><b>단일 소비자 큐</b></td><td>Kafka 파티션 키로 순서 보장 — 근본적인 해법</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// ① 가장 단순하고 강력한 방법 — DB 원자적 UPDATE
+@Modifying
+@Query("update Stock s set s.quantity = s.quantity - :qty where s.productId = :id and s.quantity &gt;= :qty")
+fun decrease(id: Long, qty: Int): Int      // 0 이면 재고 부족
+
+@Transactional
+fun order(productId: Long, qty: Int) {
+    val updated = stockRepo.decrease(productId, qty)
+    check(updated == 1) { "재고가 부족합니다" }
+}
+// 락도 재시도도 필요 없다 — DB 가 원자성을 보장한다
+
+// ② Redis 원자 연산 — DB 부하 없이 선착순 처리
+suspend fun tryIssueCoupon(couponId: Long, userId: Long): Boolean {
+    // 중복 참여 차단 (SET 은 원자적)
+    val first = redis.sadd("coupon:$couponId:users", userId.toString()) == 1L
+    if (!first) return false
+
+    val left = redis.decr("coupon:$couponId:stock") ?: -1
+    if (left &lt; 0) {
+        redis.incr("coupon:$couponId:stock")                       // 되돌린다
+        redis.srem("coupon:$couponId:users", userId.toString())
+        return false
+    }
+    // 실제 발급은 큐로 넘긴다 (DB 쓰기를 비동기화)
+    outbox.publish(CouponIssued(couponId, userId))
+    return true
+}
+
+// ③ Redisson 분산 락 — 코루틴에서
+suspend fun withDistributedLock(key: String, block: suspend () -&gt; Unit) {
+    val lock = redisson.getLock(key)
+    val acquired = lock.tryLockAsync(3, 10, TimeUnit.SECONDS).awaitSingle()   // 대기 3초, 임대 10초
+    check(acquired) { "락 획득 실패: $key" }
+    try {
+        block()
+    } finally {
+        if (lock.isHeldByCurrentThread) lock.unlockAsync().awaitSingleOrNull()
+    }
+}</code></pre>
+
+  <div class="note warn rv">
+    <b>분산 락의 함정</b> —
+    ① <b>임대 시간(TTL)이 지나면 다른 서버가 락을 얻습니다</b> — 작업이 그보다 오래 걸리면 <b>동시에 실행</b>됩니다.
+    ② <b>락 안에서 외부 API 를 부르지 마세요</b> — 임대 시간을 넘기기 쉽습니다.
+    ③ <b>락은 성능을 희생합니다</b> — 원자적 UPDATE 로 풀 수 있으면 그쪽이 훨씬 낫습니다.
+    ④ Redis 단일 노드 장애 시 <b>락이 두 번 나갈 수 있습니다</b>(Redlock 논쟁) —
+    <b>돈이 오가는 처리는 DB 제약조건으로 최종 방어선</b>을 두세요.
+  </div>
+</section>
+
+
+<!-- ==================== sc07 ==================== -->
+<section class="sec" id="sc07">
+  <div class="sec-head rv">
+    <span class="no">SCALE 07</span>
+    <h2><span class="t">멱등성</span> — 중복 요청 막기</h2>
+    <p class="lead">
+      네트워크는 언제나 불확실합니다. 클라이언트가 <b>같은 요청을 두 번</b> 보내거나,
+      재시도가 <b>이미 처리된 요청을 또</b> 보냅니다. <b>두 번 눌러도 한 번만</b> 처리돼야 합니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 1) 클라이언트가 요청마다 고유 키를 보낸다
+@PostMapping("/orders")
+suspend fun create(
+    @RequestHeader("Idempotency-Key") key: String,
+    @RequestBody @Valid req: CreateOrderRequest,
+): OrderResponse = idempotent(key, req) { service.place(req.toCommand()) }
+
+// 2) 처리 결과를 키와 함께 저장하고, 같은 키가 오면 저장된 결과를 돌려준다
+@Component
+class IdempotencyService(
+    private val redis: RedisCoroutinesCommands&lt;String, String&gt;,
+    private val json: Json,
+) {
+    suspend fun &lt;T&gt; execute(
+        key: String,
+        requestHash: String,
+        serializer: KSerializer&lt;T&gt;,
+        ttl: Duration = 24.hours,
+        block: suspend () -&gt; T,
+    ): T {
+        val redisKey = "idem:$key"
+
+        // 이미 처리됐다면 저장된 응답을 돌려준다
+        redis.get(redisKey)?.let { stored -&gt;
+            val record = json.decodeFromString&lt;IdemRecord&gt;(stored)
+            require(record.requestHash == requestHash) { "같은 키로 다른 요청이 왔습니다" }
+            return json.decodeFromString(serializer, record.response)
+        }
+
+        // 선점 — SET NX 로 '처리 중' 표시 (동시 요청 차단)
+        val acquired = redis.set(redisKey, PROCESSING, SetArgs().nx().ex(60)) != null
+        if (!acquired) throw ConflictException("같은 요청이 처리 중입니다")
+
+        return try {
+            val result = block()
+            redis.setex(redisKey, ttl.inWholeSeconds,
+                json.encodeToString(IdemRecord(requestHash, json.encodeToString(serializer, result))))
+            result
+        } catch (e: Throwable) {
+            redis.del(redisKey)        // 실패하면 재시도할 수 있게 지운다
+            throw e
+        }
+    }
+}
+
+// 3) 최종 방어선은 DB 제약조건 — 캐시가 날아가도 중복이 막힌다
+// CREATE UNIQUE INDEX uq_order_idem ON orders(idempotency_key);</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어디에 적용하나</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>결제·주문·포인트 적립</b> — 두 번 처리되면 사고인 모든 것</li>
+        <li><b>메시지 소비</b>(Kafka) — 재전달이 기본이라 필수</li>
+        <li><b>웹훅 수신</b> — 외부 서비스가 여러 번 보냅니다</li>
+        <li><b>재시도가 있는 모든 호출</b> — 재시도 = 중복 가능성</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>GET·DELETE 는 원래 멱등</b>합니다. 문제는 <b>POST</b>입니다.
+        PUT 도 “같은 값으로 덮어쓰기”라면 멱등이지만,
+        <b>“증가시키기”</b> 같은 연산은 아닙니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">3층 방어</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:130px">층</th><th>역할</th></tr>
+          <tr><td>클라이언트</td><td>버튼 비활성화 · 요청 키 생성</td></tr>
+          <tr><td>애플리케이션</td><td>Redis 멱등 키 — 빠르게 걸러낸다</td></tr>
+          <tr><td><b>DB</b></td><td><b>유니크 제약</b> — 최종 방어선. 절대 빠뜨리지 말 것</td></tr>
+        </table>
+      </div>
+      <p class="tx" style="font-size:13.4px;margin-bottom:0">
+        캐시는 언젠가 비워지고, 애플리케이션은 배포로 재시작됩니다.
+        <b>DB 제약조건만이 영구적</b>입니다.
+      </p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== sc08 ==================== -->
+<section class="sec" id="sc08">
+  <div class="sec-head rv">
+    <span class="no">SCALE 08</span>
+    <h2><span class="t">Kafka</span> · 비동기 처리</h2>
+    <p class="lead">
+      주문 하나에 <b>알림·정산·검색 색인·통계</b>가 따라붙으면 응답이 느려집니다.
+      <b>“지금 꼭 해야 하는 일”과 “나중에 해도 되는 일”</b>을 나누는 것이 큐의 본질입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">발행 — 코틀린</h4>
+      <pre class="code" data-lang="kotlin"><code>@Component
+class OrderEventPublisher(
+    private val kafka: KafkaTemplate&lt;String, String&gt;,
+    private val json: Json,
+) {
+    suspend fun publish(event: OrderEvent) = withContext(Dispatchers.IO) {
+        kafka.send(
+            ProducerRecord(
+                "order-events",
+                event.orderId.toString(),          // ★ 파티션 키 = 순서 보장 단위
+                json.encodeToString(event),
+            ).apply {
+                headers().add("eventType", event::class.simpleName!!.toByteArray())
+                headers().add("traceId", MDC.get("traceId").orEmpty().toByteArray())
+            }
+        ).await()                                   // 전송 확인까지 기다린다
+    }
+}
+
+// 이벤트는 sealed 로 — 소비 쪽에서 when 이 완전해진다
+@Serializable
+sealed interface OrderEvent {
+    val orderId: Long
+    @Serializable data class Placed(override val orderId: Long, val userId: Long, val total: Long) : OrderEvent
+    @Serializable data class Paid(override val orderId: Long, val txId: String) : OrderEvent
+    @Serializable data class Canceled(override val orderId: Long, val reason: String) : OrderEvent
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">소비 — 멱등하게</h4>
+      <pre class="code" data-lang="kotlin"><code>@Component
+class OrderEventConsumer(
+    private val notifier: Notifier,
+    private val processed: ProcessedEventRepository,
+) {
+    @KafkaListener(topics = ["order-events"], groupId = "notification")
+    fun consume(record: ConsumerRecord&lt;String, String&gt;, ack: Acknowledgment) {
+        val eventId = record.headers().lastHeader("eventId")?.value()?.decodeToString()
+            ?: "${record.topic()}-${record.partition()}-${record.offset()}"
+
+        // ★ 재전달이 기본이므로 반드시 멱등하게
+        if (processed.exists(eventId)) { ack.acknowledge(); return }
+
+        val event = json.decodeFromString&lt;OrderEvent&gt;(record.value())
+        when (event) {
+            is OrderEvent.Placed -&gt; notifier.sendOrderPlaced(event)
+            is OrderEvent.Paid -&gt; notifier.sendPaid(event)
+            is OrderEvent.Canceled -&gt; notifier.sendCanceled(event)
+        }
+
+        processed.save(eventId)
+        ack.acknowledge()          // 수동 커밋 — 처리 성공 후에만
+    }
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:200px">운영 포인트</th><th>설정 · 판단</th></tr>
+      <tr><td>순서 보장</td><td><b>같은 파티션 안에서만</b> 보장 — 키를 주문 id 로 두면 그 주문의 순서는 지켜진다</td></tr>
+      <tr><td>전달 보장</td><td>기본은 <b>at-least-once</b>(중복 가능) → 소비자가 <b>멱등</b>해야 한다</td></tr>
+      <tr><td>커밋 시점</td><td><code>enable-auto-commit: false</code> + 수동 ack — 처리 전에 커밋되면 유실</td></tr>
+      <tr><td>재시도·DLQ</td><td>실패 메시지를 무한 재시도하면 <b>파티션이 멈춥니다</b> — 몇 번 후 DLQ 로</td></tr>
+      <tr><td>컨슈머 랙</td><td><b>가장 중요한 지표</b> — 밀리기 시작하면 파티션·인스턴스를 늘린다</td></tr>
+      <tr><td>파티션 수</td><td>소비자 인스턴스 수의 한계 — <b>줄일 수 없으니</b> 여유 있게</td></tr>
+    </table>
+  </div>
+</section>
+
+
+<!-- ==================== sc09 ==================== -->
+<section class="sec" id="sc09">
+  <div class="sec-head rv">
+    <span class="no">SCALE 09</span>
+    <h2>아웃박스 · <span class="t">사가</span></h2>
+    <p class="lead">
+      “DB 에 저장하고 메시지도 보낸다” — 이 둘은 <b>한 트랜잭션이 아닙니다.</b>
+      하나만 성공하면 데이터가 어긋납니다. 그 문제를 푸는 표준 패턴입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 248" role="img" aria-label="이중 쓰기 문제와 아웃박스 패턴 비교 그림. 이중 쓰기는 DB 저장 후 카프카 발행이 실패하면 데이터가 어긋난다. 아웃박스 패턴은 DB 트랜잭션 안에서 주문과 아웃박스 테이블을 함께 저장하고, 별도 발행기가 아웃박스를 읽어 카프카로 보낸다.">
+      <text x="16" y="18" class="lbl">이중 쓰기 문제와 해법</text>
+
+      <text x="16" y="46" class="ttl rs-t">이중 쓰기 (문제)</text>
+      <rect class="bx" x="150" y="30" width="140" height="36"/>
+      <text x="220" y="53" class="val" text-anchor="middle">DB 저장 성공</text>
+      <path class="fl ar ar-rs" style="stroke:#fb7185" d="M294 48 L326 48"/>
+      <rect class="bx bx-warn" x="330" y="30" width="180" height="36"/>
+      <text x="420" y="53" class="val rs-t" text-anchor="middle">Kafka 발행 실패 💥</text>
+      <text x="522" y="53" class="ann rs-t">알림이 영영 안 감</text>
+
+      <path class="ln-t" d="M16 82 L664 82"/>
+
+      <text x="16" y="110" class="ttl ok-t">아웃박스 패턴</text>
+
+      <rect class="bx bx-ok" x="150" y="94" width="300" height="52"/>
+      <text x="300" y="116" class="val ok-t" text-anchor="middle">하나의 DB 트랜잭션</text>
+      <text x="300" y="134" class="ann" text-anchor="middle">orders INSERT + outbox INSERT — 함께 커밋 또는 함께 롤백</text>
+
+      <path class="fl ar ar-gn" style="stroke:#34d399" d="M300 150 L300 172"/>
+
+      <rect class="bx" x="150" y="176" width="180" height="44"/>
+      <text x="240" y="198" class="val" text-anchor="middle">발행기 (폴링·CDC)</text>
+      <text x="240" y="214" class="ann" text-anchor="middle">미발행 행을 읽어 전송</text>
+      <path class="fl ar" d="M334 198 L366 198"/>
+      <rect class="bx bx-ok" x="370" y="176" width="180" height="44"/>
+      <text x="460" y="198" class="val ok-t" text-anchor="middle">Kafka</text>
+      <text x="460" y="214" class="ann" text-anchor="middle">실패하면 다시 시도</text>
+      <text x="16" y="240" class="ann ok-t">DB 에 남아 있으므로 <tspan class="val">언젠가는 반드시</tspan> 발행된다 (최종 일관성)</text>
+    </svg>
+    <div class="cap">메시지가 <b>늦게 갈 수는 있어도 사라지지는 않습니다</b> — 이것이 아웃박스의 보장입니다.</div>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>@Entity
+@Table(name = "outbox")
+class OutboxEvent(
+    @Id @GeneratedValue val id: Long = 0,
+    val aggregateType: String,
+    val aggregateId: String,
+    val eventType: String,
+    @Column(columnDefinition = "text") val payload: String,
+    var published: Boolean = false,
+    val createdAt: Instant = Instant.now(),
+)
+
+@Service
+class OrderService(
+    private val orderRepo: OrderRepository,
+    private val outboxRepo: OutboxRepository,
+    private val json: Json,
+) {
+    @Transactional                     // ★ 같은 트랜잭션
+    fun place(cmd: PlaceOrderCommand): Order {
+        val order = orderRepo.save(Order(cmd))
+        outboxRepo.save(OutboxEvent(
+            aggregateType = "Order",
+            aggregateId = order.id.toString(),
+            eventType = "OrderPlaced",
+            payload = json.encodeToString(OrderEvent.Placed(order.id, order.userId, order.total)),
+        ))
+        return order
+    }
+}
+
+@Component
+class OutboxPublisher(
+    private val outboxRepo: OutboxRepository,
+    private val kafka: KafkaTemplate&lt;String, String&gt;,
+) : DisposableBean {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("outbox"))
+
+    @PostConstruct
+    fun start() = scope.launch {
+        while (isActive) {
+            runCatching { publishBatch() }.onFailure { log.error("아웃박스 발행 실패", it) }
+            delay(500)
+        }
+    }
+
+    @Transactional
+    fun publishBatch() {
+        // 여러 인스턴스가 함께 돌아도 안전하게 (SKIP LOCKED)
+        val events = outboxRepo.findUnpublishedForUpdate(limit = 100)
+        events.forEach { e -&gt;
+            kafka.send("order-events", e.aggregateId, e.payload).get(3, TimeUnit.SECONDS)
+            e.published = true
+        }
+    }
+
+    override fun destroy() { scope.cancel() }
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">사가 — 여러 서비스에 걸친 트랜잭션</h4>
+      <pre class="code" data-lang="kotlin"><code>// 분산 환경에서는 2단계 커밋 대신 '보상 트랜잭션'을 쓴다
+// 주문 → 재고 차감 → 결제 → 배송 요청
+// 결제가 실패하면? 재고를 되돌린다 (보상)
+
+sealed interface SagaStep {
+    suspend fun execute(ctx: SagaContext)
+    suspend fun compensate(ctx: SagaContext)
+}
+
+class ReserveStock(private val client: StockClient) : SagaStep {
+    override suspend fun execute(ctx: SagaContext) { client.reserve(ctx.orderId, ctx.items) }
+    override suspend fun compensate(ctx: SagaContext) { client.release(ctx.orderId) }
+}
+
+suspend fun runSaga(steps: List&lt;SagaStep&gt;, ctx: SagaContext) {
+    val done = mutableListOf&lt;SagaStep&gt;()
+    try {
+        steps.forEach { it.execute(ctx); done += it }
+    } catch (e: Exception) {
+        done.reversed().forEach {                       // 역순으로 보상
+            runCatching { it.compensate(ctx) }
+                .onFailure { c -&gt; log.error("보상 실패 — 수동 개입 필요", c) }
+        }
+        throw e
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">현실적인 조언</h4>
+      <ul class="tx">
+        <li><b>사가는 복잡합니다.</b> 서비스를 나누기 전에
+          <b>정말 나눠야 하는지</b> 먼저 물으세요 — 한 DB 트랜잭션으로 끝나면 그게 최선입니다</li>
+        <li><b>보상이 불가능한 작업</b>(메일 발송·외부 결제 승인)은 순서를 뒤로 미룹니다</li>
+        <li><b>보상 실패는 반드시 알림</b>으로 — 사람이 개입해야 하는 상태입니다</li>
+        <li><b>Debezium(CDC)</b>을 쓰면 아웃박스 폴링 없이
+          DB 변경 로그에서 바로 이벤트를 만들 수 있습니다</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>최종 일관성을 사용자에게 설명하는 것도 설계</b>입니다 —
+        “주문이 접수되었습니다(처리 중)”처럼 <b>상태를 드러내면</b>
+        기술적 지연이 자연스러운 UX 가 됩니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== sc10 ==================== -->
+<section class="sec" id="sc10">
+  <div class="sec-head rv">
+    <span class="no">SCALE 10</span>
+    <h2>격벽 · <span class="t">부하 차단</span></h2>
+    <p class="lead">
+      한 기능의 장애가 <b>전체 서비스를 멈추게</b> 하지 않도록 자원을 나눕니다.
+      코루틴에서는 <b>세마포어와 전용 디스패처</b>가 그 도구입니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// ① 격벽(bulkhead) — 기능별로 동시 실행 수를 나눈다
+@Component
+class Bulkheads {
+    val payment = Semaphore(20)      // 결제: 중요 → 넉넉히
+    val recommend = Semaphore(5)     // 추천: 부가 → 적게 (죽어도 서비스는 산다)
+    val report = Semaphore(2)        // 리포트: 무거움 → 최소
+}
+
+suspend fun recommend(userId: Long): List&lt;Item&gt; =
+    bulkheads.recommend.withPermit {
+        withTimeoutOrNull(1.seconds) { client.recommend(userId) } ?: popularItems()
+    }
+// 추천 API 가 느려져도 결제 처리에는 영향이 없다
+
+// ② 부하 차단(load shedding) — 감당 못 할 요청은 빨리 거절한다
+@Component
+class LoadShedder(private val registry: MeterRegistry) {
+    private val inFlight = AtomicInteger()
+    private val max = 500
+
+    suspend fun &lt;T&gt; execute(block: suspend () -&gt; T): T {
+        if (inFlight.get() &gt;= max) {
+            registry.counter("requests.shed").increment()
+            throw TooManyRequestsException("잠시 후 다시 시도해 주세요")   // 429
+        }
+        inFlight.incrementAndGet()
+        return try { block() } finally { inFlight.decrementAndGet() }
+    }
+}
+// 느리게 다 받아 주는 것보다 '빨리 거절'하는 편이 전체적으로 낫다
+// (대기 큐가 길어지면 이미 포기한 사용자의 요청까지 처리하게 된다)</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">우선순위를 두는 방법</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:150px">등급</th><th>정책</th></tr>
+          <tr><td>필수 (결제·주문)</td><td>자원 우선 배정 · 마지막까지 지킨다</td></tr>
+          <tr><td>중요 (조회·검색)</td><td>캐시로 대체 · 성능 저하 허용</td></tr>
+          <tr><td>부가 (추천·배너)</td><td><b>과부하 시 먼저 끈다</b> — 기능 플래그로 즉시 차단</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// 기능 플래그로 부가 기능 즉시 끄기
+if (features.isEnabled("recommendation")) {
+    runCatching { recommend(userId) }.getOrDefault(emptyList())
+} else emptyList()</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">타임아웃 예산 배분</h4>
+      <pre class="code" data-lang="kotlin"><code>// 전체 예산 안에서 각 단계에 나눠 준다
+suspend fun handle(req: Request): Response = withTimeout(3.seconds) {
+    val user = withTimeout(500.milliseconds) { userClient.get(req.userId) }
+    val items = withTimeout(1.seconds) { itemClient.list(req.ids) }
+    // 남은 시간으로 부가 데이터 — 못 받아도 진행
+    val ads = withTimeoutOrNull(300.milliseconds) { adClient.list() } ?: emptyList()
+    Response(user, items, ads)
+}
+
+// 규칙
+// · 하위 타임아웃 합 &lt; 상위 타임아웃 (여유 포함)
+// · 상위가 이미 취소됐으면 하위 호출을 시작하지 않는다 (코루틴이 자동 처리)
+// · 클라이언트 타임아웃 &gt; 서버 타임아웃 (안 그러면 서버가 헛일을 한다)</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== sc11 ==================== -->
+<section class="sec" id="sc11">
+  <div class="sec-head rv">
+    <span class="no">SCALE 11</span>
+    <h2>처리율 제한 · <span class="t">대기열</span></h2>
+    <p class="lead">
+      티켓 오픈·한정 판매처럼 <b>순간 트래픽이 평소의 100배</b>가 되는 경우입니다.
+      서버를 100배 늘릴 수 없으니 <b>들어오는 양을 조절</b>합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Rate Limit — 토큰 버킷</h4>
+      <pre class="code" data-lang="kotlin"><code>// Redis Lua 스크립트로 원자적으로 처리
+private val script = """
+    local key = KEYS[1]
+    local limit = tonumber(ARGV[1])
+    local window = tonumber(ARGV[2])
+    local current = redis.call('INCR', key)
+    if current == 1 then redis.call('EXPIRE', key, window) end
+    return current
+""".trimIndent()
+
+suspend fun allow(userId: Long, limit: Int = 100, windowSec: Int = 60): Boolean {
+    val count = redis.eval&lt;Long&gt;(script, ScriptOutputType.INTEGER,
+        arrayOf("rate:$userId:${epochMinute()}"), limit.toString(), windowSec.toString())
+    return (count ?: 0) &lt;= limit
+}
+
+// 초과하면 429 + Retry-After 헤더
+@Component
+class RateLimitFilter(private val limiter: RateLimiter) : WebFilter {
+    override fun filter(exchange: ServerWebExchange, chain: WebFilterChain) = mono {
+        val userId = exchange.userId() ?: return@mono chain.filter(exchange).awaitFirstOrNull()
+        if (!limiter.allow(userId)) {
+            exchange.response.statusCode = HttpStatus.TOO_MANY_REQUESTS
+            exchange.response.headers.set("Retry-After", "60")
+            return@mono exchange.response.setComplete().awaitFirstOrNull()
+        }
+        chain.filter(exchange).awaitFirstOrNull()
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대기열 — 순번을 준다</h4>
+      <pre class="code" data-lang="kotlin"><code>// Sorted Set 으로 대기열 (점수 = 진입 시각)
+suspend fun enqueue(userId: Long): Long {
+    val now = System.currentTimeMillis().toDouble()
+    redis.zadd("queue:event1", now, userId.toString())
+    return rank(userId)
+}
+
+suspend fun rank(userId: Long): Long =
+    (redis.zrank("queue:event1", userId.toString()) ?: -1) + 1
+
+// 일정 주기로 앞에서부터 '입장 토큰'을 발급
+@Scheduled(fixedDelay = 1000)
+fun admit() = runBlocking {
+    val batch = redis.zrange("queue:event1", 0, 99).toList()      // 초당 100명
+    batch.forEach { userId -&gt;
+        redis.setex("admitted:$userId", 300, "1")                  // 5분간 유효
+        redis.zrem("queue:event1", userId)
+    }
+}
+
+// 클라이언트는 SSE·폴링으로 자기 순번을 본다
+// "앞에 1,234명 남았습니다 (예상 3분)"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>대기열의 진짜 가치는 UX 입니다.</b>
+        “서버 오류”보다 <b>“1,234번째, 3분 예상”</b>이 사용자를 훨씬 덜 화나게 합니다.
+        그리고 서버는 <b>일정한 속도</b>로만 일하면 되므로 예측 가능해집니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== sc12 ==================== -->
+<section class="sec" id="sc12">
+  <div class="sec-head rv">
+    <span class="no">SCALE 12</span>
+    <h2>데이터베이스 <span class="t">확장</span></h2>
+    <p class="lead">
+      애플리케이션은 서버를 늘리면 되지만 <b>DB 는 그렇게 안 됩니다.</b>
+      순서는 <b>튜닝 → 캐시 → 읽기 분리 → 분할</b>이고, <b>뒤로 갈수록 비쌉니다.</b>
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:60px">순서</th><th style="width:180px">방법</th><th>내용</th></tr>
+      <tr><td>①</td><td><b>쿼리·인덱스 튜닝</b></td><td>가장 싸다. 실행 계획을 보고 인덱스 추가 — <b>대부분 여기서 해결</b></td></tr>
+      <tr><td>②</td><td><b>캐시</b></td><td>읽기 부하를 DB 밖으로 (sc03)</td></tr>
+      <tr><td>③</td><td><b>읽기 복제본</b></td><td>조회를 복제본으로. <b>복제 지연</b>을 감수해야 한다</td></tr>
+      <tr><td>④</td><td><b>수직 확장</b></td><td>돈으로 해결. 가장 빠른 임시방편</td></tr>
+      <tr><td>⑤</td><td><b>테이블 분할</b></td><td>파티셔닝 — 오래된 데이터 분리, 날짜 기준</td></tr>
+      <tr><td>⑥</td><td><b>샤딩</b></td><td>마지막 수단. 조인·트랜잭션·유니크 제약이 전부 어려워진다</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 읽기 복제본 분리 — 트랜잭션 readOnly 로 라우팅
+@Configuration
+class DataSourceConfig {
+    @Bean
+    fun routingDataSource(
+        @Qualifier("writer") writer: DataSource,
+        @Qualifier("reader") reader: DataSource,
+    ): DataSource = object : AbstractRoutingDataSource() {
+        override fun determineCurrentLookupKey(): Any =
+            if (TransactionSynchronizationManager.isCurrentTransactionReadOnly()) "reader" else "writer"
+    }.apply {
+        setTargetDataSources(mapOf("writer" to writer, "reader" to reader))
+        setDefaultTargetDataSource(writer)
+    }
+}
+
+@Transactional(readOnly = true)     // → 복제본으로
+fun list(): List&lt;Order&gt; = repo.findAll()
+
+@Transactional                       // → 주 DB 로
+fun place(cmd: PlaceOrderCommand): Order = repo.save(Order(cmd))
+
+// ⚠️ 복제 지연 함정 — 방금 쓴 데이터를 바로 읽으면 없을 수 있다
+@Transactional                       // 쓰기 직후 조회는 같은 트랜잭션(주 DB)에서
+fun placeAndReturn(cmd: PlaceOrderCommand): OrderResponse {
+    val saved = repo.save(Order(cmd))
+    return saved.toResponse()        // 복제본을 다시 조회하지 않는다
+}</code></pre>
+
+  <div class="note warn rv">
+    <b>샤딩은 정말 마지막입니다.</b> 샤딩을 하면
+    <b>여러 샤드에 걸친 조인·집계·트랜잭션</b>이 애플리케이션의 몫이 되고,
+    <b>샤드 키를 잘못 고르면 되돌리기가 거의 불가능</b>합니다.
+    그 전에 <b>아카이빙</b>(오래된 데이터 분리)과 <b>도메인별 DB 분리</b>를 먼저 검토하세요.
+  </div>
+</section>
+
+
+<!-- ==================== sc13 ==================== -->
+<section class="sec" id="sc13">
+  <div class="sec-head rv">
+    <span class="no">SCALE 13</span>
+    <h2>관측 <span class="t">가능성</span></h2>
+    <p class="lead">
+      대규모 시스템에서 <b>“느리다”는 신고를 받고 원인을 찾는 데 걸리는 시간</b>이
+      곧 장애 시간입니다. 메트릭·로그·추적 세 가지를 처음부터 갖춰야 합니다.
+    </p>
+  </div>
+
+  <div class="grid3 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메트릭 — 무엇이 이상한가</h4>
+      <pre class="code" data-lang="kotlin"><code>// Micrometer + Prometheus
+// RED 방법: Rate · Errors · Duration
+registry.counter("http.requests", "path", path, "status", status)
+registry.timer("http.duration", "path", path)
+
+// USE 방법(자원): Utilization · Saturation · Errors
+registry.gauge("db.pool.active", pool) { it.activeConnections.toDouble() }
+registry.gauge("coroutine.inflight", counter) { it.get().toDouble() }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">추적 — 어디가 느린가</h4>
+      <pre class="code" data-lang="kotlin"><code>// Micrometer Tracing + OpenTelemetry
+// 요청 하나가 여러 서비스를 거치는 경로를 이어 준다
+@Observed(name = "order.place")
+suspend fun place(cmd: PlaceOrderCommand): Order
+
+// 코루틴에서 컨텍스트 전파
+withContext(observationRegistry.asContextElement()) {
+    externalCall()
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로그 — 무슨 일이 있었나</h4>
+      <pre class="code" data-lang="kotlin"><code>// 구조화 로그 + traceId
+log.info("주문 생성 orderId={} userId={} amount={}",
+         order.id, order.userId, order.total)
+
+// 샘플링 — 대규모에서는 전부 남기면 비용이 폭발
+if (Random.nextInt(100) &lt; 1) {
+    log.debug("상세 페이로드 {}", req)
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">알람은 증상에 건다</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>좋은 알람</b> — “주문 API 5xx 가 5분간 1% 초과”,
+          “p99 지연이 2초 초과”, “컨슈머 랙 10만 초과”</li>
+        <li><b>나쁜 알람</b> — “CPU 80%”(그래서 사용자가 불편한가?),
+          “디스크 사용량 70%”</li>
+        <li><b>사용자가 느끼는 것</b>에 걸어야 <b>대응할 이유</b>가 분명해집니다</li>
+        <li>알람이 자주 울리면 <b>사람이 무시하게 됩니다</b> — 임계값 관리가 중요</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대시보드 최소 구성</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:150px">패널</th><th>내용</th></tr>
+          <tr><td>트래픽</td><td>RPS · 상태 코드 분포</td></tr>
+          <tr><td>지연</td><td>p50/p95/p99 (엔드포인트별)</td></tr>
+          <tr><td>에러</td><td>5xx 비율 · 예외 종류별 카운트</td></tr>
+          <tr><td>자원</td><td>커넥션 풀 · 코루틴 수 · GC · 메모리</td></tr>
+          <tr><td>의존 서비스</td><td>외부 API 지연·실패율 · 서킷 상태</td></tr>
+          <tr><td>큐</td><td>컨슈머 랙 · 아웃박스 미발행 건수</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== sc14 ==================== -->
+<section class="sec" id="sc14">
+  <div class="sec-head rv">
+    <span class="no">SCALE 14</span>
+    <h2>부하 테스트 · <span class="t">전체 체크리스트</span></h2>
+    <p class="lead">
+      추측으로 용량을 정하지 않습니다. <b>측정하고, 한계를 알고, 대비합니다.</b>
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">k6 로 시나리오 짜기</h4>
+      <pre class="code" data-lang="javascript"><code>// load-test.js
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+
+export const options = {
+  stages: [
+    { duration: '2m', target: 200 },   // 서서히 올린다
+    { duration: '5m', target: 200 },   // 유지 — 여기서 메모리 누수가 드러난다
+    { duration: '2m', target: 1000 },  // 급증 (스파이크)
+    { duration: '3m', target: 0 },     // 감소
+  ],
+  thresholds: {
+    http_req_duration: ['p(95)<500', 'p(99)<1500'],
+    http_req_failed: ['rate<0.01'],
+  },
+};
+
+export default function () {
+  const res = http.get('https://api.example.com/orders?page=1', {
+    headers: { Authorization: `Bearer ${__ENV.TOKEN}` },
+  });
+  check(res, { 'status 200': (r) => r.status === 200 });
+  sleep(1);
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">테스트 종류와 목적</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:130px">종류</th><th>알아내는 것</th></tr>
+          <tr><td>부하 테스트</td><td>예상 트래픽에서 SLO 를 지키는가</td></tr>
+          <tr><td>스트레스</td><td><b>어디서 무너지는가</b> — 한계점 파악</td></tr>
+          <tr><td>스파이크</td><td>급증에 견디는가 (오토스케일 속도)</td></tr>
+          <tr><td>내구</td><td>몇 시간 돌렸을 때 <b>메모리 누수·커넥션 누수</b></td></tr>
+          <tr><td>카오스</td><td>DB·Redis 를 죽였을 때 <b>정상적으로 실패하는가</b></td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>부하 테스트는 운영과 같은 환경에서</b> 해야 의미가 있습니다.
+        스펙이 낮은 개발 서버에서 잰 숫자는 <b>참고도 되지 않습니다.</b>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">대규모 트래픽 체크리스트</h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:160px">영역</th><th>확인</th></tr>
+      <tr><td>용량</td><td>피크 RPS · 동시성 산정 · 커넥션 풀 크기 정합</td></tr>
+      <tr><td>캐시</td><td>2단 구성 · 스탬피드 방지 · TTL 지터 · 무효화 경로</td></tr>
+      <tr><td>동시성</td><td>원자적 UPDATE 우선 · 분산 락은 최소 · 세마포어로 제한</td></tr>
+      <tr><td>멱등성</td><td>결제·주문에 멱등키 + <b>DB 유니크 제약</b></td></tr>
+      <tr><td>비동기</td><td>아웃박스로 유실 방지 · 소비자 멱등 · DLQ</td></tr>
+      <tr><td>격리</td><td>기능별 격벽 · 타임아웃 예산 · 서킷 브레이커 · 부하 차단</td></tr>
+      <tr><td>DB</td><td>인덱스 · 슬로우 쿼리 알람 · 읽기 분리 · 아카이빙 계획</td></tr>
+      <tr><td>관측</td><td>RED/USE 지표 · traceId 전파 · 증상 기반 알람</td></tr>
+      <tr><td>검증</td><td>부하·내구·카오스 테스트를 <b>배포 전에</b></td></tr>
+    </table>
+  </div>
+
+  <div class="note info rv">
+    <b>다음 탭 예고</b> — <b>전문가</b> 탭에서는 K2 컴파일러가 코틀린 코드를 어떻게 바꾸는지,
+    코루틴이 바이트코드 수준에서 어떻게 동작하는지, 그리고 성능 측정·메모리 분석·아키텍처 설계까지
+    <b>프레임워크 아래층</b>을 다룹니다.
+  </div>
+</section>
+
+</div>

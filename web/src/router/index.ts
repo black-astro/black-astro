@@ -68,22 +68,49 @@ export const guides: Guide[] = [
     title: '자바 · Spring Boot · JPA 실전 가이드 (별도 페이지)',
     heading: 'Java Visual Guide',
     desc:
-      'Java 25 문법과 가상 스레드부터 Spring Boot Web·WebFlux·JPA/QueryDSL·MyBatis· ' +
+      'Java 25 문법과 가상 스레드부터 Spring Boot Web·WebFlux, JPA 심화·QueryDSL·MyBatis 전용 탭, ' +
       'Security·Gateway·JavaFX, Redis·Kafka로 대규모 트래픽을 버티는 방법, ' +
       '그리고 바이트코드·JIT·메모리 모델까지 실무에서 바로 쓰는 코드로 정리했습니다.',
     tags: [
       'Java 25',
       'Spring Boot',
       'WebFlux',
-      'JPA · QueryDSL',
-      'Security',
+      'JPA 심화',
+      'QueryDSL',
+      'MyBatis',
       '대규모 트래픽',
       'JVM 내부',
-      'JavaFX',
     ],
     stats: [
-      { value: '11', label: '주제 탭' },
-      { value: '159', label: '섹션' },
+      { value: '14', label: '주제 탭' },
+      { value: '221', label: '섹션' },
+      { value: '0', label: '설치 필요' },
+    ],
+  },
+  {
+    key: 'kotlin',
+    label: 'Kotlin Guide',
+    emoji: '🟠',
+    href: `${import.meta.env.BASE_URL}kotlin-web/`,
+    title: '코틀린 · 코루틴 · Spring · Android · KMP 실전 가이드 (별도 페이지)',
+    heading: 'Kotlin Visual Guide',
+    desc:
+      '코틀린 문법과 null 안전성부터 코루틴·Flow, Spring Boot·WebFlux·JPA/Exposed, ' +
+      'Jetpack Compose 안드로이드 앱과 Kotlin Multiplatform, 대규모 트래픽 운영과 ' +
+      'K2 컴파일러 내부까지 서버·앱을 한 언어로 잇는 방법을 정리했습니다.',
+    tags: [
+      'Kotlin 2.x',
+      '코루틴 · Flow',
+      'Spring Boot',
+      'WebFlux',
+      'JPA · Exposed',
+      'Jetpack Compose',
+      'KMP',
+      'K2 내부',
+    ],
+    stats: [
+      { value: '12', label: '주제 탭' },
+      { value: '189', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 학습 가이드 빌더 (Python · Java · JS/TS · C#/Unity · C++ · Rust · Database · 서버기술 · CS 기술)
+ * 학습 가이드 빌더 (Python · Java · Kotlin · JS/TS · C#/Unity · C++ · Rust · Database · 서버기술 · CS 기술)
  *
  * guide-src/<가이드>/parts/** 조각들을 parts.json 순서대로 이어붙여
  * public/<출력경로>/index.html 을 만든다.
@@ -31,6 +31,7 @@ const SHARED_PREFIX = 'shared/' // parts.json 에서 공용 조각을 가리키�
 const GUIDES = [
   { name: 'python', out: 'python-web', label: '🐍 Python' },
   { name: 'java', out: 'java-web', label: '☕ Java' },
+  { name: 'kotlin', out: 'kotlin-web', label: '🟠 Kotlin' },
   { name: 'js-ts', out: 'js-ts-web', label: '🟨 JS · TS' },
   { name: 'db', out: 'db-web', label: '🗄️ Database' },
   { name: 'server', out: 'server-web', label: '🌐 서버기술' },

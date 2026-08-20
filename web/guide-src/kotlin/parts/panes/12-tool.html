@@ -1,0 +1,1154 @@
+<div class="pane" id="pane-tool">
+
+<!-- ---------- HERO ---------- -->
+<header class="hero">
+  <div class="eyebrow"><i></i> GRADLE KTS · DETEKT · KTOR · 직렬화 · 배포</div>
+  <h1>매일 쓰는 도구를<br>제대로 설정하면<br>팀 전체가 빨라진다</h1>
+  <p class="tx">
+    빌드 30초, 코드 스타일 논쟁 0회, 테스트가 믿을 만한 상태 —
+    이건 <b>도구 설정의 문제</b>이지 개인 실력의 문제가 아닙니다.
+    이 탭은 코틀린 프로젝트에서 <b>한 번 잘 잡아 두면 계속 이득인</b> 설정들을 모았습니다.
+  </p>
+  <div class="stats">
+    <div><b>14</b><span>SECTIONS</span></div>
+    <div><b>1</b><span>빌드 언어 (Kotlin DSL)</span></div>
+    <div><b>2</b><span>필수 정적 분석 도구</span></div>
+    <div><b>∞</b><span>절약되는 리뷰 시간</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== to01 ==================== -->
+<section class="sec" id="to01">
+  <div class="sec-head rv">
+    <span class="no">TOOL 01</span>
+    <h2>Gradle <span class="t">Kotlin DSL</span></h2>
+    <p class="lead">
+      빌드 스크립트를 코틀린으로 쓰면 <b>자동완성과 컴파일 검사</b>가 따라옵니다.
+      Groovy DSL 에서 오타로 반나절 날리던 일이 사라집니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">버전 카탈로그 — 의존성 한 곳에</h4>
+      <pre class="code" data-lang="toml"><code># gradle/libs.versions.toml
+[versions]
+kotlin = "2.2.0"
+coroutines = "1.10.2"
+springBoot = "4.0.0"
+ktor = "3.1.0"
+
+[libraries]
+coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+mockk = { module = "io.mockk:mockk", version = "1.13.13" }
+kotest-assertions = { module = "io.kotest:kotest-assertions-core", version = "5.9.1" }
+
+[bundles]
+testing = ["coroutines-test", "mockk", "kotest-assertions"]
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }
+detekt = { id = "io.gitlab.arturbosch.detekt", version = "1.23.7" }</code></pre>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// build.gradle.kts — 자동완성이 된다
+plugins {
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.spring.boot)
+}
+dependencies {
+    implementation(libs.coroutines.core)
+    testImplementation(libs.bundles.testing)
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 쓰는 설정</h4>
+      <pre class="code" data-lang="kotlin"><code>kotlin {
+    jvmToolchain(21)                     // JDK 자동 다운로드
+    compilerOptions {
+        allWarningsAsErrors.set(true)
+        freeCompilerArgs.addAll("-Xjsr305=strict")
+    }
+}
+
+tasks.test {
+    useJUnitPlatform()
+    testLogging {
+        events("passed", "skipped", "failed")
+        exceptionFormat = TestExceptionFormat.FULL
+    }
+    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
+}
+
+// 태스크 직접 만들기 — 타입 안전하다
+tasks.register("printVersion") {
+    group = "help"
+    doLast { println("버전: ${project.version}") }
+}
+
+// 소스셋 추가 (통합 테스트 분리)
+sourceSets {
+    create("integrationTest") {
+        compileClasspath += sourceSets.main.get().output
+        runtimeClasspath += sourceSets.main.get().output
+    }
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>빌드가 느리다면</b> — <code>org.gradle.configuration-cache=true</code>,
+    <code>org.gradle.parallel=true</code>, <code>org.gradle.caching=true</code> 세 줄부터.
+    그리고 <code>./gradlew build --scan</code>으로 <b>어느 태스크가 오래 걸리는지</b> 확인하세요.
+    (자세한 내용은 <a href="#dp15">전문가 15</a>)
+  </div>
+</section>
+
+
+<!-- ==================== to02 ==================== -->
+<section class="sec" id="to02">
+  <div class="sec-head rv">
+    <span class="no">TOOL 02</span>
+    <h2>멀티모듈 · <span class="t">컨벤션 플러그인</span></h2>
+    <p class="lead">
+      모듈이 열 개가 되면 <b>build.gradle.kts 열 개에 같은 설정을 복사</b>하게 됩니다.
+      컨벤션 플러그인은 그 중복을 없애는 표준 방법입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 276" role="img" aria-label="멀티모듈 의존 방향을 보여 주는 그림. 위에서부터 app 모듈이 feature order와 feature user에 의존하고, 두 feature 모듈이 core data에 의존하고, core data가 core domain에 의존한다. 의존은 언제나 아래 방향 한쪽으로만 흐르며, 되돌아오는 순환 의존이 생기면 Gradle이 빌드를 거부한다. build-logic은 코드 의존이 아니라 공통 빌드 설정만 각 모듈에 주입한다.">
+      <text x="16" y="18" class="lbl">의존은 아래로만 흐른다 — 화살표가 되돌아오면(순환) Gradle 이 빌드를 거부한다</text>
+
+      <rect class="bx" x="16" y="38" width="430" height="34"/>
+      <text x="32" y="60" class="val">:app — 실행 · 화면 조립</text>
+
+      <rect class="bx bx-hi" x="462" y="38" width="202" height="34"/>
+      <text x="478" y="54" class="val am-t">build-logic</text>
+      <text x="478" y="67" class="ann">공통 설정 한 곳</text>
+      <path class="ln-t" d="M563 76 L563 232 M563 109 L450 109 M563 163 L450 163 M563 232 L450 232"/>
+      <text x="470" y="94" class="ann">코드 의존이 아니라</text>
+      <text x="470" y="107" class="ann">설정만 주입한다</text>
+
+      <path class="fl ar" d="M120 76 L120 88"/>
+      <path class="fl ar" d="M342 76 L342 88"/>
+
+      <rect class="bx" x="16" y="92" width="207" height="34"/>
+      <text x="32" y="114" class="val">:feature:order</text>
+      <rect class="bx" x="239" y="92" width="207" height="34"/>
+      <text x="255" y="114" class="val">:feature:user</text>
+
+      <path class="fl ar" d="M120 130 L120 142"/>
+      <path class="fl ar" d="M342 130 L342 142"/>
+
+      <rect class="bx" x="16" y="146" width="430" height="34"/>
+      <text x="32" y="168" class="val">:core:data — Room · Retrofit 구현</text>
+
+      <path class="fl ar" d="M231 184 L231 196"/>
+
+      <rect class="bx bx-ok" x="16" y="200" width="430" height="34"/>
+      <text x="32" y="222" class="val ok-t">:core:domain — 순수 코틀린 · 안드로이드 의존 0</text>
+
+      <text x="16" y="252" class="ann">:core:domain 은 위쪽 모듈을 전혀 모른다 — 그래서 JVM 테스트만으로 빠르게 검증된다</text>
+      <text x="16" y="266" class="ann">처음부터 잘게 쪼개지 말 것 — 모듈 하나에 클래스 세 개면 Gradle 오버헤드가 이득보다 크다</text>
+    </svg>
+    <div class="cap">모듈 나누기의 핵심은 개수가 아니라 <b>의존 방향</b>입니다 — 아래로만 흐르게 유지하세요.</div>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// build-logic/src/main/kotlin/myapp.kotlin-common.gradle.kts
+plugins {
+    kotlin("jvm")
+    id("io.gitlab.arturbosch.detekt")
+}
+
+kotlin {
+    jvmToolchain(21)
+    compilerOptions { allWarningsAsErrors.set(true) }
+}
+
+dependencies {
+    val libs = extensions.getByType&lt;VersionCatalogsExtension&gt;().named("libs")
+    "implementation"(libs.findLibrary("coroutines-core").get())
+    "testImplementation"(libs.findBundle("testing").get())
+}
+
+tasks.withType&lt;Test&gt; { useJUnitPlatform() }
+
+// settings.gradle.kts
+// includeBuild("build-logic")
+
+// 각 모듈의 build.gradle.kts 는 이렇게 짧아진다
+plugins {
+    id("myapp.kotlin-common")
+}
+dependencies {
+    implementation(project(":core:domain"))
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">모듈 나누는 기준</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>도메인 vs 인프라</b> — 순수 코틀린 모듈은 테스트가 빠릅니다</li>
+        <li><b>기능(feature) 단위</b> — 팀이 나눠 일할 수 있습니다</li>
+        <li><b>공개 API 를 좁게</b> — <code>internal</code>을 적극 쓰면 모듈 밖에서 안 보입니다</li>
+        <li><b><code>api</code> 대신 <code>implementation</code></b> —
+          의존성 전파를 막아 재컴파일 범위를 줄입니다</li>
+      </ul>
+      <div class="note warn" style="margin-bottom:0">
+        <b>처음부터 잘게 쪼개지 마세요.</b> 모듈 하나에 클래스 세 개면
+        <b>Gradle 오버헤드가 이득보다 큽니다.</b>
+        빌드가 느려지거나 경계가 필요해질 때 나누는 편이 낫습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">모듈 의존성 확인</h4>
+      <pre class="code" data-lang="bash"><code># 의존성 트리
+./gradlew :app:dependencies --configuration runtimeClasspath
+
+# 특정 라이브러리가 어디서 들어오는지
+./gradlew :app:dependencyInsight --dependency jackson-databind
+
+# 프로젝트 의존 관계 그래프 (플러그인)
+./gradlew projectDependencyGraph
+
+# 버전 충돌 강제 해결
+configurations.all {
+    resolutionStrategy {
+        force("com.fasterxml.jackson.core:jackson-databind:2.18.2")
+        failOnVersionConflict()      // 충돌을 에러로 (엄격 모드)
+    }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== to03 ==================== -->
+<section class="sec" id="to03">
+  <div class="sec-head rv">
+    <span class="no">TOOL 03</span>
+    <h2>정적 분석 — <span class="t">ktlint · detekt</span></h2>
+    <p class="lead">
+      <b>코드 스타일 논쟁을 없애고</b>, <b>위험한 패턴을 자동으로 차단</b>합니다.
+      리뷰에서 “여기 <code>!!</code> 쓰지 마세요”를 반복하지 않게 됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ktlint — 포맷팅</h4>
+      <pre class="code" data-lang="kotlin"><code>plugins { id("org.jlleitschuh.gradle.ktlint") version "12.1.2" }
+
+ktlint {
+    version.set("1.5.0")
+    android.set(false)
+    filter { exclude("**/generated/**") }
+}
+
+// ./gradlew ktlintCheck   검사
+// ./gradlew ktlintFormat  자동 수정</code></pre>
+      <pre class="code" data-lang="ini" style="margin-bottom:0"><code># .editorconfig
+[*.{kt,kts}]
+indent_size = 4
+max_line_length = 120
+ktlint_standard_no-wildcard-imports = enabled
+ktlint_standard_function-naming = disabled   # 테스트의 백틱 이름 허용</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">detekt — 코드 품질·위험 패턴</h4>
+      <pre class="code" data-lang="yaml"><code># detekt.yml (일부)
+potential-bugs:
+  UnsafeCallOnNullableType:     # !! 사용
+    active: true
+  ImplicitDefaultLocale:
+    active: true
+
+coroutines:
+  GlobalCoroutineUsage:         # GlobalScope 금지
+    active: true
+  SuspendFunWithFlowReturnType:
+    active: true
+  RedundantSuspendModifier:
+    active: true
+
+exceptions:
+  TooGenericExceptionCaught:    # catch (e: Exception)
+    active: true
+  SwallowedException:           # 예외를 삼킴
+    active: true
+
+complexity:
+  LongMethod:
+    threshold: 60
+  CyclomaticComplexMethod:
+    threshold: 15</code></pre>
+    </div>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 커스텀 규칙 — 팀 고유의 금지 사항을 강제한다
+class NoRunBlockingInController(config: Config) : Rule(config) {
+    override val issue = Issue(
+        "NoRunBlockingInController",
+        Severity.Defect,
+        "컨트롤러에서 runBlocking 을 쓰면 스레드가 막힙니다. suspend 함수를 쓰세요.",
+        Debt.TWENTY_MINS,
+    )
+
+    override fun visitCallExpression(expression: KtCallExpression) {
+        super.visitCallExpression(expression)
+        if (expression.calleeExpression?.text == "runBlocking" &&
+            expression.containingKtFile.name.endsWith("Controller.kt")
+        ) {
+            report(CodeSmell(issue, Entity.from(expression), issue.description))
+        }
+    }
+}
+
+// CI 에서 강제
+// ./gradlew ktlintCheck detekt --continue</code></pre>
+
+  <div class="note tip rv">
+    <b>도입 요령</b> — 기존 프로젝트에 한 번에 켜면 경고가 수천 개 나옵니다.
+    <b>베이스라인</b>(<code>./gradlew detektBaseline</code>)을 만들어 <b>기존 것은 넘어가고
+    새 코드만 검사</b>하게 시작하세요. 그다음 조금씩 줄여 나가면 됩니다.
+  </div>
+</section>
+
+
+<!-- ==================== to04 ==================== -->
+<section class="sec" id="to04">
+  <div class="sec-head rv">
+    <span class="no">TOOL 04</span>
+    <h2><span class="t">테스트</span> 도구 총정리</h2>
+    <p class="lead">
+      코틀린 테스트 생태계는 선택지가 많습니다.
+      <b>무엇을 언제 쓰는지</b>와 <b>조합 방법</b>을 정리합니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:180px">도구</th><th>역할 · 언제</th></tr>
+      <tr><td><b>JUnit 5</b></td><td>실행기(러너). 사실상 기본 — 자바 경험자가 바로 씁니다</td></tr>
+      <tr><td><b>Kotest</b></td><td>러너 + 단언 + 프로퍼티 테스트. <b>단언만</b> 가져다 쓰는 조합도 흔합니다</td></tr>
+      <tr><td><b>MockK</b></td><td>코틀린 전용 목 — final·suspend·object 지원</td></tr>
+      <tr><td><b>Turbine</b></td><td>Flow 방출 검증</td></tr>
+      <tr><td><b>kotlinx-coroutines-test</b></td><td><code>runTest</code>·가상 시간</td></tr>
+      <tr><td><b>Testcontainers</b></td><td>실제 DB·Kafka·Redis 로 통합 테스트</td></tr>
+      <tr><td><b>MockWebServer</b></td><td>HTTP 응답 고정 (외부 API 대역)</td></tr>
+      <tr><td><b>Fixture Monkey</b></td><td>테스트 객체 자동 생성 (네이버 오픈소스)</td></tr>
+      <tr><td><b>power-assert</b></td><td>단언 실패 시 중간 값 표시</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 실무에서 가장 흔한 조합: JUnit5 + MockK + Kotest 단언 + Turbine
+class OrderServiceTest {
+
+    private val repo = mockk&lt;OrderRepository&gt;()
+    private val client = mockk&lt;PaymentClient&gt;(relaxed = true)
+    private val service = OrderService(repo, client)
+
+    @Test
+    fun `재고가 없으면 주문이 실패한다`() = runTest {
+        coEvery { repo.findStock(1L) } returns 0
+
+        val result = runCatching { service.place(cmd(productId = 1)) }
+
+        result.isFailure shouldBe true                              // Kotest 단언
+        result.exceptionOrNull().shouldBeInstanceOf&lt;OutOfStock&gt;()
+        coVerify(exactly = 0) { client.charge(any()) }              // 결제는 시도조차 안 함
+    }
+
+    @Test
+    fun `상태 흐름은 로딩 후 성공이다`() = runTest {
+        coEvery { repo.observe() } returns flowOf(listOf(order()))
+
+        service.state.test {                                        // Turbine
+            awaitItem() shouldBe UiState.Loading
+            awaitItem().shouldBeInstanceOf&lt;UiState.Success&gt;()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+}
+
+// 프로퍼티 기반 테스트 — 경계값을 자동으로 찾아 준다
+class MoneySpec : StringSpec({
+    "덧셈은 결합법칙을 만족한다" {
+        checkAll(Arb.long(0..1_000_000), Arb.long(0..1_000_000), Arb.long(0..1_000_000)) { a, b, c -&gt;
+            (Money(a) + Money(b)) + Money(c) shouldBe Money(a) + (Money(b) + Money(c))
+        }
+    }
+})</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">테스트 이름 짓기</h4>
+      <pre class="code" data-lang="kotlin"><code>// 코틀린은 백틱으로 한글 이름을 쓸 수 있다 — 적극 활용하세요
+@Test
+fun `재고가 부족하면 OutOfStock 예외가 발생한다`() { }
+
+@Test
+fun `쿠폰이 만료되었으면 할인이 적용되지 않는다`() { }
+
+// 실패했을 때 리포트에 그대로 나오므로 원인 파악이 빠르다
+// (안드로이드 계측 테스트에서는 제약이 있어 영문을 씁니다)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">테스트 픽스처</h4>
+      <pre class="code" data-lang="kotlin"><code>// 기본값을 가진 팩토리 — 빌더가 필요 없다
+fun order(
+    id: Long = 1,
+    userId: Long = 100,
+    status: OrderStatus = OrderStatus.NEW,
+    items: List&lt;OrderItem&gt; = listOf(orderItem()),
+) = Order(id, userId, status, items)
+
+// 여러 모듈에서 공유하려면 java-test-fixtures 플러그인
+// plugins { `java-test-fixtures` }
+// testFixtures/kotlin/ 에 두면 다른 모듈이 testImplementation(testFixtures(project(":core")))</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== to05 ==================== -->
+<section class="sec" id="to05">
+  <div class="sec-head rv">
+    <span class="no">TOOL 05</span>
+    <h2>직렬화 — <span class="t">kotlinx.serialization</span></h2>
+    <p class="lead">
+      리플렉션 없이 <b>컴파일 시점에 직렬화 코드를 생성</b>합니다.
+      멀티플랫폼·네이티브 이미지에서 Jackson 보다 유리하고, <b>코틀린 타입을 정확히</b> 다룹니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>plugins { kotlin("plugin.serialization") version "2.2.0" }
+// implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
+
+@Serializable
+data class Order(
+    val id: Long,
+    @SerialName("order_no") val orderNo: String,           // 이름 매핑
+    val status: OrderStatus,
+    @Transient val internalNote: String = "",              // 직렬화 제외
+    val items: List&lt;OrderItem&gt; = emptyList(),              // 기본값
+)
+
+@Serializable
+enum class OrderStatus { @SerialName("new") NEW, @SerialName("paid") PAID }
+
+val json = Json {
+    ignoreUnknownKeys = true          // 모르는 필드는 무시 (API 변경에 강해진다)
+    encodeDefaults = false            // 기본값과 같으면 출력하지 않는다
+    prettyPrint = false
+    explicitNulls = false             // null 필드를 생략
+    coerceInputValues = true          // null 이 오면 기본값으로
+}
+
+val text = json.encodeToString(order)
+val back = json.decodeFromString&lt;Order&gt;(text)</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다형 직렬화 — sealed 와 함께</h4>
+      <pre class="code" data-lang="kotlin"><code>@Serializable
+sealed interface Event {
+    @Serializable @SerialName("placed")
+    data class Placed(val orderId: Long) : Event
+    @Serializable @SerialName("paid")
+    data class Paid(val orderId: Long, val txId: String) : Event
+}
+
+val e: Event = Event.Paid(1, "tx-1")
+println(json.encodeToString(e))
+// {"type":"paid","orderId":1,"txId":"tx-1"}
+
+// 판별 필드 이름 바꾸기
+val json2 = Json { classDiscriminator = "eventType" }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">커스텀 직렬화</h4>
+      <pre class="code" data-lang="kotlin"><code>// value class · 도메인 타입을 원시 값으로
+object MoneySerializer : KSerializer&lt;Money&gt; {
+    override val descriptor = PrimitiveSerialDescriptor("Money", PrimitiveKind.LONG)
+    override fun serialize(encoder: Encoder, value: Money) = encoder.encodeLong(value.won)
+    override fun deserialize(decoder: Decoder) = Money(decoder.decodeLong())
+}
+
+@Serializable
+data class Cart(@Serializable(with = MoneySerializer::class) val total: Money)
+
+// 날짜 — kotlinx-datetime 은 Instant 를 기본 지원
+@Serializable
+data class Log(val at: Instant)      // "2026-08-19T10:00:00Z"
+
+// 파일 전체에 적용
+// @file:UseSerializers(MoneySerializer::class)</code></pre>
+    </div>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:190px">비교</th><th>Jackson / kotlinx.serialization</th></tr>
+      <tr><td>동작 방식</td><td>리플렉션 / <b>컴파일 시점 생성</b></td></tr>
+      <tr><td>기동 속도</td><td>느림 / <b>빠름</b></td></tr>
+      <tr><td>네이티브 이미지</td><td>힌트 필요 / <b>그냥 됨</b></td></tr>
+      <tr><td>멀티플랫폼</td><td>JVM 만 / <b>전부</b></td></tr>
+      <tr><td>생태계</td><td><b>매우 넓다</b>(스프링 기본) / 좁다</td></tr>
+      <tr><td>유연성</td><td><b>동적 처리에 강함</b> / 정적이라 제약이 있다</td></tr>
+      <tr><td>추천</td><td>스프링 서버 / <b>KMP · 안드로이드 · 네이티브</b></td></tr>
+    </table>
+  </div>
+</section>
+
+
+<!-- ==================== to06 ==================== -->
+<section class="sec" id="to06">
+  <div class="sec-head rv">
+    <span class="no">TOOL 06</span>
+    <h2><span class="t">Ktor</span> 서버 — 스프링 대안</h2>
+    <p class="lead">
+      젯브레인스가 만든 <b>코틀린 네이티브 웹 프레임워크</b>입니다.
+      코루틴이 기본이고 가벼워서, <b>작은 서비스·게이트웨이·KMP 백엔드</b>에 잘 맞습니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>fun main() {
+    embeddedServer(Netty, port = 8080) { module() }.start(wait = true)
+}
+
+fun Application.module() {
+    install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+    install(CallLogging) { level = Level.INFO }
+    install(StatusPages) {
+        exception&lt;NotFoundException&gt; { call, cause -&gt;
+            call.respond(HttpStatusCode.NotFound, ErrorResponse("NOT_FOUND", cause.message))
+        }
+        exception&lt;Throwable&gt; { call, cause -&gt;
+            log.error("처리되지 않은 예외", cause)
+            call.respond(HttpStatusCode.InternalServerError, ErrorResponse("INTERNAL", null))
+        }
+    }
+    install(Authentication) {
+        jwt("auth-jwt") {
+            verifier(jwtVerifier)
+            validate { credential -&gt; JWTPrincipal(credential.payload) }
+        }
+    }
+    install(Resources)
+
+    routing {
+        get("/health") { call.respond(mapOf("status" to "UP")) }
+
+        authenticate("auth-jwt") {
+            route("/api/orders") {
+                get {
+                    val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
+                    call.respond(orderService.list(page))      // suspend 함수를 그냥 부른다
+                }
+                get("/{id}") {
+                    val id = call.parameters["id"]?.toLongOrNull()
+                        ?: throw BadRequestException("잘못된 id")
+                    call.respond(orderService.get(id))
+                }
+                post {
+                    val req = call.receive&lt;CreateOrderRequest&gt;()
+                    call.respond(HttpStatusCode.Created, orderService.create(req))
+                }
+            }
+        }
+
+        // SSE · WebSocket 도 기본 지원
+        webSocket("/ws/chat") {
+            for (frame in incoming) {
+                if (frame is Frame.Text) send(Frame.Text("echo: ${frame.readText()}"))
+            }
+        }
+    }
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스프링과 비교</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:150px">항목</th><th>Ktor</th></tr>
+          <tr><td>철학</td><td>필요한 것만 <code>install</code> — 명시적</td></tr>
+          <tr><td>코루틴</td><td><b>처음부터 코루틴 기반</b> (변환 계층이 없다)</td></tr>
+          <tr><td>기동 속도</td><td>수백 ms — 스프링보다 훨씬 빠르다</td></tr>
+          <tr><td>DI</td><td>내장 없음 → Koin</td></tr>
+          <tr><td>데이터 접근</td><td>Exposed · jOOQ 등을 직접 조합</td></tr>
+          <tr><td>생태계</td><td>스프링보다 좁다 (배치·시큐리티 등)</td></tr>
+          <tr><td>멀티플랫폼</td><td><b>서버·클라이언트 모두</b> 지원</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 Ktor 를 고르나</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>작은 서비스·게이트웨이</b> — 스프링의 무게가 부담일 때</li>
+        <li><b>KMP 프로젝트의 백엔드</b> — 클라이언트와 코드를 공유</li>
+        <li><b>기동 속도가 중요</b> — 서버리스·짧은 수명 컨테이너</li>
+        <li><b>코루틴을 온전히</b> — 트랜잭션·시큐리티 컨텍스트 마찰이 없다</li>
+      </ul>
+      <div class="note info" style="margin-bottom:0">
+        <b>반대로 스프링을 고를 이유</b> — 팀 경험, JPA·배치·시큐리티 생태계,
+        사내 표준. <b>대부분의 기업 서비스는 여전히 스프링이 합리적</b>입니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== to07 ==================== -->
+<section class="sec" id="to07">
+  <div class="sec-head rv">
+    <span class="no">TOOL 07</span>
+    <h2>로깅 · <span class="t">날짜와 시간</span></h2>
+    <p class="lead">
+      매일 쓰지만 <b>잘못 쓰기도 쉬운</b> 두 가지입니다.
+      로그는 성능과 보안에, 시간은 정확성에 직결됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">kotlin-logging — 람다 기반</h4>
+      <pre class="code" data-lang="kotlin"><code>// implementation("io.github.oshai:kotlin-logging-jvm:7.0.3")
+private val log = KotlinLogging.logger {}
+
+class OrderService {
+    fun place(cmd: Cmd) {
+        // 람다라서 레벨이 꺼져 있으면 문자열을 만들지 않는다
+        log.debug { "주문 시작 payload=${cmd.toJson()}" }   // 비용 0 (DEBUG 꺼져 있으면)
+
+        // SLF4J 직접 쓸 때는 파라미터 형태로
+        // log.info("주문 {}", id)     — "$id" 보다 낫다
+
+        log.error(e) { "주문 실패 id=${cmd.id}" }           // 예외를 첫 인자로
+    }
+}
+
+// 로그에 담지 말아야 할 것
+// · 비밀번호 · 토큰 · 카드번호 · 주민번호
+// · 전체 요청/응답 본문 (개인정보 + 용량)
+fun String.maskCard() = replace(Regex("""\d{4}-?\d{4}-?\d{4}-?(\d{4})"""), "****-****-****-$1")</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">날짜·시간</h4>
+      <pre class="code" data-lang="kotlin"><code>// JVM 전용이면 java.time 이 여전히 최선
+val now: LocalDateTime = LocalDateTime.now(clock)        // ★ Clock 을 주입받자
+val utc: Instant = Instant.now()
+val seoul = utc.atZone(ZoneId.of("Asia/Seoul"))
+
+// 멀티플랫폼이면 kotlinx-datetime
+val instant: Instant = Clock.System.now()
+val local = instant.toLocalDateTime(TimeZone.of("Asia/Seoul"))
+val tomorrow = instant.plus(1, DateTimeUnit.DAY, TimeZone.currentSystemDefault())
+
+// 코틀린 Duration — 읽기 좋다
+val timeout = 3.seconds
+val ttl = 10.minutes + 30.seconds
+delay(timeout)
+println(ttl.inWholeSeconds)     // 630
+
+// 실무 규칙
+// · 저장은 UTC(Instant), 표시할 때만 지역 시간으로
+// · 날짜 계산에 밀리초 산술을 쓰지 말 것 (서머타임·윤초)
+// · 테스트에서는 Clock 을 고정한다
+val fixed = Clock.fixed(Instant.parse("2026-08-19T00:00:00Z"), ZoneOffset.UTC)</code></pre>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>구조화 로그를 처음부터</b> — Spring Boot 3.4+ 는
+    <code>logging.structured.format.console=ecs</code> 한 줄로 JSON 로그가 나옵니다.
+    로그 수집 시스템(ELK·Loki)에서 <b>필드로 검색</b>할 수 있게 되어 장애 분석 속도가 달라집니다.
+  </div>
+</section>
+
+
+<!-- ==================== to08 ==================== -->
+<section class="sec" id="to08">
+  <div class="sec-head rv">
+    <span class="no">TOOL 08</span>
+    <h2>파일 · <span class="t">엑셀 · CSV · PDF</span></h2>
+    <p class="lead">
+      업무 시스템에서 빠지지 않는 일들입니다.
+      코틀린에서는 <code>use</code>와 시퀀스를 쓰면 <b>대용량도 메모리 안전하게</b> 처리됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파일 · CSV</h4>
+      <pre class="code" data-lang="kotlin"><code>// 작은 파일
+val text = File("a.txt").readText(Charsets.UTF_8)
+val lines = File("a.txt").readLines()
+
+// 큰 파일 — 스트리밍 (메모리에 다 안 올린다)
+File("big.log").useLines { seq -&gt;
+    seq.filter { "ERROR" in it }
+       .take(100)
+       .forEach(::println)
+}
+
+// 쓰기
+File("out.csv").bufferedWriter().use { w -&gt;
+    w.appendLine("id,name,amount")
+    orders.forEach { w.appendLine("${it.id},${it.name.csvEscape()},${it.amount}") }
+}
+
+// CSV 라이브러리 — 따옴표·줄바꿈 처리를 직접 하지 말자
+// implementation("com.github.doyaaaaaken:kotlin-csv-jvm:1.10.0")
+csvReader().open("in.csv") {
+    readAllWithHeaderAsSequence().forEach { row -&gt;
+        println(row["상품명"])
+    }
+}
+
+// ⚠️ 엑셀에서 한글이 깨지면 BOM 문제 — UTF-8 BOM 을 붙여 준다
+File("out.csv").writeBytes(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + content.toByteArray())</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">엑셀 · PDF</h4>
+      <pre class="code" data-lang="kotlin"><code>// Apache POI — 대용량은 SXSSF (스트리밍)
+SXSSFWorkbook(100).use { wb -&gt;                 // 메모리에 100행만 유지
+    val sheet = wb.createSheet("주문")
+    val header = sheet.createRow(0)
+    listOf("주문번호", "고객", "금액").forEachIndexed { i, t -&gt;
+        header.createCell(i).setCellValue(t)
+    }
+    orders.forEachIndexed { r, o -&gt;
+        val row = sheet.createRow(r + 1)
+        row.createCell(0).setCellValue(o.orderNo)
+        row.createCell(1).setCellValue(o.userName)
+        row.createCell(2).setCellValue(o.amount.toDouble())
+    }
+    FileOutputStream("orders.xlsx").use { wb.write(it) }
+    wb.dispose()
+}
+
+// 읽기 — 대용량이면 이벤트 기반(SAX)을 고려
+WorkbookFactory.create(File("in.xlsx")).use { wb -&gt;
+    wb.getSheetAt(0).drop(1).forEach { row -&gt;
+        val name = row.getCell(0)?.stringCellValue
+        val amount = row.getCell(1)?.numericCellValue?.toLong()
+    }
+}
+
+// PDF — OpenHTMLtoPDF (HTML 로 만들고 변환하는 방식이 편하다)
+// 한글 폰트를 반드시 임베드해야 글자가 나온다</code></pre>
+    </div>
+  </div>
+
+  <div class="note warn rv">
+    <b>대용량 엑셀은 메모리를 조심하세요.</b> 10만 행 XSSF 는 수 GB 를 먹습니다.
+    <b>쓰기는 SXSSF</b>, <b>읽기는 이벤트 기반</b>, 그리고 정말 크면
+    <b>CSV 로 유도</b>하는 것이 현실적인 해법입니다.
+  </div>
+</section>
+
+
+<!-- ==================== to09 ==================== -->
+<section class="sec" id="to09">
+  <div class="sec-head rv">
+    <span class="no">TOOL 09</span>
+    <h2>HTTP <span class="t">클라이언트</span> 비교</h2>
+    <p class="lead">
+      선택지가 넷입니다. <b>어떤 스택에 있는지</b>와 <b>멀티플랫폼 계획</b>이 결정 요소입니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:170px">클라이언트</th><th style="width:130px">블로킹</th><th>고르는 이유</th></tr>
+      <tr><td><b>Ktor Client</b></td><td>논블로킹</td><td>멀티플랫폼 · 코루틴 기본 · 안드로이드·iOS·서버 공용</td></tr>
+      <tr><td><b>Retrofit + OkHttp</b></td><td>논블로킹(코루틴)</td><td>안드로이드 표준 · 인터페이스 선언 방식 · 자료가 가장 많다</td></tr>
+      <tr><td><b>Spring WebClient</b></td><td>논블로킹</td><td>스프링 스택 · 커넥션 풀·필터가 잘 갖춰져 있다</td></tr>
+      <tr><td><b>Spring RestClient</b></td><td><b>블로킹</b></td><td>MVC + 가상 스레드 · 가장 단순한 API</td></tr>
+      <tr><td>java.net.http.HttpClient</td><td>둘 다</td><td>의존성 0 — 간단한 도구·스크립트</td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>// 같은 요청을 네 가지로
+
+// ① Ktor
+val order: Order = client.get("orders/$id") { header("X-Trace", traceId) }.body()
+
+// ② Retrofit
+@GET("orders/{id}") suspend fun get(@Path("id") id: Long): Order
+
+// ③ WebClient (코루틴)
+val order = webClient.get().uri("/orders/{id}", id).retrieve().awaitBody&lt;Order&gt;()
+
+// ④ RestClient (블로킹 — 필요하면 withContext(IO))
+val order = restClient.get().uri("/orders/{id}", id).retrieve().body&lt;Order&gt;()!!
+
+// 공통으로 반드시 설정할 것
+// · 연결·읽기 타임아웃 (기본값이 무한인 경우가 있다)
+// · 커넥션 풀 크기와 maxIdleTime
+// · 재시도 정책 (멱등한 요청만)
+// · 로깅 (운영에서는 헤더만 · 개발에서는 본문까지)</code></pre>
+
+  <div class="note tip rv">
+    <b>공통 규칙 하나</b> — <b>도메인 예외로 변환하는 어댑터</b>를 반드시 두세요.
+    <code>WebClientResponseException</code>이나 <code>HttpException</code>이
+    서비스 계층까지 올라오면 <b>클라이언트 라이브러리를 바꾸는 순간 전부 고쳐야</b> 합니다.
+  </div>
+</section>
+
+
+<!-- ==================== to10 ==================== -->
+<section class="sec" id="to10">
+  <div class="sec-head rv">
+    <span class="no">TOOL 10</span>
+    <h2>CLI 도구 · <span class="t">스크립팅</span></h2>
+    <p class="lead">
+      운영 스크립트·마이그레이션 도구·사내 CLI 를 코틀린으로 만들면
+      <b>도메인 코드를 그대로 재사용</b>할 수 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Clikt — CLI 프레임워크</h4>
+      <pre class="code" data-lang="kotlin"><code>// implementation("com.github.ajalt.clikt:clikt:5.0.2")
+class Migrate : CliktCommand(help = "주문 데이터를 새 스키마로 옮깁니다") {
+    private val source by option("-s", "--source", help = "원본 DB URL").required()
+    private val target by option("-t", "--target").required()
+    private val batchSize by option("--batch").int().default(1000)
+    private val dryRun by option("--dry-run").flag()
+
+    override fun run() = runBlocking {
+        echo("마이그레이션 시작 (batch=$batchSize, dryRun=$dryRun)")
+        val total = migrate(source, target, batchSize, dryRun)
+        echo("완료: ${total}건")
+    }
+}
+
+class Cli : CliktCommand() { override fun run() = Unit }
+
+fun main(args: Array&lt;String&gt;) = Cli().subcommands(Migrate(), Verify()).main(args)
+
+// 실행 파일로 만들기
+// · ./gradlew installDist → bin/ 에 실행 스크립트
+// · GraalVM 네이티브 이미지 → 단일 바이너리 (기동 수십 ms)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코틀린 스크립트 (.main.kts)</h4>
+      <pre class="code" data-lang="kotlin"><code>#!/usr/bin/env kotlin
+@file:DependsOn("com.squareup.okhttp3:okhttp:4.12.0")
+@file:DependsOn("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
+
+import okhttp3.*
+
+val client = OkHttpClient()
+val res = client.newCall(Request.Builder().url(args[0]).build()).execute()
+println("status=${res.code} length=${res.body?.contentLength()}")
+
+// 실행: kotlin check.main.kts https://example.com
+// 장점: 의존성을 파일 안에 선언 · 타입 안전
+// 단점: 첫 실행이 느리다 (컴파일) — 자주 쓰는 건 CLI 로 만드는 편이 낫다</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>Gradle 태스크로 만드는 방법</b>도 있습니다 —
+        빌드 스크립트 안에서 코틀린으로 로직을 쓰면
+        <b>프로젝트 코드를 그대로 부를 수</b> 있어 데이터 검증·리포트 생성에 편합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== to11 ==================== -->
+<section class="sec" id="to11">
+  <div class="sec-head rv">
+    <span class="no">TOOL 11</span>
+    <h2>문서화 — <span class="t">KDoc · Dokka</span></h2>
+    <p class="lead">
+      <b>공개 API 에는 문서가 필요합니다.</b>
+      KDoc 은 IDE 자동완성에 바로 뜨고, Dokka 는 그것을 HTML 문서로 만들어 줍니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>/**
+ * 주문을 생성합니다.
+ *
+ * 재고를 확인한 뒤 결제를 요청하고, 성공하면 주문을 저장합니다.
+ * 이 함수는 **멱등하지 않습니다** — 중복 방지가 필요하면 [IdempotencyService]를 사용하세요.
+ *
+ * @param cmd 주문 명령. [PlaceOrderCommand.quantity]는 1~99 범위여야 합니다.
+ * @param userId 주문자 식별자
+ * @return 저장된 주문. [Order.id]는 이 시점에 채워집니다.
+ * @throws OutOfStockException 재고가 부족할 때
+ * @throws PaymentFailedException 결제 승인이 실패할 때
+ * @sample com.example.samples.placeOrderSample
+ * @see cancelOrder
+ * @since 2.1.0
+ */
+suspend fun placeOrder(cmd: PlaceOrderCommand, userId: UserId): Order
+
+// 문서 생성
+// plugins { id("org.jetbrains.dokka") version "2.0.0" }
+// ./gradlew dokkaHtml       → build/dokka/html
+// ./gradlew dokkaJavadoc    → 자바 스타일 (Maven Central 배포에 필요)</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 문서로 남길까</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>“무엇을 하는가”가 아니라 “왜·언제 쓰는가”</b> —
+          <code>fun getUser()</code>에 “사용자를 가져온다”는 쓸모가 없습니다</li>
+        <li><b>계약</b> — 인자 범위, 반환의 의미, 던지는 예외</li>
+        <li><b>주의사항</b> — 스레드 안전 여부, 멱등성, 성능 특성</li>
+        <li><b>예제</b>(<code>@sample</code>) — 실제 컴파일되는 코드를 가리키므로 <b>썩지 않습니다</b></li>
+        <li><b>내부 구현은 코드가 문서</b> — 주석보다 <b>이름을 잘 짓는</b> 편이 낫습니다</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">API 문서 · 아키텍처 결정 기록</h4>
+      <pre class="code" data-lang="kotlin"><code>// REST API 문서 — 스프링이라면 springdoc-openapi
+@Operation(summary = "주문 생성", description = "재고를 확인하고 결제를 진행합니다")
+@ApiResponses(
+    ApiResponse(responseCode = "201", description = "생성됨"),
+    ApiResponse(responseCode = "409", description = "재고 부족"),
+)
+@PostMapping("/orders")
+suspend fun create(@RequestBody @Valid req: CreateOrderRequest): OrderResponse
+
+// 또는 테스트에서 문서를 생성 — Spring REST Docs
+// 문서와 실제 동작이 어긋날 수 없다는 장점이 크다
+
+// ADR — 왜 이렇게 결정했는지 남긴다 (docs/adr/0007-use-ktor.md)
+// # 7. 게이트웨이는 Ktor 로 만든다
+// 상태: 승인됨 / 날짜: 2026-03-14
+// 배경 · 결정 · 결과 · 대안</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== to12 ==================== -->
+<section class="sec" id="to12">
+  <div class="sec-head rv">
+    <span class="no">TOOL 12</span>
+    <h2>라이브러리 <span class="t">배포</span></h2>
+    <p class="lead">
+      사내 공용 모듈이나 오픈소스를 <b>Maven 저장소에 올리는</b> 과정입니다.
+      코틀린 라이브러리는 <b>이진 호환성</b>이라는 추가 고려사항이 있습니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="kotlin"><code>plugins {
+    kotlin("jvm")
+    `maven-publish`
+    signing
+    id("org.jetbrains.dokka")
+    id("org.jetbrains.kotlinx.binary-compatibility-validator") version "0.17.0"
+}
+
+java {
+    withSourcesJar()          // 소스 첨부 (IDE 에서 코드를 볼 수 있다)
+    withJavadocJar()
+}
+
+publishing {
+    publications {
+        create&lt;MavenPublication&gt;("maven") {
+            from(components["java"])
+            groupId = "com.example"
+            artifactId = "order-core"
+            version = "1.2.0"
+            pom {
+                name.set("Order Core")
+                description.set("주문 도메인 공용 모듈")
+                licenses { license { name.set("Apache-2.0") } }
+                developers { developer { id.set("hw"); name.set("김현우") } }
+                scm { url.set("https://github.com/example/order-core") }
+            }
+        }
+    }
+    repositories {
+        maven {
+            url = uri("https://nexus.internal/repository/maven-releases/")
+            credentials {
+                username = System.getenv("NEXUS_USER")
+                password = System.getenv("NEXUS_PASSWORD")
+            }
+        }
+    }
+}
+
+// 공개 API 를 파일로 고정 — 실수로 시그니처가 바뀌면 CI 가 잡는다
+// ./gradlew apiDump    → api/order-core.api 갱신
+// ./gradlew apiCheck   → 변경이 있으면 실패</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코틀린 라이브러리의 호환성 함정</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>inline 함수 본문 변경</b> — 이미 펼쳐진 코드는 안 바뀝니다.
+          <b>쓰는 쪽 재컴파일이 필요</b></li>
+        <li><b>기본값 추가·변경</b> — <code>$default</code> 시그니처가 바뀔 수 있습니다</li>
+        <li><b>data class 에 프로퍼티 추가</b> — <code>copy</code>·<code>componentN</code>이 바뀝니다</li>
+        <li><b>인터페이스에 메서드 추가</b> — 기본 구현이 있어도 구현체에 영향</li>
+        <li><b>sealed 에 자식 추가</b> — 쓰는 쪽 <code>when</code>이 깨집니다(의도된 동작)</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>시맨틱 버전을 지키세요</b> — 호환이 깨지면 <b>메이저</b>를 올리고,
+        <code>@Deprecated</code>로 최소 한 버전은 예고합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Maven Central 배포 (오픈소스)</h4>
+      <pre class="code" data-lang="text"><code>준비물
+· Sonatype Central 계정 + 네임스페이스 검증 (도메인 또는 io.github.*)
+· GPG 키 (서명 필수)
+· sources jar · javadoc jar (Dokka 로 생성)
+· POM 에 name·description·url·license·developer·scm
+
+배포
+· vanniktech/gradle-maven-publish-plugin 을 쓰면 대부분 자동화된다
+· ./gradlew publishToMavenCentral
+
+멀티플랫폼(KMP)이면
+· 타깃별 아티팩트가 함께 올라간다 (metadata + jvm + iosArm64 ...)
+· CI 는 맥에서 돌려야 iOS 타깃이 포함된다</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== to13 ==================== -->
+<section class="sec" id="to13">
+  <div class="sec-head rv">
+    <span class="no">TOOL 13</span>
+    <h2>IDE · <span class="t">생산성</span></h2>
+    <p class="lead">
+      코틀린은 <b>IDE 지원이 언어의 일부</b>라고 할 만큼 도구와 밀접합니다.
+      알아 두면 매일 시간을 아끼는 기능들입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">알아 두면 좋은 기능</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:190px">기능</th><th>용도</th></tr>
+          <tr><td>자바 → 코틀린 변환</td><td>자바 코드를 붙여넣으면 자동 변환 (학습에도 최고)</td></tr>
+          <tr><td>Show Kotlin Bytecode</td><td>문법이 무엇으로 바뀌는지 확인</td></tr>
+          <tr><td>Scratch File</td><td>프로젝트 밖에서 코드 조각을 바로 실행</td></tr>
+          <tr><td>Kotlin Notebook</td><td>데이터 탐색·프로토타이핑 (셀 단위 실행)</td></tr>
+          <tr><td>구조 검색·치환</td><td>패턴 기반 대규모 리팩터링</td></tr>
+          <tr><td>Coroutine Debugger</td><td>디버깅 중 코루틴 목록·상태 확인</td></tr>
+          <tr><td>Inline Hints</td><td>추론된 타입·인자 이름 표시 (켜 두면 읽기 쉬워집니다)</td></tr>
+          <tr><td>Live Templates</td><td>자주 쓰는 코드 골격 등록</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">팀 설정 공유</h4>
+      <pre class="code" data-lang="text"><code>저장소에 함께 넣어 두면 좋은 것
+
+.editorconfig            들여쓰기·줄 길이 (ktlint 와 연동)
+.idea/codeStyles/        코드 스타일 (팀 통일)
+.idea/inspectionProfiles/ 인스펙션 수준
+detekt.yml               정적 분석 규칙
+gradle/libs.versions.toml 의존성 버전
+.github/workflows/       CI
+CONTRIBUTING.md          리뷰 기준 · 커밋 규칙
+docs/adr/                아키텍처 결정 기록
+
+새로 합류한 사람이 클론만 하면 같은 환경이 되는 것이 목표입니다.</code></pre>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>Kotlin Notebook 은 데이터 확인에 특히 좋습니다</b> —
+    운영 DB 에서 뽑은 데이터를 셀 단위로 탐색하고,
+    그 코드를 <b>그대로 서비스 코드로 옮길 수</b> 있습니다(같은 언어이므로).
+    파이썬 노트북을 쓰던 자리를 상당 부분 대체합니다.
+  </div>
+</section>
+
+
+<!-- ==================== to14 ==================== -->
+<section class="sec" id="to14">
+  <div class="sec-head rv">
+    <span class="no">TOOL 14</span>
+    <h2>목적별 <span class="t">도구 찾기</span></h2>
+    <p class="lead">
+      “이걸 하려면 뭘 써야 하지?”에 대한 답을 모았습니다.
+      아래 칸에 <b>하려는 일</b>을 한글로 입력해 보세요.
+    </p>
+  </div>
+
+  <div class="ctrls rv">
+    <input id="ktxQ" type="search" placeholder="예: 엑셀, 테스트, 캐시, 이미지, 로그, 배포…"
+           oninput="ktxFilter()" style="flex:1;min-width:240px;padding:10px 14px;border-radius:10px;
+           border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:14px">
+    <button class="chip" onclick="ktxSet('테스트')">테스트</button>
+    <button class="chip" onclick="ktxSet('직렬화')">직렬화</button>
+    <button class="chip" onclick="ktxSet('안드로이드')">안드로이드</button>
+    <button class="chip" onclick="ktxSet('DB')">DB</button>
+    <button class="chip" onclick="ktxSet('')">전체</button>
+  </div>
+  <p class="tx" id="ktxCount" style="font-size:13.4px;color:var(--dim)">전체 목록 · 위 칸에 하려는 일을 입력해 보세요</p>
+
+  <div class="tw rv">
+    <table class="cheat" id="ktxTable">
+      <thead>
+        <tr><th style="width:210px">하려는 일</th><th style="width:200px">도구</th><th>비고</th></tr>
+      </thead>
+      <tbody>
+        <tr data-k="빌드 gradle 의존성"><td>빌드·의존성 관리</td><td>Gradle Kotlin DSL + 버전 카탈로그</td><td>컨벤션 플러그인으로 중복 제거</td></tr>
+        <tr data-k="코드스타일 포맷 린트"><td>코드 스타일 통일</td><td>ktlint</td><td>.editorconfig 와 연동 · CI 강제</td></tr>
+        <tr data-k="정적분석 품질 위험패턴"><td>위험 패턴 차단</td><td>detekt</td><td><code>!!</code>·GlobalScope 금지 규칙</td></tr>
+        <tr data-k="테스트 단위 junit"><td>단위 테스트</td><td>JUnit 5 (+ Kotest 단언)</td><td>백틱 한글 테스트명 활용</td></tr>
+        <tr data-k="테스트 목 mock mockk"><td>목(mock) 만들기</td><td>MockK</td><td>final·suspend·object 지원</td></tr>
+        <tr data-k="테스트 코루틴 flow"><td>코루틴·Flow 테스트</td><td>kotlinx-coroutines-test + Turbine</td><td>가상 시간으로 즉시 실행</td></tr>
+        <tr data-k="테스트 통합 db 도커"><td>실제 DB 로 통합 테스트</td><td>Testcontainers</td><td><code>@ServiceConnection</code>으로 자동 연결</td></tr>
+        <tr data-k="테스트 http 목서버"><td>외부 API 흉내</td><td>MockWebServer · WireMock</td><td>지연·에러 시나리오 재현</td></tr>
+        <tr data-k="직렬화 json"><td>JSON 직렬화</td><td>kotlinx.serialization · Jackson</td><td>KMP·네이티브면 전자</td></tr>
+        <tr data-k="http 클라이언트 api 호출"><td>HTTP 호출</td><td>Ktor Client · Retrofit · WebClient</td><td>스택과 플랫폼에 맞춰</td></tr>
+        <tr data-k="서버 웹 프레임워크"><td>웹 서버</td><td>Spring Boot · Ktor</td><td>생태계 vs 가벼움</td></tr>
+        <tr data-k="db orm jpa"><td>ORM · DB 접근</td><td>JPA · Exposed · jOOQ · Kotlin JDSL</td><td>도메인/쿼리 복잡도로 선택</td></tr>
+        <tr data-k="db 마이그레이션 스키마"><td>스키마 관리</td><td>Flyway · Liquibase</td><td><code>ddl-auto</code> 금지</td></tr>
+        <tr data-k="캐시 redis 로컬"><td>캐시</td><td>Caffeine(로컬) + Redis(분산)</td><td>2단 구성 · 스탬피드 방지</td></tr>
+        <tr data-k="분산락 동시성 재고"><td>분산 락</td><td>Redisson</td><td>원자적 UPDATE 로 되면 그게 낫다</td></tr>
+        <tr data-k="메시지 큐 카프카 이벤트"><td>비동기 메시징</td><td>Kafka · RabbitMQ</td><td>소비자는 멱등하게</td></tr>
+        <tr data-k="로그 로깅"><td>로깅</td><td>kotlin-logging + Logback</td><td>구조화(JSON) 로그 권장</td></tr>
+        <tr data-k="모니터링 메트릭 관측"><td>메트릭·추적</td><td>Micrometer + Prometheus + OTel</td><td>RED/USE 지표</td></tr>
+        <tr data-k="di 의존성주입"><td>의존성 주입</td><td>Spring · Hilt(안드로이드) · Koin(KMP)</td><td>플랫폼에 맞춰</td></tr>
+        <tr data-k="안드로이드 ui 화면"><td>안드로이드 UI</td><td>Jetpack Compose</td><td>Material 3 · 미리보기 활용</td></tr>
+        <tr data-k="안드로이드 db 로컬저장"><td>모바일 로컬 저장</td><td>Room · DataStore · SQLDelight</td><td>KMP 면 SQLDelight</td></tr>
+        <tr data-k="안드로이드 이미지 로딩"><td>이미지 로딩</td><td>Coil 3</td><td>KMP 지원</td></tr>
+        <tr data-k="안드로이드 백그라운드 작업"><td>백그라운드 작업</td><td>WorkManager</td><td>제약 조건·재시도 내장</td></tr>
+        <tr data-k="멀티플랫폼 kmp 공유"><td>코드 공유 (iOS)</td><td>KMP + SKIE</td><td>도메인·데이터부터</td></tr>
+        <tr data-k="엑셀 excel"><td>엑셀 읽기·쓰기</td><td>Apache POI (SXSSF)</td><td>대용량은 스트리밍</td></tr>
+        <tr data-k="csv 파일"><td>CSV</td><td>kotlin-csv · commons-csv</td><td>BOM·따옴표 처리 주의</td></tr>
+        <tr data-k="pdf 문서 출력"><td>PDF 생성</td><td>OpenHTMLtoPDF · PDFBox</td><td>한글 폰트 임베드 필수</td></tr>
+        <tr data-k="cli 스크립트 도구"><td>CLI 도구</td><td>Clikt · kotlin scripting</td><td>네이티브 이미지로 배포</td></tr>
+        <tr data-k="문서화 kdoc api"><td>API 문서</td><td>Dokka · springdoc-openapi</td><td>REST Docs 도 좋은 선택</td></tr>
+        <tr data-k="배포 라이브러리 maven"><td>라이브러리 배포</td><td>maven-publish + BCV</td><td>공개 API 를 파일로 고정</td></tr>
+        <tr data-k="성능 프로파일링 측정"><td>성능 프로파일링</td><td>async-profiler · JFR · JMH</td><td>측정 없이 최적화 금지</td></tr>
+        <tr data-k="메모리 누수 힙덤프"><td>메모리 분석</td><td>Eclipse MAT · LeakCanary(앱)</td><td>JOL 로 객체 크기 확인</td></tr>
+        <tr data-k="부하테스트 성능테스트"><td>부하 테스트</td><td>k6 · Gatling · nGrinder</td><td>운영과 같은 환경에서</td></tr>
+        <tr data-k="아키텍처 구조 규칙"><td>구조 규칙 강제</td><td>ArchUnit · Konsist</td><td>테스트로 경계를 지킨다</td></tr>
+        <tr data-k="네이티브 기동 서버리스"><td>기동 시간 단축</td><td>GraalVM 네이티브 이미지</td><td>리플렉션 힌트 필요</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note info rv">
+    <b>가이드를 끝까지 읽으셨습니다.</b>
+    코틀린은 <b>서버·안드로이드·iOS·데스크톱</b>을 한 언어로 이어 주는 몇 안 되는 선택지이고,
+    그 중심에는 <b>null 안전성·sealed·코루틴</b>이라는 세 가지 축이 있습니다.
+    막힐 때는 <kbd>Ctrl K</kbd> 검색으로 필요한 섹션을 바로 찾아 쓰세요.
+  </div>
+</section>
+
+</div>

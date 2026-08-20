@@ -95,6 +95,7 @@ function toggle(id: string) {
         CI/CD 단독 구축, 리버스 터널 재구현, 폐쇄망 설치 자동화 등 상시 병행
         인프라 업무.
       </p>
+
       <div class="infra-grid">
         <article v-for="it in infra" :key="it.title" class="infra card">
           <h4 class="infra-title">{{ it.title }}</h4>

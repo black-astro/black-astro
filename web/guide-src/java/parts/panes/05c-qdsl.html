@@ -1,0 +1,1593 @@
+<div class="pane" id="pane-qdsl">
+
+<!-- ---------- HERO ---------- -->
+<header class="hero">
+  <div class="eyebrow"><i></i> 타입 안전 동적 쿼리 · 프로젝션 · 서브쿼리 · 성능</div>
+  <h1>문자열 쿼리는<br>런타임에 터지고<br>QueryDSL은 컴파일에 막힌다</h1>
+  <p class="tx">
+    검색 조건이 다섯 개만 되어도 <code>if</code> 로 JPQL 문자열을 조립하게 됩니다.
+    그러면 <b>띄어쓰기 하나로 운영에서 터집니다.</b>
+    QueryDSL 은 그 쿼리를 <b>자바 코드</b>로 쓰게 해서,
+    <b>컬럼명 오타·타입 불일치를 컴파일 단계에서</b> 잡습니다.
+  </p>
+  <div class="stats">
+    <div><b>16</b><span>SECTIONS</span></div>
+    <div><b>0</b><span>문자열 쿼리</span></div>
+    <div><b>100%</b><span>컴파일 타임 검증</span></div>
+    <div><b>5.x</b><span>기준 버전 (jakarta)</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== q01 ==================== -->
+<section class="sec" id="q01">
+  <div class="sec-head rv">
+    <span class="no">QDSL 01</span>
+    <h2>왜 <span class="t">QueryDSL</span>인가 · 설정</h2>
+    <p class="lead">
+      Spring Data 의 쿼리 메서드는 조건이 늘면 <b>이름이 감당 못 하게</b> 길어지고,
+      <code>@Query</code> 문자열은 <b>동적 조건에 취약</b>합니다. 그 사이를 메우는 도구입니다.
+    </p>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>문자열로 동적 쿼리를 만들면</h5>
+      <pre class="code" data-lang="java"><code>public List&lt;Order&gt; search(OrderCondition cond) {
+    StringBuilder jpql = new StringBuilder("select o from Order o where 1=1");
+    Map&lt;String, Object&gt; params = new HashMap&lt;&gt;();
+
+    if (cond.getStatus() != null) {
+        jpql.append(" and o.status = :status");   // 앞 공백 빠지면 런타임 에러
+        params.put("status", cond.getStatus());
+    }
+    if (cond.getMinAmount() != null) {
+        jpql.append(" and o.totalAmount &gt;= :minAmount");
+        params.put("minAmount", cond.getMinAmount());
+    }
+    // 조건이 늘수록 감당이 안 된다
+    // · 컬럼명을 바꾸면? → 컴파일은 통과, 운영에서 터진다
+    // · 타입이 틀리면?   → 마찬가지
+    // · IDE 자동완성 없음, 리팩터링 추적 안 됨
+    TypedQuery&lt;Order&gt; query = em.createQuery(jpql.toString(), Order.class);
+    params.forEach(query::setParameter);
+    return query.getResultList();
+}</code></pre>
+    </div>
+    <div class="good">
+      <h5>QueryDSL</h5>
+      <pre class="code" data-lang="java"><code>public List&lt;Order&gt; search(OrderCondition cond) {
+    return queryFactory
+        .selectFrom(order)
+        .where(
+            statusEq(cond.getStatus()),        // null 이면 조건에서 자동 제외
+            amountGoe(cond.getMinAmount()),
+            createdBetween(cond.getFrom(), cond.getTo())
+        )
+        .orderBy(order.createdAt.desc())
+        .fetch();
+}
+
+private BooleanExpression statusEq(OrderStatus status) {
+    return status != null ? order.status.eq(status) : null;
+}
+private BooleanExpression amountGoe(Long amount) {
+    return amount != null ? order.totalAmount.goe(amount) : null;
+}
+// 필드명이 바뀌면 컴파일 에러 · IDE 자동완성 · 조건 재사용 가능</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">설정 — Spring Boot 4.x · jakarta 기준</h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Gradle</h4>
+      <pre class="code" data-lang="kotlin"><code>dependencies {
+    implementation("com.querydsl:querydsl-jpa:5.1.0:jakarta")
+    annotationProcessor("com.querydsl:querydsl-apt:5.1.0:jakarta")
+    annotationProcessor("jakarta.annotation:jakarta.annotation-api")
+    annotationProcessor("jakarta.persistence:jakarta.persistence-api")
+}
+
+// 생성 위치: build/generated/sources/annotationProcessor/java/main
+// 대부분 Gradle 이 알아서 소스셋에 넣어 준다.
+// IDE 가 못 찾으면 아래를 추가
+sourceSets.main { java.srcDir(layout.buildDirectory.dir("generated/sources/annotationProcessor/java/main")) }
+
+// Q타입 정리 (스키마를 바꿨는데 옛 Q타입이 남아 있을 때)
+tasks.named("clean") {
+    doLast { delete(layout.buildDirectory.dir("generated")) }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>:jakarta</code> 분류자를 빠뜨리면</b> Boot 3+ 에서
+        <code>javax.persistence</code> 를 찾다가 실패합니다.
+        <b>“Q타입이 생성되지 않는다”</b>의 가장 흔한 원인입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Maven · 빈 등록</h4>
+      <pre class="code" data-lang="xml"><code>&lt;dependency&gt;
+  &lt;groupId&gt;com.querydsl&lt;/groupId&gt;
+  &lt;artifactId&gt;querydsl-jpa&lt;/artifactId&gt;
+  &lt;version&gt;5.1.0&lt;/version&gt;
+  &lt;classifier&gt;jakarta&lt;/classifier&gt;
+&lt;/dependency&gt;
+&lt;dependency&gt;
+  &lt;groupId&gt;com.querydsl&lt;/groupId&gt;
+  &lt;artifactId&gt;querydsl-apt&lt;/artifactId&gt;
+  &lt;version&gt;5.1.0&lt;/version&gt;
+  &lt;classifier&gt;jakarta&lt;/classifier&gt;
+  &lt;scope&gt;provided&lt;/scope&gt;
+&lt;/dependency&gt;</code></pre>
+      <pre class="code" data-lang="java" style="margin-bottom:0"><code>@Configuration
+public class QuerydslConfig {
+    @PersistenceContext
+    private EntityManager em;
+
+    @Bean
+    public JPAQueryFactory queryFactory() {
+        return new JPAQueryFactory(em);
+    }
+}
+// 이제 어디서든 주입받아 쓴다</code></pre>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>Q타입이란</b> — <code>Order</code> 엔티티로부터 <code>QOrder</code> 클래스가 생성되고,
+    그 안에 <code>order.status</code>·<code>order.totalAmount</code> 같은
+    <b>타입 있는 경로 객체</b>가 들어 있습니다. 우리가 쓰는 것은 이 경로 객체이고,
+    <b>엔티티 필드가 바뀌면 Q타입도 바뀌므로</b> 컴파일 에러로 드러납니다.
+  </div>
+</section>
+
+
+<!-- ==================== q02 ==================== -->
+<section class="sec" id="q02">
+  <div class="sec-head rv">
+    <span class="no">QDSL 02</span>
+    <h2>기본 <span class="t">문법</span></h2>
+    <p class="lead">
+      SQL 을 아는 사람이라면 <b>거의 그대로 읽힙니다.</b>
+      <code>select · from · where · orderBy · fetch</code> 다섯 개면 시작할 수 있습니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="java"><code>import static com.example.domain.QOrder.order;      // ★ static import 가 관례
+import static com.example.domain.QMember.member;
+
+// 엔티티 조회
+List&lt;Order&gt; orders = queryFactory
+        .selectFrom(order)                          // select(order).from(order) 축약
+        .where(order.status.eq(OrderStatus.PAID))
+        .orderBy(order.createdAt.desc())
+        .fetch();
+
+// 결과 가져오기 — 목적에 맞는 메서드를 쓴다
+List&lt;Order&gt; list   = query.fetch();          // 목록
+Order one          = query.fetchOne();       // 하나 (없으면 null, 둘 이상이면 예외)
+Order first        = query.fetchFirst();     // 첫 번째 (limit 1)
+// fetchResults()·fetchCount() 는 5.0에서 deprecated — 카운트는 별도 쿼리로
+
+// 조건 — SQL 연산자와 대응된다
+order.status.eq(PAID)                 // =
+order.status.ne(PAID)                 // !=
+order.totalAmount.gt(10_000)          // &gt;
+order.totalAmount.goe(10_000)         // &gt;=
+order.totalAmount.lt(10_000)          // &lt;
+order.totalAmount.loe(10_000)         // &lt;=
+order.totalAmount.between(1000, 5000)
+order.status.in(NEW, PAID)
+order.status.notIn(CANCELED)
+order.memo.isNull()
+order.memo.isNotNull()
+order.orderNo.like("ORD-2026%")
+order.orderNo.startsWith("ORD")       // like 'ORD%'
+order.orderNo.contains("2026")        // like '%2026%'
+order.createdAt.after(from)
+order.createdAt.before(to)
+
+// AND / OR
+.where(order.status.eq(PAID).and(order.totalAmount.goe(10_000)))
+.where(order.status.eq(PAID).or(order.status.eq(SHIPPED)))
+.where(order.status.eq(PAID), order.totalAmount.goe(10_000))   // 쉼표 = AND (권장)</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Q타입 인스턴스 — 별칭이 필요할 때</h4>
+      <pre class="code" data-lang="java"><code>// 기본 인스턴스 (static import) — 대부분 이것으로 충분
+import static com.example.domain.QOrder.order;
+
+// 같은 테이블을 두 번 조인할 때는 별칭을 따로 만든다
+QOrder o1 = new QOrder("o1");
+QOrder o2 = new QOrder("o2");
+
+queryFactory.select(o1, o2)
+    .from(o1)
+    .join(o2).on(o1.userId.eq(o2.userId).and(o1.id.ne(o2.id)))
+    .fetch();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쿼리 로그 보기</h4>
+      <pre class="code" data-lang="yaml"><code>logging:
+  level:
+    org.hibernate.SQL: debug
+    org.hibernate.orm.jdbc.bind: trace
+
+# QueryDSL 은 결국 JPQL 을 만든다 — 확인하려면
+# query.toString() 또는 JPAQuery#getMetadata()</code></pre>
+      <p class="tx" style="font-size:13.4px;margin-bottom:0">
+        <b>QueryDSL → JPQL → SQL</b> 순서로 변환됩니다.
+        그래서 <b>JPQL 로 안 되는 것은 QueryDSL 로도 안 됩니다</b>
+        (예: from 절 서브쿼리).
+      </p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== q03 ==================== -->
+<section class="sec" id="q03">
+  <div class="sec-head rv">
+    <span class="no">QDSL 03</span>
+    <h2>동적 조건 — <span class="t">null 이 곧 “조건 없음”</span></h2>
+    <p class="lead">
+      QueryDSL 의 가장 강력한 성질입니다.
+      <b><code>where()</code> 에 <code>null</code>을 넘기면 그 조건은 무시</b>됩니다.
+      이 규칙 하나로 동적 쿼리가 <code>if</code> 없이 표현됩니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 216" role="img" aria-label="QueryDSL의 널 조건 처리 그림. where 절에 여러 조건을 넘기면 널이 아닌 조건만 AND로 연결되어 SQL이 만들어진다. 조건 메서드가 널을 반환하면 그 조건은 쿼리에서 빠진다.">
+      <text x="16" y="18" class="lbl">where(a, b, c) — null 인 것만 빠진다</text>
+
+      <rect class="bx" x="16" y="38" width="196" height="112"/>
+      <text x="114" y="60" class="ttl" text-anchor="middle">검색 조건 입력</text>
+      <text x="30" y="84" class="ann">status = "PAID"</text>
+      <text x="30" y="104" class="ann rs-t">minAmount = null</text>
+      <text x="30" y="124" class="ann">keyword = "김"</text>
+      <text x="30" y="144" class="ann rs-t">from = null</text>
+
+      <path class="fl ar" d="M216 94 L252 94"/>
+
+      <rect class="bx bx-hi" x="256" y="38" width="180" height="112"/>
+      <text x="346" y="60" class="ttl am-t" text-anchor="middle">조건 메서드</text>
+      <text x="270" y="84" class="ann ok-t">statusEq() → 식</text>
+      <text x="270" y="104" class="ann rs-t">amountGoe() → null</text>
+      <text x="270" y="124" class="ann ok-t">nameLike() → 식</text>
+      <text x="270" y="144" class="ann rs-t">createdGoe() → null</text>
+
+      <path class="fl ar ar-gn" style="stroke:#34d399" d="M440 94 L476 94"/>
+
+      <rect class="bx bx-ok" x="480" y="38" width="184" height="112"/>
+      <text x="572" y="60" class="ttl ok-t" text-anchor="middle">생성되는 SQL</text>
+      <text x="494" y="84" class="ann">where status = ?</text>
+      <text x="494" y="104" class="ann">and m.name like ?</text>
+      <text x="494" y="130" class="ann ok-t">null 조건은 아예</text>
+      <text x="494" y="146" class="ann ok-t">SQL 에 나타나지 않는다</text>
+
+      <text x="16" y="180" class="ann">if 문 없이 조건이 조합된다 — 조건이 20개여도 코드 모양이 같다</text>
+      <text x="16" y="200" class="ann am-t">단, 모든 조건이 null 이면 where 절이 통째로 사라져 전체 조회가 된다 — 방어 필요</text>
+    </svg>
+    <div class="cap">이 성질 덕분에 <b>검색 API 한 개로 수십 가지 조합</b>을 처리할 수 있습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">BooleanExpression — 권장 방식</h4>
+      <pre class="code" data-lang="java"><code>public List&lt;Order&gt; search(OrderCondition cond) {
+    return queryFactory
+        .selectFrom(order)
+        .leftJoin(order.member, member).fetchJoin()
+        .where(
+            statusEq(cond.getStatus()),
+            amountGoe(cond.getMinAmount()),
+            memberNameContains(cond.getKeyword()),
+            createdBetween(cond.getFrom(), cond.getTo())
+        )
+        .fetch();
+}
+
+private BooleanExpression statusEq(OrderStatus status) {
+    return status == null ? null : order.status.eq(status);
+}
+private BooleanExpression amountGoe(Long amount) {
+    return amount == null ? null : order.totalAmount.goe(amount);
+}
+private BooleanExpression memberNameContains(String keyword) {
+    return !StringUtils.hasText(keyword) ? null : member.name.contains(keyword);
+}
+private BooleanExpression createdBetween(LocalDateTime from, LocalDateTime to) {
+    if (from == null &amp;&amp; to == null) return null;
+    if (from == null) return order.createdAt.loe(to);
+    if (to == null) return order.createdAt.goe(from);
+    return order.createdAt.between(from, to);
+}
+
+// ★ 장점 — 이 메서드들을 '다른 쿼리에서도 재사용'할 수 있다
+// ★ 조합도 된다: statusEq(s).and(amountGoe(a))</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">BooleanBuilder — 조건이 복잡할 때</h4>
+      <pre class="code" data-lang="java"><code>public List&lt;Order&gt; search(OrderCondition cond) {
+    BooleanBuilder builder = new BooleanBuilder();
+
+    if (cond.getStatus() != null) builder.and(order.status.eq(cond.getStatus()));
+    if (cond.getMinAmount() != null) builder.and(order.totalAmount.goe(cond.getMinAmount()));
+
+    // OR 그룹이 섞이면 Builder 가 읽기 좋다
+    if (StringUtils.hasText(cond.getKeyword())) {
+        builder.and(
+            member.name.contains(cond.getKeyword())
+                .or(order.orderNo.contains(cond.getKeyword()))
+        );
+    }
+
+    // 권한에 따른 강제 조건 (절대 빠지면 안 되는 것)
+    builder.and(order.deleted.isFalse());
+
+    return queryFactory.selectFrom(order)
+            .leftJoin(order.member, member)
+            .where(builder)
+            .fetch();
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>모든 조건이 null 이면 전체 조회가 됩니다.</b>
+        <b>기간 필수</b>나 <b>최대 조회 건수 제한</b> 같은 안전장치를
+        <b>반드시</b> 넣으세요 — 실수로 수백만 건을 읽는 사고가 흔합니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== q04 ==================== -->
+<section class="sec" id="q04">
+  <div class="sec-head rv">
+    <span class="no">QDSL 04</span>
+    <h2><span class="t">조인</span> 총정리</h2>
+    <p class="lead">
+      QueryDSL 의 조인은 JPQL 조인 그대로입니다.
+      <b>연관 기반 조인</b>과 <b>연관 없는 조인(theta·on)</b>, 그리고 <b>fetch join</b>을 구분해서 씁니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 232" role="img" aria-label="left join에서 조건을 on 절에 두는 경우와 where 절에 두는 경우의 결과 차이를 보여 주는 그림. 주문 세 건 중 2번 주문만 쿠폰을 썼다. 조건을 on 절에 두면 주문 세 건이 모두 남고 쿠폰이 없는 주문은 쿠폰 자리가 null이 된다. 같은 조건을 where 절에 두면 쿠폰이 없는 주문은 행 자체가 사라져 결과가 한 건뿐이고, 사실상 inner join이 된다.">
+      <text x="16" y="18" class="lbl">주문 3건 중 2번만 쿠폰을 썼다 — 같은 조건을 on 에 두느냐 where 에 두느냐</text>
+      <path class="ln-t" d="M340 28 L340 200"/>
+
+      <text x="16" y="44" class="ttl ok-t">① 조건을 on 절에</text>
+      <text x="16" y="60" class="ann">.leftJoin(coupon).on(orderId.eq(…), used.isTrue())</text>
+      <text x="16" y="82" class="ttl">주문</text>
+      <text x="124" y="82" class="ttl">붙은 쿠폰</text>
+
+      <rect class="bx" x="16" y="88" width="100" height="26"/>
+      <text x="66" y="105" class="val" text-anchor="middle">주문 1</text>
+      <rect class="bx bx-mut" x="124" y="88" width="200" height="26"/>
+      <text x="224" y="105" class="ann" text-anchor="middle">null — 쿠폰 없음</text>
+
+      <rect class="bx" x="16" y="118" width="100" height="26"/>
+      <text x="66" y="135" class="val" text-anchor="middle">주문 2</text>
+      <rect class="bx bx-ok" x="124" y="118" width="200" height="26"/>
+      <text x="224" y="135" class="val ok-t" text-anchor="middle">C-2 (used)</text>
+
+      <rect class="bx" x="16" y="148" width="100" height="26"/>
+      <text x="66" y="165" class="val" text-anchor="middle">주문 3</text>
+      <rect class="bx bx-mut" x="124" y="148" width="200" height="26"/>
+      <text x="224" y="165" class="ann" text-anchor="middle">null — 쿠폰 없음</text>
+
+      <text x="16" y="194" class="ttl ok-t">결과 3행 — 주문은 하나도 안 사라진다</text>
+      <text x="16" y="210" class="ann">목록 화면에 딱 맞는 모양 (쿠폰은 있으면 표시)</text>
+
+      <text x="348" y="44" class="ttl rs-t">② 같은 조건을 where 절에</text>
+      <text x="348" y="60" class="ann">.leftJoin(coupon).on(orderId.eq(…)).where(used.isTrue())</text>
+      <text x="348" y="82" class="ttl">주문</text>
+      <text x="456" y="82" class="ttl">붙은 쿠폰</text>
+
+      <rect class="bx bx-warn" x="348" y="88" width="100" height="26"/>
+      <text x="398" y="105" class="val rs-t" text-anchor="middle">주문 1</text>
+      <rect class="bx bx-warn" x="456" y="88" width="208" height="26"/>
+      <text x="560" y="105" class="ann rs-t" text-anchor="middle">행 자체가 사라짐</text>
+
+      <rect class="bx" x="348" y="118" width="100" height="26"/>
+      <text x="398" y="135" class="val" text-anchor="middle">주문 2</text>
+      <rect class="bx bx-ok" x="456" y="118" width="208" height="26"/>
+      <text x="560" y="135" class="val ok-t" text-anchor="middle">C-2 (used)</text>
+
+      <rect class="bx bx-warn" x="348" y="148" width="100" height="26"/>
+      <text x="398" y="165" class="val rs-t" text-anchor="middle">주문 3</text>
+      <rect class="bx bx-warn" x="456" y="148" width="208" height="26"/>
+      <text x="560" y="165" class="ann rs-t" text-anchor="middle">행 자체가 사라짐</text>
+
+      <text x="348" y="194" class="ttl rs-t">결과 1행 — left join 이 inner join 이 된다</text>
+      <text x="348" y="210" class="ann">「쿠폰 쓴 주문만」이 목적이면 이게 맞다 — 의도했는지가 관건</text>
+    </svg>
+    <div class="cap">조건을 어디에 두느냐가 <b>결과 행 수</b>를 바꿉니다 — left join 을 썼는데 행이 줄었다면 where 절을 보세요.</div>
+  </div>
+
+  <pre class="code rv" data-lang="java"><code>// ① 연관 기반 조인 — 가장 흔하다
+queryFactory.selectFrom(order)
+    .join(order.member, member)              // inner join
+    .leftJoin(order.delivery, delivery)      // left outer join
+    .where(member.name.eq("김현우"))
+    .fetch();
+
+// ② fetch join — 연관 엔티티를 함께 로딩 (N+1 해결)
+queryFactory.selectFrom(order)
+    .join(order.member, member).fetchJoin()
+    .leftJoin(order.delivery, delivery).fetchJoin()
+    .where(order.status.eq(PAID))
+    .fetch();
+// ⚠️ 컬렉션 fetchJoin + 페이징은 금지 (JPA 심화 08 참고)
+
+// ③ on 절 — 조인 대상 필터링 (left join 에서 의미가 크다)
+queryFactory.select(order, coupon)
+    .from(order)
+    .leftJoin(coupon).on(
+        coupon.orderId.eq(order.id),
+        coupon.status.eq(CouponStatus.USED)   // 이 조건에 맞는 쿠폰만 붙인다
+    )
+    .fetch();
+// inner join 이면 on 과 where 가 결과적으로 같지만,
+// left join 에서는 완전히 다르다 (on 은 붙일지 말지, where 는 행을 남길지)
+
+// ④ 연관관계 없는 조인 (theta join)
+queryFactory.select(order, product)
+    .from(order, product)                     // 카티션 곱 + where
+    .where(order.productName.eq(product.name))
+    .fetch();
+// left join 이 필요하면 on 을 쓴다
+queryFactory.select(order, product)
+    .from(order)
+    .leftJoin(product).on(order.productName.eq(product.name))
+    .fetch();
+
+// ⑤ 컬렉션 조인
+queryFactory.selectFrom(order)
+    .join(order.items, orderItem)             // 일대다
+    .where(orderItem.quantity.gt(5))
+    .distinct()                                // 중복 제거
+    .fetch();</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">on 과 where 의 차이 — left join 에서</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:130px">위치</th><th>결과</th></tr>
+          <tr><td>on 절 조건</td><td>조건에 안 맞으면 <b>연관만 null</b>. 왼쪽 행은 남는다</td></tr>
+          <tr><td>where 절 조건</td><td>조건에 안 맞으면 <b>행 자체가 사라진다</b> (left join 의미가 없어짐)</td></tr>
+        </table>
+      </div>
+      <pre class="code" data-lang="java" style="margin-bottom:0"><code>// 주문 전체 + 사용된 쿠폰(있으면)
+.leftJoin(coupon).on(coupon.orderId.eq(order.id), coupon.used.isTrue())
+// → 쿠폰 없는 주문도 나온다 (coupon 은 null)
+
+// 쿠폰을 쓴 주문만
+.leftJoin(coupon).on(coupon.orderId.eq(order.id))
+.where(coupon.used.isTrue())
+// → 쿠폰 없는 주문은 사라진다 (사실상 inner join)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">조인 성능 감각</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>fetch join 은 ToOne 위주로</b> — 컬렉션은 하나만, 페이징과 함께 쓰지 않기</li>
+        <li><b>조인 순서와 인덱스</b> — 결국 SQL 이므로 실행 계획을 봐야 합니다</li>
+        <li><b>distinct 는 애플리케이션 레벨</b>에서도 동작합니다(Hibernate 6+ 는 엔티티 중복을 자동 제거)</li>
+        <li><b>조인 대신 두 번 조회</b>가 빠른 경우도 많습니다 — 특히 대용량 일대다</li>
+        <li><b>표시용 데이터는 DTO 프로젝션</b>으로 (엔티티를 안 만든다)</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== q05 ==================== -->
+<section class="sec" id="q05">
+  <div class="sec-head rv">
+    <span class="no">QDSL 05</span>
+    <h2><span class="t">서브쿼리</span></h2>
+    <p class="lead">
+      <code>JPAExpressions</code> 로 작성합니다.
+      다만 <b>JPQL 의 제약을 그대로 물려받아</b> <b>from 절 서브쿼리(인라인 뷰)는 불가능</b>합니다 —
+      그 우회 방법까지 함께 봅니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="java"><code>import static com.querydsl.jpa.JPAExpressions.select;
+import static com.querydsl.jpa.JPAExpressions.selectFrom;
+
+// ① where 절 서브쿼리 — 최고 금액 주문
+QOrder sub = new QOrder("sub");             // ★ 별칭이 겹치면 안 된다
+
+queryFactory.selectFrom(order)
+    .where(order.totalAmount.eq(
+        select(sub.totalAmount.max()).from(sub)
+    ))
+    .fetch();
+
+// ② in 서브쿼리 — VIP 회원의 주문
+QMember subM = new QMember("subM");
+
+queryFactory.selectFrom(order)
+    .where(order.member.id.in(
+        select(subM.id).from(subM).where(subM.grade.eq(Grade.VIP))
+    ))
+    .fetch();
+
+// ③ exists — in 보다 빠른 경우가 많다
+queryFactory.selectFrom(order)
+    .where(selectFrom(orderItem)
+        .where(orderItem.order.eq(order), orderItem.quantity.gt(10))
+        .exists())
+    .fetch();
+
+// ④ select 절 서브쿼리 — 회원별 주문 수
+queryFactory
+    .select(member.name,
+            select(sub.count()).from(sub).where(sub.member.eq(member)))
+    .from(member)
+    .fetch();
+
+// ⑤ 상관 서브쿼리 + 최신 1건 (자주 쓰는 패턴)
+QOrder o2 = new QOrder("o2");
+queryFactory.selectFrom(order)
+    .where(order.createdAt.eq(
+        select(o2.createdAt.max()).from(o2).where(o2.member.eq(order.member))
+    ))
+    .fetch();</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">from 절 서브쿼리가 안 될 때</h4>
+      <ol class="tx" style="margin-bottom:0">
+        <li><b>조인으로 바꿔 본다</b> — 대부분의 인라인 뷰는 조인으로 표현됩니다</li>
+        <li><b>쿼리를 두 번 나눈다</b> — 서브쿼리 결과(id 목록)를 먼저 받고 그것으로 본 쿼리</li>
+        <li><b>네이티브 쿼리</b> — 통계·리포트처럼 복잡하면 이쪽이 정직합니다</li>
+        <li><b>DB 뷰를 만든다</b> — 재사용되는 복잡한 집계라면 좋은 선택</li>
+      </ol>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Hibernate 6 부터는 일부 from 절 서브쿼리를 지원</b>합니다.
+        다만 QueryDSL 5.x 의 API 가 이를 온전히 노출하지 않으므로,
+        복잡한 통계는 <b>jOOQ 나 네이티브 쿼리 병행</b>이 현실적입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">서브쿼리 성능 감각</h4>
+      <pre class="code" data-lang="java"><code>// ❌ 상관 서브쿼리가 행마다 실행되면 느리다
+.where(order.totalAmount.gt(
+    select(sub.totalAmount.avg()).from(sub).where(sub.member.eq(order.member))
+))
+
+// ✅ 조인 + 그룹핑으로 바꾸면 한 번에 계산된다
+// (평균을 미리 구해 조인)
+
+// exists vs in
+// · exists : 첫 행을 찾으면 멈춘다 → 보통 더 빠르다
+// · in     : 서브쿼리 결과를 전부 만든 뒤 비교 (옵티마이저가 바꿔 주기도 한다)
+// 실행 계획을 보고 판단하세요</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== q06 ==================== -->
+<section class="sec" id="q06">
+  <div class="sec-head rv">
+    <span class="no">QDSL 06</span>
+    <h2><span class="t">프로젝션</span> — DTO 로 받기</h2>
+    <p class="lead">
+      조회 전용 API 에서 엔티티를 통째로 읽는 것은 낭비입니다.
+      QueryDSL 은 <b>필요한 컬럼만 DTO 로</b> 받는 방법을 네 가지 제공합니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:210px">방식</th><th>특징</th></tr>
+      <tr><td><code>Projections.constructor</code></td><td>생성자 호출. <b>순서·타입이 맞아야</b> 하고 틀리면 런타임 에러</td></tr>
+      <tr><td><code>Projections.fields</code></td><td>필드에 직접 주입 (기본 생성자 필요). 이름이 맞아야 한다</td></tr>
+      <tr><td><code>Projections.bean</code></td><td>세터로 주입. DTO 에 세터가 필요</td></tr>
+      <tr><td><b><code>@QueryProjection</code></b></td><td><b>컴파일 타임 검증</b> — 가장 안전. 단 DTO 가 QueryDSL 에 의존</td></tr>
+      <tr><td><code>Tuple</code></td><td>임시 조회용. <b>서비스 밖으로 내보내지 말 것</b></td></tr>
+    </table>
+  </div>
+
+  <pre class="code rv" data-lang="java"><code>// ① @QueryProjection — 권장 (컴파일 시점에 검증된다)
+public record OrderSummary(Long id, String orderNo, String memberName, Long totalAmount) {
+    @QueryProjection
+    public OrderSummary { }        // record 의 compact 생성자에 붙인다
+}
+// → QOrderSummary 가 생성된다
+
+List&lt;OrderSummary&gt; result = queryFactory
+    .select(new QOrderSummary(order.id, order.orderNo, member.name, order.totalAmount))
+    .from(order)
+    .join(order.member, member)
+    .fetch();
+// 필드를 하나 추가하면 컴파일 에러 → 빠뜨릴 수 없다
+
+// ② Projections.constructor — DTO 가 QueryDSL 을 몰라도 된다
+List&lt;OrderSummary&gt; result2 = queryFactory
+    .select(Projections.constructor(OrderSummary.class,
+            order.id, order.orderNo, member.name, order.totalAmount))
+    .from(order).join(order.member, member)
+    .fetch();
+
+// ③ 이름이 다를 때 — as() 로 별칭
+List&lt;OrderView&gt; result3 = queryFactory
+    .select(Projections.fields(OrderView.class,
+            order.id,
+            order.orderNo.as("no"),                    // 필드명이 no 인 경우
+            ExpressionUtils.as(
+                select(sub.count()).from(sub).where(sub.member.eq(member)), "orderCount")))
+    .from(order).join(order.member, member)
+    .fetch();
+
+// ④ 중첩 DTO
+List&lt;OrderDetail&gt; details = queryFactory
+    .select(Projections.constructor(OrderDetail.class,
+            order.id,
+            Projections.constructor(MemberDto.class, member.id, member.name)))
+    .from(order).join(order.member, member)
+    .fetch();
+
+// ⑤ Tuple — 임시로 여러 값
+List&lt;Tuple&gt; tuples = queryFactory
+    .select(order.status, order.totalAmount.sum(), order.count())
+    .from(order).groupBy(order.status)
+    .fetch();
+for (Tuple t : tuples) {
+    OrderStatus status = t.get(order.status);
+    Long sum = t.get(order.totalAmount.sum());
+}</code></pre>
+
+  <div class="note warn rv">
+    <b><code>Tuple</code>을 컨트롤러까지 내보내지 마세요.</b>
+    QueryDSL 타입이 프레젠테이션 계층까지 새어 나가고,
+    <b>어떤 값이 들어 있는지 코드만 봐서는 알 수 없습니다.</b>
+    리포지터리 안에서 DTO 로 변환해 반환하세요.
+  </div>
+</section>
+
+
+<!-- ==================== q07 ==================== -->
+<section class="sec" id="q07">
+  <div class="sec-head rv">
+    <span class="no">QDSL 07</span>
+    <h2>집계 · <span class="t">그룹핑</span> · CASE</h2>
+    <p class="lead">
+      통계 API 를 만들 때 쓰는 문법들입니다.
+      <b>SQL 의 집계 함수가 거의 그대로</b> 대응되고, <b>표현식을 조합</b>할 수 있습니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="java"><code>// 집계 함수
+queryFactory
+    .select(order.totalAmount.sum(),
+            order.totalAmount.avg(),
+            order.totalAmount.max(),
+            order.totalAmount.min(),
+            order.count(),
+            order.member.countDistinct())
+    .from(order)
+    .fetch();
+
+// 그룹핑 + having
+List&lt;Tuple&gt; byStatus = queryFactory
+    .select(order.status, order.count(), order.totalAmount.sum())
+    .from(order)
+    .where(order.createdAt.goe(from))
+    .groupBy(order.status)
+    .having(order.count().gt(10))
+    .orderBy(order.totalAmount.sum().desc())
+    .fetch();
+
+// 날짜별 집계 — DB 함수 호출
+StringTemplate dayFormat = Expressions.stringTemplate(
+        "function('to_char', {0}, {1})", order.createdAt, "YYYY-MM-DD");
+
+List&lt;DailySales&gt; daily = queryFactory
+    .select(Projections.constructor(DailySales.class,
+            dayFormat, order.count(), order.totalAmount.sum()))
+    .from(order)
+    .where(order.status.eq(PAID))
+    .groupBy(dayFormat)
+    .orderBy(dayFormat.desc())
+    .fetch();
+
+// CASE — 조건부 값
+NumberExpression&lt;Integer&gt; rank = new CaseBuilder()
+        .when(order.totalAmount.goe(100_000)).then(3)
+        .when(order.totalAmount.goe(50_000)).then(2)
+        .otherwise(1);
+
+queryFactory.select(order.orderNo, rank.as("grade"))
+    .from(order)
+    .orderBy(rank.desc(), order.createdAt.desc())
+    .fetch();
+
+// 조건부 집계 (SQL 의 sum(case when ...))
+queryFactory
+    .select(
+        new CaseBuilder().when(order.status.eq(PAID)).then(1).otherwise(0).sum(),
+        new CaseBuilder().when(order.status.eq(CANCELED)).then(1).otherwise(0).sum())
+    .from(order)
+    .fetch();
+
+// 상수·연산
+order.totalAmount.multiply(0.1)            // 금액 * 0.1
+order.totalAmount.add(order.shippingFee)
+Expressions.constant("고정값")
+Expressions.asNumber(1000).as("base")
+
+// 문자열 결합 — concat 은 문자열끼리만 되므로 stringValue() 로 변환
+member.name.concat("(").concat(member.id.stringValue()).concat(")")
+
+// coalesce — null 대체
+order.memo.coalesce("메모 없음")</code></pre>
+
+  <div class="note tip rv">
+    <b>DB 함수를 쓰려면</b> <code>Expressions.stringTemplate</code>·<code>numberTemplate</code>으로
+    <code>function('함수명', 인자…)</code> 형태를 씁니다.
+    Hibernate 6 부터는 표준 함수 상당수를 <b>방언이 알아서 변환</b>해 주므로
+    <code>to_char</code>·<code>date_format</code> 같은 DB 고유 함수만 이 방식이 필요합니다.
+  </div>
+</section>
+
+
+<!-- ==================== q08 ==================== -->
+<section class="sec" id="q08">
+  <div class="sec-head rv">
+    <span class="no">QDSL 08</span>
+    <h2>페이징 · <span class="t">카운트 최적화</span></h2>
+    <p class="lead">
+      목록 API 의 절반은 페이징입니다.
+      <b>카운트 쿼리를 어떻게 만드느냐</b>로 응답 시간이 크게 달라집니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 페이징</h4>
+      <pre class="code" data-lang="java"><code>public Page&lt;OrderSummary&gt; search(OrderCondition cond, Pageable pageable) {
+    List&lt;OrderSummary&gt; content = queryFactory
+        .select(new QOrderSummary(order.id, order.orderNo, member.name, order.totalAmount))
+        .from(order)
+        .join(order.member, member)
+        .where(statusEq(cond.getStatus()), amountGoe(cond.getMinAmount()))
+        .orderBy(order.createdAt.desc())
+        .offset(pageable.getOffset())
+        .limit(pageable.getPageSize())
+        .fetch();
+
+    // 카운트는 별도 쿼리 — 조인·정렬을 뺀다
+    JPAQuery&lt;Long&gt; countQuery = queryFactory
+        .select(order.count())
+        .from(order)
+        .join(order.member, member)      // 조건에 필요한 조인만 남긴다
+        .where(statusEq(cond.getStatus()), amountGoe(cond.getMinAmount()));
+
+    // ★ 카운트를 '필요할 때만' 실행한다
+    return PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>PageableExecutionUtils</code></b>는 ① 첫 페이지이고 결과가 페이지 크기보다 작거나
+        ② 마지막 페이지인 경우 <b>카운트 쿼리를 아예 실행하지 않습니다.</b>
+        간단하지만 효과가 큽니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">깊은 페이지 · 커서 페이징</h4>
+      <pre class="code" data-lang="java"><code>// ❌ OFFSET 100000 — DB 가 10만 행을 세고 버린다
+.offset(100_000).limit(20)
+
+// ✅ 커서(키셋) 페이징 — 항상 같은 속도
+public List&lt;OrderSummary&gt; scroll(Long lastId, int size) {
+    return queryFactory
+        .select(new QOrderSummary(...))
+        .from(order)
+        .where(lastId == null ? null : order.id.lt(lastId))   // 마지막으로 본 id 이후
+        .orderBy(order.id.desc())
+        .limit(size)
+        .fetch();
+}
+
+// ✅ 커버링 인덱스 응용 — id 만 먼저 뽑고 그 id 로 조회
+List&lt;Long&gt; ids = queryFactory.select(order.id).from(order)
+        .where(cond).orderBy(order.createdAt.desc())
+        .offset(offset).limit(size).fetch();
+
+if (ids.isEmpty()) return Page.empty(pageable);
+
+List&lt;OrderSummary&gt; content = queryFactory
+        .select(new QOrderSummary(...))
+        .from(order).join(order.member, member)
+        .where(order.id.in(ids))
+        .orderBy(order.createdAt.desc())          // ★ 정렬을 다시 지정해야 한다
+        .fetch();</code></pre>
+    </div>
+  </div>
+
+  <div class="note warn rv">
+    <b>정렬 기준에 유일성이 없으면 페이지가 흔들립니다.</b>
+    <code>createdAt</code>만으로 정렬하면 같은 시각 데이터의 순서가 매번 달라져
+    <b>어떤 행은 두 번 나오고 어떤 행은 안 나옵니다.</b>
+    <b>정렬 마지막에 항상 id 를 추가</b>하세요 — <code>orderBy(createdAt.desc(), id.desc())</code>.
+  </div>
+</section>
+
+
+<!-- ==================== q09 ==================== -->
+<section class="sec" id="q09">
+  <div class="sec-head rv">
+    <span class="no">QDSL 09</span>
+    <h2>벌크 연산 · <span class="t">수정 · 삭제</span></h2>
+    <p class="lead">
+      한 건씩 더티 체킹으로 고치면 수만 건에서는 답이 없습니다.
+      QueryDSL 로 <b>UPDATE·DELETE 를 한 방에</b> 날릴 수 있지만,
+      <b>영속성 컨텍스트를 우회한다는 점</b>을 반드시 기억해야 합니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="java"><code>@Transactional
+public long expireOldOrders(LocalDateTime before) {
+    long updated = queryFactory
+        .update(order)
+        .set(order.status, OrderStatus.EXPIRED)
+        .set(order.updatedAt, LocalDateTime.now())
+        .set(order.version, order.version.add(1))     // ★ 버전을 직접 올려야 한다
+        .where(order.status.eq(OrderStatus.NEW),
+               order.createdAt.lt(before))
+        .execute();
+
+    em.flush();
+    em.clear();          // ★ 1차 캐시를 비운다 — 안 하면 옛 값을 보게 된다
+    return updated;
+}
+
+// 계산식으로 수정
+queryFactory.update(product)
+    .set(product.stock, product.stock.subtract(1))
+    .where(product.id.eq(id), product.stock.gt(0))
+    .execute();          // 반환값이 0이면 재고 부족 — 원자적 차감
+
+// 조건부 수정 (CASE)
+queryFactory.update(member)
+    .set(member.grade, new CaseBuilder()
+        .when(member.totalPurchase.goe(1_000_000)).then(Grade.VIP)
+        .when(member.totalPurchase.goe(100_000)).then(Grade.GOLD)
+        .otherwise(Grade.NORMAL))
+    .execute();
+
+// 삭제
+queryFactory.delete(orderLog)
+    .where(orderLog.createdAt.lt(LocalDateTime.now().minusYears(1)))
+    .execute();</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">벌크 연산의 성질 — 반드시 알아야 할 것</h4>
+      <ul class="tx" style="margin-bottom:0">
+        <li><b>영속성 컨텍스트를 거치지 않습니다</b> → 1차 캐시가 옛 값을 들고 있음</li>
+        <li><b>@PreUpdate·@LastModifiedDate 가 동작하지 않습니다</b> → 직접 <code>set</code></li>
+        <li><b>@Version 이 자동으로 오르지 않습니다</b> → 직접 <code>add(1)</code></li>
+        <li><b>2차 캐시도 갱신되지 않습니다</b></li>
+        <li><b>cascade 가 동작하지 않습니다</b> → 자식은 따로 처리</li>
+        <li>그 대신 <b>압도적으로 빠릅니다</b> — 10만 건이 쿼리 한 방</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">INSERT 는 안 된다 — 대안</h4>
+      <pre class="code" data-lang="java"><code>// JPA 표준에 insert 벌크가 없어 QueryDSL JPA 도 지원하지 않는다
+
+// 대안 ① JdbcTemplate 배치
+jdbcTemplate.batchUpdate(
+    "insert into order_stat(day, cnt, amount) values (?,?,?)",
+    rows, 1000,
+    (ps, r) -> { ps.setString(1, r.day()); ps.setInt(2, r.cnt()); ps.setLong(3, r.amount()); });
+
+// 대안 ② 네이티브 insert-select (집계 결과를 그대로 적재)
+em.createNativeQuery("""
+    insert into order_stat(day, cnt, amount)
+    select date(created_at), count(*), sum(total_amount)
+      from orders where created_at &gt;= :from group by date(created_at)
+    """).setParameter("from", from).executeUpdate();
+
+// 대안 ③ QueryDSL SQL 모듈(querydsl-sql) — JPA 가 아닌 SQL 레벨 API
+// 스키마에서 코드를 생성해 insert·merge 까지 지원한다 (jOOQ 와 비슷한 위치)</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== q10 ==================== -->
+<section class="sec" id="q10">
+  <div class="sec-head rv">
+    <span class="no">QDSL 10</span>
+    <h2>Spring Data 와 <span class="t">통합</span></h2>
+    <p class="lead">
+      기본 CRUD 는 Spring Data 에 맡기고, <b>복잡한 조회만 QueryDSL</b>로 붙이는 것이 표준 구성입니다.
+      <b>커스텀 리포지터리</b> 패턴 하나면 됩니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 208" role="img" aria-label="Spring Data와 QueryDSL 통합 구조 그림. 서비스는 OrderRepository 하나만 주입받고, 그 인터페이스는 JpaRepository와 커스텀 인터페이스를 함께 상속한다. 커스텀 인터페이스의 구현체가 QueryDSL을 사용하며 스프링이 두 구현을 하나로 합쳐 준다.">
+      <text x="16" y="18" class="lbl">커스텀 리포지터리 — 쓰는 쪽은 하나만 주입받는다</text>
+
+      <rect class="bx" x="250" y="34" width="180" height="38"/>
+      <text x="340" y="58" class="val" text-anchor="middle">OrderService</text>
+      <path class="fl ar" d="M340 76 L340 98"/>
+
+      <rect class="bx bx-ok" x="200" y="102" width="280" height="42"/>
+      <text x="340" y="122" class="val ok-t" text-anchor="middle">OrderRepository</text>
+      <text x="340" y="138" class="ann" text-anchor="middle">extends JpaRepository, OrderRepositoryCustom</text>
+
+      <path class="ln ar" d="M270 148 L160 172"/>
+      <path class="ln ar" d="M410 148 L520 172"/>
+
+      <rect class="bx" x="16" y="176" width="270" height="30"/>
+      <text x="151" y="196" class="val" text-anchor="middle">Spring Data 구현 (CRUD)</text>
+
+      <rect class="bx bx-hi" x="394" y="176" width="270" height="30"/>
+      <text x="529" y="196" class="val am-t" text-anchor="middle">OrderRepositoryImpl (QueryDSL)</text>
+    </svg>
+    <div class="cap">이름 규칙만 지키면(<code>인터페이스명 + Impl</code>) 스프링이 <b>두 구현을 하나로 합쳐</b> 줍니다.</div>
+  </div>
+
+  <pre class="code rv" data-lang="java"><code>// ① 커스텀 인터페이스
+public interface OrderRepositoryCustom {
+    Page&lt;OrderSummary&gt; search(OrderCondition cond, Pageable pageable);
+    List&lt;DailySales&gt; dailySales(LocalDate from, LocalDate to);
+}
+
+// ② 구현 — 이름은 반드시 '인터페이스명 + Impl'
+@Repository
+@RequiredArgsConstructor
+public class OrderRepositoryImpl implements OrderRepositoryCustom {
+
+    private final JPAQueryFactory queryFactory;
+
+    @Override
+    public Page&lt;OrderSummary&gt; search(OrderCondition cond, Pageable pageable) { ... }
+
+    @Override
+    public List&lt;DailySales&gt; dailySales(LocalDate from, LocalDate to) { ... }
+}
+
+// ③ 합치기
+public interface OrderRepository extends JpaRepository&lt;Order, Long&gt;, OrderRepositoryCustom {
+    Optional&lt;Order&gt; findByOrderNo(String orderNo);      // 기본 쿼리 메서드도 그대로
+}
+
+// ④ 서비스는 하나만 주입받는다
+@Service
+@RequiredArgsConstructor
+public class OrderService {
+    private final OrderRepository orderRepository;
+
+    public Page&lt;OrderSummary&gt; search(OrderCondition cond, Pageable pageable) {
+        return orderRepository.search(cond, pageable);   // QueryDSL 구현이 호출된다
+    }
+}</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">공통 기능을 지원 클래스로</h4>
+      <pre class="code" data-lang="java"><code>// 페이징 헬퍼를 매번 쓰기 번거롭다면 공통 추상 클래스를 만든다
+public abstract class QuerydslSupport {
+
+    protected final JPAQueryFactory queryFactory;
+
+    protected QuerydslSupport(JPAQueryFactory queryFactory) {
+        this.queryFactory = queryFactory;
+    }
+
+    protected &lt;T&gt; Page&lt;T&gt; applyPagination(
+            Pageable pageable,
+            Function&lt;JPAQueryFactory, JPAQuery&lt;T&gt;&gt; contentQuery,
+            Function&lt;JPAQueryFactory, JPAQuery&lt;Long&gt;&gt; countQuery) {
+
+        JPAQuery&lt;T&gt; query = contentQuery.apply(queryFactory);
+        List&lt;T&gt; content = query
+                .offset(pageable.getOffset())
+                .limit(pageable.getPageSize())
+                .fetch();
+
+        return PageableExecutionUtils.getPage(content, pageable,
+                () -> countQuery.apply(queryFactory).fetchOne());
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">QuerydslPredicateExecutor — 간단한 경우</h4>
+      <pre class="code" data-lang="java"><code>public interface OrderRepository
+        extends JpaRepository&lt;Order, Long&gt;, QuerydslPredicateExecutor&lt;Order&gt; { }
+
+// Predicate 를 그대로 넘겨 조회할 수 있다
+Predicate predicate = order.status.eq(PAID).and(order.totalAmount.goe(10_000));
+Page&lt;Order&gt; page = orderRepository.findAll(predicate, pageable);
+
+// 장점 — 별도 구현 클래스가 필요 없다
+// 한계
+// · 엔티티만 반환 (DTO 프로젝션 불가)
+// · fetch join 을 지정할 수 없다 → N+1 위험
+// · 조인 조건을 세밀하게 못 준다
+// 결론: 간단한 필터링에만. 실무 검색 API 는 커스텀 리포지터리가 낫다</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== q11 ==================== -->
+<section class="sec" id="q11">
+  <div class="sec-head rv">
+    <span class="no">QDSL 11</span>
+    <h2>재사용 · <span class="t">표현식 조합</span></h2>
+    <p class="lead">
+      QueryDSL 의 진짜 힘은 <b>조건을 값처럼 다룰 수 있다</b>는 데 있습니다.
+      메서드로 뽑아 두면 <b>여러 쿼리에서 재사용</b>되고, <b>조합</b>도 됩니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="java"><code>// 조건을 모아 두는 클래스 — 도메인 언어가 된다
+public final class OrderPredicates {
+
+    private OrderPredicates() {}
+
+    public static BooleanExpression isActive() {
+        return order.deleted.isFalse().and(order.status.ne(OrderStatus.CANCELED));
+    }
+
+    public static BooleanExpression paidBetween(LocalDateTime from, LocalDateTime to) {
+        if (from == null &amp;&amp; to == null) return null;
+        BooleanExpression base = order.status.eq(OrderStatus.PAID);
+        if (from != null) base = base.and(order.paidAt.goe(from));
+        if (to != null) base = base.and(order.paidAt.loe(to));
+        return base;
+    }
+
+    public static BooleanExpression bigOrder() {
+        return order.totalAmount.goe(100_000);
+    }
+
+    public static BooleanExpression ownedBy(Long memberId) {
+        return memberId == null ? null : order.member.id.eq(memberId);
+    }
+}
+
+// 쓰는 쪽 — 읽으면 뜻이 그대로 보인다
+queryFactory.selectFrom(order)
+    .where(isActive(), paidBetween(from, to), bigOrder())
+    .fetch();
+
+// 조합도 자유롭다
+BooleanExpression cond = isActive().and(bigOrder().or(ownedBy(vipId)));
+
+// 표현식도 재사용한다
+public static NumberExpression&lt;Long&gt; finalAmount() {
+    return order.totalAmount.subtract(order.discountAmount).add(order.shippingFee);
+}
+queryFactory.select(order.orderNo, finalAmount().as("finalAmount"))
+    .from(order)
+    .where(finalAmount().goe(50_000))          // select 와 where 에 같은 식을 쓴다
+    .orderBy(finalAmount().desc())
+    .fetch();</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Expressions — 없는 것을 만들 때</h4>
+      <pre class="code" data-lang="java"><code>// 상수
+Expressions.constant("고정")
+Expressions.asNumber(0).as("zero")
+
+// DB 함수 호출
+StringTemplate yearMonth = Expressions.stringTemplate(
+        "function('to_char', {0}, {1})", order.createdAt, "YYYY-MM");
+
+NumberTemplate&lt;Double&gt; distance = Expressions.numberTemplate(Double.class,
+        "function('st_distance', {0}, {1})", shop.location, point);
+
+// SQL 조각을 그대로 (최후 수단)
+BooleanTemplate raw = Expressions.booleanTemplate(
+        "JSON_EXTRACT({0}, '$.type') = {1}", product.options, "premium");
+
+// 정렬 — null 순서 지정
+.orderBy(new OrderSpecifier&lt;&gt;(Order.DESC, order.paidAt).nullsLast())
+
+// 동적 정렬 (Pageable.getSort() 를 QueryDSL 로)
+private OrderSpecifier&lt;?&gt;[] toOrderSpecifiers(Sort sort) {
+    return sort.stream().map(o -&gt; {
+        com.querydsl.core.types.Order dir =
+            o.isAscending() ? ASC : DESC;
+        PathBuilder&lt;Order&gt; path = new PathBuilder&lt;&gt;(Order.class, "order");
+        return new OrderSpecifier(dir, path.get(o.getProperty()));
+    }).toArray(OrderSpecifier[]::new);
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>동적 정렬에 사용자 입력을 그대로 넣지 마세요.</b>
+        <code>PathBuilder.get(문자열)</code>은 <b>타입 검증을 우회</b>하므로,
+        허용할 정렬 컬럼을 <b>화이트리스트</b>로 제한해야 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">커스텀 함수 등록 (Hibernate)</h4>
+      <pre class="code" data-lang="java"><code>// DB 고유 함수를 방언에 등록해 두면 깔끔하게 쓸 수 있다
+public class CustomDialectContributor implements FunctionContributor {
+    @Override
+    public void contributeFunctions(FunctionContributions functions) {
+        functions.getFunctionRegistry().registerPattern(
+            "group_concat", "group_concat(?1)",
+            functions.getTypeConfiguration().getBasicTypeRegistry()
+                     .resolve(StandardBasicTypes.STRING));
+    }
+}
+// META-INF/services/org.hibernate.boot.model.FunctionContributor 에 등록
+
+// 사용
+Expressions.stringTemplate("function('group_concat', {0})", orderItem.productName)</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== q12 ==================== -->
+<section class="sec" id="q12">
+  <div class="sec-head rv">
+    <span class="no">QDSL 12</span>
+    <h2><span class="t">성능</span> — 무엇을 조심하나</h2>
+    <p class="lead">
+      QueryDSL 은 결국 <b>JPQL 을 만드는 도구</b>입니다.
+      느린 이유는 QueryDSL 이 아니라 <b>만들어진 SQL</b>에 있습니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:230px">문제</th><th>해결</th></tr>
+      <tr><td>목록 조회에서 N+1</td><td><code>fetchJoin()</code> · <code>default_batch_fetch_size</code> · <b>DTO 프로젝션</b></td></tr>
+      <tr><td>카운트 쿼리가 느리다</td><td>조인·정렬 제거 · <code>PageableExecutionUtils</code> · 근사 카운트</td></tr>
+      <tr><td>깊은 페이지가 느리다</td><td>커서 페이징 · id 선조회 후 상세 조회</td></tr>
+      <tr><td>in 절에 값이 수천 개</td><td>임시 테이블·조인으로 대체 · 청크로 나누기</td></tr>
+      <tr><td>인덱스를 안 탄다</td><td>함수를 컬럼에 씌우지 않기 (<code>to_char(created_at)</code> → 범위 조건으로)</td></tr>
+      <tr><td>엔티티를 다 읽는다</td><td>필요한 컬럼만 프로젝션 (특히 큰 텍스트·BLOB 컬럼)</td></tr>
+      <tr><td>같은 쿼리가 반복된다</td><td>애플리케이션 캐시 (Redis·Caffeine)</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인덱스를 타게 쓰기</h4>
+      <pre class="code" data-lang="java"><code>// ❌ 컬럼에 함수를 씌우면 인덱스를 못 쓴다
+Expressions.stringTemplate("function('to_char', {0}, 'YYYY-MM-DD')", order.createdAt)
+        .eq("2026-08-19")
+
+// ✅ 범위 조건으로 바꾼다
+LocalDate day = LocalDate.of(2026, 8, 19);
+order.createdAt.goe(day.atStartOfDay())
+     .and(order.createdAt.lt(day.plusDays(1).atStartOfDay()))
+
+// ❌ 앞에 와일드카드가 붙은 like 는 인덱스를 못 탄다
+member.name.contains("현우")        // like '%현우%'
+
+// ✅ 전방 일치로 바꾸거나 전문 검색을 쓴다
+member.name.startsWith("김")        // like '김%'  — 인덱스 사용 가능
+
+// ❌ or 조건이 많으면 인덱스 선택이 어려워진다
+// ✅ union 으로 나누거나 조건을 재설계</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">exists 로 바꾸기 · 카운트 최적화</h4>
+      <pre class="code" data-lang="java"><code>// ❌ 존재 여부를 확인하려고 전부 센다
+boolean has = queryFactory.select(order.count()).from(order)
+        .where(cond).fetchOne() &gt; 0;
+
+// ✅ 첫 행만 찾으면 된다
+boolean has = queryFactory.selectOne().from(order)
+        .where(cond).fetchFirst() != null;
+
+// 대용량 테이블의 전체 카운트는 근사치로 충분한 경우가 많다
+// PostgreSQL: select reltuples from pg_class where relname = 'orders';
+// 또는 "1000+ 건" 처럼 상한만 표시하는 UX
+
+// 카운트를 아예 안 하는 무한 스크롤 UI 를 검토하세요 —
+// 사용자는 대부분 전체 건수를 필요로 하지 않습니다</code></pre>
+    </div>
+  </div>
+
+  <div class="note tip rv">
+    <b>진단 순서</b> — ① 쿼리 로그로 <b>몇 개가 나가는지</b> 확인 →
+    ② 느린 쿼리를 <b>DB 에서 EXPLAIN</b> → ③ 인덱스·조인 순서 조정 →
+    ④ 그래도 안 되면 <b>쿼리 구조 자체</b>를 바꿉니다(프로젝션·2단계 조회·집계 테이블).
+  </div>
+</section>
+
+
+<!-- ==================== q13 ==================== -->
+<section class="sec" id="q13">
+  <div class="sec-head rv">
+    <span class="no">QDSL 13</span>
+    <h2>실전 ① — <span class="t">검색 API</span> 전체 구현</h2>
+    <p class="lead">
+      지금까지 배운 것을 하나로 합칩니다.
+      <b>조건 조합 · 조인 · 프로젝션 · 페이징 · 정렬</b>이 모두 들어간 실무 코드입니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="java"><code>// ── 요청 조건 ───────────────────────────────────────────
+public record OrderSearchCondition(
+        OrderStatus status,
+        Long minAmount,
+        Long maxAmount,
+        String keyword,             // 주문번호 또는 회원명
+        LocalDate from,
+        LocalDate to,
+        Boolean onlyVip
+) {}
+
+// ── 응답 DTO ────────────────────────────────────────────
+public record OrderSummary(
+        Long id, String orderNo, String memberName, Grade memberGrade,
+        Long totalAmount, OrderStatus status, LocalDateTime createdAt, Long itemCount) {
+    @QueryProjection public OrderSummary {}
+}
+
+// ── 구현 ────────────────────────────────────────────────
+@Repository
+@RequiredArgsConstructor
+public class OrderRepositoryImpl implements OrderRepositoryCustom {
+
+    private final JPAQueryFactory queryFactory;
+
+    @Override
+    public Page&lt;OrderSummary&gt; search(OrderSearchCondition cond, Pageable pageable) {
+
+        List&lt;OrderSummary&gt; content = queryFactory
+            .select(new QOrderSummary(
+                    order.id, order.orderNo, member.name, member.grade,
+                    order.totalAmount, order.status, order.createdAt,
+                    JPAExpressions.select(orderItem.count())
+                            .from(orderItem).where(orderItem.order.eq(order))))
+            .from(order)
+            .join(order.member, member)
+            .where(
+                order.deleted.isFalse(),                 // 항상 붙는 조건
+                statusEq(cond.status()),
+                amountBetween(cond.minAmount(), cond.maxAmount()),
+                keywordContains(cond.keyword()),
+                createdBetween(cond.from(), cond.to()),
+                vipOnly(cond.onlyVip())
+            )
+            .orderBy(toOrderSpecifiers(pageable.getSort()))
+            .offset(pageable.getOffset())
+            .limit(pageable.getPageSize())
+            .fetch();
+
+        JPAQuery&lt;Long&gt; countQuery = queryFactory
+            .select(order.count())
+            .from(order)
+            .join(order.member, member)                  // 조건에 필요한 조인만
+            .where(
+                order.deleted.isFalse(),
+                statusEq(cond.status()),
+                amountBetween(cond.minAmount(), cond.maxAmount()),
+                keywordContains(cond.keyword()),
+                createdBetween(cond.from(), cond.to()),
+                vipOnly(cond.onlyVip())
+            );
+
+        return PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+    }
+
+    // ── 조건 메서드 (재사용 가능) ──
+    private BooleanExpression statusEq(OrderStatus status) {
+        return status == null ? null : order.status.eq(status);
+    }
+
+    private BooleanExpression amountBetween(Long min, Long max) {
+        if (min == null &amp;&amp; max == null) return null;
+        if (min == null) return order.totalAmount.loe(max);
+        if (max == null) return order.totalAmount.goe(min);
+        return order.totalAmount.between(min, max);
+    }
+
+    private BooleanExpression keywordContains(String keyword) {
+        if (!StringUtils.hasText(keyword)) return null;
+        return order.orderNo.contains(keyword)
+                .or(member.name.contains(keyword));
+    }
+
+    private BooleanExpression createdBetween(LocalDate from, LocalDate to) {
+        if (from == null &amp;&amp; to == null) return null;
+        LocalDateTime start = from == null ? null : from.atStartOfDay();
+        LocalDateTime end = to == null ? null : to.plusDays(1).atStartOfDay();
+        if (start == null) return order.createdAt.lt(end);
+        if (end == null) return order.createdAt.goe(start);
+        return order.createdAt.goe(start).and(order.createdAt.lt(end));
+    }
+
+    private BooleanExpression vipOnly(Boolean onlyVip) {
+        return Boolean.TRUE.equals(onlyVip) ? member.grade.eq(Grade.VIP) : null;
+    }
+
+    // ── 정렬 화이트리스트 ──
+    private static final Map&lt;String, ComparableExpressionBase&lt;?&gt;&gt; SORTABLE = Map.of(
+            "createdAt", order.createdAt,
+            "totalAmount", order.totalAmount,
+            "orderNo", order.orderNo);
+
+    private OrderSpecifier&lt;?&gt;[] toOrderSpecifiers(Sort sort) {
+        List&lt;OrderSpecifier&lt;?&gt;&gt; specs = new ArrayList&lt;&gt;();
+        for (Sort.Order o : sort) {
+            ComparableExpressionBase&lt;?&gt; path = SORTABLE.get(o.getProperty());
+            if (path == null) continue;                    // 허용되지 않은 컬럼은 무시
+            specs.add(o.isAscending() ? path.asc() : path.desc());
+        }
+        specs.add(order.id.desc());                        // ★ 안정 정렬을 위한 타이브레이커
+        return specs.toArray(OrderSpecifier[]::new);
+    }
+}</code></pre>
+
+  <div class="note tip rv">
+    <b>이 코드에서 눈여겨볼 세 가지</b> —
+    ① <b>항상 붙는 조건</b>(<code>deleted.isFalse()</code>)을 맨 앞에 고정,
+    ② <b>정렬 화이트리스트</b>로 임의 컬럼 정렬 차단,
+    ③ <b>id 타이브레이커</b>로 페이지가 흔들리지 않게.
+    세 가지 모두 <b>실무에서 사고가 났던 자리</b>입니다.
+  </div>
+</section>
+
+
+<!-- ==================== q14 ==================== -->
+<section class="sec" id="q14">
+  <div class="sec-head rv">
+    <span class="no">QDSL 14</span>
+    <h2>실전 ② — <span class="t">통계 · 대량 처리</span></h2>
+    <p class="lead">
+      리포트 화면과 배치에서 쓰는 형태입니다.
+      <b>집계 · 기간 그룹핑 · 대량 스트리밍</b>을 QueryDSL 로 어떻게 쓰는지 봅니다.
+    </p>
+  </div>
+
+  <div class="grid-a rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">일자별 매출 통계</h4>
+      <pre class="code" data-lang="java"><code>public record DailySales(String day, long orderCount,
+                         long totalAmount, long avgAmount, long maxAmount) {
+    @QueryProjection public DailySales {}
+}
+
+public List&lt;DailySales&gt; dailySales(LocalDate from, LocalDate to) {
+    StringTemplate day = Expressions.stringTemplate(
+            "function('to_char', {0}, {1})", order.paidAt, "YYYY-MM-DD");
+
+    return queryFactory
+        .select(new QDailySales(
+                day,
+                order.count(),
+                order.totalAmount.sum().coalesce(0L),
+                order.totalAmount.avg().castToNum(Long.class).coalesce(0L),
+                order.totalAmount.max().coalesce(0L)))
+        .from(order)
+        .where(order.status.eq(OrderStatus.PAID),
+               order.paidAt.goe(from.atStartOfDay()),
+               order.paidAt.lt(to.plusDays(1).atStartOfDay()))
+        .groupBy(day)
+        .orderBy(day.desc())
+        .fetch();
+}
+
+// 상품별 판매 순위 + 비중
+public List&lt;ProductRank&gt; topProducts(LocalDate from, int limit) {
+    NumberExpression&lt;Long&gt; sales = orderItem.price.multiply(orderItem.quantity).sum();
+
+    return queryFactory
+        .select(new QProductRank(product.id, product.name, sales, orderItem.count()))
+        .from(orderItem)
+        .join(orderItem.product, product)
+        .join(orderItem.order, order)
+        .where(order.status.eq(PAID), order.paidAt.goe(from.atStartOfDay()))
+        .groupBy(product.id, product.name)
+        .orderBy(sales.desc())
+        .limit(limit)
+        .fetch();
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대량 처리 — 스트리밍과 청크</h4>
+      <pre class="code" data-lang="java"><code>// ① 스트림 — 메모리에 다 올리지 않는다
+@Transactional(readOnly = true)
+public void exportAll(Consumer&lt;OrderSummary&gt; sink) {
+    try (Stream&lt;OrderSummary&gt; stream = queryFactory
+            .select(new QOrderSummary(...))
+            .from(order).join(order.member, member)
+            .where(order.status.eq(PAID))
+            .stream()) {                       // ★ fetch() 대신 stream()
+        stream.forEach(sink);
+    }
+}
+
+// ② 커서 청크 — 배치에서 가장 안전한 방식
+public void processAll(Consumer&lt;List&lt;Order&gt;&gt; handler) {
+    Long lastId = null;
+    while (true) {
+        List&lt;Order&gt; chunk = queryFactory
+            .selectFrom(order)
+            .where(order.status.eq(NEW),
+                   lastId == null ? null : order.id.gt(lastId))
+            .orderBy(order.id.asc())
+            .limit(1000)
+            .fetch();
+
+        if (chunk.isEmpty()) break;
+        handler.accept(chunk);
+        lastId = chunk.get(chunk.size() - 1).getId();
+        em.clear();                            // ★ 영속성 컨텍스트 비우기
+    }
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="note warn rv">
+    <b>통계 쿼리는 운영 DB 를 오래 잡습니다.</b>
+    조회 범위를 <b>기간으로 강제</b>하고, 무거운 리포트는
+    <b>읽기 복제본</b>이나 <b>미리 계산한 집계 테이블</b>로 옮기세요.
+    실시간이 아니어도 되는 지표를 실시간으로 만들다 DB 가 마비되는 일이 흔합니다.
+  </div>
+</section>
+
+
+<!-- ==================== q15 ==================== -->
+<section class="sec" id="q15">
+  <div class="sec-head rv">
+    <span class="no">QDSL 15</span>
+    <h2>버전 상황과 <span class="t">대안</span></h2>
+    <p class="lead">
+      QueryDSL 은 <b>원 저장소의 릴리스가 느려진 상태</b>입니다.
+      그래서 <b>포크·대안</b>이 등장했습니다 — 새 프로젝트라면 알고 고르는 편이 좋습니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:190px">선택지</th><th>상황과 특징</th></tr>
+      <tr><td><b>querydsl 5.1.x</b> (원본)</td><td>여전히 가장 널리 쓰인다. jakarta 분류자 제공. 릴리스 주기가 길다</td></tr>
+      <tr><td><b>OpenFeign 포크</b></td><td><code>io.github.openfeign.querydsl</code> — 최신 JDK·Hibernate 대응이 빠르다</td></tr>
+      <tr><td><b>Spring Data JPA + Specification</b></td><td>추가 의존성 없음. 표현력이 떨어지고 코드가 장황하다</td></tr>
+      <tr><td><b>jOOQ</b></td><td>SQL 그 자체를 타입 안전하게. 통계·복잡 쿼리에 강하다. 상용 DB 는 유료</td></tr>
+      <tr><td><b>Kotlin JDSL</b></td><td>코틀린 프로젝트라면 <b>코드 생성 없이</b> 동적 쿼리 (라인 오픈소스)</td></tr>
+      <tr><td><b>Blaze-Persistence</b></td><td>JPA 확장 — CTE·윈도 함수·엔티티 뷰까지. 학습 곡선이 있다</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Specification 과 비교</h4>
+      <pre class="code" data-lang="java"><code>// Spring Data 의 Specification — 추가 의존성 없이 동적 쿼리
+public static Specification&lt;Order&gt; statusEq(OrderStatus status) {
+    return (root, query, cb) -&gt;
+        status == null ? null : cb.equal(root.get("status"), status);
+}
+
+orderRepository.findAll(
+    Specification.where(statusEq(status)).and(amountGoe(min)), pageable);
+
+// 문제
+// · root.get("status") — 문자열이라 오타를 못 잡는다 (메타모델을 쓰면 완화)
+// · 조인·프로젝션이 장황하다
+// · 가독성이 떨어진다
+// → QueryDSL 을 쓸 수 있으면 QueryDSL 이 낫다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">포크로 갈아타기</h4>
+      <pre class="code" data-lang="kotlin"><code>// OpenFeign 포크 — 패키지명은 그대로라 코드 수정이 거의 없다
+dependencies {
+    implementation("io.github.openfeign.querydsl:querydsl-jpa:6.11")
+    annotationProcessor("io.github.openfeign.querydsl:querydsl-apt:6.11:jakarta")
+}
+
+// 확인할 것
+// · Q타입 재생성 후 컴파일이 통과하는지
+// · fetchResults()·fetchCount() 등 제거된 API 사용 여부
+// · Hibernate 버전 호환
+
+// 판단 기준
+// · 지금 잘 돌고 있다 → 굳이 바꾸지 않는다
+// · 최신 JDK·Hibernate 로 올리는데 막힌다 → 포크 검토
+// · 새 프로젝트 · 코틀린 → Kotlin JDSL 도 함께 검토</code></pre>
+    </div>
+  </div>
+
+  <div class="note info rv">
+    <b>현실적인 조언</b> — QueryDSL 은 <b>이미 수많은 실무 프로젝트에서 검증</b>됐고,
+    한국어 자료도 가장 풍부합니다. <b>릴리스 속도만 감수하면 여전히 좋은 선택</b>입니다.
+    다만 <b>새로 시작하는 코틀린 프로젝트</b>라면 kapt 부담이 없는 Kotlin JDSL 을,
+    <b>통계가 주 업무</b>라면 jOOQ 를 함께 검토하세요.
+  </div>
+</section>
+
+
+<!-- ==================== q16 ==================== -->
+<section class="sec" id="q16">
+  <div class="sec-head rv">
+    <span class="no">QDSL 16</span>
+    <h2>치트시트 · <span class="t">트러블슈팅</span></h2>
+    <p class="lead">
+      자주 찾는 문법과, <b>막혔을 때 확인할 것</b>을 한 장에 모았습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 쓰는 문법 요약</h4>
+      <pre class="code" data-lang="java"><code>// 조회
+selectFrom(order)                    // 엔티티
+select(order.id, order.orderNo)      // Tuple
+select(new QDto(...))                // DTO
+
+// 조건
+.where(a, b)                         // AND (null 은 무시)
+.where(a.and(b)) / a.or(b)
+.where(a.not())
+
+// 조인
+.join(order.member, member)
+.leftJoin(order.member, member).fetchJoin()
+.leftJoin(coupon).on(coupon.orderId.eq(order.id))
+
+// 결과
+.fetch() / .fetchOne() / .fetchFirst()
+.stream()                            // 대량
+
+// 정렬·페이징
+.orderBy(order.createdAt.desc(), order.id.desc())
+.offset(0).limit(20)
+
+// 집계
+.groupBy(order.status).having(order.count().gt(10))
+order.totalAmount.sum() / avg() / max() / min() / count()
+
+// 서브쿼리
+JPAExpressions.select(sub.id).from(sub).where(...)
+
+// 수정·삭제
+update(order).set(order.status, PAID).where(...).execute()
+delete(order).where(...).execute()
+
+// 표현식
+new CaseBuilder().when(...).then(...).otherwise(...)
+Expressions.stringTemplate("function('x', {0})", path)
+order.memo.coalesce("없음")
+order.totalAmount.add(10).multiply(2)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">막혔을 때 확인 순서</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:210px">증상</th><th>확인</th></tr>
+          <tr><td>Q타입이 생성되지 않는다</td><td><code>:jakarta</code> 분류자 · <code>annotationProcessor</code> 설정 · <b>clean 후 재빌드</b></td></tr>
+          <tr><td>IDE 가 Q타입을 못 찾는다</td><td>generated 폴더를 소스셋에 추가 · IDE 캐시 무효화</td></tr>
+          <tr><td>NullPointerException (queryFactory)</td><td><code>JPAQueryFactory</code> 빈 등록 확인</td></tr>
+          <tr><td>fetchResults() 가 없다</td><td>5.0 에서 deprecated → 카운트 쿼리를 따로 작성</td></tr>
+          <tr><td>결과가 중복된다</td><td>컬렉션 조인 → <code>distinct()</code> 또는 조회 방식 변경</td></tr>
+          <tr><td>페이징이 이상하다</td><td>컬렉션 fetchJoin + 페이징 조합인지 확인</td></tr>
+          <tr><td>DTO 로 못 받는다</td><td>생성자 순서·타입 · <code>@QueryProjection</code> 후 <b>재빌드</b></td></tr>
+          <tr><td>업데이트가 반영 안 된다</td><td>벌크 연산 후 <code>em.clear()</code> 누락</td></tr>
+          <tr><td>느리다</td><td>쿼리 로그 → 쿼리 수 → 실행 계획 순서로</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="note info rv">
+    <b>다음으로 볼 것</b> — <b>MyBatis</b> 탭에서는
+    <b>SQL 을 직접 쓰는 접근</b>을 다룹니다. QueryDSL 과 MyBatis 는 경쟁 관계가 아니라
+    <b>서로 다른 상황에 맞는 도구</b>입니다 — 두 탭을 다 보고 나면
+    <b>어떤 쿼리를 어디에 맡길지</b>가 명확해집니다.
+  </div>
+</section>
+
+</div>

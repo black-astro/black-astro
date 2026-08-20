@@ -20,7 +20,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const GUIDES = ['python-web', 'java-web', 'js-ts-web', 'csharp-web', 'cpp-web', 'rust-web', 'db-web', 'server-web', 'cs-web']
+const GUIDES = ['python-web', 'java-web', 'kotlin-web', 'js-ts-web', 'csharp-web', 'cpp-web', 'rust-web', 'db-web', 'server-web', 'cs-web']
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'public')
 let bad = 0
 
