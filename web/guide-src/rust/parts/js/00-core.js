@@ -161,6 +161,7 @@ $$(".stage-title").forEach(t => {
    "데스크탑 프로그램" → PySide6,  "엑셀 자동화" → Pandas·GUI 자동화
    ============================================================ */
 const TAB_KW = {
+  tool:"실전 생태계 크레이트 crate serde 직렬화 json toml clap cli 커맨드라인 tokio async 런타임 axum 웹서버 라우터 미들웨어 tower sqlx 데이터베이스 postgres 마이그레이션 reqwest http클라이언트 타임아웃 재시도 tracing 로그 관측 span 설정 환경변수 시크릿 테스트 nextest proptest criterion 배포 도커 musl 정적링크 바이너리 크로스컴파일",
   lang:"rust 러스트 기초 문법 cargo 카고 rustup 컴파일 빌드 변수 불변 mut 타입 함수 식 표현식 조건 반복 match 패턴매칭 소유권 이동 move vec 벡터 string 문자열 슬라이스 구조체 struct impl 메서드 열거형 enum option 널 모듈 mod crate use 제네릭 테스트 test 문서주석 치트시트 파이썬비교 c++비교",
   own:"소유권 ownership 빌림 borrow 참조 reference 라이프타임 lifetime 대여검사기 borrowck 슬라이스 트레이트 trait 인터페이스 impl 트레이트객체 dyn 제네릭 정적디스패치 동적디스패치 deref drop 연산자오버로딩 result 에러처리 물음표연산자 thiserror anyhow box rc arc refcell 내부가변성 클로저 closure fn fnmut fnonce 이터레이터 iterator 지연평가 collect",
   py:"파이썬 python 확장 모듈 바인딩 binding pyo3 maturin 임포트 import 빌드 pyproject wheel 타입변환 numpy ndarray 제로카피 zerocopy gil 해제 rayon 병렬 에러 예외 콜백 callback 스텁 pyi 타입힌트 abi3 안정abi 성능 가속 c확장 cython비교",
@@ -176,6 +177,18 @@ const FIND_CHIPS = ["파이썬에서 부르기","PyO3 첫 모듈","maturin 빌�
                     "소유권 규칙","빌림 에러","Result 와 ?","라이프타임",
                     "C ABI 로 내보내기","cbindgen 헤더","unsafe 언제","C++ 와 비교"];
 const SEC_KW = {
+  t01:"생태계 지도 크레이트선택 cratesio 역의존성 cargoaudit cargodeny geiger 표준라이브러리 작다 rand regex chrono",
+  t02:"serde 직렬화 역직렬화 json yaml toml derive rename camelcase default skip 태그enum 제로카피 u64정밀도",
+  t03:"clap cli 커맨드라인 인자 파싱 서브커맨드 help version 자동완성 indicatif 진행바 종료코드 stdout stderr cargodist",
+  t04:"tokio async 런타임 태스크 워커 workstealing join select timeout spawn spawnblocking 블로킹 데드락 mutex 취소안전성",
+  t05:"axum 웹서버 라우터 핸들러 추출기 extractor path query json state intoresponse tower 미들웨어 cors 압축 타임아웃 에러응답",
+  t06:"sqlx 데이터베이스 postgres 쿼리검증 queryas 마이그레이션 트랜잭션 커넥션풀 seaorm diesel rusqlite 오프라인빌드 decimal",
+  t07:"reqwest http클라이언트 타임아웃 커넥션풀 errorforstatus 재시도 백오프 서킷브레이커 폴백 rustls 스트리밍",
+  t08:"tracing 로그 관측 span instrument envfilter json로그 rustlog opentelemetry 분산추적 metrics tokioconsole 마스킹",
+  t09:"설정 환경변수 config dotenvy 시크릿 secrecy 우선순위 검증 기능플래그 gitleaks 12factor",
+  t10:"테스트 cfgtest 통합테스트 nextest insta proptest mockall testcontainers criterion 문서테스트 doctest",
+  t11:"배포 도커 다단계빌드 distroless musl 정적링크 scratch jemalloc 헬스체크 정상종료 gracefulshutdown 크로스컴파일 cargochef",
+  t12:"크레이트찾기 목적별 무엇을쓸까 라이브러리 선택 치트시트 uuid jwt argon2 decimal csv 이미지 템플릿",
   /* 하려는 일을 한글로 쳤을 때 걸리게 하는 보강 키워드 */
   r01:"설치 rustup cargo new run build 첫프로그램 hello main 컴파일 실행 인터프리터차이 툴체인",
   r02:"변수 let mut 불변 가변 타입 i32 f64 bool char 섀도잉 shadowing 형변환 as 오버플로",
