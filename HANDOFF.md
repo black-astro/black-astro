@@ -1,6 +1,20 @@
-# 핸드오프 — DB NoSQL 그룹 신설 · C# 대확장 · 탭 기억 제거 (2026-08-11 갱신)
+# 핸드오프 — 코틀린 · C/C++ · Rust 대확장 (2026-08-24 갱신)
 
-## 이번 세션 결과 (커밋 예정/완료 — git log 확인)
+## 이번 세션 (2026-08-24) — 코틀린 · C/C++ · Rust 순서대로
+
+| 가이드 | 결과 |
+|---|---|
+| **코틀린** | 시각화 **42 → 86** (+44, 전 탭 최소 5개) · 신규 섹션 6개(wf14 배압 · wf15 파일 스트리밍 · mp14 리소스 다국어 · mp15 기존 앱 점진 도입 · to14 의존성 보안 · to15 JMH) → **195섹션 · 12탭**. 종료 섹션은 wf16/mp16/to16 으로 이동 |
+| **C/C++** | **🅲 C 언어 탭 신설**(c01~c12) — 포인터 · 널 종료 문자열 · malloc 함정 · 구조체 정렬 · 함수 포인터 · UB · C vs C++. 시각화 **0 → 33**. **100섹션 · 9탭** |
+| **Rust** | **🧰 실전 · 생태계 탭 신설**(t01~t12) — serde · clap · tokio · axum · sqlx · reqwest · tracing · 설정 · 테스트 · 배포 · 크레이트 찾기. 시각화 **1 → 25**. **100섹션 · 9탭** |
+| **검사 도구** | `web/guide-src/tools/` 에 세 개 추가 — svgcheck(넘침·겹침 정적 검사) · smoke(탭 정합성) · integrity(제어문자·이스케이프). 자세한 사용법은 그 폴더의 README |
+
+- 아홉 가이드 `npm run verify:guide` 통과 · 열 가이드 스모크 통과 · 무결성 0건 · svgcheck 0건
+- ⚠️ **이번 세션에는 Chrome MCP 가 없어 브라우저 실측을 못 했습니다.** 대신 기존 검증 통과분으로
+  글자 폭 계수를 역산한 정적 검사기(`tools/svgcheck.mjs`)로 대신했습니다.
+  브라우저를 쓸 수 있는 세션에서 **아래 실측 스크립트를 한 번 돌려 확인**해 주세요.
+
+## 이전 세션 결과 (커밋 예정/완료 — git log 확인)
 
 | 작업 | 내용 |
 |---|---|
@@ -31,13 +45,14 @@ BOX 검사 최종판 — **텍스트 중심점이 박스 안**이면 그 박스 
 아홉 가이드(`web/guide-src/*` → `web/public/*-web/index.html`)를
 **"기초부터 전문가까지 이 페이지만 보고 실서비스를 만들 수 있는"** 수준으로 끌어올린다.
 
-## 다이어그램 현황 (`.diag` 인라인 SVG) — 총 232개 · 실측 OVER/BOX/LAP 0
+## 다이어그램 현황 (`.diag` 인라인 SVG) — 총 403개
 | 가이드 | 개수 | | 가이드 | 개수 |
 |---|---|---|---|---|
-| cs | 65 | | js-ts | 22 |
-| server | 43 | | java | 7 |
-| **db** | **36** (33→36 · redis 2 + mongo 1) | | cpp·rust | 0 (제외 대상) |
-| csharp | 33 | | python | 29 |
+| **kotlin** | **86** | | cs | 65 |
+| server | 44 | | db | 36 |
+| **cpp** | **33** | | csharp | 33 |
+| java | 30 | | python | 29 |
+| **rust** | **25** | | js-ts | 22 |
 
 ## DB 가이드 구조 (탭 12개)
 그룹: 시작(0) · SQL(1: sql·pro) · **제품별(2: oracle🅾️ pg🐘 mysql🐬 sqlite✒️ redis⚡ mongo🍃)** · 심화(3: tune·deep·app).
@@ -57,11 +72,14 @@ BOX 검사 최종판 — **텍스트 중심점이 박스 안**이면 그 박스 
 5. **Windows 10 은 Emoji 12까지** — U+1FA70~1FAFF 금지
 
 ## 남은 일 (우선순위순)
-1. python `02-numpy`(13섹션)·`10-db`(18섹션) diag 0 — 다음 시각화 후보. java 도 7개로 얇다
-2. CS 얇은 탭 — `01-math`(2)·`03-comp`(2)·`06-arch`(2)
-3. C# 얇은 탭 잔여 — scale(12)·desk(12)·tool(12)·deep(12) 도 15±로 맞추면 좋다
-4. redis·mongo 탭 diag 보강 (현재 redis 2 · mongo 1)
-5. 가이드별 css 의 .diag 중복 블록 정리 (선택)
+1. **브라우저 실측 한 번** — 이번에 추가한 시각화 100건은 정적 검사기로만 확인했습니다.
+   Chrome MCP 가 되는 세션에서 kotlin · cpp · rust 세 가이드에 아래 실측 스크립트를 돌려 주세요
+2. js-ts(22) · python(29) · rust(25) 시각화 보강 — 지금 가장 얇습니다
+3. CS 얇은 탭 — `01-math`(2)·`03-comp`(2)·`06-arch`(2)
+4. C# 얇은 탭 — scale(12)·desk(12)·tool(12)·deep(12) 를 15± 로
+5. redis·mongo 탭 diag 보강 (현재 redis 2 · mongo 1)
+6. 가이드별 css 의 .diag 중복 블록 정리 (선택)
+
 
 ## 조심할 것 (실제로 겪은 실패 — 누적)
 1. `</section>` 누락 — verify:guide 가 잡아 줌
@@ -113,4 +131,4 @@ panes.forEach((p,i)=>p.className=prev[i]);
 'DIAGS: '+document.querySelectorAll('.diag svg').length+' | OVER: '+(over.join(' / ')||'none')+' | BOX: '+(box.join(' / ')||'none')+' | LAP: '+(lap.join(' / ')||'none')
 ```
 
-**제외 대상**: cpp·rust(평균 11~12KB) — 이미 충분히 두터움.
+**시각화 상태**: 열 가이드 모두 시각화가 들어갔습니다. 얇은 쪽은 js-ts(22) · rust(25) · python(29) 입니다.
