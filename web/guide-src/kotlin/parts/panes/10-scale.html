@@ -478,6 +478,46 @@ suspend fun &lt;T&gt; getWithRefreshAhead(key: String, loader: suspend () -&gt; 
     </p>
   </div>
 
+  <div class="diag rv">
+    <svg viewBox="0 0 680 270" role="img" aria-label="서버가 여러 대일 때 JVM 락이 소용없다는 것을 보여 주는 그림. 서버 A 와 서버 B 는 각자의 JVM 안에서만 유효한 락을 걸기 때문에 동시에 재고를 읽고 차감해 초과 판매가 일어난다. Redis 의 SET NX 나 데이터베이스의 원자적 UPDATE 처럼 한 곳에서 조정해야 하며, 분산 락에는 만료 시간, 소유자 확인, 그리고 락 대신 원자 연산을 쓸 수 있는지 검토가 필요하다.">
+      <text x="16" y="18" class="lbl">서버가 두 대 이상이면 @Synchronized 는 아무 소용이 없습니다</text>
+
+      <text x="16" y="42" class="ttl rs-t">① JVM 락 — 각자의 세계 안에서만 유효</text>
+      <rect class="bx bx-warn" x="16" y="52" width="316" height="112"/>
+      <rect class="bx" x="32" y="64" width="136" height="40"/>
+      <text x="100" y="89" class="val" text-anchor="middle">서버 A</text>
+      <rect class="bx" x="180" y="64" width="136" height="40"/>
+      <text x="248" y="89" class="val" text-anchor="middle">서버 B</text>
+      <text x="32" y="126" class="ann">서로의 락을 전혀 모릅니다</text>
+      <text x="32" y="148" class="ann rs-t">동시에 재고를 읽고 동시에 차감 → 초과 판매</text>
+
+      <text x="348" y="42" class="ttl ok-t">② 한 곳에서 조정 — 분산 락 · 원자 연산</text>
+      <rect class="bx bx-ok" x="348" y="52" width="316" height="112"/>
+      <rect class="bx" x="364" y="64" width="284" height="40"/>
+      <text x="506" y="89" class="val ok-t" text-anchor="middle">Redis · DB — 판단하는 곳은 하나</text>
+      <text x="364" y="126" class="ann">SET key value NX PX 3000 — 얻은 하나만 진행</text>
+      <text x="364" y="148" class="ann">또는 UPDATE ... WHERE stock &gt;= 1 한 방으로</text>
+
+      <text x="16" y="184" class="ttl">분산 락을 쓸 때 반드시 챙길 세 가지</text>
+
+      <rect class="bx" x="16" y="194" width="210" height="68"/>
+      <text x="32" y="216" class="val">① 만료 시간(TTL)</text>
+      <text x="32" y="236" class="ann">락을 쥔 채 죽으면</text>
+      <text x="32" y="252" class="ann">영원히 잠긴 채 남습니다</text>
+
+      <rect class="bx" x="235" y="194" width="210" height="68"/>
+      <text x="251" y="216" class="val">② 소유자 확인</text>
+      <text x="251" y="236" class="ann">값을 비교한 뒤 삭제(Lua)</text>
+      <text x="251" y="252" class="ann">남의 락을 풀지 않게</text>
+
+      <rect class="bx bx-ok" x="454" y="194" width="210" height="68"/>
+      <text x="470" y="216" class="val ok-t">③ 락보다 원자 연산</text>
+      <text x="470" y="236" class="ann">쿼리 한 줄로 되면</text>
+      <text x="470" y="252" class="ann">락 자체가 필요 없습니다</text>
+    </svg>
+    <div class="cap">분산 락은 <b>마지막 수단</b>입니다 — 조건부 UPDATE 나 DB 유니크 제약으로 풀리는지 먼저 보세요.</div>
+  </div>
+
   <div class="tw rv">
     <table class="cheat">
       <tr><th style="width:200px">방법</th><th>특징 · 언제</th></tr>
@@ -551,6 +591,45 @@ suspend fun withDistributedLock(key: String, block: suspend () -&gt; Unit) {
       네트워크는 언제나 불확실합니다. 클라이언트가 <b>같은 요청을 두 번</b> 보내거나,
       재시도가 <b>이미 처리된 요청을 또</b> 보냅니다. <b>두 번 눌러도 한 번만</b> 처리돼야 합니다.
     </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 256" role="img" aria-label="멱등성 키로 중복 결제를 막는 흐름을 보여 주는 그림. 클라이언트가 타임아웃 때문에 같은 요청을 다시 보내도 요청마다 붙은 고유한 Idempotency-Key 를 저장소에서 조회해, 처음 보는 키면 실제로 처리한 뒤 결과를 저장하고 이미 본 키면 저장된 응답만 돌려준다. 키 저장과 실제 처리가 같은 트랜잭션에 있거나 유니크 제약으로 보호돼야 진짜 멱등이 된다.">
+      <text x="16" y="18" class="lbl">같은 요청이 두 번 와도 결제가 두 번 되지 않게 하는 법</text>
+
+      <rect class="bx bx-fw" x="16" y="44" width="170" height="52"/>
+      <text x="32" y="68" class="val">클라이언트</text>
+      <text x="32" y="85" class="ann">응답이 늦어 재시도</text>
+
+      <path class="fl ar" d="M190 70 L206 70"/>
+
+      <rect class="bx" x="210" y="44" width="200" height="52"/>
+      <text x="226" y="68" class="val">Idempotency-Key</text>
+      <text x="226" y="85" class="ann">요청마다 고유한 UUID 하나</text>
+
+      <path class="fl ar" d="M414 70 L430 70"/>
+
+      <rect class="bx bx-hi" x="434" y="44" width="230" height="52"/>
+      <text x="450" y="68" class="val">키 저장소 조회</text>
+      <text x="450" y="85" class="ann">Redis 또는 DB 유니크 인덱스</text>
+
+      <path class="fl ar ar-gn" d="M500 100 C 500 112 176 112 176 126"/>
+      <path class="fl ar ar-gn" d="M560 100 C 560 112 504 112 504 126"/>
+
+      <rect class="bx bx-ok" x="16" y="130" width="320" height="76"/>
+      <text x="32" y="152" class="val ok-t">① 처음 보는 키</text>
+      <text x="32" y="172" class="ann">실제로 처리하고, 결과를 키와 함께 저장합니다</text>
+      <text x="32" y="192" class="ann">그 응답을 클라이언트에 돌려줍니다</text>
+
+      <rect class="bx bx-ok" x="344" y="130" width="320" height="76"/>
+      <text x="360" y="152" class="val ok-t">② 본 적 있는 키</text>
+      <text x="360" y="172" class="ann">처리하지 않고 저장된 응답만 그대로 반환</text>
+      <text x="360" y="192" class="ann">결제는 끝까지 한 번만 일어납니다</text>
+
+      <rect class="bx bx-warn" x="16" y="214" width="648" height="36"/>
+      <text x="32" y="237" class="ann rs-t">키 저장과 실제 처리가 같은 트랜잭션 안에 있거나, 유니크 제약으로 중복 INSERT 가 막혀야 진짜 멱등입니다.</text>
+    </svg>
+    <div class="cap">"재시도해도 안전한가"는 <b>클라이언트가 아니라 서버가 보장</b>해야 합니다 — 네트워크는 언제나 두 번 보냅니다.</div>
   </div>
 
   <pre class="code rv" data-lang="kotlin"><code>// 1) 클라이언트가 요청마다 고유 키를 보낸다
@@ -962,6 +1041,39 @@ suspend fun handle(req: Request): Response = withTimeout(3.seconds) {
       티켓 오픈·한정 판매처럼 <b>순간 트래픽이 평소의 100배</b>가 되는 경우입니다.
       서버를 100배 늘릴 수 없으니 <b>들어오는 양을 조절</b>합니다.
     </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 268" role="img" aria-label="고정 윈도우 방식 처리율 제한의 경계 문제와 토큰 버킷을 비교한 그림. 분당 100건을 고정 윈도우로 세면 59초에 100건, 61초에 다시 100건이 통과해 2초 사이에 200건이 몰릴 수 있다. 토큰 버킷은 일정 속도로 토큰을 채우고 요청마다 하나씩 소모하므로 순간 몰림이 버킷 크기 안으로 제한된다.">
+      <text x="16" y="18" class="lbl">고정 윈도우의 경계 문제 — 그래서 토큰 버킷을 씁니다</text>
+
+      <text x="16" y="44" class="ttl rs-t">① 고정 윈도우 (분당 100건)</text>
+      <rect class="bx bx-mut" x="120" y="56" width="250" height="34"/>
+      <text x="245" y="78" class="val" text-anchor="middle">0~60초 · 100건 통과</text>
+      <rect class="bx bx-mut" x="374" y="56" width="250" height="34"/>
+      <text x="499" y="78" class="val" text-anchor="middle">60~120초 · 100건 통과</text>
+      <path class="ln-t" d="M372 50 L372 100"/>
+      <text x="16" y="78" class="val">시간축</text>
+      <text x="120" y="112" class="ann rs-t">59초에 100건 + 61초에 100건 = 2초 사이에 200건이 통과합니다 — 상한이 사실상 두 배</text>
+
+      <text x="16" y="146" class="ttl ok-t">② 토큰 버킷 (초당 2개 충전 · 최대 100개)</text>
+      <rect class="bx bx-ok" x="120" y="158" width="250" height="46"/>
+      <text x="245" y="180" class="val ok-t" text-anchor="middle">버킷 — 남은 토큰 수</text>
+      <text x="245" y="196" class="ann" text-anchor="middle">일정 속도로 채워진다</text>
+
+      <path class="fl ar" d="M374 181 L396 181"/>
+
+      <rect class="bx" x="400" y="158" width="224" height="46"/>
+      <text x="512" y="180" class="val" text-anchor="middle">요청 1건 = 토큰 1개</text>
+      <text x="512" y="196" class="ann" text-anchor="middle">없으면 즉시 429</text>
+
+      <text x="16" y="181" class="val">동작</text>
+      <text x="120" y="222" class="ann">평균 속도는 충전 속도로, 순간 몰림은 버킷 크기만큼만 허용됩니다 — 경계 문제가 없습니다</text>
+
+      <rect class="bx bx-warn" x="16" y="230" width="648" height="30"/>
+      <text x="32" y="249" class="ann rs-t">Redis 로 만들 때는 "읽고 · 빼고 · 쓰기"를 Lua 스크립트 하나로 묶으세요 — 나누면 그 자체가 경쟁 상태가 됩니다.</text>
+    </svg>
+    <div class="cap">거절할 때는 <b>Retry-After 헤더</b>를 같이 주세요 — 안 주면 클라이언트가 곧바로 다시 몰려옵니다.</div>
   </div>
 
   <div class="grid2 rv">

@@ -212,6 +212,8 @@ const SEC_KW = {
   wf09:"websocket 웹소켓 양방향 채팅 세션 하트비트 재연결 브로드캐스트 redis pubsub",
   wf10:"서킷브레이커 resilience4j 타임아웃 재시도 백오프 폴백 장애격리 executesuspendfunction",
   wf13:"운영 튜닝 netty ioworkercount 다이렉트메모리 maxdirectmemorysize 커넥션풀 ulimit maxinmemorysize 누수",
+  wf14:"배압 backpressure 버퍼 conflate 흐름제어 느린소비자 buffer collectlatest 오버플로",
+  wf15:"파일업로드 다운로드 스트리밍 multipart databuffer 대용량 프리사인드 csv 내보내기",
   da02:"코틀린엔티티 dataclass 금지 equals hashcode tostring 프록시 val var enumerated string allopen noarg",
   da04:"영속성컨텍스트 1차캐시 더티체킹 스냅숏 flush clear 준영속 merge lazyinitializationexception openinview",
   da07:"n+1 fetchjoin entitygraph batchfetchsize 쿼리수 페이징 distinct 성능",
@@ -246,6 +248,8 @@ const SEC_KW = {
   mp09:"compose multiplatform composemp ui공유 uikitview composeuiviewcontroller 리소스 wasm 데스크톱",
   mp10:"ui공유안함 swiftui 네이티브ui 공유viewmodel 로직공유 전략 도입순서",
   mp13:"xcframework cocoapods spm 배포 gradle xcode ci 맥 빌드시간 캐시",
+  mp14:"리소스 다국어 문자열 번역 strings 로컬라이제이션 복수형 rtl 아이콘",
+  mp15:"점진도입 기존앱 마이그레이션 파일럿 cocoapods xcframework 팀합의 공유범위",
   sc01:"용량산정 rps tps 동시처리 리틀의법칙 p99 slo 지표 micrometer",
   sc02:"병목 커넥션풀 hikari limitedparallelism 스레드고갈 슬로우쿼리 순서",
   sc03:"2단캐시 로컬캐시 caffeine redis 무효화 pubsub ttl 정합성",
@@ -275,7 +279,7 @@ const SEC_KW = {
   to06:"ktor 서버 embeddedserver routing statuspages contentnegotiation authentication websocket 스프링비교",
   to08:"파일 uselines readtext csv bom 엑셀 poi sxssf 대용량 pdf 폰트",
   to12:"라이브러리배포 mavenpublish sonatype 서명 이진호환성 apidump inline호환 시맨틱버전",
-  to14:"도구찾기 목적별 검색 라이브러리 선택 무엇을쓸까",
+  to16:"도구찾기 목적별 검색 라이브러리 선택 무엇을쓸까",
 };
 let FIDX = null;
 
