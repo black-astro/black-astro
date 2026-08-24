@@ -150,6 +150,7 @@ $$(".stage-title").forEach(t => {
    "데스크탑 프로그램" → PySide6,  "엑셀 자동화" → Pandas·GUI 자동화
    ============================================================ */
 const TAB_KW = {
+  c:"c 씨 c언어 clang gcc 표준 c17 c11 c99 c23 정수 int32_t stdint size_t 오버플로 배열 포인터 decay 문자열 널종료 strcpy snprintf 버퍼오버플로 malloc free 누수 해제후사용 이중해제 구조체 패딩 정렬 union 비트필드 함수포인터 콜백 qsort 파일 fopen fgets errno 전처리기 매크로 define 인클루드가드 헤더 static extern makefile ub 미정의동작 앨리어싱 c와c++차이 externc",
   lang:"c++ cpp 씨쁠쁠 기초 문법 컴파일 gcc clang msvc 변수 타입 auto 함수 오버로딩 조건 반복 포인터 참조 레퍼런스 주소 vector string 배열 클래스 생성자 소멸자 상속 가상함수 virtual 헤더 include 네임스페이스 매크로 예외 try catch 치트시트 파이썬비교",
   mod:"현대 modern raii 스마트포인터 unique_ptr shared_ptr weak_ptr 이동 move 복사 rvalue const constexpr stl 컨테이너 map unordered_map 알고리즘 ranges 람다 lambda function 템플릿 template 컨셉 concept optional variant expected string_view 스레드 thread atomic mutex jthread",
   py:"파이썬 python 확장 모듈 바인딩 binding pybind11 nanobind 임포트 import 빌드 setup pyproject scikit-build 타입변환 numpy 배열 제로카피 zerocopy gil 해제 병렬 예외 콜백 callback 스텁 pyi 타입힌트 wheel 성능 가속 c확장",
@@ -165,6 +166,18 @@ const FIND_CHIPS = ["파이썬에서 부르기","pybind11 첫 모듈","numpy 제
                     "CMake 최소","wheel 배포","스마트 포인터","이동 시맨틱",
                     "SIMD 벡터화","캐시 최적화","ABI 호환","세그폴트 디버깅"];
 const SEC_KW = {
+  c01:"c언어 왜쓰나 커널 임베디드 인터프리터 설치 gcc clang msvc msys2 경고플래그 wall wextra 표준버전 c17 c23",
+  c02:"정수 크기 int long size_t stdint int32_t uint64_t 오버플로 ub 부호비교 정수승격 char부호 시프트 limits",
+  c03:"배열 포인터 decay 변환 sizeof 함수인자 길이 포인터산술 2차원배열 다차원 행렬 인덱스계산",
+  c04:"문자열 널종료 strlen strcpy strncpy snprintf sprintf gets fgets 버퍼오버플로 리터럴 읽기전용 utf8 한글바이트",
+  c05:"malloc calloc realloc free 메모리누수 해제후사용 이중해제 미초기화 소유권 goto정리 아레나 풀 스택할당 asan",
+  c06:"구조체 struct 패딩 정렬 alignof offsetof packed pragma pack union 공용체 타입펀 비트필드 직렬화 엔디안 staticassert",
+  c07:"함수포인터 콜백 typedef qsort 비교함수 다형성 vtable 인터페이스 ops테이블 userdata dlsym",
+  c08:"파일 fopen fread fgets fwrite fclose 바이너리모드 errno strerror feof ferror 버퍼링 stdout stderr 부분읽기 경로 인코딩",
+  c09:"전처리기 매크로 define 괄호 이중평가 dowhile0 va_args 인클루드가드 pragmaonce 조건부컴파일 win32 gnuc msvc externc",
+  c10:"헤더 소스분리 선언 정의 extern static 전역변수 makefile 링커 심볼 의존성 mmd 공개api 접두사",
+  c11:"ub 미정의동작 오버플로 미초기화 범위밖 수명 댕글링 엄격한앨리어싱 strictaliasing 시퀀스포인트 ubsan asan valgrind 퍼징 clangtidy",
+  c12:"c와c++ 차이 상위집합 voidp 캐스트 구조체이름 지정초기화 bool union타입펀 맹글링 예약어 vla restrict memset new 절충",
   /* 하려는 일을 한글로 쳤을 때 걸리게 하는 보강 키워드 */
   x01:"컴파일 실행 gcc g++ clang msvc 빌드 첫프로그램 hello main 링크 실행파일 인터프리터차이",
   x02:"변수 타입 int double bool auto 선언 초기화 형변환 캐스팅 static_cast 정수오버플로",
