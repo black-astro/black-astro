@@ -809,6 +809,47 @@ location /events {
     수천 개의 SSE 연결이 앱 워커를 하나씩 붙잡으면 <b>서비스가 멈춥니다.</b>
     이 때문에 실시간 기능은 <b>비동기 프레임워크</b>(ASGI·Node·WebFlux)로 만드는 것이 좋습니다.
   </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 258" role="img" aria-label="빠른 생산자와 느린 소비자 사이에서 버퍼가 어떻게 쌓이는지 보여 주는 그림. 앱이 만들어 내는 속도보다 사용자가 받아 가는 속도가 느리면 그 차이가 중간 버퍼에 쌓이고, 버퍼가 가득 차면 앞쪽이 잠시 멈춰 속도를 맞춘다. 이 멈춤이 없으면 메모리가 무한히 늘어난다.">
+      <text x="16" y="18" class="lbl">빠른 쪽과 느린 쪽 사이에 버퍼가 있습니다</text>
+
+      <rect class="bx bx-fw" x="16" y="50" width="140" height="52"/>
+      <text x="86" y="70" class="ann rs-t" text-anchor="middle">앱 (빠름)</text>
+      <text x="86" y="88" class="ann" text-anchor="middle">초당 100MB 생성</text>
+
+      <path class="fl ar ar-rs" style="stroke:#f87171" d="M160 76 L200 76"/>
+
+      <rect class="bx bx-hi" x="204" y="42" width="240" height="68"/>
+      <text x="324" y="62" class="ann am-t" text-anchor="middle">중간 버퍼 (커널 · 웹서버)</text>
+      <rect class="bx bx-fw" x="220" y="72" width="40" height="24"/>
+      <rect class="bx bx-fw" x="264" y="72" width="40" height="24"/>
+      <rect class="bx bx-fw" x="308" y="72" width="40" height="24"/>
+      <rect class="bx" x="352" y="72" width="40" height="24"/>
+      <rect class="bx" x="396" y="72" width="32" height="24"/>
+
+      <path class="fl ar" d="M448 76 L488 76"/>
+
+      <rect class="bx bx-ok" x="492" y="50" width="172" height="52"/>
+      <text x="578" y="70" class="ann ok-t" text-anchor="middle">사용자 (느림)</text>
+      <text x="578" y="88" class="ann" text-anchor="middle">초당 2MB 수신</text>
+
+      <path class="fl ar ar-am" style="stroke:#fbbf24" d="M324 118 C 324 140 120 140 96 112"/>
+      <text x="150" y="138" class="ann am-t">버퍼가 차면 → 앞쪽에 "잠깐 멈춰"라고 알립니다 (백프레셔)</text>
+
+      <rect class="bx bx-warn" x="16" y="156" width="316" height="86"/>
+      <text x="32" y="176" class="val rs-t">백프레셔가 없으면</text>
+      <text x="32" y="196" class="ann">차이가 전부 메모리에 쌓입니다 — 느린 사용자 1000명이면</text>
+      <text x="32" y="212" class="ann rs-t">그만큼의 버퍼가 서버 메모리를 먹습니다</text>
+      <text x="32" y="232" class="ann">결국 OOM 또는 스왑으로 전체가 느려집니다</text>
+
+      <rect class="bx bx-ok" x="348" y="156" width="316" height="86"/>
+      <text x="364" y="176" class="val ok-t">설정으로 조절하는 자리</text>
+      <text x="364" y="196" class="ann">proxy_buffers · proxy_buffer_size — 웹서버가 들고 있을 양</text>
+      <text x="364" y="212" class="ann">넘치면 <tspan class="am-t">디스크 임시 파일</tspan>로 넘어갑니다(느려짐)</text>
+      <text x="364" y="232" class="ann ok-t">스트리밍은 버퍼를 끄고 흘려보내는 편이 맞습니다(p06)</text>
+    </svg>
+    <div class="cap">버퍼는 <b>속도 차를 흡수하는 통</b>입니다 — 무한한 통은 메모리 사고가 됩니다.</div>
+  </div>
 </section>
 
 <!-- ==================== z09 ==================== -->
@@ -1192,6 +1233,45 @@ location = /health/live {
     <br>Nginx 의 <code>max_fails</code> 는 <b>단순한 형태의 서킷 브레이커</b>이고,
     본격적인 구현은 애플리케이션(Resilience4j 등)이나 서비스 메시에서 합니다.
     자세한 패턴은 <a href="../java-web/">☕ 자바 가이드</a>의 대규모 트래픽 탭에 있습니다.
+  </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="헬스체크와 서킷 브레이커가 하는 일을 상태 변화로 보여 주는 그림. 헬스체크는 죽은 서버를 분배 대상에서 빼는 일이고, 서킷 브레이커는 계속 실패하는 대상에 대해 아예 호출을 멈추는 장치다. 닫힘 상태에서 실패가 쌓이면 열림으로 바뀌어 즉시 실패를 돌려주고, 일정 시간 뒤 반쯤 열어 한 건만 시험해 성공하면 다시 닫는다.">
+      <text x="16" y="18" class="lbl">죽은 곳을 빼는 것과, 아예 부르지 않는 것</text>
+
+      <text x="16" y="42" class="ttl">① 헬스체크 — 분배 대상에서 뺍니다</text>
+      <rect class="bx bx-ok" x="16" y="52" width="130" height="38"/>
+      <text x="81" y="76" class="ann ok-t" text-anchor="middle">앱 A — 정상</text>
+      <rect class="bx bx-ok" x="156" y="52" width="130" height="38"/>
+      <text x="221" y="76" class="ann ok-t" text-anchor="middle">앱 B — 정상</text>
+      <rect class="bx bx-warn" x="296" y="52" width="130" height="38"/>
+      <text x="361" y="76" class="ann rs-t" text-anchor="middle">앱 C — 실패 3회</text>
+      <path class="fl ar ar-rs" style="stroke:#f87171" d="M430 71 L462 71"/>
+      <rect class="bx bx-mut" x="466" y="52" width="198" height="38"/>
+      <text x="565" y="76" class="ann" text-anchor="middle">제외 — 회복되면 자동 복귀</text>
+
+      <text x="16" y="122" class="ttl am-t">② 서킷 브레이커 — 상태가 셋입니다</text>
+      <rect class="bx bx-ok" x="16" y="132" width="180" height="52"/>
+      <text x="106" y="152" class="ann ok-t" text-anchor="middle">CLOSED (닫힘)</text>
+      <text x="106" y="170" class="ann" text-anchor="middle">평소처럼 호출합니다</text>
+      <path class="fl ar ar-rs" style="stroke:#f87171" d="M200 148 L236 148"/>
+      <text x="200" y="140" class="ann rs-t">실패율 초과</text>
+
+      <rect class="bx bx-warn" x="240" y="132" width="180" height="52"/>
+      <text x="330" y="152" class="ann rs-t" text-anchor="middle">OPEN (열림)</text>
+      <text x="330" y="170" class="ann" text-anchor="middle">부르지 않고 즉시 실패</text>
+      <path class="fl ar ar-am" style="stroke:#fbbf24" d="M424 158 L460 158"/>
+      <text x="424" y="150" class="ann am-t">시간 경과</text>
+
+      <rect class="bx bx-hi" x="464" y="132" width="200" height="52"/>
+      <text x="564" y="152" class="ann am-t" text-anchor="middle">HALF-OPEN (반열림)</text>
+      <text x="564" y="170" class="ann" text-anchor="middle">한 건만 시험해 봅니다</text>
+      <path class="fl ar ar-gn" style="stroke:#4ade80" d="M564 188 C 564 214 106 214 106 190"/>
+      <text x="252" y="212" class="ann ok-t">성공하면 다시 닫힘으로</text>
+
+      <rect class="bx" x="16" y="224" width="648" height="34"/>
+      <text x="32" y="246" class="ann">왜 필요한가 — 죽은 대상을 계속 부르면 <tspan class="rs-t">타임아웃을 기다리느라 우리 쪽 스레드가 다 묶입니다</tspan>. 그 장애가 우리 서비스로 번지는 것을 끊는 장치입니다</text>
+    </svg>
+    <div class="cap">헬스체크는 <b>누구에게 보낼지</b>, 서킷 브레이커는 <b>보낼지 말지</b>를 정합니다.</div>
   </div>
 </section>
 

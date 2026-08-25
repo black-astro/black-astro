@@ -578,6 +578,43 @@ ls -l /var/cache/nginx/proxy_temp/ | head
 watch -n1 'ls /var/cache/nginx/proxy_temp/ | wc -l'
 
 # 디스크 IO 가 부담되면 proxy_buffers 를 늘려 메모리에서 처리하세요</code></pre>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 258" role="img" aria-label="프록시 버퍼링을 켰을 때와 껐을 때의 차이를 보여 주는 그림. 버퍼링을 켜면 웹서버가 뒤쪽 응답을 먼저 받아 두고 뒤쪽 연결을 빨리 놓아주므로 느린 사용자가 앱의 작업 스레드를 오래 붙잡지 않는다. 반대로 실시간으로 흘려보내야 하는 응답에서는 버퍼링이 지연을 만들기 때문에 그 경로만 꺼야 한다.">
+      <text x="16" y="18" class="lbl">버퍼링은 '느린 사용자로부터 앱을 지키는' 장치입니다</text>
+
+      <text x="16" y="42" class="ttl ok-t">① 버퍼링 켬 (기본값) — 앱이 빨리 풀려납니다</text>
+      <rect class="bx bx-fw" x="16" y="52" width="130" height="42"/>
+      <text x="81" y="72" class="ann rs-t" text-anchor="middle">앱</text>
+      <text x="81" y="88" class="ann" text-anchor="middle">10ms 만에 응답 완료</text>
+      <path class="fl ar ar-gn" style="stroke:#4ade80" d="M150 73 L186 73"/>
+      <rect class="bx bx-ok" x="190" y="52" width="170" height="42"/>
+      <text x="275" y="72" class="ann ok-t" text-anchor="middle">웹서버가 통째로 받아 둠</text>
+      <text x="275" y="88" class="ann" text-anchor="middle">앱 연결은 여기서 종료</text>
+      <path class="fl ar" d="M364 73 L400 73"/>
+      <rect class="bx bx-hi" x="404" y="52" width="260" height="42"/>
+      <text x="420" y="72" class="ann am-t">느린 3G 사용자에게 30초에 걸쳐 전송</text>
+      <text x="420" y="88" class="ann">그동안 앱은 다른 요청을 처리합니다</text>
+
+      <text x="16" y="128" class="ttl rs-t">② 버퍼링 끔 — 앱이 끝까지 붙잡힙니다</text>
+      <rect class="bx bx-fw" x="16" y="138" width="130" height="42"/>
+      <text x="81" y="158" class="ann rs-t" text-anchor="middle">앱</text>
+      <text x="81" y="174" class="ann rs-t" text-anchor="middle">30초 내내 점유</text>
+      <path class="fl ar ar-rs" style="stroke:#f87171" d="M150 159 L400 159"/>
+      <text x="200" y="151" class="ann rs-t">사용자가 받는 속도에 앱이 끌려갑니다</text>
+      <rect class="bx bx-warn" x="404" y="138" width="260" height="42"/>
+      <text x="420" y="158" class="ann rs-t">동시 접속이 몰리면 앱 스레드가 고갈됩니다</text>
+      <text x="420" y="174" class="ann">이것이 504 로 나타나는 흔한 경로입니다</text>
+
+      <rect class="bx bx-ok" x="16" y="196" width="316" height="52"/>
+      <text x="32" y="216" class="val ok-t">그래도 꺼야 하는 경로</text>
+      <text x="32" y="236" class="ann">SSE · 스트리밍 · 실시간 로그 — 그 location 에서만 off 로</text>
+
+      <rect class="bx" x="348" y="196" width="316" height="52"/>
+      <text x="364" y="216" class="val">버퍼가 모자라면 디스크로 넘어갑니다</text>
+      <text x="364" y="236" class="ann">응답이 크면 proxy_buffers 를 늘리세요 — 임시 파일은 느립니다</text>
+    </svg>
+    <div class="cap">기본값(켬)이 옳습니다 — <b>끄는 것은 스트리밍 경로에 한정</b>하세요.</div>
+  </div>
 </section>
 
 <!-- ==================== p07 ==================== -->
@@ -929,6 +966,32 @@ cat /proc/$(pgrep -f 'nginx: master')/limits | grep -i 'open files'
     <br>· Docker — <code>--ulimit nofile=65535:65535</code>
     <br>· Compose — <code>ulimits: nofile: {soft: 65535, hard: 65535}</code>
     <br>· 쿠버네티스 — 노드의 kubelet·컨테이너 런타임 설정을 따릅니다
+  </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 254" role="img" aria-label="파일 디스크립터 한계가 여러 겹으로 걸려 있다는 것을 보여 주는 그림. 시스템 전체 한계 안에 서비스별 한계가 있고 그 안에 웹서버 설정값이 있어서, 가장 낮은 값이 실제 한계가 된다. 커넥션 하나가 앞뒤로 두 개를 쓰기 때문에 필요한 수는 동시 접속 수의 두 배 이상이다.">
+      <text x="16" y="18" class="lbl">한계는 세 겹 — 가장 낮은 값이 이깁니다</text>
+
+      <rect class="bx" x="16" y="42" width="648" height="34"/>
+      <text x="32" y="63" class="ann">① 시스템 전체 — fs.file-max (수십만~수백만)</text>
+
+      <rect class="bx bx-hi" x="60" y="82" width="560" height="34"/>
+      <text x="76" y="103" class="ann am-t">② 프로세스별 — ulimit -n · systemd 의 LimitNOFILE=65535</text>
+
+      <rect class="bx bx-fw" x="120" y="122" width="440" height="34"/>
+      <text x="136" y="143" class="ann rs-t">③ 웹서버 설정 — worker_rlimit_nofile · worker_connections</text>
+
+      <rect class="bx bx-warn" x="180" y="162" width="320" height="30"/>
+      <text x="340" y="182" class="ann rs-t" text-anchor="middle">실제 한계 = 이 셋 중 가장 작은 값</text>
+
+      <rect class="bx bx-ok" x="16" y="202" width="316" height="46"/>
+      <text x="32" y="222" class="val ok-t">계산 — 커넥션 하나에 두 개를 씁니다</text>
+      <text x="32" y="240" class="ann">앞 1 + 뒤 1 · 로그도 별도 → <tspan class="ok-t">동시접속 × 2 + 여유</tspan></text>
+
+      <rect class="bx bx-warn" x="348" y="202" width="316" height="46"/>
+      <text x="364" y="222" class="val rs-t">증상 — Too many open files</text>
+      <text x="364" y="240" class="ann">이 줄이 로그에 보이면 접속이 무작위로 실패하기 시작합니다</text>
+    </svg>
+    <div class="cap">systemd 로 띄운 서비스는 <b>쉘의 ulimit 이 적용되지 않습니다</b> — 유닛 파일에 적어야 합니다.</div>
   </div>
 </section>
 
