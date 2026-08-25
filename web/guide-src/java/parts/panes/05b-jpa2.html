@@ -569,6 +569,36 @@ public class OrderBulkRepository {
     B-Tree 에 순차적으로 쌓여 이 문제가 없습니다.
     (Hibernate 6.5+ 는 <code>@UuidGenerator(style = TIME)</code> 지원)
   </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 258" role="img" aria-label="식별자 생성 전략을 비교하는 그림. 아이덴티티 전략은 데이터베이스가 번호를 매기므로 저장하는 순간 즉시 삽입이 일어나 모아서 보내기가 불가능하고, 시퀀스 전략은 미리 번호를 받아 두므로 모아 보내기가 가능하다. 무작위 식별자는 분산 환경에 유리하지만 인덱스가 흩어져 성능이 떨어질 수 있다.">
+      <text x="16" y="18" class="lbl">전략이 다르면 '언제 INSERT 가 나가는지'가 달라집니다</text>
+
+      <rect class="bx bx-warn" x="16" y="42" width="316" height="96"/>
+      <text x="32" y="62" class="val rs-t">IDENTITY (auto_increment)</text>
+      <text x="32" y="84" class="ann">persist() 하는 순간 <tspan class="rs-t">즉시 INSERT</tspan> 가 나갑니다</text>
+      <text x="32" y="102" class="ann">번호를 DB 가 매기므로 미리 알 수 없습니다</text>
+      <text x="32" y="122" class="ann rs-t">그래서 쓰기 지연·배치 삽입이 동작하지 않습니다</text>
+
+      <rect class="bx bx-ok" x="348" y="42" width="316" height="96"/>
+      <text x="364" y="62" class="val ok-t">SEQUENCE</text>
+      <text x="364" y="84" class="ann">번호를 <tspan class="ok-t">미리 받아 두고</tspan> INSERT 는 커밋 시점에</text>
+      <text x="364" y="102" class="ann ok-t">여러 건을 모아 한 번에 보낼 수 있습니다</text>
+      <text x="364" y="122" class="ann">allocationSize 로 번호를 묶어 받아 왕복을 줄입니다</text>
+
+      <rect class="bx" x="16" y="156" width="316" height="86"/>
+      <text x="32" y="176" class="val">UUID · ULID</text>
+      <text x="32" y="196" class="ann ok-t">앱에서 미리 만들 수 있어 분산 환경에 유리합니다</text>
+      <text x="32" y="214" class="ann rs-t">무작위 UUID 는 인덱스가 흩어져 삽입이 느려집니다</text>
+      <text x="32" y="232" class="ann">시간 순서가 담긴 <tspan class="ok-t">ULID · UUIDv7</tspan> 을 고려하세요</text>
+
+      <rect class="bx bx-hi" x="348" y="156" width="316" height="86"/>
+      <text x="364" y="176" class="val am-t">고르는 기준</text>
+      <text x="364" y="196" class="ann">MySQL 단일 DB · 대량 삽입 없음 → IDENTITY 로 충분</text>
+      <text x="364" y="214" class="ann">PostgreSQL·오라클 · 대량 삽입 있음 → SEQUENCE</text>
+      <text x="364" y="232" class="ann">여러 곳에서 만들어 합쳐야 한다 → UUIDv7 계열</text>
+    </svg>
+    <div class="cap">"배치 삽입이 안 먹혀요"의 답은 <b>대개 IDENTITY 전략</b>입니다.</div>
+  </div>
 </section>
 
 
@@ -1246,6 +1276,42 @@ ScrollableResults&lt;Order&gt; rs = session.createQuery(hql, Order.class)
     ① <b><code>em.clear()</code> 누락</b>으로 메모리 폭발,
     ② <b>IDENTITY 전략</b>이라 배치 INSERT 가 꺼져 있음,
     ③ <b>루프 안에서 조회</b>(N+1 의 배치 버전) — <code>findAllById</code>로 묶으세요.
+  </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 254" role="img" aria-label="벌크 연산이 영속성 컨텍스트를 건너뛴다는 것을 보여 주는 그림. 벌크 수정은 데이터베이스에 직접 반영되지만 이미 메모리에 올라와 있는 엔티티는 옛 값을 그대로 갖고 있어, 그 뒤에 조회하면 어긋난 값을 보게 된다. 그래서 벌크 연산 뒤에는 영속성 컨텍스트를 비워야 한다.">
+      <text x="16" y="18" class="lbl">벌크 연산은 영속성 컨텍스트를 지나치지 않습니다</text>
+
+      <rect class="bx bx-ok" x="16" y="44" width="200" height="70"/>
+      <text x="116" y="64" class="ann ok-t" text-anchor="middle">영속성 컨텍스트</text>
+      <text x="32" y="84" class="ann">User(1) — 등급: 일반</text>
+      <text x="32" y="102" class="ann rs-t">옛 값이 그대로 남습니다</text>
+
+      <rect class="bx bx-fw" x="248" y="44" width="200" height="70"/>
+      <text x="348" y="64" class="ann rs-t" text-anchor="middle">벌크 UPDATE</text>
+      <text x="264" y="84" class="ann">update User set grade='VIP'</text>
+      <text x="264" y="102" class="ann">where point &gt; 1000</text>
+
+      <path class="fl ar ar-rs" style="stroke:#f87171" d="M452 78 L488 78"/>
+      <rect class="bx bx-ok" x="492" y="44" width="172" height="70"/>
+      <text x="578" y="64" class="ann ok-t" text-anchor="middle">DB</text>
+      <text x="508" y="84" class="ann ok-t">User(1) — 등급: VIP</text>
+      <text x="508" y="102" class="ann">여기만 바뀌었습니다</text>
+
+      <path class="ln" d="M116 118 L116 134"/>
+      <text x="132" y="132" class="ann rs-t">이 상태에서 조회하면 캐시된 '일반'이 나옵니다</text>
+
+      <rect class="bx bx-warn" x="16" y="146" width="316" height="52"/>
+      <text x="32" y="166" class="val rs-t">해결 — 실행 뒤 비웁니다</text>
+      <text x="32" y="186" class="ann">@Modifying(clearAutomatically = true)</text>
+
+      <rect class="bx bx-ok" x="348" y="146" width="316" height="52"/>
+      <text x="364" y="166" class="val ok-t">대량 삽입은 배치로</text>
+      <text x="364" y="186" class="ann">batch_size 설정 + 일정 건수마다 flush · clear 로 메모리 관리</text>
+
+      <text x="32" y="220" class="ann">벌크 연산은 <tspan class="rs-t">엔티티 리스너·변경 감지·낙관적 락 버전을 건너뜁니다</tspan> — 감사 필드가 갱신되지 않는다는 뜻입니다</text>
+      <text x="32" y="238" class="ann">수십만 건 이상이라면 JPA 를 고집하지 말고 <tspan class="ok-t">JDBC 배치나 Spring Batch</tspan> 를 쓰는 편이 훨씬 빠릅니다</text>
+    </svg>
+    <div class="cap">빠른 대신 <b>JPA 가 해 주던 것들을 잃습니다</b> — 그 대가를 알고 쓰세요.</div>
   </div>
 </section>
 
