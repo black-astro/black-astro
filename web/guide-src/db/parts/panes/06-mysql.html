@@ -397,6 +397,49 @@ ORDER  BY data_length + index_length DESC;</code></pre>
     정확한 값이 필요하면 <code>SELECT COUNT(*)</code> 를 해야 하고, 이는 큰 테이블에서 느립니다.
     <b>화면에 총 건수를 항상 표시하는 설계</b>는 대용량에서 재검토 대상입니다.
   </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 258" role="img" aria-label="InnoDB 의 내부 구성을 보여 주는 그림. 쿼리는 먼저 메모리의 버퍼 풀을 보고 없을 때만 디스크에서 페이지를 읽어 올리며, 변경은 메모리에서 이루어진 뒤 재실행 로그에 순차 기록되고 데이터 파일에는 나중에 몰아서 반영된다. 이 구조 덕분에 갑자기 꺼져도 로그로 복구할 수 있고 커밋이 빠르다.">
+      <text x="16" y="18" class="lbl">InnoDB 는 '메모리에서 고치고 로그로 지킵니다'</text>
+
+      <rect class="bx" x="16" y="42" width="130" height="44"/>
+      <text x="81" y="62" class="ann" text-anchor="middle">쿼리</text>
+      <text x="81" y="78" class="ann" text-anchor="middle">SELECT · UPDATE</text>
+
+      <path class="fl ar" d="M150 64 L182 64"/>
+
+      <rect class="bx bx-fw" x="186" y="42" width="220" height="86"/>
+      <text x="296" y="62" class="ann rs-t" text-anchor="middle">버퍼 풀 (메모리)</text>
+      <rect class="bx bx-ok" x="202" y="70" width="56" height="22"/>
+      <rect class="bx bx-ok" x="262" y="70" width="56" height="22"/>
+      <rect class="bx bx-hi" x="322" y="70" width="56" height="22"/>
+      <text x="202" y="108" class="ann">페이지 단위(16KB)로 올려 둡니다</text>
+      <text x="202" y="122" class="ann ok-t">여기서 찾으면 디스크를 안 갑니다</text>
+
+      <path class="fl ar" d="M410 60 L442 60"/>
+      <path class="fl ar ar2" d="M410 100 L442 100"/>
+
+      <rect class="bx bx-ok" x="446" y="42" width="218" height="36"/>
+      <text x="462" y="62" class="ann ok-t">redo 로그 — 순차 기록</text>
+      <text x="462" y="74" class="ann">커밋은 이 로그만 쓰면 끝납니다</text>
+
+      <rect class="bx" x="446" y="86" width="218" height="42"/>
+      <text x="462" y="106" class="ann">데이터 파일 (.ibd)</text>
+      <text x="462" y="120" class="ann">변경은 나중에 몰아서 반영합니다</text>
+
+      <rect class="bx bx-ok" x="16" y="146" width="316" height="46"/>
+      <text x="32" y="166" class="val ok-t">그래서 커밋이 빠릅니다</text>
+      <text x="32" y="186" class="ann">여기저기 흩어진 데이터 파일 대신 <tspan class="ok-t">로그 한 줄만 순차로</tspan> 쓰기 때문입니다</text>
+
+      <rect class="bx bx-hi" x="348" y="146" width="316" height="46"/>
+      <text x="364" y="166" class="val am-t">갑자기 꺼져도 괜찮습니다</text>
+      <text x="364" y="186" class="ann">다시 켜질 때 로그를 다시 적용해 커밋된 것만 살립니다(z03·z04)</text>
+
+      <rect class="bx" x="16" y="200" width="648" height="48"/>
+      <text x="32" y="220" class="ann">튜닝의 첫 번째는 언제나 <tspan class="am-t">innodb_buffer_pool_size</tspan> 입니다 — 전용 서버라면 메모리의 60~70%</text>
+      <text x="32" y="240" class="ann">MyISAM 은 트랜잭션도 크래시 복구도 없습니다 — <tspan class="rs-t">지금 새로 만든다면 고를 이유가 없습니다</tspan></text>
+    </svg>
+    <div class="cap">"왜 커밋이 이렇게 빠르지"의 답은 <b>로그에 먼저 쓰기</b> 하나입니다.</div>
+  </div>
 </section>
 
 <!-- ==================== m06 ==================== -->
@@ -1103,6 +1146,39 @@ ALTER TABLE orders REORGANIZE PARTITION pmax INTO (
     <br>③ WHERE 에 파티션 키가 없으면 <b>모든 파티션을 뒤집니다</b>
     <br>이 때문에 실무에서는 파티셔닝 대신 <b>애플리케이션 레벨 샤딩</b>이나
     <b>아카이브 테이블 분리</b>를 택하는 경우도 많습니다.
+  </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 258" role="img" aria-label="스키마를 바꿀 때 서비스가 멈추는지 여부를 비교하는 그림. 예전 방식은 테이블 전체를 새로 복사하는 동안 쓰기가 막혔지만, 제자리 방식은 복사 없이 메타데이터만 바꾸거나 변경 중에도 읽고 쓰기를 허용한다. 어떤 방식이 쓰이는지는 미리 확인할 수 있고, 큰 테이블에서 복사 방식이 잡히면 별도 도구로 무중단 변경을 해야 한다.">
+      <text x="16" y="18" class="lbl">ALTER 한 줄이 서비스를 멈출 수 있습니다 — 미리 확인하세요</text>
+
+      <text x="16" y="42" class="ttl rs-t">① COPY — 테이블을 통째로 새로 만듭니다</text>
+      <rect class="bx bx-warn" x="16" y="52" width="150" height="44"/>
+      <text x="91" y="72" class="ann rs-t" text-anchor="middle">원본 테이블</text>
+      <text x="91" y="88" class="ann" text-anchor="middle">1억 행</text>
+      <path class="fl ar ar-rs" style="stroke:#f87171" d="M170 74 L206 74"/>
+      <rect class="bx bx-warn" x="210" y="52" width="180" height="44"/>
+      <text x="300" y="72" class="ann rs-t" text-anchor="middle">새 테이블로 전부 복사</text>
+      <text x="300" y="88" class="ann" text-anchor="middle">수십 분 ~ 몇 시간</text>
+      <rect class="bx bx-fw" x="404" y="52" width="260" height="44"/>
+      <text x="420" y="72" class="ann rs-t">그동안 쓰기가 막힙니다</text>
+      <text x="420" y="88" class="ann">커넥션이 쌓여 장애로 번집니다</text>
+
+      <text x="16" y="126" class="ttl ok-t">② INPLACE · INSTANT — 복사하지 않습니다</text>
+      <rect class="bx bx-ok" x="16" y="136" width="316" height="66"/>
+      <text x="32" y="156" class="ann ok-t">INSTANT — 메타데이터만 수정 (즉시)</text>
+      <text x="32" y="172" class="ann">맨 뒤에 컬럼 추가 · 기본값 변경 같은 것</text>
+      <text x="32" y="192" class="ann ok-t">INPLACE — 변경 중에도 읽기·쓰기 허용</text>
+
+      <rect class="bx bx-hi" x="348" y="136" width="316" height="66"/>
+      <text x="364" y="156" class="val am-t">실행 전에 확인하는 법</text>
+      <text x="364" y="176" class="ann">ALTER TABLE … , ALGORITHM=INPLACE, LOCK=NONE</text>
+      <text x="364" y="194" class="ann">이렇게 명시하면 <tspan class="rs-t">불가능할 때 실행되지 않고 에러</tspan>가 납니다</text>
+
+      <rect class="bx" x="16" y="212" width="648" height="40"/>
+      <text x="32" y="232" class="ann">복사 방식밖에 안 되는 변경이라면 <tspan class="ok-t">gh-ost · pt-online-schema-change</tspan> 로 새 테이블을 따로 채우고 마지막에 이름만 바꿉니다</text>
+      <text x="32" y="248" class="ann">어느 쪽이든 <tspan class="rs-t">운영 시간대는 피하고</tspan>, 되돌릴 방법을 먼저 정해 두고 실행하세요</text>
+    </svg>
+    <div class="cap">"개발에서는 3초였는데 운영에서 30분"이 <b>이 표를 몰라서</b> 생깁니다.</div>
   </div>
 </section>
 

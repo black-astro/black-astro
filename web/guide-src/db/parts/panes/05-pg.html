@@ -1019,6 +1019,40 @@ SELECT pg_stat_statements_reset();   -- 통계 초기화</code></pre>
     <b>explain.depesz.com</b> · <b>explain.dalibo.com</b> 같은 시각화 도구에 붙여 넣으면
     병목 노드가 색으로 표시됩니다. 큰 계획을 읽을 때 시간이 크게 절약됩니다.
   </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 258" role="img" aria-label="실행계획 트리를 읽는 방법을 보여 주는 그림. 계획은 안쪽으로 들여 쓴 단계부터 바깥으로 올라가며 실행되고, 각 단계에는 옵티마이저가 예상한 행 수와 실제로 나온 행 수가 함께 적힌다. 이 둘이 크게 어긋난 단계가 문제의 출발점이며, 전체 스캔이 도는 자리와 정렬이 디스크로 넘어간 자리를 함께 확인한다.">
+      <text x="16" y="18" class="lbl">실행계획은 '안쪽 들여쓰기부터' 읽습니다</text>
+
+      <rect class="bx" x="16" y="42" width="420" height="26"/>
+      <text x="32" y="60" class="ann">Sort  (cost=… rows=200) (actual rows=48000)</text>
+      <text x="452" y="60" class="ann rs-t">④ 마지막에 정렬</text>
+
+      <rect class="bx bx-warn" x="40" y="72" width="396" height="26"/>
+      <text x="56" y="90" class="ann rs-t">→ Hash Join  (rows=200) (actual rows=48000)</text>
+      <text x="452" y="90" class="ann rs-t">③ 예상 200 vs 실제 48000</text>
+
+      <rect class="bx bx-fw" x="64" y="102" width="372" height="26"/>
+      <text x="80" y="120" class="ann rs-t">→ Seq Scan on orders  (actual rows=1200000)</text>
+      <text x="452" y="120" class="ann rs-t">① 전체 스캔</text>
+
+      <rect class="bx bx-ok" x="64" y="132" width="372" height="26"/>
+      <text x="80" y="150" class="ann ok-t">→ Index Scan on customers  (actual rows=40)</text>
+      <text x="452" y="150" class="ann ok-t">② 인덱스로 40행만</text>
+
+      <rect class="bx bx-warn" x="16" y="172" width="316" height="76"/>
+      <text x="32" y="192" class="val rs-t">가장 먼저 볼 것 — rows 의 어긋남</text>
+      <text x="32" y="212" class="ann">예상과 실제가 수백 배 차이 나면 그 아래 단계의</text>
+      <text x="32" y="228" class="ann">선택이 전부 잘못됩니다 — ANALYZE 로 통계를 갱신하세요</text>
+      <text x="32" y="244" class="ann">그래도 어긋나면 조건식이 통계를 못 쓰는 모양입니다</text>
+
+      <rect class="bx bx-ok" x="348" y="172" width="316" height="76"/>
+      <text x="364" y="192" class="val ok-t">EXPLAIN 과 EXPLAIN ANALYZE</text>
+      <text x="364" y="212" class="ann">앞은 계획만 보고, 뒤는 <tspan class="rs-t">실제로 실행합니다</tspan></text>
+      <text x="364" y="228" class="ann">UPDATE·DELETE 에 쓸 때는 트랜잭션으로 감싸고 롤백하세요</text>
+      <text x="364" y="244" class="ann ok-t">BUFFERS 를 함께 켜면 디스크에서 읽었는지 캐시였는지 보입니다</text>
+    </svg>
+    <div class="cap">계획을 읽는 목적은 하나입니다 — <b>어느 단계가 행을 가장 많이 만졌나</b>.</div>
+  </div>
 </section>
 
 <!-- ==================== p13 ==================== -->
@@ -1083,6 +1117,47 @@ WHERE  i.inhparent = 'orders'::regclass ORDER BY c.relname;</code></pre>
     <b>언제 파티셔닝을 할까</b> — 테이블이 <b>수억 행 또는 수백 GB</b>가 되거나,
     <b>오래된 데이터를 주기적으로 대량 삭제</b>할 때입니다.
     그 이하에서는 인덱스만 잘 잡아도 충분하고, 파티셔닝은 오히려 계획 수립 비용을 늘립니다.
+  </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 254" role="img" aria-label="파티셔닝의 구조와 이득을 보여 주는 그림. 하나의 논리 테이블 아래에 기간별로 나뉜 실제 테이블들이 매달려 있어서, 기간 조건이 붙은 조회는 해당 파티션만 읽고 나머지는 건드리지 않는다. 오래된 데이터를 지울 때도 삭제 대신 파티션을 통째로 떼어 낼 수 있어 순식간에 끝난다.">
+      <text x="16" y="18" class="lbl">큰 테이블을 기간으로 잘라 둡니다 — 읽을 곳이 줄어듭니다</text>
+
+      <rect class="bx bx-hi" x="230" y="36" width="220" height="34"/>
+      <text x="340" y="57" class="ann am-t" text-anchor="middle">logs (부모 — 논리 테이블)</text>
+
+      <path class="ln" d="M340 74 L340 84"/>
+      <path class="ln" d="M92 84 L588 84"/>
+      <path class="ln" d="M92 84 L92 96"/>
+      <path class="ln" d="M258 84 L258 96"/>
+      <path class="ln" d="M424 84 L424 96"/>
+      <path class="ln" d="M588 84 L588 96"/>
+
+      <rect class="bx bx-mut" x="16" y="96" width="152" height="46"/>
+      <text x="92" y="116" class="ann" text-anchor="middle">logs_2026_05</text>
+      <text x="92" y="132" class="ann" text-anchor="middle">읽지 않습니다</text>
+      <rect class="bx bx-mut" x="182" y="96" width="152" height="46"/>
+      <text x="258" y="116" class="ann" text-anchor="middle">logs_2026_06</text>
+      <text x="258" y="132" class="ann" text-anchor="middle">읽지 않습니다</text>
+      <rect class="bx bx-fw" x="348" y="96" width="152" height="46"/>
+      <text x="424" y="116" class="ann rs-t" text-anchor="middle">logs_2026_07</text>
+      <text x="424" y="132" class="ann rs-t" text-anchor="middle">여기만 읽습니다</text>
+      <rect class="bx bx-mut" x="512" y="96" width="152" height="46"/>
+      <text x="588" y="116" class="ann" text-anchor="middle">logs_2026_08</text>
+      <text x="588" y="132" class="ann" text-anchor="middle">읽지 않습니다</text>
+
+      <rect class="bx bx-ok" x="16" y="156" width="316" height="86"/>
+      <text x="32" y="176" class="val ok-t">얻는 것</text>
+      <text x="32" y="196" class="ann ok-t">① 프루닝 — 기간 조건이 붙으면 해당 파티션만 스캔</text>
+      <text x="32" y="214" class="ann ok-t">② 오래된 데이터 정리가 순식간에 끝납니다</text>
+      <text x="44" y="230" class="ann">DELETE 수백만 건 대신 DETACH · DROP 한 번</text>
+
+      <rect class="bx bx-warn" x="348" y="156" width="316" height="86"/>
+      <text x="364" y="176" class="val rs-t">주의할 것</text>
+      <text x="364" y="196" class="ann rs-t">조건에 파티션 키가 없으면 전부 읽습니다 — 오히려 손해</text>
+      <text x="364" y="214" class="ann">파티션이 수백 개가 되면 계획 수립 자체가 느려집니다</text>
+      <text x="364" y="230" class="ann">다음 달 파티션을 미리 만들어 두는 작업을 자동화하세요</text>
+    </svg>
+    <div class="cap">파티셔닝은 성능 도구이기 전에 <b>수명 관리 도구</b>입니다 — 지우기가 쉬워집니다.</div>
   </div>
 </section>
 

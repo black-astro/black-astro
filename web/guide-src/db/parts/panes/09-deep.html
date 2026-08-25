@@ -584,6 +584,53 @@ ANALYZE TABLE member UPDATE HISTOGRAM ON city WITH 50 BUCKETS;</code></pre>
     다만 <b>고정한 계획은 데이터가 변해도 그대로</b>이므로,
     반드시 <b>왜 그런 계획이 나왔는지 원인을 먼저</b> 찾으세요.
   </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 258" role="img" aria-label="옵티마이저가 실행 방법을 고르는 과정을 보여 주는 그림. 같은 쿼리를 처리하는 여러 후보 계획을 만들고, 통계 정보를 근거로 각 후보가 읽을 행 수와 비용을 추정한 뒤 가장 싼 것을 고른다. 통계가 실제와 어긋나면 추정이 틀리고, 그러면 명백히 나쁜 계획이 선택된다.">
+      <text x="16" y="18" class="lbl">옵티마이저는 '추정한 비용'으로 고릅니다 — 실제가 아닙니다</text>
+
+      <rect class="bx" x="16" y="42" width="150" height="44"/>
+      <text x="91" y="62" class="ann" text-anchor="middle">SQL 한 줄</text>
+      <text x="91" y="78" class="ann" text-anchor="middle">무엇을 원하는지만</text>
+
+      <path class="fl ar" d="M170 64 L198 64"/>
+
+      <rect class="bx bx-hi" x="202" y="42" width="180" height="106"/>
+      <text x="292" y="62" class="ann am-t" text-anchor="middle">후보 계획들</text>
+      <rect class="bx" x="218" y="70" width="148" height="22"/>
+      <text x="234" y="86" class="ann">A: 전체 스캔 + 해시조인</text>
+      <rect class="bx" x="218" y="96" width="148" height="22"/>
+      <text x="234" y="112" class="ann">B: 인덱스 + 중첩루프</text>
+      <rect class="bx" x="218" y="122" width="148" height="22"/>
+      <text x="234" y="138" class="ann">C: 인덱스 + 병합조인</text>
+
+      <path class="fl ar" d="M386 94 L414 94"/>
+
+      <rect class="bx bx-fw" x="418" y="42" width="150" height="106"/>
+      <text x="493" y="62" class="ann rs-t" text-anchor="middle">비용 추정</text>
+      <text x="434" y="84" class="ann">근거는 통계입니다</text>
+      <text x="434" y="102" class="ann">· 행 수 · 값의 분포</text>
+      <text x="434" y="120" class="ann">· 값의 종류 수</text>
+      <text x="434" y="140" class="ann rs-t">읽을 페이지 수로 환산</text>
+
+      <path class="fl ar ar-gn" style="stroke:#4ade80" d="M572 94 L600 94"/>
+      <rect class="bx bx-ok" x="604" y="72" width="60" height="46"/>
+      <text x="634" y="92" class="ann ok-t" text-anchor="middle">가장 싼</text>
+      <text x="634" y="108" class="ann ok-t" text-anchor="middle">계획 채택</text>
+
+      <rect class="bx bx-warn" x="16" y="166" width="316" height="76"/>
+      <text x="32" y="186" class="val rs-t">통계가 낡으면 전부 틀립니다</text>
+      <text x="32" y="206" class="ann">"이 조건이면 10행" 이라 믿고 중첩루프를 골랐는데</text>
+      <text x="32" y="222" class="ann rs-t">실제로 50만 행이면 그 계획은 재앙이 됩니다</text>
+      <text x="32" y="238" class="ann ok-t">→ 대량 적재 뒤에는 통계를 갱신하세요</text>
+
+      <rect class="bx" x="348" y="166" width="316" height="76"/>
+      <text x="364" y="186" class="val">추정이 어려운 조건들</text>
+      <text x="364" y="206" class="ann">함수로 감싼 컬럼 · LIKE '%중간%' · 여러 열의 상관관계</text>
+      <text x="364" y="222" class="ann">(예: 도시='서울' AND 우편번호='06...' 는 사실 같은 뜻)</text>
+      <text x="364" y="238" class="ann am-t">→ 확장 통계나 힌트로 도와줍니다 — 최후의 수단으로</text>
+    </svg>
+    <div class="cap">계획이 이상하면 <b>옵티마이저를 의심하기 전에 통계를 보세요</b>.</div>
+  </div>
 </section>
 
 <!-- ==================== z08 ==================== -->
@@ -813,6 +860,47 @@ ALTER SESSION SET hash_area_size = 268435456;</code></pre>
     애플리케이션에 <b>재연결·재시도 로직</b>이 반드시 있어야 합니다(🔌 a11).
     "관리형이니 알아서 되겠지"라고 두면 페일오버 때마다 장애가 됩니다.
   </p>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 264" role="img" aria-label="복제와 장애 조치 구조를 보여 주는 그림. 주 서버의 변경 로그가 대기 서버들로 전달되는데, 동기 방식은 대기 서버가 받았다고 답해야 커밋이 끝나므로 데이터 손실이 없지만 느리고, 비동기 방식은 빠르지만 장애 시 마지막 몇 초가 사라질 수 있다. 자동 승격은 과반의 동의로 결정해야 두 서버가 동시에 주인이 되는 사고를 막는다.">
+      <text x="16" y="18" class="lbl">복제는 '얼마나 잃어도 되는가'를 정하는 일입니다</text>
+
+      <rect class="bx bx-fw" x="16" y="44" width="150" height="60"/>
+      <text x="91" y="64" class="ann rs-t" text-anchor="middle">Primary</text>
+      <text x="32" y="84" class="ann">쓰기를 받고</text>
+      <text x="32" y="98" class="ann">변경 로그를 보냅니다</text>
+
+      <path class="fl ar ar-gn" style="stroke:#4ade80" d="M170 62 L206 62"/>
+      <path class="fl ar" d="M170 86 L206 86"/>
+
+      <rect class="bx bx-ok" x="210" y="44" width="200" height="28"/>
+      <text x="226" y="63" class="ann ok-t">동기 — 받았다는 답을 기다림</text>
+      <rect class="bx bx-hi" x="210" y="76" width="200" height="28"/>
+      <text x="226" y="95" class="ann am-t">비동기 — 보내고 바로 커밋</text>
+
+      <rect class="bx bx-ok" x="424" y="44" width="240" height="28"/>
+      <text x="440" y="63" class="ann ok-t">잃는 데이터 0 · 대신 커밋이 느려짐</text>
+      <rect class="bx bx-warn" x="424" y="76" width="240" height="28"/>
+      <text x="440" y="95" class="ann rs-t">빠름 · 대신 마지막 몇 초가 사라질 수 있음</text>
+
+      <text x="16" y="132" class="ttl">장애가 나면 — 누가 새 주인이 되는가</text>
+      <rect class="bx bx-mut" x="16" y="142" width="130" height="54"/>
+      <text x="81" y="162" class="ann" text-anchor="middle">Primary 다운</text>
+      <text x="81" y="180" class="ann" text-anchor="middle">응답 없음</text>
+      <path class="fl ar" d="M150 169 L178 169"/>
+      <rect class="bx bx-hi" x="182" y="142" width="190" height="54"/>
+      <text x="277" y="162" class="ann am-t" text-anchor="middle">과반이 동의해야 승격</text>
+      <text x="277" y="180" class="ann" text-anchor="middle">감시자 노드를 홀수로 둡니다</text>
+      <path class="fl ar" d="M376 169 L404 169"/>
+      <rect class="bx bx-ok" x="408" y="142" width="256" height="54"/>
+      <text x="424" y="162" class="ann ok-t">새 Primary 로 승격 · 접속 주소 전환</text>
+      <text x="424" y="180" class="ann">앱은 VIP · 프록시 · DNS 중 하나로 따라갑니다</text>
+
+      <text x="32" y="222" class="ann rs-t">과반 없이 각자 판단하면 둘 다 주인이 됩니다(스플릿 브레인) — 양쪽에 다른 데이터가 쌓여 되돌릴 수 없습니다</text>
+      <text x="32" y="240" class="ann">복제는 백업이 아닙니다 — <tspan class="ok-t">실수로 지운 DELETE 도 그대로 복제됩니다</tspan>. 시점 복구가 되는 백업을 따로 두세요</text>
+      <text x="32" y="256" class="ann">읽기를 복제본으로 넘길 때는 복제 지연을 감안해야 합니다 — "방금 쓴 것"은 Primary 에서 읽습니다</text>
+    </svg>
+    <div class="cap">HA 설계의 핵심 질문은 둘입니다 — <b>얼마나 잃어도 되나 · 얼마나 멈춰도 되나</b>.</div>
+  </div>
 </section>
 
 <!-- ==================== z11 ==================== -->
