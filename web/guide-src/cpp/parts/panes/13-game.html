@@ -1,0 +1,3477 @@
+<!-- ============================================================
+     게임 서버 PANE
+     ============================================================ -->
+<div class="pane" id="pane-game">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> C++23 · Boost.Asio 1.89 · IOCP · io_uring · FlatBuffers · UE5 Dedicated · 2026 기준</div>
+  <h1>수천 명이<br>같은 세계에서<br>동시에 움직이게</h1>
+  <p class="tx">
+    게임 서버는 웹 서버와 <b>목표가 다릅니다</b>. 웹은 요청 하나에 응답 하나를 잘 돌려주면 되지만,
+    게임은 <b>아무도 요청하지 않아도 1초에 30~60번 세계를 굴려야</b> 하고,
+    그 결과를 접속한 전원에게 <b>수십 밀리초 안에</b> 뿌려야 합니다.
+    그래서 스레드 모델도, 네트워크 모델도, 데이터 저장 방식도 전부 달라집니다.
+    이 탭은 <b>틱 루프 · 신뢰 UDP · 패킷 설계 · IOCP/epoll · 넷코드(예측·보간·지연 보상)</b> 를 거쳐
+    마지막에 <b>실제로 도는 2D 실시간 대전 서버 한 벌</b>을 끝까지 만듭니다.
+    <b>국내 게임사 서버 팀에서 실제로 쓰는 용어와 구조</b>를 기준으로 씁니다.
+  </p>
+  <div class="stats">
+    <div><b>13</b><span>SECTIONS</span></div>
+    <div><b>C++23</b><span>기준</span></div>
+    <div><b>60</b><span>틱/초 목표</span></div>
+    <div><b>1</b><span>완성 서버</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== n01 ==================== -->
+<section class="sec" id="n01">
+  <div class="sec-head rv">
+    <span class="no">GAME 01</span>
+    <h2>게임 서버의 <span class="t">종류와 구조</span> — 무엇을 만들 것인지부터</h2>
+    <p class="lead">
+      "게임 서버를 만들자"는 말은 너무 넓습니다. 방 하나에 8명이 들어가는 대전 게임과
+      한 세계에 수천 명이 돌아다니는 MMO 는 <b>부품이 겹치는 게 거의 없습니다</b>.
+      먼저 어떤 종류를 만드는지 정하고, 그다음 서버를 몇 개로 쪼갤지 정합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="게임 서버의 표준 구성도와 연결 방식 세 가지를 보여 주는 그림. 위쪽 줄은 클라이언트가 게이트웨이를 거쳐 로비·매치 서버로, 매치가 성사되면 게임 룸 서버로, 게임 결과가 DB·랭킹 서버로 흐르는 경로를 보여 준다. 아래쪽 줄은 연결 방식 세 가지를 비교한다. 전용 서버는 서버가 모든 판정을 하므로 치트에 강하지만 서버 비용이 든다. 릴레이는 서버가 패킷만 중계하고 판정은 호스트가 하므로 비용이 싸지만 호스트가 치트를 쓸 수 있다. P2P 는 서버가 아예 없어 공짜지만 호스트가 나가면 판이 끝나고 IP 가 노출된다.">
+      <text x="16" y="18" class="lbl">표준 구성 — 서버 하나가 다 하지 않습니다</text>
+
+      <rect class="bx" x="16" y="34" width="112" height="60"/>
+      <text x="72" y="56" class="val" text-anchor="middle">클라이언트</text>
+      <text x="72" y="72" class="ann" text-anchor="middle">수백~수만</text>
+      <text x="72" y="85" class="ann" text-anchor="middle">동시 접속</text>
+
+      <path class="fl ar" d="M132 64 L144 64"/>
+      <rect class="bx bx-hi" x="148" y="34" width="112" height="60"/>
+      <text x="204" y="56" class="val am-t" text-anchor="middle">게이트웨이</text>
+      <text x="204" y="72" class="ann" text-anchor="middle">인증·토큰 발급</text>
+      <text x="204" y="85" class="ann" text-anchor="middle">연결 수 감당</text>
+
+      <path class="fl ar" d="M264 64 L276 64"/>
+      <rect class="bx" x="280" y="34" width="112" height="60"/>
+      <text x="336" y="56" class="val" text-anchor="middle">로비·매치</text>
+      <text x="336" y="72" class="ann" text-anchor="middle">대기열·파티</text>
+      <text x="336" y="85" class="ann" text-anchor="middle">MMR 매칭</text>
+
+      <path class="fl ar" d="M396 64 L408 64"/>
+      <rect class="bx bx-ok" x="412" y="34" width="112" height="60"/>
+      <text x="468" y="56" class="val ok-t" text-anchor="middle">게임 룸</text>
+      <text x="468" y="72" class="ann" text-anchor="middle">틱 루프·판정</text>
+      <text x="468" y="85" class="ann" text-anchor="middle">여기가 핵심</text>
+
+      <path class="fl ar" d="M528 64 L540 64"/>
+      <rect class="bx" x="544" y="34" width="120" height="60"/>
+      <text x="604" y="56" class="val" text-anchor="middle">DB·랭킹</text>
+      <text x="604" y="72" class="ann" text-anchor="middle">전적·재화</text>
+      <text x="604" y="85" class="ann" text-anchor="middle">Redis+RDB</text>
+
+      <text x="16" y="120" class="ttl">연결 방식 — 판정을 누가 하느냐가 전부입니다</text>
+
+      <rect class="bx bx-ok" x="16" y="132" width="208" height="86"/>
+      <text x="120" y="154" class="val ok-t" text-anchor="middle">전용 서버 Dedicated</text>
+      <text x="32" y="172" class="ann">서버가 모든 판정을 소유</text>
+      <text x="32" y="186" class="ann">치트에 가장 강함</text>
+      <text x="32" y="200" class="ann">서버 비용·운영 부담 큼</text>
+      <text x="32" y="213" class="ann">경쟁성 있는 게임은 사실상 필수</text>
+
+      <rect class="bx" x="242" y="132" width="208" height="86"/>
+      <text x="346" y="154" class="val" text-anchor="middle">릴레이 Relay</text>
+      <text x="258" y="172" class="ann">서버는 패킷 중계만</text>
+      <text x="258" y="186" class="ann">판정은 호스트 클라이언트</text>
+      <text x="258" y="200" class="ann">NAT 문제 해결·IP 숨김</text>
+      <text x="258" y="213" class="ann">호스트 치트는 못 막음</text>
+
+      <rect class="bx bx-warn" x="468" y="132" width="196" height="86"/>
+      <text x="566" y="154" class="val rs-t" text-anchor="middle">P2P 호스트</text>
+      <text x="484" y="172" class="ann">서버 비용 0</text>
+      <text x="484" y="186" class="ann">호스트가 나가면 판 종료</text>
+      <text x="484" y="200" class="ann">서로 IP 노출·NAT 뚫기</text>
+      <text x="484" y="213" class="ann">협동·캐주얼에만 권장</text>
+
+      <rect class="bx bx-fw" x="16" y="232" width="648" height="52"/>
+      <text x="32" y="252" class="val rs-t">고르는 기준 한 줄 — 지면 억울한 게임이면 전용 서버</text>
+      <text x="32" y="270" class="ann">순위·재화·경쟁이 걸린 순간 클라이언트 판정은 무조건 뚫립니다. 협동 PvE 라면 릴레이로 충분합니다</text>
+    </svg>
+    <div class="cap">서버를 역할별로 쪼개는 이유는 <b>부하 특성이 완전히 다르기</b> 때문입니다 — 게이트웨이는 연결 수, 게임 룸은 CPU.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 클라이언트를 못 믿나 — 한 줄로 끝나는 이유</h4>
+      <pre class="code" data-lang="cpp"><code>// ✗ 클라이언트가 보내 주는 값을 그대로 믿는 서버
+void on_move(Player&amp; p, const MovePacket&amp; pk) {
+    p.x = pk.x;          // 클라가 "나 여기 있어" 하면 그대로 반영
+    p.y = pk.y;          // → 메모리 조작 한 번이면 순간이동·벽 통과
+}
+
+// ✓ 서버가 직접 계산하는 서버 (server authoritative)
+void on_move(Player&amp; p, const MoveInput&amp; in, double dt) {
+    // 입력은 '방향'만 받습니다. 위치는 서버가 만듭니다
+    Vec2 dir = normalize({in.dx, in.dy});
+    Vec2 want = p.pos + dir * p.speed * dt;      // 속도 상한이 걸림
+
+    if (world.is_walkable(want))  p.pos = want;  // 지형 검사도 서버가
+    // 실패하면 그냥 안 움직입니다 — 클라에는 정정 패킷을 보냅니다
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>업계에서 가장 많이 반복되는 사고</b> — 개발 초반에 “일단 클라가 계산하고 서버는 저장만”으로 만들어 놓고
+        출시 직전에 뒤집으려다 프로젝트가 흔들립니다. <b>권위(authority)를 어디 두느냐는 나중에 바꿀 수 있는 설계가 아닙니다.</b>
+        처음부터 <b>서버가 상태를 소유하고 클라는 입력만 보낸다</b>로 시작하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">서버를 몇 조각으로 나누나</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">서버</th><th>병목</th><th>확장 방법</th></tr>
+        <tr><td><b>게이트웨이</b></td><td>동시 연결 수·소켓</td><td>수평(무상태)</td></tr>
+        <tr><td><b>로비/매치</b></td><td>Redis I/O</td><td>수평 + 큐 샤딩</td></tr>
+        <tr><td><b>게임 룸</b></td><td><b>CPU(틱 처리)</b></td><td>룸 단위로 분산</td></tr>
+        <tr><td><b>존(MMO)</b></td><td>CPU + 관심 영역</td><td>지역 분할</td></tr>
+        <tr><td><b>채팅</b></td><td>팬아웃</td><td>Pub/Sub</td></tr>
+        <tr><td><b>DB 프록시</b></td><td>디스크·커넥션</td><td>샤딩·읽기 복제</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>처음부터 다 쪼갤 필요는 없습니다</b> — 프로토타입은 <b>한 프로세스에 전부</b> 넣고
+        모듈 경계만 지켜 두세요(로비 코드가 룸 내부 자료구조를 직접 만지지 않게).
+        경계만 지켰다면 나중에 프로세스로 떼어 내는 건 <b>패킷 경로 하나 바꾸는 일</b>입니다.
+        경계를 안 지켰다면 다시 짜야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">실시간이냐 턴제냐가 모든 것을 정합니다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">장르별 틱 레이트와 요구 지연</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:22%">장르</th><th>틱</th><th>허용 RTT</th><th>전송</th></tr>
+        <tr><td>FPS·대전 격투</td><td><b>60~128</b></td><td>~50ms</td><td>UDP</td></tr>
+        <tr><td>MOBA</td><td>30~60</td><td>~80ms</td><td>UDP</td></tr>
+        <tr><td>액션 MMO</td><td>10~30</td><td>~150ms</td><td>UDP/TCP</td></tr>
+        <tr><td>타겟팅 MMORPG</td><td>10~20</td><td>~200ms</td><td>TCP</td></tr>
+        <tr><td>턴제·카드·보드</td><td>이벤트</td><td>~500ms</td><td>TCP/WS</td></tr>
+        <tr><td>방치형·소셜</td><td>없음</td><td>초 단위</td><td>HTTP</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>틱 레이트를 올리면</b> 반응성이 좋아지는 대신 <b>CPU 와 대역폭이 그대로 비례해서</b> 늘어납니다.
+        100명 방에서 30틱 → 60틱 은 서버 비용이 두 배입니다.
+        그래서 실무에서는 <b>시뮬레이션 틱은 60, 전송(스냅샷) 틱은 20~30</b> 으로 <b>따로 두는</b> 방식을 흔히 씁니다.
+        n02 와 n07 에서 이 분리를 코드로 봅니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">턴제라면 이 정도로 끝납니다</h4>
+      <pre class="code" data-lang="cpp"><code>// 턴제는 '루프'가 없습니다 — 이벤트가 올 때만 깨어납니다
+struct TurnRoom {
+    std::vector&lt;PlayerId&gt; order;
+    std::size_t           cur = 0;
+    Timer                 turn_timer;   // 제한 시간(예: 30초)
+
+    void on_action(PlayerId who, const Action&amp; a) {
+        if (order[cur] != who) return;          // 차례가 아니면 무시
+        if (!rules::is_legal(state, a)) return; // 규칙 검증 ★ 서버에서
+        rules::apply(state, a);
+        broadcast(StateDelta{state});           // 바뀐 부분만
+        next_turn();
+    }
+    void next_turn() {
+        cur = (cur + 1) % order.size();
+        turn_timer.expires_after(30s);          // 시간 초과 → 자동 패스
+        turn_timer.async_wait([this](auto ec){ if(!ec) on_timeout(); });
+    }
+};</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>턴제는 게임 서버가 아니라 웹 서버에 가깝습니다</b> — WebSocket 이나 심지어 HTTP 폴링으로도 됩니다.
+        C++ 로 짤 이유도 크지 않습니다. <b>이 탭이 필요한 건 실시간</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">직접 만들 것인가, 사서 쓸 것인가</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">2026년 기준 선택지와 판단 기준</h4>
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:18%">선택지</th><th>형태</th><th>맞는 경우</th><th>걸리는 지점</th></tr>
+      <tr><td><b>자체 C++ 서버</b></td><td>Asio/IOCP 직접</td><td>대규모·장수 서비스, 비용 민감, 특수 시뮬레이션</td><td>사람과 시간(서버 1~3명 × 수개월)</td></tr>
+      <tr><td><b>UE5 Dedicated</b></td><td>엔진 내장</td><td>UE 로 만드는 액션·슈터, 물리 판정이 곧 게임</td><td>인스턴스당 메모리·CPU 가 큼</td></tr>
+      <tr><td><b>Photon</b></td><td>SaaS/온프렘</td><td>소규모 방 게임, 빠른 출시</td><td>CCU 과금, 로직 커스터마이즈 한계</td></tr>
+      <tr><td><b>Nakama</b></td><td>오픈소스(Go)</td><td>로비·매치·소셜을 통째로 받고 싶을 때</td><td>실시간 시뮬은 결국 따로 짜야 함</td></tr>
+      <tr><td><b>PlayFab / GameLift</b></td><td>클라우드 백엔드</td><td>서버 인스턴스 관리·매치 대행</td><td>락인, 요금 예측이 어려움</td></tr>
+      <tr><td><b>Agones + 자체</b></td><td>K8s 오케스트레이션</td><td>자체 서버를 쓰되 배치만 맡길 때</td><td>K8s 운영 인력 필요</td></tr>
+    </table></div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>실무 판단 기준</b> — “우리 게임의 재미가 <b>서버 시뮬레이션에서 나오는가</b>”를 먼저 물으세요.
+      히트박스·투사체·물리가 곧 게임성이라면 <b>남의 서버로는 못 만듭니다</b>.
+      반대로 방을 만들고 상태를 주고받는 게 전부라면 상용을 쓰고 <b>게임에 시간을 쓰는 편</b>이 낫습니다.
+      국내 중견 이상 게임사는 대부분 <b>자체 C++ 서버 프레임워크를 사내에 하나 갖고</b> 프로젝트마다 재사용합니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 먼저 <b>전용 / 릴레이 / P2P</b> 중 무엇인지 정하고,
+    <b>서버가 상태를 소유한다</b>는 원칙을 첫 줄부터 지킵니다.
+    서버는 <b>게이트웨이 · 로비 · 게임 룸 · DB</b> 로 역할이 나뉘고, 병목이 서로 다릅니다.
+    <b>틱 레이트는 장르가 정합니다</b> — 그 숫자가 이후 모든 설계의 예산이 됩니다.</div>
+</section>
+
+
+<!-- ==================== n02 ==================== -->
+<section class="sec" id="n02">
+  <div class="sec-head rv">
+    <span class="no">GAME 02</span>
+    <h2>틱 루프 — <span class="t">아무도 부르지 않아도</span> 돌아가는 심장</h2>
+    <p class="lead">
+      웹 서버는 요청이 없으면 아무 일도 하지 않습니다. 게임 서버는 반대입니다.
+      <b>1초에 30~60번, 아무 입력이 없어도 세계를 한 칸씩 굴립니다.</b>
+      이 루프의 정확도가 곧 게임의 체감 품질이 되므로, 처음부터 제대로 짜 두어야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 296" role="img" aria-label="고정 틱 루프의 시간축을 보여 주는 그림. 1초를 30등분한 33.3밀리초 구간이 반복되고, 각 구간 안에서 서버가 일하는 시간과 남는 시간이 나뉜다. 네 번째 틱에서 처리 시간이 구간을 넘겨 밀림이 발생하고, 그다음 두 틱을 따라잡기로 연속 실행하거나 밀린 틱을 버리는 두 가지 대응이 있다. 따라잡기는 시뮬레이션 정확도를 지키지만 밀림이 계속되면 나선형으로 악화되고, 버리기는 즉시 회복되지만 그 틱의 물리가 건너뛴다.">
+      <text x="16" y="18" class="lbl">고정 틱 33.3ms — 일하는 시간과 남는 시간</text>
+
+      <path class="ln" d="M16 96 L664 96"/>
+      <text x="16" y="112" class="ann">0ms</text>
+      <text x="126" y="112" class="ann">33</text>
+      <text x="234" y="112" class="ann">66</text>
+      <text x="342" y="112" class="ann">100</text>
+      <text x="450" y="112" class="ann">133</text>
+      <text x="558" y="112" class="ann">166</text>
+
+      <path class="ln-t" d="M124 36 L124 100"/>
+      <path class="ln-t" d="M232 36 L232 100"/>
+      <path class="ln-t" d="M340 36 L340 100"/>
+      <path class="ln-t" d="M448 36 L448 100"/>
+      <path class="ln-t" d="M556 36 L556 100"/>
+
+      <rect class="bx bx-ok" x="16" y="48" width="42" height="34"/>
+      <text x="37" y="69" class="ann ok-t" text-anchor="middle">work</text>
+      <rect class="bx bx-mut" x="60" y="48" width="62" height="34"/>
+      <text x="91" y="69" class="ann" text-anchor="middle">sleep</text>
+
+      <rect class="bx bx-ok" x="126" y="48" width="50" height="34"/>
+      <text x="151" y="69" class="ann ok-t" text-anchor="middle">work</text>
+      <rect class="bx bx-mut" x="178" y="48" width="52" height="34"/>
+      <text x="204" y="69" class="ann" text-anchor="middle">sleep</text>
+
+      <rect class="bx bx-ok" x="234" y="48" width="40" height="34"/>
+      <text x="254" y="69" class="ann ok-t" text-anchor="middle">work</text>
+      <rect class="bx bx-mut" x="276" y="48" width="62" height="34"/>
+      <text x="307" y="69" class="ann" text-anchor="middle">sleep</text>
+
+      <rect class="bx bx-warn" x="342" y="48" width="140" height="34"/>
+      <text x="412" y="69" class="ann rs-t" text-anchor="middle">work 46ms — 구간 초과</text>
+
+      <rect class="bx bx-hi" x="486" y="48" width="68" height="34"/>
+      <text x="520" y="69" class="ann am-t" text-anchor="middle">밀린 틱</text>
+      <rect class="bx bx-ok" x="558" y="48" width="46" height="34"/>
+      <text x="581" y="69" class="ann ok-t" text-anchor="middle">work</text>
+      <rect class="bx bx-mut" x="606" y="48" width="58" height="34"/>
+      <text x="635" y="69" class="ann" text-anchor="middle">sleep</text>
+
+      <text x="16" y="140" class="ttl">밀렸을 때 — 두 가지 대응 중 하나를 고르세요</text>
+
+      <rect class="bx bx-ok" x="16" y="152" width="320" height="82"/>
+      <text x="32" y="174" class="val ok-t">① 따라잡기 catch-up</text>
+      <text x="32" y="192" class="ann">밀린 만큼 update(dt) 를 연속으로 여러 번 돌립니다</text>
+      <text x="32" y="206" class="ann">물리·시뮬레이션이 어긋나지 않습니다</text>
+      <text x="32" y="220" class="ann">단, 한 번에 도는 횟수에 상한을 꼭 두세요 (예: 5회)</text>
+
+      <rect class="bx bx-hi" x="352" y="152" width="312" height="82"/>
+      <text x="368" y="174" class="val am-t">② 버리기 drop</text>
+      <text x="368" y="192" class="ann">밀린 틱을 포기하고 지금 시각으로 다시 맞춥니다</text>
+      <text x="368" y="206" class="ann">즉시 회복되지만 그 틱의 이동·판정이 사라집니다</text>
+      <text x="368" y="220" class="ann">전투 판정이 있는 게임에는 위험합니다</text>
+
+      <rect class="bx bx-fw" x="16" y="248" width="648" height="34"/>
+      <text x="32" y="268" class="ann rs-t">상한 없는 따라잡기가 최악입니다 — 밀려서 더 오래 걸리고, 더 밀리는 death spiral 이 됩니다</text>
+    </svg>
+    <div class="cap">틱 예산은 <b>33.3ms 가 아니라 그 절반</b>으로 잡으세요 — 나머지는 GC 없는 언어에도 반드시 생기는 변동분입니다.</div>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">고정 틱 루프 — 이 40줄이 서버의 전부입니다</h4>
+    <pre class="code" data-lang="cpp"><code>#include &lt;chrono&gt;
+#include &lt;thread&gt;
+using namespace std::chrono;
+
+class GameLoop {
+    // ★ steady_clock 을 씁니다. system_clock 은 NTP 보정으로 '뒤로 갈' 수 있습니다
+    using Clock = steady_clock;
+
+    static constexpr int      TICK_HZ  = 30;
+    static constexpr nanoseconds DT     = nanoseconds(1'000'000'000 / TICK_HZ); // 33.33ms
+    static constexpr int      MAX_CATCHUP = 5;   // 한 번에 따라잡을 최대 틱 수
+
+    World       world_;
+    std::atomic&lt;bool&gt; running_{true};
+    std::uint64_t tick_ = 0;
+
+public:
+    void run() {
+        auto next = Clock::now();            // 다음 틱이 시작돼야 할 '이상적인' 시각
+
+        while (running_.load(std::memory_order_relaxed)) {
+            auto now = Clock::now();
+
+            int catchup = 0;
+            while (now &gt;= next &amp;&amp; catchup &lt; MAX_CATCHUP) {
+                auto t0 = Clock::now();
+
+                pump_network();                       // ① 들어온 패킷을 큐에서 꺼내 적용
+                world_.update(1.0 / TICK_HZ);         // ② 세계를 dt 만큼 굴림
+                broadcast_snapshot(tick_);            // ③ 결과를 뿌림
+
+                auto used = duration_cast&lt;microseconds&gt;(Clock::now() - t0);
+                stats_.record(used);                  // ④ 틱당 처리 시간 기록 ★ n12
+                if (used &gt; duration_cast&lt;microseconds&gt;(DT))
+                    log_warn("tick {} overrun: {}us", tick_, used.count());
+
+                ++tick_;
+                next += DT;                           // ★ now 가 아니라 next 에 더합니다
+                ++catchup;
+            }
+
+            if (catchup == MAX_CATCHUP) {             // 너무 밀렸으면 기준을 다시 잡음
+                log_error("loop far behind, resync");
+                next = Clock::now() + DT;
+            }
+
+            // 남는 시간은 자야 합니다 — 안 자면 코어 하나를 100% 태웁니다
+            auto sleep_for = next - Clock::now();
+            if (sleep_for &gt; 1ms)  std::this_thread::sleep_for(sleep_for - 1ms);
+            while (Clock::now() &lt; next) std::this_thread::yield();  // 마지막 1ms 는 스핀
+        }
+    }
+};</code></pre>
+    <div class="grid2" style="margin-top:12px">
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>next += DT</code> 가 핵심입니다</b> — <code>next = now + DT</code> 로 쓰면
+        매 틱마다 처리 시간만큼 오차가 <b>누적</b>되어 30틱이 27틱쯤으로 조용히 내려앉습니다.
+        “이상적인 시각”을 기준으로 더해야 <b>장시간 돌려도 틱 수가 정확</b>합니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>sleep_for 를 그대로 믿으면 안 됩니다</b> — 윈도우 기본 타이머 해상도는 약 15.6ms 라
+        1ms 를 재워 달라고 해도 15ms 를 잡니다. 그래서 <b>마지막 1ms 는 스핀</b>으로 채웁니다.
+        윈도우에서는 <code>timeBeginPeriod(1)</code> 또는 최신 API 인
+        <code>SetProcessInformation</code> 의 타이머 해상도 설정을 함께 씁니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">시뮬레이션 틱과 전송 틱을 분리합니다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">60틱 시뮬 · 20틱 전송</h4>
+      <pre class="code" data-lang="cpp"><code>static constexpr int SIM_HZ  = 60;   // 판정 정확도를 위해 촘촘히
+static constexpr int SEND_HZ = 20;   // 대역폭을 위해 드물게
+static constexpr int SEND_EVERY = SIM_HZ / SEND_HZ;   // 3틱마다 한 번
+
+void tick_once() {
+    pump_network();
+    world_.update(1.0 / SIM_HZ);
+
+    if (tick_ % SEND_EVERY == 0)
+        broadcast_snapshot(tick_);       // ★ 3틱에 한 번만 전송
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>왜 나누나</b> — 히트 판정은 촘촘할수록 정확하지만, 클라이언트는 <b>어차피 화면을 보간</b>해서 그립니다(n07).
+        <b>대역폭은 정확히 전송 틱에 비례</b>하므로, 60 → 20 으로 내리면 서버 트래픽 비용이 <b>1/3</b> 이 됩니다.
+        오버워치·발로란트류가 “틱레이트 128”을 말할 때도 <b>전송 틱</b>을 가리키는 경우가 많습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한 프로세스에 방이 여러 개일 때</h4>
+      <pre class="code" data-lang="cpp"><code>// 방마다 스레드를 하나씩? → 방 500개면 스레드 500개. 안 됩니다.
+// 워커 스레드 N개가 방 목록을 나눠 갖습니다 (N = 코어 수)
+
+struct RoomWorker {
+    std::vector&lt;std::unique_ptr&lt;Room&gt;&gt; rooms;   // 이 워커 전용 — 락 필요 없음 ★
+    void tick(double dt) {
+        for (auto&amp; r : rooms) {
+            if (!r-&gt;alive()) continue;
+            r-&gt;update(dt);          // 방끼리는 서로 안 건드립니다
+        }
+        std::erase_if(rooms, [](auto&amp; r){ return !r-&gt;alive(); });
+    }
+};
+
+// 방을 새로 만들 때는 가장 한가한 워커에 붙입니다
+RoomWorker&amp; pick_worker() {
+    return *std::ranges::min_element(workers_, {},
+        [](const auto&amp; w){ return w.load_score(); });
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>방을 워커에 고정(affinity)하면 락이 사라집니다</b> — 한 방의 데이터를 한 스레드만 만지므로
+        뮤텍스가 필요 없습니다. 이것이 게임 서버 스레드 설계의 <b>가장 실용적인 출발점</b>입니다(n06).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">틱이 밀리는 진짜 원인들</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">틱 안에서 절대 하면 안 되는 것</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">하지 말 것</th><th>대신</th></tr>
+        <tr><td>동기 DB 쿼리</td><td>더티 큐에 넣고 별도 스레드(n09)</td></tr>
+        <tr><td>파일·로그 동기 쓰기</td><td>비동기 로거(spdlog async)</td></tr>
+        <tr><td>메모리 할당 반복</td><td>사전 예약·오브젝트 풀</td></tr>
+        <tr><td><code>std::regex</code>·문자열 파싱</td><td>바이너리 패킷(n04)</td></tr>
+        <tr><td>전체 순회 O(n²) 충돌</td><td>공간 분할(그리드·쿼드트리)</td></tr>
+        <tr><td>블로킹 <code>send()</code></td><td>비동기 쓰기 큐(n05)</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>실제 사례</b> — 틱마다 <code>std::map</code> 을 순회하며 문자열 키를 만들던 코드 하나 때문에
+        100명 방에서 틱 시간이 4ms → 38ms 가 된 적이 있습니다.
+        <b>틱 안의 코드는 “한 번 호출” 이 아니라 “초당 30번 × 방 수” 로 읽어야</b> 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">틱 시간 히스토그램을 항상 켜 두세요</h4>
+      <pre class="code" data-lang="cpp"><code>struct TickStats {
+    std::array&lt;std::uint32_t, 8&gt; bucket{};   // &lt;1,2,4,8,16,33,66,그 이상 ms
+    std::uint64_t total = 0, over = 0;
+
+    void record(std::chrono::microseconds us) {
+        double ms = us.count() / 1000.0;
+        std::size_t i = ms &lt; 1 ? 0 : ms &lt; 2 ? 1 : ms &lt; 4 ? 2 : ms &lt; 8 ? 3
+                      : ms &lt; 16 ? 4 : ms &lt; 33 ? 5 : ms &lt; 66 ? 6 : 7;
+        ++bucket[i]; ++total;
+        if (ms &gt; 33.3) ++over;               // 오버런 비율 ★ 가장 중요한 지표
+    }
+    double p99_estimate() const;             // 버킷 누적으로 근사
+};</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>평균은 거짓말을 합니다</b> — 평균 5ms 여도 100틱 중 1번 80ms 가 나오면
+        플레이어는 그 순간 <b>끊김</b>으로 느낍니다. <b>p99 와 오버런 비율</b>만 대시보드에 띄워도
+        문제의 90%가 보입니다(n12에서 지표로 다시 다룹니다).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 틱 루프는 <b><code>next += DT</code></b> 로 이상 시각을 누적하고,
+    <b>따라잡기에 상한</b>을 두고, <b>남는 시간은 자야</b> 합니다.
+    <b>시뮬 틱과 전송 틱을 분리</b>하면 정확도는 지키면서 대역폭만 줄일 수 있습니다.
+    <b>틱 안에서는 절대 블로킹하지 않습니다</b> — 이 원칙 하나가 이후 모든 장의 전제입니다.</div>
+</section>
+
+
+<!-- ==================== n03 ==================== -->
+<section class="sec" id="n03">
+  <div class="sec-head rv">
+    <span class="no">GAME 03</span>
+    <h2>TCP 냐 UDP 냐 — <span class="t">신뢰성을 직접 얹는</span> 이유</h2>
+    <p class="lead">
+      TCP 는 “빠짐없이 순서대로” 를 보장합니다. 좋아 보이지만 실시간 게임에서는 그게 <b>독</b>이 됩니다.
+      패킷 하나가 늦으면 <b>뒤에 도착한 최신 정보까지 전부 붙잡아 두기</b> 때문입니다.
+      그래서 게임은 UDP 위에 <b>필요한 만큼만</b> 신뢰성을 얹습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 320" role="img" aria-label="신뢰 UDP 계층이 패킷 손실을 복구하는 과정을 시간 순으로 보여 주는 그림. 클라이언트가 일련번호 17, 18, 19 를 차례로 보내는데 18번이 네트워크에서 유실된다. 서버는 19번을 받고 18번이 비었다는 것을 알아채고 확인 응답에 받은 번호 목록을 담아 돌려보낸다. 클라이언트는 18번이 확인되지 않은 것을 보고 다시 보내고, 서버가 그때 18번을 받아 순서를 복원한다. 아래쪽은 신뢰성 모드 세 가지를 비교한다. 신뢰 순서 보장은 채팅과 아이템에, 신뢰 무순서는 피격 판정에, 비신뢰 최신값 우선은 위치 갱신에 쓴다.">
+      <text x="16" y="18" class="lbl">신뢰 UDP — 잃어버린 패킷만 골라서 다시 보냅니다</text>
+
+      <text x="16" y="44" class="ttl">클라이언트</text>
+      <path class="ln" d="M16 52 L664 52"/>
+      <text x="16" y="184" class="ttl">서버</text>
+      <path class="ln" d="M16 192 L664 192"/>
+
+      <text x="76" y="40" class="ann" text-anchor="middle">seq 17</text>
+      <path class="fl ar" d="M76 58 L100 186"/>
+
+      <text x="186" y="40" class="ann rs-t" text-anchor="middle">seq 18</text>
+      <path class="fl ar" style="stroke:#fb7185" d="M186 58 L200 112"/>
+      <text x="212" y="126" class="ann rs-t">✗ 유실</text>
+
+      <text x="316" y="40" class="ann" text-anchor="middle">seq 19</text>
+      <path class="fl ar" d="M316 58 L340 186"/>
+      <text x="352" y="176" class="ann am-t">18 이 비었다</text>
+
+      <path class="fl ar" style="stroke:#fbbf24" d="M420 186 L444 58"/>
+      <text x="452" y="46" class="ann am-t">ack 19 · 받은 목록 17,19</text>
+
+      <text x="560" y="40" class="ann ok-t" text-anchor="middle">seq 18 재전송</text>
+      <path class="fl ar" style="stroke:#34d399" d="M560 58 L584 186"/>
+      <text x="596" y="176" class="ann ok-t">순서 복원</text>
+
+      <text x="16" y="220" class="ttl">신뢰성 모드 — 채널마다 다르게 겁니다</text>
+
+      <rect class="bx bx-ok" x="16" y="232" width="208" height="74"/>
+      <text x="120" y="254" class="val ok-t" text-anchor="middle">신뢰 · 순서 보장</text>
+      <text x="32" y="272" class="ann">채팅 · 아이템 획득</text>
+      <text x="32" y="286" class="ann">스킬 사용 · 방 입장</text>
+      <text x="32" y="300" class="ann">잃으면 안 되고 순서도 중요</text>
+
+      <rect class="bx bx-hi" x="242" y="232" width="208" height="74"/>
+      <text x="346" y="254" class="val am-t" text-anchor="middle">신뢰 · 무순서</text>
+      <text x="258" y="272" class="ann">피격 판정 · 이펙트 트리거</text>
+      <text x="258" y="286" class="ann">도착만 하면 순서는 무관</text>
+      <text x="258" y="300" class="ann">앞 패킷이 막지 않음</text>
+
+      <rect class="bx" x="468" y="232" width="196" height="74"/>
+      <text x="566" y="254" class="val cy-t" text-anchor="middle">비신뢰 · 최신값</text>
+      <text x="484" y="272" class="ann">위치 · 회전 · 애니 상태</text>
+      <text x="484" y="286" class="ann">다시 보낼 이유가 없음</text>
+      <text x="484" y="300" class="ann">오래된 건 그냥 버립니다</text>
+    </svg>
+    <div class="cap">위치 정보는 <b>다시 보내는 순간 이미 낡았습니다</b> — 재전송이 항상 이득이 아닌 이유입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">TCP 의 진짜 문제 — 머리 막힘(HOL blocking)</h4>
+      <pre class="code" data-lang="text"><code>TCP 로 위치를 60Hz 로 보낸다고 합시다.
+
+  보낸 순서 :  P100  P101  P102  P103  P104  P105
+  P101 이 유실 →  재전송에 RTT(예: 80ms) 가 걸립니다
+
+  그동안 P102~P105 는 이미 도착해 있지만
+  커널 수신 버퍼에 갇혀 앱으로 올라오지 못합니다 ★
+  "순서대로" 를 지켜야 하기 때문입니다
+
+  결과 : 80ms 뒤에 P101~P105 가 한꺼번에 올라옵니다
+        → 화면에서는 '멈췄다가 순간이동' 으로 보입니다
+
+UDP + 최신값 우선이라면 :
+  P101 은 그냥 버립니다. P102 가 도착한 순간 그걸 씁니다
+  → 16ms 뒤 정상 진행. 한 프레임 튄 것으로 끝납니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“TCP 는 느리다”는 말은 부정확합니다</b> — 대역폭·처리량은 오히려 TCP 가 좋습니다.
+        문제는 <b>지연의 분포</b>입니다. 손실이 1%만 있어도 TCP 는 <b>가끔 RTT 만큼 통째로 멈추고</b>,
+        게임에서는 그 “가끔”이 곧 렉으로 체감됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그럼 언제 TCP/WebSocket 이 정답인가</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:40%">상황</th><th>선택</th></tr>
+        <tr><td>턴제·카드·보드</td><td><b>TCP / WebSocket</b></td></tr>
+        <tr><td>타겟팅 MMORPG</td><td>TCP 로도 충분</td></tr>
+        <tr><td>브라우저(WebGL) 클라</td><td><b>WebSocket 또는 WebTransport</b></td></tr>
+        <tr><td>로비·매치·상점·인증</td><td>TCP/HTTPS</td></tr>
+        <tr><td>사내망·모바일 3G 배려</td><td>TCP 가 방화벽에 강함</td></tr>
+        <tr><td>FPS·격투·레이싱</td><td><b>UDP 필수</b></td></tr>
+        <tr><td>MOBA·액션 MMO</td><td>UDP 권장</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>대부분의 상용 게임은 둘 다 씁니다</b> — 로비·상점·인증은 <b>TCP(또는 HTTPS)</b>,
+        게임 룸 안의 실시간 상태만 <b>UDP</b>. 국내 모바일 게임은 회사 방화벽·통신사 NAT 때문에
+        <b>UDP 가 막히는 사용자</b>가 실제로 존재하므로 <b>TCP 폴백 경로</b>를 함께 두는 경우가 많습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">신뢰 UDP 라이브러리 고르기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">2026년 기준 실사용 후보</h4>
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:22%">라이브러리</th><th>특징</th><th>암호화</th><th>맞는 경우</th></tr>
+      <tr><td><b>GameNetworkingSockets</b><br><span class="sm">Valve</span></td><td>Steam 에서 실제로 도는 코드. 채널·혼잡 제어·릴레이</td><td><b>내장</b>(AES-GCM)</td><td>PC 게임, Steam 연동, 가장 무난한 기본값</td></tr>
+      <tr><td><b>ENet</b></td><td>가볍고 API 가 단순. 20년 된 검증된 코드</td><td>없음(직접)</td><td>학습·소규모·프로토타입</td></tr>
+      <tr><td><b>KCP</b></td><td>ARQ 만 제공. 전송은 직접 붙임. 지연에 공격적</td><td>없음</td><td>중국계 게임·모바일 고손실 환경</td></tr>
+      <tr><td><b>yojimbo</b></td><td>Glenn Fiedler. 암호화+연결 토큰 설계가 교과서적</td><td><b>내장</b>(libsodium)</td><td>보안 설계를 배우고 싶을 때</td></tr>
+      <tr><td><b>QUIC</b><br><span class="sm">msquic·quiche</span></td><td>표준. 스트림별 독립 순서 보장, 0-RTT</td><td><b>필수</b>(TLS 1.3)</td><td>모바일(회선 전환), 웹 연동</td></tr>
+      <tr><td><b>직접 구현</b></td><td>seq·ack 비트필드·재전송을 손으로</td><td>직접</td><td>학습용. 상용에는 권장하지 않음</td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>현실적인 조언</b> — 신뢰 UDP 를 처음부터 직접 만들면
+      <b>혼잡 제어·MTU 탐색·재연결·NAT 유지</b> 같은 “보이지 않는 8할”에서 반드시 막힙니다.
+      <b>기본값은 GameNetworkingSockets</b> 로 두고, 원리를 이해하기 위해 아래 코드를 읽어 보세요.
+      단, 브라우저 클라이언트가 있다면 <b>WebTransport(QUIC 기반)</b> 이 사실상 유일한 UDP 계열 선택지입니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">seq · ack 비트필드는 이렇게 생겼습니다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">32개를 한 번에 확인하는 ack 비트필드</h4>
+      <pre class="code" data-lang="cpp"><code>// 헤더 12바이트로 "내가 받은 최근 33개" 를 전부 알려 줍니다
+struct RelHeader {
+    std::uint16_t seq;        // 이 패킷의 번호
+    std::uint16_t ack;        // 내가 받은 것 중 가장 최신 번호
+    std::uint32_t ack_bits;   // ack-1 ~ ack-32 를 비트 1개씩 ★
+    std::uint32_t sent_at_ms; // RTT 계산용
+};
+
+// 받았을 때 — 내 수신 기록을 갱신
+void on_recv(std::uint16_t s) {
+    if (seq_greater(s, recv_ack_)) {          // 더 최신이면 창을 민다
+        std::uint16_t shift = s - recv_ack_;
+        recv_bits_ = (shift &gt;= 32) ? 0 : (recv_bits_ &lt;&lt; shift) | (1u &lt;&lt; (shift-1));
+        recv_ack_  = s;
+    } else {                                   // 늦게 도착한 옛 패킷
+        std::uint16_t diff = recv_ack_ - s;
+        if (diff &lt;= 32) recv_bits_ |= (1u &lt;&lt; (diff-1));
+    }
+}
+
+// ★ 순환 비교 — 65535 다음이 0 이므로 그냥 &lt; 로 비교하면 틀립니다
+inline bool seq_greater(std::uint16_t a, std::uint16_t b) {
+    return (a &gt; b &amp;&amp; a - b &lt;= 32768) || (a &lt; b &amp;&amp; b - a &gt; 32768);
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">보낸 쪽 — 확인 안 된 것만 다시</h4>
+      <pre class="code" data-lang="cpp"><code>struct SentInfo { std::uint32_t at_ms; bool acked; std::vector&lt;std::byte&gt; body; };
+std::array&lt;SentInfo, 1024&gt; sent_;          // seq % 1024 로 원형 저장
+
+void on_ack(const RelHeader&amp; h, std::uint32_t now_ms) {
+    auto confirm = [&amp;](std::uint16_t s) {
+        auto&amp; e = sent_[s % 1024];
+        if (e.acked) return;
+        e.acked = true;
+        rtt_ = rtt_ * 0.9 + (now_ms - e.at_ms) * 0.1;   // 지수 이동 평균
+    };
+    confirm(h.ack);
+    for (int i = 0; i &lt; 32; ++i)
+        if (h.ack_bits &amp; (1u &lt;&lt; i)) confirm(h.ack - (i + 1));
+}
+
+void update(std::uint32_t now_ms) {
+    // RTT 의 1.5배가 지나도 확인이 없으면 유실로 간주하고 재전송
+    const std::uint32_t timeout = static_cast&lt;std::uint32_t&gt;(rtt_ * 1.5) + 10;
+    for (auto&amp; e : sent_)
+        if (!e.acked &amp;&amp; e.body.size() &amp;&amp; now_ms - e.at_ms &gt; timeout)
+            { resend(e); e.at_ms = now_ms; }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>ack 는 따로 보내지 않습니다</b> — 어차피 매 틱 패킷이 오가므로 <b>헤더에 얹어 보냅니다</b>(piggyback).
+        ack 전용 패킷을 만들면 트래픽이 두 배가 됩니다.
+        <b>보낼 게 없을 때만</b> 200ms 주기로 빈 keep-alive 를 보내 NAT 매핑을 유지합니다.
+      </div>
+    </div>
+  </div>
+
+    <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">패킷 크기 — MTU 를 넘기면 조각납니다</h4>
+      <pre class="code" data-lang="text"><code>이더넷 MTU 1500 바이트에서 실제로 쓸 수 있는 크기는
+
+  1500 - IP 헤더 20 - UDP 헤더 8 = 1472 바이트
+  VPN·PPPoE·모바일 터널을 감안하면 실무 안전선은 ★ 1200 바이트
+
+이 선을 넘으면 IP 단편화가 일어납니다
+  · 조각 중 하나만 잃어도 패킷 전체가 무효가 됩니다
+  · 손실률 1% 짜리 회선에서 3조각 패킷의 손실률은 약 3%
+  · 일부 방화벽·NAT 는 조각난 UDP 를 아예 버립니다
+
+그래서 게임 패킷은 항상 1200 바이트 안에 넣습니다
+  · 스냅샷이 크면 '중요한 것부터' 잘라 담고 나머지는 다음 틱에
+  · 그래도 커야 하는 것(맵 데이터·리소스)은 TCP/HTTP 로 따로 받습니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>1200 바이트라는 숫자를 외워 두세요</b> — QUIC 표준이 초기 패킷에 요구하는 최소값도
+        이 근처(1200)입니다. 신뢰 UDP 라이브러리들도 대부분 <b>기본 MTU 를 1200 안팎</b>으로 잡습니다.
+        직접 만든다면 접속 시 <b>MTU 탐색</b>을 한 번 돌리는 것이 정석입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">UDP 라고 마음대로 보내면 안 됩니다</h4>
+      <pre class="code" data-lang="cpp"><code>// TCP 는 혼잡 제어가 커널에 들어 있습니다. UDP 는 없습니다.
+// 아무 제어 없이 쏘면 회선을 스스로 막아 '내가 만든 렉' 이 됩니다
+
+class SendPacer {
+    double budget_bytes_ = 0;
+    double rate_bps_     = 256'000;   // 초당 32KB 에서 시작
+public:
+    void update(double dt, double loss_ratio) {
+        // ★ 손실이 보이면 줄이고, 깨끗하면 천천히 늘립니다 (AIMD)
+        if (loss_ratio &gt; 0.05)      rate_bps_ *= 0.75;          // 곱셈 감소
+        else if (loss_ratio &lt; 0.01) rate_bps_ += 8'000 * dt;    // 덧셈 증가
+        rate_bps_ = std::clamp(rate_bps_, 64'000.0, 4'000'000.0);
+        budget_bytes_ = std::min(budget_bytes_ + rate_bps_ / 8 * dt, 4096.0);
+    }
+    bool allow(std::size_t n) {                 // 예산 안에서만 보냅니다
+        if (budget_bytes_ &lt; double(n)) return false;
+        budget_bytes_ -= double(n); return true;
+    }
+};
+
+// 우선순위 — 예산이 모자랄 때 무엇부터 버리나
+//   ① 신뢰 채널(아이템·스킬)          → 절대 버리지 않음
+//   ② 가까운 적의 위치                 → 우선
+//   ③ 먼 적의 위치 · 이펙트            → 이번 틱은 건너뜀 ★
+//   ④ 통계·디버그 정보                 → 여유 있을 때만</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>모바일 회선에서 특히 중요합니다</b> — LTE·5G 는 버퍼가 커서(bufferbloat)
+        과하게 보내면 패킷이 <b>버려지는 대신 수백 ms 씩 지연됩니다</b>.
+        “손실은 없는데 핑만 계속 오른다”면 거의 항상 <b>내가 너무 많이 보내고 있는 것</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> TCP 의 문제는 속도가 아니라 <b>머리 막힘</b>입니다.
+    위치처럼 <b>최신값만 의미 있는 데이터</b>는 재전송하면 손해입니다.
+    UDP 위에 <b>신뢰 순서 / 신뢰 무순서 / 비신뢰</b> 세 채널을 두고 데이터마다 골라 씁니다.
+    직접 만들지 말고 <b>GameNetworkingSockets</b> 같은 검증된 계층을 쓰되, seq·ack 원리는 알고 있어야 디버깅이 됩니다.</div>
+</section>
+
+
+<!-- ==================== n04 ==================== -->
+<section class="sec" id="n04">
+  <div class="sec-head rv">
+    <span class="no">GAME 04</span>
+    <h2>패킷 설계 — <span class="t">바이트 흐름을 메시지로</span> 되돌리기</h2>
+    <p class="lead">
+      TCP 에는 “메시지”라는 개념이 없습니다. <code>send</code> 를 세 번 했다고 <code>recv</code> 가 세 번 나오지 않습니다.
+      신입 서버 개발자가 가장 많이 만드는 버그가 여기서 나옵니다.
+      <b>길이를 앞에 붙이고, 다 모일 때까지 기다리는 것</b> — 이 규칙 하나가 프로토콜의 절반입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 316" role="img" aria-label="TCP 스트림에서 메시지 경계가 어긋나는 모습과 그것을 복원하는 파서 동작을 보여 주는 그림. 보낸 쪽은 20바이트 이동 패킷, 35바이트 스냅샷 패킷, 12바이트 하트비트 패킷 세 개를 보냈지만, 받는 쪽의 recv 호출은 30바이트, 25바이트, 12바이트로 전혀 다르게 쪼개져 돌아온다. 그래서 받는 쪽은 받은 바이트를 링버퍼에 계속 쌓고, 앞의 4바이트 헤더에서 길이를 읽어 그 길이만큼 다 모였을 때만 하나의 메시지로 꺼낸다. 모자라면 그대로 두고 다음 수신을 기다린다.">
+      <text x="16" y="18" class="lbl">TCP 는 바이트 흐름 — recv 경계와 메시지 경계는 절대 일치하지 않습니다</text>
+
+      <text x="16" y="42" class="ttl">보낸 쪽이 생각한 메시지 (67바이트)</text>
+      <rect class="bx bx-ok" x="16" y="52" width="193" height="34"/>
+      <text x="112" y="73" class="ann ok-t" text-anchor="middle">MOVE 20B</text>
+      <rect class="bx bx-ok" x="209" y="52" width="338" height="34"/>
+      <text x="378" y="73" class="ann ok-t" text-anchor="middle">SNAPSHOT 35B</text>
+      <rect class="bx bx-ok" x="547" y="52" width="116" height="34"/>
+      <text x="605" y="73" class="ann ok-t" text-anchor="middle">PING 12B</text>
+
+      <path class="ln-t" d="M209 88 L209 148"/>
+      <path class="ln-t" d="M547 88 L547 148"/>
+
+      <text x="16" y="112" class="ttl">실제로 recv() 가 돌려준 덩어리</text>
+      <rect class="bx bx-warn" x="16" y="122" width="290" height="34"/>
+      <text x="161" y="143" class="ann rs-t" text-anchor="middle">recv #1 — 30B (MOVE 전부 + SNAPSHOT 앞 10B)</text>
+      <rect class="bx bx-warn" x="306" y="122" width="242" height="34"/>
+      <text x="427" y="143" class="ann rs-t" text-anchor="middle">recv #2 — 25B</text>
+      <rect class="bx bx-warn" x="548" y="122" width="116" height="34"/>
+      <text x="606" y="143" class="ann rs-t" text-anchor="middle">recv #3 — 12B</text>
+
+      <text x="16" y="182" class="ttl">파서가 하는 일 — 링버퍼에 쌓고 길이를 보고 꺼냅니다</text>
+
+      <circle class="stp" cx="34" cy="208" r="11"/>
+      <text x="34" y="212" class="stpn" text-anchor="middle">1</text>
+      <rect class="bx" x="56" y="192" width="608" height="32"/>
+      <text x="72" y="212" class="ann">받은 바이트를 그대로 링버퍼 뒤에 붙입니다 — 여기서는 아무 해석도 하지 않습니다</text>
+
+      <circle class="stp" cx="34" cy="250" r="11"/>
+      <text x="34" y="254" class="stpn" text-anchor="middle">2</text>
+      <rect class="bx bx-hi" x="56" y="234" width="608" height="32"/>
+      <text x="72" y="254" class="ann am-t">앞 4바이트(len 2 + id 2)가 모였나? 아니면 그대로 두고 다음 수신을 기다립니다</text>
+
+      <circle class="stp" cx="34" cy="292" r="11"/>
+      <text x="34" y="296" class="stpn" text-anchor="middle">3</text>
+      <rect class="bx bx-ok" x="56" y="276" width="608" height="32"/>
+      <text x="72" y="296" class="ann ok-t">len 바이트가 다 모였으면 한 메시지를 꺼내 처리하고, 소비한 만큼 앞을 당깁니다 — 루프로 반복</text>
+    </svg>
+    <div class="cap">한 번의 recv 로 <b>0개, 1개, 혹은 3.5개</b>의 메시지가 올 수 있습니다 — 파서는 항상 <b>while 루프</b>여야 합니다.</div>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">헤더와 파서 — 복붙해서 바로 쓰는 형태</h4>
+    <pre class="code" data-lang="cpp"><code>#include &lt;bit&gt;        // std::byteswap (C++23), std::endian
+#include &lt;cstdint&gt;
+#include &lt;span&gt;
+#include &lt;vector&gt;
+
+// ── 헤더 4바이트 : 길이(본문만) + 메시지 id ──────────────────
+#pragma pack(push, 1)
+struct PacketHeader {
+    std::uint16_t size;   // 본문 길이 (헤더 제외) — 최대 65535
+    std::uint16_t id;     // 메시지 종류
+};
+#pragma pack(pop)
+static_assert(sizeof(PacketHeader) == 4);
+
+// ── 엔디안 : 네트워크는 빅엔디안이 관례입니다 ─────────────────
+constexpr std::uint16_t hton16(std::uint16_t v) {
+    if constexpr (std::endian::native == std::endian::little) return std::byteswap(v);
+    else return v;
+}
+constexpr std::uint16_t ntoh16(std::uint16_t v) { return hton16(v); }
+
+// ── 수신 버퍼 : 받은 것을 쌓고, 완성된 메시지만 꺼냅니다 ───────
+class RecvBuffer {
+    std::vector&lt;std::byte&gt; buf_;
+    std::size_t            read_ = 0;   // 다음에 읽을 위치
+
+public:
+    void append(std::span&lt;const std::byte&gt; in) {
+        buf_.insert(buf_.end(), in.begin(), in.end());
+    }
+
+    // 완성된 메시지가 있으면 꺼내 true. 없으면 false — ★ while 로 돌리세요
+    bool next(PacketHeader&amp; out_hdr, std::span&lt;const std::byte&gt;&amp; out_body) {
+        const std::size_t avail = buf_.size() - read_;
+        if (avail &lt; sizeof(PacketHeader)) return false;          // ① 헤더도 안 왔다
+
+        PacketHeader h;
+        std::memcpy(&amp;h, buf_.data() + read_, sizeof h);
+        h.size = ntoh16(h.size);
+        h.id   = ntoh16(h.id);
+
+        if (h.size &gt; MAX_BODY) throw ProtocolError{"body too large"};   // ★ 반드시 상한
+        if (avail &lt; sizeof(PacketHeader) + h.size) return false;  // ② 본문이 덜 왔다
+
+        out_hdr  = h;
+        out_body = {buf_.data() + read_ + sizeof h, h.size};
+        read_   += sizeof h + h.size;                             // ③ 소비
+        return true;
+    }
+
+    void compact() {                       // 처리 후 앞부분을 버립니다
+        if (read_ == 0) return;
+        buf_.erase(buf_.begin(), buf_.begin() + read_);
+        read_ = 0;
+    }
+    static constexpr std::uint16_t MAX_BODY = 8192;
+};
+
+// ── 사용 : 소켓에서 읽은 뒤 ────────────────────────────────
+void on_bytes(Session&amp; s, std::span&lt;const std::byte&gt; in) {
+    s.rb.append(in);
+    PacketHeader h; std::span&lt;const std::byte&gt; body;
+    while (s.rb.next(h, body))        // ★ 한 번에 여러 개가 나올 수 있습니다
+        dispatch(s, h.id, body);
+    s.rb.compact();
+}</code></pre>
+    <div class="grid2" style="margin-top:12px">
+      <div class="note warn" style="margin-bottom:0">
+        <b>길이 상한 검사를 빼면 그대로 서비스 거부 취약점입니다</b> —
+        공격자가 <code>size = 65535</code> 를 잔뜩 보내면 세션마다 64KB 씩 붙잡습니다.
+        연결 1만 개면 640MB. <b>메시지 id 별로 허용 최대 크기를 따로 두는 것</b>이 더 안전합니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>erase</code> 대신 링버퍼</b> — 초당 수만 번 호출되면 <code>vector::erase</code> 의 이동 비용이 보입니다.
+        읽기·쓰기 오프셋 두 개를 둔 <b>고정 크기 링버퍼</b>로 바꾸면 복사가 사라집니다.
+        n13 프로젝트에서는 링버퍼 버전을 씁니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">직렬화 — 손으로? Protobuf? FlatBuffers?</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">세 방식의 실제 차이</h4>
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:20%"></th><th>수동 직렬화</th><th>Protobuf</th><th>FlatBuffers</th></tr>
+      <tr><td>읽는 비용</td><td>복사 1회</td><td><b>파싱+할당</b></td><td><b>0 (제로카피)</b></td></tr>
+      <tr><td>크기</td><td>가장 작음</td><td>작음(varint)</td><td>조금 큼(정렬 패딩)</td></tr>
+      <tr><td>스키마 변경</td><td>손으로 버전 관리</td><td><b>호환 잘 됨</b></td><td><b>호환 잘 됨</b></td></tr>
+      <tr><td>클라 연동</td><td>직접</td><td>전 언어 지원</td><td>C#·C++·TS 지원</td></tr>
+      <tr><td>디버깅</td><td>어렵다</td><td>텍스트 덤프 쉬움</td><td>보통</td></tr>
+      <tr><td>쓰기 좋은 곳</td><td>위치 갱신 같은 초고빈도</td><td>로비·상점·전적</td><td><b>게임 룸 스냅샷</b></td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>실무 조합</b> — 로비·인증·상점처럼 <b>초당 수십 번</b>인 경로는 Protobuf(또는 JSON) 로 편하게 가고,
+      게임 룸 안의 <b>초당 수만 번</b> 경로만 FlatBuffers 나 수동으로 짭니다.
+      <b>전부 하나로 통일해야 한다는 규칙은 없습니다</b> — 통일하려다 로비 코드가 읽기 힘들어지는 쪽이 손해입니다.
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">FlatBuffers 스키마 — 스냅샷에 맞는 이유</h4>
+      <pre class="code" data-lang="text"><code>// game.fbs
+namespace pk;
+
+struct Vec2 { x:float; y:float; }          // struct = 고정 크기·인라인 ★
+
+table EntityState {
+  id:uint32;
+  pos:Vec2;
+  vel:Vec2;
+  hp:uint16;
+  flags:uint8;
+}
+
+table Snapshot {
+  tick:uint32;
+  ack_input:uint32;                        // 이 클라의 마지막 입력 번호 (n07)
+  entities:[EntityState];
+}
+
+table Input {
+  seq:uint32;
+  dx:float; dy:float;
+  buttons:uint16;
+  client_tick:uint32;
+}
+
+union Body { Snapshot, Input }
+table Envelope { body:Body; }
+root_type Envelope;</code></pre>
+      <pre class="code" data-lang="bash"><code># 코드 생성 (flatc 25.x)
+flatc --cpp --scoped-enums -o gen/ game.fbs
+# → gen/game_generated.h 하나가 나옵니다. 런타임 라이브러리 링크 불필요</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">읽을 때 복사가 없다는 뜻</h4>
+      <pre class="code" data-lang="cpp"><code>#include "gen/game_generated.h"
+
+// 보내는 쪽 — 버퍼를 한 번 만들고 그대로 소켓에 넣습니다
+flatbuffers::FlatBufferBuilder fbb(1024);
+std::vector&lt;flatbuffers::Offset&lt;pk::EntityState&gt;&gt; ents;
+for (const auto&amp; e : room.entities) {
+    pk::Vec2 p{e.pos.x, e.pos.y}, v{e.vel.x, e.vel.y};
+    ents.push_back(pk::CreateEntityState(fbb, e.id, &amp;p, &amp;v, e.hp, e.flags));
+}
+auto snap = pk::CreateSnapshot(fbb, room.tick, sess.ack_input, fbb.CreateVector(ents));
+fbb.Finish(pk::CreateEnvelope(fbb, pk::Body::Snapshot, snap.Union()));
+send_framed(sess, {fbb.GetBufferPointer(), fbb.GetSize()});
+
+// 받는 쪽 — 파싱이 '없습니다'. 수신 버퍼를 그대로 가리킵니다 ★
+auto* env = pk::GetEnvelope(body.data());
+if (env-&gt;body_type() == pk::Body::Snapshot) {
+    auto* s = env-&gt;body_as_Snapshot();
+    for (auto* e : *s-&gt;entities())        // 접근하는 필드만 읽습니다
+        world.apply(e-&gt;id(), {e-&gt;pos()-&gt;x(), e-&gt;pos()-&gt;y()}, e-&gt;hp());
+}
+
+// ★ 단, 신뢰할 수 없는 입력에는 검증기를 반드시 돌립니다
+flatbuffers::Verifier v(body.data(), body.size());
+if (!pk::VerifyEnvelopeBuffer(v)) { kick(sess, "malformed"); return; }</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Verifier 를 건너뛰면 원격 코드 실행급 취약점이 됩니다</b> — 제로카피는
+        “버퍼 안의 오프셋을 그대로 믿는다”는 뜻이라, 조작된 오프셋 하나로 <b>버퍼 밖을 읽습니다</b>.
+        서버 → 클라 방향은 생략해도 되지만 <b>클라 → 서버는 예외 없이 검증</b>하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">패킷 id 관리와 버전 호환</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">디스패치 테이블 — switch 문 대신</h4>
+      <pre class="code" data-lang="cpp"><code>enum class MsgId : std::uint16_t {
+    C2S_Login = 1, C2S_Input = 2, C2S_Chat = 3,
+    S2C_Welcome = 101, S2C_Snapshot = 102, S2C_Chat = 103,
+};
+
+using Handler = void(*)(Session&amp;, std::span&lt;const std::byte&gt;);
+
+// 배열로 두면 O(1) 이고 캐시에도 좋습니다
+inline constexpr std::size_t MAX_ID = 256;
+std::array&lt;Handler, MAX_ID&gt; g_handlers{};
+
+template &lt;MsgId Id&gt; void reg(Handler h) {
+    static_assert(static_cast&lt;std::size_t&gt;(Id) &lt; MAX_ID);
+    g_handlers[static_cast&lt;std::size_t&gt;(Id)] = h;
+}
+
+void dispatch(Session&amp; s, std::uint16_t id, std::span&lt;const std::byte&gt; b) {
+    if (id &gt;= MAX_ID || !g_handlers[id]) { kick(s, "unknown id"); return; }
+    if (!s.authed &amp;&amp; id != (std::uint16_t)MsgId::C2S_Login) { kick(s,"unauth"); return; }
+    g_handlers[id](s, b);                 // ★ 인증 전 접근 차단이 여기 한 줄
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">클라와 서버 버전이 어긋날 때</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 접속 즉시 프로토콜 해시를 교환합니다
+//    스키마 파일을 빌드 때 해시해서 상수로 박아 둡니다
+inline constexpr std::uint32_t PROTO_HASH = 0x9F3A21C4;  // CI 가 생성
+
+void on_login(Session&amp; s, const LoginReq&amp; req) {
+    if (req.proto_hash != PROTO_HASH) {
+        send(s, LoginRes{.ok = false, .reason = "UPDATE_REQUIRED"});
+        return;                       // ★ 여기서 막지 않으면 원인 불명 크래시로 옵니다
+    }
+    ...
+}
+
+// ② 필드를 추가할 때 규칙
+//    · FlatBuffers/Protobuf : 새 필드는 '끝에만' 추가, 기존 번호 재사용 금지
+//    · 수동 직렬화          : 헤더에 ver 를 넣고 분기, 혹은 새 MsgId 를 만든다
+//    · 필드 삭제            : 삭제하지 말고 deprecated 표시만 (번호를 비워 둠)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>운영에서 가장 무서운 건 “일부만 업데이트된 상태”</b> 입니다 — 스토어 심사·강제 업데이트 유예 때문에
+        <b>구버전 클라가 며칠씩 남습니다</b>. 프로토콜 해시로 <b>즉시 거절</b>하거나,
+        아예 <b>구버전용 서버 풀을 따로</b> 띄우는 것이 실무의 두 가지 답입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> TCP 는 메시지 경계를 지켜 주지 않으므로 <b>길이 접두사 + while 루프 파서</b>가 필수입니다.
+    <b>길이 상한 검사</b>를 빼면 그대로 취약점입니다.
+    직렬화는 <b>로비는 Protobuf, 룸은 FlatBuffers</b> 식으로 경로별로 나눠 쓰고,
+    제로카피를 쓴다면 <b>클라에서 온 버퍼는 반드시 Verifier</b> 를 통과시킵니다.</div>
+</section>
+
+
+<!-- ==================== n05 ==================== -->
+<section class="sec" id="n05">
+  <div class="sec-head rv">
+    <span class="no">GAME 05</span>
+    <h2>세션과 I/O 모델 — <span class="t">IOCP · epoll · Asio</span></h2>
+    <p class="lead">
+      연결 5천 개에 스레드 5천 개를 만들 수는 없습니다. 그래서 <b>소수의 스레드가 수천 개의 소켓을 돌아가며 처리</b>합니다.
+      윈도우는 <b>IOCP</b>, 리눅스는 <b>epoll / io_uring</b>. 이 둘은 사고방식이 다릅니다.
+      Boost.Asio 는 그 차이를 덮어 하나의 코드로 만들어 줍니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="윈도우 IOCP 의 동작 흐름을 보여 주는 그림. 앱이 WSARecv 를 호출하면 커널에 버퍼 주소만 넘기고 즉시 돌아온다. 데이터가 실제로 도착하면 커널이 그 버퍼에 직접 복사하고 완료 패킷을 완성 포트 큐에 넣는다. 워커 스레드들은 GetQueuedCompletionStatus 에서 자고 있다가 완료 패킷을 하나씩 꺼내 처리한다. 커널이 동시에 깨어 있는 스레드 수를 코어 수로 제한하므로 문맥 전환이 거의 없다. 리눅스 epoll 은 반대로 읽을 수 있게 되었다는 사실만 알려 주고 실제 read 는 앱이 직접 한다.">
+      <text x="16" y="18" class="lbl">IOCP — "다 되면 알려 줘" · epoll — "읽을 수 있게 되면 알려 줘"</text>
+
+      <circle class="stp" cx="30" cy="62" r="11"/>
+      <text x="30" y="66" class="stpn" text-anchor="middle">1</text>
+      <rect class="bx" x="50" y="40" width="182" height="46"/>
+      <text x="66" y="60" class="val">WSARecv 등록</text>
+      <text x="66" y="76" class="ann">버퍼 주소만 넘기고 즉시 리턴</text>
+
+      <path class="fl ar" d="M236 63 L262 63"/>
+
+      <circle class="stp" cx="280" cy="62" r="11"/>
+      <text x="280" y="66" class="stpn" text-anchor="middle">2</text>
+      <rect class="bx bx-hi" x="300" y="40" width="182" height="46"/>
+      <text x="316" y="60" class="val am-t">커널이 직접 복사</text>
+      <text x="316" y="76" class="ann">NIC 도착 → 내 버퍼로 DMA</text>
+
+      <path class="fl ar" d="M486 63 L512 63"/>
+
+      <circle class="stp" cx="530" cy="62" r="11"/>
+      <text x="530" y="66" class="stpn" text-anchor="middle">3</text>
+      <rect class="bx bx-ok" x="550" y="40" width="114" height="46"/>
+      <text x="566" y="60" class="val ok-t">완료 통지</text>
+      <text x="566" y="76" class="ann">큐에 넣습니다</text>
+
+      <path class="ln ar" d="M607 90 L607 108 L340 108 L340 122"/>
+
+      <rect class="bx bx-fw" x="180" y="126" width="320" height="38"/>
+      <text x="340" y="150" class="val rs-t" text-anchor="middle">I/O Completion Port 큐</text>
+
+      <path class="fl ar" d="M250 168 L110 194"/>
+      <path class="fl ar" d="M310 168 L268 194"/>
+      <path class="fl ar" d="M370 168 L412 194"/>
+      <path class="fl ar" d="M430 168 L570 194"/>
+
+      <rect class="bx" x="16" y="198" width="148" height="52"/>
+      <text x="90" y="220" class="val" text-anchor="middle">워커 1</text>
+      <text x="90" y="238" class="ann" text-anchor="middle">GQCS 에서 대기</text>
+      <rect class="bx" x="180" y="198" width="148" height="52"/>
+      <text x="254" y="220" class="val" text-anchor="middle">워커 2</text>
+      <text x="254" y="238" class="ann" text-anchor="middle">깨어나 처리</text>
+      <rect class="bx" x="344" y="198" width="148" height="52"/>
+      <text x="418" y="220" class="val" text-anchor="middle">워커 3</text>
+      <text x="418" y="238" class="ann" text-anchor="middle">깨어나 처리</text>
+      <rect class="bx bx-mut" x="508" y="198" width="156" height="52"/>
+      <text x="586" y="220" class="val" text-anchor="middle">워커 4</text>
+      <text x="586" y="238" class="ann" text-anchor="middle">한도 초과 — 대기</text>
+
+      <rect class="bx bx-ok" x="16" y="258" width="648" height="34"/>
+      <text x="32" y="278" class="ann ok-t">커널이 동시에 깨우는 워커 수를 코어 수로 제한합니다 — 스레드를 많이 만들어도 문맥 전환이 폭발하지 않습니다</text>
+    </svg>
+    <div class="cap">IOCP 는 <b>복사까지 끝난 뒤</b> 알려 주고, epoll 은 <b>읽을 수 있다는 사실만</b> 알려 줍니다 — 코드 구조가 달라지는 지점입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 모델의 차이 — 한 표로</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:22%"></th><th>IOCP (Windows)</th><th>epoll (Linux)</th></tr>
+        <tr><td>통지 시점</td><td><b>완료 후</b></td><td><b>준비 됨</b></td></tr>
+        <tr><td>모델 이름</td><td>proactor</td><td>reactor</td></tr>
+        <tr><td>버퍼 소유</td><td>커널이 들고 있음</td><td>앱이 그때 준비</td></tr>
+        <tr><td>스레드 제어</td><td>커널이 조절</td><td>앱이 직접</td></tr>
+        <tr><td>연결 10k</td><td>매우 좋음</td><td>매우 좋음</td></tr>
+        <tr><td>대안</td><td>RIO(초저지연)</td><td><b>io_uring</b></td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>io_uring 은 리눅스의 IOCP</b> 라고 보면 거의 맞습니다 — 제출 큐에 요청을 넣고 완료 큐에서 결과를 꺼냅니다.
+        커널 5.10+ 에서 안정적이고, 2026년 기준 <b>고성능 게임 서버의 리눅스 기본 선택</b>으로 자리 잡았습니다.
+        Boost.Asio 1.89 도 <code>BOOST_ASIO_HAS_IO_URING</code> 로 백엔드를 바꿀 수 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">IOCP 뼈대 — 등록 · 대기 · 재등록</h4>
+      <pre class="code" data-lang="cpp"><code>// Windows. 실제로 도는 최소 형태입니다
+struct IoCtx : OVERLAPPED {          // ★ OVERLAPPED 를 '상속' 하는 것이 관례
+    enum class Op { Recv, Send } op;
+    WSABUF   wsabuf;
+    char     buf[8192];
+    Session* sess;
+};
+
+HANDLE g_cp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
+
+void attach(SOCKET s, Session* sess) {
+    CreateIoCompletionPort((HANDLE)s, g_cp, (ULONG_PTR)sess, 0);
+    post_recv(sess);                 // 첫 수신 요청을 걸어 둡니다
+}
+
+void post_recv(Session* s) {
+    auto* ctx = s-&gt;recv_ctx();
+    ZeroMemory(static_cast&lt;OVERLAPPED*&gt;(ctx), sizeof(OVERLAPPED));
+    ctx-&gt;op = IoCtx::Op::Recv;
+    ctx-&gt;wsabuf = { sizeof ctx-&gt;buf, ctx-&gt;buf };
+    DWORD flags = 0;
+    int r = WSARecv(s-&gt;sock, &amp;ctx-&gt;wsabuf, 1, nullptr, &amp;flags, ctx, nullptr);
+    if (r == SOCKET_ERROR &amp;&amp; WSAGetLastError() != WSA_IO_PENDING)
+        s-&gt;close();                  // 진짜 에러
+}
+
+void worker() {                      // 코어 수만큼 띄웁니다
+    DWORD bytes; ULONG_PTR key; OVERLAPPED* ov;
+    for (;;) {
+        BOOL ok = GetQueuedCompletionStatus(g_cp, &amp;bytes, &amp;key, &amp;ov, INFINITE);
+        if (!ov) break;                            // 종료 신호(PostQueued…)
+        auto* ctx  = static_cast&lt;IoCtx*&gt;(ov);
+        auto* sess = reinterpret_cast&lt;Session*&gt;(key);
+
+        if (!ok || bytes == 0) { sess-&gt;close(); continue; }   // ★ 0 = 정상 종료
+
+        if (ctx-&gt;op == IoCtx::Op::Recv) {
+            sess-&gt;on_bytes({reinterpret_cast&lt;std::byte*&gt;(ctx-&gt;buf), bytes});
+            post_recv(sess);                        // ★ 다시 걸어야 계속 받습니다
+        } else {
+            sess-&gt;on_sent(bytes);
+        }
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 IOCP 버그 두 가지</b> — ① <code>post_recv</code> 재등록을 잊어 <b>첫 패킷만 받고 조용해지는</b> 것,
+        ② <code>OVERLAPPED</code> 를 스택에 두어 함수가 끝난 뒤 커널이 <b>죽은 메모리에 쓰는</b> 것.
+        비동기 I/O 의 버퍼와 컨텍스트는 <b>완료 통지를 받을 때까지 반드시 살아 있어야</b> 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">Boost.Asio 로 한 코드가 세 OS 에서</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">세션 클래스 — 수명 관리까지 포함한 완성형</h4>
+    <pre class="code" data-lang="cpp"><code>#include &lt;boost/asio.hpp&gt;
+#include &lt;deque&gt;
+#include &lt;memory&gt;
+namespace asio = boost::asio;
+using tcp = asio::ip::tcp;
+
+// ★ enable_shared_from_this : 비동기 콜백이 끝날 때까지 객체를 살려 둡니다
+class Session : public std::enable_shared_from_this&lt;Session&gt; {
+    tcp::socket                 sock_;
+    asio::strand&lt;asio::any_io_executor&gt; strand_;   // ★ 이 세션의 콜백 직렬화
+    std::array&lt;std::byte, 8192&gt; rbuf_{};
+    RecvBuffer                  parser_;
+    std::deque&lt;std::vector&lt;std::byte&gt;&gt; wq_;        // 쓰기 대기 큐
+    bool                        writing_ = false;
+
+public:
+    explicit Session(tcp::socket s)
+        : sock_(std::move(s)), strand_(asio::make_strand(sock_.get_executor())) {}
+
+    void start() {
+        sock_.set_option(tcp::no_delay(true));     // ★ Nagle 끄기 — 게임에서는 필수
+        do_read();
+    }
+
+    // 어느 스레드에서 불러도 안전합니다 (strand 로 넘김)
+    void send(std::vector&lt;std::byte&gt; msg) {
+        asio::post(strand_, [self = shared_from_this(), m = std::move(msg)]() mutable {
+            self-&gt;wq_.push_back(std::move(m));
+            if (!self-&gt;writing_) self-&gt;do_write();
+        });
+    }
+
+private:
+    void do_read() {
+        auto self = shared_from_this();
+        sock_.async_read_some(asio::buffer(rbuf_),
+            asio::bind_executor(strand_, [self](auto ec, std::size_t n) {
+                if (ec) { self-&gt;on_close(ec); return; }
+                self-&gt;parser_.append({self-&gt;rbuf_.data(), n});
+                PacketHeader h; std::span&lt;const std::byte&gt; body;
+                while (self-&gt;parser_.next(h, body))
+                    self-&gt;enqueue_to_room(h.id, body);   // ★ 여기서 게임 로직을 부르지 않습니다
+                self-&gt;parser_.compact();
+                self-&gt;do_read();                          // 다시 읽기
+            }));
+    }
+
+    void do_write() {
+        writing_ = true;
+        auto self = shared_from_this();
+        asio::async_write(sock_, asio::buffer(wq_.front()),
+            asio::bind_executor(strand_, [self](auto ec, std::size_t) {
+                if (ec) { self-&gt;on_close(ec); return; }
+                self-&gt;wq_.pop_front();
+                if (!self-&gt;wq_.empty()) self-&gt;do_write();
+                else                    self-&gt;writing_ = false;
+            }));
+    }
+
+    void on_close(boost::system::error_code ec) {
+        if (closed_) return; closed_ = true;
+        boost::system::error_code ign;
+        sock_.shutdown(tcp::socket::shutdown_both, ign);
+        room_-&gt;post_leave(id_);        // 방에 "나갔다" 를 알립니다
+    }
+    bool closed_ = false;
+};
+
+// ── 서버 구동 ────────────────────────────────────────────────
+int main() {
+    asio::io_context io;                        // 윈도우면 내부적으로 IOCP,
+    tcp::acceptor acc(io, {tcp::v4(), 7777});   // 리눅스면 epoll/io_uring 을 씁니다
+
+    std::function&lt;void()&gt; accept_one = [&amp;] {
+        acc.async_accept([&amp;](auto ec, tcp::socket s) {
+            if (!ec) std::make_shared&lt;Session&gt;(std::move(s))-&gt;start();
+            accept_one();                        // 계속 받습니다
+        });
+    };
+    accept_one();
+
+    std::vector&lt;std::jthread&gt; pool;              // 코어 수만큼
+    for (unsigned i = 1; i &lt; std::thread::hardware_concurrency(); ++i)
+        pool.emplace_back([&amp;]{ io.run(); });
+    io.run();
+}</code></pre>
+    <div class="grid2" style="margin-top:12px">
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>strand</code> 가 하는 일</b> — 스레드가 여러 개여도 <b>같은 세션의 콜백은 절대 동시에 실행되지 않게</b> 합니다.
+        세션 내부 자료구조에 <b>뮤텍스가 필요 없어지는</b> 이유입니다.
+        Asio 를 쓰면서 <code>std::mutex</code> 를 세션마다 들고 있다면, 십중팔구 strand 를 안 쓴 것입니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>no_delay(true)</code> 를 빼면 40ms 가 그냥 사라집니다</b> — Nagle 알고리즘이
+        작은 패킷을 모아서 보내려고 기다립니다. 게임 패킷은 원래 작으므로 <b>항상 끕니다</b>.
+        여기에 상대편 <b>지연 ACK</b> 까지 겹치면 최악 200ms 가 나오는 것으로 유명합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">세션 수명 · 끊김 처리가 실제 난이도</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 <code>shared_from_this</code> 인가</h4>
+      <pre class="code" data-lang="cpp"><code>// ✗ 이렇게 쓰면 크래시합니다
+void Session::do_read() {
+    sock_.async_read_some(buf, [this](auto ec, auto n) {  // this 캡처 ★
+        this-&gt;handle(n);      // 콜백이 불릴 때 Session 이 이미 지워졌을 수 있음
+    });
+}
+// 연결이 끊겨 Session 을 delete 했는데, 커널에 걸어 둔 읽기 요청의
+// 완료 콜백은 그 뒤에 옵니다 → use-after-free
+
+// ✓ shared_ptr 를 캡처해 콜백이 살아 있는 동안 객체를 붙잡습니다
+void Session::do_read() {
+    auto self = shared_from_this();
+    sock_.async_read_some(buf, [self](auto ec, auto n) {
+        self-&gt;handle(n);      // 마지막 콜백이 끝나면 참조수 0 → 소멸
+    });
+}
+
+// 방(Room) 이 세션을 들고 있을 때는 weak_ptr 로 — 순환 참조 방지
+std::unordered_map&lt;PlayerId, std::weak_ptr&lt;Session&gt;&gt; members_;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">끊김을 감지하는 세 가지 층</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">층</th><th>감지 방법</th><th>걸리는 시간</th></tr>
+        <tr><td>소켓 에러</td><td>read/write 실패</td><td>즉시</td></tr>
+        <tr><td>정상 종료</td><td>read 가 0바이트</td><td>즉시</td></tr>
+        <tr><td><b>앱 하트비트</b></td><td>N초간 패킷 없음</td><td><b>N초 (권장 10~15)</b></td></tr>
+        <tr><td>TCP keepalive</td><td>OS 설정</td><td>기본 2시간(쓸모없음)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="cpp"><code>// 틱마다 도는 타임아웃 검사 — 게임 서버의 필수 장치
+void Room::check_timeouts(std::uint64_t now_ms) {
+    for (auto&amp; [id, p] : players_) {
+        if (now_ms - p.last_packet_ms &gt; 15'000) {
+            log_info("player {} timed out", id);
+            p.state = PlayerState::Disconnected;   // ★ 바로 지우지 않습니다
+            p.grace_until_ms = now_ms + 60'000;    // 60초 재접속 유예
+        }
+    }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>모바일은 “잠깐 끊김” 이 일상입니다</b> — 지하철·엘리베이터·앱 백그라운드 전환.
+        연결이 끊겼다고 캐릭터를 즉시 지우면 원성이 쏟아집니다.
+        <b>세션(연결)과 플레이어(게임 안의 존재)를 분리</b>하고, 재접속 토큰으로 <b>같은 플레이어에 다시 붙이는</b> 설계가 표준입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> IOCP 는 <b>완료 통지</b>, epoll 은 <b>준비 통지</b>입니다.
+    직접 쓸 게 아니라면 <b>Boost.Asio</b> 하나로 세 OS 를 덮습니다.
+    세션은 <b><code>shared_from_this</code> + strand</b> 로 수명과 동시성을 동시에 해결하고,
+    <b><code>no_delay</code></b> 를 켜고 <b>앱 하트비트</b>로 끊김을 감지하며, <b>세션과 플레이어는 분리</b>합니다.</div>
+</section>
+
+
+<!-- ==================== n06 ==================== -->
+<section class="sec" id="n06">
+  <div class="sec-head rv">
+    <span class="no">GAME 06</span>
+    <h2>스레드 모델 — <span class="t">락을 줄이는</span> 가장 확실한 방법</h2>
+    <p class="lead">
+      멀티스레드 게임 로직은 “되긴 되는데 가끔 이상한” 버그의 온상입니다.
+      그래서 실무의 정답은 대개 <b>스레드를 잘 쓰는 것</b>이 아니라
+      <b>공유를 없애서 락 자체를 지우는 것</b>입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="공유 데이터를 락으로 보호하는 방식과 액터 메시지 큐 방식을 비교하는 그림. 왼쪽은 워커 스레드 넷이 하나의 존 데이터를 뮤텍스로 잡고 들어가려다 셋이 대기하는 모습이다. 코어를 늘려도 처리량이 늘지 않고, 락 순서를 잘못 잡으면 교착이 생긴다. 오른쪽은 각 방이 자기 메시지 큐를 가지고 워커 하나에 고정되어 있어 데이터를 만지는 스레드가 항상 하나뿐이다. 락이 필요 없고 방 수만큼 선형으로 늘어난다. 대신 방과 방 사이의 상호작용은 메시지로만 해야 한다.">
+      <text x="16" y="18" class="lbl">공유 + 락  vs  액터(방마다 큐 하나 · 스레드 하나)</text>
+
+      <rect class="bx bx-warn" x="16" y="34" width="316" height="248"/>
+      <text x="174" y="56" class="val rs-t" text-anchor="middle">공유 데이터 + 뮤텍스</text>
+
+      <rect class="bx" x="32" y="68" width="66" height="34"/>
+      <text x="65" y="89" class="ann" text-anchor="middle">워커1</text>
+      <rect class="bx bx-mut" x="106" y="68" width="66" height="34"/>
+      <text x="139" y="89" class="ann" text-anchor="middle">워커2</text>
+      <rect class="bx bx-mut" x="180" y="68" width="66" height="34"/>
+      <text x="213" y="89" class="ann" text-anchor="middle">워커3</text>
+      <rect class="bx bx-mut" x="254" y="68" width="62" height="34"/>
+      <text x="285" y="89" class="ann" text-anchor="middle">워커4</text>
+
+      <path class="fl ar" d="M65 106 L150 138"/>
+      <path class="ln" d="M139 106 L160 138"/>
+      <path class="ln" d="M213 106 L182 138"/>
+      <path class="ln" d="M285 106 L196 138"/>
+
+      <rect class="bx bx-fw" x="72" y="142" width="204" height="40"/>
+      <text x="174" y="166" class="val rs-t" text-anchor="middle">zone_mutex</text>
+
+      <rect class="bx" x="72" y="192" width="204" height="38"/>
+      <text x="174" y="216" class="val" text-anchor="middle">Zone 데이터</text>
+
+      <text x="32" y="250" class="ann rs-t">코어를 늘려도 처리량이 안 늘어납니다</text>
+      <text x="32" y="266" class="ann rs-t">락 순서가 엇갈리면 교착 · 재현이 어렵습니다</text>
+
+      <rect class="bx bx-ok" x="348" y="34" width="316" height="248"/>
+      <text x="506" y="56" class="val ok-t" text-anchor="middle">액터 — 방마다 큐 하나</text>
+
+      <rect class="bx" x="364" y="68" width="136" height="52"/>
+      <text x="432" y="88" class="ann" text-anchor="middle">Room A 메시지 큐</text>
+      <text x="432" y="104" class="ann" text-anchor="middle">입력·입장·퇴장</text>
+      <rect class="bx" x="512" y="68" width="136" height="52"/>
+      <text x="580" y="88" class="ann" text-anchor="middle">Room B 메시지 큐</text>
+      <text x="580" y="104" class="ann" text-anchor="middle">입력·입장·퇴장</text>
+
+      <path class="fl ar" d="M432 124 L432 146"/>
+      <path class="fl ar" d="M580 124 L580 146"/>
+
+      <rect class="bx bx-ok" x="364" y="150" width="136" height="46"/>
+      <text x="432" y="170" class="ann ok-t" text-anchor="middle">워커1 전용</text>
+      <text x="432" y="186" class="ann ok-t" text-anchor="middle">락 없음</text>
+      <rect class="bx bx-ok" x="512" y="150" width="136" height="46"/>
+      <text x="580" y="170" class="ann ok-t" text-anchor="middle">워커2 전용</text>
+      <text x="580" y="186" class="ann ok-t" text-anchor="middle">락 없음</text>
+
+      <text x="364" y="222" class="ann ok-t">데이터를 만지는 스레드가 항상 하나뿐입니다</text>
+      <text x="364" y="238" class="ann ok-t">방 수만큼 선형으로 늘어납니다</text>
+      <text x="364" y="256" class="ann am-t">대신 방끼리의 상호작용은 메시지로만 합니다</text>
+      <text x="364" y="272" class="ann am-t">즉시 응답이 필요한 조회는 설계가 까다롭습니다</text>
+    </svg>
+    <div class="cap">게임 서버에서 <b>가장 큰 성능 개선은 대개 락을 잘 쓰는 게 아니라 없애는 것</b>입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">잡 큐 — 액터의 실제 구현</h4>
+      <pre class="code" data-lang="cpp"><code>#include &lt;functional&gt;
+#include &lt;mutex&gt;
+#include &lt;vector&gt;
+
+// 방 하나 = 액터 하나. 외부에서는 오직 post() 로만 접근합니다
+class Room {
+    std::mutex                            qmx_;      // ★ 큐에만 걸리는 짧은 락
+    std::vector&lt;std::function&lt;void()&gt;&gt;    q_, swap_;
+    WorldState                            state_;    // 락 없이 씁니다 ★
+
+public:
+    // 어느 스레드에서든 호출 가능 (I/O 스레드가 부릅니다)
+    void post(std::function&lt;void()&gt; job) {
+        std::lock_guard lk(qmx_);
+        q_.push_back(std::move(job));
+    }
+
+    // 이 방을 소유한 워커 스레드에서만 호출됩니다
+    void tick(double dt) {
+        { std::lock_guard lk(qmx_); swap_.swap(q_); }   // ★ 통째로 훔쳐 옵니다
+        for (auto&amp; job : swap_) job();                  // 락 밖에서 실행
+        swap_.clear();
+
+        state_.step(dt);
+        broadcast_snapshot();
+    }
+};
+
+// I/O 스레드에서 패킷이 왔을 때 — 게임 로직을 직접 부르지 않습니다
+void Session::enqueue_to_room(std::uint16_t id, std::span&lt;const std::byte&gt; body) {
+    auto copy = std::vector&lt;std::byte&gt;(body.begin(), body.end());   // 소유권 이전
+    room_-&gt;post([r = room_, pid = player_id_, id, b = std::move(copy)] {
+        r-&gt;handle(pid, id, b);          // ★ 룸 스레드에서 안전하게 실행됩니다
+    });
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>swap</code> 트릭</b> — 큐를 통째로 바꿔치기하면 락을 잡는 시간이 <b>포인터 교환 한 번</b>으로 끝납니다.
+        잡 실행은 락 밖에서 하므로, 잡 안에서 다시 <code>post</code> 를 불러도 교착이 없습니다.
+        <b>이 패턴 하나로 게임 서버 동시성의 8할이 해결됩니다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그래도 락을 써야 할 때 — 순서 규칙</h4>
+      <pre class="code" data-lang="cpp"><code>// 교착은 "A→B 로 잡는 스레드"와 "B→A 로 잡는 스레드"가 만나면 생깁니다
+// 해결책은 단 하나 : 전역 순서를 정하고 예외 없이 지키기
+
+// ① 주소 순서로 잡기 — std::scoped_lock 이 알아서 해 줍니다 (C++17)
+void trade(Player&amp; a, Player&amp; b) {
+    std::scoped_lock lk(a.mx, b.mx);      // ★ 교착 회피 알고리즘 내장
+    // a.mx 먼저인지 b.mx 먼저인지 신경 쓸 필요가 없습니다
+}
+
+// ② 계층 번호를 붙여 낮은 쪽 → 높은 쪽만 허용 (디버그 빌드에서 검사)
+struct HierMutex {
+    std::mutex m; int level;
+    static thread_local int cur;         // 지금 이 스레드가 잡은 최고 레벨
+    void lock() {
+        assert(level &gt; cur &amp;&amp; "lock order violation");   // ★ 개발 중에 잡습니다
+        prev_ = cur; cur = level; m.lock();
+    }
+    void unlock() { cur = prev_; m.unlock(); }
+    int prev_ = 0;
+};
+// 예: Room(10) → Player(20) → Inventory(30). 역방향은 assert 로 터집니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“가끔 서버가 멈춘다”의 대부분은 교착입니다</b> — 재현이 안 되므로 <b>사후 분석</b>이 유일한 방법입니다.
+        리눅스는 <code>gdb -p</code> 후 <code>thread apply all bt</code>,
+        윈도우는 크래시 덤프를 WinDbg 로 열어 <code>!locks</code> 를 봅니다(n12).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">MMO 의 존(zone) 은 어떻게 나누나</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">존 분할 세 가지 방식</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">방식</th><th>장점</th><th>단점</th></tr>
+        <tr><td><b>맵 단위</b></td><td>구현이 단순, 경계=로딩 화면</td><td>인기 맵에 몰림</td></tr>
+        <tr><td><b>채널</b></td><td>같은 맵을 복제해 인원 분산</td><td>친구가 다른 채널에</td></tr>
+        <tr><td><b>그리드 분할</b></td><td>이음매 없는 세계</td><td>경계 이동 처리가 복잡</td></tr>
+        <tr><td><b>관심 영역</b><br><span class="sm">AoI</span></td><td>보내는 양이 확 줄어듦</td><td>자료구조 관리 비용</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>국내 MMORPG 는 “채널”이 사실상 표준</b>입니다 — 같은 맵을 프로세스별로 복제하고
+        플레이어가 채널을 골라 들어갑니다. 그리드 분할(이음매 없는 세계)은 훨씬 어렵고,
+        경계에서 <b>객체 소유권 이전(handoff)</b> 이라는 난제가 따라옵니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">관심 영역(AoI) — 안 보이면 안 보냅니다</h4>
+      <pre class="code" data-lang="cpp"><code>// 100명 방에서 전원에게 전원을 보내면 초당 100×100×30 = 30만 건입니다
+// 시야 안(예: 40m)의 대상만 보내면 보통 10분의 1 이하로 줄어듭니다
+
+class Grid {                       // 셀 크기 = 시야 반경
+    static constexpr float CELL = 40.f;
+    std::unordered_map&lt;std::uint64_t, std::vector&lt;EntityId&gt;&gt; cells_;
+
+    static std::uint64_t key(int cx, int cy) {
+        return (std::uint64_t)(std::uint32_t)cx &lt;&lt; 32 | (std::uint32_t)cy;
+    }
+public:
+    void move(EntityId id, Vec2 from, Vec2 to) {
+        auto a = key(int(from.x/CELL), int(from.y/CELL));
+        auto b = key(int(to.x  /CELL), int(to.y  /CELL));
+        if (a == b) return;                       // 같은 셀이면 할 일 없음
+        std::erase(cells_[a], id);
+        cells_[b].push_back(id);
+    }
+    // 내 셀 + 인접 8칸만 보면 됩니다 — 3×3 = 최대 9칸
+    template &lt;class F&gt; void for_near(Vec2 p, F&amp;&amp; f) const {
+        int cx = int(p.x/CELL), cy = int(p.y/CELL);
+        for (int dy = -1; dy &lt;= 1; ++dy)
+          for (int dx = -1; dx &lt;= 1; ++dx)
+            if (auto it = cells_.find(key(cx+dx, cy+dy)); it != cells_.end())
+                for (auto id : it-&gt;second) f(id);
+    }
+};</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">멀티스레드 게임 로직의 현실</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">실제로 병렬화가 이득인 곳과 아닌 곳</h4>
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:26%">작업</th><th>병렬화</th><th>이유</th></tr>
+      <tr><td>방 여러 개의 틱</td><td><b>매우 좋음</b></td><td>완전히 독립 — 그냥 나눠 주면 됩니다</td></tr>
+      <tr><td>충돌 검사(읽기 전용 단계)</td><td>좋음</td><td>같은 데이터를 읽기만 하면 안전</td></tr>
+      <tr><td>스냅샷 직렬화·압축</td><td><b>좋음</b></td><td>플레이어별로 독립. 틱 시간의 큰 부분</td></tr>
+      <tr><td>경로 탐색(A*)</td><td>좋음</td><td>요청 단위로 잡 큐에 던지면 됨</td></tr>
+      <tr><td>한 방 안의 이동·전투 판정</td><td><b>대체로 손해</b></td><td>서로 참조가 많아 락 비용 &gt; 이득</td></tr>
+      <tr><td>인벤토리·거래</td><td>하지 말 것</td><td>정합성이 생명 — 단일 스레드가 안전</td></tr>
+    </table></div>
+    <div class="grid2" style="margin-top:12px">
+      <div class="note warn" style="margin-bottom:0">
+        <b>한 방 안을 병렬화하려는 시도는 대개 실패합니다</b> — 이동 → 충돌 → 전투 → 사망 처리는
+        <b>순서에 의미가 있고 서로를 참조</b>합니다. 이걸 락으로 감싸면 락 경합이 원래 계산보다 비싸집니다.
+        방 하나를 더 빠르게 만드는 정답은 병렬화가 아니라 <b>알고리즘·메모리 배치 개선</b>입니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>대신 이렇게 씁니다</b> — 방 틱은 단일 스레드로 두고, <b>틱 밖으로 뺄 수 있는 것</b>
+        (스냅샷 압축·경로 탐색·DB 쓰기·로그)만 워커 풀로 던집니다.
+        “한 방 = 한 스레드” 를 지키면 게임 로직 코드에서 <b>동시성을 아예 생각하지 않아도</b> 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 게임 서버 동시성의 실전 답은 <b>액터 — 방마다 큐 하나, 워커 하나</b>입니다.
+    I/O 스레드는 <b>패킷을 큐에 넣기만</b> 하고 게임 로직은 룸 스레드에서만 돕니다.
+    락이 꼭 필요하면 <b><code>scoped_lock</code> 과 계층 번호</b>로 순서를 강제하고,
+    병렬화는 <b>방 단위·스냅샷·경로 탐색</b>처럼 독립적인 곳에만 씁니다.</div>
+</section>
+
+
+<!-- ==================== n07 ==================== -->
+<section class="sec" id="n07">
+  <div class="sec-head rv">
+    <span class="no">GAME 07</span>
+    <h2>넷코드 — <span class="t">예측 · 리컨실리에이션 · 보간 · 지연 보상</span></h2>
+    <p class="lead">
+      서버가 권위를 가지면 “버튼을 누르고 RTT 뒤에 캐릭터가 움직이는” 문제가 생깁니다.
+      100ms 를 기다린 뒤 움직이는 게임은 <b>아무도 못 합니다</b>.
+      그래서 네 가지 기법으로 <b>지연을 숨깁니다</b>. 이것이 넷코드이고, 게임 서버의 핵심 지식입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 320" role="img" aria-label="클라이언트 예측과 서버 리컨실리에이션의 시간 흐름을 보여 주는 그림. 클라이언트는 입력 42번을 서버로 보내면서 동시에 자기 화면에서 먼저 움직이고, 그 입력을 버퍼에 저장한다. 서버 응답을 기다리는 동안 43번, 44번 입력도 계속 예측해서 적용한다. 서버는 42번을 받아 속도 상한과 지형을 검사한 뒤 권위 위치를 계산하고, 마지막으로 처리한 입력 번호 42를 스냅샷에 담아 돌려준다. 스냅샷이 도착하면 클라이언트는 서버가 준 위치에서 시작해 43번과 44번 입력을 다시 적용하고, 그 결과가 지금 화면과 다르면 그 차이만큼만 보정한다.">
+      <text x="16" y="18" class="lbl">클라 예측 + 서버 리컨실리에이션 — 지연을 숨기는 기본기</text>
+
+      <rect class="bx bx-hi" x="16" y="26" width="196" height="62"/>
+      <text x="32" y="46" class="val am-t">① 입력 #42 즉시 적용</text>
+      <text x="32" y="62" class="ann">내 화면은 지금 바로 움직입니다</text>
+      <text x="32" y="76" class="ann">입력을 버퍼에 보관해 둡니다</text>
+
+      <rect class="bx" x="228" y="26" width="196" height="62"/>
+      <text x="244" y="46" class="val">② #43 #44 계속 예측</text>
+      <text x="244" y="62" class="ann">서버 응답을 기다리지 않습니다</text>
+      <text x="244" y="76" class="ann">전부 버퍼에 쌓아 둡니다</text>
+
+      <rect class="bx bx-ok" x="440" y="26" width="224" height="62"/>
+      <text x="456" y="46" class="val ok-t">③ 스냅샷 도착 → 재적용</text>
+      <text x="456" y="62" class="ann">서버 위치부터 #43 #44 다시 계산</text>
+      <text x="456" y="76" class="ann">어긋난 만큼만 부드럽게 보정</text>
+
+      <text x="16" y="110" class="ttl">클라이언트</text>
+      <path class="ln" d="M16 118 L664 118"/>
+
+      <path class="fl ar" d="M110 124 L272 218"/>
+      <text x="120" y="176" class="ann cy-t">입력 전송 · RTT/2</text>
+
+      <path class="fl ar" style="stroke:#34d399" d="M418 218 L556 124"/>
+      <text x="440" y="176" class="ann ok-t">스냅샷 + ack 42</text>
+
+      <text x="16" y="238" class="ttl">서버</text>
+      <path class="ln" d="M16 226 L664 226"/>
+
+      <rect class="bx bx-fw" x="200" y="246" width="196" height="52"/>
+      <text x="216" y="266" class="val rs-t">입력 #42 검증 후 적용</text>
+      <text x="216" y="284" class="ann">속도 상한 · 지형 · 쿨다운을 서버가 확인</text>
+
+      <rect class="bx bx-ok" x="412" y="246" width="252" height="52"/>
+      <text x="428" y="266" class="val ok-t">권위 위치 + ack_input=42 전송</text>
+      <text x="428" y="284" class="ann">"내가 42번까지 처리했다" 를 반드시 함께 보냅니다</text>
+    </svg>
+    <div class="cap"><b>ack_input</b> 하나가 리컨실리에이션의 전부입니다 — 그 번호 이후의 입력만 다시 적용하면 됩니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">클라이언트 예측 — 클라 쪽 코드</h4>
+      <pre class="code" data-lang="cpp"><code>// 서버와 '완전히 같은' 이동 함수를 클라도 갖고 있어야 합니다 ★
+// 공용 라이브러리로 빼서 서버·클라가 같은 .cpp 를 씁니다
+Vec2 step_move(Vec2 pos, const Input&amp; in, double dt, const Map&amp; map);
+
+struct Prediction {
+    std::uint32_t         next_seq = 1;
+    std::deque&lt;Input&gt;     pending;      // 아직 서버가 확인 안 한 입력들
+    Vec2                  shown;        // 화면에 그리는 위치
+
+    void on_local_input(Input in, const Map&amp; map, double dt) {
+        in.seq = next_seq++;
+        net::send(in);                  // ① 서버로 보내고
+        shown = step_move(shown, in, dt, map);   // ② 기다리지 않고 바로 움직임
+        pending.push_back(in);          // ③ 나중에 다시 쓰려고 보관
+    }
+
+    void on_snapshot(Vec2 server_pos, std::uint32_t ack, const Map&amp; map, double dt) {
+        // ④ 서버가 처리한 것까지는 버립니다
+        while (!pending.empty() &amp;&amp; pending.front().seq &lt;= ack) pending.pop_front();
+
+        // ⑤ 서버 위치에서 시작해, 남은 입력을 다시 적용 (re-simulation)
+        Vec2 p = server_pos;
+        for (const auto&amp; in : pending) p = step_move(p, in, dt, map);
+
+        // ⑥ 예측이 맞았으면 p == shown 이라 아무 일도 안 일어납니다
+        if (dist(p, shown) &gt; 0.01f) {
+            if (dist(p, shown) &gt; 2.0f) shown = p;          // 크게 틀렸으면 즉시 점프
+            else shown = lerp(shown, p, 0.25f);            // 작게 틀렸으면 부드럽게
+        }
+    }
+};</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>서버와 클라의 이동 코드가 조금이라도 다르면 계속 튑니다</b> —
+        <code>float</code> 연산 순서, 프레임 dt, 난수 시드까지 같아야 합니다.
+        그래서 실무에서는 <b>이동·충돌 코드를 공용 모듈로 빼고 클라·서버가 같은 소스를 컴파일</b>합니다.
+        UE5 처럼 엔진이 같은 코드를 쓰는 구조가 유리한 이유이기도 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">보간(interpolation) — 남의 캐릭터는 과거를 그립니다</h4>
+      <pre class="code" data-lang="cpp"><code>// 스냅샷은 20Hz(50ms 간격)로 옵니다. 화면은 60Hz 입니다
+// 받은 즉시 그리면 초당 20번만 움직이는 뚝뚝 끊긴 화면이 됩니다
+
+struct RemoteEntity {
+    struct Sample { double t; Vec2 pos; float rot; };
+    std::deque&lt;Sample&gt; hist;                 // 최근 1초치 보관
+    static constexpr double DELAY = 0.10;    // ★ 100ms 뒤처져서 그립니다
+
+    void on_snapshot(double server_t, Vec2 p, float r) {
+        hist.push_back({server_t, p, r});
+        while (hist.size() &gt; 2 &amp;&amp; hist[1].t &lt; server_t - 1.0) hist.pop_front();
+    }
+
+    Vec2 render_pos(double now_t) const {
+        const double target = now_t - DELAY;      // 과거 시점을 그립니다
+        for (std::size_t i = 1; i &lt; hist.size(); ++i) {
+            if (hist[i].t &gt;= target) {
+                const auto&amp; a = hist[i-1]; const auto&amp; b = hist[i];
+                double u = (target - a.t) / std::max(1e-6, b.t - a.t);
+                return lerp(a.pos, b.pos, float(u));   // ★ 두 스냅샷 사이를 채움
+            }
+        }
+        return hist.empty() ? Vec2{} : hist.back().pos;   // 데이터가 끊기면 마지막 값
+    }
+};</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>DELAY 는 “스냅샷 간격 × 2” 정도</b>가 안전합니다(20Hz → 100ms).
+        이보다 짧으면 패킷이 하나만 늦어도 그릴 데이터가 없어 <b>외삽(extrapolation)</b> 으로 넘어가고,
+        외삽은 <b>벽을 뚫고 미끄러지는</b> 현상을 만듭니다.
+        <b>내 캐릭터는 예측(미래), 남의 캐릭터는 보간(과거)</b> — 이 비대칭이 넷코드의 핵심입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">지연 보상 — 서버가 시간을 되감습니다</span> <span class="lvl h">🔴 실무</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="지연 보상을 위해 서버가 과거 상태로 되감아 히트를 판정하는 그림. 서버는 최근 스무 틱 정도의 모든 캐릭터 위치를 히스토리로 보관한다. 클라이언트가 틱 100 시점에 사격 패킷을 보내면서 자기가 화면에서 본 시점이 틱 96 이었다고 알려 준다. 서버는 지금 위치가 아니라 틱 96 의 위치로 적의 히트박스를 되돌려 놓고 광선을 쏴서 맞았는지 판정한다. 그래서 화면에서 조준선이 맞았다면 실제로 맞는다. 대신 맞은 쪽 화면에서는 이미 엄폐물 뒤로 숨었는데 맞는 일이 생기는데, 이것이 지연 보상의 피할 수 없는 대가다.">
+      <text x="16" y="18" class="lbl">지연 보상 — 히스토리에서 그 순간으로 되감아 판정합니다</text>
+
+      <text x="16" y="44" class="ttl">서버가 보관하는 틱별 위치 히스토리 (최근 20틱 ≈ 0.6초)</text>
+
+      <rect class="bx bx-mut" x="16" y="54" width="88" height="52"/>
+      <text x="60" y="76" class="ann" text-anchor="middle">tick 94</text>
+      <text x="60" y="92" class="ann" text-anchor="middle">적 x=12.0</text>
+      <rect class="bx bx-mut" x="108" y="54" width="88" height="52"/>
+      <text x="152" y="76" class="ann" text-anchor="middle">tick 95</text>
+      <text x="152" y="92" class="ann" text-anchor="middle">적 x=12.6</text>
+      <rect class="bx bx-fw" x="200" y="54" width="88" height="52"/>
+      <text x="244" y="76" class="ann rs-t" text-anchor="middle">tick 96</text>
+      <text x="244" y="92" class="ann rs-t" text-anchor="middle">적 x=13.2</text>
+      <rect class="bx bx-mut" x="292" y="54" width="88" height="52"/>
+      <text x="336" y="76" class="ann" text-anchor="middle">tick 97</text>
+      <text x="336" y="92" class="ann" text-anchor="middle">적 x=13.8</text>
+      <rect class="bx bx-mut" x="384" y="54" width="88" height="52"/>
+      <text x="428" y="76" class="ann" text-anchor="middle">tick 98</text>
+      <text x="428" y="92" class="ann" text-anchor="middle">적 x=14.4</text>
+      <rect class="bx bx-mut" x="476" y="54" width="88" height="52"/>
+      <text x="520" y="76" class="ann" text-anchor="middle">tick 99</text>
+      <text x="520" y="92" class="ann" text-anchor="middle">적 x=15.0</text>
+      <rect class="bx bx-hi" x="568" y="54" width="88" height="52"/>
+      <text x="612" y="76" class="ann am-t" text-anchor="middle">tick 100</text>
+      <text x="612" y="92" class="ann am-t" text-anchor="middle">지금 x=15.6</text>
+
+      <path class="fl ar" style="stroke:#fb7185" d="M608 118 L252 118"/>
+      <text x="264" y="136" class="ann rs-t">되감기 4틱 — 클라가 본 시점으로</text>
+
+      <rect class="bx" x="16" y="150" width="316" height="76"/>
+      <text x="32" y="172" class="val">클라가 보낸 사격 패킷</text>
+      <text x="32" y="190" class="ann">조준 방향 · 발사 시각</text>
+      <text x="32" y="204" class="ann">view_tick = 96 (내가 본 화면의 틱)</text>
+      <text x="32" y="218" class="ann">서버는 이 값을 검증합니다 — 상한 밖이면 잘라 냅니다</text>
+
+      <rect class="bx bx-ok" x="348" y="150" width="316" height="76"/>
+      <text x="364" y="172" class="val ok-t">서버 판정</text>
+      <text x="364" y="190" class="ann">히스토리[96] 로 히트박스를 되돌림</text>
+      <text x="364" y="204" class="ann">그 상태에서 광선 검사 → 명중</text>
+      <text x="364" y="218" class="ann">"화면에서 맞았으면 맞는다" 가 성립합니다</text>
+
+      <rect class="bx bx-warn" x="16" y="238" width="648" height="52"/>
+      <text x="32" y="258" class="val rs-t">대가 — 맞은 쪽에서는 "엄폐물 뒤로 숨었는데 맞았다" 가 생깁니다</text>
+      <text x="32" y="276" class="ann">되감기 상한을 두고(예: 200ms), 핑이 아주 높은 사용자는 보상을 줄이는 것이 실무 절충입니다</text>
+    </svg>
+    <div class="cap">지연 보상은 <b>쏜 사람과 맞은 사람 중 누구 편을 들지</b>를 정하는 문제입니다 — 공짜 해법은 없습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">서버 쪽 되감기 구현</h4>
+      <pre class="code" data-lang="cpp"><code>class HitboxHistory {
+    static constexpr std::size_t N = 32;            // 32틱 ≈ 1초(30Hz)
+    struct Frame { std::uint32_t tick; std::vector&lt;Aabb&gt; boxes; };
+    std::array&lt;Frame, N&gt; ring_{};
+
+public:
+    void snapshot(std::uint32_t tick, const World&amp; w) {
+        auto&amp; f = ring_[tick % N];
+        f.tick = tick; f.boxes.clear();
+        for (const auto&amp; e : w.entities) f.boxes.push_back(e.hitbox());
+    }
+
+    const Frame* at(std::uint32_t tick) const {
+        const auto&amp; f = ring_[tick % N];
+        return f.tick == tick ? &amp;f : nullptr;       // 너무 오래됐으면 nullptr
+    }
+};
+
+void Room::on_fire(PlayerId who, const FireCmd&amp; cmd) {
+    auto&amp; p = players_.at(who);
+
+    // ① 클라가 주장하는 시점을 그대로 믿지 않습니다 ★
+    const std::uint32_t max_rewind = 6;             // 200ms 상한
+    std::uint32_t view = std::clamp(cmd.view_tick,
+                                    tick_ &gt; max_rewind ? tick_ - max_rewind : 0u,
+                                    tick_);
+
+    // ② 쿨다운·탄약도 서버가 검증
+    if (now_ms() - p.last_fire_ms &lt; p.weapon.cooldown_ms) return;
+    if (p.ammo == 0) return;
+    p.last_fire_ms = now_ms(); --p.ammo;
+
+    // ③ 그 시점의 히트박스로 판정
+    const auto* f = hist_.at(view);
+    if (!f) return;
+    if (auto hit = raycast(p.pos, cmd.dir, f-&gt;boxes, p.weapon.range)) {
+        apply_damage(hit-&gt;entity, p.weapon.damage);
+        broadcast(HitEvent{who, hit-&gt;entity, hit-&gt;point});
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스냅샷 델타 압축 — 대역폭이 반이 됩니다</h4>
+      <pre class="code" data-lang="cpp"><code>// 100명 방에서 전체 스냅샷을 20Hz 로 보내면
+//   100엔티티 × 20바이트 × 20Hz × 100명 = 4MB/s. 감당이 안 됩니다
+
+// ① 플레이어마다 "그가 마지막으로 확인한 스냅샷" 을 기억합니다
+struct ClientView {
+    std::uint32_t                       acked_tick = 0;
+    std::unordered_map&lt;EntityId, State&gt; acked_state;   // 그 시점 상태
+};
+
+// ② 바뀐 필드만, 바뀐 엔티티만 보냅니다
+void build_delta(const World&amp; w, ClientView&amp; cv, Writer&amp; out) {
+    out.u32(w.tick); out.u32(cv.acked_tick);        // 무엇 대비 델타인지
+    for (const auto&amp; e : w.entities) {
+        if (!cv.visible(e)) continue;               // ★ AoI 로 먼저 거릅니다
+        const State* prev = cv.find(e.id);
+        std::uint8_t mask = 0;
+        if (!prev || prev-&gt;pos != e.pos) mask |= 1;
+        if (!prev || prev-&gt;hp  != e.hp ) mask |= 2;
+        if (!prev || prev-&gt;ani != e.ani) mask |= 4;
+        if (mask == 0) continue;                    // 안 바뀌었으면 아예 생략
+        out.u32(e.id); out.u8(mask);
+        if (mask &amp; 1) out.pos_q(e.pos);             // 양자화 ★
+        if (mask &amp; 2) out.u16(e.hp);
+        if (mask &amp; 4) out.u8(e.ani);
+    }
+}
+
+// ③ 양자화 — float 4바이트를 2바이트로. 1cm 단위면 충분합니다
+inline std::int16_t quantize(float m) { return std::int16_t(std::lround(m * 100)); }</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>양자화 + 델타 + AoI 세 가지를 다 적용하면</b> 실측으로 대역폭이 <b>1/8~1/15</b> 로 떨어집니다.
+        서버 비용의 큰 부분이 <b>아웃바운드 트래픽</b> 이므로, 이 최적화가 곧 돈입니다.
+        단, 델타는 <b>기준 스냅샷이 유실되면 복구가 필요</b>하므로 몇 초에 한 번 <b>전체 스냅샷(키프레임)</b> 을 섞습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">넷코드 네 기법 — 언제 무엇을</h4>
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:20%">기법</th><th>어디서 돌까</th><th>무엇을 숨기나</th><th>부작용</th></tr>
+      <tr><td><b>클라 예측</b></td><td>클라</td><td>내 입력의 왕복 지연</td><td>틀리면 튐(rubber-banding)</td></tr>
+      <tr><td><b>리컨실리에이션</b></td><td>클라</td><td>예측 오차 정정</td><td>재계산 비용, 코드 일치 필요</td></tr>
+      <tr><td><b>보간</b></td><td>클라</td><td>낮은 스냅샷 주기</td><td>남이 100ms 과거로 보임</td></tr>
+      <tr><td><b>지연 보상</b></td><td><b>서버</b></td><td>쏜 사람의 지연</td><td>맞은 쪽이 억울함</td></tr>
+      <tr><td>롤백 넷코드</td><td>양쪽</td><td>격투 게임의 프레임 단위 지연</td><td>구현 난도 최상</td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>격투 게임의 롤백 넷코드</b>는 다릅니다 — 서버가 아니라 <b>양쪽이 상대 입력을 예측</b>하고,
+      틀리면 <b>몇 프레임을 통째로 되감아 다시 시뮬레이션</b>합니다.
+      결정론적 시뮬레이션(같은 입력 → 반드시 같은 결과)이 전제라 <b>부동소수점 하나까지 맞춰야</b> 하고,
+      그래서 대개 <b>고정소수점 연산</b>으로 짭니다. GGPO 계열 라이브러리가 이 영역입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>내 캐릭터는 예측(미래), 남의 캐릭터는 보간(과거)</b> 로 그립니다.
+    서버는 <b>ack_input</b> 을 함께 보내 클라가 <b>그 이후 입력만 다시 적용</b>하게 합니다.
+    사격 판정은 <b>히스토리를 되감아</b> 하되 <b>되감기 상한</b>을 두고,
+    전송량은 <b>AoI · 델타 · 양자화</b> 세 가지로 줄입니다.</div>
+</section>
+
+
+<!-- ==================== n08 ==================== -->
+<section class="sec" id="n08">
+  <div class="sec-head rv">
+    <span class="no">GAME 08</span>
+    <h2>매치메이킹 · 로비 — <span class="t">Redis</span> 로 대기열과 랭킹을</h2>
+    <p class="lead">
+      게임 룸이 잘 돌아도 <b>거기까지 들어가는 길</b>이 없으면 서비스가 아닙니다.
+      대기열 · 파티 · MMR 매칭 · 랭킹 · 세션 공유 — 이 영역은 CPU 가 아니라 <b>상태 공유</b>가 문제이고,
+      그래서 거의 항상 <b>Redis</b> 가 답이 됩니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 302" role="img" aria-label="매치메이킹에서 대기 시간이 길어질수록 허용 실력 범위를 넓히는 방식을 보여 주는 그림. 내 실력 점수가 1500 일 때 처음에는 앞뒤 50 점 안에서만 상대를 찾는다. 10초가 지나면 150 점, 30초가 지나면 400 점까지 범위를 넓힌다. 좁게 시작해 넓히면 대부분의 사람은 비슷한 실력끼리 빠르게 매칭되고, 인구가 적은 극단 구간의 사람만 기다린 만큼 범위가 넓어져 결국 잡힌다. 아래쪽은 레디스의 어떤 자료구조를 쓰는지 보여 준다. 대기열은 정렬 집합, 파티와 세션은 해시, 랭킹은 정렬 집합, 매칭 알림은 발행 구독을 쓴다.">
+      <text x="16" y="18" class="lbl">대기 시간에 따라 허용 MMR 범위를 넓힙니다</text>
+
+      <path class="ln-t" d="M340 34 L340 150"/>
+      <text x="340" y="46" class="ann am-t" text-anchor="middle">내 MMR 1500</text>
+
+      <rect class="bx bx-ok" x="319" y="54" width="42" height="24"/>
+      <text x="372" y="70" class="ann ok-t">대기 0초 — 허용 ±50 · 거의 동급</text>
+
+      <rect class="bx bx-hi" x="276" y="86" width="128" height="24"/>
+      <text x="415" y="102" class="ann am-t">10초 — ±150 · 이 구간에서 대부분 잡힙니다</text>
+
+      <rect class="bx" x="169" y="118" width="342" height="24"/>
+      <text x="522" y="134" class="ann">30초 — ±400</text>
+
+      <path class="ln ar" d="M16 158 L664 158"/>
+      <text x="40" y="174" class="ann">800</text>
+      <text x="169" y="174" class="ann">1100</text>
+      <text x="298" y="174" class="ann">1400</text>
+      <text x="427" y="174" class="ann">1700</text>
+      <text x="556" y="174" class="ann">2000</text>
+
+      <text x="16" y="200" class="ttl">Redis 자료구조 — 무엇을 어디에 담나</text>
+
+      <rect class="bx" x="16" y="212" width="156" height="76"/>
+      <text x="94" y="234" class="val cy-t" text-anchor="middle">대기열</text>
+      <text x="32" y="252" class="ann">ZSET queue:solo</text>
+      <text x="32" y="266" class="ann">score = MMR</text>
+      <text x="32" y="280" class="ann">범위 조회가 O(log n)</text>
+
+      <rect class="bx" x="180" y="212" width="156" height="76"/>
+      <text x="258" y="234" class="val cy-t" text-anchor="middle">파티 · 세션</text>
+      <text x="196" y="252" class="ann">HASH party:{id}</text>
+      <text x="196" y="266" class="ann">멤버·초대·상태</text>
+      <text x="196" y="280" class="ann">TTL 로 자동 정리</text>
+
+      <rect class="bx" x="344" y="212" width="156" height="76"/>
+      <text x="422" y="234" class="val cy-t" text-anchor="middle">랭킹</text>
+      <text x="360" y="252" class="ann">ZSET rank:season7</text>
+      <text x="360" y="266" class="ann">ZREVRANK 로 내 등수</text>
+      <text x="360" y="280" class="ann">상위 100 은 O(log n)</text>
+
+      <rect class="bx bx-ok" x="508" y="212" width="156" height="76"/>
+      <text x="586" y="234" class="val ok-t" text-anchor="middle">매칭 알림</text>
+      <text x="524" y="252" class="ann">PUB/SUB · Stream</text>
+      <text x="524" y="266" class="ann">게임 서버 배정 통보</text>
+      <text x="524" y="280" class="ann">여러 로비 서버에 팬아웃</text>
+    </svg>
+    <div class="cap">좁게 시작해 <b>기다린 만큼 넓히는</b> 것이 핵심입니다 — 처음부터 넓히면 실력 차가 커집니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">대기열 — Redis ZSET 로</h4>
+      <pre class="code" data-lang="text"><code># 대기열 등록 : score 를 MMR 로 두면 범위 조회가 그대로 됩니다
+ZADD queue:solo 1500 player:8812
+HSET wait:player:8812 since 1756100000 party 0
+
+# 후보 찾기 : 내 MMR ±band 안의 사람들
+ZRANGEBYSCORE queue:solo 1350 1650 LIMIT 0 20
+
+# 뽑았으면 원자적으로 빼야 합니다 (두 매치에 동시에 들어가면 대참사)
+ZREM queue:solo player:8812 player:9910 ...
+#   → 반환값이 요청한 인원 수와 같을 때만 매치 성립 ★
+
+# 실무에서는 Lua 스크립트로 '조회 + 제거 + 방 생성' 을 한 번에 원자 실행합니다
+EVAL "..." 1 queue:solo 1350 1650 10</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>중복 매칭이 이 영역 최대의 버그</b> 입니다 — 로비 서버가 여러 대면
+        두 서버가 같은 사람을 동시에 뽑을 수 있습니다.
+        <b><code>ZREM</code> 의 반환값(실제로 지운 개수)을 반드시 확인</b>하고,
+        전원을 다 못 지웠으면 <b>지운 사람들을 되돌려 넣고 매치를 취소</b>하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">매처 루프 — C++ 쪽</h4>
+      <pre class="code" data-lang="cpp"><code>struct Waiting { PlayerId id; int mmr; std::uint64_t since_ms; int party_size; };
+
+// 대기 시간에 따라 넓어지는 밴드
+int band_for(std::uint64_t waited_ms) {
+    if (waited_ms &lt;  5'000) return 50;
+    if (waited_ms &lt; 15'000) return 150;
+    if (waited_ms &lt; 30'000) return 250;
+    return std::min(400 + int((waited_ms - 30'000) / 1000) * 20, 900);
+}
+
+void Matcher::tick() {                     // 0.5초마다 돕니다
+    auto now = now_ms();
+    auto pool = redis_.zrange_all("queue:solo");     // MMR 순으로 정렬돼 옵니다
+
+    // 오래 기다린 사람부터 처리해야 공평합니다 ★
+    std::ranges::sort(pool, {}, &amp;Waiting::since_ms);
+
+    for (auto&amp; anchor : pool) {
+        if (taken_.contains(anchor.id)) continue;
+        const int band = band_for(now - anchor.since_ms);
+
+        std::vector&lt;PlayerId&gt; team;
+        for (auto&amp; c : pool) {                        // 정렬돼 있어 근처만 보면 됩니다
+            if (taken_.contains(c.id)) continue;
+            if (std::abs(c.mmr - anchor.mmr) &gt; band) continue;
+            team.push_back(c.id);
+            if (team.size() == TEAM_TOTAL) break;
+        }
+        if (team.size() &lt; TEAM_TOTAL) continue;
+
+        if (!redis_.atomic_take("queue:solo", team)) continue;   // ★ 원자적 확보
+        auto srv = alloc_.pick_game_server();                    // 가장 한가한 서버
+        auto room = srv.create_room(balance_teams(team));
+        for (auto id : team) notify_match(id, srv.addr, room.token);
+        for (auto id : team) taken_.insert(id);
+    }
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">MMR 은 어떻게 계산하나</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Elo — 이해하기 쉬운 기본형</h4>
+      <pre class="code" data-lang="cpp"><code>// 기대 승률 : 점수 차 400 이면 약 91% 승리 기대
+double expected(double ra, double rb) {
+    return 1.0 / (1.0 + std::pow(10.0, (rb - ra) / 400.0));
+}
+
+// K 값이 클수록 한 판의 영향이 큽니다
+int k_factor(int games_played, int rating) {
+    if (games_played &lt; 10)  return 60;   // 배치 고사 — 빨리 제자리 찾게
+    if (rating &gt; 2200)      return 16;   // 고랭크는 천천히
+    return 32;
+}
+
+void apply_result(Player&amp; a, Player&amp; b, double score_a /*1 승, 0.5 무, 0 패*/) {
+    double ea = expected(a.mmr, b.mmr);
+    int k = k_factor(a.games, a.mmr);
+    int delta = int(std::lround(k * (score_a - ea)));
+    a.mmr += delta;  b.mmr -= delta;      // 제로섬
+    ++a.games; ++b.games;
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>팀 게임이라면 Elo 만으로는 부족합니다</b> — 5대5 에서 “누가 얼마나 기여했나”를 Elo 는 모릅니다.
+        상용 게임은 <b>TrueSkill</b>(마이크로소프트) 이나 <b>Glicko-2</b> 처럼
+        <b>불확실도(σ)를 함께 추적</b>하는 모델을 씁니다 — 새 계정은 σ 가 커서 점수가 빠르게 움직입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">매칭 품질을 재는 지표</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">지표</th><th>목표</th></tr>
+        <tr><td>중앙 대기 시간</td><td>&lt; 30초</td></tr>
+        <tr><td>p95 대기 시간</td><td>&lt; 120초</td></tr>
+        <tr><td>팀 MMR 차이 평균</td><td>&lt; 60</td></tr>
+        <tr><td>일방적 경기 비율</td><td>&lt; 20%</td></tr>
+        <tr><td>매치 취소율(수락 거절)</td><td>&lt; 5%</td></tr>
+        <tr><td>재매칭까지 시간</td><td>&lt; 10초</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>대기 시간과 매칭 품질은 정확히 반대로 움직입니다</b> — 한쪽을 좋게 하면 다른 쪽이 나빠집니다.
+        그래서 매처 튜닝은 <b>둘을 동시에 보는 대시보드 없이는 불가능</b>합니다.
+        새벽 시간대·저인구 지역은 <b>밴드 확장 속도를 시간대별로 다르게</b> 두는 것이 흔한 처방입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">파티 · 재접속 토큰 · 서버 배정</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">로비에서 게임 서버까지 — 토큰 흐름</h4>
+    <pre class="code" data-lang="cpp"><code>// ① 매치가 잡히면 로비가 '입장 토큰' 을 만들어 Redis 에 저장하고 클라에 줍니다
+struct JoinTicket {
+    std::string   room_id;
+    std::string   server_addr;     // "10.0.3.17:7801"
+    PlayerId      player;
+    std::uint64_t expire_ms;       // 30초 뒤 만료
+    std::array&lt;std::byte,32&gt; hmac; // 서버 공유키로 서명 ★
+};
+
+// Redis 에도 넣습니다 — 게임 서버가 이걸로 검증합니다
+// SET ticket:{uuid} '{"room":"r91","player":8812}' PX 30000 NX
+
+// ② 클라는 게임 서버에 직접 접속해 토큰을 냅니다
+void GameServer::on_join(Session&amp; s, const JoinReq&amp; req) {
+    auto j = redis_.getdel("ticket:" + req.ticket);   // ★ GETDEL — 1회용
+    if (!j) { s.close("invalid ticket"); return; }    // 재사용·위조 차단
+
+    auto info = parse(*j);
+    if (info.room != /* 이 서버가 가진 방 */ ) { s.close("wrong server"); return; }
+    rooms_.at(info.room)-&gt;post([&amp;, pid = info.player] { room-&gt;join(pid, s.shared()); });
+}
+
+// ③ 재접속 : 방이 살아 있는 동안은 같은 플레이어로 다시 붙습니다
+//    SET reconnect:{player} '{"room":"r91","server":"10.0.3.17:7801"}' PX 300000
+//    클라는 접속이 끊기면 먼저 이 키를 조회해 원래 방으로 복귀를 시도합니다</code></pre>
+    <div class="grid2" style="margin-top:12px">
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>GETDEL</code> 이 핵심입니다</b> — 토큰을 읽는 동시에 지워야 <b>같은 토큰으로 두 번 들어오는</b> 것을 막습니다.
+        Redis 6.2+ 에서 지원하고, 그 전 버전이면 Lua 로 <code>GET</code>+<code>DEL</code> 을 원자 실행합니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>게임 서버 주소를 클라에 그대로 주는 것</b>은 DDoS 표면이 됩니다.
+        규모가 커지면 <b>릴레이/프록시 계층</b>(예: Steam Datagram Relay, 자체 UDP 프록시)을 두어
+        실제 서버 IP 를 숨깁니다. 초기에는 <b>방화벽 + 토큰 검증</b> 만으로 시작해도 충분합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 대기열은 <b>Redis ZSET(score = MMR)</b>, 파티·세션은 HASH, 랭킹도 ZSET 입니다.
+    밴드는 <b>좁게 시작해 대기 시간만큼 넓힙니다</b>.
+    <b><code>ZREM</code> 반환값 확인</b>으로 중복 매칭을 막고,
+    로비 → 게임 서버 이동은 <b>1회용 토큰(GETDEL)</b> 으로 넘깁니다.</div>
+</section>
+
+
+<!-- ==================== n09 ==================== -->
+<section class="sec" id="n09">
+  <div class="sec-head rv">
+    <span class="no">GAME 09</span>
+    <h2>DB 와 영속화 — <span class="t">틱을 멈추지 않고</span> 저장하기</h2>
+    <p class="lead">
+      게임 서버에서 DB 쿼리를 <b>틱 안에서 동기로</b> 부르는 순간 끝입니다.
+      5ms 짜리 쿼리 하나가 방 전체를 5ms 멈춥니다.
+      그렇다고 아무렇게나 미루면 <b>아이템 복사 버그</b>가 납니다. 이 둘 사이의 균형이 이 절의 주제입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="게임 서버가 데이터를 저장하는 두 가지 경로를 보여 주는 그림. 위쪽은 지연 쓰기 경로다. 룸 스레드가 메모리 상태를 바꾸고 더티 비트를 세운 뒤 즉시 클라이언트에 응답하고, 별도의 디비 워커가 몇 초마다 더티 목록을 모아 한 번에 저장한다. 빠르지만 서버가 죽으면 마지막 저장 이후 몇 초가 사라진다. 아래쪽은 즉시 트랜잭션 경로다. 재화 결제나 거래처럼 절대 어긋나면 안 되는 것은 디비 트랜잭션이 커밋될 때까지 결과를 확정하지 않는다. 느리지만 정합성이 보장된다. 위치나 경험치처럼 잃어도 되는 것은 위 경로, 돈과 아이템은 아래 경로로 나눈다.">
+      <text x="16" y="18" class="lbl">지연 쓰기(write-behind) — 틱을 멈추지 않는 기본 경로</text>
+
+      <circle class="stp" cx="28" cy="64" r="11"/>
+      <text x="28" y="68" class="stpn" text-anchor="middle">1</text>
+      <rect class="bx" x="46" y="40" width="140" height="50"/>
+      <text x="62" y="60" class="val">메모리 변경</text>
+      <text x="62" y="78" class="ann">인벤토리 갱신 · 즉시 응답</text>
+
+      <path class="fl ar" d="M190 65 L206 65"/>
+
+      <circle class="stp" cx="222" cy="64" r="11"/>
+      <text x="222" y="68" class="stpn" text-anchor="middle">2</text>
+      <rect class="bx bx-hi" x="240" y="40" width="140" height="50"/>
+      <text x="256" y="60" class="val am-t">dirty 비트 세움</text>
+      <text x="256" y="78" class="ann">저장할 것만 표시</text>
+
+      <path class="fl ar" d="M384 65 L400 65"/>
+
+      <circle class="stp" cx="416" cy="64" r="11"/>
+      <text x="416" y="68" class="stpn" text-anchor="middle">3</text>
+      <rect class="bx" x="434" y="40" width="110" height="50"/>
+      <text x="450" y="60" class="val">더티 큐</text>
+      <text x="450" y="78" class="ann">3초마다 수집</text>
+
+      <path class="fl ar" d="M548 65 L564 65"/>
+
+      <rect class="bx bx-ok" x="568" y="40" width="96" height="50"/>
+      <text x="616" y="60" class="val ok-t" text-anchor="middle">DB 워커</text>
+      <text x="616" y="78" class="ann ok-t" text-anchor="middle">배치 UPSERT</text>
+
+      <rect class="bx bx-warn" x="16" y="102" width="648" height="34"/>
+      <text x="32" y="122" class="ann rs-t">대가 — 서버가 죽으면 마지막 저장 이후 몇 초가 사라집니다. 무엇을 잃어도 되는지 미리 정해 두세요</text>
+
+      <text x="16" y="164" class="ttl">두 경로를 반드시 나눠야 합니다</text>
+
+      <rect class="bx" x="16" y="176" width="316" height="112"/>
+      <text x="32" y="198" class="val cy-t">지연 쓰기로 충분한 것</text>
+      <text x="32" y="216" class="ann">위치 · 방향 · 현재 맵</text>
+      <text x="32" y="230" class="ann">경험치 · 플레이 시간 · 통계</text>
+      <text x="32" y="244" class="ann">설정 · 단축키 · 퀘스트 진행도</text>
+      <text x="32" y="258" class="ann">잃어도 "조금 되돌아간" 정도로 끝납니다</text>
+      <text x="32" y="276" class="ann cy-t">→ 초당 수만 건도 감당됩니다</text>
+
+      <rect class="bx bx-ok" x="348" y="176" width="316" height="112"/>
+      <text x="364" y="198" class="val ok-t">즉시 트랜잭션이어야 하는 것</text>
+      <text x="364" y="216" class="ann">현금 결제 · 유료 재화</text>
+      <text x="364" y="230" class="ann">플레이어 간 거래 · 우편</text>
+      <text x="364" y="244" class="ann">경매장 · 길드 창고</text>
+      <text x="364" y="258" class="ann">어긋나면 아이템 복사가 됩니다</text>
+      <text x="364" y="276" class="ann ok-t">→ 커밋 전에는 결과를 확정하지 않습니다</text>
+    </svg>
+    <div class="cap">모든 것을 즉시 저장하면 서버가 느려지고, 모두 미루면 <b>복사 버그</b>가 납니다 — <b>데이터마다 다르게</b> 다룹니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">더티 플래그와 배치 저장</h4>
+      <pre class="code" data-lang="cpp"><code>enum Dirty : std::uint32_t {
+    None = 0, Pos = 1u&lt;&lt;0, Stats = 1u&lt;&lt;1, Inventory = 1u&lt;&lt;2, Quest = 1u&lt;&lt;3,
+};
+
+struct PlayerData {
+    PlayerId      id;
+    Vec2          pos;
+    std::uint64_t exp;
+    std::vector&lt;ItemSlot&gt; inv;
+    std::uint32_t dirty = Dirty::None;
+    std::uint64_t last_saved_ms = 0;
+};
+
+// 룸 스레드 — 아주 싸게 표시만 합니다
+void Room::gain_exp(PlayerData&amp; p, std::uint64_t amount) {
+    p.exp += amount;
+    p.dirty |= Dirty::Stats;          // ★ DB 는 건드리지 않습니다
+}
+
+// 3초마다 도는 수집 — 룸 스레드에서 스냅샷을 떠서 워커에 넘깁니다
+void Room::flush_dirty(std::uint64_t now_ms) {
+    if (now_ms - last_flush_ms_ &lt; 3'000) return;
+    last_flush_ms_ = now_ms;
+
+    std::vector&lt;SaveJob&gt; batch;
+    for (auto&amp; [id, p] : players_) {
+        if (p.dirty == Dirty::None) continue;
+        batch.push_back(SaveJob{ .id = id, .mask = p.dirty,
+                                 .snap = copy_of(p) });   // ★ 값 복사로 넘김
+        p.dirty = Dirty::None;                            // 즉시 초기화
+    }
+    if (!batch.empty()) db_pool_.post(std::move(batch));  // 다른 스레드로
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>포인터를 넘기면 안 됩니다</b> — DB 워커가 저장하는 동안 룸 스레드가 같은 객체를 고칩니다.
+        <b>값을 복사해서 넘기고</b>, 그 사이 새로 생긴 변경은 다음 주기에 다시 dirty 로 잡히게 두세요.
+        복사 비용이 아깝다면 <b>변경분만 담은 작은 구조체</b>를 만들어 넘깁니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">DB 워커 풀 — 커넥션은 스레드마다 하나</h4>
+      <pre class="code" data-lang="cpp"><code>// MySQL/PostgreSQL C 클라이언트는 기본이 '블로킹' 입니다.
+// 그래서 게임 서버는 대개 전용 스레드 풀로 감쌉니다 (진짜 비동기 API 는 까다롭습니다)
+
+class DbPool {
+    struct Worker { std::jthread th; MYSQL* conn; };
+    std::vector&lt;Worker&gt;                 workers_;
+    moodycamel::BlockingConcurrentQueue&lt;std::vector&lt;SaveJob&gt;&gt; q_;
+
+public:
+    explicit DbPool(int n, const DbCfg&amp; cfg) {
+        for (int i = 0; i &lt; n; ++i) {
+            auto* c = mysql_init(nullptr);
+            mysql_real_connect(c, cfg.host, cfg.user, cfg.pw, cfg.db, cfg.port, nullptr, 0);
+            workers_.push_back({std::jthread{[this, c](std::stop_token st){ loop(c, st); }}, c});
+        }
+    }
+    void post(std::vector&lt;SaveJob&gt; batch) { q_.enqueue(std::move(batch)); }
+
+private:
+    void loop(MYSQL* c, std::stop_token st) {
+        std::vector&lt;SaveJob&gt; batch;
+        while (!st.stop_requested()) {
+            if (!q_.wait_dequeue_timed(batch, std::chrono::milliseconds(200))) continue;
+            // ★ 한 트랜잭션에 묶어야 왕복이 1회로 끝납니다
+            mysql_query(c, "START TRANSACTION");
+            for (const auto&amp; j : batch) write_one(c, j);
+            mysql_query(c, "COMMIT");
+        }
+    }
+};</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>배치가 성능의 전부입니다</b> — 개별 UPDATE 를 1000번 보내면 왕복 1000번이지만,
+        한 트랜잭션에 묶으면 왕복이 사실상 1번입니다. 실측으로 <b>10~50배</b> 차이가 납니다.
+        <code>INSERT ... ON DUPLICATE KEY UPDATE</code>(MySQL) 또는
+        <code>INSERT ... ON CONFLICT DO UPDATE</code>(PostgreSQL) 로 <b>여러 행을 한 문장</b>에 넣으면 더 좋습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">아이템 복사 버그를 막는 법</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>✗ 복사 버그가 나는 거래</h5>
+      <pre class="code" data-lang="cpp"><code>void trade(Player&amp; a, Player&amp; b, ItemId item) {
+    a.inv.remove(item);        // ① 메모리에서 빼고
+    b.inv.add(item);           // ② 메모리에 넣고
+    a.dirty |= Inventory;      // ③ 나중에 저장
+    b.dirty |= Inventory;
+}
+// ①과 ③ 사이에 서버가 죽으면?
+//   → 둘 다 저장 안 됨 : a 가 그대로 갖고 있음 (그나마 다행)
+// a 만 저장되고 b 는 다른 서버에 있어 저장이 늦었다면?
+//   → 아이템이 사라집니다
+// 반대로 b 만 저장되면?
+//   → ★ 아이템이 두 개가 됩니다 (복사)</code></pre>
+    </div>
+    <div class="good">
+      <h5>✓ 원장(ledger) 기반 거래</h5>
+      <pre class="code" data-lang="sql"><code>-- 거래는 '기록' 이 먼저, 반영은 그 다음입니다
+START TRANSACTION;
+
+-- ① 멱등 키로 중복 실행 차단 (재시도해도 한 번만)
+INSERT INTO trade_log(trade_id, from_id, to_id, item_uid, state)
+VALUES ('t-9f31', 8812, 9910, 55231, 'PENDING');
+-- trade_id 가 PK 이므로 두 번째 시도는 여기서 실패합니다
+
+-- ② 소유권을 '한 줄' 로 옮깁니다 — 조건부 UPDATE ★
+UPDATE item SET owner_id = 9910
+ WHERE uid = 55231 AND owner_id = 8812;
+-- 영향 행이 0 이면 이미 남에게 갔다는 뜻 → ROLLBACK
+
+UPDATE trade_log SET state='DONE' WHERE trade_id='t-9f31';
+COMMIT;</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복사 버그를 막는 다섯 가지 규칙</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">규칙</th><th>이유</th></tr>
+        <tr><td><b>아이템에 고유 uid</b></td><td>“몇 개”가 아니라 “그 물건”을 옮깁니다</td></tr>
+        <tr><td><b>소유자 컬럼 하나</b></td><td>소유는 항상 한 곳에만 기록</td></tr>
+        <tr><td><b>조건부 UPDATE</b></td><td><code>WHERE owner_id = 이전주인</code> 이 락 역할</td></tr>
+        <tr><td><b>멱등 키</b></td><td>재시도·중복 패킷에도 한 번만</td></tr>
+        <tr><td><b>거래는 지연 쓰기 금지</b></td><td>커밋 전에는 성공을 알리지 않습니다</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“서버 두 대가 같은 캐릭터를 동시에 들고 있는 상황”</b> 이 복사 버그의 진짜 원인입니다.
+        접속 중복(다중 로그인)을 <b>Redis 의 <code>SET NX</code> 잠금</b>으로 막고,
+        <b>캐릭터를 소유한 서버가 항상 하나</b> 임을 보장하세요. 이것이 무너지면 어떤 SQL 로도 못 막습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">캐릭터 소유권 잠금</h4>
+      <pre class="code" data-lang="cpp"><code>// 로그인할 때 — 이 캐릭터를 이 서버가 소유한다고 선언
+bool acquire_char_lock(Redis&amp; r, PlayerId pid, std::string_view server_id) {
+    // NX = 없을 때만 성공, PX = 60초 뒤 자동 해제(서버가 죽어도 풀립니다)
+    return r.set("lock:char:" + std::to_string(pid), server_id,
+                 Redis::NX, std::chrono::seconds(60));
+}
+
+// 살아 있는 동안 20초마다 갱신 (lease 연장)
+void renew_char_lock(Redis&amp; r, PlayerId pid, std::string_view server_id) {
+    // ★ 내 것일 때만 연장 — Lua 로 원자 실행
+    static constexpr char LUA[] =
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+      "  return redis.call('PEXPIRE', KEYS[1], ARGV[2]) else return 0 end";
+    r.eval(LUA, {"lock:char:" + std::to_string(pid)}, {server_id, "60000"});
+}
+
+// 로그아웃 — 저장이 '끝난 뒤' 에 풉니다 ★ 순서가 중요합니다
+void release_char(Redis&amp; r, PlayerId pid, std::string_view server_id) {
+    save_now_and_wait(pid);                       // 동기 저장
+    r.eval(DEL_IF_MINE, {"lock:char:" + std::to_string(pid)}, {server_id});
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>TTL 이 있는 잠금</b>이어야 합니다 — 서버가 크래시하면 잠금을 풀 사람이 없습니다.
+        TTL 이 없으면 그 캐릭터는 <b>영원히 로그인 불가</b> 상태가 되고, 실제로 운영 중 자주 겪는 사고입니다.
+        <b>60초 TTL + 20초 갱신</b> 정도가 안전한 기본값입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 틱 안에서 DB 를 부르지 않습니다. <b>더티 플래그 + 배치 + 별도 워커 풀</b>이 기본 경로입니다.
+    <b>돈·아이템·거래만</b> 즉시 트랜잭션으로 처리하고, <b>고유 uid + 조건부 UPDATE + 멱등 키</b>로 복사를 막습니다.
+    그리고 무엇보다 <b>캐릭터의 소유 서버가 항상 하나</b> 임을 Redis 잠금으로 보장합니다.</div>
+</section>
+
+
+<!-- ==================== n10 ==================== -->
+<section class="sec" id="n10">
+  <div class="sec-head rv">
+    <span class="no">GAME 10</span>
+    <h2>언리얼 엔진 <span class="t">전용 서버</span> — 직접 안 짜도 되는 경우</h2>
+    <p class="lead">
+      UE5 로 게임을 만든다면 <b>서버를 처음부터 짤 이유가 거의 없습니다</b>.
+      엔진 안에 이미 리플리케이션 · RPC · 이동 예측 · 지연 보상이 들어 있고,
+      같은 코드가 서버와 클라에서 함께 돕니다. 대신 <b>그 구조를 알아야</b> 쓸 수 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 306" role="img" aria-label="언리얼 엔진 전용 서버의 리플리케이션과 원격 호출 구조를 보여 주는 그림. 위쪽은 속성 리플리케이션이다. 서버에 있는 액터의 값이 바뀌면 넷드라이버가 액터 채널을 통해 클라이언트의 복제본에 그 값을 밀어 준다. 방향은 항상 서버에서 클라이언트로 한 방향이다. 가운데는 원격 호출 세 종류다. 서버 호출은 클라이언트가 서버에게 요청할 때, 클라이언트 호출은 서버가 특정 한 명에게만 알릴 때, 넷멀티캐스트는 서버가 관련된 모두에게 알릴 때 쓴다. 아래쪽은 어떤 클래스가 어디에 존재하는지 보여 준다. 게임모드는 서버에만 있고 게임스테이트와 플레이어스테이트는 모두에게 복제되며 플레이어컨트롤러는 서버와 그 소유 클라이언트에만 있다.">
+      <text x="16" y="18" class="lbl">UE 리플리케이션 — 서버가 값을 밀고, RPC 로 요청과 통보를 주고받습니다</text>
+
+      <rect class="bx bx-ok" x="16" y="34" width="190" height="52"/>
+      <text x="111" y="56" class="val ok-t" text-anchor="middle">서버 액터 (권위)</text>
+      <text x="111" y="74" class="ann ok-t" text-anchor="middle">HasAuthority() == true</text>
+
+      <path class="fl ar" d="M210 60 L242 60"/>
+
+      <rect class="bx bx-hi" x="246" y="34" width="190" height="52"/>
+      <text x="341" y="56" class="val am-t" text-anchor="middle">NetDriver · 액터 채널</text>
+      <text x="341" y="74" class="ann am-t" text-anchor="middle">관련성·빈도·우선순위 판단</text>
+
+      <path class="fl ar" d="M440 60 L472 60"/>
+
+      <rect class="bx" x="476" y="34" width="188" height="52"/>
+      <text x="570" y="56" class="val" text-anchor="middle">클라 복제본</text>
+      <text x="570" y="74" class="ann" text-anchor="middle">OnRep_ 함수가 불림</text>
+
+      <text x="16" y="112" class="ttl">RPC 세 종류 — 방향이 곧 이름입니다</text>
+
+      <rect class="bx" x="16" y="124" width="208" height="76"/>
+      <text x="120" y="146" class="val cy-t" text-anchor="middle">Server RPC</text>
+      <text x="32" y="164" class="ann">클라 → 서버 (요청)</text>
+      <text x="32" y="178" class="ann">"이 방향으로 이동할게요"</text>
+      <text x="32" y="192" class="ann">WithValidation 으로 검증 필수</text>
+
+      <rect class="bx" x="236" y="124" width="208" height="76"/>
+      <text x="340" y="146" class="val cy-t" text-anchor="middle">Client RPC</text>
+      <text x="252" y="164" class="ann">서버 → 소유 클라 1명</text>
+      <text x="252" y="178" class="ann">"당신만 보는 결과 알림"</text>
+      <text x="252" y="192" class="ann">PlayerController 에서 주로</text>
+
+      <rect class="bx" x="456" y="124" width="208" height="76"/>
+      <text x="560" y="146" class="val cy-t" text-anchor="middle">NetMulticast</text>
+      <text x="472" y="164" class="ann">서버 → 관련된 전원</text>
+      <text x="472" y="178" class="ann">"폭발 이펙트를 재생"</text>
+      <text x="472" y="192" class="ann">Unreliable 로 두는 게 보통</text>
+
+      <text x="16" y="226" class="ttl">어떤 클래스가 어디에 존재하나</text>
+
+      <rect class="bx bx-fw" x="16" y="238" width="208" height="58"/>
+      <text x="120" y="260" class="val rs-t" text-anchor="middle">GameMode</text>
+      <text x="32" y="278" class="ann">서버에만 존재합니다</text>
+      <text x="32" y="292" class="ann">규칙·승패·스폰을 여기서</text>
+
+      <rect class="bx bx-ok" x="236" y="238" width="208" height="58"/>
+      <text x="340" y="260" class="val ok-t" text-anchor="middle">GameState · PlayerState</text>
+      <text x="252" y="278" class="ann">전원에게 복제됩니다</text>
+      <text x="252" y="292" class="ann">점수·남은 시간을 여기에</text>
+
+      <rect class="bx" x="456" y="238" width="208" height="58"/>
+      <text x="560" y="260" class="val" text-anchor="middle">PlayerController</text>
+      <text x="472" y="278" class="ann">서버 + 그 소유 클라에만</text>
+      <text x="472" y="292" class="ann">입력·UI 명령의 통로</text>
+    </svg>
+    <div class="cap">UE 를 쓴다면 “서버를 만든다”가 아니라 <b>“어떤 값을 복제하고 어떤 RPC 를 열지”</b>를 설계하는 일이 됩니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전용 서버 타깃 만들기</h4>
+      <pre class="code" data-lang="csharp"><code>// Source/MyGameServer.Target.cs  ★ 파일 이름이 규칙입니다
+using UnrealBuildTool;
+
+public class MyGameServerTarget : TargetRules
+{
+    public MyGameServerTarget(TargetInfo Target) : base(Target)
+    {
+        Type = TargetType.Server;                  // ★ 이 한 줄이 전용 서버
+        DefaultBuildSettings = BuildSettingsVersion.Latest;
+        IncludeOrderVersion  = EngineIncludeOrderVersion.Latest;
+        ExtraModuleNames.Add("MyGame");
+
+        // 서버에는 렌더링·사운드가 통째로 빠집니다 → 바이너리와 메모리가 훨씬 작아집니다
+        bUsesSteam = false;
+    }
+}</code></pre>
+      <pre class="code" data-lang="bash"><code># 전용 서버는 '소스 빌드된 엔진' 이 필요합니다 (에픽 런처 버전으로는 불가)
+# ① GitHub 에서 UnrealEngine 클론 → Setup.sh / GenerateProjectFiles
+
+# ② 서버 타깃 빌드 (리눅스)
+./Engine/Build/BatchFiles/Linux/Build.sh MyGameServer Linux Development \
+    -project="/path/MyGame.uproject"
+
+# ③ 쿠킹 + 패키징 (배포용)
+./Engine/Build/BatchFiles/RunUAT.sh BuildCookRun \
+    -project="/path/MyGame.uproject" -noP4 -platform=Linux \
+    -clientconfig=Development -serverconfig=Development \
+    -cook -server -noclient -build -stage -pak -archive \
+    -archivedirectory=/out
+
+# ④ 실행
+./MyGameServer.sh /Game/Maps/Arena -log -port=7777 -NOSTEAM</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>-noclient</code> 와 <code>-server</code></b> 가 핵심 플래그입니다.
+        전용 서버 빌드는 <b>텍스처·사운드·머티리얼이 빠져</b> 패키지가 클라이언트의 1/5 이하가 됩니다.
+        도커 이미지로 만들 때 이 차이가 곧 <b>배포 속도와 오토스케일 반응 시간</b>이 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">리플리케이션 — 실제 코드</h4>
+      <pre class="code" data-lang="cpp"><code>// MyCharacter.h
+UCLASS()
+class AMyCharacter : public ACharacter {
+    GENERATED_BODY()
+public:
+    AMyCharacter() { bReplicates = true; SetReplicateMovement(true); }
+
+    // ★ 복제할 속성은 UPROPERTY 에 표시하고 아래 함수에도 등록해야 합니다
+    UPROPERTY(ReplicatedUsing = OnRep_Health)
+    float Health = 100.f;
+
+    UPROPERTY(Replicated)
+    int32 Ammo = 30;
+
+    UFUNCTION() void OnRep_Health();   // 클라에서 값이 바뀐 뒤 불립니다
+
+    // 클라 → 서버 요청. 반드시 검증합니다
+    UFUNCTION(Server, Reliable, WithValidation)
+    void ServerFire(FVector_NetQuantize Dir);
+
+    // 서버 → 전원 통보 (이펙트처럼 놓쳐도 되는 것)
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayHitFx(FVector_NetQuantize Loc);
+
+    virtual void GetLifetimeReplicatedProps(
+        TArray&lt;FLifetimeProperty&gt;&amp; Out) const override;
+};
+
+// MyCharacter.cpp
+void AMyCharacter::GetLifetimeReplicatedProps(TArray&lt;FLifetimeProperty&gt;&amp; Out) const {
+    Super::GetLifetimeReplicatedProps(Out);
+    DOREPLIFETIME(AMyCharacter, Health);
+    DOREPLIFETIME_CONDITION(AMyCharacter, Ammo, COND_OwnerOnly);  // 나만 알면 됨 ★
+}
+
+bool AMyCharacter::ServerFire_Validate(FVector_NetQuantize Dir) {
+    return Dir.IsNormalized();          // false 면 연결이 끊깁니다
+}
+void AMyCharacter::ServerFire_Implementation(FVector_NetQuantize Dir) {
+    if (!HasAuthority()) return;        // 서버에서만 도는 코드 ★
+    if (Ammo &lt;= 0) return;              // 검증은 언제나 서버에서
+    --Ammo;
+    if (FHitResult Hit; TraceShot(Dir, Hit)) {
+        ApplyDamage(Hit.GetActor(), 25.f);
+        MulticastPlayHitFx(Hit.ImpactPoint);
+    }
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">서버 부하를 줄이는 UE 설정</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">관련성 · 빈도 · 푸시 모델</h4>
+      <pre class="code" data-lang="cpp"><code>AMyActor::AMyActor() {
+    bReplicates            = true;
+    NetUpdateFrequency     = 20.f;      // 초당 몇 번 검사할지 (기본 100 은 과합니다)
+    MinNetUpdateFrequency  = 2.f;       // 변화가 없으면 여기까지 내려갑니다
+    NetCullDistanceSquared = 150000.f * 150000.f;   // 이 거리 밖은 아예 안 보냅니다
+    NetPriority            = 1.0f;      // 대역폭이 모자랄 때의 우선순위
+    bAlwaysRelevant        = false;     // ★ true 는 정말 필요할 때만
+}
+
+// 푸시 모델 — "바뀌었을 때만 검사" (UE5, WITH_PUSH_MODEL)
+// 기본 리플리케이션은 매 틱 모든 복제 속성을 이전 값과 '비교' 합니다.
+// 액터가 수천 개면 이 비교 자체가 CPU 를 먹습니다
+void AMyActor::SetHealth(float V) {
+    Health = V;
+    MARK_PROPERTY_DIRTY_FROM_NAME(AMyActor, Health, this);   // 바뀔 때만 표시
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>Iris 리플리케이션 시스템</b> — UE5.1 에서 실험적으로 들어온 차세대 복제 시스템으로,
+        기존 방식보다 <b>대규모 액터 수에서 훨씬 잘 확장</b> 됩니다(포트나이트 대규모 모드에서 검증).
+        2026년 기준으로는 <b>대규모 프로젝트에서 실제로 검토할 만한</b> 단계이며,
+        기존 프로젝트는 <b>푸시 모델 + 관련성 튜닝</b> 만으로도 큰 효과를 봅니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 UE 서버, 언제 직접 짜나</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">상황</th><th>선택</th></tr>
+        <tr><td>UE 로 만드는 슈터·액션 대전</td><td><b>UE 전용 서버</b></td></tr>
+        <tr><td>물리·애니가 곧 판정</td><td><b>UE 전용 서버</b></td></tr>
+        <tr><td>방당 인원 ≤ 64, 세션 길이 짧음</td><td>UE 전용 서버</td></tr>
+        <tr><td>동접 수천이 한 세계에</td><td>자체 C++ + UE 클라</td></tr>
+        <tr><td>인스턴스당 비용이 관건</td><td><b>자체 C++</b></td></tr>
+        <tr><td>로비·상점·랭킹</td><td><b>항상 별도 백엔드</b></td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>UE 전용 서버의 실제 비용</b> — 인스턴스 하나가 <b>수백 MB 메모리와 코어 하나</b>를 쓰는 일이 흔합니다.
+        방 하나당 프로세스 하나이므로, 동시 1000 방이면 서버 비용이 그대로 1000배입니다.
+        그래서 <b>MMO 급 규모에서는 UE 클라 + 자체 C++ 서버</b> 조합이 여전히 많습니다.
+        로비·랭킹·결제는 <b>어떤 경우에도 UE 밖의 백엔드</b>로 두세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> UE5 전용 서버는 <b><code>Type = TargetType.Server</code></b> 한 줄에서 시작합니다.
+    <b>GameMode 는 서버에만</b> 있고, 값은 <b>DOREPLIFETIME 으로 복제</b>, 요청은 <b>Server RPC + WithValidation</b> 입니다.
+    부하는 <b>NetUpdateFrequency · NetCullDistance · 푸시 모델</b>로 줄이고,
+    <b>로비·랭킹·결제는 UE 밖의 백엔드</b>에 둡니다.</div>
+</section>
+
+
+<!-- ==================== n11 ==================== -->
+<section class="sec" id="n11">
+  <div class="sec-head rv">
+    <span class="no">GAME 11</span>
+    <h2>보안과 치트 방지 — <span class="t">클라이언트는 적의 컴퓨터</span>입니다</h2>
+    <p class="lead">
+      게임 클라이언트는 <b>공격자의 손 안에서 도는 코드</b>입니다. 디버거를 붙이고, 메모리를 고치고,
+      패킷을 뜯어보고, 아예 클라를 새로 만들어 붙일 수도 있습니다.
+      그래서 방어의 원칙은 하나입니다 — <b>서버에서 검증되지 않은 것은 존재하지 않는다.</b>
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 320" role="img" aria-label="클라이언트에서 온 패킷이 서버에서 통과해야 하는 검증 층을 깔때기 모양으로 보여 주는 그림. 맨 위는 전송 암호화로 도청과 변조를 막고, 다음은 세션과 토큰 확인으로 남의 계정 행세를 막는다. 세 번째는 초당 요청 수 제한으로 패킷 폭탄을 막고, 네 번째는 스키마와 길이 검증으로 조작된 버퍼를 막는다. 다섯 번째가 가장 중요한 게임 규칙 검증으로 이동 속도, 쿨다운, 사거리, 소유권을 서버가 직접 확인한다. 마지막은 통계 기반 이상 탐지로 사람이 낼 수 없는 정확도나 반응 속도를 잡아낸다. 위쪽 층은 도구로 막을 수 있지만 다섯 번째 층은 게임을 아는 사람이 직접 짜야 한다.">
+      <text x="16" y="18" class="lbl">클라 패킷이 통과해야 하는 여섯 층 — 아래로 갈수록 게임 지식이 필요합니다</text>
+
+      <rect class="bx" x="16" y="38" width="648" height="40"/>
+      <text x="340" y="56" class="val" text-anchor="middle">① 전송 암호화 — TLS / DTLS</text>
+      <text x="340" y="71" class="ann" text-anchor="middle">도청·중간자 변조 차단 · 라이브러리가 해 줍니다</text>
+
+      <rect class="bx" x="52" y="84" width="576" height="40"/>
+      <text x="340" y="102" class="val" text-anchor="middle">② 세션 · 토큰 검증</text>
+      <text x="340" y="117" class="ann" text-anchor="middle">인증 전 패킷은 전부 거절 · 1회용 입장 토큰</text>
+
+      <rect class="bx" x="88" y="130" width="504" height="40"/>
+      <text x="340" y="148" class="val" text-anchor="middle">③ 속도 제한 (rate limit)</text>
+      <text x="340" y="163" class="ann" text-anchor="middle">메시지 종류별 초당 상한 · 넘으면 경고 후 강제 종료</text>
+
+      <rect class="bx" x="124" y="176" width="432" height="40"/>
+      <text x="340" y="194" class="val" text-anchor="middle">④ 스키마 · 길이 검증</text>
+      <text x="340" y="209" class="ann" text-anchor="middle">FlatBuffers Verifier · 배열 크기 상한 · 문자열 길이</text>
+
+      <rect class="bx bx-fw" x="160" y="222" width="360" height="40"/>
+      <text x="340" y="240" class="val rs-t" text-anchor="middle">⑤ 게임 규칙 검증 ★ 핵심</text>
+      <text x="340" y="255" class="ann rs-t" text-anchor="middle">속도·쿨다운·사거리·소유권을 서버가 계산</text>
+
+      <rect class="bx bx-ok" x="196" y="268" width="288" height="40"/>
+      <text x="340" y="286" class="val ok-t" text-anchor="middle">⑥ 통계 이상 탐지</text>
+      <text x="340" y="301" class="ann ok-t" text-anchor="middle">사람이 못 내는 정확도·반응 속도</text>
+    </svg>
+    <div class="cap">①~④ 는 라이브러리가 해 주지만 <b>⑤ 는 게임을 아는 사람이 직접 짜야</b> 합니다 — 여기가 실제 방어선입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">게임 규칙 검증 — 실제로 이렇게 생겼습니다</h4>
+      <pre class="code" data-lang="cpp"><code>struct Limits {
+    float  max_speed      = 6.0f;    // m/s — 이동 스킬 포함 상한
+    float  max_accel      = 30.0f;
+    float  interact_range = 3.0f;    // 상자·NPC 상호작용 거리
+    int    max_inputs_per_sec = 90;  // 60틱 게임에서 90 이면 넉넉합니다
+};
+
+bool Room::validate_move(Player&amp; p, const Input&amp; in, double dt) {
+    // ① 입력 폭탄 — 초당 개수 제한
+    if (++p.input_count_this_sec &gt; limits_.max_inputs_per_sec) {
+        flag(p, Cheat::InputFlood); return false;
+    }
+    // ② dt 조작 — 클라가 보낸 dt 를 믿지 않습니다 ★
+    dt = std::clamp(dt, 0.0, 1.0 / 20.0);
+
+    // ③ 속도 상한 — 텔레포트·스피드핵의 1차 방어선
+    Vec2 want = step_move(p.pos, in, dt, map_);
+    float moved = dist(want, p.pos);
+    if (moved &gt; limits_.max_speed * dt * 1.15f) {   // 15% 여유(부동소수·지연)
+        // 즉시 밴이 아니라 '보정' 이 정답입니다 ★
+        send_correction(p);                          // 서버 위치를 강제로 알림
+        flag(p, Cheat::SpeedSuspect);                // 누적 카운트만 올림
+        return false;
+    }
+    // ④ 지형 통과 — 벽 뚫기
+    if (!map_.is_walkable(want) || map_.crosses_wall(p.pos, want)) {
+        send_correction(p); return false;
+    }
+    p.pos = want;
+    return true;
+}
+
+// 상호작용은 '거리 + 소유권 + 상태' 세 가지를 항상 봅니다
+bool Room::validate_loot(Player&amp; p, EntityId chest_id) {
+    auto* c = world_.find_chest(chest_id);
+    if (!c)                                   return false;   // 존재하나
+    if (dist(p.pos, c-&gt;pos) &gt; limits_.interact_range) return false;   // 가까운가
+    if (c-&gt;opened)                            return false;   // 이미 열렸나
+    if (c-&gt;owner &amp;&amp; c-&gt;owner != p.id)         return false;   // 내 것인가
+    return true;
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“한 번 이상하면 밴”은 반드시 오탐을 만듭니다</b> — 네트워크 지연, 프레임 튐, 부동소수 차이로
+        정상 유저도 걸립니다. <b>즉시 대응은 보정(correction)</b> 으로 하고,
+        <b>누적 카운트가 임계를 넘을 때</b> 킥·조사 대상으로 올리는 2단 구조가 실무 표준입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">속도 제한과 재생 공격 방어</h4>
+      <pre class="code" data-lang="cpp"><code>// ── 메시지 종류별 토큰 버킷 ──────────────────────────────
+struct TokenBucket {
+    double tokens, rate, cap;
+    bool take(double now, double n = 1) {
+        tokens = std::min(cap, tokens + (now - last) * rate); last = now;
+        if (tokens &lt; n) return false;
+        tokens -= n; return true;
+    }
+    double last = 0;
+};
+
+// 종류마다 다른 상한 — 채팅은 초당 2회, 입력은 90회
+std::array&lt;TokenBucket, MAX_ID&gt; buckets_;
+
+bool Session::allow(std::uint16_t id, double now) {
+    if (!buckets_[id].take(now)) {
+        if (++violations_ &gt; 20) { close("rate limit"); }
+        return false;
+    }
+    return true;
+}
+
+// ── 재생 공격(replay) 방어 ──────────────────────────────
+// 공격자가 예전에 캡처한 '스킬 사용' 패킷을 그대로 다시 보내는 공격입니다
+bool Session::check_nonce(std::uint32_t seq) {
+    if (seq &lt;= last_seq_ - 64) return false;         // 너무 오래된 것
+    if (seq &lt;= last_seq_ &amp;&amp; (seen_bits_ &gt;&gt; (last_seq_ - seq)) &amp; 1)
+        return false;                                 // ★ 이미 본 번호
+    if (seq &gt; last_seq_) { seen_bits_ &lt;&lt;= (seq - last_seq_); last_seq_ = seq; }
+    seen_bits_ |= 1ull &lt;&lt; (last_seq_ - seq);
+    return true;
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>DTLS 나 GameNetworkingSockets 를 쓰면 재생 방어가 기본 포함</b> 입니다.
+        직접 UDP 를 다룬다면 <b>일련번호 + 슬라이딩 윈도우 비트맵</b> 을 반드시 넣으세요.
+        TCP 는 전송 계층이 순서를 보장하므로 앱 레벨 재생 공격 위험이 훨씬 낮습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">암호화는 어디에 거나</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">경로별 선택</h4>
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:24%">경로</th><th>선택</th><th>이유</th></tr>
+      <tr><td>로그인·결제·상점</td><td><b>HTTPS(TLS 1.3)</b></td><td>토큰과 개인정보가 오갑니다. 협상 불가</td></tr>
+      <tr><td>로비 TCP</td><td>TLS</td><td>부담이 크지 않고 표준 라이브러리로 끝납니다</td></tr>
+      <tr><td>게임 룸 UDP</td><td><b>DTLS 또는 라이브러리 내장</b></td><td>GNS·yojimbo 는 AES-GCM 이 이미 들어 있습니다</td></tr>
+      <tr><td>서버 ↔ 서버</td><td>사설망 + mTLS</td><td>내부라고 평문으로 두면 침해 시 전면 노출</td></tr>
+      <tr><td>Redis · DB</td><td>사설망 + 암호</td><td>포트를 공개망에 여는 사고가 실제로 잦습니다</td></tr>
+      <tr><td>패킷 자체 난독화</td><td>보조 수단</td><td>시간을 벌 뿐 — <b>검증을 대체하지 못합니다</b></td></tr>
+    </table></div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>“패킷을 암호화했으니 안전하다”는 착각</b>이 가장 위험합니다 — 클라이언트가 암호화 키를 갖고 있으므로
+      <b>공격자도 그 키를 갖고 있습니다</b>. 암호화가 막는 것은 <b>제3자의 도청과 변조</b>이지
+      <b>사용자 본인의 조작</b>이 아닙니다. 조작을 막는 것은 오직 <b>서버 검증</b> 뿐입니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">봇 탐지와 로그 감사</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">통계로 잡는 것들</h4>
+      <pre class="code" data-lang="cpp"><code>// 사람은 이런 값을 만들 수 없습니다 — 통계로 걸러 조사 큐에 올립니다
+struct BehaviorProfile {
+    RollingStats aim_snap_deg;    // 조준 각속도(스냅 에임)
+    RollingStats hit_ratio;       // 명중률
+    RollingStats reaction_ms;     // 적 등장 → 발사까지
+    RollingStats input_interval;  // 입력 간격의 '분산' ★ 매크로는 너무 일정합니다
+    int          wallbang_kills;  // 시야에 없던 적을 맞힌 횟수
+
+    int suspicion() const {
+        int s = 0;
+        if (hit_ratio.mean()      &gt; 0.85 &amp;&amp; hit_ratio.n() &gt; 200) s += 30;
+        if (reaction_ms.mean()    &lt; 90)                          s += 25;
+        if (aim_snap_deg.p99()    &gt; 120)                         s += 25;
+        if (input_interval.stdev() &lt; 1.5)                        s += 20; // 매크로
+        if (wallbang_kills        &gt; 5)                           s += 40; // 월핵
+        return s;
+    }
+};
+
+// 서버는 판단하지 않습니다 — '증거를 남기고' 사람이 봅니다
+void Room::on_kill(Player&amp; killer, Player&amp; victim, const HitInfo&amp; h) {
+    profiles_[killer.id].update(h);
+    if (profiles_[killer.id].suspicion() &gt;= 70)
+        audit_.emit(AuditEvent{                    // ★ 리플레이용 원본 로그
+            .type = "SUSPECT", .player = killer.id, .match = match_id_,
+            .tick = tick_, .detail = h.to_json()});
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">감사 로그 — 무엇을 남기나</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">항목</th><th>보관</th></tr>
+        <tr><td>재화 증감 전부</td><td><b>영구</b>(원장)</td></tr>
+        <tr><td>아이템 생성·소멸·이동</td><td><b>영구</b></td></tr>
+        <tr><td>거래·우편·경매</td><td>영구</td></tr>
+        <tr><td>로그인 IP·기기</td><td>90일</td></tr>
+        <tr><td>매치 입력 리플레이</td><td>7~30일</td></tr>
+        <tr><td>의심 이벤트</td><td>1년</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>입력 리플레이가 가장 강력한 증거</b> 입니다 — 매치의 모든 입력과 난수 시드를 남겨 두면
+        <b>경기를 통째로 재생</b>할 수 있습니다. 신고가 들어왔을 때 사람이 직접 보고 판단할 수 있고,
+        <b>버그 재현</b>에도 그대로 쓰입니다. 용량은 매치당 수백 KB 수준이라 충분히 감당됩니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>클라이언트 안티치트(EAC · BattlEye 등)</b> 는 <b>보조</b> 입니다.
+        커널 드라이버로 메모리 조작·후킹을 탐지해 <b>공격 비용을 올리는</b> 역할이지,
+        서버 검증을 대체하지 않습니다. 국내 게임은 여기에 더해
+        <b>계정 인증·기기 식별·이상 거래 탐지</b>를 운영 조직과 함께 돌리는 것이 보통입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>서버에서 검증되지 않은 것은 존재하지 않습니다</b>.
+    암호화는 제3자를 막을 뿐 <b>사용자 본인의 조작은 못 막습니다</b>.
+    이동은 <b>속도 상한 + 지형 검사</b>, 상호작용은 <b>거리 + 소유권 + 상태</b>,
+    의심은 <b>즉시 밴이 아니라 보정 + 누적</b>으로 다루고, <b>입력 리플레이</b>를 증거로 남깁니다.</div>
+</section>
+
+
+<!-- ==================== n12 ==================== -->
+<section class="sec" id="n12">
+  <div class="sec-head rv">
+    <span class="no">GAME 12</span>
+    <h2>부하 테스트와 운영 — <span class="t">몇 명까지 되는지</span> 숫자로 말하기</h2>
+    <p class="lead">
+      “우리 서버는 몇 명까지 버팁니까?” 이 질문에 <b>숫자로 답하지 못하면</b> 출시할 수 없습니다.
+      답을 만드는 방법은 하나뿐입니다 — <b>봇으로 진짜 부하를 걸어 보는 것</b>.
+      그리고 운영 중에는 <b>지표 · 덤프 · 무중단 배포</b> 세 가지가 있어야 살아남습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="부하 테스트와 운영 지표의 흐름을 보여 주는 그림. 봇 클라이언트 수천 개가 실제 클라이언트와 똑같은 패킷을 보내 서버에 부하를 건다. 서버는 틱마다 처리 시간, 동시 접속 수, 인당 대역폭, 큐 적체량을 기록해 지표 수집기로 내보낸다. 수집된 값 중 틱 처리 시간의 99 퍼센타일이 예산의 절반을 넘으면 새 방 배정을 멈추고, 계속 오르면 인스턴스를 늘린다. 아래쪽은 반드시 봐야 하는 지표 네 가지와 각각의 위험선을 보여 준다. 틱 99 퍼센타일은 틱 간격의 절반 아래, 인당 대역폭은 초당 20 킬로바이트 아래, 메모리는 세션당 상한 이내, 잡 큐 적체는 0 에 가까워야 한다.">
+      <text x="16" y="18" class="lbl">봇으로 부하를 걸고, 지표로 한계를 찾고, 그 숫자로 오토스케일을 겁니다</text>
+
+      <rect class="bx" x="16" y="36" width="164" height="58"/>
+      <text x="98" y="58" class="val" text-anchor="middle">봇 클라 5,000</text>
+      <text x="98" y="76" class="ann" text-anchor="middle">실제와 같은 패킷</text>
+      <text x="98" y="89" class="ann" text-anchor="middle">여러 대에 나눠 실행</text>
+
+      <path class="fl ar" d="M184 65 L208 65"/>
+
+      <rect class="bx bx-fw" x="212" y="36" width="180" height="58"/>
+      <text x="302" y="58" class="val rs-t" text-anchor="middle">게임 서버</text>
+      <text x="302" y="76" class="ann rs-t" text-anchor="middle">틱 시간 · 큐 길이</text>
+      <text x="302" y="89" class="ann rs-t" text-anchor="middle">1초마다 기록</text>
+
+      <path class="fl ar" d="M396 65 L420 65"/>
+
+      <rect class="bx bx-ok" x="424" y="36" width="240" height="58"/>
+      <text x="544" y="58" class="val ok-t" text-anchor="middle">지표 수집 · 대시보드</text>
+      <text x="544" y="76" class="ann ok-t" text-anchor="middle">Prometheus · Grafana</text>
+      <text x="544" y="89" class="ann ok-t" text-anchor="middle">임계 넘으면 알림</text>
+
+      <path class="ln ar" d="M544 98 L544 116 L340 116 L340 134"/>
+      <rect class="bx bx-hi" x="160" y="138" width="360" height="38"/>
+      <text x="340" y="162" class="val am-t" text-anchor="middle">p99 &gt; 예산 절반 → 신규 방 배정 중단 → 인스턴스 증설</text>
+
+      <text x="16" y="200" class="ttl">반드시 보는 지표 네 개와 위험선</text>
+
+      <rect class="bx" x="16" y="212" width="156" height="72"/>
+      <text x="94" y="234" class="val cy-t" text-anchor="middle">틱 처리 p99</text>
+      <text x="32" y="252" class="ann">목표: 틱 간격의 절반</text>
+      <text x="32" y="266" class="ann">30틱이면 16ms 이하</text>
+      <text x="32" y="279" class="ann">가장 먼저 무너지는 값</text>
+
+      <rect class="bx" x="180" y="212" width="156" height="72"/>
+      <text x="258" y="234" class="val cy-t" text-anchor="middle">인당 대역폭</text>
+      <text x="196" y="252" class="ann">목표: 20KB/s 이하</text>
+      <text x="196" y="266" class="ann">넘으면 AoI·델타 점검</text>
+      <text x="196" y="279" class="ann">비용에 직결됩니다</text>
+
+      <rect class="bx" x="344" y="212" width="156" height="72"/>
+      <text x="422" y="234" class="val cy-t" text-anchor="middle">세션당 메모리</text>
+      <text x="360" y="252" class="ann">상한을 정하고 감시</text>
+      <text x="360" y="266" class="ann">증가 추세면 누수</text>
+      <text x="360" y="279" class="ann">버퍼 누적을 먼저 의심</text>
+
+      <rect class="bx bx-warn" x="508" y="212" width="156" height="72"/>
+      <text x="586" y="234" class="val rs-t" text-anchor="middle">잡 큐 적체</text>
+      <text x="524" y="252" class="ann rs-t">항상 0 에 가까워야</text>
+      <text x="524" y="266" class="ann rs-t">쌓이기 시작하면</text>
+      <text x="524" y="279" class="ann rs-t">이미 한계를 넘었습니다</text>
+    </svg>
+    <div class="cap">한계는 <b>CPU 사용률이 아니라 틱 p99 로</b> 판단합니다 — CPU 50% 여도 p99 가 튀면 이미 렉입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">봇 클라이언트 — 진짜 클라와 같은 패킷을</h4>
+      <pre class="code" data-lang="cpp"><code>// 봇은 '가짜' 여서는 안 됩니다. 실제 프로토콜을 그대로 써야 의미가 있습니다
+class BotClient {
+    asio::io_context&amp; io_;
+    tcp::socket       sock_;
+    asio::steady_timer tick_;
+    std::mt19937      rng_;
+    std::uint32_t     seq_ = 0;
+
+public:
+    void start(std::string_view host, std::uint16_t port) {
+        asio::async_connect(sock_, resolve(host, port), [this](auto ec, auto) {
+            if (ec) { ++g_stats.connect_fail; return; }
+            send_login();
+            schedule_input();
+        });
+    }
+private:
+    void schedule_input() {
+        tick_.expires_after(std::chrono::milliseconds(33));    // 30Hz 입력
+        tick_.async_wait([this](auto ec) {
+            if (ec) return;
+            Input in{.seq = ++seq_,
+                     .dx = jitter(), .dy = jitter(),          // 랜덤 워크
+                     .buttons = (rng_() % 40 == 0) ? FIRE : 0};
+            send_framed(sock_, encode(in));
+            ++g_stats.sent;
+            schedule_input();
+        });
+    }
+};
+
+int main(int argc, char** argv) {
+    const int n = std::atoi(argv[1]);            // 예: 2000
+    asio::io_context io;
+    std::vector&lt;std::unique_ptr&lt;BotClient&gt;&gt; bots;
+    for (int i = 0; i &lt; n; ++i) {
+        bots.push_back(std::make_unique&lt;BotClient&gt;(io));
+        bots.back()-&gt;start("10.0.3.17", 7777);
+        // ★ 한꺼번에 접속시키지 말 것 — 실제 트래픽 패턴이 아닙니다
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    std::vector&lt;std::jthread&gt; th;
+    for (unsigned i = 1; i &lt; std::thread::hardware_concurrency(); ++i)
+        th.emplace_back([&amp;]{ io.run(); });
+    io.run();
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>봇 머신이 먼저 죽는 함정</b> — 봇 5000개를 한 대에서 돌리면 <b>봇 쪽 CPU 가 병목</b> 이 되어
+        서버가 멀쩡한데 지표가 나빠 보입니다. <b>봇 머신의 CPU·대역폭도 함께 재고</b>,
+        모자라면 여러 대에 나눠 돌리세요. 그리고 <b>접속을 서서히 늘리는</b> 램프업이 실제 패턴에 가깝습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">서버 지표 내보내기</h4>
+      <pre class="code" data-lang="cpp"><code>// 1초마다 스냅샷을 찍어 텍스트로 노출합니다 (Prometheus 형식)
+struct Metrics {
+    std::atomic&lt;std::uint64_t&gt; ccu{0}, packets_in{0}, bytes_out{0};
+    TickStats                  tick;      // n02 의 히스토그램
+
+    std::string render() const {
+        std::string s;
+        std::format_to(std::back_inserter(s),
+            "game_ccu {}\n"
+            "game_tick_p99_ms {:.2f}\n"
+            "game_tick_overrun_ratio {:.4f}\n"
+            "game_bytes_out_per_ccu {:.0f}\n"
+            "game_jobqueue_depth {}\n",
+            ccu.load(), tick.p99_estimate(), tick.overrun_ratio(),
+            ccu ? double(bytes_out) / ccu : 0.0, job_depth());
+        return s;
+    }
+};
+
+// 아주 작은 HTTP 엔드포인트 하나면 충분합니다 — /metrics
+// 게임 포트와 분리된 관리 포트(예: 9100)에 열고 사설망에서만 접근시킵니다 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>지표는 “출시 전에 붙이는 것”이 아니라 “처음부터 있는 것”</b> 입니다.
+        틱 히스토그램과 큐 깊이만 있어도 <b>성능 회귀를 커밋 단위로</b> 잡을 수 있습니다.
+        CI 에서 봇 200개로 3분 돌리고 <b>p99 가 이전보다 20% 이상 나빠지면 실패</b>시키는 팀도 많습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">크래시 덤프 · 무중단 배포 · 오토스케일</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크래시가 나면 반드시 증거가 남아야 합니다</h4>
+      <pre class="code" data-lang="cpp"><code>// ── Windows : 미니덤프 ────────────────────────────────
+LONG WINAPI on_crash(EXCEPTION_POINTERS* ep) {
+    HANDLE f = CreateFileW(dump_path().c_str(), GENERIC_WRITE, 0, nullptr,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    MINIDUMP_EXCEPTION_INFORMATION mei{GetCurrentThreadId(), ep, FALSE};
+    MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), f,
+        MiniDumpWithIndirectlyReferencedMemory, &amp;mei, nullptr, nullptr);
+    CloseHandle(f);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+// main 초기에 : SetUnhandledExceptionFilter(on_crash);</code></pre>
+      <pre class="code" data-lang="bash"><code># ── Linux : 코어 덤프 ─────────────────────────────────
+ulimit -c unlimited
+sysctl -w kernel.core_pattern=/var/dumps/core.%e.%p.%t
+
+# 디버그 심볼은 분리해서 보관합니다 (바이너리는 작게, 심볼은 서버에)
+objcopy --only-keep-debug game_server game_server.debug
+objcopy --strip-debug --add-gnu-debuglink=game_server.debug game_server
+
+# 분석
+gdb ./game_server /var/dumps/core.game_server.1841.1756100000
+(gdb) thread apply all bt      # ★ 교착·크래시 모두 여기서 시작합니다
+
+# 상용 환경에서는 Crashpad·Sentry 로 자동 수집하는 것이 표준입니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>심볼을 잃어버리면 덤프는 쓰레기가 됩니다</b> — 배포한 <b>모든 빌드의 심볼(pdb/.debug)을 버전별로 보관</b>하세요.
+        “재현이 안 되는데 심볼도 없다”가 게임 서버 운영에서 가장 절망적인 상황입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무중단 배포 — 드레인 방식</h4>
+      <pre class="code" data-lang="cpp"><code>// 게임 서버는 '즉시 재시작' 이 불가능합니다. 진행 중인 매치가 있으니까요
+enum class ServerState { Ready, Draining, Empty };
+
+void GameServer::begin_drain() {
+    state_ = ServerState::Draining;
+    alloc_.unregister(self_id_);      // ★ 매처가 더 이상 새 방을 주지 않습니다
+    log_info("draining: {} rooms left", rooms_.size());
+}
+
+void GameServer::tick() {
+    ...
+    if (state_ == ServerState::Draining &amp;&amp; rooms_.empty()) {
+        save_all_and_wait();          // 남은 데이터 저장
+        state_ = ServerState::Empty;
+        std::exit(0);                 // 오케스트레이터가 새 버전을 띄웁니다
+    }
+}
+
+// SIGTERM 을 받으면 드레인을 시작합니다 (K8s 가 보내는 신호)
+std::signal(SIGTERM, [](int){ g_server-&gt;begin_drain(); });
+// terminationGracePeriodSeconds 를 매치 최대 길이보다 길게 두세요 ★</code></pre>
+      <pre class="code" data-lang="yaml"><code># Agones — 게임 서버 전용 K8s 오케스트레이터
+apiVersion: "agones.dev/v1"
+kind: Fleet
+metadata: { name: arena-server }
+spec:
+  replicas: 20
+  scheduling: Packed          # 빈 노드를 만들어 축소가 쉽게
+  template:
+    spec:
+      ports:
+        - name: game
+          containerPort: 7777
+          protocol: UDP
+      health: { periodSeconds: 5, failureThreshold: 3 }
+      template:
+        spec:
+          containers:
+            - name: server
+              image: registry/arena-server:2026.08.1
+              resources:
+                requests: { cpu: "1", memory: "512Mi" }
+                limits:   { cpu: "2", memory: "1Gi" }</code></pre>
+    </div>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">설정 핫 리로드 — 재시작 없이 숫자만 바꾸기</h4>
+    <pre class="code" data-lang="cpp"><code>// 밸런스 수치(데미지·쿨다운·드랍률)를 코드에 박으면 배포 없이는 못 고칩니다.
+// 게임 서버는 '데이터로 뺀 뒤 원자 교체' 가 정석입니다
+
+struct BalanceTable { /* 무기·스킬·드랍 수치 전부 */ };
+
+class Config {
+    std::shared_ptr&lt;const BalanceTable&gt; cur_;      // ★ 읽기는 락 없이
+public:
+    std::shared_ptr&lt;const BalanceTable&gt; get() const {
+        return std::atomic_load(&amp;cur_);            // 스냅샷을 잡습니다
+    }
+    void reload(const std::filesystem::path&amp; p) {
+        auto next = std::make_shared&lt;BalanceTable&gt;(parse_json(read_file(p)));
+        if (!validate(*next)) { log_error("bad config, keep old"); return; }  // ★
+        std::atomic_store(&amp;cur_, std::shared_ptr&lt;const BalanceTable&gt;(next));
+        log_info("config reloaded rev={}", next-&gt;rev);
+    }
+};
+
+// 틱 안에서는 한 번만 잡아서 씁니다 — 도중에 바뀌면 같은 틱에서 값이 달라집니다
+void Room::tick(double dt) {
+    auto cfg = g_config.get();          // ★ 이 틱 동안 고정
+    for (auto&amp; p : players_) apply_damage(p, cfg-&gt;weapon[p.weapon_id].damage);
+}</code></pre>
+    <div class="grid2" style="margin-top:12px">
+      <div class="note tip" style="margin-bottom:0">
+        <b>검증 실패 시 이전 설정을 유지</b> 하는 한 줄이 사고를 막습니다.
+        운영 중 잘못된 JSON 하나로 전 서버가 죽는 사고는 <b>실제로 흔합니다</b>.
+        가능하면 <b>스테이징에서 먼저 적용 → 카나리 1대 → 전체</b> 순서를 지키세요.
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>코드 핫 리로드는 다른 이야기</b> 입니다 — C++ 에서 로직을 무중단 교체하려면
+        <b>동적 라이브러리(.so/.dll) 분리 + 상태 직렬화</b> 가 필요하고 위험합니다.
+        국내 실무에서는 <b>로직은 드레인 배포, 수치는 핫 리로드</b> 로 나누는 쪽이 압도적으로 흔합니다.
+        (스크립트 계층을 두어 Lua 로 로직 일부를 리로드하는 회사도 있습니다.)
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 한계는 <b>봇으로 실제 프로토콜 부하를 걸어</b> 찾습니다.
+    판단 기준은 CPU 가 아니라 <b>틱 p99 · 인당 대역폭 · 큐 적체</b> 입니다.
+    <b>덤프와 심볼</b>을 반드시 보관하고, 배포는 <b>드레인</b>으로,
+    수치는 <b>핫 리로드(검증 실패 시 롤백)</b> 로 바꿉니다.</div>
+</section>
+
+
+<!-- ==================== n13 ==================== -->
+<section class="sec" id="n13">
+  <div class="sec-head rv">
+    <span class="no">GAME 13</span>
+    <h2>실전 프로젝트 — <span class="t">2D 탑다운 실시간 대전</span> 서버 한 벌</h2>
+    <p class="lead">
+      앞의 열두 절을 하나로 합칩니다. <b>Asio 세션 → 프레이밍 → FlatBuffers → 룸 잡 큐 → 60Hz 틱 →
+      델타 스냅샷 → Redis 매치 → Docker 배포</b> 까지, 실제로 빌드해서 돌릴 수 있는 형태로 만듭니다.
+      코드는 짧게 유지하되 <b>실무에서 빠지면 안 되는 것은 전부</b> 넣었습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="완성 프로젝트의 데이터 흐름 전체를 보여 주는 그림. 위쪽 줄은 클라이언트에서 시작해 아시오 세션이 받아 스트랜드에서 처리하고, 길이 접두사 프레이밍과 플랫버퍼 검증을 거쳐 룸 잡 큐에 넣는 경로다. 아래쪽 줄은 반대 방향으로, 60헤르츠 틱 루프가 세계를 굴리고 델타 스냅샷을 만들어 양자화한 뒤 20헤르츠로 전송하면 클라이언트가 보간과 재적용으로 화면을 만든다. 맨 아래는 옆에서 돕는 세 가지로 레디스가 매치와 티켓을, 마이에스큐엘이 전적 저장을, 도커 컴포즈가 전체 구동을 맡는다.">
+      <text x="16" y="18" class="lbl">완성 프로젝트의 데이터 흐름 — 입력은 위로, 결과는 아래로</text>
+
+      <rect class="bx" x="16" y="40" width="146" height="56"/>
+      <text x="89" y="62" class="val" text-anchor="middle">클라이언트</text>
+      <text x="89" y="80" class="ann" text-anchor="middle">입력 30Hz 전송</text>
+
+      <path class="fl ar" d="M166 68 L178 68"/>
+      <rect class="bx bx-hi" x="182" y="40" width="146" height="56"/>
+      <text x="255" y="62" class="val am-t" text-anchor="middle">Asio 세션</text>
+      <text x="255" y="80" class="ann am-t" text-anchor="middle">strand · no_delay</text>
+
+      <path class="fl ar" d="M332 68 L344 68"/>
+      <rect class="bx" x="348" y="40" width="146" height="56"/>
+      <text x="421" y="62" class="val" text-anchor="middle">프레이밍 + 검증</text>
+      <text x="421" y="80" class="ann" text-anchor="middle">len 접두 · Verifier</text>
+
+      <path class="fl ar" d="M498 68 L510 68"/>
+      <rect class="bx bx-ok" x="514" y="40" width="146" height="56"/>
+      <text x="587" y="62" class="val ok-t" text-anchor="middle">룸 잡 큐</text>
+      <text x="587" y="80" class="ann ok-t" text-anchor="middle">post() 로 전달</text>
+
+      <path class="fl ar" d="M587 100 L587 126"/>
+
+      <rect class="bx bx-fw" x="514" y="130" width="146" height="56"/>
+      <text x="587" y="152" class="val rs-t" text-anchor="middle">틱 루프 60Hz</text>
+      <text x="587" y="170" class="ann rs-t" text-anchor="middle">검증 · 이동 · 판정</text>
+
+      <path class="fl ar" d="M510 158 L498 158"/>
+      <rect class="bx" x="348" y="130" width="146" height="56"/>
+      <text x="421" y="152" class="val" text-anchor="middle">델타 스냅샷</text>
+      <text x="421" y="170" class="ann" text-anchor="middle">AoI · 양자화</text>
+
+      <path class="fl ar" d="M344 158 L332 158"/>
+      <rect class="bx" x="182" y="130" width="146" height="56"/>
+      <text x="255" y="152" class="val" text-anchor="middle">전송 20Hz</text>
+      <text x="255" y="170" class="ann" text-anchor="middle">ack_input 동봉</text>
+
+      <path class="fl ar" d="M178 158 L166 158"/>
+      <rect class="bx bx-ok" x="16" y="130" width="146" height="56"/>
+      <text x="89" y="152" class="val ok-t" text-anchor="middle">보간 · 재적용</text>
+      <text x="89" y="170" class="ann ok-t" text-anchor="middle">화면이 부드러워짐</text>
+
+      <text x="16" y="212" class="ttl">옆에서 돕는 것들</text>
+
+      <rect class="bx" x="16" y="224" width="204" height="66"/>
+      <text x="118" y="246" class="val cy-t" text-anchor="middle">Redis</text>
+      <text x="32" y="264" class="ann">대기열 ZSET · 입장 티켓</text>
+      <text x="32" y="280" class="ann">GETDEL 로 1회용 소비</text>
+
+      <rect class="bx" x="238" y="224" width="204" height="66"/>
+      <text x="340" y="246" class="val cy-t" text-anchor="middle">MySQL</text>
+      <text x="254" y="264" class="ann">전적 · MMR 배치 저장</text>
+      <text x="254" y="280" class="ann">더티 큐 → 워커 스레드</text>
+
+      <rect class="bx" x="460" y="224" width="204" height="66"/>
+      <text x="562" y="246" class="val cy-t" text-anchor="middle">Docker Compose</text>
+      <text x="476" y="264" class="ann">서버 · Redis · MySQL 한 번에</text>
+      <text x="476" y="280" class="ann">docker compose up 으로 끝</text>
+    </svg>
+    <div class="cap">이 그림의 <b>모든 상자에 대응하는 파일</b>이 아래 폴더 구조에 하나씩 있습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">폴더 구조</h4>
+      <pre class="code" data-lang="text"><code>arena-server/
+├─ CMakeLists.txt
+├─ vcpkg.json                 의존성 선언 (매니페스트 모드)
+├─ proto/
+│   └─ arena.fbs              패킷 스키마 (클라와 공유) ★
+├─ shared/                    ★ 서버와 클라가 같이 컴파일하는 코드
+│   ├─ sim.h / sim.cpp        step_move · 충돌 — 예측이 맞으려면 반드시 공유
+│   └─ types.h                Vec2 · 상수
+├─ src/
+│   ├─ main.cpp               구동 · 시그널 · 워커 스레드
+│   ├─ net/
+│   │   ├─ session.h/.cpp     Asio 세션 (strand · 쓰기 큐 · 프레이밍)
+│   │   ├─ framing.h          길이 접두사 파서 (링버퍼)
+│   │   └─ listener.cpp       accept 루프
+│   ├─ room/
+│   │   ├─ room.h/.cpp        잡 큐 + 60Hz 틱 + 판정
+│   │   ├─ snapshot.cpp       AoI · 델타 · 양자화
+│   │   └─ history.h          지연 보상용 히트박스 링
+│   ├─ match/
+│   │   └─ ticket.cpp         Redis 티켓 검증 (GETDEL)
+│   ├─ db/
+│   │   └─ dbpool.cpp         더티 큐 → 배치 UPSERT
+│   └─ obs/
+│       ├─ metrics.cpp        /metrics 엔드포인트
+│       └─ crash.cpp          덤프 핸들러
+├─ tools/
+│   └─ bot/main.cpp           부하 테스트 봇 (n12)
+├─ deploy/
+│   ├─ Dockerfile
+│   └─ docker-compose.yml
+└─ tests/
+    └─ sim_test.cpp           step_move 결정성 테스트 ★ 가장 중요한 테스트</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>shared/</code> 가 이 구조의 핵심</b> 입니다 — 예측·리컨실리에이션이 성립하려면
+        서버와 클라가 <b>같은 이동 코드</b>를 써야 합니다(n07).
+        클라가 C# 이라면 이 부분만 <b>수식과 상수를 문서로 고정</b>하고 양쪽에서 테스트로 비교하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드 설정</h4>
+      <pre class="code" data-lang="json"><code>// vcpkg.json — 2026년 기준 안정 버전대
+{
+  "name": "arena-server",
+  "version": "1.0.0",
+  "dependencies": [
+    "boost-asio",
+    "flatbuffers",
+    "hiredis",
+    "spdlog",
+    "libmysql",
+    { "name": "gtest", "platform": "!android" }
+  ]
+}</code></pre>
+      <pre class="code" data-lang="cmake"><code>cmake_minimum_required(VERSION 3.28)
+project(arena_server LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+find_package(Boost REQUIRED COMPONENTS system)
+find_package(flatbuffers CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
+
+# ── 스키마 → 헤더 자동 생성 ──────────────────────────────
+set(FBS ${CMAKE_SOURCE_DIR}/proto/arena.fbs)
+set(GEN ${CMAKE_BINARY_DIR}/gen/arena_generated.h)
+add_custom_command(OUTPUT ${GEN}
+  COMMAND flatbuffers::flatc --cpp --scoped-enums
+          -o ${CMAKE_BINARY_DIR}/gen ${FBS}
+  DEPENDS ${FBS} VERBATIM)
+add_custom_target(gen_proto DEPENDS ${GEN})
+
+add_library(arena_shared STATIC shared/sim.cpp)
+target_include_directories(arena_shared PUBLIC shared)
+
+add_executable(arena_server
+  src/main.cpp src/net/session.cpp src/net/listener.cpp
+  src/room/room.cpp src/room/snapshot.cpp
+  src/match/ticket.cpp src/db/dbpool.cpp
+  src/obs/metrics.cpp src/obs/crash.cpp ${GEN})
+add_dependencies(arena_server gen_proto)
+target_include_directories(arena_server PRIVATE src ${CMAKE_BINARY_DIR}/gen)
+target_link_libraries(arena_server PRIVATE
+  arena_shared Boost::system flatbuffers::flatbuffers spdlog::spdlog)
+
+target_compile_options(arena_server PRIVATE
+  $&lt;$&lt;CXX_COMPILER_ID:MSVC&gt;:/W4&gt;
+  $&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall -Wextra&gt;)
+
+enable_testing()
+add_executable(sim_test tests/sim_test.cpp)
+target_link_libraries(sim_test PRIVATE arena_shared GTest::gtest_main)
+add_test(NAME sim COMMAND sim_test)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">핵심 코드 — <span class="t">룸과 틱</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">room.h — 잡 큐 + 틱 + 판정 + 스냅샷</h4>
+    <pre class="code" data-lang="cpp"><code>#pragma once
+#include "shared/sim.h"
+#include "room/history.h"
+#include &lt;chrono&gt;
+#include &lt;functional&gt;
+#include &lt;memory&gt;
+#include &lt;mutex&gt;
+#include &lt;unordered_map&gt;
+
+struct PlayerSlot {
+    PlayerId                 id{};
+    std::weak_ptr&lt;Session&gt;   sess;
+    Vec2                     pos{}, vel{};
+    std::uint16_t            hp = 100;
+    std::uint32_t            last_input_seq = 0;   // ★ ack_input 으로 돌려줄 값
+    std::uint64_t            last_packet_ms = 0;
+    ClientView               view;                 // 델타 기준 (n07)
+    BehaviorProfile          prof;                 // 이상 탐지 (n11)
+    std::uint32_t            dirty = 0;            // 저장 대상 (n09)
+};
+
+class Room : public std::enable_shared_from_this&lt;Room&gt; {
+public:
+    static constexpr int SIM_HZ    = 60;
+    static constexpr int SEND_EVERY = 3;                     // 20Hz 전송
+    static constexpr double DT     = 1.0 / SIM_HZ;
+
+    explicit Room(std::string id, const Map&amp; map) : id_(std::move(id)), map_(map) {}
+
+    // 어느 스레드에서든 호출 가능 — I/O 스레드가 부릅니다
+    void post(std::function&lt;void()&gt; job) {
+        std::lock_guard lk(qmx_);
+        q_.push_back(std::move(job));
+    }
+
+    // 이 방을 소유한 워커 스레드에서만 호출
+    void tick() {
+        drain_jobs();                                        // ① 입력 반영
+        for (auto&amp; [id, p] : players_) integrate(p);         // ② 이동
+        resolve_combat();                                    // ③ 전투 판정
+        hist_.snapshot(tick_, players_);                     // ④ 되감기용 기록
+        if (tick_ % SEND_EVERY == 0) broadcast_delta();      // ⑤ 전송
+        check_timeouts();                                    // ⑥ 끊김 정리
+        flush_dirty();                                       // ⑦ 저장은 비동기로
+        ++tick_;
+    }
+
+    bool alive() const { return !finished_ &amp;&amp; !players_.empty(); }
+
+private:
+    void drain_jobs() {
+        { std::lock_guard lk(qmx_); swap_.swap(q_); }
+        for (auto&amp; j : swap_) j();
+        swap_.clear();
+    }
+
+    void integrate(PlayerSlot&amp; p) {
+        // 입력은 이미 on_input 에서 검증되어 p.vel 에 반영돼 있습니다
+        Vec2 want = step_move(p.pos, p.vel, DT, map_);       // ★ shared/ 의 함수
+        if (map_.is_walkable(want)) p.pos = want;
+        p.dirty |= Dirty::Pos;
+    }
+
+public:
+    // ── 입력 처리 (잡으로 들어옵니다) ─────────────────────
+    void on_input(PlayerId who, const pk::Input&amp; in) {
+        auto it = players_.find(who);
+        if (it == players_.end()) return;
+        auto&amp; p = it-&gt;second;
+        p.last_packet_ms = now_ms();
+
+        if (in.seq() &lt;= p.last_input_seq) return;            // 재생·중복 무시 ★
+        p.last_input_seq = in.seq();
+
+        Vec2 dir{in.dx(), in.dy()};
+        if (float l = len(dir); l &gt; 1.0f) dir = dir / l;     // 대각선 가속 방지 ★
+        p.vel = dir * MOVE_SPEED;                            // 속도는 서버가 정합니다
+    }
+
+    void on_fire(PlayerId who, std::uint32_t view_tick, Vec2 dir) {
+        auto&amp; p = players_.at(who);
+        if (now_ms() - p.last_fire_ms &lt; FIRE_COOLDOWN_MS) return;   // 쿨다운 ★
+        p.last_fire_ms = now_ms();
+
+        const std::uint32_t v = std::clamp(view_tick,
+            tick_ &gt; MAX_REWIND ? tick_ - MAX_REWIND : 0u, tick_);   // 되감기 상한
+        if (const auto* f = hist_.at(v))
+            if (auto hit = raycast(p.pos, normalize(dir), *f, WEAPON_RANGE))
+                apply_damage(hit-&gt;target, WEAPON_DAMAGE, who);
+    }
+
+private:
+    std::string                          id_;
+    const Map&amp;                           map_;
+    std::unordered_map&lt;PlayerId, PlayerSlot&gt; players_;
+    HitboxHistory                        hist_;
+    std::uint32_t                        tick_ = 0;
+    bool                                 finished_ = false;
+    std::mutex                           qmx_;
+    std::vector&lt;std::function&lt;void()&gt;&gt;   q_, swap_;
+};</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>대각선 정규화를 빼먹는 실수가 굉장히 흔합니다</b> — <code>dx=1, dy=1</code> 을 그대로 쓰면
+      대각선 이동이 <b>1.414배 빨라집니다</b>. 클라가 이걸 알아채면 그대로 스피드핵이 됩니다.
+      <b>서버가 방향을 정규화하고 속도는 서버 상수를 쓰는 것</b>이 정답입니다.
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">main.cpp — 구동 전체</h4>
+      <pre class="code" data-lang="cpp"><code>int main(int argc, char** argv) {
+    install_crash_handler();                       // n12
+    auto cfg = Config::load("config/server.json");
+    spdlog::set_level(spdlog::level::info);
+
+    asio::io_context io;
+    RoomManager  rooms(cfg-&gt;max_rooms);
+    Redis        redis(cfg-&gt;redis_url);
+    DbPool       db(4, cfg-&gt;db);
+    Metrics      metrics;
+
+    Listener listener(io, cfg-&gt;port, [&amp;](tcp::socket s) {
+        std::make_shared&lt;Session&gt;(std::move(s), rooms, redis, metrics)-&gt;start();
+    });
+    listener.run();
+
+    // ── 룸 워커 : 코어 수만큼. 각 워커가 방들을 고정 소유합니다 (n06) ──
+    std::vector&lt;std::jthread&gt; room_workers;
+    const unsigned nw = std::max(1u, std::thread::hardware_concurrency() / 2);
+    for (unsigned i = 0; i &lt; nw; ++i)
+        room_workers.emplace_back([&amp;, i](std::stop_token st) {
+            auto next = std::chrono::steady_clock::now();
+            const auto dt = std::chrono::nanoseconds(1'000'000'000 / Room::SIM_HZ);
+            while (!st.stop_requested()) {
+                auto t0 = std::chrono::steady_clock::now();
+                rooms.tick_shard(i, nw);                   // 이 워커가 맡은 방만
+                metrics.tick.record(elapsed_us(t0));
+                next += dt;
+                sleep_until_precise(next);                 // n02
+            }
+        });
+
+    // ── I/O 스레드 ──────────────────────────────────────
+    std::vector&lt;std::jthread&gt; io_threads;
+    for (unsigned i = 1; i &lt; std::thread::hardware_concurrency(); ++i)
+        io_threads.emplace_back([&amp;]{ io.run(); });
+
+    // ── 드레인 종료 (n12) ───────────────────────────────
+    asio::signal_set sig(io, SIGINT, SIGTERM);
+    sig.async_wait([&amp;](auto, int){ rooms.begin_drain(); });
+
+    metrics.serve(io, cfg-&gt;metrics_port);          // /metrics
+    io.run();
+    return 0;
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 — Dockerfile 과 Compose</h4>
+      <pre class="code" data-lang="text"><code># deploy/Dockerfile — 멀티 스테이지
+FROM ubuntu:24.04 AS build
+RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends \
+    build-essential cmake ninja-build git curl zip unzip tar pkg-config \
+ &amp;&amp; rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 https://github.com/microsoft/vcpkg /opt/vcpkg \
+ &amp;&amp; /opt/vcpkg/bootstrap-vcpkg.sh
+WORKDIR /src
+COPY . .
+RUN cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
+ &amp;&amp; cmake --build build -j
+
+FROM ubuntu:24.04
+RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends \
+    libstdc++6 ca-certificates &amp;&amp; rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/build/arena_server /usr/local/bin/
+COPY config /etc/arena/config
+EXPOSE 7777/tcp 9100/tcp
+# ★ PID 1 이 시그널을 받아야 드레인이 동작합니다
+ENTRYPOINT ["/usr/local/bin/arena_server", "--config", "/etc/arena/config/server.json"]</code></pre>
+      <pre class="code" data-lang="yaml"><code># deploy/docker-compose.yml — 로컬에서 전부 한 번에
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: devpw
+      MYSQL_DATABASE: arena
+    volumes: ["./sql:/docker-entrypoint-initdb.d:ro"]
+  server:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    depends_on: [redis, mysql]
+    ports: ["7777:7777", "9100:9100"]
+    environment:
+      ARENA_REDIS: "redis://redis:6379"
+      ARENA_DB:    "mysql://root:devpw@mysql:3306/arena"
+    stop_grace_period: 180s     # ★ 매치 최대 길이보다 길게
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 1G }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">돌려 보기 — <span class="t">빌드부터 부하 테스트까지</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">명령 순서</h4>
+      <pre class="code" data-lang="bash"><code># ① 로컬 빌드
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+cmake --build build -j
+ctest --test-dir build --output-on-failure     # ★ 시뮬 결정성 테스트
+
+# ② 의존 서비스 + 서버 기동
+docker compose -f deploy/docker-compose.yml up -d --build
+curl -s localhost:9100/metrics | head
+
+# ③ 봇으로 부하 — 500 → 2000 → 5000 순서로 올립니다
+./build/tools/bot 500  --host localhost --port 7777 --ramp 5s
+watch -n1 'curl -s localhost:9100/metrics | grep -E "ccu|p99|overrun"'
+
+# ④ 한계 지점 확인 : p99 가 8ms(60틱 예산 16.6ms 의 절반)를 넘는 CCU 를 기록
+#    그 값이 "인스턴스 한 대의 정원" 입니다 ★
+
+# ⑤ 프로파일 — 어디서 시간을 쓰는지
+perf record -F 999 -g -p $(pgrep arena_server) -- sleep 20
+perf script | stackcollapse-perf.pl | flamegraph.pl &gt; flame.svg</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>정원을 구한 다음이 진짜 시작</b> 입니다 — 그 숫자로
+        <b>필요한 인스턴스 수 · 월 비용 · 오토스케일 임계</b> 가 전부 계산됩니다.
+        “대충 많이 띄우자”가 아니라 <b>“한 대에 800명, 목표 동접 4만이면 50대 + 여유 20%”</b> 처럼 말할 수 있어야 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가장 중요한 테스트 — 시뮬 결정성</h4>
+      <pre class="code" data-lang="cpp"><code>// 예측이 맞으려면 '같은 입력 → 같은 결과' 가 반드시 성립해야 합니다
+TEST(Sim, DeterministicReplay) {
+    Map map = Map::load("tests/data/arena.map");
+    std::vector&lt;Input&gt; inputs = load_recorded_inputs("tests/data/session1.bin");
+
+    auto run = [&amp;] {
+        Vec2 p{10.f, 10.f};
+        for (const auto&amp; in : inputs) p = step_move(p, in, 1.0/60.0, map);
+        return p;
+    };
+    Vec2 a = run(), b = run();
+    EXPECT_EQ(std::bit_cast&lt;std::uint64_t&gt;(a),      // ★ 비트 단위로 같아야 합니다
+              std::bit_cast&lt;std::uint64_t&gt;(b));
+}
+
+// 실무에서는 클라(C#/UE)와 서버(C++)의 결과도 비교합니다
+// → 같은 입력 파일을 양쪽에서 돌리고 최종 좌표를 맞춰 봅니다
+TEST(Sim, MatchesGoldenTrace) {
+    auto golden = load_golden("tests/data/session1.golden");   // 클라가 만든 것
+    auto mine   = replay("tests/data/session1.bin");
+    for (std::size_t i = 0; i &lt; golden.size(); ++i)
+        EXPECT_NEAR(dist(golden[i], mine[i]), 0.0, 1e-4) &lt;&lt; "diverged at " &lt;&lt; i;
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“가끔 캐릭터가 튄다”의 원인 대부분이 여기</b> 입니다 — 서버와 클라의 이동 계산이 미세하게 다르면
+        리컨실리에이션이 매번 보정을 걸어 고무줄 현상이 납니다.
+        <b>이 테스트를 CI 에 넣어 두면</b> 밸런스 수정 커밋이 몰래 시뮬을 바꾸는 사고를 막을 수 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">여기서 더 나아간다면 — 다음 단계 로드맵</h4>
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:24%">단계</th><th>할 일</th><th>얻는 것</th></tr>
+      <tr><td><b>① UDP 로 전환</b></td><td>TCP 세션을 GameNetworkingSockets 로 교체(n03)</td><td>손실 환경에서 지연 안정화</td></tr>
+      <tr><td><b>② AoI 도입</b></td><td>그리드 + 시야 필터(n06)</td><td>방 인원 상한이 몇 배로</td></tr>
+      <tr><td><b>③ 매치 서버 분리</b></td><td>매처를 별도 프로세스로, 티켓으로 연결(n08)</td><td>게임 서버 수평 확장</td></tr>
+      <tr><td><b>④ 리플레이</b></td><td>입력 + 시드 저장, 재생 도구(n11)</td><td>버그 재현·치트 조사</td></tr>
+      <tr><td><b>⑤ Agones 배포</b></td><td>Fleet + 드레인 + 오토스케일(n12)</td><td>운영 자동화</td></tr>
+      <tr><td><b>⑥ 관측</b></td><td>OpenTelemetry 트레이스 + 로그 상관관계</td><td>장애 원인 추적 시간 단축</td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>순서를 지키는 것이 중요합니다</b> — 처음부터 UDP·AoI·K8s 를 다 넣으면 <b>디버깅이 불가능</b> 해집니다.
+      TCP + 단일 프로세스로 <b>게임이 재미있는지</b> 부터 확인하고,
+      부하 테스트로 <b>실제 병목이 확인된 순서</b> 대로 하나씩 바꾸세요.
+      이것이 국내외 게임 서버 팀이 공통으로 지키는 순서입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 완성된 서버는 <b>세션(strand) · 프레이밍 · 룸 잡 큐 · 60Hz 틱 · 20Hz 델타 전송</b> 다섯 부품입니다.
+    <b><code>shared/</code> 의 시뮬 코드를 클라와 공유</b>하고 <b>결정성 테스트</b>로 지킵니다.
+    Redis 티켓으로 로비와 잇고, Docker 로 묶고, <b>봇으로 정원을 측정</b>해 그 숫자로 운영합니다.
+    여기까지 왔다면 <b>게임 서버 개발자로서 필요한 지도는 완성</b>된 것입니다.</div>
+</section>
+
+</div><!-- /pane-game -->

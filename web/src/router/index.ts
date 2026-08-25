@@ -224,31 +224,31 @@ export const guides: Guide[] = [
   },
   {
     key: 'cpp',
-    label: 'C++ Guide',
+    label: 'C / C++ Guide',
     emoji: '🔵',
     href: `${import.meta.env.BASE_URL}cpp-web/`,
-    title: 'C++ 네이티브 모듈 가이드 — 파이썬 · Node 에서 불러 쓰기 (별도 페이지)',
-    heading: 'C++ Native Module Guide',
+    title: 'C · C++ 종합 가이드 — 서버 · 게임 서버 · 고성능 시스템 · 네이티브 모듈 (별도 페이지)',
+    heading: 'C / C++ Visual Guide',
     desc:
-      'C++ 로 앱을 만드는 것이 아니라 파이썬·Node 가 느린 그 함수 하나를 대신할 ' +
-      '모듈을 만드는 가이드입니다. 왕기초 문법과 현대 C++(RAII·스마트 포인터·이동)부터 ' +
-      'pybind11 로 numpy 를 복사 없이 다루고 GIL 을 해제하는 법, N-API 애드온, ' +
-      'C ABI 로 여러 언어에서 함께 쓰기, wheel·prebuild 배포, 캐시·SIMD 최적화, ' +
-      'UB 와 ABI 호환성까지 한 페이지에 담았습니다.',
+      '가장 빠른 코드가 필요한 자리에 여전히 서 있는 언어를 한 페이지로 다룹니다. ' +
+      '설치와 환경 세팅(MSVC·MSYS2·CMake·vcpkg)부터 C 언어 26개 섹션, 왕기초 문법과 ' +
+      '현대 C++(RAII·스마트 포인터·이동), Drogon·Asio·gRPC 로 만드는 백엔드 서버, ' +
+      'IOCP·넷코드·매치메이킹까지 다루는 게임 서버, 락프리·SIMD·CUDA·io_uring 고성능 시스템, ' +
+      '그리고 pybind11·N-API·C ABI 로 파이썬·Node 에서 불러 쓰는 모듈까지 이어집니다.',
     tags: [
-      'C++20',
-      'pybind11',
-      'numpy 제로카피',
-      'GIL 해제',
-      'N-API 애드온',
+      'C17 · C23',
+      'C++23',
+      '설치 · CMake · vcpkg',
+      'Drogon · Asio 서버',
+      '게임 서버 · IOCP',
+      '락프리 · SIMD · CUDA',
+      'pybind11 · N-API',
       'C ABI · FFI',
-      'CMake · wheel',
-      'SIMD · 캐시',
     ],
     stats: [
-      { value: '8', label: '주제 탭' },
-      { value: '88', label: '섹션' },
-      { value: '3', label: '모듈 전용 탭' },
+      { value: '13', label: '주제 탭' },
+      { value: '165', label: '섹션' },
+      { value: '4', label: '실전 · 모듈 탭' },
     ],
   },
   {
