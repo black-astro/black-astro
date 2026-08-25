@@ -730,6 +730,36 @@ SELECT team, SUM(amount) FROM orders WHERE ordered_at &gt;= '2026-01-01' GROUP B
     Oracle <code>AWR / v$sql</code>. 하나를 켜 두면
     “느린 쿼리 찾기”가 “목록에서 위에서 세 개 고르기”로 바뀝니다.
   </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 254" role="img" aria-label="실행계획을 읽는 법을 보여 주는 그림. 계획은 안쪽 들여쓰기부터 실행되며 각 단계에 예상 행 수와 실제 행 수가 함께 나오는데, 이 둘이 크게 어긋난 단계가 문제의 출발점이다. 전체 스캔이 도는 자리와 정렬이 디스크로 넘어간 자리도 함께 확인한다.">
+      <text x="16" y="18" class="lbl">계획은 안쪽부터 읽습니다 — 그리고 두 가지만 봅니다</text>
+
+      <rect class="bx" x="16" y="42" width="440" height="26"/>
+      <text x="32" y="60" class="ann">Sort  (rows=200) (actual rows=48000)</text>
+      <text x="472" y="60" class="ann rs-t">③ 마지막에 정렬</text>
+
+      <rect class="bx bx-warn" x="40" y="72" width="416" height="26"/>
+      <text x="56" y="90" class="ann rs-t">→ Hash Join  (rows=200) (actual rows=48000)</text>
+      <text x="472" y="90" class="ann rs-t">② 예상과 240배 차이</text>
+
+      <rect class="bx bx-fw" x="64" y="102" width="392" height="26"/>
+      <text x="80" y="120" class="ann rs-t">→ Seq Scan on orders  (actual rows=1200000)</text>
+      <text x="472" y="120" class="ann rs-t">① 전체 스캔</text>
+
+      <rect class="bx bx-warn" x="16" y="146" width="316" height="86"/>
+      <text x="32" y="166" class="val rs-t">① 예상 행 수와 실제 행 수의 차이</text>
+      <text x="32" y="186" class="ann">크게 어긋나면 <tspan class="rs-t">그 아래 선택이 전부 잘못</tspan>됩니다</text>
+      <text x="32" y="204" class="ann ok-t">→ 통계를 갱신하세요 (ANALYZE)</text>
+      <text x="32" y="222" class="ann">그래도 어긋나면 조건식이 인덱스를 못 쓰는 모양입니다</text>
+
+      <rect class="bx bx-ok" x="348" y="146" width="316" height="86"/>
+      <text x="364" y="166" class="val ok-t">② 전체 스캔이 도는 자리</text>
+      <text x="364" y="186" class="ann">작은 테이블이면 정상입니다 — 인덱스가 더 느립니다</text>
+      <text x="364" y="204" class="ann rs-t">큰 테이블에서 나오면 인덱스 설계를 봅니다(d08)</text>
+      <text x="364" y="222" class="ann">EXPLAIN ANALYZE 는 <tspan class="rs-t">실제로 실행합니다</tspan> — UPDATE 주의</text>
+    </svg>
+    <div class="cap">계획을 읽는 목적은 하나 — <b>어느 단계가 행을 가장 많이 만졌나</b>.</div>
+  </div>
 </section>
 
 <!-- ==================== d10 ==================== -->
@@ -813,7 +843,7 @@ with psycopg.connect(DSN) as conn:       # 블록을 정상 탈출 -> COMMIT
     PostgreSQL은 DDL도 트랜잭션에 넣을 수 있어(롤백 가능) 마이그레이션에 강합니다.
   </div>
   <div class="diag rv">
-    <svg viewBox="0 0 680 244" role="img" aria-label="트랜잭션은 여러 개의 변경을 하나의 덩어리로 묶어 전부 되든가 전부 안 되든가로 만든다. 계좌 이체에서 출금은 됐는데 입금 직전에 오류가 나면 되돌리기를 통해 출금도 없던 일이 된다. 커밋을 해야만 다른 사람에게 보이고, 되돌리면 중간 상태는 아무도 보지 못한다. 파이썬 드라이버는 대개 자동 커밋이 꺼져 있어 커밋을 부르지 않으면 아무것도 저장되지 않는다.">
+    <svg viewBox="0 0 680 248" role="img" aria-label="트랜잭션은 여러 개의 변경을 하나의 덩어리로 묶어 전부 되든가 전부 안 되든가로 만든다. 계좌 이체에서 출금은 됐는데 입금 직전에 오류가 나면 되돌리기를 통해 출금도 없던 일이 된다. 커밋을 해야만 다른 사람에게 보이고, 되돌리면 중간 상태는 아무도 보지 못한다. 파이썬 드라이버는 대개 자동 커밋이 꺼져 있어 커밋을 부르지 않으면 아무것도 저장되지 않는다.">
       <text x="16" y="18" class="lbl">트랜잭션 — 전부 되든가, 전부 없던 일이 되든가</text>
 
       <rect class="bx" x="16" y="36" width="130" height="46"/>
@@ -918,6 +948,43 @@ SELECT * FROM stock WHERE id = 10 FOR UPDATE SKIP LOCKED; -- 잠긴 행은 건�
     <b>데드락</b> — A가 1번 행을 잡고 2번을 기다리는데, B는 2번을 잡고 1번을 기다리면 영원히 멈춥니다.
     DB가 감지해 <b>한쪽을 강제 종료</b>하므로, 애플리케이션은 <b>재시도</b>할 수 있어야 합니다.
     예방책은 단순합니다 — <b>모든 트랜잭션이 같은 순서로 행을 잠그게</b> 하세요(예: 항상 id 오름차순).
+  </div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 256" role="img" aria-label="동시에 같은 행을 고칠 때 생기는 문제와 해결을 보여 주는 그림. 두 트랜잭션이 같은 값을 읽고 각자 계산해 저장하면 한쪽의 수정이 사라진다. 읽을 때 잠그거나 버전 번호를 확인하는 방식으로 막을 수 있으며, 잠그는 순서를 통일하지 않으면 서로를 기다리는 교착이 생긴다.">
+      <text x="16" y="18" class="lbl">동시에 고치면 한쪽이 사라집니다 — 갱신 손실</text>
+
+      <rect class="bx bx-warn" x="16" y="42" width="150" height="70"/>
+      <text x="91" y="62" class="ann rs-t" text-anchor="middle">A: 재고 10 읽음</text>
+      <text x="91" y="82" class="ann" text-anchor="middle">3 빼서 7 저장</text>
+      <text x="91" y="102" class="ann rs-t" text-anchor="middle">→ 7</text>
+
+      <rect class="bx bx-warn" x="180" y="42" width="150" height="70"/>
+      <text x="255" y="62" class="ann rs-t" text-anchor="middle">B: 재고 10 읽음</text>
+      <text x="255" y="82" class="ann" text-anchor="middle">2 빼서 8 저장</text>
+      <text x="255" y="102" class="ann rs-t" text-anchor="middle">→ 8</text>
+
+      <path class="fl ar ar-rs" style="stroke:#f87171" d="M334 77 L370 77"/>
+      <rect class="bx bx-fw" x="374" y="42" width="290" height="70"/>
+      <text x="519" y="62" class="ann rs-t" text-anchor="middle">최종 결과는 8</text>
+      <text x="390" y="84" class="ann">A 의 차감이 사라졌습니다 — 실제로는 5 여야 합니다</text>
+      <text x="390" y="104" class="ann rs-t">에러도 경고도 없습니다</text>
+
+      <rect class="bx bx-ok" x="16" y="132" width="316" height="76"/>
+      <text x="32" y="152" class="val ok-t">① 비관적 — 읽을 때 잠급니다</text>
+      <text x="32" y="172" class="ann">SELECT … FOR UPDATE — 뒤에 온 쪽은 기다립니다</text>
+      <text x="32" y="190" class="ann">충돌이 잦은 곳(재고·좌석)에 적합합니다</text>
+      <text x="32" y="204" class="ann rs-t">길게 잡으면 대기가 쌓입니다 — 짧게</text>
+
+      <rect class="bx bx-hi" x="348" y="132" width="316" height="76"/>
+      <text x="364" y="152" class="val am-t">② 낙관적 — 버전으로 확인합니다</text>
+      <text x="364" y="172" class="ann">UPDATE … WHERE id=1 AND version=3</text>
+      <text x="364" y="190" class="ann">0행이 바뀌면 누가 먼저 고친 것 → 다시 시도</text>
+      <text x="364" y="204" class="ann ok-t">충돌이 드문 곳에 적합합니다</text>
+
+      <text x="32" y="230" class="ann">가장 간단한 해결 — <tspan class="ok-t">UPDATE stock SET qty = qty - 3 WHERE id=1 AND qty &gt;= 3</tspan> 한 줄이면 읽지 않고 원자적으로 처리됩니다</text>
+      <text x="32" y="248" class="ann rs-t">데드락은 잠그는 순서가 서로 다를 때 생깁니다 — 코드에서 <tspan class="ok-t">항상 같은 순서로</tspan> 잠그세요</text>
+    </svg>
+    <div class="cap">격리 수준을 올리기 전에 <b>한 문장으로 끝낼 수 있는지</b> 먼저 보세요.</div>
   </div>
 </section>
 
