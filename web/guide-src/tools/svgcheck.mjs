@@ -47,10 +47,11 @@ export function checkFile(file, onlyIds) {
         const y = parseFloat((a.match(/\by="([\d.-]+)"/) || [])[1] ?? '0');
         const cls = (a.match(/class="([^"]*)"/) || [])[1] || '';
         const fsz = fontSize(cls, (a.match(/font-size="([\d.]+)"/) || [])[1]);
-        const mid = /text-anchor="middle"/.test(a);
+        const anc = (a.match(/text-anchor="(middle|end)"/) || [])[1];   // 기본(start) · middle · end
         const w = width(raw, fsz);
-        const x0 = mid ? x - w / 2 : x, x1 = mid ? x + w / 2 : x + w;
-        texts.push({ x0, x1, y, fsz, raw, mid, cx: x });
+        const x0 = anc === 'middle' ? x - w / 2 : anc === 'end' ? x - w : x;
+        const x1 = x0 + w;
+        texts.push({ x0, x1, y, fsz, raw, anc, cx: (x0 + x1) / 2 });
       }
       let maxY = 0;
       for (const t of texts) {
@@ -62,7 +63,7 @@ export function checkFile(file, onlyIds) {
         for (const r of rects) {
           const cy = t.y - t.fsz * 0.35;
           const inside = cy > r.y + 2 && cy < r.y + r.h - 1
-            && (t.mid ? (t.cx > r.x + 4 && t.cx < r.x + r.w - 4) : (t.x0 >= r.x + 6 && t.x0 < r.x + r.w));
+            && (t.anc ? (t.cx > r.x + 4 && t.cx < r.x + r.w - 4) : (t.x0 >= r.x + 6 && t.x0 < r.x + r.w));
           if (inside && (!own || r.w < own.w)) own = r;
         }
         if (own) {
