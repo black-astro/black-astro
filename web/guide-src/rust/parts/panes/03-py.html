@@ -242,6 +242,30 @@ def test_parity(case):
     Rust 가 유리한 것은 <b>벡터화가 안 되는 루프 · 문자열 파싱 · GIL 이 막는 CPU 작업</b>입니다.
     시작할 때는 <b>순수 파이썬 폴백 + parity 테스트</b>를 함께 두고,
     <b>경계를 넘는 횟수를 데이터 크기와 분리</b>하세요.</div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 272" role="img" aria-label="파이썬 코드를 Rust 로 옮겨서 이득이 큰 경우와 아닌 경우가 뚜렷하게 갈린다. 순수 파이썬 반복문이 오래 도는 코드나 GIL 때문에 코어를 못 쓰는 코드는 큰 폭으로 빨라진다. 반대로 이미 넘파이나 판다스로 벡터화된 코드는 그 안이 이미 C 라서 이득이 작고, 네트워크나 디스크 대기가 대부분인 코드는 거의 차이가 없다. 그래서 먼저 프로파일을 떠서 시간이 어디에 쓰이는지 확인해야 한다.">
+      <text x="16" y="18" class="lbl">어떤 코드가 Rust 로 옮겨서 이득인가 — 먼저 재고 판단합니다</text>
+
+      <rect class="bx bx-ok" x="16" y="34" width="648" height="46"/>
+      <text x="32" y="54" class="val">이득이 큽니다 — 순수 파이썬 반복문이 오래 도는 코드</text>
+      <text x="32" y="70" class="ann">문자열 파싱 · 좌표 계산 · 트리 순회 · 커스텀 알고리즘 — 보통 10~100배</text>
+
+      <rect class="bx bx-ok" x="16" y="88" width="648" height="46"/>
+      <text x="32" y="108" class="val">이득이 큽니다 — GIL 때문에 코어를 못 쓰는 코드</text>
+      <text x="32" y="124" class="ann">Rust 쪽에서 GIL 을 놓고 rayon 으로 돌리면 코어 수만큼 그대로 붙습니다</text>
+
+      <rect class="bx bx-warn" x="16" y="142" width="648" height="46"/>
+      <text x="32" y="162" class="val">이득이 작습니다 — 이미 numpy · pandas 로 벡터화한 코드</text>
+      <text x="32" y="178" class="ann">그 안은 이미 C 입니다. 잘해야 몇십 퍼센트이고 오히려 느려지는 경우도 있습니다</text>
+
+      <rect class="bx bx-warn" x="16" y="196" width="648" height="46"/>
+      <text x="32" y="216" class="val">거의 차이가 없습니다 — 대기가 대부분인 코드</text>
+      <text x="32" y="232" class="ann">HTTP 응답 · 디스크 · DB 대기는 언어를 바꿔도 그대로 기다립니다</text>
+
+      <text x="16" y="264" class="lbl">순서는 항상 같습니다 — 프로파일을 떠서 가장 오래 걸리는 함수 하나를 찾고, 그것만 옮깁니다</text>
+    </svg>
+    <div class="cap">전부 옮길 필요는 없습니다 — <b>시간의 대부분을 쓰는 함수 하나</b>면 충분한 경우가 많습니다.</div>
+  </div>
 </section>
 
 
@@ -1020,6 +1044,29 @@ py.allow_threads(|| heavy(&amp;owned));        // ★ 이제 GIL 을 놓을 수 
     <b><code>&amp;str</code>·<code>&amp;[u8]</code>·numpy 배열은 복사가 없습니다</b>.
     큰 수치 데이터는 <b>반드시 numpy 로</b>(y06), 그 외에는 <b>배치 API 로 호출 횟수를 줄이세요</b>.
     <code>#[derive(FromPyObject)]</code> 로 dict → 구조체 변환을 자동화할 수 있습니다.</div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 264" role="img" aria-label="파이썬 값과 Rust 값 사이의 변환 비용은 종류마다 크게 다르다. 정수 리스트를 벡터로 받으면 원소마다 변환과 복사가 일어나 길이에 비례해 비싸고, 문자열도 복사가 생긴다. 반면 넘파이 배열은 메모리 배치가 같아 복사 없이 슬라이스로 그대로 볼 수 있다. 그래서 큰 데이터는 넘파이로 한 번에 넘기고, 작은 호출을 반복해서 부르는 방식은 피해야 한다.">
+      <text x="16" y="18" class="lbl">변환 비용 — 무엇을 어떻게 넘기느냐가 성능을 가릅니다</text>
+
+      <rect class="bx bx-warn" x="16" y="36" width="648" height="46"/>
+      <text x="32" y="56" class="val">list[int] → Vec&lt;i64&gt;  ·  원소마다 변환 + 복사</text>
+      <text x="32" y="72" class="ann">길이에 비례합니다. 100만 개면 이 변환만으로 계산보다 오래 걸리기도 합니다</text>
+
+      <rect class="bx bx-warn" x="16" y="90" width="648" height="46"/>
+      <text x="32" y="110" class="val">str → String  ·  UTF-8 로 복사</text>
+      <text x="32" y="126" class="ann">읽기만 한다면 &amp;str 로 빌려 받으세요 — 복사가 사라집니다</text>
+
+      <rect class="bx bx-ok" x="16" y="144" width="648" height="46"/>
+      <text x="32" y="164" class="val">numpy 배열 → &amp;[f64]  ·  복사 없음 (제로카피)</text>
+      <text x="32" y="180" class="ann">메모리 배치가 같아 그대로 들여다봅니다 — 100MB 배열도 넘기는 비용이 0 에 가깝습니다</text>
+
+      <rect class="bx bx-hi" x="16" y="204" width="648" height="34"/>
+      <text x="340" y="225" font-size="11" text-anchor="middle">큰 데이터를 한 번에 · 작은 호출을 반복하지 않기</text>
+
+      <text x="16" y="256" class="lbl">호출 한 번에도 고정 비용이 있습니다 — 100만 번 부르면 그 비용이 전체를 잡아먹습니다</text>
+    </svg>
+    <div class="cap">PyO3 성능의 승부처는 Rust 코드가 아니라 <b>경계를 몇 번 넘느냐</b>입니다.</div>
+  </div>
 </section>
 
 
@@ -2921,6 +2968,33 @@ fn fast_path() { /* 안정 API 로 */ }
     <b>wheel 수가 5분의 1</b>로 줄고 <b>새 파이썬이 나와도 그대로 동작</b>합니다.
     대가는 <b>약간의 성능 손해와 일부 API 제한</b>인데, 대부분의 확장에서는 문제가 되지 않습니다.
     <b>배포하는 패키지라면 켜세요.</b> <code>sdist</code> 와 <code>musllinux</code> wheel 도 함께 올리는 것을 잊지 마세요.</div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 232" role="img" aria-label="abi3 를 쓰지 않으면 파이썬 버전마다 따로 빌드해야 해서 운영체제와 아키텍처까지 곱해지면 휠 파일이 서른 개 가까이 나온다. abi3 로 최소 버전을 정해 빌드하면 그 버전 이상의 모든 파이썬에서 같은 파일이 동작하므로 운영체제와 아키텍처 조합만 남아 여섯 개로 줄어든다. 대신 파이썬 최신 내부 API 중 일부는 쓸 수 없다.">
+      <text x="16" y="18" class="lbl">abi3 — 빌드 매트릭스가 30개에서 6개로 줄어듭니다</text>
+
+      <rect class="bx bx-warn" x="16" y="34" width="320" height="120"/>
+      <text x="176" y="54" font-size="11" text-anchor="middle">abi3 없이</text>
+      <text x="176" y="74" class="ann" text-anchor="middle">파이썬 3.9 · 3.10 · 3.11 · 3.12 · 3.13</text>
+      <text x="176" y="90" class="ann" text-anchor="middle">× Linux · macOS · Windows</text>
+      <text x="176" y="106" class="ann" text-anchor="middle">× x86_64 · arm64</text>
+      <rect class="bx bx-warn" x="34" y="116" width="284" height="26"/>
+      <text x="176" y="134" class="ann" text-anchor="middle">휠 약 30개 — CI 시간도 30배</text>
+
+      <rect class="bx bx-ok" x="344" y="34" width="320" height="120"/>
+      <text x="504" y="54" font-size="11" text-anchor="middle">abi3-py39 로 빌드</text>
+      <text x="504" y="74" class="ann" text-anchor="middle">파이썬 3.9 이상 전부 같은 파일</text>
+      <text x="504" y="90" class="ann" text-anchor="middle">× Linux · macOS · Windows</text>
+      <text x="504" y="106" class="ann" text-anchor="middle">× x86_64 · arm64</text>
+      <rect class="bx bx-ok" x="362" y="116" width="284" height="26"/>
+      <text x="504" y="134" class="ann" text-anchor="middle">휠 6개 — 새 파이썬이 나와도 그대로</text>
+
+      <rect class="bx bx-hi" x="16" y="174" width="648" height="34"/>
+      <text x="340" y="195" font-size="11" text-anchor="middle">대신 안정 ABI 밖의 최신 내부 API 는 쓸 수 없습니다</text>
+
+      <text x="16" y="226" class="lbl">라이브러리를 배포한다면 거의 항상 abi3 가 답입니다 — 새 파이썬이 나올 때마다 재빌드하지 않아도 됩니다</text>
+    </svg>
+    <div class="cap">배포 부담의 대부분은 코드가 아니라 <b>곱해지는 조합의 수</b>에서 옵니다.</div>
+  </div>
 </section>
 
 
