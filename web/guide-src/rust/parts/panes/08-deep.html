@@ -1076,6 +1076,45 @@ unsafe { MaybeUninit::slice_assume_init_ref(&amp;buf) };
     다만 <b>실무에서 필요한 경우는 드뭅니다</b> — <code>vec![0; n]</code> 은 생각보다 싸고,
     <b>정당한 용도는 FFI 의 out 파라미터</b> 정도입니다.
     <b><code>set_len</code> 은 가장 위험한 함수</b>이니 조건을 반드시 확인하세요.</div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 256" role="img" aria-label="MaybeUninit 을 쓰는 세 단계를 상태 변화로 보여 주는 그림. 처음에는 아무것도 쓰이지 않은 메모리가 있고 이 상태에서 값으로 읽으면 정의되지 않은 동작이다. 포인터를 통해 값을 완전히 써 넣은 다음에야 assume_init 으로 초기화되었다고 선언할 수 있으며, 이 선언이 사실과 다르면 그 자리에서 정의되지 않은 동작이 된다.">
+      <text x="16" y="18" class="lbl">초기화되지 않은 메모리는 '아직 값이 아닙니다'</text>
+
+      <rect class="stp" x="16" y="36" width="200" height="18" rx="4"/>
+      <text x="116" y="49" class="stpn" text-anchor="middle">① MaybeUninit::uninit()</text>
+      <rect class="bx bx-warn" x="16" y="62" width="200" height="66"/>
+      <text x="116" y="86" class="val rs-t" text-anchor="middle">? ? ? ?</text>
+      <text x="32" y="106" class="ann">메모리는 잡혔지만</text>
+      <text x="32" y="122" class="ann rs-t">값으로 읽으면 UB</text>
+
+      <path class="fl ar" d="M220 94 L236 94"/>
+
+      <rect class="stp" x="240" y="36" width="200" height="18" rx="4"/>
+      <text x="340" y="49" class="stpn" text-anchor="middle">② ptr 로 완전히 써 넣기</text>
+      <rect class="bx bx-hi" x="240" y="62" width="200" height="66"/>
+      <text x="340" y="86" class="val am-t" text-anchor="middle">7 · "ok" · 0x1f</text>
+      <text x="256" y="106" class="ann">as_mut_ptr().write(v)</text>
+      <text x="256" y="122" class="ann">모든 필드를 빠짐없이</text>
+
+      <path class="fl ar" d="M444 94 L460 94"/>
+
+      <rect class="stp" x="464" y="36" width="200" height="18" rx="4"/>
+      <text x="564" y="49" class="stpn" text-anchor="middle">③ assume_init()</text>
+      <rect class="bx bx-ok" x="464" y="62" width="200" height="66"/>
+      <text x="564" y="86" class="val ok-t" text-anchor="middle">진짜 T</text>
+      <text x="480" y="106" class="ann ok-t">여기서부터 평범한 값</text>
+      <text x="480" y="122" class="ann">Drop 도 정상 동작</text>
+
+      <rect class="bx bx-warn" x="16" y="146" width="648" height="46"/>
+      <text x="32" y="168" class="val rs-t">assume_init 은 검사가 아니라 '내가 보증한다'는 선언입니다</text>
+      <text x="32" y="186" class="ann">한 필드라도 안 썼는데 이 줄을 지나면, 그 순간부터 프로그램 전체가 정의되지 않은 상태가 됩니다 — 크래시는 한참 뒤에 납니다</text>
+
+      <rect class="bx" x="16" y="202" width="648" height="46"/>
+      <text x="32" y="224" class="ann">정당한 용도는 좁습니다 — <tspan class="ok-t">FFI 의 out 파라미터</tspan>(C 함수가 채워 주는 구조체)와 <tspan class="ok-t">큰 버퍼의 memset 회피</tspan> 정도입니다</text>
+      <text x="32" y="242" class="ann">그마저도 리눅스는 0 페이지를 지연 할당하므로, <tspan class="rs-t">memset 이 정말 병목인지 프로파일러로 확인한 뒤에</tspan> 손대세요</text>
+    </svg>
+    <div class="cap">"쓰레기 값이 들어 있다"가 아니라 <b>"값이라는 개념 자체가 아직 없다"</b>가 정확한 이해입니다.</div>
+  </div>
 </section>
 
 
@@ -1926,6 +1965,42 @@ cargo fuzz run my_target -- -max_total_time=300
     <b>aliasing · 정렬 · 초기화 · 누수 · 데이터 경쟁</b>을 자동으로 잡아 줍니다.
     <b>실행된 코드만 검사</b>하므로 <code>unsafe</code> 함수마다 작은 테스트를 두고,
     <b>FFI 로 넘어간 C 코드는 ASan</b> 으로 따로 봐야 합니다.</div>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 264" role="img" aria-label="일반 테스트와 Miri 를 비교하는 그림. 정의되지 않은 동작이 들어 있는 unsafe 코드도 일반 테스트에서는 대개 통과하지만, Miri 는 코드를 해석기로 실행하면서 포인터의 유래와 정렬과 초기화 여부를 함께 추적해 위반이 일어난 줄을 그 자리에서 알려 준다. 다만 Miri 는 테스트가 실제로 지나간 경로만 검사하므로 널이나 길이 0 같은 경계 입력을 테스트로 만들어 두어야 한다.">
+      <text x="16" y="18" class="lbl">UB 가 있는 코드도 테스트는 대개 통과합니다</text>
+
+      <rect class="bx bx-fw" x="16" y="42" width="180" height="66"/>
+      <text x="106" y="64" class="val rs-t" text-anchor="middle">unsafe 블록</text>
+      <text x="32" y="84" class="ann">from_raw_parts(p, len)</text>
+      <text x="32" y="100" class="ann">정렬이 어긋난 포인터</text>
+
+      <path class="fl ar ar-rs" style="stroke:#f87171" d="M200 60 C 228 60 228 48 256 48"/>
+      <path class="fl ar ar-gn" style="stroke:#4ade80" d="M200 90 C 228 90 228 108 256 108"/>
+
+      <rect class="bx bx-warn" x="260" y="30" width="404" height="36"/>
+      <text x="276" y="46" class="ann rs-t">cargo test — 통과합니다</text>
+      <text x="276" y="60" class="ann">그 하드웨어에서 우연히 동작했을 뿐, 최적화 설정이 바뀌면 깨집니다</text>
+
+      <rect class="bx bx-ok" x="260" y="90" width="404" height="46"/>
+      <text x="276" y="108" class="ann ok-t">cargo miri test — 그 줄에서 멈춰 세웁니다</text>
+      <text x="276" y="124" class="ann">해석기로 실행하며 포인터의 유래·정렬·초기화·누수·데이터 경쟁을 함께 추적합니다</text>
+
+      <rect class="bx bx-warn" x="16" y="152" width="316" height="88"/>
+      <text x="32" y="172" class="val rs-t">Miri 의 한계 — 지나간 길만 봅니다</text>
+      <text x="32" y="194" class="ann">정적 분석이 아니라 실행입니다. 테스트가 밟지 않은</text>
+      <text x="32" y="210" class="ann">분기의 UB 는 보이지 않습니다</text>
+      <text x="32" y="232" class="ann ok-t">→ 널 · 길이 0 · 해제 직후 같은 경계 입력을 테스트로</text>
+
+      <rect class="bx bx-ok" x="348" y="152" width="316" height="88"/>
+      <text x="364" y="172" class="val ok-t">그래서 이렇게 씁니다</text>
+      <text x="364" y="194" class="ann">느립니다(수십 배) — 전체 테스트를 돌리지 말고</text>
+      <text x="364" y="210" class="ann">unsafe 를 감싼 작은 단위 테스트만 겨냥합니다</text>
+      <text x="364" y="232" class="ann ok-t">→ CI 에 nightly 잡 하나로 넣어 두면 충분합니다</text>
+
+      <text x="32" y="256" class="ann">FFI 로 넘어간 C 코드 안은 Miri 가 보지 못합니다 — 그쪽은 <tspan class="am-t">ASan · Valgrind</tspan> 의 몫입니다</text>
+    </svg>
+    <div class="cap">unsafe 를 쓴다면 <b>Miri 를 CI 에 넣지 않을 이유가 없습니다</b> — 잡히는 것이 전부 진짜 버그입니다.</div>
+  </div>
 </section>
 
 
@@ -2473,7 +2548,7 @@ pub fn expect_valid(v: Option&lt;T&gt;) -&gt; T { v.expect("유효하지 않음"
     <b><code>cargo expand</code> 로 무엇을 만드는지 볼 수 있습니다</b>.
     <b>만들기 전에 제네릭·트레이트로 되는지</b> 먼저 확인하세요 — 빌드 시간과 유지보수 비용이 큽니다.</div>
   <div class="diag rv">
-    <svg viewBox="0 0 680 246" role="img" aria-label="매크로는 컴파일 도중에 코드를 만들어 넣는 장치다. 소스를 읽어 매크로 호출을 찾으면 그 자리를 확장된 코드로 바꾼 뒤 평소처럼 컴파일한다. 선언 매크로는 패턴을 보고 코드 조각을 끼워 넣는 방식이라 간단한 반복 제거에 알맞고, 절차 매크로는 문법 구조 자체를 입력으로 받아 자유롭게 코드를 생성하므로 derive 나 속성 형태로 쓰인다. 무엇이 만들어졌는지는 cargo expand 로 직접 볼 수 있다.">
+    <svg viewBox="0 0 680 250" role="img" aria-label="매크로는 컴파일 도중에 코드를 만들어 넣는 장치다. 소스를 읽어 매크로 호출을 찾으면 그 자리를 확장된 코드로 바꾼 뒤 평소처럼 컴파일한다. 선언 매크로는 패턴을 보고 코드 조각을 끼워 넣는 방식이라 간단한 반복 제거에 알맞고, 절차 매크로는 문법 구조 자체를 입력으로 받아 자유롭게 코드를 생성하므로 derive 나 속성 형태로 쓰인다. 무엇이 만들어졌는지는 cargo expand 로 직접 볼 수 있다.">
       <text x="16" y="18" class="lbl">매크로 — 컴파일 도중에 코드를 만들어 넣습니다</text>
 
       <rect class="bx" x="16" y="36" width="150" height="46"/>
