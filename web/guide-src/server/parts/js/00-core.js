@@ -288,6 +288,7 @@ const TAB_KW = {
   deep:"전문가 초고급 내부 internals 소켓 socket accept listen backlog 커넥션 이벤트루프 epoll kqueue select poll 논블로킹 nginx워커 모델 프로세스 apache mpm prefork worker event 비교 http1.1 http2 http3 quic 멀티플렉싱 헤드오브라인 hol 우선순위 tls종료 termination 성능 오프로드 제로카피 sendfile splice 백프레셔 버퍼 파일디스크립터 프록시프로토콜 proxy protocol 실제ip x-forwarded-for 신뢰 로드밸런싱 알고리즘 해시 일관된해싱 헬스체크 서킷브레이커 관측 추적 traceid opentelemetry 아키텍처 체크리스트",
   msa:"백엔드 backend msa 마이크로서비스 microservice 모놀리스 monolith 모듈러 모놀리스 도메인 ddd 바운디드컨텍스트 분해 쪼개기 서비스분리 api게이트웨이 gateway bff 디스커버리 discovery eureka consul 중앙설정 config 시크릿 vault rest grpc protobuf 통신 동기 비동기 이벤트 event driven 사가 saga 보상트랜잭션 분산트랜잭션 2pc 아웃박스 outbox 서킷브레이커 circuit breaker resilience4j 타임아웃 재시도 retry 백오프 벌크헤드 관측가능성 observability 로그 메트릭 트레이싱 tracing opentelemetry 분산추적 traceid 스트랭글러 strangler 전환 도입판단 콘웨이",
   kafka:"카프카 kafka 메시지큐 브로커 broker 토픽 topic 파티션 partition 오프셋 offset 컨슈머 consumer 프로듀서 producer 컨슈머그룹 리밸런싱 rebalancing 랙 lag kraft zookeeper 설치 도커 acks 멱등성 idempotence 키 순서보장 커밋 commit 중복 유실 at least once exactly once 정확히한번 dlq 데드레터 아웃박스 outbox cdc debezium 복제 replication isr 리더 팔로워 min.insync.replicas 고가용성 스트림 streams flink 이벤트소싱 파이프라인 데이터레이크 rabbitmq 래빗엠큐 redis 레디스 비교 선택 대용량 대규모 데이터처리 이벤트",
+  win:"윈도우 windows 서버 사내 내부망 인트라넷 배포 공개 아이피 ip 포트 port 8080 방화벽 firewall 인바운드 netsh 규칙 서비스등록 nssm sc.exe 작업스케줄러 자동시작 재부팅 0.0.0.0 localhost 127.0.0.1 바인딩 listen netstat 공유기 라우터 iptime 아이피타임 포트포워딩 포트포워드 nat 사설ip 공인ip 고정ip dhcp 예약 mac 게이트웨이 ddns iptime.org 도메인 이중nat 브리지 dmz upnp isp차단 헤어핀 보안 관리자비밀번호 원격관리 3389 rdp 원격데스크톱 vpn 접속제한 remoteaddress 로그인 basic auth caddy https 인증서 로그 백업 절전 체크리스트 문제해결 접속불가",
   scale:"대규모 트래픽 대용량 확장 스케일 scale rps tps dau 동시접속 백만 무상태 stateless 세션 jwt 캐시 cache cdn 브라우저캐시 cache-control redis 레디스 스탬피드 stampede 관통 핫키 ttl db확장 리드레플리카 replica 복제지연 샤딩 sharding 샤드키 큐 queue 피크 비동기 평탄화 선착순 쿠폰 티켓팅 rate limit 처리율제한 토큰버킷 429 셰딩 shedding 백프레셔 대기열 오토스케일링 autoscaling hpa keda 쿠버네티스 서버리스 부하테스트 k6 jmeter ngrinder wrk p99 병목 용량산정 capacity 아키텍처 시스템설계 면접 팬아웃 타임라인 랭킹 런북",
 };
 const FIND_CHIPS = ["502 에러가 나요","리버스 프록시 설정","HTTPS 인증서 발급","로드밸런싱 구성",
@@ -494,6 +495,19 @@ const SEC_KW = {
   x10:"부하테스트 k6 jmeter ngrinder wrk p99 무릎점 병목 회복",
   x11:"디데이 이벤트운영 런북 캐시예열 커넥션풀 재시도폭풍 배포동결",
   x12:"시스템설계 면접 선착순 쿠폰 타임라인 피드 팬아웃 랭킹 sorted set 골격",
+
+  v01:"전체그림 구조 사내공개 외부공개 무엇이필요 웹서버없이 앱만 띄우기",
+  v02:"ipconfig 사설ip 공인ip 게이트웨이 netstat 포트확인 8080 80 443 3389 예약포트",
+  v03:"서비스등록 nssm sc create 작업스케줄러 자동시작 0.0.0.0 바인딩 콘솔실행 죽음 재시작 로그파일",
+  v04:"방화벽 인바운드 규칙 netsh advfirewall new-netfirewallrule 프로필 개인 공용 도메인 wf.msc 차단 침묵",
+  v05:"접속확인 ping test-netconnection 포트테스트 localhost 컴퓨터이름 진단순서",
+  v06:"공유기 nat 사설ip 고정 dhcp예약 mac주소 이중nat 게이트웨이 수동ip할당",
+  v07:"iptime 포트포워딩 포트포워드 규칙 내부ip 외부포트 내부포트 dmz upnp 관리도구 고급설정",
+  v08:"외부접속 실패 원인 이중nat isp차단 80막힘 헤어핀 공인ip변경 lte테스트",
+  v09:"ddns iptime.org 호스트이름 동적dns 고정ip 도메인 a레코드 갱신",
+  v10:"보안 공유기비밀번호 원격관리 dmz금지 3389 445 db포트 ip제한 remoteaddress vpn 백업 절전 업데이트",
+  v11:"로그인 basic auth caddy 리버스프록시 https 인증서 자동발급 로그 접속기록 4625 무차별대입",
+  v12:"체크리스트 문제해결 증상 연결할수없음 연결거부 어제까지됐는데 진단순서도",
 };
 
 let FIDX = null;
