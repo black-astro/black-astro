@@ -49,6 +49,8 @@ const TAB_LABEL = {
   web:"🌐 백엔드 서버 · Axum",
   svc:"🚀 고성능 서비스 · 시스템",
   tauri:"🖥️ Tauri · 데스크톱 · GUI",
+  jvm:"☕ 자바 · 코틀린 모듈",
+  cs:"🟣 C# · .NET 모듈",
 };
 
 function tabDrop(force){
@@ -85,6 +87,8 @@ const SEC_LV = {
   /* web */ w01:"b", w02:"b", w03:"i", w04:"i", w05:"i", w06:"i", w07:"i", w08:"a", w09:"a", w10:"i", w11:"i", w12:"i", w13:"a",
   /* svc */ h01:"b", h02:"a", h03:"a", h04:"a", h05:"i", h06:"a", h07:"i", h08:"i", h09:"b", h10:"a", h11:"i", h12:"i", h13:"a",
   /* tauri */ u01:"b", u02:"b", u03:"b", u04:"i", u05:"i", u06:"i", u07:"a", u08:"i", u09:"i", u10:"a", u11:"i", u12:"a", u13:"a",
+  /* jvm */ v01:"b", v02:"b", v03:"i", v04:"i", v05:"i", v06:"b", v07:"b", v08:"a", v09:"i", v10:"i", v11:"a", v12:"a",
+  /* cs */ k01:"b", k02:"b", k03:"b", k04:"b", k05:"i", k06:"i", k07:"a", k08:"a", k09:"a", k10:"i", k11:"a", k12:"a",
 };
 
 
@@ -252,6 +256,32 @@ const EZ = {
   u11:"쉽게 말하면 — WebView 없이 Rust 만으로 화면을 그리는 길입니다. <b>내부 도구면 egui, 구조를 오래 유지할 앱이면 iced, 임베디드면 Slint, 웹·모바일까지면 Dioxus</b>. 사람에게 파는 앱이면 거의 언제나 Tauri 입니다.",
   u12:"쉽게 말하면 — Rust 를 WASM 으로 컴파일해 브라우저에서 돌리는 길입니다. 기술은 훌륭하지만 <b>컴포넌트도 사람도 없습니다</b>. 현실적인 정답은 <b>화면은 TypeScript, 무거운 계산만 Rust</b> 입니다.",
   u13:"쉽게 말하면 — 앞의 12개를 한 앱으로 엮습니다. <b>walkdir 로 훑고 rayon 으로 병렬 해시하고 SQLite FTS5 에 넣어 즉시 검색</b>, 거기에 트레이·전역 단축키·자동 업데이트·서명까지 붙입니다.",
+  /* ── jvm ── */
+  v01:"<b>서버 JVM 이면 Panama FFM</b>, <b>안드로이드·KMP 면 UniFFI</b>, <b>Java 21 이하에 묶였고 호출이 잦으면 jni 크레이트</b>가 2026년의 기본값입니다.",
+  v02:"JNI 는 <b>이름으로 찾는 규약</b>입니다 — <code>cdylib</code> · <code>extern \"system\"</code> · <code>Java_패키지_클래스_메서드</code> 셋만 맞으면 첫 호출이 돕니다.",
+  v03:"배열은 <b>수 KB 면 복사 · 되쓰기가 필요하면 핀 · 1MB 이상이면 DirectByteBuffer</b> 입니다 — 성능 차이는 전부 복사 횟수에서 납니다.",
+  v04:"<b>지역 참조는 메서드가 끝나면 사라지고 스레드를 넘지 못합니다</b> — 오래 쓰려면 GlobalRef, 다른 스레드면 JavaVM 으로 attach 입니다.",
+  v05:"FFM 은 <b>Rust 쪽을 언어 중립으로 남깁니다</b> — 평범한 <code>extern \"C\"</code> 하나면 되고 바인딩은 cbindgen 과 jextract 가 만듭니다.",
+  v06:"<b><code>#[uniffi::export]</code> 표시만 붙이면</b> 코틀린·스위프트·파이썬 바인딩이 통째로 생성됩니다 — 객체·enum·Result·async 까지.",
+  v07:"JNA 는 <b>인터페이스 선언 하나로 끝나는 가장 빠른 시작</b>입니다 — 호출이 드물면 그대로 운영에 써도 됩니다.",
+  v08:"빈 호출은 <b>JNI ≈ FFM ≪ UniFFI &lt; JNA</b> 이지만, 실제 성능을 가르는 것은 <b>복사 횟수와 호출 횟수</b>입니다.",
+  v09:"네이티브를 <b><code>native/&lt;os&gt;-&lt;arch&gt;/</code> 규약으로 jar 안에 넣고</b> 실행할 때 꺼내 <code>System.load</code> 로 올립니다.",
+  v10:"안드로이드는 <b>FFM 이 없어 JNI 또는 UniFFI</b> 입니다 — <code>cargo ndk … -o jniLibs build --release</code> 한 줄이면 ABI 배치가 끝납니다.",
+  v11:"KMP 에서는 <b>UniFFI 하나로 안드로이드·iOS·데스크톱 바인딩</b>이 전부 나옵니다 — cinterop 은 안드로이드를 못 덮어 두 벌이 됩니다.",
+  v12:"<b>순수 Rust 코어 한 벌</b> 위에 <b>jni · extern \"C\" · UniFFI</b> 세 어댑터를 얹으면 Spring Boot 와 안드로이드가 같은 로직을 씁니다.",
+  /* ── cs ── */
+  k01:"쉽게 말하면 — Rust 를 C# 에서 부르는 길은 다섯 개지만 <b>고민되는 건 두 개</b>뿐입니다. 함수가 열 개 안쪽이면 손으로 <code>[LibraryImport]</code> 를 쓰고, 그보다 많거나 Unity 도 쓴다면 <b>csbindgen</b> 에 맡깁니다. 바닥은 전부 같은 C ABI 라서 나중에 갈아 끼워도 손해가 없습니다.",
+  k02:"쉽게 말하면 — Rust 에 <code>cdylib</code> 과 <code>#[unsafe(no_mangle)] pub extern \"C\"</code> 두 줄, C# 에 <code>[LibraryImport(\"mylib\")] static partial</code> 한 줄이면 함수가 불립니다. 초보가 막히는 곳은 코드가 아니라 <b>만들어진 DLL 을 C# 출력 폴더로 복사하는 csproj 설정</b> 하나뿐입니다.",
+  k03:"쉽게 말하면 — <code>build.rs</code> 에 다섯 줄을 넣으면 <b>빌드할 때마다 C# 바인딩 파일이 새로 만들어집니다.</b> 구조체·포인터·함수 포인터까지 자동이고, Unity iOS 용 <code>__Internal</code> 분기도 설정 한 줄입니다. 얻는 건 타이핑 절약이 아니라 <b>“Rust 를 고치면 C# 이 따라 바뀐다”는 보장</b>입니다.",
+  k04:"쉽게 말하면 — <b>메모리 모양이 같은 것만 넘어갑니다.</b> 정수·실수·포인터·<code>#[repr(C)]</code> 구조체는 공짜로 통과하고, <code>String</code>·<code>Vec</code>·<code>Option</code>·<code>Result</code> 는 아예 못 넘어갑니다. bool 은 양쪽 다 <code>u8</code> 로, 문자열은 UTF-8 (ptr, len) 로, 실패는 에러 코드로 바꿔 쓰세요.",
+  k05:"쉽게 말하면 — 1MB 를 <b>복사하면 수십 μs, 포인터만 넘기면 수 ns</b> 입니다. C# 배열은 <code>fixed</code> 로 잠깐 고정해 (ptr, len) 으로 넘기고, Rust 가 만든 버퍼는 <code>Buf</code> 구조체로 돌려받아 <b><code>finally</code> 에서 반드시 해제</b>합니다. 핀은 짧을수록 좋습니다.",
+  k06:"쉽게 말하면 — Rust 상태를 <code>Box::into_raw</code> 로 <b>주소만</b> 내주고, C# 은 그 주소를 <code>SafeHandle</code> 에 담아 들고 다닙니다. <code>Dispose</code> → <code>ReleaseHandle</code> → <code>Box::from_raw</code> 가 한 줄로 이어지면 <b>누수도 이중 해제도 구조적으로 사라집니다</b>.",
+  k07:"쉽게 말하면 — 콜백은 <b>Rust 의 스레드에서 실행됩니다.</b> C# 이 만든 적 없는 낯선 스레드라서, 델리게이트를 붙잡아 두지 않으면 GC 가 수거하고, UI 를 직접 건드리면 깨지고, 예외가 새어 나가면 프로세스가 죽습니다. 그래서 <b>본문은 무조건 <code>try</code></b> 입니다.",
+  k08:"쉽게 말하면 — Rust 의 <code>panic!</code> 이 C# 스택을 지나가면 <b>정의되지 않은 동작</b>입니다. 모든 <code>extern \"C\"</code> 함수를 <code>catch_unwind</code> 로 감싸 <b>-99 같은 숫자로 바꿔</b> 내보내고, 메시지는 <code>thread_local</code> 에 담아 따로 꺼내 씁니다. C# 은 그걸 예외로 올립니다.",
+  k09:"쉽게 말하면 — Unity 는 .NET 이 아니라 Mono/IL2CPP 라서 <code>[LibraryImport]</code> 가 안 되고 <code>[DllImport]</code> 를 씁니다. <b>플랫폼마다 파일을 놓는 자리가 다르고</b>(iOS 만 정적 링크 + <code>__Internal</code>), <b>에디터가 DLL 을 붙잡고 안 놓아 주는</b> 고유 문제가 있습니다. 둘 다 정해진 해법이 있습니다.",
+  k10:"쉽게 말하면 — 프레임워크가 달라도 문제는 하나입니다. <b>네이티브 파일을 어디서 찾게 할 것인가.</b> <code>NativeLibrary.SetDllImportResolver</code> 로 탐색 규칙을 직접 쓰면 Godot 익스포트든 맥 앱 번들이든 단일 파일 게시든 전부 해결됩니다. 실패해도 0 을 돌려주면 기본 규칙으로 넘어가서 안전합니다.",
+  k11:"쉽게 말하면 — <code>runtimes/&lt;rid&gt;/native/</code> 규약만 지키면 <b>NuGet 이 알아서 맞는 파일을 골라 줍니다.</b> 여러 타깃은 OS 별 CI 러너와 <code>cargo-zigbuild</code> 로 만들고, 서버·CLI 라면 <b>NativeAOT + 정적 링크로 파일 하나</b>가 되는 것이 가장 좋습니다.",
+  k12:"쉽게 말하면 — <b>image 크레이트로 리사이즈 코어를 만들고 csbindgen 으로 감싸</b> ASP.NET Core Minimal API 와 Unity 에서 같이 씁니다. <code>ArrayPool</code> 로 빌린 버퍼를 <code>fixed</code> 로 넘기고 결과는 <code>Buf</code> 로 받아 <code>finally</code> 에서 해제합니다. 그리고 BenchmarkDotNet 으로 경계 비용이 <b>수 나노초</b>라는 걸 눈으로 확인합니다.",
 };
 
 
@@ -420,6 +450,32 @@ const CAP = {
   u11:["p","다섯 갈래의 Rust GUI 를 즉시 모드·보존 모드 개념으로 구분하고, 프로젝트 성격에 맞는 툴킷을 근거를 들어 고를 수 있습니다."],
   u12:["s","Leptos·Dioxus·Yew 의 차이를 이해하고, Rust 프런트가 맞는 좁은 경우와 아닌 경우를 스스로 판단할 수 있습니다."],
   u13:["e","50만 개 파일을 몇 분 안에 색인하고 수십 밀리초에 검색하는 실제 배포 가능한 데스크톱 앱을 처음부터 끝까지 만들 수 있습니다."],
+  /* ── jvm ── */
+  v01:["p","팀에 어떤 연동 방식을 쓸지 런타임 버전과 배포 플랫폼을 근거로 결정하고, 도입에 따라오는 빌드·배포·사람 비용까지 함께 제시할 수 있습니다"],
+  v02:["p","Rust 함수를 자바에서 부르는 최소 프로젝트를 처음부터 만들고, Gradle 이나 Maven 빌드에 cargo 를 엮어 팀이 쓸 수 있게 할 수 있습니다"],
+  v03:["p","큰 이미지나 버퍼를 복사 없이 네이티브로 넘기는 경로를 설계하고, Modified UTF-8 과 부호 있는 byte 때문에 생기는 데이터 깨짐을 막을 수 있습니다"],
+  v04:["p","네이티브에서 자바 콜백을 안전하게 부르고, 패닉을 자바 예외로 번역해 JVM 이 통째로 죽는 사고를 막을 수 있습니다"],
+  v05:["p","Java 25 서버에서 Rust 라이브러리를 FFM 으로 붙이고, 헤더 생성부터 바인딩 자동화와 실행 옵션까지 운영 수준으로 구성할 수 있습니다"],
+  v06:["p","안드로이드와 iOS 에 같은 Rust 로직을 얹는 프로젝트를 바인딩 코드 없이 시작하고, 생성 파이프라인을 Gradle 빌드에 묶을 수 있습니다"],
+  v07:["s","네이티브 연동이 가능한지 하루 안에 검증하고, 필요해지면 Direct 매핑이나 FFM 으로 호출부를 바꾸지 않고 이관할 수 있습니다"],
+  v08:["e","네이티브 도입 효과를 JMH 와 부하 테스트로 증명하고, p99 와 RSS 를 근거로 인스턴스 수 절감을 보고할 수 있습니다"],
+  v09:["p","여러 OS·아키텍처 네이티브를 담은 jar 를 CI 매트릭스로 굽고 Maven Central 까지 배포하는 파이프라인을 만들 수 있습니다"],
+  v10:["p","안드로이드 앱에 Rust 모듈을 붙여 출시 가능한 상태(16KB 정렬·R8 규칙·크래시 분석·앱 크기)까지 만들 수 있습니다"],
+  v11:["e","안드로이드와 iOS 와 데스크톱이 같은 Rust 코어를 쓰는 멀티플랫폼 구조를 설계하고 CI 로 세 산출물을 함께 낼 수 있습니다"],
+  v12:["p","이미지 처리 같은 무거운 작업을 Rust 로 옮겨 서버와 앱에서 함께 쓰고, 설정 한 줄로 되돌릴 수 있는 안전한 배포까지 마칠 수 있습니다"],
+  /* ── cs ── */
+  k01:["p","새 프로젝트에서 어떤 연결 방식을 쓸지 근거를 대며 정하고, 팀에 그 이유를 표 한 장으로 설명할 수 있습니다."],
+  k02:["p","Rust 라이브러리를 만들어 C# 콘솔 프로젝트에 붙이고, 팀원이 clone 후 dotnet run 한 줄로 돌릴 수 있게 빌드를 묶을 수 있습니다."],
+  k03:["p","함수가 수십 개로 늘어도 바인딩을 손으로 관리하지 않고, 시그니처 불일치로 인한 조용한 메모리 파손을 원천 차단할 수 있습니다."],
+  k04:["p","타입 때문에 값이 어긋나는 버그를 사전에 없애고, 경계 시그니처를 blittable 로만 유지해 마샬링 비용을 0 으로 만들 수 있습니다."],
+  k05:["p","대용량 데이터를 복사 없이 주고받아 GC 압박을 없애고, 어디서 복사가 생기는지 시그니처만 보고 판단할 수 있습니다."],
+  k06:["p","열린 파일·디코더·연결 풀처럼 상태를 가진 Rust 객체를 C# 에서 안전하게 다루고, 이중 해제와 use-after-free 를 설계로 막을 수 있습니다."],
+  k07:["p","진행률 보고와 완료 알림을 안전하게 구현하고, 재현되지 않는 랜덤 크래시의 원인(델리게이트 수거·재진입 데드락)을 미리 없앨 수 있습니다."],
+  k08:["p","네이티브 층의 버그가 프로세스를 죽이지 않게 가두고, 크래시 대신 원인이 적힌 예외를 받아 운영에서 대응할 수 있습니다."],
+  k09:["p","Unity 게임에 Rust 코어를 넣어 다섯 플랫폼으로 빌드하고, 에디터를 껐다 켜지 않고도 네이티브를 계속 고쳐 나갈 수 있습니다."],
+  k10:["p","Godot·Avalonia·MAUI 앱에 같은 Rust 코어를 붙이고, 실행 환경마다 다른 파일 위치 문제를 코드 한 곳에서 처리할 수 있습니다."],
+  k11:["p","dotnet add package 한 줄로 모든 플랫폼에서 도는 패키지를 만들고, 배포 후에야 드러나는 glibc·RID 사고를 미리 막을 수 있습니다."],
+  k12:["p","서버와 게임 클라이언트가 같은 Rust 코어를 쓰는 구조를 처음부터 끝까지 만들고, 성능과 할당량을 숫자로 증명해 팀을 설득할 수 있습니다."],
 };
 
 
@@ -460,7 +516,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (0 = 10번째 탭) */
-const TAB_ORDER = ["setup","lang","own","py","node","ffi","build","perf","deep","tool"];
+const TAB_ORDER = ["setup","lang","own","py","node","jvm","cs","ffi","build","perf"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;

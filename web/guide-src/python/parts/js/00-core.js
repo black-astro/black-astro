@@ -170,6 +170,7 @@ const TAB_KW = {
   ml:"머신러닝 machine learning ml 인공지능 ai 모델 학습 예측 분류 회귀 지도학습 비지도학습 sklearn scikit-learn 사이킷런 랜덤포레스트 random forest 부스팅 xgboost lightgbm 결정트리 로지스틱 svm knn kmeans 군집 클러스터링 pca 이상탐지 과적합 교차검증 하이퍼파라미터 튜닝 gridsearch optuna 정확도 정밀도 재현율 f1 auc 혼동행렬 피처 feature 전처리 스케일링 인코딩 데이터누수 shap 중요도 파이프라인 pipeline joblib 서빙",
   dl:"딥러닝 deep learning dl 신경망 뉴럴넷 neural network 파이토치 pytorch torch 텐서 tensor gpu cuda 뉴런 층 레이어 활성화 relu 역전파 backpropagation 경사하강 gradient 옵티마이저 adam adamw 학습률 손실함수 loss 에포크 배치 cnn 합성곱 convolution 이미지분류 rnn lstm 시계열 어텐션 attention 트랜스포머 transformer 전이학습 미세조정 finetuning 파인튜닝 허깅페이스 huggingface transformers 드롭아웃 정규화 batchnorm mnist onnx 양자화 임베딩",
   llm:"llm 대규모언어모델 생성형 ai gpt chatgpt 클로드 claude anthropic openai gemini api 챗봇 프롬프트 prompt 프롬프트엔지니어링 토큰 token 컨텍스트 context 스트리밍 streaming sse 구조화출력 json pydantic tool use 툴 함수호출 function calling 에이전트 agent mcp 임베딩 embedding 벡터 vector 유사도 rag 검색증강 벡터db 챗 요약 번역 추출 분류 환각 hallucination 파인튜닝 lora 올라마 ollama 로컬llm 양자화 평가 eval 비용 캐시 프롬프트캐시 인젝션 보안",
+  setup:"설치 세팅 셋업 setup install 파이썬설치 python설치 python.org 다운로드 download 인스톨 installer 마법사 wizard AddToPATH PATH 패스 환경변수 environment variable 시스템변수 사용자변수 where which py런처 pylauncher py-0p PY_PYTHON 버전 version 3.14 3.13 3.12 여러버전 멀티버전 가상환경 venv virtualenv activate deactivate 액티베이트 pip 핍 pipinstall requirements requirements.txt wheel 휠 sdist 소스빌드 conda anaconda miniconda miniforge pyenv uv winget homebrew brew apt dnf deadsnakes wsl macOS 맥 리눅스 linux ubuntu fedora windows 윈도우 윈도우즈 vscode 브이에스코드 pycharm 파이참 jupyter 주피터 cursor 커서 인터프리터 interpreter selectinterpreter settings.json launch.json 디버그 debug ruff mypy pyright pytest precommit pre-commit pyproject pyproject.toml 코드품질 lint 린트 포맷 format numpy pandas matplotlib scikit-learn sklearn pytorch torch cuda nvidia-smi gpu 딥러닝 pyinstaller nuitka exe 실행파일 docker 도커 slim systemd 서버배포 에러 오류 트러블슈팅 troubleshooting notrecognized 내부또는외부명령 MicrosoftStore 스토어 실행정책 ExecutionPolicy RemoteSigned SSL 인증서 certificate 프록시 proxy 사내미러 nexus VisualC++ buildtools ModuleNotFoundError ensurepip externally-managed cp949 한글경로 32비트 64비트 ARM64",
 };
 const FIND_CHIPS = ["데스크탑 프로그램","엑셀","자동화","이미지 리사이즈","가상환경",
                     "리스트 정렬","클래스","SQL 조인","코딩테스트","정규식",
@@ -307,6 +308,18 @@ const SEC_KW = {
   q26:"MultiEffect blur shadow colorization brightness saturation QtQuick.Effects QtGraphicalEffects ShaderEffect frag qsb pyside6-qsb GLSL uniform Shape ShapePath CurveRenderer PathAngleArc Canvas requestPaint layer.enabled 오버드로 sourceSize QSG_RENDER_TIMING",
   q27:"Material Symbols 가변폰트 variableAxes FontLoader 코드포인트 Lucide SVG 아이콘 IconImage MultiEffect colorization AppIcon Theme.qml pragma Singleton qmldir 색토큰 디자인시스템 폰트임베딩 Pretendard OFL 라이선스 sourceSize",
   q28:"qrc resources.qrc pyside6-rcc rc_resources qmldir conf 누락 PyInstaller collect-all PySide6 hidden-import onefile 폴더배포 용량줄이기 exclude-module imageformats 플러그인 QQuickWidget 위젯섞기 QApplication 배포 트러블슈팅",
+  st01:"설치방법 비교 python.org uv MicrosoftStore Anaconda Miniforge pyenv 버전선택 3.14 3.13 3.12 EOL CPython PyPy 32비트 64비트 ARM64 설치경로 추천",
+  st02:"윈도우설치 installer 마법사 AddToPATH Customize AdvancedOptions pylauncher tcltk IDLE DisablePathLengthLimit 앱실행별칭 Store별칭 winget 무인설치 quiet PrependPath 확인 where.exe",
+  st03:"macOS Homebrew brew pkg universal2 InstallCertificates Ubuntu apt deadsnakes PPA python3-venv Fedora dnf RHEL Arch pacman zypper pyenv shim WSL python3 python-is-python3 시스템파이썬",
+  st04:"PATH 환경변수 사용자변수 시스템변수 sysdm.cpl 고급시스템설정 where.exe GetCommand which -a type -a sys.executable 우선순위 pythonmpip 실행정책 ExecutionPolicy RemoteSigned Bypass zshrc bashrc",
+  st05:"py런처 pylauncher py-0p listpaths PY_PYTHON py.ini 셔뱅 shebang VIRTUAL_ENV 버전고정 .python-version requires-python 여러버전 멀티버전 버전업그레이드 마이그레이션 setx",
+  st06:"가상환경 venv virtualenv activate deactivate Activate.ps1 activate.bat pyvenv.cfg site-packages 격리 requirements.txt pipfreeze gitignore uv poetry pipenv conda 비교 sys.prefix base_prefix",
+  st07:"pip install uninstall list freeze show check debug 버전지정 wheel 휠 sdist 소스빌드 manylinux cp314 pip.ini pip.conf indexurl extraindexurl trustedhost cert 프록시 proxy 캐시 cache nocachedir 폐쇄망 오프라인 findlinks noindex editable -e pyproject extras",
+  st08:"VSCode 확장 Python Pylance Ruff Jupyter SelectInterpreter 인터프리터 settings.json launch.json debugpy formatOnSave codeActionsOnSave pytest PyCharm Community Professional JupyterLab ipykernel 커널 Cursor Zed Spyder Colab",
+  st09:"ruff mypy pyright pytest pytest-cov pre-commit precommit pyproject.toml 설정 lint 린트 format 포맷 isort black flake8 타입검사 strict GitHubActions CI 커버리지 coverage blameignorerevs",
+  st10:"numpy pandas matplotlib scikit-learn sklearn scipy pyarrow openpyxl seaborn 한글폰트 Agg 백엔드 PyTorch torch torchvision cuda cu128 nvidia-smi 드라이버 indexurl mps rocm conda Miniforge condaforge GDAL RDKit geopandas autoactivatebase",
+  st11:"배포 deploy PyInstaller Nuitka onefile windowed spec 코드서명 백신오탐 systemd service venv 서버 Ubuntu PYTHONUNBUFFERED Docker 도커 Dockerfile python3.14-slim alpine musl distroless 멀티스테이지 캐시 uv이미지",
+  st12:"에러 오류 트러블슈팅 notrecognized 내부또는외부명령 commandnotfound MicrosoftStore 앱실행별칭 ensurepip nomodulenamedpip venv없음 실행정책 ExecutionPolicy externally-managed VisualC++14 buildtools SSL CERTIFICATE_VERIFY_FAILED ModuleNotFoundError PermissionDenied UnicodeDecodeError cp949 한글경로 python3만있음 두버전섞임 0x80070643 buildwheels 진단스크립트 doctor",
 };
 let FIDX = null;
 

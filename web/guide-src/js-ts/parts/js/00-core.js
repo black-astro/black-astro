@@ -165,6 +165,7 @@ const TAB_KW = {
   react:"리액트 react 컴포넌트 component jsx 상태 state usestate props 렌더링 render 리렌더 rerender 훅 hook useeffect 이펙트 정리 cleanup 의존성 배열 usememo usecallback memo 메모이제이션 리스트 key 키 배열 map 폼 form 제어 uncontrolled controlled formdata useactionstate 상태끌어올리기 lifting context usecontext provider 커스텀훅 custom hook 성능 profiler 가상스크롤 virtual 코드분할 lazy suspense usedeferredvalue 데이터 fetch tanstack query 캐시 mutation 라우팅 react router 넥스트 nextjs app router 서버컴포넌트 rsc use client ssr 하이드레이션 strictmode 컴파일러 react19 에러 디버깅 devtools",
   vue:"뷰 vue vue3 컴포넌트 sfc single file component script setup template style scoped 반응성 reactivity ref reactive value torefs shallowref 컴퓨티드 computed watch watcheffect 감시 디렉티브 directive v-if v-show v-for v-bind v-on v-model 양방향 defineprops defineemits definemodel withdefaults props emit 슬롯 slot 스코프슬롯 scoped slot 생명주기 lifecycle onmounted onunmounted nexttick 템플릿ref 컴포저블 composable 재사용 피니아 pinia 스토어 store storetorefs 상태관리 라우터 vue router 라우팅 가드 guard 네비게이션 keepalive teleport 텔레포트 suspense transition 트랜지션 deep 옵션api composition api 마이그레이션 devtools",
   deep:"전문가 초고급 고급 심화 내부동작 v8 엔진 engine jit 컴파일 히든클래스 hidden class 인라인캐시 최적화 deopt 메모리 memory gc 가비지컬렉션 힙 heap 누수 leak 스냅샷 마이크로태스크 microtask 매크로태스크 프로파일링 profiling flame cpu proxy reflect 메타프로그래밍 symbol weakmap weakref finalizationregistry 함수형 불변성 커링 합성 디자인패턴 pattern 싱글턴 팩토리 옵저버 타입레벨 동시성 abortcontroller 세마포어 보안 프로토타입오염 공급망 supply chain 아키텍처 헥사고날 ddd 계층",
+  setup:"설치 세팅 환경설정 환경세팅 셋업 setup install 노드 node nodejs 노드제이에스 npm 엔피엠 npx pnpm 피엔피엠 yarn 얀 bun 번 deno 디노 corepack 코어팩 nvm fnm volta 버전관리자 버전매니저 lts 최신버전 windows 윈도우 윈도 msi 설치파일 macos 맥 맥오에스 homebrew 브루 linux 리눅스 ubuntu 우분투 apt wsl path 패스 경로 환경변수 envvar env dotenv 실행정책 executionpolicy powershell 파워셸 터미널 typescript 타입스크립트 tsc tsx tsconfig 컴파일 vscode 브이에스코드 에디터 확장 익스텐션 eslint 이에스린트 prettier 프리티어 biome 바이옴 린트 포맷 husky 허스키 lintstaged vite 바이트 비트 hmr 개발서버 tailwind 테일윈드 nodegyp 네이티브모듈 buildtools 빌드도구 python 파이썬 eacces eresolve enoent 포트충돌 3000 프록시 인증서 sslerror 초보 처음 시작하기 빈피시 트러블슈팅 오류해결 에러 안됨 명령어없음 notrecognized",
 };
 const FIND_CHIPS = ["JWT 인증 만들기","이벤트 루프 순서","제네릭","유틸리티 타입",
                     "스트림으로 큰 파일","메모리 누수 잡기","NestJS 트랜잭션","FlatList 성능",
@@ -266,6 +267,18 @@ const SEC_KW = {
   d17:"스트림 백프레셔 highwatermark pipeline drain webstreams 대용량 csv 메모리",
   d18:"번들 트리셰이킹 sideeffects 코드스플리팅 동적import 청크 lodash moment 번들크기",
   s17:"cqrs 명령 조회 분리 이벤트소싱 동적모듈 configurablemodule cls asynclocalstorage 요청스코프",
+  st01:"브라우저 콘솔 devtools f12 repl snippets node bun deno 런타임 비교 lts current 버전선택 24 26 eol engines 실행환경 무엇을깔까 시작",
+  st02:"윈도우 windows msi 설치마법사 addtopath 네이티브모듈도구 winget 설치경로 programfiles appdata roaming npm corepack 확인 nodev npmv 업그레이드 삭제 재설치",
+  st03:"fnm nvm nvmwindows volta asdf 버전관리자 버전전환 nvmrc nodeversion usoncd 셸훅 profile zshrc 전역설치 packagemanager 프로젝트별버전",
+  st04:"macos 맥 homebrew brew nodepkg linux ubuntu debian apt nodesource snap wsl wsl2 sudo eacces prefix npmglobal chown 도커 dockerfile setupnode github actions alpine",
+  st05:"path 환경변수 sysdmcpl 사용자변수 시스템변수 whereexe which typea getcommand powershell 실행정책 executionpolicy remotesigned ps1차단 npx막힘 zshrc bashrc zprofile processenv envfile dotenv gitignore",
+  st06:"npm pnpm yarn berry bun 패키지매니저 corepack enable packagemanager packagejson scripts dependencies devdependencies lockfile packagelock pnpmlock 캐릿 틸드 semver 유령의존성 phantom npmci frozenlockfile npmrc 레지스트리 미러 프록시 캐시 store prune workspace 모노레포",
+  st07:"typescript 타입스크립트 tsc tsx tsnode tsconfig strict target module moduleresolution nodenext bundler noemit typecheck typesnode 타입스트리핑 stripTypes erasableSyntaxOnly enum 확장자 esm paths 별칭 sourcemap skiplibcheck",
+  st08:"vscode 브이에스코드 확장 extensions eslint prettier errorlens pathintellisense volar 세팅 settingsjson formatonsave codeactionsonsave workspace tsdk 워크스페이스버전 restarttsserver launchjson 디버깅 중단점 breakpoint inspectbrk editorconfig autocrlf",
+  st09:"eslint 9 flatconfig eslintconfigjs typescripteslint recommendedtypechecked nofloatingpromises prettier prettierrc eslintconfigprettier biome 바이옴 린트 포맷 husky 허스키 lintstaged precommit commitlint ci verify",
+  st10:"vite 비트 바이트 createvite vuets reactts 개발서버 devserver hmr 핫리로드 preview build proxy cors host 5173 포트 devtools network elements application tailwind 테일윈드 importmetaenv viteprefix 환경변수",
+  st11:"nodegyp gyperr 네이티브모듈 nativemodule sharp bettersqlite3 bcrypt canvas nodesass prebuilt 바이너리 buildtools vsbuildtools windowsbuildtools 폐기 python3 buildessential xcodeselect alpine musl slim onlyBuiltDependencies approvebuilds",
+  st12:"오류 에러 트러블슈팅 notrecognized commandnotfound eacces eperm eresolve legacypeerdeps gyperr eaddrinuse 포트점유 netstat lsof taskkill selfsignedcertinchain nodeextracacerts strictssl 프록시 cannotfindmodule errmodulenotfound typemodule 한글경로 공백경로 nodemodules삭제 npmdoctor 재설치 체크리스트",
 };
 let FIDX = null;
 

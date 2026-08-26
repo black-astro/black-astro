@@ -50,6 +50,7 @@ const TAB_LABEL = {
   deep:"🔬 전문가 · JVM 내부",
   tool:"🧰 실전 도구",
   fx:"🖥️ JavaFX 데스크톱 앱",
+  setup:"🧰 설치 · 환경 세팅",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -95,6 +96,7 @@ const SEC_LV = {
   /* deep */ z01:"a",z02:"a",z03:"a",z04:"a",z05:"a",z06:"a",z07:"a",z08:"a",
              z09:"a",z10:"a",z11:"a",z12:"i",z13:"i",z14:"i",z15:"a",z16:"a",
              z17:"a",z18:"a",
+  /* setup */ st01:"b", st02:"b", st03:"b", st04:"b", st05:"i", st06:"i", st07:"b", st08:"b", st09:"b", st10:"i", st11:"a", st12:"i",
 };
 
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 한 줄 번역 (항상 표시) */
@@ -334,6 +336,19 @@ const EZ = {
  z16:"규모가 커지면 <b>패키지 구조가 곧 설계</b>예요. ArchUnit으로 규칙을 테스트로 만드세요.",
  z17:"<code>--add-opens</code>를 치게 되는 이유가 여기 있어요. Java 9부터 <b>public이어도 밖에서 못 쓰는</b> 패키지가 생겼습니다.",
  z18:"기동 <b>50ms</b>에 메모리 1/5. 대신 <b>리플렉션을 전부 등록</b>해야 하고 장시간 처리량은 JVM이 이깁니다.",
+  /* ── setup ── */
+  st01:"자바를 만드는 회사가 여럿이라 이름은 다르지만 <b>안에 든 것은 거의 같습니다</b> — 고민되면 Temurin 25 LTS.",
+  st02:"adoptium.net 에서 <b>.msi</b> 를 받아 마법사에서 <b>JAVA_HOME</b> 과 <b>PATH</b> 체크박스 두 개만 켜면 끝납니다.",
+  st03:"JAVA_HOME 은 <b>bin 의 부모 폴더</b>, PATH 에는 <code>%JAVA_HOME%\\bin</code> 을 <b>맨 앞</b>에 둡니다.",
+  st04:"맥은 <code>brew --cask temurin</code> 과 <code>java_home</code>, 우분투는 Adoptium 저장소와 <code>update-alternatives</code> 입니다.",
+  st05:"버전 관리 도구가 하는 일은 <b>가리키는 링크 하나를 옮기는 것</b>뿐입니다 — 마법이 아닙니다.",
+  st06:"Gradle 은 <b>설치하지 않는 것이 정답</b>입니다 — 프로젝트 안의 <code>./gradlew</code> 가 알아서 받아 씁니다.",
+  st07:"IntelliJ 에서 JDK 를 지정하는 자리는 <b>세 군데</b>입니다 — 하나만 바꾸면 안 됩니다.",
+  st08:"VS Code 는 <b>Extension Pack for Java</b> 하나, Eclipse 는 <b>워크스페이스</b> 개념부터 잡으면 됩니다.",
+  st09:"스프링은 <b>설치할 것이 없습니다</b> — start.spring.io 에서 받아 <code>./gradlew bootRun</code> 하면 끝입니다.",
+  st10:"한글은 <b>소스 · 컴파일 · JVM · 콘솔</b> 네 곳을 지나갑니다 — 깨진 지점이 곧 범인입니다.",
+  st11:"전달 방법은 <b>받는 쪽에 자바가 있는가</b>로 갈립니다 — jar · jlink · Docker.",
+  st12:"막히면 <b>java → javac → JAVA_HOME → gradlew</b> 네 관문을 순서대로 확인하면 원인이 좁혀집니다.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -588,6 +603,19 @@ const CAP = {
   z16:["e","패키지 의존 규칙을 ArchUnit 테스트로 강제해, 개발자 수십 명이 붙어도 구조가 무너지지 않게 지킵니다."],
   z17:["p","모듈 경계를 설계하고 --add-opens를 치게 되는 이유를 압니다 — 라이브러리 배포와 경량 런타임 제작까지."],
   z18:["e","네이티브 이미지로 기동 50ms에 메모리 1/5을 만듭니다 — 서버리스와 스케일아웃 비용을 실제로 낮춥니다."],
+  /* ── setup ── */
+  st01:["p","팀 표준 JDK 배포판과 버전을 라이선스·지원 기준으로 근거 있게 고를 수 있습니다."],
+  st02:["p","빈 윈도우 PC 를 받아 10분 안에 java · javac 가 도는 상태로 만들 수 있습니다."],
+  st03:["p","환경 변수 화면에서 자바 경로를 직접 잡고 버전 충돌을 순서로 해결할 수 있습니다."],
+  st04:["p","맥·리눅스·WSL 어느 환경에서도 JDK 를 깔고 기본 자바를 지정할 수 있습니다."],
+  st05:["p","프로젝트마다 다른 JDK 버전을 충돌 없이 오가며 개발할 수 있습니다."],
+  st06:["p","래퍼로 팀 전체가 같은 빌드 버전을 쓰게 하고 사내망 프록시·미러를 설정할 수 있습니다."],
+  st07:["p","IntelliJ 로 Gradle 프로젝트를 만들고 JDK·인코딩·자동 import 를 제대로 세팅할 수 있습니다."],
+  st08:["s","IntelliJ 말고도 상황에 맞는 편집기를 골라 자바 프로젝트를 열 수 있습니다."],
+  st09:["p","start.spring.io 로 프로젝트를 만들어 IDE 에서 열고 첫 서버를 띄울 수 있습니다."],
+  st10:["p","한글 깨짐과 시간대 문제를 원인 지점별로 나눠 고칠 수 있습니다."],
+  st11:["e","만든 프로그램을 jar · 컨테이너 · 설치 파일 형태로 다른 환경에 전달할 수 있습니다."],
+  st12:["p","설치·환경 오류 메시지를 보고 원인을 짚어 스스로 해결할 수 있습니다."],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 */
@@ -627,7 +655,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (0 = 10번째 탭) */
-const TAB_ORDER = ["core","adv","boot","flux","data","sec","gw","scale","deep","tool"];
+const TAB_ORDER = ["setup","core","adv","boot","flux","data","qdsl","mb","sec","gw"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;

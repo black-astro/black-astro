@@ -55,8 +55,8 @@ export const guides: Guide[] = [
       'CPython 내부',
     ],
     stats: [
-      { value: '17', label: '주제 탭' },
-      { value: '268', label: '섹션' },
+      { value: '18', label: '주제 탭' },
+      { value: '280', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -82,8 +82,8 @@ export const guides: Guide[] = [
       'JVM 내부',
     ],
     stats: [
-      { value: '14', label: '주제 탭' },
-      { value: '221', label: '섹션' },
+      { value: '15', label: '주제 탭' },
+      { value: '233', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -136,8 +136,8 @@ export const guides: Guide[] = [
       'WebRTC · OSR',
     ],
     stats: [
-      { value: '11', label: '주제 탭' },
-      { value: '178', label: '섹션' },
+      { value: '16', label: '주제 탭' },
+      { value: '245', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -275,9 +275,9 @@ export const guides: Guide[] = [
       'C ABI · unsafe',
     ],
     stats: [
-      { value: '13', label: '주제 탭' },
-      { value: '150', label: '섹션' },
-      { value: '3', label: '실전 탭' },
+      { value: '15', label: '주제 탭' },
+      { value: '174', label: '섹션' },
+      { value: '5', label: '실전 · 모듈 탭' },
     ],
   },
   {
