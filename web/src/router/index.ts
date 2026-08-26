@@ -246,9 +246,9 @@ export const guides: Guide[] = [
       'C ABI · FFI',
     ],
     stats: [
-      { value: '13', label: '주제 탭' },
-      { value: '165', label: '섹션' },
-      { value: '4', label: '실전 · 모듈 탭' },
+      { value: '15', label: '주제 탭' },
+      { value: '189', label: '섹션' },
+      { value: '6', label: '실전 · 모듈 탭' },
     ],
   },
   {
@@ -256,27 +256,27 @@ export const guides: Guide[] = [
     label: 'Rust Guide',
     emoji: '🦀',
     href: `${import.meta.env.BASE_URL}rust-web/`,
-    title: 'Rust 네이티브 모듈 가이드 — 파이썬 · Node 에서 불러 쓰기 (별도 페이지)',
-    heading: 'Rust Native Module Guide',
+    title: 'Rust 가이드 — 설치 · 소유권 · 네이티브 모듈 (별도 페이지)',
+    heading: 'Rust Visual Guide',
     desc:
-      'C++ 가이드와 같은 목적을 Rust 로 다시 씁니다. 왕기초 문법과 소유권·빌림· ' +
-      '트레이트부터 PyO3·maturin 으로 파이썬 모듈을 만들고 numpy 를 복사 없이 다루며 ' +
+      'C++ 만큼 빠르면서 메모리 사고와 데이터 레이스를 컴파일 단계에서 막는 언어를 한 페이지로 다룹니다. ' +
+      'rustup 설치와 환경 세팅(MSVC 링커·cargo·rust-analyzer·clippy)부터 왕기초 문법과 ' +
+      '소유권·빌림·트레이트, PyO3·maturin 으로 파이썬 모듈을 만들고 numpy 를 복사 없이 다루며 ' +
       'GIL 을 해제해 rayon 으로 전 코어를 쓰는 법, napi-rs 애드온과 WASM, ' +
-      'C ABI 로 여러 언어에서 함께 쓰기, cargo 빌드와 크로스 컴파일, ' +
-      '그리고 unsafe·UB·Miri 까지 한 페이지에 담았습니다.',
+      'C ABI 로 여러 언어에서 함께 쓰기, 크로스 컴파일, unsafe·Miri 까지 이어집니다.',
     tags: [
+      '설치 · rustup',
       'Rust 2021',
       '소유권 · 빌림',
       'PyO3 · maturin',
       'numpy 제로카피',
       'GIL 해제 · rayon',
       'napi-rs · WASM',
-      'C ABI · FFI',
-      'unsafe · Miri',
+      'C ABI · unsafe',
     ],
     stats: [
-      { value: '8', label: '주제 탭' },
-      { value: '88', label: '섹션' },
+      { value: '10', label: '주제 탭' },
+      { value: '111', label: '섹션' },
       { value: '4', label: '깊이 층' },
     ],
   },
