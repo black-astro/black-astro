@@ -1,0 +1,4324 @@
+<!-- ============================================================
+     고성능 서비스 · 시스템 PANE
+     ============================================================ -->
+<div class="pane" id="pane-svc">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> Tokio 1.x · 액터 · 제로카피 · QUIC · Kafka · Polars · PGO — 2026 기준</div>
+  <h1>Rust 가<br>정말로 이기는<br>자리를 다룹니다</h1>
+  <p class="tx">
+    이 탭은 <b>“Rust 로 웹 서버를 만들 수 있다”에서 한 층 더 내려갑니다</b> —
+    Tokio 스케줄러가 태스크를 어떻게 굴리는지, 채널과 액터로 <b><code>Arc&lt;Mutex&gt;</code> 없이 설계</b>하는 법,
+    바이트를 복사하지 않고 넘기는 법, Kafka·Redis 파이프라인, Polars·DataFusion 같은 데이터 엔진,
+    할당자 교체와 아레나, 그리고 <b>flamegraph · tokio-console · PGO</b> 로 수치를 끌어올리는 법까지입니다.
+    마지막 섹션에서 <b>실시간 로그 수집·집계 서비스</b>를 처음부터 끝까지 만들고 부하를 걸어 봅니다.
+    <b>⚡ 성능 탭이 “언어 안쪽”이라면 이 탭은 “서비스 바깥쪽”입니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>13</b><span>SECTIONS</span></div>
+    <div><b>Tokio 1.x</b><span>기준</span></div>
+    <div><b>13</b><span>시각화</span></div>
+    <div><b>1</b><span>완성 프로젝트</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== h01 ==================== -->
+<section class="sec" id="h01">
+  <div class="sec-head rv">
+    <span class="no">SVC 01</span>
+    <h2>Rust 가 <span class="t">이기는 자리</span> — 어디에 쓰면 남는 장사인가</h2>
+    <p class="lead">
+      Rust 를 “빠른 언어”로만 소개하면 절반만 맞습니다. C 도 빠르고 C++ 도 빠릅니다.
+      Rust 의 진짜 값어치는 <b>그 속도를 유지하면서 메모리 사고와 데이터 레이스를 컴파일 단계에서 지운다</b>는 데 있습니다.
+      이 섹션은 “그래서 어떤 일을 Rust 로 다시 써야 이득인가”를 실제 사례와 함께 정리합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="세 갈래 선택지를 비교하는 그림. C 와 C++ 는 빠르지만 메모리 사고와 데이터 레이스가 실행 중에 터지고, 자바나 고 같은 가비지 컬렉터 언어는 안전하지만 수집기가 도는 동안 멈추며 메모리를 몇 배 더 쓴다. Rust 는 두 축을 동시에 만족시켜 빠르면서도 사고가 컴파일 단계에서 막히고 멈춤도 없다. 아래에는 실제로 Rust 로 다시 쓰인 시스템들이 나열된다.">
+      <text x="16" y="18" class="lbl">시스템 소프트웨어를 쓸 때 원래는 둘 중 하나를 포기했습니다</text>
+
+      <rect class="bx bx-warn" x="16" y="34" width="204" height="112"/>
+      <text x="118" y="58" class="val rs-t" text-anchor="middle">C · C++</text>
+      <text x="32" y="80" class="ann">속도 · 제어 : 최고</text>
+      <text x="32" y="98" class="ann rs-t">use-after-free · 버퍼 넘침</text>
+      <text x="32" y="116" class="ann rs-t">데이터 레이스 : 실행 중 터짐</text>
+      <text x="32" y="136" class="ann">MS · 구글 통계 : 보안 결함 약 70%</text>
+
+      <rect class="bx bx-hi" x="238" y="34" width="204" height="112"/>
+      <text x="340" y="58" class="val am-t" text-anchor="middle">Java · Go · C#</text>
+      <text x="254" y="80" class="ann">메모리 안전 : 확보</text>
+      <text x="254" y="98" class="ann am-t">GC 멈춤 : p99 가 튐</text>
+      <text x="254" y="116" class="ann am-t">메모리 : 2~5배 더 씀</text>
+      <text x="254" y="136" class="ann">커널 · 임베디드에는 못 들어감</text>
+
+      <rect class="bx bx-ok" x="460" y="34" width="204" height="112"/>
+      <text x="562" y="58" class="val ok-t" text-anchor="middle">Rust</text>
+      <text x="476" y="80" class="ann ok-t">속도 : C++ 와 같은 급</text>
+      <text x="476" y="98" class="ann ok-t">사고 : 컴파일 에러로</text>
+      <text x="476" y="116" class="ann ok-t">GC 없음 : 멈춤 없음</text>
+      <text x="476" y="136" class="ann">대가 : 배우는 시간 · 빌드 시간</text>
+
+      <path class="fl ar" d="M224 90 L234 90"/>
+      <path class="fl ar" d="M446 90 L456 90"/>
+
+      <text x="16" y="176" class="ttl">그래서 2020년 이후 실제로 다시 쓰인 것들</text>
+      <rect class="bx" x="16" y="186" width="318" height="100"/>
+      <text x="32" y="208" class="val">운영체제 · 인프라</text>
+      <text x="32" y="228" class="ann">Linux 커널 드라이버(6.1+) · Android 시스템 구성요소</text>
+      <text x="32" y="246" class="ann">Windows 커널 일부 · AWS Firecracker(마이크로 VM)</text>
+      <text x="32" y="264" class="ann">Cloudflare Pingora — nginx 대체, CPU 3분의 1</text>
+      <text x="32" y="280" class="ann">Discord 상태 서비스 — Go 에서 옮겨 p99 급락</text>
+
+      <rect class="bx" x="346" y="186" width="318" height="100"/>
+      <text x="362" y="208" class="val">개발자 도구 · 데이터</text>
+      <text x="362" y="228" class="ann">Deno · Turbopack · Biome · SWC — JS 도구 체인</text>
+      <text x="362" y="246" class="ann">uv · ruff — 파이썬 도구, 기존 대비 10~100배</text>
+      <text x="362" y="264" class="ann">Polars · DataFusion — DataFrame · SQL 엔진</text>
+      <text x="362" y="280" class="ann">ripgrep · fd · bat · zoxide — CLI 표준이 됨</text>
+    </svg>
+    <div class="cap">Rust 가 들어간 자리는 전부 <b>“빠르면서 절대 죽으면 안 되는”</b> 곳입니다 — 그게 이 언어의 시장입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">제로 비용 추상화 — 예쁘게 써도 안 느려집니다</h4>
+      <pre class="code" data-lang="rust"><code>// 읽기 좋은 이터레이터 체인
+pub fn sum_even(v: &amp;[u32]) -&gt; u64 {
+    v.iter()
+     .filter(|&amp;&amp;x| x % 2 == 0)
+     .map(|&amp;x| x as u64)
+     .sum()
+}
+
+// --release 로 빌드하면 컴파일러가 이걸로 바꿉니다:
+//   루프 하나 + SIMD 벡터화. 클로저 호출도, 중간 Vec 도 없습니다.
+//   godbolt.org 에 붙여 보면 어셈블리가 20줄 남짓입니다.
+
+// 파이썬이라면 sum(x for x in v if x % 2 == 0) — 편하지만
+//   제너레이터 프레임 · 정수 객체 할당 · 참조 카운트가 매 원소마다 돕니다.
+// 자바라면 IntStream — JIT 가 잘 풀어 주지만 워밍업이 필요하고
+//   객체 헤더 · 카드 마킹 같은 비용이 남습니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“제로 비용”의 정확한 뜻</b> — <b>“쓰지 않으면 비용이 없고, 쓰더라도 손으로 짠 것보다 느리지 않다”</b>(비야네 스트롭스트룹의 정의)입니다.
+        추상화가 <b>컴파일 시점에 사라지기</b> 때문이고, 그 근거는 제네릭이 단형화(monomorphization)되고
+        트레이트 호출 대부분이 정적으로 결정되기 때문입니다(🔬 d03).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">데이터 레이스 — 다른 언어에선 런타임, 여기선 빌드 에러</h4>
+      <pre class="code" data-lang="rust"><code>use std::collections::HashMap;
+use std::thread;
+
+fn main() {
+    let mut map = HashMap::new();
+    map.insert("hits", 0u64);
+
+    // ❌ 두 스레드가 같은 HashMap 을 동시에 건드리려 함
+    thread::scope(|s| {
+        s.spawn(|| { map.insert("a", 1); });   // error[E0499]:
+        s.spawn(|| { map.insert("b", 2); });   //   cannot borrow `map` as mutable
+    });                                        //   more than once at a time
+}
+
+// ✅ 공유하려면 '어떻게 공유할지'를 타입으로 적어야 통과합니다
+use std::sync::{Arc, Mutex};
+let map = Arc::new(Mutex::new(HashMap::new()));
+// 또는 아예 공유하지 않는 설계 — 액터 (h03) ★ 이 탭이 미는 방향</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Go 와 결정적으로 갈리는 지점</b> — Go 에서 같은 map 을 두 고루틴이 건드리면
+        <b>컴파일은 되고 운영에서 <code>concurrent map writes</code> 로 프로세스가 죽습니다</b>.
+        Java 라면 조용히 값이 깨집니다. Rust 는 <b>그 코드가 애초에 빌드되지 않습니다</b>(⚡ e06 의 <code>Send</code>·<code>Sync</code>).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">C++ 와 항목별로 나란히 놓기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 대비 — 실무에서 체감되는 것만</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">항목</th><th>C++23</th><th>Rust</th></tr>
+        <tr><td>런타임 속도</td><td>기준</td><td><b>같은 급</b>(±5%)</td></tr>
+        <tr><td>메모리 사고</td><td>개발자 책임</td><td><b>컴파일러가 차단</b></td></tr>
+        <tr><td>데이터 레이스</td><td>실행 중 발견</td><td><b>빌드 에러</b></td></tr>
+        <tr><td>의존성</td><td>vcpkg/Conan/직접</td><td><b>cargo 하나</b></td></tr>
+        <tr><td>빌드 시스템</td><td>CMake 학습 필요</td><td><b>없음(cargo)</b></td></tr>
+        <tr><td>테스트·벤치·문서</td><td>따로 붙임</td><td><b>내장</b></td></tr>
+        <tr><td>컴파일 시간</td><td><b>모듈로 개선 중</b></td><td>느림(제네릭·LLVM)</td></tr>
+        <tr><td>기존 자산</td><td><b>30년치</b></td><td>10년치 + FFI</td></tr>
+        <tr><td>인력 구하기</td><td><b>쉬움</b></td><td>어려움</td></tr>
+        <tr><td>GUI · 게임 엔진</td><td><b>성숙</b></td><td>미성숙</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>정직하게</b> — 아래 절반은 C++ 가 이깁니다. 그래서 <b>전면 교체가 아니라 “새로 쓰는 부분부터”</b>가
+        업계의 실제 전략입니다. Linux · Android · Windows 전부 그렇게 들어갔습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Rust 를 고르면 안 되는 자리도 분명합니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">상황</th><th>더 나은 선택</th></tr>
+        <tr><td>CRUD 웹 · 관리자 페이지</td><td>Spring · Django · Rails</td></tr>
+        <tr><td>데이터 분석 · 실험</td><td>파이썬(무거우면 Polars 로)</td></tr>
+        <tr><td>2주짜리 프로토타입</td><td>익숙한 언어 아무거나</td></tr>
+        <tr><td>팀에 Rust 경험 0명</td><td>한 서비스만 파일럿</td></tr>
+        <tr><td>UI 가 핵심인 앱</td><td>Kotlin · Swift · TS</td></tr>
+        <tr><td>I/O 대기가 99%</td><td><b>언어를 바꿔도 안 빨라집니다</b></td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 오판</b> — “느려서 Rust 로 바꾸자”. 병목이 <b>DB 쿼리·네트워크 왕복</b>이면
+        언어를 바꿔도 그대로입니다. 먼저 재세요(h11). Rust 가 이득인 건
+        <b>CPU 를 태우거나 · 메모리를 아끼거나 · 꼬리 지연(p99)을 잡아야 할 때</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">전환은 “가장 뜨거운 한 조각”부터</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 전면 재작성</h5>
+      <pre class="code" data-lang="text"><code>“파이썬 백엔드 전체를 Rust 로 옮기겠습니다”
+
+  6개월 뒤 상태
+    · 기능은 아직 60%          (기존 팀은 그동안 신규 기능을 계속 냄)
+    · 소유권 에러로 매일 두 시간씩 멈춤
+    · 라이브러리가 없어 직접 구현한 코드가 늘어남
+    · 결국 롤백 — “Rust 는 우리 팀엔 안 맞더라”
+
+  실패 원인은 언어가 아니라 '전면'입니다.</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 뜨거운 조각만 도려내기</h5>
+      <pre class="code" data-lang="text"><code>① 프로파일로 CPU 상위 3개 함수를 찾는다        (h11)
+② 그중 '순수 계산 + 입출력 없음' 인 것 하나를 고른다
+③ Rust 로 다시 쓰고 파이썬 모듈로 노출한다      (🐍 y03)
+④ A/B 로 수치를 재고 (지연 · CPU · 메모리) 기록한다
+⑤ 수치가 팀을 설득하면 다음 조각으로
+
+  실제 사례가 전부 이 모양입니다
+    · Dropbox   — 동기화 엔진의 압축·해시 부분
+    · Discord   — 상태(read state) 서비스 한 개
+    · Figma     — 멀티플레이어 서버 한 개
+    · Cloudflare— 프록시 한 계층(Pingora)</code></pre>
+    </div>
+  </div>
+  <div class="note tip rv">
+    <b>이 탭을 읽는 순서</b> — 서버를 짓는 중이면 <b>h02 → h03 → h04</b>(런타임·채널·락)가 먼저입니다.
+    데이터 처리라면 <b>h05 → h07 → h08</b>(제로카피·파이프라인·엔진),
+    이미 돌고 있는 걸 빠르게 만들어야 하면 <b>h10 → h11</b>(할당·프로파일)로 바로 가세요.
+    <b>h13 은 그 전부를 한 프로젝트에 합친 것</b>입니다.
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">“안전하다”가 정확히 무엇을 보장하나</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">막아 주는 것과 안 막아 주는 것</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">사고</th><th>안전한 Rust 에서</th></tr>
+        <tr><td>use-after-free</td><td><b>불가능</b></td></tr>
+        <tr><td>이중 해제</td><td><b>불가능</b></td></tr>
+        <tr><td>버퍼 넘침</td><td><b>패닉</b>(조용히 안 넘어감)</td></tr>
+        <tr><td>널 역참조</td><td><b>타입에 없음</b></td></tr>
+        <tr><td>데이터 레이스</td><td><b>빌드 에러</b></td></tr>
+        <tr><td>이터레이터 무효화</td><td><b>빌드 에러</b></td></tr>
+        <tr><td>메모리 누수</td><td>가능 (안전으로 분류)</td></tr>
+        <tr><td>데드락</td><td><b>가능</b> — h04 참고</td></tr>
+        <tr><td>논리 버그</td><td>가능</td></tr>
+        <tr><td>무한 루프 · OOM</td><td>가능</td></tr>
+        <tr><td>정수 오버플로</td><td>디버그 패닉/릴리즈 wrap</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“메모리 누수가 안전이라니?”</b> — Rust 의 안전 정의는 <b>“미정의 동작(UB)이 없다”</b>이지
+        “버그가 없다”가 아닙니다. 누수는 UB 가 아니라 <b>그냥 메모리를 안 돌려준 상태</b>입니다.
+        <code>Arc</code> 순환 참조가 대표적이고, 잡는 법은 h10 에 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">unsafe 는 “검사를 끄는” 게 아닙니다</h4>
+      <pre class="code" data-lang="rust"><code>// unsafe 블록 안에서도 소유권·빌림·타입 검사는 그대로 돕니다.
+// 추가로 '다섯 가지'가 허용될 뿐입니다:
+//   ① 원시 포인터 역참조   ② unsafe fn 호출
+//   ③ static mut 접근      ④ union 필드 읽기
+//   ⑤ unsafe trait 구현 (Send/Sync 를 손으로 붙이기)
+
+// 실무 원칙: unsafe 를 안전한 API 로 '포장'해서 밖으로는 안 보이게 합니다.
+pub fn split_at_mut(v: &amp;mut [u32], mid: usize)
+    -&gt; (&amp;mut [u32], &amp;mut [u32])
+{
+    assert!(mid &lt;= v.len());              // ← 여기서 조건을 보장하고
+    let ptr = v.as_mut_ptr();
+    unsafe {                               // ← 좁은 범위에서만
+        (std::slice::from_raw_parts_mut(ptr, mid),
+         std::slice::from_raw_parts_mut(ptr.add(mid), v.len() - mid))
+    }
+}
+// 표준 라이브러리가 통째로 이 패턴입니다 — Vec · HashMap 내부는 unsafe 투성이고,
+// 밖으로는 안전한 인터페이스만 나옵니다. (🔬 d01)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>서비스 코드에서 unsafe 비율</b> — 실측 조사(cargo-geiger 등)에서
+        애플리케이션 크레이트의 <b>99% 이상이 <code>unsafe</code> 를 한 줄도 안 씁니다</b>.
+        쓰는 곳은 FFI 경계(🔗 f03)와 자료구조 내부뿐입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> Rust 를 고르는 이유는 “빠르다”가 아니라 <b>“빠른데 안 죽는다”</b>입니다.
+    CPU 를 태우거나 · 메모리를 아끼거나 · <b>p99 를 잡아야 하는 조각</b>에 넣으면 남는 장사이고,
+    I/O 대기가 대부분인 코드에 넣으면 빌드 시간만 늘어납니다.
+    전환은 <b>가장 뜨거운 함수 하나부터</b>, 그리고 반드시 <b>수치를 재서</b> 하세요.</div>
+</section>
+
+
+<!-- ==================== h02 ==================== -->
+<section class="sec" id="h02">
+  <div class="sec-head rv">
+    <span class="no">SVC 02</span>
+    <h2>Tokio 내부 — <span class="t">work-stealing 스케줄러</span>가 태스크를 굴리는 법</h2>
+    <p class="lead">
+      <code>tokio::spawn</code> 한 태스크는 그다음에 무슨 일을 겪을까요.
+      이 그림이 머릿속에 있으면 <b>“왜 서버가 갑자기 멈추는지” · “워커 수를 몇으로 둘지” · “어디에 <code>spawn_blocking</code> 을 쓸지”</b>가
+      추측이 아니라 계산이 됩니다. 🧰 t04 가 사용법이라면 여기는 <b>구조</b>입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 336" role="img" aria-label="토키오 멀티스레드 런타임의 스케줄러 구조를 보여 주는 그림. 각 워커 스레드는 최근에 깨어난 태스크를 담는 LIFO 슬롯 하나와 256칸짜리 지역 큐를 가지며, 지역 큐가 가득 차면 절반을 전역 큐로 넘긴다. 워커는 지역 큐, 그다음 전역 큐, 마지막으로 다른 워커의 지역 큐에서 절반을 훔치는 순서로 일을 찾고, 아무것도 없으면 잠든다. 아래에는 워커가 폴링 중에 블로킹 호출을 만나면 그 워커가 통째로 멈춰 전체 처리량이 줄어드는 상황이 표시된다.">
+      <text x="16" y="18" class="lbl">워커 스레드 하나가 다음 일을 찾는 순서 — 위에서 아래로</text>
+
+      <rect class="bx bx-fw" x="16" y="34" width="196" height="76"/>
+      <text x="114" y="56" class="val rs-t" text-anchor="middle">워커 #0</text>
+      <text x="32" y="76" class="ann">LIFO 슬롯 1칸</text>
+      <text x="32" y="94" class="ann">방금 깨어난 태스크 — 캐시가 아직 따뜻함</text>
+
+      <rect class="bx" x="16" y="118" width="196" height="70"/>
+      <text x="32" y="140" class="val">지역 큐 (256칸 고정)</text>
+      <text x="32" y="158" class="ann">락 없는 링 버퍼 · 자기 것만 push</text>
+      <text x="32" y="176" class="ann">가득 차면 절반을 전역 큐로 밀어냄</text>
+
+      <rect class="bx" x="240" y="118" width="196" height="70"/>
+      <text x="256" y="140" class="val">전역 큐 (공용)</text>
+      <text x="256" y="158" class="ann">넘친 태스크 · 런타임 밖에서 spawn 된 것</text>
+      <text x="256" y="176" class="ann">61번 폴링마다 한 번은 여기부터 봄</text>
+
+      <rect class="bx bx-hi" x="464" y="118" width="200" height="70"/>
+      <text x="480" y="140" class="val am-t">남의 지역 큐에서 훔치기</text>
+      <text x="480" y="158" class="ann">무작위 워커를 골라 절반을 가져옴</text>
+      <text x="480" y="176" class="ann">실패하면 잠듦(park) → 깨울 때 unpark</text>
+
+      <path class="fl ar" d="M114 114 L114 114"/>
+      <path class="fl ar" d="M216 152 L236 152"/>
+      <path class="fl ar" d="M440 152 L460 152"/>
+      <text x="222" y="206" class="ann">① 비었으면 →</text>
+      <text x="446" y="206" class="ann">② 비었으면 →</text>
+
+      <text x="16" y="238" class="ttl rs-t">이 구조가 무너지는 단 하나의 경우 — 폴링 중 블로킹</text>
+      <rect class="bx bx-warn" x="16" y="248" width="318" height="76"/>
+      <text x="32" y="270" class="val rs-t">워커 안에서 std::fs::read / 무거운 계산</text>
+      <text x="32" y="290" class="ann">그 워커는 다음 폴링을 못 함 — 지역 큐 256개가 통째로 대기</text>
+      <text x="32" y="308" class="ann">코어 8개 중 3개가 막히면 처리량이 그대로 5/8 로</text>
+
+      <rect class="bx bx-ok" x="346" y="248" width="318" height="76"/>
+      <text x="362" y="270" class="val ok-t">spawn_blocking 으로 격리</text>
+      <text x="362" y="290" class="ann">별도 블로킹 풀(기본 최대 512 스레드)로 보냄</text>
+      <text x="362" y="308" class="ann">워커는 즉시 다음 태스크로 — 큐가 흐름을 유지</text>
+    </svg>
+    <div class="cap">태스크는 <b>스레드가 아니라 폴링 단위</b>입니다 — 폴링 한 번이 길어지면 그 워커가 통째로 멈춥니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">런타임을 손으로 만들어 설정하기</h4>
+      <pre class="code" data-lang="rust"><code>use tokio::runtime::Builder;
+
+fn main() -&gt; anyhow::Result&lt;()&gt; {
+    let rt = Builder::new_multi_thread()
+        .worker_threads(8)                 // 기본값 = 논리 코어 수
+        .max_blocking_threads(256)         // spawn_blocking 풀 상한 (기본 512)
+        .thread_name("svc-worker")         // 스레드 이름 ★ 프로파일에서 바로 보입니다
+        .thread_stack_size(2 * 1024 * 1024)// 기본 2MB — 재귀가 깊으면 늘림
+        .enable_all()                      // 타이머 + I/O 드라이버 켜기
+        .build()?;
+
+    rt.block_on(async {
+        // 여기부터 async 세계
+        server().await
+    })
+}
+
+// 매크로 버전 — 위와 같은 일을 합니다
+#[tokio::main(worker_threads = 8)]
+async fn main() { /* … */ }
+
+// 스레드 하나짜리 — 테스트 · CLI · 임베디드에 ★
+#[tokio::main(flavor = "current_thread")]
+async fn main() { /* … */ }</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>워커 수를 몇으로?</b> — 기본값(코어 수)에서 시작하고,
+        <b>컨테이너에서는 반드시 명시</b>하세요. 쿠버네티스에서 CPU limit 이 2코어여도
+        Tokio 는 <b>호스트의 64코어를 보고 워커를 64개 만듭니다</b> —
+        컨텍스트 스위칭만 늘어납니다. <code>std::thread::available_parallelism()</code> 도 cgroup 을 못 보는 경우가 있어
+        환경변수로 주입하는 편이 안전합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">current_thread vs multi_thread — 무엇이 다른가</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%"></th><th>current_thread</th><th>multi_thread</th></tr>
+        <tr><td>스레드</td><td>1</td><td><b>N (코어 수)</b></td></tr>
+        <tr><td>work stealing</td><td>없음</td><td><b>있음</b></td></tr>
+        <tr><td>태스크 요구</td><td><code>'static</code>만</td><td><b><code>Send</code> 필수</b></td></tr>
+        <tr><td>동기화 비용</td><td>거의 없음</td><td>원자연산·훔치기</td></tr>
+        <tr><td>지연 편차</td><td>작음</td><td>조금 있음</td></tr>
+        <tr><td>쓰는 곳</td><td>테스트·CLI·프록시 샤딩</td><td><b>일반 서버</b></td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// Send 가 아닌 값을 await 너머로 들고 가야 할 때 (Rc, RefCell 등)
+use tokio::task::LocalSet;
+
+let local = LocalSet::new();
+local.run_until(async {
+    // spawn_local 은 같은 스레드에서만 돕니다 → Send 불필요
+    tokio::task::spawn_local(async {
+        let rc = std::rc::Rc::new(1);      // ★ Send 아님
+        some_async(&amp;rc).await;
+    }).await.unwrap();
+}).await;
+
+// 고급 패턴: 코어마다 current_thread 런타임을 하나씩 띄우고
+//   SO_REUSEPORT 로 소켓을 나눠 갖기 → 훔치기 비용 0, 캐시 지역성 최대
+//   (monoio · glommio 가 이 모델입니다 — h06)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">블로킹을 판별하고 격리하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 “블로킹”인가 — 판별 기준</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">코드</th><th>판정</th></tr>
+        <tr><td><code>std::fs::read_to_string</code></td><td><b>블로킹</b> → tokio::fs 또는 spawn_blocking</td></tr>
+        <tr><td><code>std::thread::sleep</code></td><td><b>블로킹</b> → <code>tokio::time::sleep</code></td></tr>
+        <tr><td><code>reqwest::blocking</code></td><td><b>블로킹</b> → 비동기 API 로</td></tr>
+        <tr><td>이미지 리사이즈 · 압축</td><td><b>CPU 블로킹</b> → spawn_blocking / rayon</td></tr>
+        <tr><td>bcrypt · argon2 해싱</td><td><b>CPU 블로킹</b>(수십~수백 ms)</td></tr>
+        <tr><td>큰 <code>serde_json::from_slice</code></td><td>수 MB 넘으면 블로킹 취급</td></tr>
+        <tr><td><code>Mutex</code>(std) 잠깐 잠금</td><td>괜찮음 — 단 <b>await 를 건너지 말 것</b></td></tr>
+        <tr><td>DB 드라이버(sqlx·async)</td><td>안전</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>기준선 하나만 외우세요</b> — <b>한 번의 <code>poll</code> 이 10~100µs 를 넘기면 위험</b>합니다.
+        “대기”든 “계산”이든 워커를 붙잡는다는 점에서 똑같습니다.
+        확신이 안 서면 <code>tokio-console</code> 의 <b>busy 시간</b>을 보세요(h11).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">격리하는 세 가지 방법</h4>
+      <pre class="code" data-lang="rust"><code>use tokio::task;
+
+// ① spawn_blocking — 짧고 가끔인 블로킹 (파일 · 레거시 라이브러리)
+let text = task::spawn_blocking(move || {
+    std::fs::read_to_string("big.log")     // 블로킹 풀에서 실행
+}).await??;                                 // JoinError + io::Error
+
+// ② block_in_place — 지금 이 워커를 '블로킹 전용'으로 잠시 전환
+//    (multi_thread 전용. 지역 큐를 다른 워커에게 넘기고 실행합니다)
+let sum = task::block_in_place(|| heavy_cpu(&amp;data));
+
+// ③ rayon 으로 넘기고 결과만 async 로 받기 ★ CPU 작업의 정석 (⚡ e05)
+let (tx, rx) = tokio::sync::oneshot::channel();
+rayon::spawn(move || {
+    let out = data.par_iter().map(expensive).sum::&lt;f64&gt;();
+    let _ = tx.send(out);
+});
+let out = rx.await?;   // 워커는 그동안 다른 요청을 처리합니다</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>①과 ②의 차이</b> — <code>spawn_blocking</code> 은 <b>다른 스레드로 보내므로 클로저가 <code>Send + 'static</code></b> 이어야 합니다.
+        <code>block_in_place</code> 는 <b>현재 스레드에서 그대로</b> 돌기 때문에 빌린 참조를 그대로 쓸 수 있지만,
+        <b><code>current_thread</code> 런타임에선 패닉</b>합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">협력적 스케줄링과 런타임 관측</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">태스크 예산(budget) — 굶주림을 막는 장치 ★</h4>
+      <pre class="code" data-lang="rust"><code>// Tokio 는 태스크마다 '128번의 자원 연산' 예산을 줍니다.
+// 예산을 다 쓰면 그 자원(소켓·채널)이 Pending 을 돌려주고 태스크는 양보합니다.
+// → 데이터가 계속 준비된 소켓 하나가 워커를 독점하는 일이 막힙니다.
+
+// ❌ 예산을 소모하지 않는 루프 — 다른 태스크가 굶습니다
+loop {
+    counter += 1;                 // 순수 계산은 예산을 안 씁니다
+    if counter &gt; 100_000_000 { break; }
+}
+
+// ✅ 직접 양보 지점을 넣습니다
+loop {
+    counter += 1;
+    if counter % 1024 == 0 {
+        tokio::task::yield_now().await;    // ★ 여기서 스케줄러에 반납
+    }
+    if counter &gt; 100_000_000 { break; }
+}
+
+// ✅ 예산을 무시하고 끝까지 돌려야 할 때 (셧다운 처리 등)
+tokio::task::unconstrained(async { drain_all().await }).await;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>증상으로 알아보기</b> — “요청 대부분은 1ms 인데 <b>가끔 500ms 가 찍힌다</b>”는
+        거의 항상 <b>같은 워커에서 누가 오래 붙잡고 있었다</b>는 뜻입니다.
+        평균이 아니라 <b>p99 히스토그램</b>을 보세요(🧰 t08 의 tracing + h11).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">런타임 지표를 직접 뽑기</h4>
+      <pre class="code" data-lang="rust"><code>// Cargo.toml
+// tokio = { version = "1", features = ["full"] }
+// (일부 지표는 unstable — RUSTFLAGS="--cfg tokio_unstable")
+
+let handle = tokio::runtime::Handle::current();
+let m = handle.metrics();
+
+println!("워커 수        {}", m.num_workers());
+println!("살아있는 태스크 {}", m.num_alive_tasks());
+println!("전역 큐 깊이    {}", m.global_queue_depth());
+
+// 이 세 개만 주기적으로 찍어도 사고 원인의 절반이 보입니다
+//   · 전역 큐 깊이가 계속 증가 → 처리량 &lt; 유입량 (백프레셔 필요 · h03)
+//   · alive_tasks 가 단조 증가  → 태스크 누수 (JoinHandle 을 버렸거나
+//                                 채널 수신자가 사라져 영원히 대기)
+
+// 30초마다 지표를 로그로
+tokio::spawn(async move {
+    let mut tick = tokio::time::interval(Duration::from_secs(30));
+    loop {
+        tick.tick().await;
+        tracing::info!(alive = m.num_alive_tasks(),
+                       gq = m.global_queue_depth(), "rt");
+    }
+});</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">태스크 하나의 실제 메모리와 수명</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">async fn 은 상태 기계가 됩니다</h4>
+      <pre class="code" data-lang="rust"><code>async fn handle(mut sock: TcpStream) -&gt; io::Result&lt;()&gt; {
+    let mut buf = [0u8; 4096];          // ← 이 4KB 가 태스크 크기에 들어갑니다
+    let n = sock.read(&amp;mut buf).await?; //   await 를 건너므로 저장돼야 함
+    sock.write_all(&amp;buf[..n]).await?;
+    Ok(())
+}
+
+// 컴파일러가 만드는 것 (개념)
+// enum HandleFuture {
+//     Start { sock: TcpStream, buf: [u8; 4096] },
+//     WaitingRead { sock: TcpStream, buf: [u8; 4096], n: usize },
+//     WaitingWrite { … },
+//     Done,
+// }
+// 크기 = 가장 큰 변형의 크기 ≈ 4KB + α
+
+// 태스크 크기 확인
+println!("{}", std::mem::size_of_val(&amp;handle(sock)));
+
+// ★ 동시 접속 10만이면 4KB × 10만 = 400MB 입니다.
+//   버퍼를 힙으로 빼거나(BytesMut · h05) 크기를 줄이세요.
+let mut buf = vec![0u8; 4096];   // 태스크는 포인터 24바이트만 들고 있음</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>큰 Future 잡는 법</b> — <code>clippy::large_futures</code> 린트를 켜거나,
+        <code>Box::pin(fut)</code> 으로 힙에 눕히세요. 재귀 async 함수는 <b>반드시</b> 박싱해야 합니다
+        (크기가 무한이 되므로 컴파일 에러가 납니다).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JoinHandle · 취소 · 셧다운</h4>
+      <pre class="code" data-lang="rust"><code>// ① JoinHandle 을 drop 해도 태스크는 계속 돕니다 (분리)
+let h = tokio::spawn(work());
+drop(h);                       // work() 는 그대로 실행됨 ★ 자바 Future 와 다름
+
+// ② abort() 는 '다음 await 지점에서' 취소합니다
+let h = tokio::spawn(work());
+h.abort();
+match h.await {
+    Err(e) if e.is_cancelled() =&gt; println!("취소됨"),
+    Err(e) if e.is_panic()     =&gt; println!("태스크가 패닉"),
+    Ok(v) =&gt; println!("{v:?}"),
+    Err(e) =&gt; return Err(e.into()),
+}
+
+// ③ 여러 태스크를 묶어 함께 취소 — 실무 표준
+use tokio_util::task::TaskTracker;
+use tokio_util::sync::CancellationToken;
+
+let token = CancellationToken::new();
+let tracker = TaskTracker::new();
+for i in 0..4 {
+    let t = token.clone();
+    tracker.spawn(async move {
+        tokio::select! {
+            _ = t.cancelled() =&gt; {/* 정리 */}
+            _ = worker(i)     =&gt; {}
+        }
+    });
+}
+tracker.close();
+tokio::signal::ctrl_c().await?;
+token.cancel();                 // 전부에게 신호
+tracker.wait().await;           // 전부 끝날 때까지 ★ 우아한 종료</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 워커는 <b>LIFO 슬롯 → 지역 큐 → 전역 큐 → 훔치기</b> 순으로 일을 찾습니다.
+    이 흐름을 끊는 유일한 것이 <b>긴 폴링</b>이고, 그래서 블로킹은 <code>spawn_blocking</code>·<code>rayon</code> 으로 격리합니다.
+    컨테이너에서는 <b>워커 수를 명시</b>하고, <b>전역 큐 깊이와 살아있는 태스크 수</b>를 지표로 찍어 두세요 —
+    사고의 절반은 이 두 숫자에서 먼저 보입니다.</div>
+</section>
+
+
+<!-- ==================== h03 ==================== -->
+<section class="sec" id="h03">
+  <div class="sec-head rv">
+    <span class="no">SVC 03</span>
+    <h2>채널 · 액터 — <span class="t"><code>Arc&lt;Mutex&gt;</code> 를 안 쓰는 설계</span></h2>
+    <p class="lead">
+      상태를 여럿이 공유해야 할 때 대부분 <code>Arc&lt;Mutex&lt;T&gt;&gt;</code> 부터 꺼냅니다. 동작은 합니다.
+      그런데 <b>락 경합 · 데드락 · “누가 언제 잠그는지 모르겠음”</b>이 따라옵니다.
+      Rust 에서 더 잘 통하는 답은 <b>“상태를 한 태스크가 독점하고 메시지로만 말을 건다”</b> — 액터입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 322" role="img" aria-label="공유 락 방식과 액터 방식을 비교하고 액터의 메시지 흐름을 보여 주는 그림. 왼쪽에서는 여러 태스크가 하나의 Arc Mutex 를 잡으려고 줄을 서서 경합이 생기고 잠근 채 await 하면 데드락 위험이 있다. 오른쪽에서는 상태를 소유한 액터 태스크 하나가 있고 다른 태스크들은 mpsc 채널로 메시지만 보내며, 응답이 필요하면 oneshot 채널을 메시지에 실어 보내 답을 받는다. 아래에는 요청, 큐, 액터 루프, 응답으로 이어지는 네 단계가 그려진다.">
+      <text x="16" y="18" class="lbl">같은 카운터를 여러 태스크가 올린다 — 두 가지 설계</text>
+
+      <text x="16" y="42" class="ttl rs-t">① Arc&lt;Mutex&lt;T&gt;&gt; — 자리를 두고 다툽니다</text>
+      <rect class="bx bx-warn" x="16" y="52" width="318" height="102"/>
+      <text x="32" y="74" class="ann">태스크 A · B · C 가 동시에 lock() 을 시도</text>
+      <text x="32" y="92" class="ann rs-t">한 번에 하나만 통과 — 나머지는 대기</text>
+      <text x="32" y="110" class="ann rs-t">잠근 채 .await 하면 다른 태스크가 영영 못 들어옴</text>
+      <text x="32" y="128" class="ann">코어를 늘려도 이 지점은 안 빨라집니다</text>
+      <text x="32" y="146" class="ann">읽기가 압도적이면 RwLock · ArcSwap 이 답 (h04)</text>
+
+      <text x="346" y="42" class="ttl ok-t">② 액터 — 상태 주인이 한 명입니다</text>
+      <rect class="bx bx-ok" x="346" y="52" width="318" height="102"/>
+      <text x="362" y="74" class="ann">상태는 액터 태스크 안의 평범한 지역 변수</text>
+      <text x="362" y="92" class="ann ok-t">락이 아예 없음 — 소유자가 하나뿐이라</text>
+      <text x="362" y="110" class="ann ok-t">순서가 채널 순서로 결정 — 재현 가능</text>
+      <text x="362" y="128" class="ann">대기는 채널 큐에서 — 백프레셔가 자연스럽게 생김</text>
+      <text x="362" y="146" class="ann">부하가 크면 샤딩 (액터 N개 · 키로 나눔)</text>
+
+      <text x="16" y="182" class="ttl">액터 한 바퀴 — 메시지가 도는 길</text>
+
+      <circle class="stp" cx="44" cy="222" r="11"/>
+      <text x="44" y="226" class="stpn" text-anchor="middle">1</text>
+      <rect class="bx" x="64" y="200" width="128" height="46"/>
+      <text x="128" y="220" class="val" text-anchor="middle">호출자</text>
+      <text x="128" y="238" class="ann" text-anchor="middle">tx.send(msg).await</text>
+
+      <path class="fl ar" d="M196 223 L226 223"/>
+
+      <circle class="stp" cx="248" cy="222" r="11"/>
+      <text x="248" y="226" class="stpn" text-anchor="middle">2</text>
+      <rect class="bx bx-hi" x="268" y="200" width="128" height="46"/>
+      <text x="332" y="220" class="val am-t" text-anchor="middle">mpsc 큐</text>
+      <text x="332" y="238" class="ann" text-anchor="middle">capacity 1024</text>
+
+      <path class="fl ar" d="M400 223 L430 223"/>
+
+      <circle class="stp" cx="452" cy="222" r="11"/>
+      <text x="452" y="226" class="stpn" text-anchor="middle">3</text>
+      <rect class="bx bx-fw" x="472" y="200" width="192" height="46"/>
+      <text x="568" y="220" class="val rs-t" text-anchor="middle">액터 루프 (단 하나)</text>
+      <text x="568" y="238" class="ann" text-anchor="middle">while let Some(m) = rx.recv().await</text>
+
+      <path class="fl ar ar-gn" d="M568 250 L568 268 L128 268 L128 254"/>
+      <circle class="stp" cx="330" cy="290" r="11"/>
+      <text x="330" y="294" class="stpn" text-anchor="middle">4</text>
+      <text x="352" y="294" class="ann ok-t">응답은 메시지에 실은 oneshot 채널로 돌아옵니다 — 호출자는 그것만 await</text>
+      <text x="16" y="314" class="ann">큐가 가득 차면 send 가 기다립니다 → 그게 곧 백프레셔이고, 폭주를 자동으로 막아 줍니다</text>
+    </svg>
+    <div class="cap">락은 <b>“같은 자리를 나눠 쓰는”</b> 설계고 액터는 <b>“주인에게 부탁하는”</b> 설계입니다 — 후자가 훨씬 디버깅하기 쉽습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">채널 네 종류 — 고르는 표 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:22%">채널</th><th>보내는 쪽</th><th>받는 쪽</th><th>쓰는 곳</th></tr>
+        <tr><td><code>mpsc</code></td><td>여럿</td><td><b>하나</b></td><td>작업 큐 · 액터 입구</td></tr>
+        <tr><td><code>oneshot</code></td><td>하나(1회)</td><td>하나</td><td><b>요청-응답</b></td></tr>
+        <tr><td><code>broadcast</code></td><td>여럿</td><td><b>모두가 사본</b></td><td>이벤트 팬아웃 · WS 푸시</td></tr>
+        <tr><td><code>watch</code></td><td>여럿</td><td>모두(최신만)</td><td><b>설정 변경 · 셧다운</b></td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>use tokio::sync::{mpsc, oneshot, broadcast, watch};
+
+// ① mpsc — 반드시 bounded 로 (unbounded 는 OOM 으로 가는 길)
+let (tx, mut rx) = mpsc::channel::&lt;Job&gt;(1024);
+tx.send(job).await?;                 // 가득 차면 여기서 대기 = 백프레셔 ★
+
+// ② oneshot — 딱 한 번
+let (rtx, rrx) = oneshot::channel::&lt;u64&gt;();
+rtx.send(42).ok();
+let v = rrx.await?;
+
+// ③ broadcast — 늦은 구독자는 값을 '건너뜁니다'
+let (btx, mut brx) = broadcast::channel::&lt;Event&gt;(256);
+match brx.recv().await {
+    Ok(e) =&gt; handle(e),
+    Err(broadcast::error::RecvError::Lagged(n)) =&gt;
+        tracing::warn!("이벤트 {n}개 놓침"),   // ★ 반드시 처리
+    Err(_) =&gt; return,
+}
+
+// ④ watch — 항상 '가장 최근 값' 하나만
+let (wtx, mut wrx) = watch::channel(Config::default());
+wtx.send(new_cfg)?;
+wrx.changed().await?;                 // 바뀔 때까지 대기
+let cfg = wrx.borrow_and_update().clone();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">액터 — 실제로 쓰는 형태 (핸들 + 루프)</h4>
+      <pre class="code" data-lang="rust"><code>use tokio::sync::{mpsc, oneshot};
+use std::collections::HashMap;
+
+// ① 메시지 타입 — 응답이 필요하면 oneshot 을 같이 싣습니다
+enum Msg {
+    Incr { key: String },
+    Get  { key: String, reply: oneshot::Sender&lt;u64&gt; },
+    Snapshot { reply: oneshot::Sender&lt;HashMap&lt;String, u64&gt;&gt; },
+}
+
+// ② 액터 본체 — 상태가 그냥 지역 변수입니다 (락 없음!)
+async fn run(mut rx: mpsc::Receiver&lt;Msg&gt;) {
+    let mut counts: HashMap&lt;String, u64&gt; = HashMap::new();
+    while let Some(msg) = rx.recv().await {
+        match msg {
+            Msg::Incr { key } =&gt; *counts.entry(key).or_default() += 1,
+            Msg::Get { key, reply } =&gt; {
+                let _ = reply.send(counts.get(&amp;key).copied().unwrap_or(0));
+            }
+            Msg::Snapshot { reply } =&gt; { let _ = reply.send(counts.clone()); }
+        }
+    }
+    // rx.recv() 가 None → 모든 송신자가 사라짐 → 여기서 정리하고 종료 ★
+    tracing::info!(keys = counts.len(), "counter actor stopped");
+}
+
+// ③ 핸들 — 밖에서는 이것만 보입니다. Clone 해서 마음껏 나눠 줍니다
+#[derive(Clone)]
+pub struct Counter(mpsc::Sender&lt;Msg&gt;);
+
+impl Counter {
+    pub fn spawn() -&gt; Self {
+        let (tx, rx) = mpsc::channel(1024);
+        tokio::spawn(run(rx));
+        Counter(tx)
+    }
+    pub async fn incr(&amp;self, key: &amp;str) {
+        let _ = self.0.send(Msg::Incr { key: key.into() }).await;
+    }
+    pub async fn get(&amp;self, key: &amp;str) -&gt; u64 {
+        let (tx, rx) = oneshot::channel();
+        if self.0.send(Msg::Get { key: key.into(), reply: tx }).await.is_err() {
+            return 0;                      // 액터가 죽었음
+        }
+        rx.await.unwrap_or(0)
+    }
+}</code></pre>
+    </div>
+  </div>
+  <div class="note tip rv">
+    <b>이 패턴의 진짜 이득</b> — <code>Counter</code> 를 쓰는 쪽은 <b>락도 <code>Arc</code> 도 모릅니다</b>.
+    나중에 “액터를 16개로 샤딩”하거나 “다른 프로세스로 분리”해도 <b>호출부 코드가 그대로</b>입니다.
+    <code>Arc&lt;Mutex&gt;</code> 로 짜면 그 변경이 전부 호출부까지 번집니다.
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">백프레셔 · 부하 차단</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">unbounded 는 “장애를 미루는” 선택입니다</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 흔한 실수 — 급하니까 unbounded
+let (tx, rx) = mpsc::unbounded_channel();
+// 유입 12,000/s · 처리 8,000/s 이면
+//   1분 뒤 큐 24만 개, 10분 뒤 240만 개 → OOM 킬
+//   그동안 지연은 계속 늘어나 결국 전부 타임아웃된 요청을 처리하게 됩니다
+
+// ✅ bounded — 유입이 처리보다 빠르면 '앞단'이 느려집니다
+let (tx, rx) = mpsc::channel(1024);
+
+// 대응 세 가지 중 하나를 반드시 고릅니다
+// (a) 기다린다 — 앞단이 HTTP 라면 클라이언트가 대기
+tx.send(job).await?;
+
+// (b) 버린다 — 큐가 차면 즉시 503 (실시간성이 중요할 때 ★)
+match tx.try_send(job) {
+    Ok(()) =&gt; {}
+    Err(mpsc::error::TrySendError::Full(_)) =&gt; {
+        metrics::counter!("dropped").increment(1);
+        return Err(StatusCode::SERVICE_UNAVAILABLE.into());
+    }
+    Err(mpsc::error::TrySendError::Closed(_)) =&gt; return Err(anyhow!("shutdown")),
+}
+
+// (c) 시간 제한을 둔다 — 그 안에 못 들어가면 포기
+tokio::time::timeout(Duration::from_millis(50), tx.send(job)).await??;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>큐 길이는 “지연 예산”으로 정하세요</b> — 처리량이 8,000/s 이고
+        허용 지연이 100ms 라면 <b>큐는 800개면 충분</b>합니다.
+        그보다 길면 <b>어차피 타임아웃될 요청을 메모리에 쌓아 두는 것</b>뿐입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">동시 실행 수를 세마포어로 제한</h4>
+      <pre class="code" data-lang="rust"><code>use std::sync::Arc;
+use tokio::sync::Semaphore;
+
+// 외부 API 가 초당 100건만 받아 준다 → 동시 20건으로 묶습니다
+static LIMIT: usize = 20;
+let sem = Arc::new(Semaphore::new(LIMIT));
+
+for url in urls {
+    let permit = sem.clone().acquire_owned().await?;   // 자리가 날 때까지 대기
+    tokio::spawn(async move {
+        let _p = permit;              // 스코프가 끝나면 자동 반납 ★
+        fetch(&amp;url).await
+    });
+}
+
+// 즉시 거절해야 할 때
+match sem.try_acquire() {
+    Ok(_p) =&gt; do_work().await,
+    Err(_) =&gt; return Err(StatusCode::TOO_MANY_REQUESTS.into()),
+}
+
+// axum 이라면 미들웨어로 한 줄 (tower)
+use tower::limit::ConcurrencyLimitLayer;
+let app = Router::new()
+    .route("/heavy", post(heavy))
+    .layer(ConcurrencyLimitLayer::new(20))
+    .layer(tower::load_shed::LoadShedLayer::new());  // 넘치면 503 ★</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>Semaphore vs 큐</b> — <b>세마포어는 “동시에 몇 개”</b>, <b>채널은 “대기줄 길이”</b>를 제한합니다.
+        보통 <b>둘 다</b> 씁니다: 채널로 유입을 받고, 세마포어로 하류 자원(DB 커넥션·외부 API)을 보호합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">샤딩 · 감독 · 채널 크레이트 선택</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">액터 하나가 병목이면 — 키로 샤딩</h4>
+      <pre class="code" data-lang="rust"><code>use std::hash::{Hash, Hasher};
+
+pub struct ShardedCounter {
+    shards: Vec&lt;Counter&gt;,        // 위에서 만든 액터 핸들 N개
+}
+
+impl ShardedCounter {
+    pub fn new(n: usize) -&gt; Self {
+        Self { shards: (0..n).map(|_| Counter::spawn()).collect() }
+    }
+    fn pick(&amp;self, key: &amp;str) -&gt; &amp;Counter {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&amp;mut h);
+        &amp;self.shards[(h.finish() as usize) % self.shards.len()]
+    }
+    pub async fn incr(&amp;self, key: &amp;str) { self.pick(key).incr(key).await }
+    pub async fn get(&amp;self, key: &amp;str) -&gt; u64 { self.pick(key).get(key).await }
+}
+
+// ★ 같은 키는 항상 같은 액터로 갑니다 → 순서가 보장되고 락이 여전히 없습니다.
+//   샤드 수는 보통 코어 수의 1~2배. 전체 합계가 필요하면
+//   모든 샤드에 Snapshot 을 뿌리고 join_all 로 모읍니다.
+let totals = futures::future::join_all(
+    self.shards.iter().map(|s| s.snapshot())
+).await;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">액터가 죽으면 — 감독(supervision)</h4>
+      <pre class="code" data-lang="rust"><code>// 태스크가 패닉하면 그 태스크만 죽고 서버는 살아 있습니다.
+// 문제는 '조용히' 죽는다는 것 — JoinHandle 을 보고 있어야 압니다.
+
+fn spawn_supervised(name: &amp;'static str) -&gt; Counter {
+    let (tx, rx) = mpsc::channel(1024);
+    let mut rx = Some(rx);
+    tokio::spawn(async move {
+        loop {
+            let r = rx.take().expect("rx");
+            let h = tokio::spawn(run_returning(r));
+            match h.await {
+                Ok(returned_rx) =&gt; { rx = Some(returned_rx); }   // 정상 종료
+                Err(e) if e.is_panic() =&gt; {
+                    tracing::error!(actor = name, "패닉 — 재시작");
+                    // 여기서는 rx 를 잃었으므로 새 채널이 필요합니다.
+                    // 실전에서는 상태를 외부(Redis·파일)에 두거나
+                    // rx 를 Arc&lt;Mutex&lt;Option&lt;_&gt;&gt;&gt; 로 넘겨 회수합니다.
+                    break;
+                }
+                Err(_) =&gt; break,
+            }
+        }
+    });
+    Counter(tx)
+}
+
+// 더 간단한 실무 답: 패닉을 아예 프로세스 종료로 만들고 재시작을 오케스트레이터에 맡김
+// Cargo.toml → [profile.release] panic = "abort"  (h11)
+// 쿠버네티스라면 그게 가장 예측 가능합니다.</code></pre>
+    </div>
+  </div>
+  <div class="tw rv"><table class="cheat">
+    <tr><th style="width:18%">크레이트</th><th>async</th><th>특징</th><th>고르는 기준</th></tr>
+    <tr><td><code>tokio::sync::mpsc</code></td><td><b>예</b></td><td>bounded 시 <code>send().await</code></td><td><b>기본값</b> — 이유 없으면 이걸로</td></tr>
+    <tr><td><code>std::sync::mpsc</code></td><td>아니오</td><td>블로킹 <code>recv()</code></td><td>순수 스레드 코드에서만</td></tr>
+    <tr><td><code>crossbeam-channel</code></td><td>아니오</td><td><b>매우 빠름</b> · <code>select!</code> 지원</td><td>rayon·스레드 파이프라인 (h04)</td></tr>
+    <tr><td><code>flume</code></td><td><b>양쪽</b></td><td>동기·비동기 모두 · 빠름</td><td><b>스레드↔async 경계</b>를 잇는 곳 ★</td></tr>
+    <tr><td><code>async-channel</code></td><td>예</td><td>mpmc(<b>수신자도 여럿</b>)</td><td>워커 풀에 일감 뿌리기</td></tr>
+    <tr><td><code>kanal</code></td><td>양쪽</td><td>벤치상 최고 수준</td><td>극한 처리량 · 성숙도는 낮음</td></tr>
+  </table></div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">select! 취소 안전성이라는 함정</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 취소되면 데이터가 사라집니다</h5>
+      <pre class="code" data-lang="rust"><code>loop {
+    tokio::select! {
+        // read 도중에 다른 갈래가 이기면 이 future 는 drop 됩니다.
+        // 이미 소켓에서 꺼낸 바이트는? — 사라집니다. ★
+        n = sock.read(&amp;mut buf) =&gt; { handle(&amp;buf[..n?]); }
+        _ = shutdown.cancelled()  =&gt; break,
+    }
+}
+
+// 더 나쁜 예 — 직접 만든 async 함수
+tokio::select! {
+    _ = save_to_db(&amp;rows) =&gt; {}      // 절반만 쓰고 취소될 수 있음
+    _ = timeout            =&gt; {}      // → 부분 쓰기 상태로 남음
+}</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 취소에 안전한 것만 select! 에 넣습니다</h5>
+      <pre class="code" data-lang="rust"><code>// 취소 안전(cancel-safe)한 대표 목록 — 문서에 명시돼 있습니다
+//   mpsc::Receiver::recv · broadcast::recv · watch::changed
+//   tokio::time::sleep · FramedRead::next (h06) · TcpListener::accept
+
+let mut framed = Framed::new(sock, LinesCodec::new());
+loop {
+    tokio::select! {
+        Some(line) = framed.next() =&gt; { handle(line?).await; }  // ✅ 안전
+        _ = shutdown.cancelled()   =&gt; break,
+    }
+}
+
+// 취소가 위험한 작업은 spawn 으로 떼어 내고 '핸들'만 select! 합니다
+let h = tokio::spawn(save_to_db(rows));
+tokio::select! {
+    r = h                     =&gt; r??,      // ✅ 취소돼도 저장은 계속 진행
+    _ = shutdown.cancelled()  =&gt; { /* 나중에 h.await 로 마무리 */ }
+}</code></pre>
+    </div>
+  </div>
+  <div class="note warn rv">
+    <b>규칙 하나로 요약</b> — <code>select!</code> 의 갈래에는 <b>“중간에 버려도 아무 상태가 안 남는 것”</b>만 두세요.
+    애매하면 <code>tokio::spawn</code> 으로 떼어 내고 <code>JoinHandle</code> 을 select 하면 됩니다.
+    이 함정은 <b>테스트에서 거의 안 잡히고 부하가 걸릴 때만</b> 나타나서 특히 고약합니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 공유 상태가 보이면 먼저 <b>“이걸 한 태스크가 독점할 수 있나”</b>를 물어보세요.
+    답이 예면 <b>액터 + <code>mpsc</code> + <code>oneshot</code></b> 이고, 그 편이 락보다 읽기도 고치기도 쉽습니다.
+    채널은 <b>반드시 bounded</b> 로 만들어 백프레셔를 얻고, 큐 길이는 <b>지연 예산으로 계산</b>하세요.
+    <code>select!</code> 에는 <b>취소 안전한 것만</b> 넣습니다.</div>
+</section>
+
+
+<!-- ==================== h04 ==================== -->
+<section class="sec" id="h04">
+  <div class="sec-head rv">
+    <span class="no">SVC 04</span>
+    <h2>동기화 고급 — <span class="t">락을 고르는 기준</span>과 락을 없애는 법</h2>
+    <p class="lead">
+      액터로 다 풀리지는 않습니다. <b>읽기가 압도적으로 많은 설정</b>, <b>수십만 키의 캐시</b>,
+      <b>초당 수백만 번 올라가는 카운터</b> — 각각 정답이 다릅니다.
+      이 섹션은 <code>std::sync</code> · <code>tokio::sync</code> · <code>parking_lot</code> · <code>DashMap</code> · <code>ArcSwap</code> · 원자 연산을
+      <b>“언제 무엇을”</b>로 정리합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 358" role="img" aria-label="공유 상태를 다룰 때 무엇을 쓸지 고르는 흐름도. 먼저 상태를 한 태스크가 독점할 수 있으면 액터를 쓴다. 아니라면 값이 정수 하나인지 묻고 맞으면 원자 변수를 쓴다. 값 전체를 통째로 교체하는 설정 같은 것이면 ArcSwap 을 쓴다. 키가 많은 맵이면 DashMap 이나 샤딩된 락을 쓴다. 잠근 상태에서 await 를 해야 하면 tokio 뮤텍스를, 그렇지 않고 짧게만 잠근다면 parking_lot 뮤텍스를 쓴다. 읽기가 쓰기보다 백 배 이상 많을 때만 RwLock 을 고려한다.">
+      <text x="16" y="18" class="lbl">공유 상태를 만났을 때 — 위에서부터 순서대로 물어봅니다</text>
+
+      <rect class="bx bx-fw" x="16" y="34" width="288" height="40"/>
+      <text x="32" y="58" class="val rs-t">Q1. 한 태스크가 독점할 수 있나?</text>
+      <path class="fl ar ar-gn" d="M308 54 L356 54"/>
+      <rect class="bx bx-ok" x="360" y="34" width="304" height="40"/>
+      <text x="376" y="58" class="val ok-t">예 → 액터 + mpsc (h03) ★ 첫 번째 답</text>
+
+      <path class="fl ar" d="M160 78 L160 90"/>
+      <rect class="bx bx-fw" x="16" y="94" width="288" height="40"/>
+      <text x="32" y="118" class="val rs-t">Q2. 값이 숫자·플래그 하나인가?</text>
+      <path class="fl ar ar-gn" d="M308 114 L356 114"/>
+      <rect class="bx bx-ok" x="360" y="94" width="304" height="40"/>
+      <text x="376" y="118" class="val ok-t">예 → AtomicU64 · AtomicBool (락 없음)</text>
+
+      <path class="fl ar" d="M160 138 L160 150"/>
+      <rect class="bx bx-fw" x="16" y="154" width="288" height="40"/>
+      <text x="32" y="178" class="val rs-t">Q3. 통째로 갈아끼우는 설정인가?</text>
+      <path class="fl ar ar-gn" d="M308 174 L356 174"/>
+      <rect class="bx bx-ok" x="360" y="154" width="304" height="40"/>
+      <text x="376" y="178" class="val ok-t">예 → ArcSwap (읽기 비용 ≈ 원자 읽기)</text>
+
+      <path class="fl ar" d="M160 198 L160 210"/>
+      <rect class="bx bx-fw" x="16" y="214" width="288" height="40"/>
+      <text x="32" y="238" class="val rs-t">Q4. 키가 많은 맵인가?</text>
+      <path class="fl ar ar-gn" d="M308 234 L356 234"/>
+      <rect class="bx bx-ok" x="360" y="214" width="304" height="40"/>
+      <text x="376" y="238" class="val ok-t">예 → DashMap · moka (샤딩된 락)</text>
+
+      <path class="fl ar" d="M160 258 L160 270"/>
+      <rect class="bx bx-fw" x="16" y="274" width="288" height="40"/>
+      <text x="32" y="298" class="val rs-t">Q5. 잠근 채 .await 해야 하나?</text>
+      <path class="fl ar ar-am" d="M308 294 L356 294"/>
+      <rect class="bx bx-hi" x="360" y="274" width="304" height="40"/>
+      <text x="376" y="298" class="val am-t">예 → tokio::sync::Mutex (느립니다)</text>
+
+      <path class="fl ar" d="M160 318 L160 330"/>
+      <rect class="bx" x="16" y="326" width="648" height="26"/>
+      <text x="32" y="344" class="ann">전부 아니오 → parking_lot::Mutex 로 짧게 잠급니다. RwLock 은 읽기가 쓰기보다 100배 이상일 때만 이득입니다</text>
+    </svg>
+    <div class="cap">락을 고르기 전에 <b>“락이 정말 필요한가”</b>를 네 번 묻습니다 — 넷 중 하나에서 대개 걸립니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">std::sync::Mutex 와 tokio::sync::Mutex — 언제 무엇</h4>
+      <pre class="code" data-lang="rust"><code>use std::sync::Mutex as StdMutex;
+use tokio::sync::Mutex as TokioMutex;
+
+// ✅ 대부분의 경우 — std(또는 parking_lot). 잠금 구간에 await 가 없으면 됩니다.
+let cache = std::sync::Arc::new(StdMutex::new(HashMap::new()));
+{
+    let mut g = cache.lock().unwrap();
+    g.insert(k, v);                 // 수십 나노초 — 워커를 막지 않습니다
+}                                   // ★ 스코프를 좁게! 여기서 풀립니다
+
+// ❌ 잠근 채 await — 컴파일은 되지만 재앙입니다 (Send 에러로 막힐 때가 많음)
+// let g = cache.lock().unwrap();
+// let row = db.query(&amp;g.sql).await?;   // 이 몇 ms 동안 모두가 대기
+
+// ✅ 정말로 잠금 구간에 await 가 필요하면 tokio 것을 씁니다
+let conn = std::sync::Arc::new(TokioMutex::new(Connection::new()));
+let mut g = conn.lock().await;       // 대기 중 워커를 반납합니다
+g.execute("…").await?;
+
+// ✅ 더 나은 답: 잠금 밖으로 await 를 밀어냅니다
+let sql = { cache.lock().unwrap().sql.clone() };   // 락은 여기서 끝
+let row = db.query(&amp;sql).await?;                   // await 는 락 밖에서</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>표준 Mutex 는 “독(poison)”이 됩니다</b> — 잠근 스레드가 패닉하면 이후 <code>lock()</code> 이 <code>Err</code> 를 돌려줍니다.
+        그래서 <code>.unwrap()</code> 이 붙습니다. <code>parking_lot</code> 은 <b>중독 개념이 없어 <code>lock()</code> 이 바로 가드를 줍니다</b> —
+        코드가 깔끔해지는 이유 중 하나입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">parking_lot — 표준보다 작고 빠릅니다</h4>
+      <pre class="code" data-lang="toml"><code># Cargo.toml
+[dependencies]
+parking_lot = "0.12"</code></pre>
+      <pre class="code" data-lang="rust"><code>use parking_lot::{Mutex, RwLock};
+
+let m = Mutex::new(0u64);
+*m.lock() += 1;                  // unwrap 없음 (중독 없음)
+
+// 데드락 회피용 시도 잠금
+if let Some(mut g) = m.try_lock() { *g += 1; }
+if let Some(g) = m.try_lock_for(Duration::from_millis(10)) { /* … */ }
+
+let rw = RwLock::new(Vec::&lt;u8&gt;::new());
+{
+    let r = rw.read();           // 여럿이 동시에
+    println!("{}", r.len());
+}
+{
+    let mut w = rw.write();      // 혼자만
+    w.push(1);
+}
+
+// 디버그 빌드에서 데드락 감지 (feature = "deadlock_detection")
+// parking_lot::deadlock::check_deadlock() 을 별도 스레드에서 주기 호출</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%"></th><th>std</th><th>parking_lot</th></tr>
+        <tr><td>Mutex 크기</td><td>보통 16~40B</td><td><b>1바이트</b></td></tr>
+        <tr><td>경합 없을 때</td><td>빠름</td><td><b>더 빠름</b></td></tr>
+        <tr><td>중독(poison)</td><td>있음</td><td><b>없음</b></td></tr>
+        <tr><td>공정성</td><td>OS 의존</td><td><b>eventual fairness</b></td></tr>
+        <tr><td>시도 잠금(시간)</td><td>없음</td><td><b>있음</b></td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">RwLock 이 오히려 느려지는 이유</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">“읽기가 많으니 RwLock” 은 절반만 맞습니다</h4>
+      <pre class="code" data-lang="text"><code>RwLock 의 숨은 비용
+  ① 읽기 잠금도 '원자 연산'입니다 — 독자 수를 세야 하니까.
+     여러 코어가 같은 캐시 라인을 두드립니다 (false sharing 과 같은 문제)
+  ② 그래서 읽기가 짧으면 Mutex 보다 느립니다.
+     경험칙 — 임계 구역이 100ns 미만이면 Mutex 가 낫습니다.
+  ③ 쓰기 기아(writer starvation) 또는 그 반대가 생깁니다.
+     std::RwLock 은 OS 구현에 맡기므로 플랫폼마다 다르게 굶습니다.
+
+실측 감각 (8코어, 초당 연산 백만 단위)
+  임계구역 20ns  · 읽기 99%   Mutex 승     (RwLock 은 -20~30%)
+  임계구역 500ns · 읽기 99%   RwLock 승    (2~4배)
+  임계구역 500ns · 읽기 80%   비슷하거나 Mutex 승
+  임계구역이 길다  → 애초에 설계를 바꿀 것 (액터 · 샤딩)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무 순서</b> — ① 먼저 <code>Mutex</code> 로 짜고 ② <b>재 보고</b> ③ 정말 읽기가 길고 많을 때만 <code>RwLock</code>.
+        “읽기가 많다”는 직관만으로 <code>RwLock</code> 을 쓰면 <b>대개 손해</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ArcSwap — 읽기를 사실상 공짜로</h4>
+      <pre class="code" data-lang="rust"><code>use arc_swap::ArcSwap;
+use std::sync::Arc;
+
+// 설정처럼 '읽기 수백만 번 · 쓰기 하루 몇 번' 인 값에 최적입니다
+static CONFIG: once_cell::sync::Lazy&lt;ArcSwap&lt;Config&gt;&gt; =
+    once_cell::sync::Lazy::new(|| ArcSwap::from_pointee(Config::default()));
+
+// 읽기 — 락이 없습니다. 원자 포인터 읽기 + 참조 카운트 하나
+fn handle(req: &amp;Request) -&gt; Response {
+    let cfg = CONFIG.load();          // Guard&lt;Arc&lt;Config&gt;&gt;
+    if req.len() &gt; cfg.max_body { return too_large(); }
+    // …
+}
+
+// 쓰기 — 통째로 새 값으로 교체. 이미 읽던 쪽은 옛 값을 계속 씁니다(안전)
+async fn reload() -&gt; anyhow::Result&lt;()&gt; {
+    let new = Config::from_file("config.toml").await?;
+    CONFIG.store(Arc::new(new));      // ★ 무중단 설정 리로드
+    Ok(())
+}
+
+// 라우팅 테이블 · 기능 플래그 · TLS 인증서 · 요금표 — 전부 이 패턴입니다.
+// 조건: '부분 수정'이 아니라 '통째 교체'여야 합니다.</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>비슷한 도구</b> — <code>tokio::sync::watch</code> 도 같은 일을 하지만
+        <b>구독자가 “바뀌었다”를 알아야 할 때</b> 씁니다. 그냥 최신 값을 읽기만 하면
+        <code>ArcSwap</code> 이 더 가볍습니다. 단순 초기화 1회면 <code>std::sync::OnceLock</code> 이면 충분합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">동시 맵과 캐시</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">DashMap — 샤딩된 <code>RwLock&lt;HashMap&gt;</code></h4>
+      <pre class="code" data-lang="rust"><code>use dashmap::DashMap;
+use std::sync::Arc;
+
+let map: Arc&lt;DashMap&lt;String, u64&gt;&gt; = Arc::new(DashMap::new());
+
+// API 는 HashMap 과 거의 같은데 &amp;mut self 가 필요 없습니다
+map.insert("a".into(), 1);
+map.entry("a".into()).and_modify(|v| *v += 1).or_insert(1);
+if let Some(v) = map.get("a") { println!("{}", *v); }
+
+// 내부: 키 해시 상위 비트로 샤드(기본 4 × 코어 수)를 고르고
+//       그 샤드의 RwLock 만 잠급니다 → 서로 다른 키는 경합이 없습니다
+
+// ⚠️ 데드락 1순위 — 가드를 든 채 같은 맵을 또 건드리기
+// let a = map.get("a");
+// map.insert("b".into(), 2);   // ← 같은 샤드면 그대로 멈춥니다 ★
+let v = { *map.get("a").unwrap() };   // ✅ 가드를 즉시 떨어뜨립니다
+map.insert("b".into(), v + 1);
+
+// ⚠️ iter() 도 샤드 락을 듭니다 — 순회 중 insert 는 위험합니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가드의 수명이 전부입니다</b> — <code>DashMap</code> 사고는 거의 전부
+        <b><code>Ref</code>/<code>RefMut</code> 가 살아 있는 채로 다시 접근</b>해서 납니다.
+        <code>{ }</code> 로 감싸거나 <code>.copied()</code>·<code>.clone()</code> 으로 <b>값만 꺼내서 나오세요</b>.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">캐시가 필요하면 — moka</h4>
+      <pre class="code" data-lang="rust"><code>// DashMap 은 '지우는 정책'이 없습니다 → 그냥 쓰면 메모리가 무한히 큽니다.
+// 만료 · 용량 제한 · 통계가 필요하면 moka 를 쓰세요.
+use moka::future::Cache;
+use std::time::Duration;
+
+let cache: Cache&lt;u64, Arc&lt;User&gt;&gt; = Cache::builder()
+    .max_capacity(100_000)                       // 엔트리 수 상한
+    .time_to_live(Duration::from_secs(300))      // 넣은 뒤 5분
+    .time_to_idle(Duration::from_secs(60))       // 안 쓰이면 1분
+    .build();
+
+// ★ get_with — 같은 키에 대한 동시 요청을 하나로 합칩니다 (thundering herd 방지)
+let user = cache.get_with(id, async move {
+    Arc::new(db::load_user(id).await.unwrap())
+}).await;
+
+cache.invalidate(&amp;id).await;      // 개별 무효화
+cache.run_pending_tasks().await;  // 정리 강제 (테스트용)
+
+// 정책 요약
+//   TinyLFU 기반 축출 — LRU 보다 적중률이 높습니다
+//   동기 버전은 moka::sync::Cache</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>get_with</code> 가 진짜 이유</b> — 캐시 미스가 동시에 1,000건 나면
+        평범한 구현은 <b>DB 에 1,000번</b> 갑니다. <code>get_with</code> 는 <b>한 번만 가고 나머지는 기다립니다</b>.
+        캐시 도입 후 오히려 DB 가 죽는 사고가 여기서 납니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">원자 연산과 lock-free 큐</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Atomic — 메모리 순서를 고르는 법</h4>
+      <pre class="code" data-lang="rust"><code>use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
+
+static REQS: AtomicU64 = AtomicU64::new(0);
+
+// ① 통계 카운터 — Relaxed 로 충분합니다 (순서 보장이 필요 없음)
+REQS.fetch_add(1, Ordering::Relaxed);
+let n = REQS.load(Ordering::Relaxed);
+
+// ② 플래그로 다른 데이터를 '공개'할 때 — Release/Acquire 짝 ★
+static READY: AtomicBool = AtomicBool::new(false);
+// 쓰는 쪽
+unsafe { DATA = compute(); }
+READY.store(true, Ordering::Release);      // 이 앞의 쓰기가 전부 보이게 됨
+// 읽는 쪽
+if READY.load(Ordering::Acquire) {         // 보이면 DATA 도 반드시 보임
+    unsafe { use_data(&amp;DATA); }
+}
+
+// ③ 확신이 없으면 SeqCst — 가장 강하고 조금 느립니다
+REQS.fetch_add(1, Ordering::SeqCst);
+
+// ④ compare_exchange — 낙관적 갱신 루프
+let mut cur = REQS.load(Ordering::Relaxed);
+loop {
+    let next = cur.max(new_value);
+    match REQS.compare_exchange_weak(cur, next,
+              Ordering::Relaxed, Ordering::Relaxed) {
+        Ok(_) =&gt; break,
+        Err(actual) =&gt; cur = actual,       // 누가 먼저 바꿨음 → 재시도
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>카운터를 코어마다 나누세요</b> — 하나의 <code>AtomicU64</code> 를 16코어가 <code>fetch_add</code> 하면
+        <b>같은 캐시 라인을 서로 빼앗아</b> 처리량이 급락합니다(⚡ e04 의 false sharing).
+        해법은 <b>스레드별 카운터를 두고 읽을 때만 합치기</b>(<code>metrics</code>·<code>prometheus</code> 크레이트가 이렇게 합니다).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">crossbeam — 스레드 간 lock-free 도구</h4>
+      <pre class="code" data-lang="rust"><code>use crossbeam::queue::{ArrayQueue, SegQueue};
+
+// ① ArrayQueue — 고정 용량 lock-free MPMC. 가득 차면 push 가 실패합니다
+let q: ArrayQueue&lt;Job&gt; = ArrayQueue::new(4096);
+if q.push(job).is_err() {
+    metrics::counter!("queue_full").increment(1);   // 즉시 버림 = 부하 차단
+}
+while let Some(j) = q.pop() { run(j); }
+
+// ② SegQueue — 무제한(세그먼트 단위 확장). 상한이 없으니 주의
+let q2: SegQueue&lt;Job&gt; = SegQueue::new();
+
+// ③ 스코프 스레드 — 'static 이 아닌 참조를 스레드에 넘길 수 있습니다
+let data = vec![1u64; 1_000_000];
+crossbeam::thread::scope(|s| {
+    for chunk in data.chunks(250_000) {
+        s.spawn(move |_| chunk.iter().sum::&lt;u64&gt;());
+    }
+}).unwrap();
+// (표준의 std::thread::scope 도 같은 일을 합니다 — 1.63 이후)
+
+// ④ epoch 기반 회수 — lock-free 자료구조를 직접 만들 때
+//    "아무도 안 보게 된 뒤에 해제"를 안전하게 처리합니다 (🔬 d09)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>lock-free 를 직접 만들지 마세요</b> — ABA 문제 · 메모리 회수 · 메모리 순서가 얽혀
+        <b>전문가도 틀립니다</b>. <code>crossbeam</code>·<code>flume</code>·<code>DashMap</code> 처럼
+        <b>검증된 것을 쓰고</b>, 정말 필요하면 <code>loom</code> 으로 모델 검사(🔬 d10)를 돌리세요.
+      </div>
+    </div>
+  </div>
+  <div class="tw rv"><table class="cheat">
+    <tr><th style="width:22%">상황</th><th>도구</th><th>이유</th></tr>
+    <tr><td>요청 수 세기</td><td><code>AtomicU64</code>(코어별 분산)</td><td>락 없음 · 정확도 요구 낮음</td></tr>
+    <tr><td>설정 무중단 교체</td><td><b><code>ArcSwap</code></b></td><td>읽기 비용 ≈ 0</td></tr>
+    <tr><td>세션 맵 10만 건</td><td><code>DashMap</code> · <code>moka</code></td><td>샤딩으로 경합 분산</td></tr>
+    <tr><td>DB 커넥션 대여</td><td><b>세마포어 + 풀</b></td><td>동시 수 제한이 본질</td></tr>
+    <tr><td>순서가 중요한 상태</td><td><b>액터</b>(h03)</td><td>채널 순서 = 처리 순서</td></tr>
+    <tr><td>잠금 구간에 await</td><td><code>tokio::sync::Mutex</code></td><td>다른 선택지가 없음</td></tr>
+    <tr><td>짧은 임계 구역</td><td><code>parking_lot::Mutex</code></td><td>가장 단순하고 빠름</td></tr>
+    <tr><td>긴 읽기 · 드문 쓰기</td><td><code>RwLock</code></td><td>이때만 이득</td></tr>
+  </table></div>
+
+  <div class="ez mid"><b>정리 —</b> 락을 고르기 전에 <b>액터 · 원자변수 · <code>ArcSwap</code> · 샤딩</b> 으로 락을 없앨 수 있는지 먼저 보세요.
+    남았다면 <b><code>parking_lot::Mutex</code> 를 짧게</b> 쓰는 것이 기본값이고,
+    <code>RwLock</code> 은 <b>임계 구역이 길고 읽기가 압도적일 때만</b> 이득입니다.
+    <code>tokio::sync::Mutex</code> 는 <b>잠근 채 <code>await</code> 해야 할 때만</b> 씁니다.</div>
+</section>
+
+
+<!-- ==================== h05 ==================== -->
+<section class="sec" id="h05">
+  <div class="sec-head rv">
+    <span class="no">SVC 05</span>
+    <h2>제로카피 — <span class="t">바이트를 옮기지 않고 넘기기</span></h2>
+    <p class="lead">
+      네트워크 서비스가 느린 이유의 상당 부분은 계산이 아니라 <b>같은 바이트를 서너 번 복사하는 것</b>입니다.
+      소켓 버퍼 → <code>Vec&lt;u8&gt;</code> → 파싱 결과 <code>String</code> → 다시 직렬화 버퍼.
+      Rust 는 <b>소유권 덕분에 “복사 안 하고 넘기기”가 안전하게 가능한</b> 드문 언어입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 306" role="img" aria-label="바이트 버퍼를 다루는 두 방식을 비교하는 그림. 위쪽은 Vec 을 잘라 쓸 때마다 새 메모리를 잡고 내용을 복사하므로 요청 하나에 버퍼가 여러 벌 생긴다. 아래쪽은 bytes 크레이트의 Bytes 타입으로, 하나의 힙 버퍼를 참조 카운트로 공유하고 각 조각은 시작 위치와 길이만 다르게 가리키므로 복사가 일어나지 않고 마지막 조각이 사라질 때 버퍼가 해제된다.">
+      <text x="16" y="18" class="lbl">한 번 읽은 8KB 를 헤더·본문·꼬리로 나눠 쓸 때</text>
+
+      <text x="16" y="42" class="ttl rs-t">① Vec&lt;u8&gt; 을 to_vec() 으로 자르면 — 매번 새 메모리 + memcpy</text>
+      <rect class="bx" x="16" y="52" width="200" height="34"/>
+      <text x="116" y="74" class="val" text-anchor="middle">원본 8KB</text>
+      <path class="fl ar ar-rs" d="M220 69 L252 69"/>
+      <rect class="bx bx-warn" x="256" y="52" width="126" height="34"/>
+      <text x="319" y="74" class="ann rs-t" text-anchor="middle">헤더 사본 200B</text>
+      <rect class="bx bx-warn" x="390" y="52" width="126" height="34"/>
+      <text x="453" y="74" class="ann rs-t" text-anchor="middle">본문 사본 7KB</text>
+      <rect class="bx bx-warn" x="524" y="52" width="140" height="34"/>
+      <text x="594" y="74" class="ann rs-t" text-anchor="middle">꼬리 사본 800B</text>
+      <text x="16" y="106" class="ann">할당 3번 + 복사 8KB — 초당 5만 요청이면 초당 400MB 를 헛되이 옮깁니다</text>
+
+      <text x="16" y="140" class="ttl ok-t">② Bytes — 버퍼는 하나, 조각들은 '어디부터 몇 바이트'만 들고 있습니다</text>
+      <rect class="bx bx-ok" x="16" y="152" width="648" height="40"/>
+      <text x="32" y="177" class="val ok-t">힙에 있는 실제 버퍼 8KB — 참조 카운트 3</text>
+      <text x="470" y="177" class="ann">할당 0회 · 복사 0바이트</text>
+
+      <rect class="bx" x="16" y="206" width="200" height="46"/>
+      <text x="116" y="226" class="val" text-anchor="middle">Bytes A</text>
+      <text x="116" y="244" class="ann" text-anchor="middle">offset 0 · len 200</text>
+      <rect class="bx" x="240" y="206" width="200" height="46"/>
+      <text x="340" y="226" class="val" text-anchor="middle">Bytes B</text>
+      <text x="340" y="244" class="ann" text-anchor="middle">offset 200 · len 7168</text>
+      <rect class="bx" x="464" y="206" width="200" height="46"/>
+      <text x="564" y="226" class="val" text-anchor="middle">Bytes C</text>
+      <text x="564" y="244" class="ann" text-anchor="middle">offset 7368 · len 800</text>
+
+      <path class="ln" d="M116 202 L116 196"/>
+      <path class="ln" d="M340 202 L340 196"/>
+      <path class="ln" d="M564 202 L564 196"/>
+
+      <rect class="bx bx-hi" x="16" y="264" width="648" height="34"/>
+      <text x="32" y="286" class="ann am-t">셋 중 하나만 남아도 버퍼는 살아 있고, 마지막 조각이 drop 될 때 한 번에 해제됩니다 — 수동 관리가 필요 없습니다</text>
+    </svg>
+    <div class="cap"><b>복사 대신 참조</b> — 소유권이 있으니 “언제 해제할지”를 사람이 안 정해도 됩니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">bytes — 서버 코드의 사실상 표준</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+bytes = "1"</code></pre>
+      <pre class="code" data-lang="rust"><code>use bytes::{Bytes, BytesMut, Buf, BufMut};
+
+// BytesMut — 쓰는 쪽. 읽으면서 채워 나갑니다
+let mut buf = BytesMut::with_capacity(8 * 1024);
+sock.read_buf(&amp;mut buf).await?;         // tokio 가 남은 공간에 직접 씁니다
+
+// split_to — 앞의 n 바이트를 '떼어' 냅니다. 복사 없음 ★
+let header: BytesMut = buf.split_to(200);
+let header: Bytes = header.freeze();     // 불변으로 굳히면 clone 이 공짜
+
+// clone 은 참조 카운트만 올립니다 — Arc&lt;Vec&lt;u8&gt;&gt; 와 같은 비용
+let for_log = header.clone();
+tokio::spawn(async move { log_it(for_log).await });
+
+// slice — 부분 참조 (역시 복사 없음)
+let magic: Bytes = header.slice(0..4);
+
+// Buf 트레이트 — 커서처럼 읽습니다
+let mut b = header.clone();
+let ver = b.get_u8();
+let len = b.get_u32();                   // 빅엔디안
+let rest = b.copy_to_bytes(len as usize);
+
+// BufMut — 쓰기
+let mut out = BytesMut::new();
+out.put_u8(1);
+out.put_u32(payload.len() as u32);
+out.put_slice(&amp;payload);</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>왜 <code>Arc&lt;Vec&lt;u8&gt;&gt;</code> 로는 부족한가</b> — <code>Arc&lt;Vec&gt;</code> 는 <b>전체</b>를 공유할 뿐
+        “앞의 200바이트만”을 따로 넘길 수 없습니다. <code>Bytes</code> 는 <b>같은 할당 위에 여러 뷰</b>를 만들고
+        각 뷰가 독립적으로 살아 있을 수 있게 합니다. hyper·axum·tonic 이 전부 이 타입을 씁니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Cow — “대개는 안 고치는데 가끔 고친다”</h4>
+      <pre class="code" data-lang="rust"><code>use std::borrow::Cow;
+
+// 입력의 95%는 정상이고 5%만 정규화가 필요하다면,
+// 95%는 복사 없이 그대로 돌려줍니다.
+fn normalize(s: &amp;str) -&gt; Cow&lt;'_, str&gt; {
+    if s.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+        Cow::Borrowed(s)                  // ★ 할당 0
+    } else {
+        Cow::Owned(s.to_lowercase().replace(' ', "_"))
+    }
+}
+
+let a = normalize("user_id");   // Borrowed — 새 메모리 없음
+let b = normalize("User Id");   // Owned    — 여기서만 할당
+
+// 함수 시그니처에서의 관용구
+fn render(tpl: &amp;str, vars: &amp;Vars) -&gt; Cow&lt;'_, str&gt; { /* … */ }
+
+// serde 와 함께 — 역직렬화 시 입력 버퍼를 그대로 빌립니다
+#[derive(serde::Deserialize)]
+struct Event&lt;'a&gt; {
+    #[serde(borrow)]
+    name: Cow&lt;'a, str&gt;,           // 이스케이프가 없으면 빌리고, 있으면 소유
+    ts: u64,
+}
+// serde_json::from_slice::&lt;Event&gt;(&amp;buf)?  ← buf 가 살아 있는 동안만 유효</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>수명이 붙습니다</b> — 빌리는 순간 <b>원본 버퍼보다 오래 살 수 없습니다</b>.
+        구조체에 담아 다른 태스크로 보내야 한다면 <code>.into_owned()</code> 로 소유하게 만들거나
+        처음부터 <code>Bytes</code> 를 쓰세요. <b>“채널 너머로 보낼 것은 소유, 함수 안에서 쓸 것은 빌림”</b>이 기준입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">복사가 일어나는 자리 찾기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 요청 하나에 복사 다섯 번</h5>
+      <pre class="code" data-lang="rust"><code>async fn handle(mut sock: TcpStream) -&gt; Result&lt;()&gt; {
+    let mut v = Vec::new();
+    sock.read_to_end(&amp;mut v).await?;            // ① 소켓 → Vec (불가피)
+
+    let s = String::from_utf8(v.clone())?;      // ② 통째 복사 ★
+    let parts: Vec&lt;String&gt; = s.split(',')
+        .map(|p| p.to_string())                 // ③ 조각마다 할당 ★
+        .collect();
+
+    let joined = parts.join("|");               // ④ 또 새 String ★
+    let out = format!("{}\n", joined);          // ⑤ 또 ★
+    sock.write_all(out.as_bytes()).await?;
+    Ok(())
+}
+// 1KB 요청 하나에 할당 수십 번 · 복사 4KB
+// 초당 3만 요청 → 초당 120MB 를 옮기고 할당자를 백만 번 부릅니다</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 빌려서 쓰고 한 번만 쓴다</h5>
+      <pre class="code" data-lang="rust"><code>async fn handle(mut sock: TcpStream) -&gt; Result&lt;()&gt; {
+    let mut buf = BytesMut::with_capacity(4096);
+    sock.read_buf(&amp;mut buf).await?;             // ① 불가피한 한 번
+
+    let s = std::str::from_utf8(&amp;buf)?;         // ② 검사만, 복사 없음 ★
+    let mut out = BytesMut::with_capacity(buf.len() + 8);
+    let mut first = true;
+    for p in s.split(',') {                     // ③ &amp;str 조각 — 할당 없음 ★
+        if !first { out.put_u8(b'|'); }
+        out.put_slice(p.as_bytes());            // ④ 목적지 버퍼에 직접
+        first = false;
+    }
+    out.put_u8(b'\n');
+    sock.write_all(&amp;out).await?;                // ⑤ 한 번만
+    Ok(())
+}
+// 할당 2번 · 복사 2KB. 벤치에서 보통 3~6배 차이가 납니다.</code></pre>
+    </div>
+  </div>
+  <div class="note info rv">
+    <b>복사를 찾는 실용적 방법 세 가지</b> —
+    ① <code>cargo clippy -- -W clippy::redundant_clone -W clippy::inefficient_to_string</code> 로 정적 검출,
+    ② <b>dhat</b> 힙 프로파일러로 <b>할당 횟수</b>를 세기(h10),
+    ③ 코드에서 <code>.to_string()</code> · <code>.clone()</code> · <code>.to_vec()</code> · <code>format!</code> 를 검색해
+    <b>“이게 정말 새 소유가 필요한가”</b>를 하나씩 묻기. 세 번째가 제일 많이 잡힙니다.
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">mmap 으로 큰 파일 다루기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">memmap2 — 파일을 메모리처럼</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] memmap2 = "0.9"
+use memmap2::Mmap;
+use std::fs::File;
+
+// 20GB 로그 파일에서 특정 바이트 열만 훑기
+let file = File::open("huge.log")?;
+let mmap = unsafe { Mmap::map(&amp;file)? };   // unsafe: 밖에서 파일이 바뀌면 UB
+
+// 이제 &amp;[u8] 처럼 씁니다 — 읽는 페이지만 실제로 메모리에 올라옵니다
+let data: &amp;[u8] = &amp;mmap;
+let count = data.iter().filter(|&amp;&amp;b| b == b'\n').count();
+
+// rayon 과 조합하면 코어 수만큼 병렬로 (h09)
+use rayon::prelude::*;
+let count = data.par_chunks(1 &lt;&lt; 20)
+                .map(|c| c.iter().filter(|&amp;&amp;b| b == b'\n').count())
+                .sum::&lt;usize&gt;();
+
+// 쓰기용
+use memmap2::MmapMut;
+let mut m = unsafe { MmapMut::map_mut(&amp;file)? };
+m[0..4].copy_from_slice(&amp;[1, 2, 3, 4]);
+m.flush()?;                                 // 디스크로 내려쓰기</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>mmap 이 항상 빠르지는 않습니다</b> — <b>순차로 한 번만 읽는다면</b>
+        <code>BufReader</code> 가 더 빠를 때가 많습니다(read-ahead 가 잘 듣습니다).
+        mmap 이 이기는 건 <b>랜덤 접근 · 여러 번 읽음 · 여러 프로세스가 공유</b>할 때입니다.
+        또 <b>페이지 폴트가 블로킹</b>이므로 async 워커에서 직접 만지면 h02 의 문제가 그대로 납니다 —
+        <code>spawn_blocking</code> 안에서 쓰세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직렬화 포맷 — 무엇을 고를 것인가</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:22%">포맷</th><th>크기</th><th>속도</th><th>쓰는 곳</th></tr>
+        <tr><td>JSON</td><td>큼</td><td>느림</td><td>외부 API · 사람이 읽음</td></tr>
+        <tr><td><code>bincode</code></td><td>작음</td><td>빠름</td><td><b>내부 서비스 간</b></td></tr>
+        <tr><td><code>postcard</code></td><td><b>가장 작음</b></td><td>빠름</td><td>임베디드 · no_std (h12)</td></tr>
+        <tr><td><code>rkyv</code></td><td>중간</td><td><b>역직렬화 0</b></td><td>대용량 · mmap 캐시</td></tr>
+        <tr><td><code>MessagePack</code></td><td>작음</td><td>중간</td><td>다언어 호환</td></tr>
+        <tr><td>Protobuf(prost)</td><td>작음</td><td>중간</td><td><b>gRPC</b> · 스키마 진화</td></tr>
+        <tr><td>Arrow/Parquet</td><td>작음</td><td>열 단위</td><td><b>분석</b>(h08)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// rkyv — '역직렬화가 없는' 포맷 ★
+// 바이트를 그대로 구조체로 '들여다봅니다' (파싱 0)
+use rkyv::{Archive, Deserialize, Serialize};
+
+#[derive(Archive, Serialize, Deserialize)]
+struct Index { ids: Vec&lt;u64&gt;, offsets: Vec&lt;u32&gt; }
+
+// 저장
+let bytes = rkyv::to_bytes::&lt;_, 256&gt;(&amp;index)?;
+std::fs::write("idx.rkyv", &amp;bytes)?;
+
+// 로드 — mmap 하고 캐스팅만 하면 끝입니다 (수 GB 도 즉시)
+let mmap = unsafe { Mmap::map(&amp;File::open("idx.rkyv")?)? };
+let archived = unsafe { rkyv::archived_root::&lt;Index&gt;(&amp;mmap) };
+let first = archived.ids[0];        // 파싱 없이 바로 접근 ★
+
+// 비교: 1GB 인덱스를 bincode 로 읽으면 수 초 + 1GB 힙,
+//       rkyv + mmap 이면 수 밀리초 + 실제 만진 페이지만 메모리</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">운영체제 수준의 제로카피</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">sendfile · splice — 유저 공간을 아예 안 거침</h4>
+      <pre class="code" data-lang="text"><code>파일을 소켓으로 보낼 때 실제로 일어나는 복사
+
+  평범한 read + write (복사 4번 · 컨텍스트 스위치 4번)
+    디스크 → 커널 페이지 캐시 → 유저 버퍼 → 커널 소켓 버퍼 → NIC
+
+  sendfile(2)  (복사 2번 · 스위치 2번)
+    디스크 → 커널 페이지 캐시 ──────────────→ 커널 소켓 버퍼 → NIC
+      유저 공간을 거치지 않습니다 ★
+
+  DMA 스캐터-개더까지 지원되면 사실상 복사 0번
+    커널 페이지 캐시의 주소만 NIC 에 알려 주고 NIC 가 직접 읽습니다</code></pre>
+      <pre class="code" data-lang="rust"><code>// Rust 에서 쓰는 법 — 대부분 크레이트가 감싸 줍니다
+// tokio 에는 직접 API 가 없어 nix 등을 씁니다
+#[cfg(target_os = "linux")]
+fn send_file(out: &amp;TcpStream, f: &amp;File, len: usize) -&gt; std::io::Result&lt;usize&gt; {
+    use std::os::fd::AsRawFd;
+    let n = unsafe {
+        libc::sendfile(out.as_raw_fd(), f.as_raw_fd(),
+                       std::ptr::null_mut(), len)
+    };
+    if n &lt; 0 { Err(std::io::Error::last_os_error()) } else { Ok(n as usize) }
+}
+
+// 실무에서는 정적 파일 서빙에 tower-http 의 ServeDir 를 쓰고,
+// 그쪽이 내부적으로 최적 경로를 고르게 두는 편이 낫습니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">벡터 I/O 와 버퍼 재사용</h4>
+      <pre class="code" data-lang="rust"><code>use tokio::io::AsyncWriteExt;
+use std::io::IoSlice;
+
+// ① writev — 흩어진 조각을 한 번의 시스템 콜로 (합치는 복사 없이)
+let bufs = [
+    IoSlice::new(&amp;header),
+    IoSlice::new(&amp;body),
+    IoSlice::new(b"\r\n"),
+];
+sock.write_vectored(&amp;bufs).await?;
+// 헤더+본문을 format! 으로 합치던 코드를 이걸로 바꾸면 할당이 사라집니다
+
+// ② 버퍼 풀 — 요청마다 새로 할당하지 않습니다
+use std::sync::Arc;
+use crossbeam::queue::ArrayQueue;
+
+struct Pool(Arc&lt;ArrayQueue&lt;BytesMut&gt;&gt;);
+impl Pool {
+    fn get(&amp;self) -&gt; BytesMut {
+        self.0.pop().unwrap_or_else(|| BytesMut::with_capacity(16 * 1024))
+    }
+    fn put(&amp;self, mut b: BytesMut) {
+        b.clear();                       // 용량은 유지, 길이만 0
+        let _ = self.0.push(b);          // 가득 차면 그냥 버림
+    }
+}
+
+// ③ 그런데 먼저 재 보세요 — mimalloc 으로 바꾸는 것만으로
+//    풀링과 비슷한 효과가 나는 경우가 많습니다 (h10) ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>순서를 지키세요</b> — ① <code>Bytes</code>·<code>Cow</code> 로 불필요한 복사 제거 →
+        ② 할당자 교체(h10) → ③ 그래도 부족하면 버퍼 풀.
+        <b>버퍼 풀부터 만들면 복잡도만 얻고 이득은 적습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 서버 코드에서 바이트는 <b><code>Bytes</code>/<code>BytesMut</code></b> 로 다루고,
+    자를 때는 <code>split_to</code>·<code>slice</code> 로 <b>참조만 나눠</b> 가지세요.
+    “가끔만 고치는” 문자열은 <code>Cow</code>, 큰 파일은 <b>mmap + <code>spawn_blocking</code></b>,
+    내부 통신은 <code>bincode</code>, 즉시 로드해야 하는 대용량 인덱스는 <b><code>rkyv</code></b> 입니다.</div>
+</section>
+
+
+<!-- ==================== h06 ==================== -->
+<section class="sec" id="h06">
+  <div class="sec-head rv">
+    <span class="no">SVC 06</span>
+    <h2>네트워크 저수준 — <span class="t">TCP 직접 · 커스텀 프로토콜 · QUIC</span></h2>
+    <p class="lead">
+      HTTP 만 쓰는 게 아닙니다. 게임 서버 · 로그 수집기 · 메시지 브로커 · 프록시는
+      <b>바이트를 직접 프레이밍</b>합니다. Rust 는 이 층에서 특히 강합니다 —
+      <code>tokio-util</code> 의 codec 이 <b>“바이트 스트림 → 메시지 스트림”</b> 변환을 표준화해 두었기 때문입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 318" role="img" aria-label="TCP 바이트 스트림을 프레임으로 나누는 과정을 보여 주는 그림. TCP 는 경계가 없어 한 번의 읽기에 메시지 하나가 절반만 오거나 두 개 반이 한꺼번에 올 수 있다. 코덱은 누적 버퍼를 두고 길이 머리 4바이트를 먼저 읽어 본문이 다 도착했는지 확인하고, 다 왔으면 그만큼 잘라 메시지로 내보내고 모자라면 더 읽기를 기다린다. 그 결과 위쪽 코드는 완성된 메시지 스트림만 보게 된다.">
+      <text x="16" y="18" class="lbl">TCP 에는 '메시지 경계'가 없습니다 — 코덱이 그걸 만듭니다</text>
+
+      <text x="16" y="42" class="ttl rs-t">소켓에서 실제로 읽히는 모습 (read 세 번)</text>
+      <rect class="bx bx-warn" x="16" y="52" width="200" height="44"/>
+      <text x="32" y="72" class="ann rs-t">read #1 → 6바이트</text>
+      <text x="32" y="90" class="ann">[len=10][본문 2바이트만]</text>
+      <rect class="bx bx-warn" x="240" y="52" width="200" height="44"/>
+      <text x="256" y="72" class="ann rs-t">read #2 → 30바이트</text>
+      <text x="256" y="90" class="ann">[남은 8][len=12][12][len=6][3]</text>
+      <rect class="bx bx-warn" x="464" y="52" width="200" height="44"/>
+      <text x="480" y="72" class="ann rs-t">read #3 → 3바이트</text>
+      <text x="480" y="90" class="ann">[앞 메시지의 남은 3]</text>
+
+      <path class="fl ar" d="M116 100 L116 122"/>
+      <path class="fl ar" d="M340 100 L340 122"/>
+      <path class="fl ar" d="M564 100 L564 122"/>
+
+      <rect class="bx bx-hi" x="16" y="126" width="648" height="64"/>
+      <text x="32" y="148" class="val am-t">Decoder — 누적 버퍼(BytesMut)를 들고 매번 같은 질문을 합니다</text>
+      <text x="32" y="168" class="ann">① 4바이트(길이)가 있나? 없으면 Ok(None) — "더 읽어 줘"</text>
+      <text x="32" y="184" class="ann">② 길이만큼 본문이 다 있나? 있으면 split_to 로 떼어 메시지로, 없으면 다시 Ok(None)</text>
+
+      <path class="fl ar ar-gn" d="M340 194 L340 214"/>
+
+      <text x="16" y="234" class="ttl ok-t">위쪽 코드가 보는 것 — 완성된 메시지만</text>
+      <rect class="bx bx-ok" x="16" y="244" width="152" height="40"/>
+      <text x="92" y="269" class="val ok-t" text-anchor="middle">Msg #1</text>
+      <rect class="bx bx-ok" x="180" y="244" width="152" height="40"/>
+      <text x="256" y="269" class="val ok-t" text-anchor="middle">Msg #2</text>
+      <rect class="bx bx-ok" x="344" y="244" width="152" height="40"/>
+      <text x="420" y="269" class="val ok-t" text-anchor="middle">Msg #3</text>
+      <rect class="bx bx-mut" x="508" y="244" width="156" height="40"/>
+      <text x="586" y="269" class="ann" text-anchor="middle">아직 안 온 것은 버퍼에 대기</text>
+
+      <text x="16" y="304" class="ann">while let Some(msg) = framed.next().await — 위 코드는 TCP 의 조각남을 전혀 몰라도 됩니다 · 이 next() 는 취소 안전합니다</text>
+    </svg>
+    <div class="cap">코덱은 <b>“모자라면 None, 다 왔으면 Some”</b> 한 규칙만 지키면 됩니다 — 나머지는 <code>Framed</code> 가 합니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">TcpListener 를 직접 — 서버의 뼈대</h4>
+      <pre class="code" data-lang="rust"><code>use tokio::net::{TcpListener, TcpStream};
+use tokio_util::sync::CancellationToken;
+
+#[tokio::main]
+async fn main() -&gt; anyhow::Result&lt;()&gt; {
+    let listener = TcpListener::bind("0.0.0.0:9000").await?;
+    let token = CancellationToken::new();
+    tracing::info!(addr = %listener.local_addr()?, "listening");
+
+    loop {
+        tokio::select! {
+            res = listener.accept() =&gt; {
+                let (sock, peer) = match res {
+                    Ok(v) =&gt; v,
+                    // ★ accept 실패로 루프를 끝내면 안 됩니다 (EMFILE 등)
+                    Err(e) =&gt; { tracing::warn!(%e, "accept"); continue; }
+                };
+                sock.set_nodelay(true)?;      // 작은 응답의 지연을 없앰 ★
+                let t = token.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = serve(sock, t).await {
+                        tracing::warn!(%peer, %e, "conn");
+                    }
+                });
+            }
+            _ = tokio::signal::ctrl_c() =&gt; { token.cancel(); break; }
+        }
+    }
+    Ok(())
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>set_nodelay(true)</code> 를 잊지 마세요</b> — 기본은 Nagle 알고리즘이 켜져 있어
+        작은 패킷을 모아 보냅니다. 요청-응답형 프로토콜에서는 <b>응답마다 최대 40ms 가 붙습니다</b>.
+        “왜 로컬에서 40ms 씩 걸리지?”의 단골 원인입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">커스텀 코덱 — 길이 머리 + 본문</h4>
+      <pre class="code" data-lang="rust"><code>use tokio_util::codec::{Decoder, Encoder, Framed};
+use bytes::{Bytes, BytesMut, Buf, BufMut};
+
+pub struct LenCodec { max: usize }
+
+impl Decoder for LenCodec {
+    type Item = Bytes;
+    type Error = std::io::Error;
+
+    fn decode(&amp;mut self, src: &amp;mut BytesMut)
+        -&gt; Result&lt;Option&lt;Bytes&gt;, Self::Error&gt;
+    {
+        if src.len() &lt; 4 { return Ok(None); }              // ① 길이도 안 옴
+        let len = u32::from_be_bytes(src[..4].try_into().unwrap()) as usize;
+        if len &gt; self.max {                                 // ★ 반드시 상한 검사
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData, "frame too large"));
+        }
+        if src.len() &lt; 4 + len {
+            src.reserve(4 + len - src.len());               // 미리 확보(재할당 감소)
+            return Ok(None);                                // ② 본문이 덜 옴
+        }
+        src.advance(4);                                     // 머리 버리고
+        Ok(Some(src.split_to(len).freeze()))                // 본문만 떼어 냄 ★
+    }
+}
+
+impl Encoder&lt;Bytes&gt; for LenCodec {
+    type Error = std::io::Error;
+    fn encode(&amp;mut self, item: Bytes, dst: &amp;mut BytesMut) -&gt; Result&lt;(), Self::Error&gt; {
+        dst.reserve(4 + item.len());
+        dst.put_u32(item.len() as u32);
+        dst.put_slice(&amp;item);
+        Ok(())
+    }
+}</code></pre>
+    </div>
+  </div>
+  <div class="note tip rv">
+    <b>바로 쓸 수 있는 기본 코덱들</b> — <code>LinesCodec</code>(줄 단위) ·
+    <code>LengthDelimitedCodec</code>(위 코드와 같은 일을 설정으로) · <code>BytesCodec</code>(그대로 통과).
+    <b>대부분은 <code>LengthDelimitedCodec</code> + <code>serde</code> 조합으로 충분합니다</b> —
+    <code>tokio-serde</code> 를 얹으면 <b>구조체가 그대로 오가는 채널</b>이 됩니다.
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">Framed 로 읽고 쓰기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한 연결을 다루는 표준 루프</h4>
+      <pre class="code" data-lang="rust"><code>use futures::{SinkExt, StreamExt};
+
+async fn serve(sock: TcpStream, token: CancellationToken) -&gt; anyhow::Result&lt;()&gt; {
+    let mut framed = Framed::new(sock, LenCodec { max: 16 * 1024 * 1024 });
+
+    loop {
+        tokio::select! {
+            // ★ next() 는 취소 안전 — select! 에 넣어도 됩니다 (h03)
+            frame = framed.next() =&gt; {
+                let Some(frame) = frame else { break };      // 상대가 닫음
+                let req = frame?;
+                let resp = handle_frame(req).await?;
+                framed.send(resp).await?;                    // 인코더가 머리를 붙임
+            }
+            _ = token.cancelled() =&gt; {
+                framed.send(Bytes::from_static(b"BYE")).await.ok();
+                break;
+            }
+            // 유휴 연결 정리 — 좀비 커넥션이 파일 디스크립터를 먹지 않게
+            _ = tokio::time::sleep(Duration::from_secs(300)) =&gt; {
+                tracing::info!("idle timeout");
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+// 읽기/쓰기를 다른 태스크로 나누고 싶다면
+let (mut sink, mut stream) = framed.split();
+tokio::spawn(async move { while let Some(f) = stream.next().await { /* … */ } });</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">UDP — 프레이밍이 이미 되어 있습니다</h4>
+      <pre class="code" data-lang="rust"><code>use tokio::net::UdpSocket;
+
+let sock = UdpSocket::bind("0.0.0.0:9001").await?;
+// 수신 버퍼를 키웁니다 — 기본값이면 폭주 시 커널이 조용히 버립니다 ★
+// (리눅스: sysctl net.core.rmem_max, socket2 로 SO_RCVBUF 설정)
+
+let mut buf = vec![0u8; 65_535];
+loop {
+    let (n, peer) = sock.recv_from(&amp;mut buf).await?;
+    // ★ 여기서 무거운 처리를 하면 그동안 들어온 패킷이 커널 버퍼에서 넘칩니다.
+    //    반드시 '받아서 채널에 넣기'만 하고 처리는 다른 태스크로 (h13)
+    if tx.try_send(Packet::new(&amp;buf[..n], peer)).is_err() {
+        DROPPED.fetch_add(1, Ordering::Relaxed);   // 버린 수를 반드시 세세요
+    }
+}
+
+// UDP 로 로그·메트릭을 받을 때의 현실
+//   · 유실은 정상입니다 — 세고, 알람을 걸고, 재전송은 하지 않습니다
+//   · MTU 1500 을 넘기면 IP 단편화 → 하나만 잃어도 전부 손실
+//     → 페이로드는 1200바이트 안쪽으로 맞추는 것이 관례입니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>UDP 수신 루프의 철칙</b> — <b>수신 태스크는 아무 일도 하지 않습니다</b>.
+        받아서 큐에 넣기만 하고 즉시 다음 <code>recv_from</code> 으로 돌아갑니다.
+        파싱·집계·저장은 전부 다른 태스크의 몫입니다(h13 에서 그대로 씁니다).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">QUIC(quinn)과 HTTP/3</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">quinn — UDP 위의 신뢰성 있는 다중 스트림</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] quinn = "0.11", rustls = "0.23", rcgen = "0.13"
+use quinn::{Endpoint, ServerConfig};
+
+let (cert, key) = generate_self_signed()?;      // 실서비스는 진짜 인증서로
+let mut cfg = ServerConfig::with_single_cert(vec![cert], key)?;
+std::sync::Arc::get_mut(&amp;mut cfg.transport).unwrap()
+    .max_concurrent_uni_streams(0_u8.into())
+    .keep_alive_interval(Some(Duration::from_secs(10)));
+
+let endpoint = Endpoint::server(cfg, "0.0.0.0:4433".parse()?)?;
+
+while let Some(incoming) = endpoint.accept().await {
+    tokio::spawn(async move {
+        let conn = incoming.await?;
+        // 한 연결 안에서 스트림을 여러 개 — 서로 막지 않습니다 ★
+        while let Ok((mut send, mut recv)) = conn.accept_bi().await {
+            tokio::spawn(async move {
+                let req = recv.read_to_end(64 * 1024).await?;
+                send.write_all(&amp;handle(req)).await?;
+                send.finish()?;
+                anyhow::Ok(())
+            });
+        }
+        anyhow::Ok(())
+    });
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>QUIC 이 이기는 지점</b> — ① <b>head-of-line blocking 없음</b>(스트림 하나가 패킷을 잃어도 다른 스트림은 진행),
+        ② <b>0-RTT 재연결</b>, ③ <b>연결 마이그레이션</b>(와이파이↔LTE 전환에도 연결 유지),
+        ④ TLS 1.3 내장. 모바일 클라이언트·잦은 재연결 환경에서 체감이 큽니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">HTTP/3 와 io_uring — 2026 현황</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">기술</th><th>크레이트</th><th>상태</th></tr>
+        <tr><td>HTTP/3 서버</td><td><code>h3</code> + <code>quinn</code></td><td>실사용 가능 · API 변동</td></tr>
+        <tr><td>HTTP/3 클라이언트</td><td><code>reqwest</code>(feature)</td><td>실험적</td></tr>
+        <tr><td>QUIC</td><td><b><code>quinn</code></b> · <code>quiche</code></td><td><b>성숙</b></td></tr>
+        <tr><td>io_uring 범용</td><td><code>tokio-uring</code></td><td>실험적 · 정체</td></tr>
+        <tr><td>thread-per-core</td><td><b><code>monoio</code></b> · <code>glommio</code></td><td>실사용 사례 있음</td></tr>
+        <tr><td>저수준 uring</td><td><code>io-uring</code></td><td>안정 · 손이 많이 감</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// monoio — 코어마다 런타임 하나 + io_uring. Send 가 필요 없습니다
+#[monoio::main(driver = "uring")]
+async fn main() -&gt; std::io::Result&lt;()&gt; {
+    let listener = monoio::net::TcpListener::bind("0.0.0.0:8080")?;
+    loop {
+        let (stream, _) = listener.accept().await?;
+        monoio::spawn(async move {
+            let buf = vec![0u8; 4096];
+            // ★ 버퍼의 '소유권'을 커널에 넘기고 돌려받는 방식 (완료 기반 I/O)
+            let (res, buf) = stream.read(buf).await;
+            let n = res?;
+            let (res, _) = stream.write_all(buf.slice(..n)).await;
+            res?;
+            std::io::Result::Ok(())
+        });
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>io_uring 을 지금 도입할 것인가</b> — 벤치에서는 tokio 대비 <b>작은 요청 위주일 때 20~40%</b> 가 나오지만,
+        <b>생태계가 전부 tokio 기준</b>입니다(sqlx·reqwest·axum 전부). 실무 권고는
+        <b>“프록시·캐시처럼 의존성이 거의 없는 단일 목적 서비스”에만</b> 검토하는 것입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">소켓 옵션과 커널 튜닝</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SO_REUSEPORT — 커널이 부하를 나눠 줍니다</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] socket2 = "0.5"
+use socket2::{Domain, Protocol, Socket, Type};
+
+fn reuseport_listener(addr: std::net::SocketAddr) -&gt; std::io::Result&lt;TcpListener&gt; {
+    let sock = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    sock.set_reuse_address(true)?;
+    sock.set_reuse_port(true)?;          // ★ 리눅스: 같은 포트에 여러 소켓
+    sock.set_nonblocking(true)?;
+    sock.bind(&amp;addr.into())?;
+    sock.listen(1024)?;                  // backlog — 기본 128 은 부족할 때가 있음
+    TcpListener::from_std(sock.into())
+}
+
+// 코어마다 스레드 + 각자 리스너 → accept 경합이 사라집니다
+for core in 0..num_cpus::get() {
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all().build().unwrap();
+        rt.block_on(async {
+            let l = reuseport_listener(addr).unwrap();
+            loop { let (s, _) = l.accept().await.unwrap(); tokio::spawn(serve(s)); }
+        });
+    });
+}
+// 무중단 배포에도 씁니다 — 새 프로세스가 같은 포트를 열고 옛 프로세스를 종료</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">부하가 걸릴 때 먼저 보는 커널 값들</h4>
+      <pre class="code" data-lang="bash"><code># 열 수 있는 파일(=소켓) 수 — 'Too many open files' 의 원인
+ulimit -n                       # 보통 1024 → 서버는 65535 이상으로
+# systemd 유닛: LimitNOFILE=1048576
+
+# accept 대기줄 — 넘치면 SYN 이 조용히 버려집니다
+sysctl net.core.somaxconn                   # 4096 권장
+sysctl net.ipv4.tcp_max_syn_backlog         # 8192
+
+# TIME_WAIT 이 쌓일 때 (짧은 연결이 아주 많은 경우)
+sysctl net.ipv4.tcp_tw_reuse                # 1
+sysctl net.ipv4.ip_local_port_range         # 1024 65535
+
+# UDP 수신 버퍼 — 로그 수집기라면 필수 (h13)
+sysctl net.core.rmem_max                    # 16MB 정도로
+
+# 지금 무슨 일이 일어나는지 보기
+ss -s                          # 소켓 요약 (TIME_WAIT · ESTAB 수)
+ss -lnt 'sport = :9000'        # 그 포트의 Recv-Q / Send-Q ★
+netstat -su | grep -i error    # UDP 수신 버퍼 넘침 카운터
+cat /proc/net/softnet_stat     # 커널이 드롭한 패킷</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>수치를 올리기 전에 <code>ss -lnt</code> 를 보세요</b> — <code>Recv-Q</code> 가 계속 크면
+        <b>애플리케이션이 못 따라가는 것</b>이고, <code>Send-Q</code> 가 크면 <b>상대가 못 받는 것</b>입니다.
+        원인이 다르면 고칠 곳도 다릅니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> TCP 는 <b>메시지 경계가 없으므로</b> 항상 코덱이 필요합니다 —
+    <code>Decoder</code> 는 <b>“모자라면 <code>Ok(None)</code>”</b> 만 지키면 되고, 반드시 <b>프레임 크기 상한</b>을 두세요.
+    <code>set_nodelay(true)</code> · <code>accept</code> 실패 시 <b>계속 진행</b> · UDP 수신 태스크는 <b>받아서 큐에 넣기만</b>.
+    QUIC 은 모바일·다중 스트림에서 이득이 크고, io_uring 은 <b>아직 특수 목적</b>입니다.</div>
+</section>
+
+
+<!-- ==================== h07 ==================== -->
+<section class="sec" id="h07">
+  <div class="sec-head rv">
+    <span class="no">SVC 07</span>
+    <h2>데이터 파이프라인 — <span class="t">Kafka · Redis · 스트림 처리</span></h2>
+    <p class="lead">
+      고성능 서비스는 대부분 <b>“받아서 · 변환해서 · 어딘가에 넣는”</b> 파이프라인입니다.
+      Rust 로 이걸 짜면 <b>같은 처리량을 1/3 의 CPU 와 1/5 의 메모리</b>로 하는 일이 흔합니다.
+      여기서는 Kafka 소비/생산 · Redis 비동기 풀 · <code>Stream</code> 조합 · 그리고
+      <b>“정확히 한 번”이 실제로 무엇을 뜻하는지</b>를 다룹니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 330" role="img" aria-label="카프카 파티션과 소비자 그룹의 관계를 보여 주는 그림. 토픽은 파티션 여섯 개로 나뉘고 각 파티션은 순서가 보장된 로그다. 같은 소비자 그룹 안에서는 파티션 하나를 소비자 하나만 맡으므로 소비자를 파티션 수보다 많이 띄우면 남는 소비자는 아무것도 못 받는다. 아래에는 소비자가 메시지를 받아 처리하고 오프셋을 커밋하는 순서와, 처리 전에 커밋하면 유실이 나고 처리 후에 커밋하면 중복이 날 수 있다는 점이 표시된다.">
+      <text x="16" y="18" class="lbl">토픽 = 파티션들의 묶음 · 파티션 = 순서가 보장된 로그 하나</text>
+
+      <text x="16" y="42" class="ttl">토픽 logs (파티션 6개) — 키 해시로 나뉩니다</text>
+      <rect class="bx" x="16" y="52" width="100" height="34"/>
+      <text x="66" y="74" class="ann" text-anchor="middle">P0</text>
+      <rect class="bx" x="124" y="52" width="100" height="34"/>
+      <text x="174" y="74" class="ann" text-anchor="middle">P1</text>
+      <rect class="bx" x="232" y="52" width="100" height="34"/>
+      <text x="282" y="74" class="ann" text-anchor="middle">P2</text>
+      <rect class="bx" x="340" y="52" width="100" height="34"/>
+      <text x="390" y="74" class="ann" text-anchor="middle">P3</text>
+      <rect class="bx" x="448" y="52" width="100" height="34"/>
+      <text x="498" y="74" class="ann" text-anchor="middle">P4</text>
+      <rect class="bx" x="556" y="52" width="108" height="34"/>
+      <text x="610" y="74" class="ann" text-anchor="middle">P5</text>
+
+      <path class="fl ar" d="M66 90 L66 108"/>
+      <path class="fl ar" d="M174 90 L174 108"/>
+      <path class="fl ar" d="M282 90 L282 108"/>
+      <path class="fl ar" d="M390 90 L390 108"/>
+      <path class="fl ar" d="M498 90 L498 108"/>
+      <path class="fl ar ar-rs" d="M610 90 L610 108"/>
+
+      <text x="16" y="128" class="ttl ok-t">소비자 그룹 svc-agg — 파티션 하나당 소비자 하나</text>
+      <rect class="bx bx-ok" x="16" y="138" width="208" height="40"/>
+      <text x="120" y="162" class="val ok-t" text-anchor="middle">소비자 A — P0 · P1</text>
+      <rect class="bx bx-ok" x="232" y="138" width="208" height="40"/>
+      <text x="336" y="162" class="val ok-t" text-anchor="middle">소비자 B — P2 · P3</text>
+      <rect class="bx bx-ok" x="448" y="138" width="100" height="40"/>
+      <text x="498" y="162" class="val ok-t" text-anchor="middle">C — P4</text>
+      <rect class="bx bx-warn" x="556" y="138" width="108" height="40"/>
+      <text x="610" y="157" class="ann rs-t" text-anchor="middle">D — P5</text>
+      <text x="610" y="172" class="ann" text-anchor="middle">7번째는 놀게 됨</text>
+
+      <text x="16" y="204" class="ttl am-t">한 메시지가 처리되는 순서 — 커밋 위치가 의미를 바꿉니다</text>
+      <circle class="stp" cx="44" cy="238" r="11"/>
+      <text x="44" y="242" class="stpn" text-anchor="middle">1</text>
+      <rect class="bx" x="64" y="220" width="130" height="36"/>
+      <text x="129" y="243" class="ann" text-anchor="middle">poll → 메시지</text>
+      <path class="fl ar" d="M198 238 L222 238"/>
+      <circle class="stp" cx="244" cy="238" r="11"/>
+      <text x="244" y="242" class="stpn" text-anchor="middle">2</text>
+      <rect class="bx bx-fw" x="264" y="220" width="150" height="36"/>
+      <text x="339" y="243" class="ann rs-t" text-anchor="middle">처리 (DB 쓰기 등)</text>
+      <path class="fl ar" d="M418 238 L442 238"/>
+      <circle class="stp" cx="464" cy="238" r="11"/>
+      <text x="464" y="242" class="stpn" text-anchor="middle">3</text>
+      <rect class="bx bx-ok" x="484" y="220" width="180" height="36"/>
+      <text x="574" y="243" class="ann ok-t" text-anchor="middle">오프셋 커밋</text>
+
+      <rect class="bx bx-warn" x="16" y="270" width="318" height="52"/>
+      <text x="32" y="292" class="ann rs-t">커밋을 2번 앞에 두면 — at-most-once</text>
+      <text x="32" y="310" class="ann">처리 중 죽으면 그 메시지는 영영 사라집니다</text>
+      <rect class="bx bx-hi" x="346" y="270" width="318" height="52"/>
+      <text x="362" y="292" class="ann am-t">지금 그림대로면 — at-least-once (기본)</text>
+      <text x="362" y="310" class="ann">3번 직전에 죽으면 재시작 후 다시 처리 → 멱등성이 필요</text>
+    </svg>
+    <div class="cap">파티션 수가 <b>동시성의 상한</b>이고, 커밋 위치가 <b>유실이냐 중복이냐</b>를 정합니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">rdkafka — 소비자</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+# librdkafka 를 함께 빌드 (cmake 불필요, SSL·SASL 포함)
+rdkafka = { version = "0.36", features = ["cmake-build", "ssl", "sasl"] }</code></pre>
+      <pre class="code" data-lang="rust"><code>use rdkafka::config::ClientConfig;
+use rdkafka::consumer::{Consumer, StreamConsumer, CommitMode};
+use rdkafka::Message;
+
+let consumer: StreamConsumer = ClientConfig::new()
+    .set("bootstrap.servers", "kafka:9092")
+    .set("group.id", "svc-agg")
+    .set("enable.auto.commit", "false")      // ★ 손으로 커밋합니다
+    .set("auto.offset.reset", "earliest")
+    .set("session.timeout.ms", "10000")
+    .set("max.poll.interval.ms", "300000")   // 처리가 길면 늘려야 리밸런스를 안 당함
+    .set("fetch.min.bytes", "65536")         // 배치로 받아 처리량 ↑
+    .create()?;
+
+consumer.subscribe(&amp;["logs"])?;
+
+loop {
+    match consumer.recv().await {            // 내부에서 배치로 가져옵니다
+        Err(e) =&gt; tracing::warn!(%e, "kafka"),
+        Ok(m) =&gt; {
+            let payload = m.payload().unwrap_or_default();   // &amp;[u8] — 복사 없음
+            let key = m.key().map(|k| String::from_utf8_lossy(k).to_string());
+            process(key, payload).await?;                    // ← 멱등하게 짜야 함
+            // 매 건 커밋은 느립니다 — 보통 N건 또는 N초마다 (아래 참고)
+            consumer.commit_message(&amp;m, CommitMode::Async)?;
+        }
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>max.poll.interval.ms</code> 사고</b> — 한 메시지 처리가 이 시간을 넘기면
+        브로커가 <b>“이 소비자 죽었다”</b>고 판단해 파티션을 뺏습니다(리밸런스).
+        그러면 <b>같은 메시지를 다른 소비자가 또 처리</b>합니다.
+        무거운 처리는 <code>spawn_blocking</code>·별도 워커로 넘기고 <b>poll 루프는 항상 가볍게</b> 유지하세요(h02).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">rdkafka — 생산자와 배치 커밋</h4>
+      <pre class="code" data-lang="rust"><code>use rdkafka::producer::{FutureProducer, FutureRecord};
+
+let producer: FutureProducer = ClientConfig::new()
+    .set("bootstrap.servers", "kafka:9092")
+    .set("compression.type", "lz4")          // 네트워크·저장 비용을 크게 줄임 ★
+    .set("linger.ms", "10")                  // 10ms 모아서 한 번에 (처리량 ↑)
+    .set("batch.size", "1048576")
+    .set("acks", "all")                      // 복제본까지 확인 (내구성)
+    .set("enable.idempotence", "true")       // ★ 재시도해도 중복 저장 안 됨
+    .create()?;
+
+// 보내기 — 응답을 기다리지 않고 계속 쌓을 수 있습니다
+let rec = FutureRecord::to("events")
+    .key(&amp;user_id)                            // ★ 같은 키 = 같은 파티션 = 순서 보장
+    .payload(&amp;body);
+let _ = producer.send(rec, Duration::from_secs(5)).await;
+
+// ── 배치 커밋 패턴 (소비자 쪽) ──────────────────────────
+let mut n = 0usize;
+let mut last = std::time::Instant::now();
+loop {
+    let m = consumer.recv().await?;
+    process(&amp;m).await?;
+    n += 1;
+    if n &gt;= 1000 || last.elapsed() &gt; Duration::from_secs(5) {
+        consumer.commit_consumer_state(CommitMode::Async)?;   // 여기까지 처리했다
+        n = 0; last = std::time::Instant::now();
+    }
+}
+// 커밋 주기가 곧 '재시작 시 다시 처리할 최대 건수'입니다 — 멱등성과 짝입니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">“정확히 한 번”의 진실</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">분산 시스템에 진짜 exactly-once 는 없습니다</h4>
+      <pre class="code" data-lang="text"><code>가능한 것은 둘뿐입니다
+  at-most-once   유실 가능 · 중복 없음      (커밋을 먼저)
+  at-least-once  유실 없음 · 중복 가능      (처리를 먼저) ★ 기본값
+
+"exactly-once" 로 불리는 것들의 정체
+  ① Kafka 트랜잭션        — 같은 클러스터 안에서 읽고 쓸 때만 성립
+  ② 멱등 소비 (idempotent) — 중복이 와도 결과가 같게 만드는 것 ★ 실무 정답
+  ③ 결과 저장소의 트랜잭션 — 오프셋과 결과를 '같은 트랜잭션'에 쓰기
+
+즉 현실의 답은 거의 항상 ②입니다 —
+  "중복을 막는다"가 아니라 "중복이 와도 괜찮게 만든다"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>멱등성 만드는 세 가지 수단</b> —
+        ① <b>고유 키 + UPSERT</b>(<code>INSERT … ON CONFLICT DO UPDATE</code>),
+        ② <b>결과가 집합·최대값처럼 “다시 해도 같은 것”</b>이 되게 설계,
+        ③ 처리한 메시지 id 를 <b>Redis <code>SETNX</code> + TTL</b> 로 기억.
+        ③은 TTL 안쪽의 중복만 막는다는 걸 잊지 마세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">오프셋과 결과를 한 트랜잭션에</h4>
+      <pre class="code" data-lang="rust"><code>// Kafka 의 오프셋 저장소를 안 쓰고, 우리 DB 에 같이 씁니다.
+// → 결과와 진행 위치가 항상 일치합니다 (진짜 '한 번처럼' 보임)
+
+let mut tx = pool.begin().await?;
+
+for m in batch.iter() {
+    sqlx::query!("INSERT INTO events (id, body) VALUES ($1, $2)
+                  ON CONFLICT (id) DO NOTHING",             // 멱등 ★
+                 m.id, m.body)
+        .execute(&amp;mut *tx).await?;
+}
+
+// 같은 트랜잭션에 오프셋을 기록
+sqlx::query!("INSERT INTO kafka_offsets (topic, partition, offset)
+              VALUES ($1, $2, $3)
+              ON CONFLICT (topic, partition)
+              DO UPDATE SET offset = EXCLUDED.offset",
+             topic, part, last_offset)
+    .execute(&amp;mut *tx).await?;
+
+tx.commit().await?;    // ★ 결과와 위치가 함께 확정되거나 함께 취소됩니다
+
+// 시작할 때는 DB 의 오프셋으로 seek 합니다
+let mut tpl = TopicPartitionList::new();
+tpl.add_partition_offset("logs", part, Offset::Offset(saved + 1))?;
+consumer.assign(&amp;tpl)?;</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>이 패턴의 이름</b> — “transactional outbox” 의 소비자 쪽 버전입니다.
+        추가 인프라 없이 <b>DB 트랜잭션 하나로</b> 문제를 옮겨 놓기 때문에
+        운영 난이도가 Kafka 트랜잭션보다 훨씬 낮습니다(🌐 서버기술 가이드에 더 자세히 있습니다).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">Redis 비동기 · 커넥션 풀 · NATS</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">redis-rs — 풀 · 파이프라인 · 스크립트</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+# 또는 풀이 필요하면
+deadpool-redis = "0.18"</code></pre>
+      <pre class="code" data-lang="rust"><code>use redis::AsyncCommands;
+
+// ① ConnectionManager — 자동 재연결 + 내부 멀티플렉싱 (풀이 필요 없을 때가 많음)
+let client = redis::Client::open("redis://redis:6379")?;
+let mut con = client.get_connection_manager().await?;
+
+let _: () = con.set_ex("k", "v", 60).await?;
+let v: Option&lt;String&gt; = con.get("k").await?;
+
+// ② 파이프라인 — 왕복을 한 번으로 ★ 여기서 10배씩 납니다
+let mut pipe = redis::pipe();
+for (k, n) in counts.iter() {
+    pipe.hincr("counters", k, *n).ignore();
+}
+pipe.expire("counters", 3600).ignore();
+let _: () = pipe.query_async(&amp;mut con).await?;
+// 1,000건을 개별 호출하면 왕복 1,000번(≈100ms), 파이프라인이면 1번(≈1ms)
+
+// ③ 원자적 로직은 Lua 스크립트로 (여러 명령의 경합 방지)
+let script = redis::Script::new(r"
+    local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
+    if cur + tonumber(ARGV[1]) &gt; tonumber(ARGV[2]) then return 0 end
+    redis.call('INCRBY', KEYS[1], ARGV[1])
+    redis.call('EXPIRE', KEYS[1], 60)
+    return 1
+");
+let allowed: i32 = script.key("quota:u1").arg(1).arg(100)
+                         .invoke_async(&amp;mut con).await?;   // 레이트 리밋 ★</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>풀 크기의 함정</b> — Redis 는 <b>단일 스레드로 명령을 처리</b>합니다.
+        커넥션을 200개 열어도 처리 속도는 그대로이고 <b>메모리와 컨텍스트 스위치만 늘어납니다</b>.
+        <code>ConnectionManager</code> 하나 또는 <b>코어 수 × 2 정도의 작은 풀</b>이면 충분합니다.
+        느리다면 <b>왕복 횟수</b>를 줄이세요(파이프라인).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">NATS — 가볍고 빠른 메시지 버스</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] async-nats = "0.38"
+let client = async_nats::connect("nats://nats:4222").await?;
+
+// ① 발행/구독 — 지속성 없음, 아주 빠름 (마이크로초대)
+client.publish("metrics.cpu", payload.into()).await?;
+let mut sub = client.subscribe("metrics.&gt;").await?;      // 와일드카드
+while let Some(msg) = sub.next().await {
+    handle(&amp;msg.payload);
+}
+
+// ② 요청-응답이 내장돼 있습니다 (RPC 처럼)
+let resp = client.request("svc.echo", b"ping".into()).await?;
+
+// ③ JetStream — 지속성·재전송·중복 제거가 필요할 때
+let js = async_nats::jetstream::new(client);
+js.create_stream(async_nats::jetstream::stream::Config {
+    name: "LOGS".into(),
+    subjects: vec!["logs.&gt;".into()],
+    max_age: std::time::Duration::from_secs(86400),
+    ..Default::default()
+}).await?;</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:22%"></th><th>Kafka</th><th>NATS</th><th>Redis Stream</th></tr>
+        <tr><td>지연</td><td>수 ms</td><td><b>수십 µs</b></td><td>수백 µs</td></tr>
+        <tr><td>보존</td><td><b>며칠~영구</b></td><td>JetStream 시</td><td>메모리 한도</td></tr>
+        <tr><td>재처리</td><td><b>오프셋 되감기</b></td><td>가능</td><td>제한적</td></tr>
+        <tr><td>운영 난이도</td><td>높음</td><td><b>낮음</b></td><td>낮음</td></tr>
+        <tr><td>쓰는 곳</td><td>이벤트 원장</td><td>서비스 간 알림</td><td>가벼운 큐</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">Stream 을 조합해 파이프라인을 만든다</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">futures::Stream — 비동기판 Iterator</h4>
+      <pre class="code" data-lang="rust"><code>use futures::stream::{self, StreamExt, TryStreamExt};
+
+// 소비자 → 파싱 → 필터 → 배치 → 저장, 을 선언적으로 잇습니다
+let stream = consumer.stream()                      // rdkafka 가 Stream 을 줍니다
+    .map(|r| r.map_err(anyhow::Error::from))
+    .and_then(|m| async move { parse(m.payload()) }) // 파싱
+    .try_filter(|e| futures::future::ready(e.level &gt;= Level::Warn))
+    .chunks(1000);                                   // 1,000건씩 묶기 ★
+
+tokio::pin!(stream);
+while let Some(batch) = stream.next().await {
+    let rows: Vec&lt;Event&gt; = batch.into_iter().collect::&lt;Result&lt;_, _&gt;&gt;()?;
+    save(&amp;rows).await?;
+}
+
+// 동시 처리 — 순서가 상관없으면 buffer_unordered ★
+stream::iter(urls)
+    .map(|u| async move { fetch(u).await })
+    .buffer_unordered(32)          // 동시에 32개까지
+    .for_each_concurrent(None, |r| async move { handle(r).await })
+    .await;
+
+// 시간 기준 배치 — "1,000건 또는 1초 중 먼저" (tokio-stream)
+use tokio_stream::StreamExt as _;
+let mut chunks = tokio_stream::StreamExt::chunks_timeout(
+    stream, 1000, Duration::from_secs(1));</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>chunks_timeout</code> 이 실무의 핵심</b> — 건수만으로 묶으면
+        <b>트래픽이 적을 때 데이터가 영원히 안 나갑니다</b>. 배치 저장은 언제나
+        <b>“N건 또는 T초 중 먼저 오는 것”</b>이어야 합니다. h13 에서 그대로 씁니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">async-stream — 내가 만드는 Stream</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] async-stream = "0.3"
+use async_stream::try_stream;
+use futures::Stream;
+
+// 페이지네이션 API 를 하나의 스트림처럼 보이게 만들기
+fn all_users(client: Client) -&gt; impl Stream&lt;Item = anyhow::Result&lt;User&gt;&gt; {
+    try_stream! {
+        let mut cursor: Option&lt;String&gt; = None;
+        loop {
+            let page = client.list_users(cursor.clone()).await?;
+            for u in page.items {
+                yield u;                       // ★ 제너레이터처럼
+            }
+            match page.next_cursor {
+                Some(c) =&gt; cursor = Some(c),
+                None =&gt; break,
+            }
+        }
+    }
+}
+
+// 쓰는 쪽은 그냥 스트림입니다 — 페이지 개념이 사라집니다
+let mut s = std::pin::pin!(all_users(client));
+while let Some(u) = s.next().await {
+    println!("{}", u?.name);
+}
+
+// 파일을 줄 스트림으로
+use tokio::io::AsyncBufReadExt;
+let f = tokio::fs::File::open("app.log").await?;
+let mut lines = tokio::io::BufReader::new(f).lines();
+while let Some(line) = lines.next_line().await? { /* … */ }</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>왜 스트림으로 만드나</b> — <b>메모리가 일정</b>해집니다.
+        “전부 <code>Vec</code> 에 모아서 반환”하면 100만 건에서 죽지만,
+        스트림이면 <b>한 건씩 흘러가</b> 메모리가 상수입니다.
+        여기에 <code>chunks</code> 를 얹으면 배치 처리까지 자연스럽게 붙습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> Kafka 는 <b>파티션 수가 동시성의 상한</b>이고, <code>poll</code> 루프는 <b>항상 가볍게</b> 유지해야
+    리밸런스에 안 물립니다. exactly-once 를 좇지 말고 <b>at-least-once + 멱등 처리</b>로 설계하세요 —
+    가장 튼튼한 방법은 <b>결과와 오프셋을 같은 DB 트랜잭션</b>에 쓰는 것입니다.
+    Redis 는 <b>커넥션을 늘리지 말고 왕복을 줄이고</b>(파이프라인),
+    배치는 언제나 <b>“N건 또는 T초”</b>로 묶습니다.</div>
+</section>
+
+
+<!-- ==================== h08 ==================== -->
+<section class="sec" id="h08">
+  <div class="sec-head rv">
+    <span class="no">SVC 08</span>
+    <h2>데이터 엔진 — <span class="t">Polars · DataFusion · Arrow</span></h2>
+    <p class="lead">
+      Rust 가 파이썬 세계를 가장 크게 흔든 곳이 여기입니다.
+      <b>Polars</b>(DataFrame)와 <b>DataFusion</b>(SQL 엔진)은 둘 다 Rust 로 쓰였고,
+      <b>Apache Arrow</b> 라는 공통 메모리 형식 위에 서 있습니다.
+      이 섹션은 <b>“왜 Pandas 보다 빠른가”</b>를 구조로 설명하고 실제로 돌려 봅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 332" role="img" aria-label="행 단위 저장과 열 단위 저장을 비교하고 그 위에 얹힌 도구 스택을 보여 주는 그림. 행 단위로 저장하면 한 열만 합계를 낼 때도 모든 열이 캐시에 딸려 올라와 낭비가 크다. 열 단위로 저장하면 필요한 열만 연속된 메모리로 읽어 캐시 효율이 높고 벡터 연산이 가능하다. 아래 스택은 맨 아래 Parquet 파일 형식, 그 위에 Arrow 메모리 형식, 그 위에 Polars 와 DataFusion, 맨 위에 파이썬과 러스트 양쪽 API 가 있음을 보여 준다.">
+      <text x="16" y="18" class="lbl">같은 표를 메모리에 놓는 두 가지 방법</text>
+
+      <text x="16" y="42" class="ttl rs-t">행 단위 (Pandas 이전 · 일반 DB) — SUM(price) 하나에</text>
+      <rect class="bx bx-warn" x="16" y="52" width="318" height="82"/>
+      <text x="32" y="74" class="ann">[id0 name0 price0 qty0][id1 name1 price1 qty1]…</text>
+      <text x="32" y="94" class="ann rs-t">price 만 필요한데 name·qty 까지 캐시에 올라옴</text>
+      <text x="32" y="112" class="ann">캐시 라인 64B 중 실제로 쓰는 건 8B — 87% 낭비</text>
+      <text x="32" y="128" class="ann">SIMD 도 못 씁니다 (값들이 떨어져 있어서)</text>
+
+      <text x="346" y="42" class="ttl ok-t">열 단위 (Arrow · Parquet · Polars)</text>
+      <rect class="bx bx-ok" x="346" y="52" width="318" height="82"/>
+      <text x="362" y="74" class="ann">[id0 id1 id2…][name0 name1…][price0 price1 price2…]</text>
+      <text x="362" y="94" class="ann ok-t">price 열만 연속으로 읽음 — 캐시 100% 활용</text>
+      <text x="362" y="112" class="ann ok-t">한 번에 8개씩 SIMD 로 더함 (⚡ e09)</text>
+      <text x="362" y="128" class="ann">같은 값이 모여 있어 압축률도 훨씬 좋음</text>
+
+      <text x="16" y="164" class="ttl">그 위에 쌓인 것들 — 아래에서 위로</text>
+
+      <rect class="bx" x="16" y="176" width="648" height="34"/>
+      <text x="32" y="197" class="val">Parquet — 디스크에 열 단위로 저장하는 파일 형식 (압축 · 통계 · 열 건너뛰기)</text>
+
+      <path class="fl ar" d="M340 214 L340 224"/>
+      <rect class="bx bx-hi" x="16" y="228" width="648" height="34"/>
+      <text x="32" y="249" class="val am-t">Apache Arrow — 메모리에서의 열 형식 표준. 언어·프로세스 간 복사 없이 공유</text>
+
+      <path class="fl ar" d="M180 266 L180 276"/>
+      <path class="fl ar" d="M500 266 L500 276"/>
+      <rect class="bx bx-ok" x="16" y="280" width="318" height="34"/>
+      <text x="32" y="301" class="val ok-t">Polars — DataFrame · 지연 실행 · 쿼리 최적화</text>
+      <rect class="bx bx-ok" x="346" y="280" width="318" height="34"/>
+      <text x="362" y="301" class="val ok-t">DataFusion — SQL 엔진 · 커스텀 함수 · 분산 기반</text>
+
+      <text x="16" y="324" class="ann">둘 다 Rust 로 쓰였고 파이썬 바인딩(pyo3)을 통해 그대로 노출됩니다 — 파이썬에서 쓰는 Polars 가 곧 이 Rust 코드입니다</text>
+    </svg>
+    <div class="cap">빠른 이유는 마법이 아니라 <b>메모리 배치 · 캐시 · SIMD · 지연 실행</b> 네 가지입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Polars — Rust 에서 직접 쓰기</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+polars = { version = "0.44", features = [
+    "lazy", "parquet", "csv", "dtype-datetime", "strings", "temporal"
+] }</code></pre>
+      <pre class="code" data-lang="rust"><code>use polars::prelude::*;
+
+// ★ LazyFrame — 바로 읽지 않고 '계획'만 세웁니다
+let df = LazyCsvReader::new("events.csv")
+    .with_has_header(true)
+    .finish()?
+    .filter(col("level").eq(lit("ERROR")))
+    .group_by([col("service"), col("ts").dt().truncate(lit("1m"))])
+    .agg([
+        col("latency_ms").mean().alias("avg_ms"),
+        col("latency_ms").quantile(lit(0.99), QuantileMethod::Nearest)
+            .alias("p99_ms"),
+        len().alias("count"),
+    ])
+    .sort(["count"], SortMultipleOptions::default().with_order_descending(true))
+    .limit(20)
+    .collect()?;              // ★ 여기서야 실제로 읽고 계산합니다
+
+println!("{df}");
+
+// 최적화가 실제로 무엇을 했는지 보기
+println!("{}", lazy_plan.explain(true)?);
+//   → predicate pushdown  : filter 를 파일 읽기 단계로 밀어 넣음
+//     projection pushdown : 쓰는 열만 읽음 (나머지는 디스크에서 안 읽음) ★
+//     이 둘이 대부분의 속도 차이를 만듭니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>scan_*</code> 를 쓰세요</b> — <code>read_csv</code>/<code>read_parquet</code> 는 전부 읽지만
+        <code>scan_csv</code>/<code>scan_parquet</code> 는 <b>계획을 보고 필요한 부분만</b> 읽습니다.
+        100열짜리 Parquet 에서 3열만 쓰면 <b>디스크 I/O 가 30분의 1</b> 이 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Pandas 대비 — 왜 차이가 나나</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">항목</th><th>Pandas</th><th>Polars</th></tr>
+        <tr><td>메모리 형식</td><td>NumPy(열)+객체</td><td><b>Arrow</b></td></tr>
+        <tr><td>문자열</td><td><b>파이썬 객체</b></td><td>연속 바이트</td></tr>
+        <tr><td>병렬</td><td>기본 1코어</td><td><b>전 코어</b></td></tr>
+        <tr><td>실행</td><td>즉시</td><td><b>지연 + 최적화</b></td></tr>
+        <tr><td>결측</td><td>NaN 혼란</td><td>비트맵으로 명확</td></tr>
+        <tr><td>메모리 사용</td><td>기준</td><td><b>1/2 ~ 1/5</b></td></tr>
+        <tr><td>큰 파일</td><td>메모리 초과</td><td><b>스트리밍 가능</b></td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>흔히 인용되는 감각적 수치 (데이터·질의에 따라 크게 다릅니다)
+
+  group_by + 집계 (1억 행)   Pandas 대비  10~30배
+  CSV 읽기                                 5~20배
+  조인 (수천만 행)                          5~15배
+  문자열 연산                              10~50배  ★ 차이가 가장 큼
+  메모리 사용량                             1/2~1/5
+
+  ※ 반드시 본인 데이터로 재세요 (h11).
+    "10배"는 벤치 데이터의 성질에 크게 좌우됩니다.
+    행이 수만 개면 차이가 거의 없거나 Pandas 가 빠를 수도 있습니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">Parquet 로 쓰고 스트리밍으로 처리</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Parquet 쓰기 — h13 에서 그대로 씁니다</h4>
+      <pre class="code" data-lang="rust"><code>use polars::prelude::*;
+use std::fs::File;
+
+// 배치로 모은 데이터를 DataFrame 으로
+let mut df = df![
+    "ts"      =&gt; ts_vec,           // Vec&lt;i64&gt;
+    "service" =&gt; svc_vec,          // Vec&lt;String&gt;
+    "level"   =&gt; lvl_vec,
+    "latency" =&gt; lat_vec,          // Vec&lt;u32&gt;
+]?;
+
+// 파티션 경로 규칙 — 조회할 때 폴더 단위로 건너뛸 수 있습니다 ★
+let path = format!("data/dt={}/hour={:02}/part-{}.parquet", date, hour, uuid);
+std::fs::create_dir_all(std::path::Path::new(&amp;path).parent().unwrap())?;
+
+ParquetWriter::new(File::create(&amp;path)?)
+    .with_compression(ParquetCompression::Zstd(None))   // lz4 는 빠르고 zstd 는 작음
+    .with_statistics(StatisticsOptions::full())         // min/max → 건너뛰기 가능 ★
+    .with_row_group_size(Some(128 * 1024))
+    .finish(&amp;mut df)?;
+
+// 읽을 때 — 여러 파일을 한 번에 (글롭)
+let out = LazyFrame::scan_parquet("data/dt=2026-08-25/**/*.parquet",
+                                  ScanArgsParquet::default())?
+    .filter(col("service").eq(lit("api")))
+    .group_by([col("level")]).agg([len()])
+    .collect()?;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>작은 파일 문제</b> — 1분마다 파일을 만들면 하루 1,440개, 한 달에 4만 개가 됩니다.
+        <b>메타데이터 읽기만으로 조회가 느려집니다</b>. 실무에서는
+        <b>파일 하나를 최소 수십 MB</b>가 되게 배치를 키우고, 하루가 지나면
+        <b>작은 파일을 합치는 정리 작업</b>(compaction)을 돌립니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">DataFusion — 내 데이터에 SQL 을 얹기</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] datafusion = "43"
+use datafusion::prelude::*;
+
+let ctx = SessionContext::new();
+
+// ① 파일을 테이블로 등록
+ctx.register_parquet("logs", "data/**/*.parquet",
+                     ParquetReadOptions::default()).await?;
+
+// ② 그냥 SQL 을 씁니다
+let df = ctx.sql("
+    SELECT service,
+           COUNT(*)                                  AS n,
+           APPROX_PERCENTILE_CONT(latency, 0.99)     AS p99
+    FROM logs
+    WHERE level = 'ERROR' AND ts &gt;= 1756000000
+    GROUP BY service
+    ORDER BY n DESC
+    LIMIT 10
+").await?;
+
+df.show().await?;
+
+// ③ 내 함수를 SQL 에서 부르게 만들기 (UDF)
+use datafusion::logical_expr::{create_udf, Volatility};
+let mask = create_udf("mask_ip", vec![DataType::Utf8], DataType::Utf8,
+                      Volatility::Immutable, Arc::new(mask_impl));
+ctx.register_udf(mask);
+ctx.sql("SELECT mask_ip(client_ip) FROM logs LIMIT 5").await?.show().await?;
+
+// ④ 결과를 스트림으로 받기 — 메모리 상수 유지
+let mut stream = df.execute_stream().await?;
+while let Some(batch) = stream.next().await {
+    let batch = batch?;      // RecordBatch (Arrow)
+    handle(batch);
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>Polars vs DataFusion</b> — <b>Polars 는 “DataFrame API 가 편한” 쪽</b>,
+        <b>DataFusion 은 “SQL 과 확장이 필요한” 쪽</b>입니다.
+        내 서비스에 <b>쿼리 엔진을 내장</b>하고 싶다면(사용자가 SQL 을 입력) DataFusion,
+        데이터 변환 파이프라인이면 Polars 가 보통 더 간결합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">파이썬과 함께 쓰기 · 벡터 검색</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Arrow 로 파이썬과 복사 없이 주고받기</h4>
+      <pre class="code" data-lang="python"><code># 파이썬 쪽 — Polars 는 pyo3 로 감싼 이 Rust 엔진 그대로입니다
+import polars as pl
+
+df = (pl.scan_parquet("data/**/*.parquet")
+        .filter(pl.col("level") == "ERROR")
+        .group_by("service")
+        .agg(pl.len().alias("n"), pl.col("latency").quantile(0.99))
+        .sort("n", descending=True)
+        .collect())          # ← 여기서 Rust 코드가 전 코어로 돕니다
+
+# Pandas 로 넘길 때도 Arrow 를 거치면 복사가 거의 없습니다
+pdf = df.to_pandas(use_pyarrow_extension_array=True)
+
+# 반대로: 내 Rust 함수를 파이썬에서 부르고 Arrow 로 결과 받기 (🐍 y03)
+#   pyo3 + arrow-rs → RecordBatch 를 그대로 넘기면 직렬화가 없습니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>실무에서 가장 현실적인 조합</b> — <b>분석·탐색은 파이썬 Polars</b>,
+        <b>운영 파이프라인은 Rust Polars</b>. 같은 엔진이라 <b>결과가 동일</b>하고,
+        표현식(<code>col("x").mean()</code>)도 거의 그대로 옮겨집니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">임베딩 벡터 검색 — HNSW</h4>
+      <pre class="code" data-lang="rust"><code>// 선택지
+//   hnsw_rs        순수 Rust HNSW · 가볍고 임베드하기 좋음
+//   instant-distance HNSW · API 가 단순
+//   qdrant / lancedb  DB 로 통째로 (둘 다 Rust 로 쓰였습니다)
+//   usearch        C++ 코어 + Rust 바인딩 · 매우 빠름
+
+// [dependencies] hnsw_rs = "0.3"
+use hnsw_rs::prelude::*;
+
+let nb_elem = 1_000_000;
+let hnsw = Hnsw::&lt;f32, DistCosine&gt;::new(
+    24,          // max_nb_connection (M) — 크면 정확·느림·메모리↑
+    nb_elem,
+    16,          // 층 수
+    200,         // ef_construction — 크면 색인 품질↑ 색인 속도↓
+    DistCosine {},
+);
+
+// 색인 — 병렬로 넣을 수 있습니다 (내부적으로 rayon)
+let data: Vec&lt;(&amp;Vec&lt;f32&gt;, usize)&gt; = embeddings.iter().zip(0..).collect();
+hnsw.parallel_insert(&amp;data);
+
+// 검색 — ef_search 가 정확도/속도 손잡이
+hnsw.set_searching_mode(true);
+let found = hnsw.search(&amp;query_vec, 10, 64);   // top-10, ef=64
+for n in found {
+    println!("id={} dist={:.4}", n.d_id, n.distance);
+}
+
+// 100만 벡터 × 768차원 = 약 3GB (f32). 메모리가 부담이면
+//   · f16 또는 int8 양자화로 절반~1/4
+//   · 디스크 기반이 필요하면 lancedb / qdrant 로</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">언제 이 도구들이 손해인가</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 이럴 땐 오히려 느립니다</h5>
+      <pre class="code" data-lang="text"><code>· 행이 수천~수만 개
+    프레임 구성 · 스레드 분배 오버헤드가 계산보다 큽니다.
+    평범한 Vec + 반복문이 더 빠릅니다.
+
+· 행 단위 임의 접근이 많은 작업
+    "id 로 한 건 찾아 한 필드 고치기" → 열 저장의 최악 패턴.
+    그건 DB(또는 HashMap)가 할 일입니다.
+
+· 매번 다른 스키마의 작은 JSON
+    파싱 비용이 지배적이라 엔진을 바꿔도 그대로입니다.
+
+· 이미 DB 가 인덱스로 잘 처리하는 질의
+    Parquet 전체 스캔보다 인덱스 조회가 압도적으로 빠릅니다.</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 확실히 이기는 자리</h5>
+      <pre class="code" data-lang="text"><code>· 수백만~수십억 행의 집계 · 조인 · 정렬
+· 로그·이벤트를 하루 단위로 말아 리포트 만들기   ★ h13
+· 파이썬 배치 잡이 메모리 초과로 죽는 상황
+    → scan_parquet + streaming 으로 상수 메모리
+· 컨테이너 메모리 한도가 빡빡한 환경
+    Pandas 8GB → Polars 1.5GB 같은 사례가 흔합니다
+· 같은 로직을 파이썬과 서비스에서 함께 써야 할 때
+    표현식이 거의 동일해 이식 비용이 낮습니다
+
+측정 없이 도입하지 마세요 — 이 표의 위아래가 뒤집히는 데이터도 있습니다.</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> Polars·DataFusion 이 빠른 이유는 <b>열 저장(Arrow) · 전 코어 · 지연 실행 최적화</b> 셋입니다.
+    파일은 <b>Parquet + 통계 + 파티션 경로</b>로 쓰고 읽을 때는 <b><code>scan_*</code></b> 를 써서
+    <b>필요한 열·행만</b> 읽게 하세요. 작은 데이터에서는 오히려 손해이니
+    <b>본인 데이터로 재고</b> 도입하세요.</div>
+</section>
+
+
+<!-- ==================== h09 ==================== -->
+<section class="sec" id="h09">
+  <div class="sec-head rv">
+    <span class="no">SVC 09</span>
+    <h2>CLI · 시스템 도구 — <span class="t">ripgrep 이 빠른 이유</span>를 내 도구에</h2>
+    <p class="lead">
+      Rust 가 가장 조용히, 그러나 가장 널리 퍼진 곳은 <b>커맨드라인 도구</b>입니다.
+      <code>ripgrep</code> · <code>fd</code> · <code>bat</code> · <code>eza</code> · <code>zoxide</code> · <code>uv</code> · <code>ruff</code> — 전부 Rust 입니다.
+      이 섹션은 <b>그들이 빠른 구체적인 이유</b>와, 같은 기법으로 내 도구를 만드는 법을 다룹니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="파일을 병렬로 훑는 도구의 구조를 보여 주는 그림. 디렉터리 순회를 여러 스레드가 나눠 하고 각 파일은 워커 스레드가 받아 메모리 맵으로 읽은 뒤 SIMD 로 후보를 걸러 내고 정규식으로 확인한다. 결과는 채널로 모아 출력 스레드 하나가 순서대로 찍는다. 아래에는 느린 구현과 빠른 구현의 차이 네 가지가 표시된다.">
+      <text x="16" y="18" class="lbl">ripgrep 계열 도구의 구조 — 네 갈래가 동시에 돕니다</text>
+
+      <rect class="bx bx-fw" x="16" y="36" width="150" height="52"/>
+      <text x="91" y="58" class="val rs-t" text-anchor="middle">병렬 디렉터리 순회</text>
+      <text x="91" y="76" class="ann" text-anchor="middle">ignore 크레이트</text>
+
+      <path class="fl ar" d="M170 62 L198 62"/>
+
+      <rect class="bx" x="202" y="36" width="150" height="52"/>
+      <text x="277" y="58" class="val" text-anchor="middle">일감 채널</text>
+      <text x="277" y="76" class="ann" text-anchor="middle">.gitignore 는 여기서 걸림</text>
+
+      <path class="fl ar" d="M356 62 L384 62"/>
+
+      <rect class="bx bx-hi" x="388" y="36" width="150" height="52"/>
+      <text x="463" y="58" class="val am-t" text-anchor="middle">워커 N개</text>
+      <text x="463" y="76" class="ann" text-anchor="middle">코어당 하나</text>
+
+      <path class="fl ar" d="M542 62 L570 62"/>
+
+      <rect class="bx bx-ok" x="574" y="36" width="90" height="52"/>
+      <text x="619" y="58" class="val ok-t" text-anchor="middle">출력 1개</text>
+      <text x="619" y="76" class="ann" text-anchor="middle">순서 유지</text>
+
+      <text x="16" y="116" class="ttl">워커 하나가 파일 하나에 하는 일</text>
+      <rect class="bx" x="16" y="126" width="212" height="56"/>
+      <text x="32" y="148" class="ann">① mmap 또는 큰 버퍼로 읽기</text>
+      <text x="32" y="166" class="ann">줄 단위로 자르지 않습니다</text>
+      <rect class="bx" x="236" y="126" width="212" height="56"/>
+      <text x="252" y="148" class="ann">② SIMD 로 후보 바이트 찾기</text>
+      <text x="252" y="166" class="ann">memchr — 한 번에 32바이트씩</text>
+      <rect class="bx" x="456" y="126" width="208" height="56"/>
+      <text x="472" y="148" class="ann">③ 후보 근처만 정규식 확인</text>
+      <text x="472" y="166" class="ann">전체 줄에 정규식을 안 돌림</text>
+
+      <text x="16" y="206" class="ttl rs-t">느린 구현과 갈리는 지점 — 네 가지</text>
+      <rect class="bx bx-warn" x="16" y="216" width="318" height="76"/>
+      <text x="32" y="238" class="ann rs-t">한 줄씩 read + String 할당</text>
+      <text x="32" y="256" class="ann rs-t">모든 줄에 정규식 엔진 호출</text>
+      <text x="32" y="274" class="ann rs-t">단일 스레드 · 출력마다 flush</text>
+      <text x="32" y="288" class="ann">→ 같은 작업이 10~50배 느려집니다</text>
+
+      <rect class="bx bx-ok" x="346" y="216" width="318" height="76"/>
+      <text x="362" y="238" class="ann ok-t">큰 버퍼 한 번에 · 할당 재사용</text>
+      <text x="362" y="256" class="ann ok-t">memchr 로 먼저 거르고 정규식은 최후에</text>
+      <text x="362" y="274" class="ann ok-t">코어 수만큼 병렬 · 출력은 락 하나로 모음</text>
+      <text x="362" y="288" class="ann">→ 이 네 가지가 체감 차이의 대부분입니다</text>
+    </svg>
+    <div class="cap">빠른 CLI 의 비밀은 알고리즘이 아니라 <b>할당을 안 하고 · 병렬로 · 먼저 거르는 것</b>입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">clap — 서브커맨드까지 derive 로</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4"</code></pre>
+      <pre class="code" data-lang="rust"><code>use clap::{Parser, Subcommand, ValueEnum, ArgAction};
+use std::path::PathBuf;
+
+#[derive(Parser)]
+#[command(name = "logtool", version, about = "로그를 훑고 집계합니다")]
+struct Cli {
+    /// 자세히 (-v, -vv, -vvv)
+    #[arg(short, long, action = ArgAction::Count, global = true)]
+    verbose: u8,
+
+    /// 설정 파일 — 환경변수 LOGTOOL_CONFIG 로도 받습니다
+    #[arg(short, long, env = "LOGTOOL_CONFIG", global = true)]
+    config: Option&lt;PathBuf&gt;,
+
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// 패턴을 찾습니다
+    Grep {
+        pattern: String,
+        #[arg(default_value = ".")]
+        paths: Vec&lt;PathBuf&gt;,
+        /// 동시 처리 수 (기본: 코어 수)
+        #[arg(short = 'j', long)]
+        jobs: Option&lt;usize&gt;,
+        #[arg(long, value_enum, default_value_t = Fmt::Text)]
+        format: Fmt,
+    },
+    /// 집계합니다
+    Agg {
+        #[arg(long)] since: Option&lt;String&gt;,
+        #[arg(long, num_args = 1.., value_delimiter = ',')]
+        group_by: Vec&lt;String&gt;,
+    },
+}
+
+#[derive(Copy, Clone, ValueEnum)]
+enum Fmt { Text, Json, Csv }
+
+fn main() -&gt; anyhow::Result&lt;()&gt; {
+    let cli = Cli::parse();
+    match cli.cmd {
+        Cmd::Grep { pattern, paths, jobs, format } =&gt; grep(&amp;pattern, &amp;paths, jobs, format),
+        Cmd::Agg { since, group_by } =&gt; agg(since, &amp;group_by),
+    }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>셸 자동완성을 공짜로</b> —
+        <code>clap_complete::generate(Shell::Bash, &amp;mut Cli::command(), "logtool", &amp;mut io::stdout())</code>
+        한 줄이면 bash·zsh·fish·PowerShell 스크립트가 나옵니다.
+        <code>--help</code> 도 <b>doc 주석이 그대로</b> 설명이 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">병렬 파일 처리 — ignore + rayon</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] ignore = "0.4"  rayon = "1"  memchr = "2"  grep-regex/regex = "1"
+use ignore::WalkBuilder;
+use std::sync::mpsc;
+
+fn grep(pattern: &amp;str, paths: &amp;[PathBuf], jobs: Option&lt;usize&gt;) -&gt; anyhow::Result&lt;()&gt; {
+    let re = regex::bytes::Regex::new(pattern)?;   // ★ bytes 버전 — UTF-8 검증 생략
+    let (tx, rx) = mpsc::channel::&lt;String&gt;();
+    let n = jobs.unwrap_or_else(|| std::thread::available_parallelism()
+                                      .map(|v| v.get()).unwrap_or(4));
+
+    // 출력 전담 스레드 하나 — 여기서만 stdout 을 잠급니다
+    let printer = std::thread::spawn(move || {
+        let stdout = std::io::stdout();
+        let mut out = std::io::BufWriter::new(stdout.lock());   // ★ 버퍼링 필수
+        use std::io::Write;
+        for line in rx { let _ = writeln!(out, "{line}"); }
+        let _ = out.flush();
+    });
+
+    // 병렬 순회 — .gitignore · 숨김 파일 규칙을 알아서 지킵니다
+    WalkBuilder::new(&amp;paths[0])
+        .threads(n)
+        .hidden(true).git_ignore(true).git_global(true)
+        .build_parallel()
+        .run(|| {
+            let re = re.clone();
+            let tx = tx.clone();
+            Box::new(move |res| {
+                let Ok(entry) = res else { return ignore::WalkState::Continue };
+                if !entry.file_type().is_some_and(|t| t.is_file()) {
+                    return ignore::WalkState::Continue;
+                }
+                if let Ok(buf) = std::fs::read(entry.path()) {
+                    for m in re.find_iter(&amp;buf) {
+                        let _ = tx.send(format!("{}:{}", entry.path().display(), m.start()));
+                    }
+                }
+                ignore::WalkState::Continue
+            })
+        });
+
+    drop(tx);              // ★ 이걸 빠뜨리면 printer 가 영원히 안 끝납니다
+    printer.join().unwrap();
+    Ok(())
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">진행바 · 출력 · 색</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">indicatif — 진행바와 다중 막대</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] indicatif = { version = "0.17", features = ["rayon"] }
+use indicatif::{ProgressBar, ProgressStyle, MultiProgress, ParallelProgressIterator};
+use rayon::prelude::*;
+
+let files: Vec&lt;PathBuf&gt; = collect_files();
+
+let pb = ProgressBar::new(files.len() as u64);
+pb.set_style(ProgressStyle::with_template(
+    "{spinner} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}")?
+    .progress_chars("=&gt;-"));
+
+// rayon 과 그대로 결합 — 스레드 안전합니다
+let results: Vec&lt;_&gt; = files.par_iter()
+    .progress_with(pb.clone())
+    .map(|f| process(f))
+    .collect();
+pb.finish_with_message("완료");
+
+// 여러 줄을 동시에 (다운로드 여러 개 등)
+let m = MultiProgress::new();
+let a = m.add(ProgressBar::new(100));
+let b = m.add(ProgressBar::new(100));
+
+// ★ 파이프로 넘길 때는 진행바를 끕니다 (터미널이 아니면 쓰레기 문자가 됩니다)
+if !std::io::IsTerminal::is_terminal(&amp;std::io::stderr()) {
+    pb.set_draw_target(indicatif::ProgressDrawTarget::hidden());
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>진행바는 stderr 로</b> — <code>stdout</code> 은 <b>파이프로 넘길 데이터</b>의 자리입니다.
+        <code>indicatif</code> 는 기본이 stderr 라 맞게 되어 있지만, 직접 찍는 로그도 같은 원칙을 지키세요.
+        <b><code>mytool | grep x</code> 가 깨지면 대개 이 실수입니다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">출력이 느린 진짜 이유 — 버퍼링</h4>
+      <pre class="code" data-lang="rust"><code>use std::io::{self, Write, BufWriter};
+
+// ❌ println! 은 매번 stdout 을 잠그고 줄 단위로 flush 합니다
+for line in &amp;lines {
+    println!("{line}");        // 100만 줄이면 시스템 콜 100만 번
+}
+
+// ✅ 락을 한 번만 잡고 버퍼에 모읍니다 — 보통 10~30배 빨라집니다 ★
+let stdout = io::stdout();
+let mut out = BufWriter::with_capacity(64 * 1024, stdout.lock());
+for line in &amp;lines {
+    writeln!(out, "{line}")?;
+}
+out.flush()?;                  // ★ 잊으면 마지막 부분이 안 나옵니다
+
+// 색 — 터미널일 때만 켭니다
+use anstream::println as cprintln;   // anstyle/anstream 이 자동 판정
+// 또는 owo-colors 의 if_supports_color
+
+// 에러 메시지를 사람이 읽게 (anyhow + color-eyre)
+fn main() -&gt; anyhow::Result&lt;()&gt; {
+    color_eyre::install()?;
+    run().context("로그 처리 실패")?;   // 원인 체인이 예쁘게 출력됩니다
+    Ok(())
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>실측 감각</b> — 100만 줄 출력에서 <code>println!</code> 은 수 초,
+        <code>BufWriter</code> 는 <b>수십 밀리초</b>입니다.
+        “내 Rust CLI 가 파이썬보다 느리다”는 신고의 상당수가 <b>이것 하나</b>였습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">배포 — 바이너리 하나로 끝내기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">cargo-dist — 릴리스를 자동화</h4>
+      <pre class="code" data-lang="bash"><code># 설치 후 한 번만 초기화하면 GitHub Actions 워크플로가 생성됩니다
+cargo install cargo-dist
+cargo dist init            # 타깃 · 설치 스크립트 · 릴리스 방식을 물어봅니다
+cargo dist build           # 로컬에서 확인
+cargo dist plan            # 무엇이 만들어질지 미리 보기
+
+# 태그를 밀면 나머지는 CI 가 합니다
+git tag v0.3.0 &amp;&amp; git push --tags
+#   → 리눅스(x86_64/aarch64 · musl) · macOS(x86_64/arm64) · Windows 빌드
+#   → tar.gz / zip / .msi 패키징
+#   → GitHub Release 업로드 + 체크섬
+#   → 한 줄 설치 스크립트 생성
+#        curl --proto '=https' -LsSf https://…/logtool-installer.sh | sh
+#   → homebrew tap · npm 래퍼까지 옵션으로</code></pre>
+      <pre class="code" data-lang="toml"><code># Cargo.toml — 배포용 릴리스 프로필 (h11 에서 자세히)
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"        # 심볼 제거 — 바이너리가 절반 이하로
+panic = "abort"          # CLI 라면 무난합니다
+
+# 정적 링크 — 어느 리눅스에서든 그냥 도는 바이너리
+# rustup target add x86_64-unknown-linux-musl
+# cargo build --release --target x86_64-unknown-linux-musl</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">시작 시간까지 챙기기</h4>
+      <pre class="code" data-lang="text"><code>CLI 는 '시작 시간'이 곧 체감 속도입니다
+
+  파이썬 도구        50~300ms  (인터프리터 + import)
+  Node 도구          80~200ms  (V8 부팅)
+  Java 도구         200~800ms  (JVM 부팅)
+  Rust 바이너리       1~5ms    ★ 이게 uv·ruff 가 이긴 진짜 이유
+
+  Rust 에서도 느려지는 원인
+    · 큰 static 테이블을 시작할 때 초기화 → LazyLock 으로 미루기
+    · 설정 파일·네트워크를 무조건 읽기 → 필요할 때만
+    · 정규식을 매번 컴파일     → LazyLock&lt;Regex&gt; 로 한 번만 ★
+    · 디버그 빌드로 재기       → 반드시 --release</code></pre>
+      <pre class="code" data-lang="rust"><code>use std::sync::LazyLock;
+use regex::Regex;
+
+// ❌ 함수가 불릴 때마다 정규식 컴파일 (수백 µs)
+fn is_id(s: &amp;str) -&gt; bool { Regex::new(r"^[a-z]+$").unwrap().is_match(s) }
+
+// ✅ 프로그램당 한 번만 (1.80+ 표준. 이전엔 once_cell::sync::Lazy)
+static ID: LazyLock&lt;Regex&gt; = LazyLock::new(|| Regex::new(r"^[a-z]+$").unwrap());
+fn is_id2(s: &amp;str) -&gt; bool { ID.is_match(s) }
+
+// 실행 시간을 직접 재기
+// hyperfine 'logtool grep foo .' 'rg foo .'   ← 통계까지 내 줍니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">memchr 과 “먼저 거르기”</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SIMD 문자열 탐색 — 직접 써 보기</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] memchr = "2"
+use memchr::{memchr, memchr_iter, memmem};
+
+let hay: &amp;[u8] = &amp;buf;
+
+// ① 바이트 하나 찾기 — 한 번에 16~64바이트씩 비교합니다
+if let Some(pos) = memchr(b'\n', hay) { /* … */ }
+
+// ② 줄 수 세기 — naive 반복문보다 5~20배
+let lines = memchr_iter(b'\n', hay).count();
+
+// ③ 부분 문자열 — 자동으로 좋은 알고리즘을 고릅니다
+let finder = memmem::Finder::new(b"ERROR");     // ★ 미리 만들어 재사용
+for pos in finder.find_iter(hay) {
+    let start = memchr::memrchr(b'\n', &amp;hay[..pos]).map_or(0, |i| i + 1);
+    let end = memchr(b'\n', &amp;hay[pos..]).map_or(hay.len(), |i| pos + i);
+    println!("{}", String::from_utf8_lossy(&amp;hay[start..end]));
+}
+
+// ④ 정규식도 내부에서 이걸 씁니다 —
+//    regex 크레이트는 패턴에서 '반드시 나오는 리터럴'을 뽑아
+//    memmem 으로 후보를 먼저 찾고, 그 근처에서만 오토마타를 돌립니다.
+//    그래서 r"ERROR.*timeout" 같은 패턴이 아주 빠릅니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">줄을 자르지 않고 처리하기</h4>
+      <pre class="code" data-lang="rust"><code>use std::io::{BufRead, BufReader};
+
+// ❌ lines() 는 줄마다 String 을 새로 할당합니다
+for line in BufReader::new(f).lines() {
+    let line = line?;                 // 할당 1회 · UTF-8 검증
+    if line.contains("ERROR") { n += 1; }
+}
+
+// ✅ 버퍼 하나를 재사용 (할당 1회로 끝)
+let mut r = BufReader::with_capacity(256 * 1024, f);
+let mut buf = String::with_capacity(4096);
+loop {
+    buf.clear();                      // ★ 용량은 유지
+    if r.read_line(&amp;mut buf)? == 0 { break; }
+    if buf.contains("ERROR") { n += 1; }
+}
+
+// ✅✅ 아예 바이트로 — UTF-8 검증도 건너뜁니다
+let mut r = BufReader::with_capacity(256 * 1024, f);
+let mut buf = Vec::with_capacity(4096);
+loop {
+    buf.clear();
+    if r.read_until(b'\n', &amp;mut buf)? == 0 { break; }
+    if memmem::find(&amp;buf, b"ERROR").is_some() { n += 1; }
+}
+// 1GB 로그에서 세 방식이 대략 8초 / 2초 / 0.7초 정도로 갈립니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>기억할 원칙 하나</b> — <b>“한 항목당 할당 한 번”이 보이면 그게 병목입니다.</b>
+        <code>lines()</code> · <code>to_string()</code> · <code>collect::&lt;Vec&lt;String&gt;&gt;()</code> 가 루프 안에 있으면
+        <b>버퍼 재사용</b>으로 바꿀 수 있는지 먼저 보세요(h05·h10).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 빠른 CLI 는 <b>① 병렬 순회 ② 큰 버퍼 · 할당 재사용 ③ <code>memchr</code> 로 먼저 거르기
+    ④ 출력은 <code>BufWriter</code> 로 모으기</b> 네 가지에서 나옵니다.
+    인터페이스는 <b>clap derive</b>, 진행바는 <b>indicatif(stderr)</b>, 배포는 <b>cargo-dist + musl 정적 링크</b>.
+    시작 시간이 1~5ms 라는 점이 <b>도구 시장에서 Rust 가 이긴 이유</b>입니다.</div>
+</section>
+
+
+<!-- ==================== h10 ==================== -->
+<section class="sec" id="h10">
+  <div class="sec-head rv">
+    <span class="no">SVC 10</span>
+    <h2>메모리 · 할당 — <span class="t">할당자를 바꾸고 아레나를 쓴다</span></h2>
+    <p class="lead">
+      서버가 느릴 때 <b>코드는 그대로 두고 한 줄로 10~30% 를 얻는 방법</b>이 실제로 있습니다 — 할당자 교체입니다.
+      여기에 <b>아레나 · <code>SmallVec</code> · <code>Box&lt;[T]&gt;</code></b> 를 얹으면 할당 횟수 자체가 줄고,
+      <b>dhat</b> 으로 어디서 얼마나 잡는지 숫자로 볼 수 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 312" role="img" aria-label="개별 할당과 아레나 할당을 비교하는 그림. 개별 할당은 노드마다 할당자를 호출해 크기 계산과 자유 목록 탐색을 거치고 메모리가 흩어져 캐시 적중률이 떨어지며 해제도 하나씩 해야 한다. 아레나는 큰 덩어리를 미리 잡아 두고 포인터만 앞으로 밀어 할당하므로 할당 비용이 포인터 증가 한 번이고 메모리가 연속이라 캐시에 잘 맞으며 요청이 끝나면 아레나 전체를 한 번에 버린다.">
+      <text x="16" y="18" class="lbl">요청 하나를 파싱하며 노드 1,000개를 만들 때</text>
+
+      <text x="16" y="42" class="ttl rs-t">① 개별 할당 — 노드마다 malloc</text>
+      <rect class="bx bx-warn" x="16" y="52" width="318" height="106"/>
+      <text x="32" y="74" class="ann">Box::new(Node) × 1,000</text>
+      <text x="32" y="94" class="ann rs-t">할당자 호출 1,000번 (크기 계산 · 자유 목록 탐색 · 락)</text>
+      <text x="32" y="112" class="ann rs-t">메모리가 힙 여기저기 흩어짐 → 캐시 미스</text>
+      <text x="32" y="130" class="ann rs-t">해제도 1,000번 — Drop 이 트리를 재귀로 내려감</text>
+      <text x="32" y="150" class="ann">단편화가 쌓이면 RSS 가 안 내려갑니다</text>
+
+      <text x="346" y="42" class="ttl ok-t">② 아레나 — 큰 덩어리 하나에 밀어 넣기</text>
+      <rect class="bx bx-ok" x="346" y="52" width="318" height="106"/>
+      <text x="362" y="74" class="ann">arena.alloc(Node) × 1,000</text>
+      <text x="362" y="94" class="ann ok-t">할당 = 포인터를 앞으로 미는 것 한 번 (수 나노초)</text>
+      <text x="362" y="112" class="ann ok-t">메모리가 연속 → 순회할 때 캐시가 잘 맞음</text>
+      <text x="362" y="130" class="ann ok-t">해제 = 아레나 통째로 버리기 한 번 ★</text>
+      <text x="362" y="150" class="ann">대신 개별 해제가 불가능합니다 (수명이 같아야 함)</text>
+
+      <text x="16" y="188" class="ttl">아레나 안쪽 — bump 포인터가 앞으로만 갑니다</text>
+      <rect class="bx" x="16" y="198" width="648" height="44"/>
+      <rect class="bx bx-hi" x="24" y="206" width="90" height="28"/>
+      <text x="69" y="225" class="ann am-t" text-anchor="middle">노드 A</text>
+      <rect class="bx bx-hi" x="118" y="206" width="90" height="28"/>
+      <text x="163" y="225" class="ann am-t" text-anchor="middle">노드 B</text>
+      <rect class="bx bx-hi" x="212" y="206" width="90" height="28"/>
+      <text x="257" y="225" class="ann am-t" text-anchor="middle">노드 C</text>
+      <rect class="bx bx-mut" x="306" y="206" width="350" height="28"/>
+      <text x="481" y="225" class="ann" text-anchor="middle">아직 안 쓴 공간 — 다음 할당은 여기서 시작</text>
+      <path class="fl ar ar-am" d="M302 250 L302 240"/>
+      <text x="310" y="258" class="ann am-t">bump 포인터</text>
+
+      <rect class="bx bx-warn" x="16" y="268" width="648" height="36"/>
+      <text x="32" y="292" class="ann rs-t">쓰면 안 되는 곳 — 수명이 제각각인 장기 객체 · 개별 해제가 필요한 캐시. 아레나는 "요청 하나 동안만 사는 것들" 전용입니다</text>
+    </svg>
+    <div class="cap">아레나는 <b>“같이 태어나 같이 죽는”</b> 객체 전용입니다 — 그 조건이 맞으면 압도적입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">할당자 교체 — 한 줄로 끝납니다 ★</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+mimalloc = { version = "0.1", default-features = false }
+# 또는
+tikv-jemallocator = "0.6"</code></pre>
+      <pre class="code" data-lang="rust"><code>// src/main.rs — 이 세 줄이 전부입니다
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+// jemalloc 이라면
+// #[global_allocator]
+// static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+fn main() { /* 나머지 코드는 그대로 */ }</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:22%">할당자</th><th>강점</th><th>고르는 기준</th></tr>
+        <tr><td>시스템 기본</td><td>추가 의존성 0</td><td>리눅스 glibc 는 <b>멀티스레드에 약함</b></td></tr>
+        <tr><td><b>mimalloc</b></td><td>작고 빠름 · 전 플랫폼</td><td><b>기본 추천</b> — 윈도우에서 특히 큼</td></tr>
+        <tr><td>jemalloc</td><td>단편화 제어 · <b>프로파일 내장</b></td><td>장시간 구동 서버 · 메모리 분석 필요</td></tr>
+        <tr><td>snmalloc</td><td>메시지 패싱형에 강함</td><td>스레드 간 할당/해제가 엇갈릴 때</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>얼마나 좋아지나</b> — 할당이 잦은 서버에서 <b>처리량 10~30% · p99 개선</b>이 흔합니다.
+        멀티스레드 할당 경합이 심할수록 차이가 큽니다.
+        <b>공짜에 가까운 개선이니 벤치를 먼저 잡아 두고(h11) 한번 재 보세요.</b>
+        단, musl 타깃의 기본 할당자는 특히 느리므로 <b>musl 정적 빌드라면 거의 필수</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">bumpalo — 요청 단위 아레나</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] bumpalo = { version = "3", features = ["collections"] }
+use bumpalo::Bump;
+use bumpalo::collections::{Vec as BVec, String as BString};
+
+// 요청 하나를 처리하는 동안만 사는 임시 객체들
+fn handle(input: &amp;str) -&gt; Summary {
+    let bump = Bump::with_capacity(64 * 1024);      // 미리 한 덩어리
+
+    let mut tokens: BVec&lt;&amp;str&gt; = BVec::new_in(&amp;bump);
+    for t in input.split_whitespace() {
+        tokens.push(t);                             // 힙 할당 없음
+    }
+
+    let node = bump.alloc(Node { kind: Kind::Root, children: BVec::new_in(&amp;bump) });
+    // … 파싱 트리를 아레나 안에 만듭니다 …
+
+    let s = summarize(node);                        // 결과만 소유로 꺼냅니다
+    s
+}   // ★ 여기서 bump 가 drop → 1,000개가 한 번에 사라짐 (Drop 재귀 없음)
+
+// 반복 사용 — 매 요청마다 새로 잡지 않고 재사용합니다
+let mut bump = Bump::new();
+loop {
+    let req = rx.recv().await.unwrap();
+    handle_in(&amp;bump, req);
+    bump.reset();          // ★ 메모리는 유지, 포인터만 처음으로 (할당 0회)
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>아레나의 대가</b> — 아레나 안의 값은 <b><code>Drop</code> 이 안 불립니다</b>(bumpalo 기본).
+        그래서 <b><code>File</code>·<code>Vec</code> 처럼 해제가 필요한 것을 넣으면 누수</b>가 됩니다.
+        넣어도 되는 건 <b>순수 데이터(POD 성격)</b>뿐이라고 생각하세요.
+        또 수명(<code>'bump</code>)이 전파되므로 <b>구조체 정의에 수명 파라미터가 번집니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">할당을 아예 안 하는 자료구조</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SmallVec · ArrayVec · Box&lt;[T]&gt;</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] smallvec = "1"  arrayvec = "0.7"  compact_str = "0.8"
+use smallvec::{SmallVec, smallvec};
+
+// ① SmallVec — N개까지는 스택에, 넘으면 힙으로 자동 전환
+//    "거의 항상 3개 이하인데 가끔 100개" 인 경우에 딱 맞습니다
+let mut tags: SmallVec&lt;[u32; 4]&gt; = smallvec![1, 2];
+tags.push(3);          // 여기까지 힙 할당 0
+tags.push(4);
+tags.push(5);          // 여기서 처음 힙으로 이동
+
+// ② ArrayVec — 상한이 확실하면. 넘으면 에러(힙으로 안 갑니다) → no_std 가능
+use arrayvec::ArrayVec;
+let mut buf: ArrayVec&lt;u8, 64&gt; = ArrayVec::new();
+buf.try_push(1).ok();
+
+// ③ Box&lt;[T]&gt; — 더 안 늘릴 Vec 은 여분 용량을 반납합니다
+let v: Vec&lt;u64&gt; = (0..1000).collect();   // capacity 가 1024 일 수 있음
+let fixed: Box&lt;[u64]&gt; = v.into_boxed_slice();   // 정확히 1000개분만 ★
+// 포인터 크기도 Vec(24B) → Box&lt;[T]&gt;(16B) 로 줄어듭니다
+
+// ④ CompactString — 24바이트 안에 들어가는 문자열은 힙을 안 씁니다
+use compact_str::CompactString;
+let s = CompactString::new("service-api");   // 힙 할당 0 (24바이트 이하)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>고르는 기준</b> — <b>분포를 보고</b> 정합니다. 원소 수가 <b>대부분 N 이하</b>면 <code>SmallVec&lt;[T; N]&gt;</code>,
+        <b>절대 N 을 안 넘으면</b> <code>ArrayVec</code>, <b>한 번 만들고 안 바꾸면</b> <code>Box&lt;[T]&gt;</code>.
+        아무 근거 없이 <code>SmallVec</code> 을 쓰면 <b>구조체만 커지고 손해</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">용량을 미리 잡는 것만으로</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 재할당이 log2(n) 번 일어나고 그때마다 전체 복사
+let mut v = Vec::new();
+for i in 0..1_000_000 { v.push(i); }      // 확장 20번 · 누적 복사 약 2백만 원소
+
+// ✅ 한 번만 잡습니다
+let mut v = Vec::with_capacity(1_000_000);
+for i in 0..1_000_000 { v.push(i); }      // 확장 0번
+
+// ✅✅ 크기를 안다면 이터레이터로 — 내부에서 알아서 잡습니다
+let v: Vec&lt;_&gt; = (0..1_000_000).collect();     // size_hint 를 보고 한 번에
+
+// 문자열도 같습니다
+let mut s = String::with_capacity(estimated);
+for part in parts { s.push_str(part); }        // format! 반복보다 훨씬 빠름
+
+// HashMap 도
+let mut m = HashMap::with_capacity_and_hasher(10_000, FxBuildHasher::default());
+//   ★ 기본 해셔(SipHash)는 DoS 방어용이라 느립니다.
+//     외부 입력이 아닌 내부 키라면 rustc-hash 의 FxHashMap 이 2~5배 빠릅니다.
+use rustc_hash::FxHashMap;
+let mut m: FxHashMap&lt;u64, u32&gt; = FxHashMap::default();</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>FxHashMap</code> 주의</b> — 해시 충돌을 의도적으로 만들 수 있어
+        <b>사용자 입력을 키로 쓰면 HashDoS 위험</b>이 있습니다.
+        <b>내부 id · 정수 키</b>에만 쓰고, 외부 문자열 키에는 기본 해셔나 <code>ahash</code> 를 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">힙 프로파일링과 누수 추적</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">dhat — 어디서 얼마나 잡는지 숫자로</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+dhat = { version = "0.3", optional = true }
+
+[features]
+dhat-heap = ["dep:dhat"]
+
+[profile.release]
+debug = 1                # ★ 프로파일에 함수 이름이 나오게 (성능 영향 없음)</code></pre>
+      <pre class="code" data-lang="rust"><code>#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();   // drop 될 때 리포트 저장
+
+    run();
+}   // → dhat-heap.json 생성 → https://nnethercote.github.io/dh_view/dh_view.html 에 올려 봄</code></pre>
+      <pre class="code" data-lang="bash"><code>cargo run --release --features dhat-heap
+
+# 리포트에서 보는 것 세 가지
+#   ① Total blocks   — 할당 '횟수' ★ 이게 크면 루프 안에 할당이 있는 것
+#   ② At t-gmax      — 최대 사용 시점의 크기 (OOM 원인)
+#   ③ At t-end       — 끝났는데 남아 있는 것 = 누수 후보 ★
+
+# 대안
+valgrind --tool=massif ./target/release/svc     # 시간에 따른 힙 그래프
+heaptrack ./target/release/svc                  # GUI · 스택별 집계 (리눅스)
+# jemalloc 을 쓰면 내장 프로파일러
+MALLOC_CONF=prof:true,lg_prof_interval:30 ./svc</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Arc 순환 — Rust 에서 나는 “누수”</h4>
+      <pre class="code" data-lang="rust"><code>use std::sync::{Arc, Weak, Mutex};
+
+// ❌ 부모 → 자식 → 부모 를 전부 Arc 로 하면 카운트가 0이 되지 않습니다
+struct Node {
+    parent: Option&lt;Arc&lt;Node&gt;&gt;,          // ★ 여기가 문제
+    children: Mutex&lt;Vec&lt;Arc&lt;Node&gt;&gt;&gt;,
+}
+// 부모가 자식을 1 잡고, 자식이 부모를 1 잡음 → 서로 붙잡고 안 죽음
+
+// ✅ 한쪽을 Weak 로 — '소유하지 않는 참조'
+struct Node2 {
+    parent: Option&lt;Weak&lt;Node2&gt;&gt;,        // 카운트를 올리지 않습니다
+    children: Mutex&lt;Vec&lt;Arc&lt;Node2&gt;&gt;&gt;,
+}
+// 쓸 때 승격
+if let Some(p) = node.parent.as_ref().and_then(|w| w.upgrade()) { /* … */ }
+
+// 규칙: '소유 방향'을 정하고 반대 방향은 전부 Weak
+//   부모가 자식을 소유 · 자식은 부모를 Weak
+//   캐시가 값을 소유 · 값이 캐시를 가리키면 Weak
+//   옵저버 목록은 Weak (구독자가 사라지면 자동으로 무효)
+
+// 살아 있는 개수 확인 — 누수 감시에 유용합니다
+println!("strong={} weak={}", Arc::strong_count(&amp;a), Arc::weak_count(&amp;a));</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>서버에서 실제로 자주 새는 것들</b> —
+        ① <b>끝나지 않는 태스크</b>(수신자가 사라진 채널을 계속 기다림 · h02 의 <code>num_alive_tasks</code> 로 감지),
+        ② <b>상한 없는 캐시</b>(<code>DashMap</code> 에 넣기만 함 → <code>moka</code> 로),
+        ③ <b>구독자 목록에서 안 지운 항목</b>,
+        ④ <code>Box::leak</code> 을 루프에서 호출. 넷 다 <code>Arc</code> 순환보다 훨씬 흔합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">RSS 가 안 내려가는 이유</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">“메모리를 풀었는데 왜 그대로인가”</h4>
+      <pre class="code" data-lang="text"><code>Rust 가 free() 했다고 OS 에 돌아가는 게 아닙니다
+
+  ① 할당자가 붙잡고 있습니다
+       다음 요청에 다시 쓰려고 캐시로 들고 있습니다 — 정상 동작입니다.
+  ② 단편화
+       128KB 덩어리 하나가 남아 있으면 그 주변 페이지를 못 돌려줍니다.
+       요청마다 크기가 들쭉날쭉하면 특히 심합니다.
+  ③ glibc 는 특히 잘 안 돌려줍니다
+       malloc_trim(0) 을 호출해야 일부가 반환됩니다.
+
+  대책
+    · jemalloc  : MALLOC_CONF=dirty_decay_ms:5000,muzzy_decay_ms:5000
+    · mimalloc  : 기본적으로 비교적 잘 반환합니다
+    · 큰 버퍼는 크기를 '표준화' 해서 재사용 (버퍼 풀 · h05)
+    · 컨테이너 메모리 한도는 '최대 사용량' 기준으로 잡을 것
+      (평균 기준으로 잡으면 OOMKilled 를 반복합니다)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메모리 사용량을 직접 재기</h4>
+      <pre class="code" data-lang="rust"><code>// ① 프로세스 RSS — 리눅스
+fn rss_bytes() -&gt; Option&lt;u64&gt; {
+    let s = std::fs::read_to_string("/proc/self/statm").ok()?;
+    let pages: u64 = s.split_whitespace().nth(1)?.parse().ok()?;
+    Some(pages * 4096)
+}
+
+// ② 컨테이너 한도 안에서 얼마나 쓰는지 (cgroup v2)
+//    /sys/fs/cgroup/memory.current  ·  memory.max
+//    ★ 쿠버네티스 OOMKilled 는 이 값 기준입니다 — /proc/meminfo 가 아닙니다
+
+// ③ 타입 하나의 크기
+println!("{}", std::mem::size_of::&lt;MyStruct&gt;());
+// 필드 순서를 바꾸면 패딩이 줄어드는 경우가 많습니다 (⚡ e04)
+//   cargo install cargo-show-asm / top-type-sizes
+//   RUSTFLAGS="-Zprint-type-sizes" cargo +nightly build  ← 큰 타입 찾기 ★
+
+// ④ 지표로 노출 (프로메테우스)
+metrics::gauge!("process_rss_bytes").set(rss_bytes().unwrap_or(0) as f64);</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>OOMKilled 대응 순서</b> — ① cgroup 기준으로 <b>실제 최대치를 재고</b>
+        ② dhat 으로 <b>t-gmax 시점의 큰 항목</b>을 찾고 ③ 그게 <b>큐·캐시라면 상한</b>을 걸고
+        ④ 그게 <b>태스크당 버퍼라면 크기를 줄이거나 풀링</b>(h02 의 Future 크기 · h05).
+        메모리 한도만 올리는 건 마지막 수단입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 가장 싼 개선은 <b><code>#[global_allocator]</code> 로 mimalloc 을 얹는 것</b>입니다(한 줄).
+    그다음이 <b>용량 미리 잡기 · <code>SmallVec</code> · 버퍼 재사용</b>으로 <b>할당 횟수</b>를 줄이는 것이고,
+    “요청 동안만 사는” 객체가 많으면 <b>아레나</b>가 답입니다.
+    숫자로 확인할 때는 <b>dhat 의 Total blocks(횟수) · t-gmax(최대) · t-end(누수)</b> 세 개를 보세요.</div>
+</section>
+
+
+<!-- ==================== h11 ==================== -->
+<section class="sec" id="h11">
+  <div class="sec-head rv">
+    <span class="no">SVC 11</span>
+    <h2>벤치 · 프로파일 — <span class="t">flamegraph · tokio-console · PGO</span></h2>
+    <p class="lead">
+      ⚡ e01 에서 criterion 으로 함수를 재는 법을 봤습니다. 여기서는 <b>서비스 전체</b>를 대상으로 합니다 —
+      <b>CPU 가 어디서 타는지(flamegraph)</b>, <b>태스크가 어디서 기다리는지(tokio-console)</b>,
+      그리고 코드를 안 고치고 얻는 <b>LTO · PGO · BOLT</b> 까지.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 314" role="img" aria-label="증상별로 어떤 프로파일 도구를 쓸지 정리한 지도. CPU 사용률이 높으면 플레임그래프와 퍼프로 어떤 함수가 타는지 본다. CPU 는 낮은데 느리면 대기 문제이므로 토키오 콘솔로 태스크의 유휴 시간과 폴링 시간을 본다. 메모리가 문제면 디하트나 힙트랙을 쓴다. 특정 요청만 느리면 트레이싱의 스팬으로 구간을 나눠 본다. 마지막으로 함수 단위 비교는 크라이테리온이나 다반으로 한다.">
+      <text x="16" y="18" class="lbl">증상을 먼저 정하고 도구를 고릅니다 — 반대로 하면 시간만 씁니다</text>
+
+      <rect class="bx bx-fw" x="16" y="36" width="200" height="52"/>
+      <text x="116" y="58" class="val rs-t" text-anchor="middle">CPU 100% · 느림</text>
+      <text x="116" y="76" class="ann" text-anchor="middle">계산이 문제</text>
+      <path class="fl ar" d="M220 62 L252 62"/>
+      <rect class="bx bx-ok" x="256" y="36" width="408" height="52"/>
+      <text x="272" y="58" class="val ok-t">cargo flamegraph · perf record — 어느 함수가 태우는지</text>
+      <text x="272" y="76" class="ann">넓은 봉우리를 찾습니다. 상위 3개가 대개 80% 입니다</text>
+
+      <rect class="bx bx-fw" x="16" y="96" width="200" height="52"/>
+      <text x="116" y="118" class="val rs-t" text-anchor="middle">CPU 낮은데 느림</text>
+      <text x="116" y="136" class="ann" text-anchor="middle">대기가 문제</text>
+      <path class="fl ar" d="M220 122 L252 122"/>
+      <rect class="bx bx-ok" x="256" y="96" width="408" height="52"/>
+      <text x="272" y="118" class="val ok-t">tokio-console — 태스크별 busy / idle / poll 횟수</text>
+      <text x="272" y="136" class="ann">busy 가 긴 태스크 = 블로킹 · idle 이 긴 태스크 = 하류 대기</text>
+
+      <rect class="bx bx-fw" x="16" y="156" width="200" height="52"/>
+      <text x="116" y="178" class="val rs-t" text-anchor="middle">메모리가 문제</text>
+      <text x="116" y="196" class="ann" text-anchor="middle">OOM · RSS 증가</text>
+      <path class="fl ar" d="M220 182 L252 182"/>
+      <rect class="bx bx-ok" x="256" y="156" width="408" height="52"/>
+      <text x="272" y="178" class="val ok-t">dhat · heaptrack · jemalloc prof (h10)</text>
+      <text x="272" y="196" class="ann">할당 횟수 · 최대 사용 시점 · 끝나고 남은 것</text>
+
+      <rect class="bx bx-fw" x="16" y="216" width="200" height="52"/>
+      <text x="116" y="238" class="val rs-t" text-anchor="middle">일부 요청만 느림</text>
+      <text x="116" y="256" class="ann" text-anchor="middle">p99 만 나쁨</text>
+      <path class="fl ar" d="M220 242 L252 242"/>
+      <rect class="bx bx-ok" x="256" y="216" width="408" height="52"/>
+      <text x="272" y="238" class="val ok-t">tracing 스팬 + 히스토그램 (🧰 t08)</text>
+      <text x="272" y="256" class="ann">구간별로 쪼개면 어디서 튀는지 바로 보입니다</text>
+
+      <rect class="bx bx-hi" x="16" y="276" width="648" height="30"/>
+      <text x="32" y="296" class="ann am-t">함수 하나를 A/B 비교할 때만 criterion · divan 을 씁니다 — 서비스 전체를 마이크로벤치로 이해하려 들지 마세요</text>
+    </svg>
+    <div class="cap">도구는 <b>증상마다 다릅니다</b> — “느리다”를 먼저 <b>CPU · 대기 · 메모리 · 꼬리</b> 중 하나로 좁히세요.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">flamegraph — 5분이면 원인이 보입니다</h4>
+      <pre class="code" data-lang="bash"><code>cargo install flamegraph
+# 리눅스: perf 필요 · 커널 설정 한 번
+sudo sysctl -w kernel.perf_event_paranoid=1
+
+# Cargo.toml 에 debug 심볼을 켜 둡니다 (릴리스여도 성능 영향 없음)
+#   [profile.release] debug = 1
+
+cargo flamegraph --bin svc -- --config prod.toml     # 실행하며 수집
+cargo flamegraph --root --pid 12345                  # 이미 도는 프로세스에 붙기
+cargo flamegraph --bench my_bench                    # 벤치를 프로파일
+
+# 읽는 법
+#   x축 = 시간이 아니라 '샘플 비율' (넓을수록 많이 태움) ★
+#   y축 = 콜 스택 깊이
+#   찾을 것: 넓고 평평한 봉우리 · 예상 못 한 이름(memcpy · malloc · drop_in_place)
+#   memcpy 가 넓다  → 복사 과다 (h05)
+#   malloc 이 넓다  → 할당 과다 (h10)
+#   드롭이 넓다     → 큰 트리 해제 → 아레나 검토
+
+# 대안 — 샘플링 프로파일러
+cargo install samply &amp;&amp; samply record ./target/release/svc   # 브라우저 UI
+perf record -F 999 -g -- ./target/release/svc &amp;&amp; perf report</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>인라인 때문에 함수가 안 보일 때</b> — <code>lto</code>·<code>codegen-units=1</code> 이 켜져 있으면
+        스택이 뭉개집니다. <b>프로파일용 프로필</b>을 따로 만들어
+        <code>[profile.profiling] inherits = "release" · debug = 1 · lto = false</code>
+        로 재는 것이 실무 요령입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">tokio-console — 비동기 전용 관측기</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+console-subscriber = "0.4"
+tokio = { version = "1", features = ["full", "tracing"] }</code></pre>
+      <pre class="code" data-lang="rust"><code>#[tokio::main]
+async fn main() {
+    console_subscriber::init();     // ★ 이 한 줄 (기본 포트 6669)
+    // 또는 다른 레이어와 함께
+    // tracing_subscriber::registry()
+    //     .with(console_subscriber::spawn())
+    //     .with(tracing_subscriber::fmt::layer())
+    //     .init();
+    run().await;
+}</code></pre>
+      <pre class="code" data-lang="bash"><code># 빌드할 때 unstable 플래그가 필요합니다
+RUSTFLAGS="--cfg tokio_unstable" cargo run --release
+
+# 다른 터미널에서
+cargo install tokio-console
+tokio-console                       # http://127.0.0.1:6669
+
+# 화면에서 보는 것
+#   Total / Busy / Idle    태스크가 실제로 일한 시간 vs 기다린 시간
+#   Polls                  폴링 횟수 — 이상하게 많으면 바쁜 대기(busy loop)
+#   ⚠ warnings             tokio 가 직접 잡아 줍니다
+#       "task has lost its waker"      → 영원히 안 깨어남 (누수)
+#       "task blocked for N ms"        → 폴링이 길다 = 블로킹 ★ h02
+#       "task spent N% of time busy"   → CPU 작업이 async 안에 있음</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 도구가 유일하게 답하는 질문</b> — <b>“어떤 태스크가 워커를 붙잡고 있나”</b>.
+        flamegraph 는 <b>함수</b>를 보여 주지만 <b>어느 태스크의 것인지</b>는 모릅니다.
+        <code>tokio::task::Builder::new().name("agg")</code> 로 이름을 붙여 두면 훨씬 읽기 쉽습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">벤치를 신뢰할 수 있게 만들기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">criterion · divan — 함수 단위 A/B</h4>
+      <pre class="code" data-lang="rust"><code>// benches/parse.rs  (criterion)
+use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
+use std::hint::black_box;
+
+fn bench(c: &amp;mut Criterion) {
+    let data = std::fs::read("testdata/sample.log").unwrap();
+
+    let mut g = c.benchmark_group("parse");
+    g.throughput(Throughput::Bytes(data.len() as u64));   // MB/s 로 나옵니다 ★
+    for &amp;chunk in &amp;[1024usize, 8192, 65536] {
+        g.bench_with_input(BenchmarkId::from_parameter(chunk), &amp;chunk, |b, &amp;n| {
+            b.iter(|| parse_chunked(black_box(&amp;data), n))
+        });
+    }
+    g.finish();
+}
+criterion_group!(benches, bench);
+criterion_main!(benches);</code></pre>
+      <pre class="code" data-lang="bash"><code>cargo bench                       # target/criterion/report/index.html
+cargo bench -- --save-baseline before
+# … 코드 수정 …
+cargo bench -- --baseline before  # 변화량 + 통계적 유의성까지 표시 ★
+
+# divan — 더 가볍고 빠릅니다 (#[divan::bench] 어트리뷰트만)
+# 마이크로벤치를 자주 돌린다면 이쪽이 편합니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>벤치가 거짓말하는 세 가지</b> —
+        ① <code>black_box</code> 없이 결과를 안 쓰면 <b>코드가 통째로 사라집니다</b>,
+        ② 캐시에 다 올라간 작은 데이터로 재면 <b>현실과 다릅니다</b>,
+        ③ CPU 주파수 스케일링·터보 때문에 <b>첫 몇 초와 이후가 다릅니다</b>.
+        서버라면 벤치보다 <b>부하 테스트</b>(아래)가 훨씬 정직합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">부하 테스트 — 서비스는 이렇게 잽니다</h4>
+      <pre class="code" data-lang="bash"><code># HTTP — oha (Rust 로 작성 · 히스토그램이 예쁨)
+cargo install oha
+oha -z 60s -c 200 --latency-correction http://localhost:8080/api
+
+# 또는 wrk / bombardier / k6
+wrk -t8 -c400 -d60s --latency http://localhost:8080/api
+
+# gRPC — ghz
+ghz --insecure -c 100 -z 60s --proto svc.proto --call svc.Api/Get localhost:50051
+
+# TCP·UDP 커스텀 프로토콜은 직접 만듭니다 (h13 에서 실제로 만듭니다)
+
+# 반드시 함께 기록할 것 ★
+#   · p50 / p90 / p99 / p999   (평균만 보면 아무것도 못 봅니다)
+#   · 처리량(req/s)과 그때의 CPU · RSS
+#   · 에러율 · 타임아웃 수
+#   · 부하를 올렸을 때 '어디서 꺾이는지' (포화점)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>Coordinated Omission 을 조심하세요</b> — 부하 도구가 <b>응답을 기다렸다가 다음 요청을 보내면</b>
+        서버가 멈춘 동안의 지연이 <b>측정에서 빠집니다</b>. 그래서 p99 가 실제보다 훨씬 좋게 나옵니다.
+        <code>oha --latency-correction</code> 이나 <code>wrk2</code> 처럼 <b>고정 요청률</b> 모드를 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">릴리스 프로필 완전판</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Cargo.toml — 그대로 복사해 쓰는 설정</h4>
+      <pre class="code" data-lang="toml"><code># ── 배포용 ────────────────────────────────────────────
+[profile.release]
+opt-level = 3          # 기본값. 크기가 중요하면 "s" 또는 "z"
+lto = "fat"            # 크레이트 경계를 넘는 인라인 ★ 보통 5~20%
+codegen-units = 1      # 병렬 코드 생성을 포기하고 최적화 극대화
+panic = "abort"        # 되감기 코드 제거 → 바이너리 ↓ · 약간 빠름
+strip = "symbols"      # 심볼 제거
+incremental = false
+debug = 1              # ★ 프로파일용 심볼은 남깁니다 (성능 영향 없음)
+overflow-checks = true # 금액·인덱스 계산이 있으면 켜 두는 편이 안전
+
+# ── 프로파일 전용 (스택이 뭉개지지 않게) ────────────────
+[profile.profiling]
+inherits = "release"
+lto = false
+codegen-units = 16
+debug = 2
+
+# ── 개발 중에도 의존성만은 최적화 (테스트가 훨씬 빨라집니다) ★
+[profile.dev.package."*"]
+opt-level = 3
+
+# ── 크기를 최소화 (WASM · 임베디드 · h12) ─────────────
+[profile.min]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+panic = "abort"
+strip = true</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>panic = "abort"</code> 의 대가</b> — <code>catch_unwind</code> 가 안 되고,
+        <b>한 태스크의 패닉이 프로세스 전체를 죽입니다</b>. 서버라면
+        <b>“쿠버네티스가 재시작해 주니 오히려 낫다”</b>는 쪽과
+        <b>“한 요청 때문에 전부 죽으면 안 된다”</b>는 쪽이 갈립니다.
+        멀티테넌트 서버라면 <b>기본값(unwind)을 유지</b>하는 편이 안전합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">PGO · BOLT — 코드를 안 고치고 5~20%</h4>
+      <pre class="code" data-lang="bash"><code># ① PGO (Profile-Guided Optimization)
+#    실제 사용 패턴을 수집해 분기 예측·인라인 결정을 개선합니다
+rustup component add llvm-tools-preview
+
+# 1단계 — 계측 빌드
+RUSTFLAGS="-Cprofile-generate=/tmp/pgo" cargo build --release
+# 2단계 — '진짜 같은' 부하를 먹입니다 ★ 이 단계가 품질을 정합니다
+./target/release/svc &amp; oha -z 120s -c 100 http://localhost:8080/api; kill %1
+# 3단계 — 프로파일 합치기
+llvm-profdata merge -o /tmp/pgo/merged.profdata /tmp/pgo
+# 4단계 — 최종 빌드
+RUSTFLAGS="-Cprofile-use=/tmp/pgo/merged.profdata" cargo build --release
+
+# 실측 보고 감각: 5~15% (분기가 많은 파서·인터프리터에서 더 큼)
+# rustc 자신도 PGO 로 빌드됩니다.
+
+# ② BOLT — 링크 후 바이너리의 '코드 배치'를 재정렬 (I-캐시 적중률 ↑)
+llvm-bolt ./target/release/svc -o svc.bolt \
+  -data=perf.fdata -reorder-blocks=ext-tsp -reorder-functions=hfsort \
+  -split-functions -split-all-cold
+# PGO 위에 추가로 2~10% — 큰 바이너리일수록 효과가 큽니다
+
+# ③ target-cpu — 배포 대상이 고정이면
+RUSTFLAGS="-C target-cpu=native" cargo build --release
+#   ★ 다른 CPU 에서 안 돕니다. 컨테이너 배포면 x86-64-v3 정도가 무난합니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>투자 대비 효과 순서</b> — ① <code>--release</code> 로 재고 있는지 확인(디버그면 10~100배 차이),
+        ② <code>lto = "fat"</code> + <code>codegen-units = 1</code>, ③ 할당자 교체(h10),
+        ④ <code>target-cpu</code>, ⑤ PGO, ⑥ BOLT.
+        <b>①②③ 이 전체 이득의 대부분</b>이고 ⑤⑥ 은 CI 복잡도를 꽤 올립니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">인라인과 성능 회귀 감시</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">#[inline] 을 언제 붙이나</h4>
+      <pre class="code" data-lang="rust"><code>// 같은 크레이트 안에서는 컴파일러가 알아서 판단합니다 — 손대지 마세요.
+// 문제는 '크레이트 경계'입니다. LTO 없이는 인라인이 안 됩니다.
+
+#[inline]                 // "인라인해도 좋다" — 다른 크레이트에서도 가능해짐
+pub fn fast_hash(x: u64) -&gt; u64 { x.wrapping_mul(0x9E3779B97F4A7C15) }
+
+#[inline(always)]         // 강제. 아주 작은 함수에만 ★ 남용하면 코드가 커져 느려짐
+fn bit(x: u64, i: u32) -&gt; bool { (x &gt;&gt; i) &amp; 1 == 1 }
+
+#[inline(never)]          // 프로파일에서 보고 싶을 때 · 코드 크기를 줄일 때
+fn cold_error_path(e: &amp;Error) { /* … */ }
+
+#[cold]                   // "거의 안 불린다" — 분기 예측·배치에 힌트
+fn handle_rare(e: Error) -&gt; ! { panic!("{e}") }
+
+// 실제로 인라인됐는지 확인
+// cargo install cargo-show-asm
+// cargo asm --lib my_crate::fast_hash --rust        ← 어셈블리를 소스와 나란히</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>제네릭 함수는 이미 인라인 후보입니다</b> — 단형화되면서 호출 크레이트에서 코드가 생성되므로
+        <code>#[inline]</code> 이 없어도 됩니다. <b><code>#[inline]</code> 이 필요한 건 구체 타입의 <code>pub fn</code></b> 뿐입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI 에서 성능 회귀 잡기</h4>
+      <pre class="code" data-lang="yaml"><code># .github/workflows/bench.yml — PR 마다 벤치를 비교
+name: bench
+on: [pull_request]
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 기준(main) 벤치
+        run: |
+          git checkout origin/main
+          cargo bench -- --save-baseline main
+      - name: 이 PR 벤치
+        run: |
+          git checkout -
+          cargo bench -- --baseline main 2&gt;&amp;1 | tee bench.txt
+      - name: 회귀 확인
+        run: |
+          if grep -q "Performance has regressed" bench.txt; then
+            echo "::warning::성능 회귀 감지" ; fi</code></pre>
+      <pre class="code" data-lang="bash"><code># 마이크로벤치는 CI 러너에서 흔들립니다. 더 안정적인 대안 —
+#   ① 실행 명령 수를 세기 (하드웨어 노이즈에 둔감)
+cargo install iai-callgrind    # valgrind 기반 · 편차가 거의 없음
+#   ② 바이너리 크기 · 의존성 수를 회귀 지표로
+cargo bloat --release --crates | head -20
+cargo tree --duplicates        # 같은 크레이트의 여러 버전 찾기
+#   ③ 컴파일 시간 감시
+cargo build --timings</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 증상을 먼저 <b>CPU · 대기 · 메모리 · 꼬리</b> 중 하나로 좁히고 도구를 고르세요.
+    CPU 는 <b>flamegraph</b>, 비동기 대기는 <b>tokio-console</b>, 메모리는 <b>dhat</b> 입니다.
+    설정으로 얻는 이득은 <b><code>lto="fat"</code> + <code>codegen-units=1</code> + 할당자 교체</b>가 대부분이고,
+    부하 테스트는 반드시 <b>고정 요청률 + p99</b> 로 재세요.</div>
+</section>
+
+
+<!-- ==================== h12 ==================== -->
+<section class="sec" id="h12">
+  <div class="sec-head rv">
+    <span class="no">SVC 12</span>
+    <h2>임베디드 · WASM · 엣지 — <span class="t">런타임이 없는 곳</span>에서도 돕니다</h2>
+    <p class="lead">
+      Rust 에는 가비지 컬렉터도 런타임도 없습니다. 그래서 <b>운영체제가 없는 마이크로컨트롤러</b>,
+      <b>브라우저·서버리스 WASM</b>, <b>엣지 함수</b> 처럼 다른 언어가 못 들어가는 곳에 그대로 들어갑니다.
+      이 섹션은 그 세 갈래의 <b>현재 실제 상태</b>와 시작하는 법을 정리합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="러스트가 돌아가는 환경을 메모리 크기 순으로 늘어놓은 스펙트럼. 왼쪽부터 킬로바이트 단위의 no_std 마이크로컨트롤러, 메가바이트 단위의 웹어셈블리와 엣지 함수, 기가바이트 단위의 일반 서버 순이다. 각 칸에는 표준 라이브러리 사용 범위, 대표 크레이트, 그리고 그 환경에서 러스트가 적합한 이유가 적혀 있다.">
+      <text x="16" y="18" class="lbl">같은 언어가 KB 부터 GB 까지 — 표준 라이브러리 사용 범위만 달라집니다</text>
+
+      <rect class="bx bx-hi" x="16" y="36" width="208" height="118"/>
+      <text x="120" y="58" class="val am-t" text-anchor="middle">no_std — 수십 KB</text>
+      <text x="32" y="80" class="ann">MCU · 펌웨어 · 부트로더</text>
+      <text x="32" y="98" class="ann">core + alloc 만 (OS · 힙 선택)</text>
+      <text x="32" y="116" class="ann">embassy · embedded-hal</text>
+      <text x="32" y="134" class="ann">RP2040 · ESP32 · STM32 · nRF</text>
+      <text x="32" y="150" class="ann">GC 가 없어 실시간성이 예측 가능</text>
+
+      <rect class="bx bx-fw" x="236" y="36" width="208" height="118"/>
+      <text x="340" y="58" class="val rs-t" text-anchor="middle">WASM — 수 MB</text>
+      <text x="252" y="80" class="ann">브라우저 · 엣지 · 플러그인</text>
+      <text x="252" y="98" class="ann">wasm32-unknown-unknown</text>
+      <text x="252" y="116" class="ann">wasm32-wasip2 (시스템 접근)</text>
+      <text x="252" y="134" class="ann">wasm-bindgen · workers-rs · Spin</text>
+      <text x="252" y="150" class="ann">시작 1ms 이하 — 콜드 스타트가 없음</text>
+
+      <rect class="bx bx-ok" x="456" y="36" width="208" height="118"/>
+      <text x="560" y="58" class="val ok-t" text-anchor="middle">서버 — GB</text>
+      <text x="472" y="80" class="ann">일반 std + tokio</text>
+      <text x="472" y="98" class="ann">이 탭의 h01~h11 전부</text>
+      <text x="472" y="116" class="ann">스레드 · 파일 · 네트워크 자유</text>
+      <text x="472" y="134" class="ann">축약 없이 생태계 전부 사용</text>
+      <text x="472" y="150" class="ann">가장 흔한 자리</text>
+
+      <text x="16" y="188" class="ttl">경계에서 무엇이 사라지나</text>
+      <rect class="bx" x="16" y="198" width="318" height="90"/>
+      <text x="32" y="220" class="val">no_std 에서 없는 것</text>
+      <text x="32" y="240" class="ann">std::thread · std::fs · std::net · println!</text>
+      <text x="32" y="258" class="ann">Vec · String 은 alloc 을 붙이면 사용 가능</text>
+      <text x="32" y="276" class="ann">패닉 처리기와 진입점을 직접 정의해야 함</text>
+
+      <rect class="bx" x="346" y="198" width="318" height="90"/>
+      <text x="362" y="220" class="val">WASM 에서 조심할 것</text>
+      <text x="362" y="240" class="ann">스레드 제한적 · 시간·난수는 호스트가 제공</text>
+      <text x="362" y="258" class="ann">usize 가 32비트 — 큰 인덱스 계산 주의</text>
+      <text x="362" y="276" class="ann">바이너리 크기가 곧 로딩 시간 (opt-level="z")</text>
+    </svg>
+    <div class="cap">차이는 <b>“무엇이 없느냐”</b>일 뿐 언어·소유권·크레이트 대부분은 그대로입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">no_std — 시작하는 법</h4>
+      <pre class="code" data-lang="rust"><code>#![no_std]                  // 표준 라이브러리 대신 core 만
+#![no_main]                 // OS 가 주는 main 진입점 없음
+
+use panic_probe as _;       // 패닉 처리기 (필수 — 없으면 링크 에러)
+use defmt_rtt as _;         // 로그 출력 (RTT 로 디버거에 찍힘)
+
+extern crate alloc;         // 힙이 필요하면 (할당자를 직접 지정)
+use alloc::vec::Vec;
+
+#[cortex_m_rt::entry]       // 진입점
+fn main() -&gt; ! {            // ★ 절대 반환하지 않습니다
+    let p = embassy_rp::init(Default::default());
+    let mut led = embassy_rp::gpio::Output::new(p.PIN_25, Level::Low);
+    loop {
+        led.toggle();
+        cortex_m::asm::delay(8_000_000);
+    }
+}
+
+// core 에는 있는 것 / 없는 것
+//   있음: Option Result Iterator 슬라이스 정수 연산 fmt(일부)
+//   없음: Vec String HashMap 파일 스레드 시간 (alloc·크레이트로 보충)
+//         → heapless 크레이트가 고정 크기 Vec/String/HashMap 을 줍니다 ★</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>왜 임베디드에서 Rust 인가</b> — C 에서 가장 흔한 사고가
+        <b>버퍼 넘침 · 널 포인터 · 인터럽트와 메인 루프의 데이터 레이스</b>인데
+        셋 다 컴파일 단계에서 막힙니다. 특히 <code>Send</code>/<code>Sync</code> 와
+        <code>critical-section</code> 크레이트 조합으로 <b>인터럽트 공유 데이터가 타입으로 강제</b>됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">embassy — 임베디드용 async 런타임</h4>
+      <pre class="code" data-lang="toml"><code># .cargo/config.toml
+[build]
+target = "thumbv6m-none-eabi"        # RP2040 (Raspberry Pi Pico)
+# ESP32-C3 라면 riscv32imc-unknown-none-elf
+
+[target.thumbv6m-none-eabi]
+runner = "probe-rs run --chip RP2040"   # cargo run 이 보드에 굽습니다 ★</code></pre>
+      <pre class="code" data-lang="rust"><code>use embassy_executor::Spawner;
+use embassy_time::{Duration, Timer};
+
+// 태스크가 여러 개여도 스레드는 없습니다 — 협력적 스케줄링 + 인터럽트 ★
+#[embassy_executor::task]
+async fn blink(mut led: Output&lt;'static&gt;) {
+    loop {
+        led.toggle();
+        Timer::after(Duration::from_millis(500)).await;  // 이 동안 CPU 는 잠듦
+    }
+}
+
+#[embassy_executor::task]
+async fn read_sensor(mut adc: Adc&lt;'static&gt;, tx: Sender&lt;'static, ThreadModeRawMutex, u16, 8&gt;) {
+    loop {
+        let v = adc.read().await;
+        tx.send(v).await;             // 채널도 그대로 있습니다 (h03 과 같은 개념)
+        Timer::after(Duration::from_secs(1)).await;
+    }
+}
+
+#[embassy_executor::main]
+async fn main(spawner: Spawner) {
+    let p = embassy_rp::init(Default::default());
+    spawner.spawn(blink(Output::new(p.PIN_25, Level::Low))).unwrap();
+    // 힙 할당 0 · 태스크 크기는 컴파일 타임에 확정됩니다
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>async 가 임베디드에 잘 맞는 이유</b> — 태스크가 <b>대기할 때 CPU 를 재우고</b>
+        인터럽트로 깨우기 때문에 <b>전력 소모가 크게 줄어듭니다</b>.
+        RTOS 처럼 태스크마다 스택을 잡을 필요도 없습니다(상태 기계라서).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">WASM 과 엣지 런타임</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Cloudflare Workers — workers-rs</h4>
+      <pre class="code" data-lang="rust"><code>// [dependencies] worker = "0.4"
+use worker::*;
+
+#[event(fetch)]
+async fn fetch(req: Request, env: Env, _ctx: Context) -&gt; Result&lt;Response&gt; {
+    Router::new()
+        .get("/", |_, _| Response::ok("hello from the edge"))
+        .get_async("/kv/:key", |_, ctx| async move {
+            let key = ctx.param("key").unwrap();
+            let kv = ctx.kv("MY_KV")?;                 // 엣지 키-값 저장소
+            match kv.get(key).text().await? {
+                Some(v) =&gt; Response::ok(v),
+                None =&gt; Response::error("not found", 404),
+            }
+        })
+        .post_async("/d1", |mut req, ctx| async move {
+            let body: serde_json::Value = req.json().await?;
+            let db = ctx.env.d1("DB")?;                // 엣지 SQLite
+            db.prepare("INSERT INTO logs (body) VALUES (?1)")
+              .bind(&amp;[body.to_string().into()])?
+              .run().await?;
+            Response::ok("ok")
+        })
+        .run(req, env).await
+}</code></pre>
+      <pre class="code" data-lang="bash"><code>npm create cloudflare@latest -- my-worker --template=hello-world-rust
+npx wrangler dev            # 로컬 실행
+npx wrangler deploy         # 전 세계 300+ 도시에 배포
+
+# 왜 Rust 인가: WASM 이라 콜드 스타트가 거의 0 이고,
+#   무거운 계산(이미지 변환 · 암호 · 파싱)을 JS 보다 훨씬 싸게 합니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WASI · Spin — 서버 쪽 WASM</h4>
+      <pre class="code" data-lang="bash"><code># ① 표준 WASI 로 빌드 — 파일·소켓 접근이 있는 WASM
+rustup target add wasm32-wasip1
+cargo build --release --target wasm32-wasip1
+wasmtime target/wasm32-wasip1/release/svc.wasm       # 어디서든 같은 바이너리
+
+# ② 크기 줄이기 (로딩 시간 = 크기)
+cargo install wasm-opt-rs   # 또는 binaryen 의 wasm-opt
+wasm-opt -Oz -o small.wasm svc.wasm
+# [profile.release] opt-level = "z"  lto = "fat"  panic = "abort"  strip = true
+
+# ③ Spin — WASM 마이크로서비스 프레임워크
+spin new -t http-rust my-svc
+spin build &amp;&amp; spin up
+spin deploy                 # Fermyon Cloud 또는 쿠버네티스(SpinKube)</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">플랫폼</th><th>런타임</th><th>특징</th></tr>
+        <tr><td>Cloudflare Workers</td><td>V8 + WASM</td><td><b>콜드 스타트 ≈ 0</b> · KV/D1/R2</td></tr>
+        <tr><td>Fastly Compute</td><td>Wasmtime</td><td>요청마다 새 인스턴스</td></tr>
+        <tr><td>Spin / SpinKube</td><td>Wasmtime</td><td>자체 호스팅 가능</td></tr>
+        <tr><td>AWS Lambda</td><td>네이티브</td><td><b>WASM 아님</b> — 그냥 바이너리</td></tr>
+        <tr><td>브라우저</td><td>V8/SM</td><td>wasm-bindgen (🟨 j08)</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">어디에 Rust 가 맞나</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 굳이 Rust 가 아니어도 되는 곳</h5>
+      <pre class="code" data-lang="text"><code>· 엣지에서 라우팅·리다이렉트만 하는 함수
+    JS 로 열 줄이면 끝나고 성능 차이가 안 납니다.
+
+· 아두이노 수준의 취미 프로젝트
+    C++ 생태계(라이브러리·예제)가 훨씬 두껍습니다.
+
+· 브라우저 UI 전체
+    Leptos·Dioxus 가 훌륭하지만 채용·생태계에서 React 를 못 이깁니다.
+    WASM 은 'UI 옆의 무거운 계산'에 쓰는 게 현실적입니다.
+
+· 팀에 임베디드 Rust 경험이 아무도 없고 납기가 3개월
+    HAL·디버깅 도구에 익숙해지는 데만 몇 주가 갑니다.</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ Rust 가 확실히 맞는 곳</h5>
+      <pre class="code" data-lang="text"><code>· 배터리로 도는 기기 — GC 가 없어 전력·지연이 예측 가능
+· 안전이 중요한 펌웨어 — 의료·자동차·산업 (인증 사례 증가)
+· 엣지에서의 무거운 계산 — 이미지 변환 · 암호 · 파싱 · 압축
+· 브라우저에서 도는 계산 코어 — 코덱 · 시뮬레이션 · 편집기 엔진
+    (Figma · Photoshop Web · Google Earth 가 이 방식입니다)
+· 플러그인 시스템 — WASM 으로 샌드박싱 (extism · wasmtime 임베드)
+· "같은 로직을 서버 · 브라우저 · 기기에서" 써야 할 때 ★
+    코어를 no_std 크레이트로 만들고 각 타깃에서 껍데기만 다르게</code></pre>
+    </div>
+  </div>
+  <div class="note tip rv">
+    <b>실무에서 가장 값어치 있는 패턴</b> — <b>핵심 로직을 <code>no_std</code> 크레이트</b>로 짜 두면
+    그대로 <b>서버 · WASM · 펌웨어</b> 셋에 들어갑니다.
+    <code>#![cfg_attr(not(feature = "std"), no_std)]</code> 로 두 모드를 함께 지원하는 것이
+    <code>serde</code>·<code>heapless</code>·<code>postcard</code> 같은 크레이트가 쓰는 방식입니다.
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">크기와 시작 시간을 실제로 줄이기</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">바이너리에서 무엇이 자리를 차지하나</h4>
+      <pre class="code" data-lang="bash"><code>cargo install cargo-bloat
+cargo bloat --release --crates -n 20      # 크레이트별 차지 비율
+cargo bloat --release -n 20               # 함수별
+
+# 흔한 범인들
+#   · 포매팅 기계 (core::fmt) — println!/format! 이 있으면 수십 KB
+#     → 임베디드에서는 defmt 로 대체 (포맷을 호스트에서 함)
+#   · 패닉 메시지 문자열 — panic_immediate_abort 로 제거 (nightly)
+#   · 제네릭 단형화 폭발 — 같은 함수가 타입마다 복제
+#     → 내부를 &amp;dyn 이나 구체 타입 함수로 빼서 한 벌만 생성 ★
+#   · regex · serde_json 은 무겁습니다 (엣지·임베디드에서 주의)
+
+# 크기 최적화 조합
+# [profile.release] opt-level="z" lto="fat" codegen-units=1 panic="abort" strip=true
+# + build-std (nightly): cargo +nightly build -Z build-std=core,alloc \
+#     -Z build-std-features=panic_immediate_abort --target thumbv6m-none-eabi</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">단형화 폭발을 줄이는 관용구</h4>
+      <pre class="code" data-lang="rust"><code>// ❌ 제네릭 본문이 타입마다 통째로 복제됩니다
+pub fn save&lt;P: AsRef&lt;std::path::Path&gt;&gt;(path: P, data: &amp;[u8]) -&gt; std::io::Result&lt;()&gt; {
+    // … 200줄 …
+    std::fs::write(path.as_ref(), data)
+}
+
+// ✅ 얇은 껍데기만 제네릭으로, 본문은 한 벌만 ★
+pub fn save&lt;P: AsRef&lt;std::path::Path&gt;&gt;(path: P, data: &amp;[u8]) -&gt; std::io::Result&lt;()&gt; {
+    save_inner(path.as_ref(), data)          // 껍데기: 한 줄
+}
+fn save_inner(path: &amp;std::path::Path, data: &amp;[u8]) -&gt; std::io::Result&lt;()&gt; {
+    // … 200줄 … (구체 타입 — 한 벌만 생성됩니다)
+    std::fs::write(path, data)
+}
+
+// 표준 라이브러리가 쓰는 패턴입니다 (fs::write · File::open 등이 전부 이 모양)
+// 컴파일 시간도 같이 줄어듭니다.
+
+// 얼마나 복제됐는지 보기
+// cargo +nightly rustc -- -Zprint-mono-items=lazy | sort | uniq -c | sort -rn</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>부수 효과</b> — 이 패턴은 <b>컴파일 시간 단축</b>에도 잘 듣습니다.
+        빌드가 느린 크레이트를 <code>cargo build --timings</code> 로 찾은 뒤
+        <b>제네릭 함수의 본문을 구체 타입으로 빼는 것</b>이 가장 자주 효과를 봅니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>no_std</code> 는 <b>“std 가 없을 뿐”</b>이고 언어와 소유권은 그대로입니다.
+    임베디드는 <b>embassy + probe-rs</b>, 엣지는 <b>workers-rs · Spin</b>, 브라우저는 <b>wasm-bindgen</b> 이 표준 경로입니다.
+    가장 값어치 있는 설계는 <b>핵심 로직을 <code>no_std</code> 크레이트로 두고</b>
+    서버·WASM·펌웨어에서 껍데기만 바꿔 쓰는 것입니다.</div>
+</section>
+
+
+<!-- ==================== h13 ==================== -->
+<section class="sec" id="h13">
+  <div class="sec-head rv">
+    <span class="no">SVC 13</span>
+    <h2>실전 프로젝트 — <span class="t">실시간 로그 수집·집계 서비스</span></h2>
+    <p class="lead">
+      지금까지의 조각을 하나로 잇습니다. <b>TCP·UDP 로 로그를 받아(h06) · 채널과 액터로 흘리고(h03) ·
+      Parquet 로 배치 저장하고(h08) · Redis 에 실시간 카운터를 올리고(h07) · Axum 으로 조회 API 를 여는</b>
+      서비스입니다. 마지막에 <b>부하 테스트 수치와 튜닝 기록 · Docker 배포</b>까지 남깁니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 344" role="img" aria-label="실시간 로그 수집 서비스의 전체 구성도. 왼쪽에서 클라이언트가 TCP 와 UDP 로 로그를 보내면 수신 태스크가 코덱으로 프레임을 잘라 유계 채널에 넣기만 한다. 채널에서 파서 워커 여러 개가 꺼내 구조체로 만들고 두 갈래로 보낸다. 한 갈래는 집계 액터로 가서 일 분 단위 카운터를 만들고 레디스에 파이프라인으로 올린다. 다른 갈래는 배치 수집기로 가서 오만 건 또는 삼십 초마다 파케이 파일로 저장한다. 오른쪽에는 액섬 API 가 있어 레디스에서 실시간 값을, 파케이에서 과거 값을 읽어 응답한다.">
+      <text x="16" y="18" class="lbl">전체 구성 — 각 단계가 이 탭의 어느 섹션인지 함께 표시</text>
+
+      <rect class="bx" x="16" y="36" width="126" height="60"/>
+      <text x="79" y="58" class="val" text-anchor="middle">클라이언트</text>
+      <text x="79" y="76" class="ann" text-anchor="middle">TCP 프레임</text>
+      <text x="79" y="90" class="ann" text-anchor="middle">UDP 패킷</text>
+
+      <path class="fl ar" d="M146 66 L174 66"/>
+
+      <rect class="bx bx-fw" x="178" y="36" width="140" height="60"/>
+      <text x="248" y="58" class="val rs-t" text-anchor="middle">수신 태스크</text>
+      <text x="248" y="76" class="ann" text-anchor="middle">codec 으로 자르기만</text>
+      <text x="248" y="90" class="ann" text-anchor="middle">h06</text>
+
+      <path class="fl ar" d="M322 66 L350 66"/>
+
+      <rect class="bx bx-hi" x="354" y="36" width="140" height="60"/>
+      <text x="424" y="58" class="val am-t" text-anchor="middle">유계 채널 65536</text>
+      <text x="424" y="76" class="ann" text-anchor="middle">가득 차면 버리고 셈</text>
+      <text x="424" y="90" class="ann" text-anchor="middle">h03 백프레셔</text>
+
+      <path class="fl ar" d="M498 66 L526 66"/>
+
+      <rect class="bx" x="530" y="36" width="134" height="60"/>
+      <text x="597" y="58" class="val" text-anchor="middle">파서 워커 N개</text>
+      <text x="597" y="76" class="ann" text-anchor="middle">Bytes → Event</text>
+      <text x="597" y="90" class="ann" text-anchor="middle">h05 제로카피</text>
+
+      <path class="fl ar ar-gn" d="M597 100 L597 118 L248 118 L248 140"/>
+      <path class="fl ar ar-gn" d="M597 100 L597 118 L500 118 L500 140"/>
+
+      <rect class="bx bx-ok" x="150" y="144" width="196" height="66"/>
+      <text x="248" y="166" class="val ok-t" text-anchor="middle">집계 액터 (샤드 8)</text>
+      <text x="248" y="184" class="ann" text-anchor="middle">1분 버킷 카운터 · p99</text>
+      <text x="248" y="200" class="ann" text-anchor="middle">h03 액터 · h04 샤딩</text>
+
+      <rect class="bx bx-ok" x="402" y="144" width="196" height="66"/>
+      <text x="500" y="166" class="val ok-t" text-anchor="middle">배치 수집기</text>
+      <text x="500" y="184" class="ann" text-anchor="middle">5만 건 또는 30초</text>
+      <text x="500" y="200" class="ann" text-anchor="middle">h07 chunks_timeout</text>
+
+      <path class="fl ar" d="M248 214 L248 236"/>
+      <path class="fl ar" d="M500 214 L500 236"/>
+
+      <rect class="bx" x="150" y="240" width="196" height="52"/>
+      <text x="248" y="262" class="val" text-anchor="middle">Redis</text>
+      <text x="248" y="280" class="ann" text-anchor="middle">HINCRBY 파이프라인 · TTL 2시간</text>
+
+      <rect class="bx" x="402" y="240" width="196" height="52"/>
+      <text x="500" y="262" class="val" text-anchor="middle">Parquet</text>
+      <text x="500" y="280" class="ann" text-anchor="middle">dt=날짜/hour=시 파티션</text>
+
+      <path class="fl ar ar-am" d="M346 266 L374 266"/>
+
+      <rect class="bx bx-fw" x="16" y="304" width="648" height="34"/>
+      <text x="32" y="326" class="ann rs-t">Axum 조회 API — 최근 2시간은 Redis 에서, 그 이전은 Parquet 스캔으로. 같은 응답 형태로 합쳐 돌려줍니다 (h08 · 🧰 t05)</text>
+    </svg>
+    <div class="cap">수신은 <b>받기만</b>, 무거운 일은 <b>전부 뒤에서</b> — 이 분리가 폭주에도 안 죽는 이유입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Cargo.toml — 이 프로젝트가 쓰는 전부</h4>
+      <pre class="code" data-lang="toml"><code>[package]
+name = "logsvc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
+futures = "0.3"
+bytes = "1"
+axum = "0.8"
+tower-http = { version = "0.6", features = ["trace", "compression-gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+polars = { version = "0.44", features = ["lazy", "parquet", "temporal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+anyhow = "1"
+mimalloc = { version = "0.1", default-features = false }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+debug = 1
+strip = "symbols"</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>구조</b> — <code>src/main.rs</code>(부팅·설정) · <code>ingest.rs</code>(TCP/UDP 수신) ·
+        <code>parse.rs</code>(Bytes → Event) · <code>agg.rs</code>(집계 액터) ·
+        <code>sink.rs</code>(Parquet · Redis) · <code>api.rs</code>(Axum).
+        <b>각 파일이 이 탭의 한 섹션에 대응</b>합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 수신 — 받아서 넣기만 합니다</h4>
+      <pre class="code" data-lang="rust"><code>// src/ingest.rs
+use tokio_util::codec::{FramedRead, LinesCodec};
+use tokio::net::{TcpListener, UdpSocket};
+use futures::StreamExt;
+
+pub async fn tcp(addr: &amp;str, tx: mpsc::Sender&lt;RawLine&gt;) -&gt; anyhow::Result&lt;()&gt; {
+    let l = TcpListener::bind(addr).await?;
+    loop {
+        let (sock, peer) = match l.accept().await {
+            Ok(v) =&gt; v,
+            Err(e) =&gt; { tracing::warn!(%e, "accept"); continue; }   // h06
+        };
+        sock.set_nodelay(true).ok();
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            // 한 줄 = 한 로그. 최대 길이를 반드시 제한합니다
+            let mut fr = FramedRead::new(sock, LinesCodec::new_with_max_length(64 * 1024));
+            while let Some(line) = fr.next().await {
+                match line {
+                    Ok(s) =&gt; {
+                        // ★ 가득 차면 기다리지 않고 버립니다 — 수신이 막히면 안 됩니다
+                        if tx.try_send(RawLine::from(s)).is_err() {
+                            metrics::counter!("ingest_dropped", "proto" =&gt; "tcp").increment(1);
+                        }
+                    }
+                    Err(e) =&gt; { tracing::debug!(%peer, %e, "line"); break; }
+                }
+            }
+        });
+    }
+}
+
+pub async fn udp(addr: &amp;str, tx: mpsc::Sender&lt;RawLine&gt;) -&gt; anyhow::Result&lt;()&gt; {
+    let sock = UdpSocket::bind(addr).await?;
+    let mut buf = vec![0u8; 65_535];
+    loop {
+        let (n, _peer) = sock.recv_from(&amp;mut buf).await?;
+        // 이 루프에서는 절대 파싱하지 않습니다 (h06 의 철칙)
+        if tx.try_send(RawLine::from_slice(&amp;buf[..n])).is_err() {
+            metrics::counter!("ingest_dropped", "proto" =&gt; "udp").increment(1);
+        }
+    }
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">집계 액터와 배치 저장</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 집계 — 1분 버킷 카운터</h4>
+      <pre class="code" data-lang="rust"><code>// src/agg.rs — h03 의 액터 패턴 그대로
+use std::collections::HashMap;
+
+#[derive(Default)]
+struct Bucket { count: u64, err: u64, lat: Vec&lt;u32&gt; }
+
+pub async fn run(mut rx: mpsc::Receiver&lt;Event&gt;, redis: ConnectionManager) {
+    // (분 단위 타임스탬프, 서비스명) → 버킷
+    let mut buckets: HashMap&lt;(i64, String), Bucket&gt; = HashMap::new();
+    let mut flush = tokio::time::interval(Duration::from_secs(10));
+
+    loop {
+        tokio::select! {
+            Some(e) = rx.recv() =&gt; {                    // ★ 취소 안전
+                let minute = e.ts - (e.ts % 60);
+                let b = buckets.entry((minute, e.service.clone())).or_default();
+                b.count += 1;
+                if e.level &gt;= Level::Error { b.err += 1; }
+                b.lat.push(e.latency_ms);
+            }
+            _ = flush.tick() =&gt; {
+                if buckets.is_empty() { continue; }
+                // 파이프라인으로 한 번에 (h07) — 왕복이 1회
+                let mut pipe = redis::pipe();
+                for ((min, svc), b) in buckets.drain() {
+                    let key = format!("agg:{min}");
+                    pipe.hincr(&amp;key, format!("{svc}:n"), b.count).ignore();
+                    pipe.hincr(&amp;key, format!("{svc}:e"), b.err).ignore();
+                    let mut lat = b.lat; lat.sort_unstable();
+                    let p99 = lat[lat.len() * 99 / 100.min(lat.len() - 1)];
+                    pipe.hset(&amp;key, format!("{svc}:p99"), p99).ignore();
+                    pipe.expire(&amp;key, 7200).ignore();       // 2시간만 보관
+                }
+                let mut con = redis.clone();
+                if let Err(e) = pipe.query_async::&lt;()&gt;(&amp;mut con).await {
+                    tracing::error!(%e, "redis flush");     // 실패해도 서비스는 계속
+                }
+            }
+            else =&gt; break,
+        }
+    }
+}
+// 초당 수십만 건이면 이 액터를 서비스명 해시로 8개 샤딩합니다 (h03)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ 배치 저장 — Parquet</h4>
+      <pre class="code" data-lang="rust"><code>// src/sink.rs
+use tokio_stream::StreamExt;
+use polars::prelude::*;
+
+pub async fn parquet_sink(rx: mpsc::Receiver&lt;Event&gt;) -&gt; anyhow::Result&lt;()&gt; {
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    // ★ "5만 건 또는 30초 중 먼저" (h07) — 둘 중 하나만 쓰면 반드시 문제가 납니다
+    let mut chunks = stream.chunks_timeout(50_000, Duration::from_secs(30));
+
+    while let Some(batch) = chunks.next().await {
+        let n = batch.len();
+        let t0 = std::time::Instant::now();
+
+        // 열 단위로 뒤집습니다 (h08 의 Arrow 형식에 맞게)
+        let mut ts = Vec::with_capacity(n);
+        let mut svc = Vec::with_capacity(n);
+        let mut lvl = Vec::with_capacity(n);
+        let mut lat = Vec::with_capacity(n);
+        for e in batch {
+            ts.push(e.ts); svc.push(e.service); lvl.push(e.level as u8); lat.push(e.latency_ms);
+        }
+        let mut df = df!["ts" =&gt; ts, "service" =&gt; svc, "level" =&gt; lvl, "latency" =&gt; lat]?;
+
+        // ★ Parquet 쓰기는 CPU 를 씁니다 → 워커를 막지 않게 격리 (h02)
+        let path = partition_path(&amp;df)?;
+        tokio::task::spawn_blocking(move || -&gt; PolarsResult&lt;()&gt; {
+            std::fs::create_dir_all(std::path::Path::new(&amp;path).parent().unwrap()).ok();
+            ParquetWriter::new(std::fs::File::create(&amp;path)?)
+                .with_compression(ParquetCompression::Zstd(None))
+                .with_statistics(StatisticsOptions::full())
+                .finish(&amp;mut df)?;
+            Ok(())
+        }).await??;
+
+        metrics::histogram!("sink_batch_ms").record(t0.elapsed().as_millis() as f64);
+        metrics::counter!("sink_rows").increment(n as u64);
+    }
+    Ok(())
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">조회 API · 배포 · 관측</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">④ Axum 조회 API — 뜨거운 데이터와 찬 데이터</h4>
+      <pre class="code" data-lang="rust"><code>// src/api.rs
+use axum::{Router, routing::get, extract::{Query, State}, Json};
+
+#[derive(serde::Deserialize)]
+struct Q { service: String, from: i64, to: i64 }
+
+async fn stats(State(st): State&lt;AppState&gt;, Query(q): Query&lt;Q&gt;)
+    -&gt; Result&lt;Json&lt;Vec&lt;Point&gt;&gt;, ApiError&gt;
+{
+    let now = chrono::Utc::now().timestamp();
+    let hot_from = (now - 7200).max(q.from);          // 최근 2시간은 Redis
+
+    // ① 뜨거운 구간 — Redis (밀리초)
+    let mut out = redis_points(&amp;st.redis, &amp;q.service, hot_from, q.to).await?;
+
+    // ② 찬 구간 — Parquet 스캔 (수백 ms) · 블로킹이므로 격리 (h02)
+    if q.from &lt; hot_from {
+        let (svc, from, to) = (q.service.clone(), q.from, hot_from);
+        let cold = tokio::task::spawn_blocking(move || -&gt; PolarsResult&lt;Vec&lt;Point&gt;&gt; {
+            let lf = LazyFrame::scan_parquet("data/**/*.parquet", Default::default())?
+                .filter(col("service").eq(lit(svc)))
+                .filter(col("ts").gt_eq(lit(from)).and(col("ts").lt(lit(to))))
+                .group_by([(col("ts") / lit(60)).alias("m")])
+                .agg([len().alias("n"), col("latency").mean().alias("avg")]);
+            to_points(lf.collect()?)
+        }).await??;
+        out.splice(0..0, cold);                        // 앞에 붙입니다
+    }
+    Ok(Json(out))
+}
+
+pub fn router(st: AppState) -&gt; Router {
+    Router::new()
+        .route("/stats", get(stats))
+        .route("/healthz", get(|| async { "ok" }))
+        .route("/metrics", get(|State(s): State&lt;AppState&gt;| async move { s.prom.render() }))
+        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(tower::limit::ConcurrencyLimitLayer::new(64))   // h03
+        .layer(tower::load_shed::LoadShedLayer::new())
+        .with_state(st)
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">⑤ Dockerfile — 다단계 빌드</h4>
+      <pre class="code" data-lang="text"><code># syntax=docker/dockerfile:1.7
+FROM rust:1.83-bookworm AS build
+WORKDIR /app
+
+# ① 의존성만 먼저 캐시 (소스가 바뀌어도 의존성 빌드를 다시 안 함)
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src &amp;&amp; echo "fn main(){}" &gt; src/main.rs \
+ &amp;&amp; cargo build --release &amp;&amp; rm -rf src
+
+# ② 진짜 소스
+COPY src ./src
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release &amp;&amp; cp target/release/logsvc /logsvc
+
+# ③ 실행 이미지 — 필요한 것만
+FROM gcr.io/distroless/cc-debian12
+COPY --from=build /logsvc /logsvc
+EXPOSE 9000/tcp 9001/udp 8080/tcp
+ENV RUST_LOG=info TOKIO_WORKER_THREADS=4
+ENTRYPOINT ["/logsvc"]
+
+# 정적 링크로 더 작게 하려면 (h09)
+#   FROM rust:1.83-alpine + musl → FROM scratch  (이미지 약 10MB)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>TOKIO_WORKER_THREADS</code> 를 반드시 주세요</b> — h02 에서 봤듯
+        컨테이너 CPU limit 이 2 여도 Tokio 는 <b>호스트 코어 수</b>를 봅니다.
+        <code>Builder::worker_threads(env 값)</code> 으로 읽어 쓰는 것이 실무 관행입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">부하 테스트 기록과 튜닝 일지</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">튜닝 일지 — 순서와 효과</h4>
+      <pre class="code" data-lang="text"><code>환경: 4 vCPU · 8GB · 컨테이너 · 로그 한 줄 약 220바이트
+부하: TCP 커넥션 200개에서 라인을 계속 밀어 넣기 (자체 도구)
+지표: 초당 처리 라인 · 유실률 · p99 저장 지연 · RSS · CPU
+
+① 최초 (디버그 빌드)                     18,000 line/s   ← 함정 ★
+② --release 로 빌드                     240,000 line/s   +13배
+③ println! 로그를 tracing 으로            310,000 line/s   +29%
+      (표준출력 락 + flush 가 병목이었음 · h09)
+④ 채널 unbounded → bounded(65536) + 드롭   310,000 line/s   유실률이 '보임'
+      숫자는 그대로지만 OOM 이 사라짐 — 이게 진짜 이득 ★
+⑤ 파서에서 String 할당 제거 (Bytes · h05) 470,000 line/s   +52%
+      flamegraph 상단이 memcpy → 파싱 로직으로 바뀜
+⑥ mimalloc 으로 교체 (h10)                540,000 line/s   +15%  (한 줄)
+⑦ 파서 워커 1 → 4, 집계 액터 샤딩 4        810,000 line/s   +50%
+⑧ Parquet 쓰기를 spawn_blocking 으로       810,000 line/s   p99 2.4s → 180ms ★
+      처리량은 그대로인데 꼬리 지연이 사라짐 — h02 그대로
+⑨ lto=fat + codegen-units=1               870,000 line/s   +7%
+⑩ TOKIO_WORKER_THREADS=4 명시             880,000 line/s   CPU 사용률 안정
+
+최종: 880,000 line/s · 유실 0 · p99 180ms · RSS 420MB · CPU 3.6/4</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 표에서 배울 것</b> — 가장 큰 이득은 <b>②(빌드 모드)</b>, 그다음이 <b>⑤(할당 제거)</b>·<b>⑦(병렬화)</b> 입니다.
+        <b>⑧ 은 처리량을 안 올렸지만 서비스 품질을 가장 크게 바꿨습니다</b> —
+        평균만 보면 아무 일도 없어 보였을 변경입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영 체크리스트</h4>
+      <pre class="code" data-lang="text"><code>반드시 지표로 내보낼 것 (없으면 장애 때 눈이 없습니다)
+  ingest_lines_total        받은 줄 수 (프로토콜별)
+  ingest_dropped_total      버린 줄 수 ★ 0 이 아니면 즉시 알람
+  channel_depth             큐 깊이 (h02 의 global_queue_depth 도 함께)
+  parse_errors_total        파싱 실패
+  sink_batch_ms             배치 저장 소요 (히스토그램)
+  sink_rows_total           저장한 행 수
+  redis_flush_errors_total  Redis 실패
+  process_rss_bytes         메모리 (h10)
+  tokio_alive_tasks         살아있는 태스크 ★ 단조 증가면 누수
+
+종료 절차 (데이터를 잃지 않으려면 순서가 중요합니다)
+  ① SIGTERM 수신 → 리스너를 먼저 닫습니다 (새 연결 차단)
+  ② 수신 채널의 송신자를 drop → 파서가 남은 것을 다 처리
+  ③ 집계 액터에 마지막 flush 를 시키고 Redis 반영
+  ④ 배치 수집기의 남은 버퍼를 Parquet 으로 강제 저장 ★
+  ⑤ TaskTracker::wait() 로 전부 끝날 때까지 대기 (h02)
+  ⑥ 종료. 쿠버네티스라면 terminationGracePeriodSeconds 를 넉넉히</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>다음으로 확장하기</b> — ① 수신을 <b>Kafka 소비자</b>로 바꾸면 재처리가 가능해집니다(h07),
+        ② 조회를 <b>DataFusion SQL</b> 로 열면 임의 질의를 받을 수 있습니다(h08),
+        ③ 노드를 늘릴 때는 <b>서비스명 해시로 샤딩</b>해 같은 키가 같은 노드로 가게 합니다(h03).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 고성능 서비스의 뼈대는 늘 같습니다 —
+    <b>수신은 받기만 하고 · 유계 채널로 흘리고 · 무거운 일은 격리하고 · 배치로 저장</b>합니다.
+    이 네 가지를 지키면 폭주해도 죽지 않고, 죽지 않으면 <b>수치를 재서 하나씩 올릴 수</b> 있습니다.
+    이 탭의 나머지 열두 섹션은 전부 <b>그 “하나씩”의 목록</b>이었습니다.</div>
+</section>
+
+</div><!-- /pane-svc -->

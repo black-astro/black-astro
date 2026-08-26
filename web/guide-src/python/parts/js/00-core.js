@@ -295,6 +295,18 @@ const SEC_KW = {
   c13:"파인튜닝 fine-tuning lora qlora peft 미세조정 언제 판단",
   c14:"평가 eval 테스트 골든셋 llm judge 채점 회귀 프롬프트테스트",
   c15:"운영 비용절감 프롬프트캐시 cache 배치api 라우팅 보안 프롬프트인젝션 injection 개인정보",
+  q17:"QML Qt Quick QWidget 비교 선언형 명령형 GPU 씬그래프 scene graph 렌더스레드 render thread RHI 소프트웨어렌더 QSG_RHI_BACKEND 터치 애니메이션 러닝커브 선택 흐름도 큐엠엘",
+  q18:"QQmlApplicationEngine QGuiApplication main.qml ApplicationWindow visible rootObjects 로드실패 qmllint qmlformat pyside6-qml 핫리로드 hot reload clearComponentCache QFileSystemWatcher 폴더구조 qmldir 대문자 컴포넌트 Qt Design Studio",
+  q19:"QML 문법 오브젝트 트리 프로퍼티 property alias readonly id 바인딩 binding 의존성추적 시그널핸들러 onClicked signal 화살표함수 JavaScript 표현식 Qt.binding Component.onCompleted qsTr 바인딩루프 binding loop console.log",
+  q20:"anchors fill centerIn margins Row Column Grid RowLayout ColumnLayout GridLayout Layout.fillWidth preferredWidth alignment Repeater required property modelData 반응형 responsive 미디어쿼리 implicitWidth 배치 레이아웃",
+  q21:"Qt Quick Controls ApplicationWindow header footer ToolBar TabBar Drawer SplitView StackView Button TextField ComboBox Slider Switch CheckBox SpinBox Dialog Popup Menu ToolTip Overlay contentItem background 커스터마이즈 컨트롤",
+  q22:"QQuickStyle setStyle QT_QUICK_CONTROLS_STYLE qtquickcontrols2.conf Basic Fusion Material Universal FluentWinUI3 macOS iOS Imagine Material.theme accent primary roundedScale elevation 다크모드 라이트모드 colorScheme 첨부프로퍼티 스타일 우선순위",
+  q23:"QObject Property Slot Signal notify setContextProperty rootContext QmlElement QML_IMPORT_NAME QML_IMPORT_MAJOR_VERSION QmlSingleton Connections QThread moveToThread QVariantList QVariantMap 브리지 bridge 파이썬 연동",
+  q24:"ListView GridView TableView delegate section header ScrollBar clip QAbstractListModel roleNames beginResetModel pandas DataFrame numpy item cacheBuffer reuseItems onReused DelegateModel QSortFilterProxyModel 지연로딩 무한스크롤 성능",
+  q25:"NumberAnimation PropertyAnimation ColorAnimation SequentialAnimation ParallelAnimation Behavior on states transitions PropertyChanges Easing OutQuad InOutCubic OutBack Animator RotationAnimator OpacityAnimator StackView pushEnter 로딩스피너 페이지전환 모션",
+  q26:"MultiEffect blur shadow colorization brightness saturation QtQuick.Effects QtGraphicalEffects ShaderEffect frag qsb pyside6-qsb GLSL uniform Shape ShapePath CurveRenderer PathAngleArc Canvas requestPaint layer.enabled 오버드로 sourceSize QSG_RENDER_TIMING",
+  q27:"Material Symbols 가변폰트 variableAxes FontLoader 코드포인트 Lucide SVG 아이콘 IconImage MultiEffect colorization AppIcon Theme.qml pragma Singleton qmldir 색토큰 디자인시스템 폰트임베딩 Pretendard OFL 라이선스 sourceSize",
+  q28:"qrc resources.qrc pyside6-rcc rc_resources qmldir conf 누락 PyInstaller collect-all PySide6 hidden-import onefile 폴더배포 용량줄이기 exclude-module imageformats 플러그인 QQuickWidget 위젯섞기 QApplication 배포 트러블슈팅",
 };
 let FIDX = null;
 

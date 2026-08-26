@@ -1,46 +1,57 @@
-# 핸드오프 — 언어 가이드 확장 (2026-08-26 6차 갱신)
+# 핸드오프 — 언어 가이드 확장 (2026-08-26 7차 갱신)
 
-## 최근 세션 결과 — C/C++ · Rust 가이드 확장
+## 최근 결과 — C/C++ · Rust · Python 확장
 
 | 가이드 | 탭 | 섹션 | 다이어그램 |
 |---|---|---|---|
-| **cpp** | 9 → **15** | 88 → **189** | 63 → **156** |
-| **rust** | 9 → **10** | 100 → **111** | 63 → **76** |
+| **cpp** | 9 → **16** | 88 → **201** | 63 → **169** |
+| **rust** | 9 → **13** | 100 → **150** | 63 → **116** |
+| **python** | 17 (그대로) | 256 → **268** | 119 → **132** |
 
-두 가이드 모두 **"앱을 만들지 않습니다" 라는 소개 문구를 강점 소개로 교체**했습니다.
+cpp · rust 모두 **"앱을 만들지 않습니다" 소개 문구를 강점 소개로 교체**했습니다.
 
-### cpp 에 새로 들어간 탭 6개 + C 탭 확장
+### cpp 새 탭 7개 + C 탭 확장
 | 탭 | id | 섹션 | 그림 |
 |---|---|---|---|
 | 🧰 설치 · 환경 세팅 (맨 앞) | `setup` | s01~s12 | 13 |
+| ☕ 자바 · 코틀린 모듈 | `jvm` | v01~v12 | 13 |
+| 🟣 C# · .NET 모듈 | `cs` | k01~k12 | 12 |
 | 🖥️ 데스크톱 앱 · GUI | `app` | g01~g12 | 13 |
 | 🌐 백엔드 서버 | `srv` | w01~w13 | 14 |
 | 🎮 게임 서버 | `game` | n01~n13 | 14 |
 | 🚀 고성능 · 시스템 작업 | `hpc` | h01~h13 | 13 |
-| 🟣 C# · .NET 모듈 | `cs` | k01~k12 | 12 |
 | 🅲 C 언어 탭 **확장** | `c` | c13~c26 (12→26) | 7→21 |
 
-- 탭 그룹 신설 — `data-g="4"` **실전 · 앱 · 서버**(🖥️🌐🎮🚀), 시트 라벨 "실전"
-- 모듈 그룹(`data-g="1"`)에 C# 모듈 탭 추가 — 현재 groupIcs `🐍🟨🟣🔗`
+탭 순서: setup · c · lang · mod / py · node · **jvm · cs** · ffi / build · perf · deep / **app · srv · game · hpc**
+그룹: 0 언어 · 1 모듈(🐍🟨☕🟣🔗) · 2 빌드 · 3 심화 · 4 **실전 · 앱 · 서버**(🖥️🌐🎮🚀)
 
-### rust 에 새로 들어간 탭 1개
+### rust 새 탭 4개
 | 탭 | id | 섹션 | 그림 |
 |---|---|---|---|
 | 🧰 설치 · 환경 세팅 (맨 앞) | `setup` | s01~s11 | 13 |
+| 🌐 백엔드 서버 · Axum | `web` | w01~w13 | 13 |
+| 🚀 고성능 서비스 · 시스템 | `svc` | h01~h13 | 13 |
+| 🖥️ Tauri · 데스크톱 · GUI | `tauri` | u01~u13 | 14 |
+
+그룹 4 **실전 · 서비스**(🧰🌐🚀🖥️) 신설.
+
+### python — PySide6 탭 확장 (사용자 요청분 완료)
+`panes/07-qt.html` 에 **q17~q28 (12섹션 · 162KB · 그림 12)** 추가 — QML·Qt Quick 개념,
+첫 앱, 문법·바인딩, 앵커/Layout, **Qt Quick Controls 2**, **스타일 6종(Material · FluentWinUI3 포함)**,
+파이썬↔QML(`@QmlElement`), 모델·ListView, 애니메이션·상태, **Qt Quick Effects(MultiEffect·ShaderEffect)**,
+**Material Symbols vs Lucide 아이콘**, qrc·PyInstaller 배포.
 
 ### 문구를 고친 곳 (cpp · rust 각각)
 `panes/01-lang.html` hero · `parts/12-tabbar.html` #hello 배너 ·
 `parts/11-sidebar.html` 브랜드 · `parts/00-head.html` title/description/og ·
-`web/src/router/index.ts` 의 해당 블록(label · title · heading · desc · tags · stats).
+`web/src/router/index.ts` 의 해당 블록. python 은 router 의 stats·tags 만 갱신.
 
-- 전 가이드 `npm run verify:guide` 통과 · svgcheck 0건 · integrity 0건 · smoke 통과 · `vue-tsc -b` 통과
+- 전 가이드 `verify:guide` 통과 · svgcheck 0건 · integrity 0건 · smoke 통과 · `vue-tsc -b` 통과
 
 ---
 
 ## 🔴 남은 일 — 순서대로 (이어서 하면 됩니다)
 
-> 2026-08-26 에 1·2번(cpp jvm · rust web/svc/tauri/jvm)과 4번(PySide6 QML)을 **착수했다가 초기 단계에서 중단**했습니다.
-> 저장소에 남은 부분 산출물은 없습니다 — 처음부터 다시 쓰면 됩니다.
 
 집필용 지침서와 자동 등록 스크립트가 **이미 준비되어 있습니다.** 새 세션에서는
 `(A) 지침서 읽기 → (B) 에이전트에 과제 주기 → (C) reg.mjs 로 등록 → (D) 검증` 만 반복하면 됩니다.
@@ -48,42 +59,23 @@
 > **주의:** 지침서(`BRIEF.md`)와 등록 스크립트(`reg.mjs`)는 세션 스크래치패드에 있습니다.
 > 세션이 바뀌어 사라졌다면 아래 §도구 를 보고 다시 만드세요.
 
-### 1. C++ 가이드 — 남은 탭 1개
+### 1. Rust 가이드 — 남은 모듈 탭 2개
 | 탭 | pane 파일 | 접두사 | 섹션 | 그룹 |
 |---|---|---|---|---|
-| ☕ 자바 · 코틀린 모듈 | `panes/15-jvm.html` | `v` | v01~v12 | 1 (모듈), after `node` |
-
-- **jvm**: **JNI 를 중심으로**(FFM 이 아직 미완성이므로) — jni 첫 모듈 · 타입/문자열 · DirectByteBuffer 제로카피 ·
-  콜백/예외 · Panama FFM · jextract · JNA/JNR · Gradle+CMake · 안드로이드 NDK · 실전
-- 넣은 뒤 그룹 1 의 `groupIcs` 를 `🐍🟨☕🟣🔗`, `groupTitle` 을
-  "파이썬 모듈 · Node 애드온 · 자바 · C# · C ABI" 로 되돌리고, `cs` 탭의 순서를 jvm 뒤로 옮길 것
-  (지금은 jvm 이 없어 `cs` 가 `node` 바로 뒤에 있습니다)
-
-### 2. Rust 가이드 — 남은 탭 5개
-| 탭 | pane 파일 | 접두사 | 섹션 | 그룹 |
-|---|---|---|---|---|
-| 🌐 백엔드 서버 · Axum | `panes/11-web.html` | `w` | w01~w13 | 4 (실전 · 서비스), after `tool` |
-| 🚀 고성능 서비스 · 시스템 | `panes/12-svc.html` | `h` | h01~h13 | 4, after `web` |
-| 🖥️ Tauri · 데스크톱 · GUI | `panes/13-tauri.html` | `u` | u01~u13 | 4, after `svc` |
 | ☕ 자바 · 코틀린 모듈 | `panes/14-jvm.html` | `v` | v01~v12 | 1 (모듈), after `node` |
 | 🟣 C# · .NET 모듈 | `panes/15-cs.html` | `k` | k01~k12 | 1, after `jvm` |
 
-그룹 4 는 아직 없습니다 — 첫 탭(web) 등록 때 `groupLabel` "실전 · 서비스", `groupIcs` `🧰🌐🚀🖥️`,
-`groupTitle` "생태계 · 백엔드 서버 · 고성능 서비스 · Tauri", `sheetLabel` "실전" 로 만들어집니다.
+- **jvm**: `jni` 크레이트 · Panama FFM · **UniFFI**(코틀린·스위프트 바인딩 자동) · JNA 비교,
+  DirectByteBuffer 제로카피, cargo-ndk 안드로이드, KMP, JMH 수치. "가장 간편한 길"은 UniFFI 로 추천
+- **cs**: 손 P/Invoke vs **csbindgen**(Cysharp, 추천) vs interoptopus, `#[repr(C)]` 마샬링,
+  `Span`↔`slice` 제로카피, `Box::into_raw` 핸들 + SafeHandle, `catch_unwind` panic 경계,
+  Unity 플러그인, NuGet `runtimes/` 배포
+- 넣은 뒤 rust 모듈 그룹(`data-g="1"`)의 `groupIcs` 를 `🐍🟨☕🟣🔗` 로 갱신할 것
+  (reg.mjs 는 **이미 있는 그룹 버튼은 건드리지 않습니다** — 사이드바를 직접 고쳐야 합니다)
 
-- **web**: Axum 0.8 구조 · 워크스페이스 골격 · sqlx · tower 미들웨어 · JWT/OAuth2 · utoipa · WebSocket ·
-  tonic · tracing/OTel · testcontainers · cargo-chef Docker · URL 단축 실전
-  (기존 `09-tool.html` 의 t01~t12 가 입문 수준이므로 **그 위 단계로**, 겹치면 "t0X 참고" 로 넘길 것)
-- **svc**: Tokio 내부 · 채널/액터 · 락 선택 · bytes 제로카피 · quinn/QUIC · rdkafka · Polars/DataFusion ·
-  CLI · 할당자 · 프로파일 · no_std/WASM · 로그 수집 실전
-- **tauri**: Tauri 2 전 과정(command/IPC · state/event · 트레이 · capabilities 권한 · sidecar ·
-  서명·updater · 모바일) + egui/iced/Slint/Dioxus 비교
-- **jvm/cs**: UniFFI · csbindgen 을 "가장 간편한 길" 로 추천
-- 이 탭들이 들어가면 rust 의 hero·#hello·head·router 문구에 **서버 · Tauri** 를 추가할 것
-  (지금 문구는 "설치 → 기초 → 모듈" 까지만 말합니다)
-
-### 3. 나머지 언어 — 설치 · 환경 세팅 탭 6개
+### 2. 나머지 언어 — 설치 · 환경 세팅 탭 6개
 전부 **맨 앞 탭**(`after: "^"`), 접두사 `st`, cls `st`, grad `["#10b981","#065f46"]`, 아이콘 🧰.
+cpp `panes/10-setup.html` 와 rust `panes/10-setup.html` 가 완성된 본보기입니다 — 그 구성을 따르세요.
 
 | 가이드 | pane 파일 | 섹션 | 핵심 내용 |
 |---|---|---|---|
@@ -98,42 +90,17 @@
 (python `기본 · BASIC`/🧰🐍📦 · java `언어 · JAVA`/🧰☕ · kotlin `언어 · KOTLIN`/🧰🟠 ·
 js-ts `언어 · LANGUAGE`/🧰🟨🔷 · csharp `언어 · C#`/🧰🟣 · db `시작 · START`/🧰🚀).
 
-### 4. 파이썬 PySide6 — QML · Qt Quick 확장 (사용자 요청 · 2026-08-26)
-
-기존 `panes/07-qt.html` 의 q01~q16 은 **QWidget 계열만** 다룹니다. 여기에
-**q17~q28 (12개)** 를 append 로 붙여 PySide6 의 현대적 UI 축을 채웁니다.
-탭은 그대로 `qt`, meta 는 `"append": true` 로 두고 sections 에 q17~q28 만 기록합니다.
-hero 의 stats 숫자 16 → 28 만 고치고 기존 섹션은 손대지 않습니다. 기준은 **PySide6 / Qt 6.9**.
-
-| 섹션 | 내용 |
-|---|---|
-| q17 ★ | QML · Qt Quick 이란 — QWidget vs QML 비교표, 선택 흐름도, QML 엔진·씬 그래프 구조 |
-| q18 ★ | 첫 QML 앱 — `QQmlApplicationEngine` · main.qml · 프로젝트 구조 · qmllint · 핫 리로드 |
-| q19 ★ | QML 문법 — 오브젝트 트리 · **프로퍼티 바인딩** · id · 시그널 핸들러 · property 선언 |
-| q20 ★ | 레이아웃 — anchors · Row/Column/Grid · RowLayout 등 `Layout.*` · Repeater · 반응형 |
-| q21 ★ | **Qt Quick Controls 2** — Button~SplitView 카탈로그, ApplicationWindow, background/contentItem 교체 |
-| q22 ★ | **스타일** — Basic·Fusion·**Material**·Universal·**FluentWinUI3**(6.8+)·macOS 비교, 지정 3가지 방법(qtquickcontrols2.conf · QT_QUICK_CONTROLS_STYLE · QQuickStyle), Material theme/accent, 다크 모드 |
-| q23 ★ | 파이썬 ↔ QML — `@Property(notify=)`·`@Slot`·Signal, setContextProperty vs **@QmlElement**(권장) |
-| q24 ★ | 모델 — ListView/GridView/TableView + delegate, `QAbstractListModel` 구현, DataFrame 띄우기, 성능 |
-| q25 ★ | 애니메이션 · 상태 — NumberAnimation · Behavior on · states/transitions · Easing · 페이지 전환 |
-| q26 ★ | **Qt Quick Effects · 셰이더** — `MultiEffect`(6.5+, blur/shadow/colorization), 유리 효과 카드, `ShaderEffect`+qsb, Canvas, Shape |
-| q27 ★ | **아이콘 · 디자인 시스템** — **Material Symbols**(가변 폰트·FontLoader·codepoint) vs **Lucide**(SVG·IconImage·MultiEffect 색 입히기), AppIcon.qml, qrc 폰트 임베딩, 색 토큰 |
-| q28 ★ | 실전 · 배포 — 폴더 구조, `pyside6-rcc` qrc, PyInstaller 로 QML 앱 배포 시 빠지는 것들(`--collect-all PySide6`), QQuickWidget 로 위젯과 섞기 |
-
-- 분량 총 130KB 이상, 시각화 최소 9개
-- 코드는 QML 과 파이썬을 나란히. `data-lang` 은 QML 에 `qml`(미지원이면 `js`), 파이썬은 `python`
-
-### 5. 전 가이드 기술 스택 점검 (아직 못 함)
+### 3. 전 가이드 기술 스택 점검 (아직 못 함)
 언어별 강점 프레임워크·라이브러리에 빠진 것이 없는지 훑고 보강 — 예:
 java(Virtual Thread·Spring AI·Testcontainers) · kotlin(Ktor·Arrow·Compose Multiplatform) ·
 js-ts(Hono·Bun·Drizzle·TanStack) · csharp(Blazor·Aspire·MAUI) · python(Polars·LangGraph) ·
 db(pgvector·DuckDB·ClickHouse). 오류·설명 오점·시각화 결함도 같이 고칩니다.
 
-### 6. 브라우저 실측 (계속 밀려 있음)
+### 4. 브라우저 실측 (계속 밀려 있음)
 Chrome MCP 가 있는 세션에서 열 가이드에 아래 스크립트를 한 번씩. 정적 검사(svgcheck)는
-**±5px 안쪽 차이를 못 잡습니다.** 미실측 누적 = 2차 290 + 3차 224 + 4차 68 + 이번 **63** = **645건**.
+**±5px 안쪽 차이를 못 잡습니다.** 미실측 누적 = 2차 290 + 3차 224 + 4차 68 + 5차 63 + 이번 **90** = **735건**.
 
-### 7. 마지막에 할 것
+### 5. 마지막에 할 것
 - `npm run verify:guide` · svgcheck · integrity · smoke · `vue-tsc -b`
 - `src/router/index.ts` 의 stats(탭 수 · 섹션 수) 를 실제 값으로 맞추기
 - HANDOFF 갱신 후 커밋 · 푸시
@@ -190,14 +157,14 @@ npx vue-tsc -b                                                       # router �
 - svgcheck 지적의 대부분은 **좌우 316폭 박스에 긴 한 줄** — 두 줄로 쪼개고 박스 높이 52→68
 - 넘침은 **x 를 옮기지 말고 문구를 줄여서** 해결 (옮기면 LAP 이 생깁니다)
 
-## 다이어그램 현황 — 총 1,062개
+## 다이어그램 현황 — 총 1,140개
 | 가이드 | 개수 | | 가이드 | 개수 |
 |---|---|---|---|---|
-| **cpp** | **156** | | python | 119 |
-| server | 114 | | cs | 106 |
-| js-ts | 105 | | java | 98 |
-| kotlin | 93 | | db | 84 |
-| **rust** | **76** | | csharp | 71 |
+| **cpp** | **169** | | **python** | **132** |
+| **rust** | **116** | | server | 114 |
+| cs | 106 | | js-ts | 105 |
+| java | 98 | | kotlin | 93 |
+| db | 84 | | csharp | 71 |
 
 **모든 가이드의 모든 탭이 7개 이상**입니다.
 
@@ -268,4 +235,4 @@ panes.forEach((p,i)=>p.className=prev[i]);
 ## 목표
 열 가이드(`web/guide-src/*` → `web/public/*-web/index.html`)를
 **"기초부터 전문가까지 이 페이지만 보고 실서비스를 만들 수 있는"** 수준으로.
-C/C++ 가 그 모양을 갖췄고 Rust 가 설치 탭까지 왔습니다. 다음은 **Rust 실전 탭 5개** 와 **각 언어 설치·환경 세팅 탭 6개** 입니다.
+C/C++ 와 Rust 가 그 모양을 갖췄습니다. 다음은 **Rust 모듈 탭 2개** 와 **각 언어 설치·환경 세팅 탭 6개** 입니다.

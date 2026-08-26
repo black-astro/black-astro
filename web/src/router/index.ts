@@ -41,7 +41,7 @@ export const guides: Guide[] = [
     title: '파이썬 · Pandas 시각 가이드 (별도 페이지)',
     heading: 'Python Visual Guide',
     desc:
-      '파이썬 문법부터 Pandas·NumPy·이미지 처리·업무 자동화·PySide6 GUI·알고리즘·DB, ' +
+      '파이썬 문법부터 Pandas·NumPy·이미지 처리·업무 자동화·PySide6 GUI(위젯과 QML/Qt Quick)·알고리즘·DB, ' +
       'FastAPI·Celery로 대규모 트래픽을 받는 법, 그리고 CPython 내부·GIL·메타클래스까지 ' +
       '데이터가 움직이는 과정을 눈으로 보면서 익히는 단일 페이지 가이드입니다.',
     tags: [
@@ -49,14 +49,14 @@ export const guides: Guide[] = [
       'Pandas',
       'NumPy',
       '업무 자동화',
-      'PySide6',
+      'PySide6 · QML',
       'FastAPI',
       '대규모 트래픽',
       'CPython 내부',
     ],
     stats: [
-      { value: '14', label: '주제 탭' },
-      { value: '207', label: '섹션' },
+      { value: '17', label: '주제 탭' },
+      { value: '268', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -246,9 +246,9 @@ export const guides: Guide[] = [
       'C ABI · FFI',
     ],
     stats: [
-      { value: '15', label: '주제 탭' },
-      { value: '189', label: '섹션' },
-      { value: '6', label: '실전 · 모듈 탭' },
+      { value: '16', label: '주제 탭' },
+      { value: '201', label: '섹션' },
+      { value: '7', label: '실전 · 모듈 탭' },
     ],
   },
   {
@@ -256,28 +256,28 @@ export const guides: Guide[] = [
     label: 'Rust Guide',
     emoji: '🦀',
     href: `${import.meta.env.BASE_URL}rust-web/`,
-    title: 'Rust 가이드 — 설치 · 소유권 · 네이티브 모듈 (별도 페이지)',
+    title: 'Rust 가이드 — 설치 · Axum 서버 · 고성능 서비스 · Tauri · 네이티브 모듈 (별도 페이지)',
     heading: 'Rust Visual Guide',
     desc:
       'C++ 만큼 빠르면서 메모리 사고와 데이터 레이스를 컴파일 단계에서 막는 언어를 한 페이지로 다룹니다. ' +
-      'rustup 설치와 환경 세팅(MSVC 링커·cargo·rust-analyzer·clippy)부터 왕기초 문법과 ' +
-      '소유권·빌림·트레이트, PyO3·maturin 으로 파이썬 모듈을 만들고 numpy 를 복사 없이 다루며 ' +
-      'GIL 을 해제해 rayon 으로 전 코어를 쓰는 법, napi-rs 애드온과 WASM, ' +
-      'C ABI 로 여러 언어에서 함께 쓰기, 크로스 컴파일, unsafe·Miri 까지 이어집니다.',
+      'rustup 설치와 환경 세팅부터 왕기초 문법과 소유권·빌림·트레이트, Axum 0.8 + sqlx 로 만드는 ' +
+      '백엔드 서버와 JWT·OpenAPI·관측·Docker 배포, Tokio 내부와 락프리·Kafka·Polars 고성능 서비스, ' +
+      'Tauri 2 로 만드는 데스크톱 앱, 그리고 PyO3·napi-rs·C ABI 로 파이썬·Node 에서 불러 쓰는 ' +
+      '모듈까지 이어집니다.',
     tags: [
       '설치 · rustup',
-      'Rust 2021',
       '소유권 · 빌림',
+      'Axum · sqlx',
+      'Tokio · 락프리',
+      'Tauri 2 데스크톱',
       'PyO3 · maturin',
-      'numpy 제로카피',
-      'GIL 해제 · rayon',
       'napi-rs · WASM',
       'C ABI · unsafe',
     ],
     stats: [
-      { value: '10', label: '주제 탭' },
-      { value: '111', label: '섹션' },
-      { value: '4', label: '깊이 층' },
+      { value: '13', label: '주제 탭' },
+      { value: '150', label: '섹션' },
+      { value: '3', label: '실전 탭' },
     ],
   },
   {
