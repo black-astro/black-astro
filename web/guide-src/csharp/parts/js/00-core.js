@@ -160,6 +160,7 @@ const TAB_KW = {
   tool:"도구 로깅 serilog 설정 options http polly 재시도 직렬화 json messagepack 테스트 xunit moq testcontainers 통합테스트 벤치마크 프로파일링 analyzer editorconfig ci cd githubactions nuget 패키지 cli 컨테이너 에러사전",
   scale:"대규모 트래픽 동시접속 ccu 확장 스케일 수평확장 redis 레디스 랭킹 분산락 lock 메시지큐 kafka rabbitmq 샤딩 복제 캐시 스탬피드 게이트웨이 무중단 점검 모니터링 프로메테우스 grafana 장애 비용 글로벌 지연 latency 사후분석",
   deep:"전문가 심화 내부 clr jit il 바이트코드 메모리모델 gc 세대 loh 서버gc 누수 스레드풀 async상태기계 statemachine 락프리 interlocked struct 레이아웃 캐시라인 aot 트리밍 nativeaot 소스제너레이터 unsafe 포인터 프로파일링 dotnet-trace dump 보안 역직렬화 공급망 함수형 불변 디자인패턴 아키텍처",
+  setup:"설치 세팅 환경설정 환경구성 셋업 setup install 닷넷 dotnet .NET NET10 net10 dotnet10 SDK 런타임 runtime 비주얼스튜디오 VisualStudio VS2026 Community 커뮤니티 워크로드 workload VSCode 브이에스코드 CDevKit DevKit 라이더 Rider JetBrains winget 윈겟 brew apt 우분투 Ubuntu 리눅스 Linux 맥 macOS 맥북 PATH 패스 환경변수 dotnetCLI CLI 명령어 dotnetnew dotnetrun dotnetbuild dotnetpublish 솔루션 sln slnx csproj 프로젝트파일 globaljson NuGet 뉴겟 누겟 패키지 package restore 복원 피드 feed 프록시 proxy 캐시 cache EFCore dotnetef 마이그레이션 LocalDB SQLServer SSMS 도커 Docker PostgreSQL SQLite HTTPS 인증서 devcerts editorconfig 에디터컨피그 dotnetformat 포맷 nullable 널러블 분석기 analyzer TreatWarningsAsErrors DirectoryBuildprops CI GitHubActions setupdotnet 트러블슈팅 오류 에러 error NETSDK1045 NU1101 NU1301 안됨 못찾음 notrecognized 포트충돌 5000 7000 한글경로 MAUI WinUI WPF WinForms Avalonia Godot Unity UnityHub 유니티 게임개발 데스크톱 LTS STS 버전 version 업그레이드 빈PC 처음",
 };
 
 const FIND_CHIPS = ["오브젝트 풀링","클라이언트 예측","async await","Span 성능",
@@ -309,6 +310,18 @@ const SEC_KW = {
   z10:"프로파일링 dotnetcounters dotnettrace dotnetdump gcdump clrstack syncblk",
   z11:"보안 역직렬화 binaryformatter typenamehandling 공급망 취약점 lockfile",
   z12:"최적화 순서 측정 제거 축소 미세최적화 근거",
+  st01:"닷넷 .NET NETCore NETFramework Mono SDK 런타임 runtime LTS STS net10 net8 버전 사이드바이사이드 dotnetinfo listsdks TargetFramework C#14 계보 차이 구분",
+  st02:"VisualStudio 비주얼스튜디오 VS2026 Community 커뮤니티 무료 라이선스 워크로드 workload 설치관리자 Installer vsinstaller vswhere 용량 설치위치 캐시 winget BuildTools 첫실행 계정로그인",
+  st03:"SDK 설치 다운로드 dotnetmicrosoft winget x64 Arm64 PATH 환경변수 where dotnettools 전역도구 VSCode CDevKit 확장 extension dotnetinstall 관리자권한없이 DOTNETROOT 제거 재설치",
+  st04:"macOS 맥 맥북 pkg brew Homebrew AppleSilicon Arm64 Ubuntu 우분투 apt packagesmicrosoft Debian Fedora dnf Arch dotnetinstallsh 도커 systemd Rider Avalonia WPF불가 크로스플랫폼",
+  st05:"dotnetCLI dotnetnew dotnetbuild dotnetrun dotnettest dotnetpublish dotnetwatch 템플릿 template 솔루션 sln slnx csproj 프로젝트참조 reference globaljson rollForward RID selfcontained AOT 빌드",
+  st06:"NuGet 뉴겟 누겟 패키지 package restore 복원 캐시 locals 피드 source NuGetConfig 프록시 proxy 사내피드 Nexus AzureArtifacts NU1101 NU1301 중앙패키지관리 DirectoryPackagesprops 잠금파일 lockfile 취약점 vulnerable",
+  st07:"VisualStudio 설정 옵션 테마 글꼴 CascadiaCode 저장시서식 editorconfig 솔루션탐색기 디버거 중단점 breakpoint 조건부중단점 추적점 tracepoint 조사식 watch 예외설정 핫리로드 hotreload 단축키 확장 Roslynator",
+  st08:"Rider JetBrains Toolbox 라이선스 비상업무료 VSCode settingsjson launchjson tasksjson problemMatcher 디버깅 원격개발 Remote SSH WSL 도커 프로파일러 dotMemory 편집기선택 IDE비교",
+  st09:"WPF WinForms WinUI WindowsAppSDK MAUI 워크로드 dotnetworkload mauicheck JDK AndroidSDK 에뮬레이터 iOS Xcode Unity UnityHub 유니티 Godot 고도 Avalonia 데스크톱 게임 netwindows NETSDK1100",
+  st10:"ASPNETCore webapi Kestrel HTTPS 인증서 devcerts trust launchSettings 포트 5000 7000 포트충돌 netstat SQLServer Express LocalDB SSMS 도커 Docker PostgreSQL SQLite EFCore dotnetef 마이그레이션 usersecrets 연결문자열 httpfile",
+  st11:"editorconfig nullable 널러블 NullReferenceException 분석기 analyzer EnableNETAnalyzers AnalysisMode TreatWarningsAsErrors 경고 warning dotnetformat verifynochanges DirectoryBuildprops Husky githook CI GitHubActions setupdotnet 커버리지 lockedmode",
+  st12:"오류 에러 트러블슈팅 안됨 dotnet못찾음 notrecognized commandnotfound NETSDK1045 NETSDK1141 NETSDK1100 NU1101 NU1301 globaljson 인증서경고 포트점유 bindtoaddress 한글경로 공백경로 OneDrive 워크로드누락 캐시정리 binlog 환경변수 DOTNETROOT 점검표",
 };
 
 let FIDX = null;

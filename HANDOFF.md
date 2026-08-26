@@ -1,52 +1,41 @@
-# 핸드오프 — 언어 가이드 확장 (2026-08-26 7차 갱신)
+# 핸드오프 — 언어 가이드 확장 (2026-08-26 8차 갱신)
 
-## 최근 결과 — C/C++ · Rust · Python 확장
+## 최근 결과 — 열 가이드 전부 "설치부터 실전까지"
+
+**모든 언어 가이드에 🧰 설치 · 환경 세팅 탭이 생겼습니다.** 빈 PC 에서 시작해
+설치 → 기초 → 실전(서버 · 앱 · 모듈)까지 한 페이지로 이어집니다.
 
 | 가이드 | 탭 | 섹션 | 다이어그램 |
 |---|---|---|---|
 | **cpp** | 9 → **16** | 88 → **201** | 63 → **169** |
-| **rust** | 9 → **13** | 100 → **150** | 63 → **116** |
-| **python** | 17 (그대로) | 256 → **268** | 119 → **132** |
+| **rust** | 9 → **15** | 100 → **174** | 63 → **142** |
+| **python** | 17 → **18** | 256 → **280** | 119 → **144** |
+| **js-ts** | 15 → **16** | 233 → **245** | 105 → **117** |
+| **java** | 14 → **15** | 221 → **233** | 98 → **110** |
+| **kotlin** | 12 → **13** | 195 → **206** | 93 → **104** |
+| **db** | 12 → **13** | 179 → **191** | 84 → **97** |
+| **csharp** | 10 → **11** | 141 → **153** | 71 → **85** |
+| server · cs | 그대로 | 198 · 173 | 114 · 106 |
 
-cpp · rust 모두 **"앱을 만들지 않습니다" 소개 문구를 강점 소개로 교체**했습니다.
-
-### cpp 새 탭 7개 + C 탭 확장
-| 탭 | id | 섹션 | 그림 |
+### 새로 만든 탭 (전부 이번 작업)
+| 가이드 | 탭 | 섹션 | 그림 |
 |---|---|---|---|
-| 🧰 설치 · 환경 세팅 (맨 앞) | `setup` | s01~s12 | 13 |
-| ☕ 자바 · 코틀린 모듈 | `jvm` | v01~v12 | 13 |
-| 🟣 C# · .NET 모듈 | `cs` | k01~k12 | 12 |
-| 🖥️ 데스크톱 앱 · GUI | `app` | g01~g12 | 13 |
-| 🌐 백엔드 서버 | `srv` | w01~w13 | 14 |
-| 🎮 게임 서버 | `game` | n01~n13 | 14 |
-| 🚀 고성능 · 시스템 작업 | `hpc` | h01~h13 | 13 |
-| 🅲 C 언어 탭 **확장** | `c` | c13~c26 (12→26) | 7→21 |
+| cpp | 🧰 설치 · 🖥️ 데스크톱 앱 · 🌐 백엔드 서버 · 🎮 게임 서버 · 🚀 고성능 · ☕ 자바 모듈 · 🟣 C# 모듈 | 각 12~13 | 12~14 |
+| cpp | 🅲 C 언어 **확장** (12→26섹션) | +14 | 7→21 |
+| rust | 🧰 설치 · 🌐 Axum 서버 · 🚀 고성능 서비스 · 🖥️ Tauri · ☕ 자바 모듈 · 🟣 C# 모듈 | 각 11~13 | 13~14 |
+| python | 🧰 설치 · **PySide6 탭에 QML/Qt Quick 12섹션 확장**(q17~q28) | 12 · 12 | 12 · 12 |
+| java · kotlin · js-ts · csharp · db | 🧰 설치 · 환경 세팅 | 11~12 | 11~14 |
 
-탭 순서: setup · c · lang · mod / py · node · **jvm · cs** · ffi / build · perf · deep / **app · srv · game · hpc**
-그룹: 0 언어 · 1 모듈(🐍🟨☕🟣🔗) · 2 빌드 · 3 심화 · 4 **실전 · 앱 · 서버**(🖥️🌐🎮🚀)
-
-### rust 새 탭 4개
-| 탭 | id | 섹션 | 그림 |
-|---|---|---|---|
-| 🧰 설치 · 환경 세팅 (맨 앞) | `setup` | s01~s11 | 13 |
-| 🌐 백엔드 서버 · Axum | `web` | w01~w13 | 13 |
-| 🚀 고성능 서비스 · 시스템 | `svc` | h01~h13 | 13 |
-| 🖥️ Tauri · 데스크톱 · GUI | `tauri` | u01~u13 | 14 |
-
-그룹 4 **실전 · 서비스**(🧰🌐🚀🖥️) 신설.
-
-### python — PySide6 탭 확장 (사용자 요청분 완료)
-`panes/07-qt.html` 에 **q17~q28 (12섹션 · 162KB · 그림 12)** 추가 — QML·Qt Quick 개념,
-첫 앱, 문법·바인딩, 앵커/Layout, **Qt Quick Controls 2**, **스타일 6종(Material · FluentWinUI3 포함)**,
-파이썬↔QML(`@QmlElement`), 모델·ListView, 애니메이션·상태, **Qt Quick Effects(MultiEffect·ShaderEffect)**,
-**Material Symbols vs Lucide 아이콘**, qrc·PyInstaller 배포.
-
-### 문구를 고친 곳 (cpp · rust 각각)
-`panes/01-lang.html` hero · `parts/12-tabbar.html` #hello 배너 ·
-`parts/11-sidebar.html` 브랜드 · `parts/00-head.html` title/description/og ·
-`web/src/router/index.ts` 의 해당 블록. python 은 router 의 stats·tags 만 갱신.
-
+- cpp · rust 는 **"앱을 만들지 않습니다" 소개 문구를 강점 소개로 교체**했습니다
+- 설치 탭은 전부 **맨 앞 탭**, 접두사 `st`(cpp·rust 만 `s`), cls `st`, 그룹 0 아이콘 앞에 🧰
 - 전 가이드 `verify:guide` 통과 · svgcheck 0건 · integrity 0건 · smoke 통과 · `vue-tsc -b` 통과
+
+### PySide6 QML 확장 (사용자 요청분 — 완료)
+`python/panes/07-qt.html` q17~q28 — QML·Qt Quick 개념/첫 앱/문법·바인딩/앵커·Layout,
+**Qt Quick Controls 2**, **스타일 6종(Material · FluentWinUI3 포함) 과 지정 3가지 방법**,
+파이썬↔QML(`@QmlElement`), 모델·ListView, 애니메이션·상태,
+**Qt Quick Effects(MultiEffect · ShaderEffect · Shape)**, **Material Symbols vs Lucide 아이콘**,
+qrc·PyInstaller 배포.
 
 ---
 
@@ -59,48 +48,17 @@ cpp · rust 모두 **"앱을 만들지 않습니다" 소개 문구를 강점 소
 > **주의:** 지침서(`BRIEF.md`)와 등록 스크립트(`reg.mjs`)는 세션 스크래치패드에 있습니다.
 > 세션이 바뀌어 사라졌다면 아래 §도구 를 보고 다시 만드세요.
 
-### 1. Rust 가이드 — 남은 모듈 탭 2개
-| 탭 | pane 파일 | 접두사 | 섹션 | 그룹 |
-|---|---|---|---|---|
-| ☕ 자바 · 코틀린 모듈 | `panes/14-jvm.html` | `v` | v01~v12 | 1 (모듈), after `node` |
-| 🟣 C# · .NET 모듈 | `panes/15-cs.html` | `k` | k01~k12 | 1, after `jvm` |
-
-- **jvm**: `jni` 크레이트 · Panama FFM · **UniFFI**(코틀린·스위프트 바인딩 자동) · JNA 비교,
-  DirectByteBuffer 제로카피, cargo-ndk 안드로이드, KMP, JMH 수치. "가장 간편한 길"은 UniFFI 로 추천
-- **cs**: 손 P/Invoke vs **csbindgen**(Cysharp, 추천) vs interoptopus, `#[repr(C)]` 마샬링,
-  `Span`↔`slice` 제로카피, `Box::into_raw` 핸들 + SafeHandle, `catch_unwind` panic 경계,
-  Unity 플러그인, NuGet `runtimes/` 배포
-- 넣은 뒤 rust 모듈 그룹(`data-g="1"`)의 `groupIcs` 를 `🐍🟨☕🟣🔗` 로 갱신할 것
-  (reg.mjs 는 **이미 있는 그룹 버튼은 건드리지 않습니다** — 사이드바를 직접 고쳐야 합니다)
-
-### 2. 나머지 언어 — 설치 · 환경 세팅 탭 6개
-전부 **맨 앞 탭**(`after: "^"`), 접두사 `st`, cls `st`, grad `["#10b981","#065f46"]`, 아이콘 🧰.
-cpp `panes/10-setup.html` 와 rust `panes/10-setup.html` 가 완성된 본보기입니다 — 그 구성을 따르세요.
-
-| 가이드 | pane 파일 | 섹션 | 핵심 내용 |
-|---|---|---|---|
-| python | `panes/18-setup.html` | st01~st12 | python.org 설치 마법사(Add to PATH) · py 런처 · venv · pip · VS Code · 문제 사전. `04-uv.html` 과 겹치지 않게 |
-| java | `panes/00-setup.html` | st01~st12 | JDK 배포판 고르기 · Temurin msi · **JAVA_HOME/PATH 손으로 잡기** · SDKMAN · Gradle wrapper · IntelliJ · 인코딩 · 문제 사전 |
-| kotlin | `panes/00-setup.html` | st01~st11 | 세 갈래(JVM·Android·KMP) · JDK · Gradle Kotlin DSL · Android Studio SDK/AVD · KMP · 문제 사전 |
-| js-ts | `panes/00-setup.html` | st01~st12 | Node 24 LTS 설치 · fnm 버전 관리 · pnpm/corepack · TS/tsx · VS Code · ESLint 9 · node-gyp · 문제 사전 |
-| csharp | `panes/00-setup.html` | st01~st12 | .NET 10 SDK vs Runtime · VS 2026 워크로드 · dotnet CLI · NuGet · Rider/VS Code · dev-certs · 문제 사전 |
-| db | `panes/00-setup.html` | st01~st12 | DB 고르기 · Docker Desktop/WSL2 · compose 한 방 · 클라이언트 도구(DBeaver) · 포트/방화벽 · **언어별 드라이버·연결 문자열** · 문제 사전 |
-
-각 가이드의 그룹 0 라벨은 그대로 쓰고 `groupIcs` 앞에 🧰 를 붙입니다
-(python `기본 · BASIC`/🧰🐍📦 · java `언어 · JAVA`/🧰☕ · kotlin `언어 · KOTLIN`/🧰🟠 ·
-js-ts `언어 · LANGUAGE`/🧰🟨🔷 · csharp `언어 · C#`/🧰🟣 · db `시작 · START`/🧰🚀).
-
-### 3. 전 가이드 기술 스택 점검 (아직 못 함)
+### 1. 전 가이드 기술 스택 점검 (아직 못 함)
 언어별 강점 프레임워크·라이브러리에 빠진 것이 없는지 훑고 보강 — 예:
 java(Virtual Thread·Spring AI·Testcontainers) · kotlin(Ktor·Arrow·Compose Multiplatform) ·
 js-ts(Hono·Bun·Drizzle·TanStack) · csharp(Blazor·Aspire·MAUI) · python(Polars·LangGraph) ·
 db(pgvector·DuckDB·ClickHouse). 오류·설명 오점·시각화 결함도 같이 고칩니다.
 
-### 4. 브라우저 실측 (계속 밀려 있음)
+### 2. 브라우저 실측 (계속 밀려 있음)
 Chrome MCP 가 있는 세션에서 열 가이드에 아래 스크립트를 한 번씩. 정적 검사(svgcheck)는
-**±5px 안쪽 차이를 못 잡습니다.** 미실측 누적 = 2차 290 + 3차 224 + 4차 68 + 5차 63 + 이번 **90** = **735건**.
+**±5px 안쪽 차이를 못 잡습니다.** 미실측 누적 = 2차 290 + 3차 224 + 4차 68 + 5차 63 + 6차 90 + 이번 **175** = **910건**.
 
-### 5. 마지막에 할 것
+### 3. 마지막에 할 것
 - `npm run verify:guide` · svgcheck · integrity · smoke · `vue-tsc -b`
 - `src/router/index.ts` 의 stats(탭 수 · 섹션 수) 를 실제 값으로 맞추기
 - HANDOFF 갱신 후 커밋 · 푸시
@@ -157,14 +115,14 @@ npx vue-tsc -b                                                       # router �
 - svgcheck 지적의 대부분은 **좌우 316폭 박스에 긴 한 줄** — 두 줄로 쪼개고 박스 높이 52→68
 - 넘침은 **x 를 옮기지 말고 문구를 줄여서** 해결 (옮기면 LAP 이 생깁니다)
 
-## 다이어그램 현황 — 총 1,140개
+## 다이어그램 현황 — 총 1,288개
 | 가이드 | 개수 | | 가이드 | 개수 |
 |---|---|---|---|---|
-| **cpp** | **169** | | **python** | **132** |
-| **rust** | **116** | | server | 114 |
-| cs | 106 | | js-ts | 105 |
-| java | 98 | | kotlin | 93 |
-| db | 84 | | csharp | 71 |
+| **cpp** | **169** | | **python** | **144** |
+| **rust** | **142** | | **js-ts** | **117** |
+| server | 114 | | **java** | **110** |
+| cs | 106 | | **kotlin** | **104** |
+| **db** | **97** | | **csharp** | **85** |
 
 **모든 가이드의 모든 탭이 7개 이상**입니다.
 
@@ -235,4 +193,4 @@ panes.forEach((p,i)=>p.className=prev[i]);
 ## 목표
 열 가이드(`web/guide-src/*` → `web/public/*-web/index.html`)를
 **"기초부터 전문가까지 이 페이지만 보고 실서비스를 만들 수 있는"** 수준으로.
-C/C++ 와 Rust 가 그 모양을 갖췄습니다. 다음은 **Rust 모듈 탭 2개** 와 **각 언어 설치·환경 세팅 탭 6개** 입니다.
+열 가이드 전부가 **설치 → 기초 → 실전** 축을 갖췄습니다. 남은 것은 기술 스택 공백 점검과 브라우저 실측입니다.

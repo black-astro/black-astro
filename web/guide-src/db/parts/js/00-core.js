@@ -287,6 +287,7 @@ const TAB_KW = {
   tune:"설계 모델링 정규화 1nf 2nf 3nf 반정규화 키설계 자연키 대리키 uuid ulid 인덱스 b-tree 원리 복합인덱스 순서 커버링 인덱스안탐 형변환 함수사용 like 실행계획 explain 읽는법 통계 카디널리티 페이징 offset 느림 커서페이징 무한스크롤 트랜잭션 acid 격리수준 read committed repeatable read serializable 팬텀 팬텀리드 더티리드 반복불가 락 lock 데드락 대기 블로킹 커넥션풀 pool 사이징 슬로우쿼리 느린쿼리 모니터링 지표 알람 주문 재고 모델링",
   deep:"전문가 초고급 내부 internals 페이지 page 힙 heap 슬롯 저장구조 버퍼풀 buffer pool 캐시히트율 wal redo undo 로그 체크포인트 크래시복구 fsync 내구성 mvcc 스냅샷 가시성 버전 락매니저 2pl 옵티마이저 비용모델 카디널리티추정 조인순서 조인알고리즘 네스티드루프 해시조인 소트머지 파티셔닝 샤딩 sharding 샤드키 복제 리플리케이션 동기 비동기 반동기 합의 raft ha 페일오버 분산트랜잭션 2pc xa saga 보상 cap 일관성 선형화 newsql 아카이빙 보관 암호화 tde 감사 audit 최소권한 장애 대응 포스트모템 dba 체크리스트",
   app:"연동 애플리케이션 드라이버 커넥션 연결문자열 dsn jdbc hikari hikaricp psycopg psycopg2 oracledb cx_oracle pymysql mysqlclient sqlite3 mysql2 pg node-postgres better-sqlite3 sqlalchemy jpa hibernate mybatis prisma typeorm orm sql인젝션 injection 바인딩 파라미터 prepared statement 트랜잭션 with begin commit rollback 컨텍스트매니저 n+1 배치조회 in절 마이그레이션 alembic flyway liquibase prisma migrate 대량적재 copy load data infile executemany bulk 재시도 retry 타임아웃 커넥션누수 테스트 testcontainers 롤백테스트 픽스처",
+  setup:"설치 install 세팅 setup 환경구축 개발환경 도커 docker 도커데스크톱 dockerdesktop compose 컴포즈 docker-compose wsl wsl2 가상화 virtualization bios 하이퍼v hyperv rancher podman colima 포스트그레 postgresql postgres pg 마이에스큐엘 mysql 마리아디비 mariadb sqlite 에스큐엘라이트 sqlserver mssql 오라클 oracle mongodb 몽고디비 redis 레디스 valkey 포트 port 5432 3306 1433 1521 27017 6379 방화벽 firewall 인바운드 inbound 원격접속 remote 바인드 bind listen_addresses pg_hba my.cnf 드라이버 driver jdbc odbc psycopg pymysql sqlalchemy hikaricp npgsql libpqxx sqlx prisma drizzle efcore 연결문자열 connectionstring datasource database_url 환경변수 env dotenv 시크릿 secret 비밀번호 password 계정 user 권한 grant 문자셋 charset utf8 utf8mb4 인코딩 encoding 타임존 timezone utc kst collation 정렬 백업 backup pg_dump mysqldump dbeaver datagrip pgadmin workbench ssms compass redisinsight tableplus psql mysql-cli sqlite3 redis-cli mongosh cli 터미널 terminal 마이그레이션 migration flyway liquibase alembic testcontainers 포트충돌 conflict accessdenied 접속오류 연결실패 한글깨짐 깨짐 설치오류 트러블슈팅 troubleshooting brew homebrew apt dnf winget msi 서비스 service systemctl",
 };
 const FIND_CHIPS = ["설치부터 하고 싶어요","도커로 DB 띄우기","JOIN 이해하기","윈도우 함수",
                     "느린 쿼리 튜닝","인덱스가 안 타요","페이징 최적화","격리 수준",
@@ -484,6 +485,18 @@ const SEC_KW = {
   a10:"대량적재 copy load data infile executemany bulk insert 성능 100배",
   a11:"재시도 retry 백오프 타임아웃 커넥션누수 헬스체크 서킷브레이커",
   a12:"테스트 db 롤백 testcontainers 픽스처 시드 격리 sqlite대체위험",
+  st01:"DB선택 제품비교 postgresql mysql mariadb sqlite sqlserver oracle mongodb redis 라이선스 license gpl sspl 무료 유료 설치난이도 기본포트 2026 추천 선택흐름도 관계형 nosql 캐시 문서형",
+  st02:"docker desktop 도커설치 wsl wsl2 가상화 vtx svm bios 하이퍼v 재부팅 hello-world brew cask get.docker.com usermod 라이선스 250명 rancher podman colima 대안",
+  st03:"docker run compose.yml 볼륨 volume 포트매핑 -p -v 헬스체크 healthcheck initdb 초기SQL entrypoint 데이터유지 환경변수 down -v host.docker.internal 서비스이름 네트워크 pg_dump 백업",
+  st04:"네이티브설치 windows macos linux 설치파일 msi exe 마법사 wizard 서비스등록 services.msc homebrew brew services apt dnf systemctl postgresql-setup initdb stackbuilder mysqlinstaller ssms tcpip 확인명령",
+  st05:"dbeaver datagrip pgadmin workbench ssms azuredatastudio compass redisinsight tableplus vscode sqltools 드라이버자동다운로드 연결화면 testconnection psql mysql sqlite3 redis-cli mongosh path 환경변수 읽기전용 색지정",
+  st06:"포트 port 5432 3306 1433 1521 27017 6379 방화벽 firewall wf.msc 인바운드 New-NetFirewallRule ufw firewalld listen_addresses bind-address pg_hba.conf host 원격접속 사내망 ssh터널 포트포워딩 보안",
+  st07:"드라이버 driver 연결문자열 connectionstring jdbc psycopg pymysql mysqlclient sqlalchemy oracledb hikaricp exposed springdata pg mysql2 better-sqlite3 prisma drizzle npgsql efcore libpqxx vcpkg sqlx tokio 커넥션풀 pool 플레이스홀더 바인딩",
+  st08:"환경변수 env dotenv .env .env.example gitignore DATABASE_URL 시크릿 secret 비밀번호 password setx SetEnvironmentVariable export zshrc user-secrets dotenvy compose env_file gitleaks 유출 rotate vault secretsmanager",
+  st09:"계정분리 앱전용계정 최소권한 grant revoke default privileges 읽기전용 readonly 문자셋 utf8 utf8mb4 encoding collation 타임존 timezone utc timestamptz 샘플DB pagila sakila chinook northwind 백업 복원 pg_dump mysqldump 체크리스트",
+  st10:"cli 터미널 psql mysql sqlite3 redis-cli mongosh 메타명령 백슬래시 dot명령 세미콜론 프롬프트 종료 quit exit 치트시트 -c -e --eval 스크립트실행 출력형식 mode box pset psqlrc timing copy csv",
+  st11:"프로젝트구조 compose 포트분리 COMPOSE_PROJECT_NAME 마이그레이션 migration flyway liquibase alembic prisma drizzle efcore golang-migrate sqlx-cli 이력테이블 schema_history testcontainers 테스트DB h2 onboarding readme",
+  st12:"트러블슈팅 오류 에러 포트충돌 address already in use netstat 서비스삭제 password authentication failed access denied host pg_hba entry connection refused timed out permission denied 볼륨권한 wsl2 가상화 bios 한글깨짐 이모지 utf8mb4 타임존 9시간 too many connections database is locked 오라클용량",
 };
 
 let FIDX = null;

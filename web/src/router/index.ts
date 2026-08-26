@@ -109,8 +109,8 @@ export const guides: Guide[] = [
       'K2 내부',
     ],
     stats: [
-      { value: '12', label: '주제 탭' },
-      { value: '189', label: '섹션' },
+      { value: '13', label: '주제 탭' },
+      { value: '206', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -163,8 +163,8 @@ export const guides: Guide[] = [
       'CLR · GC 내부',
     ],
     stats: [
-      { value: '10', label: '주제 탭' },
-      { value: '120', label: '섹션' },
+      { value: '11', label: '주제 탭' },
+      { value: '153', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -190,8 +190,8 @@ export const guides: Guide[] = [
       'DB 내부 구조',
     ],
     stats: [
-      { value: '10', label: '주제 탭' },
-      { value: '154', label: '섹션' },
+      { value: '13', label: '주제 탭' },
+      { value: '191', label: '섹션' },
       { value: '4', label: 'DB 전용 탭' },
     ],
   },
