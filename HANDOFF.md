@@ -1,27 +1,39 @@
-# 핸드오프 — 언어 가이드 확장 (2026-08-25 4차 갱신)
+# 핸드오프 — 언어 가이드 확장 (2026-08-26 5차 갱신)
 
-## 이번 세션 결과 — C/C++ 가이드 대확장
+## 최근 세션 결과 — C/C++ · Rust 가이드 확장
 
-C++ 가이드가 **탭 9 → 13 · 섹션 88 → 165 · 다이어그램 63 → 131** 이 되었습니다.
-"C++ 로 앱을 만들지 않습니다" 라는 소개 문구를 **강점 소개**로 바꾸고,
-가이드 성격을 *모듈 전용* 에서 **C/C++ 종합(서버 · 게임 서버 · 고성능 · 모듈)** 으로 넓혔습니다.
+| 가이드 | 탭 | 섹션 | 다이어그램 |
+|---|---|---|---|
+| **cpp** | 9 → **15** | 88 → **189** | 63 → **156** |
+| **rust** | 9 → **10** | 100 → **111** | 63 → **76** |
 
-| 새로 들어간 것 | 탭 id | 섹션 | 그림 | 크기 |
-|---|---|---|---|---|
-| 🧰 설치 · 환경 세팅 (맨 앞 탭) | `setup` | s01~s12 | 13 | 184KB |
-| 🌐 백엔드 서버 | `srv` | w01~w13 | 14 | 209KB |
-| 🎮 게임 서버 | `game` | n01~n13 | 14 | 197KB |
-| 🚀 고성능 · 시스템 작업 | `hpc` | h01~h13 | 13 | 238KB |
-| 🅲 C 언어 탭 **확장** | `c` | c13~c26 추가 (12→26) | 7→21 | 294KB |
+두 가이드 모두 **"앱을 만들지 않습니다" 라는 소개 문구를 강점 소개로 교체**했습니다.
 
-- 탭 그룹도 하나 늘었습니다 — `data-g="4"` **실전 · 서버 · 성능**(🌐🎮🚀), 시트 라벨 "실전"
-- 단축키 1~9 는 tabrow 앞 10개 기준으로 **자동 재부여**됩니다(`setup` 이 1번)
-- 전 가이드 `npm run verify:guide` 통과 · svgcheck 0건 · integrity 0건 · smoke 통과 · `vue-tsc -b` 통과
+### cpp 에 새로 들어간 탭 6개 + C 탭 확장
+| 탭 | id | 섹션 | 그림 |
+|---|---|---|---|
+| 🧰 설치 · 환경 세팅 (맨 앞) | `setup` | s01~s12 | 13 |
+| 🖥️ 데스크톱 앱 · GUI | `app` | g01~g12 | 13 |
+| 🌐 백엔드 서버 | `srv` | w01~w13 | 14 |
+| 🎮 게임 서버 | `game` | n01~n13 | 14 |
+| 🚀 고성능 · 시스템 작업 | `hpc` | h01~h13 | 13 |
+| 🟣 C# · .NET 모듈 | `cs` | k01~k12 | 12 |
+| 🅲 C 언어 탭 **확장** | `c` | c13~c26 (12→26) | 7→21 |
 
-### 문구를 고친 곳 (cpp)
+- 탭 그룹 신설 — `data-g="4"` **실전 · 앱 · 서버**(🖥️🌐🎮🚀), 시트 라벨 "실전"
+- 모듈 그룹(`data-g="1"`)에 C# 모듈 탭 추가 — 현재 groupIcs `🐍🟨🟣🔗`
+
+### rust 에 새로 들어간 탭 1개
+| 탭 | id | 섹션 | 그림 |
+|---|---|---|---|
+| 🧰 설치 · 환경 세팅 (맨 앞) | `setup` | s01~s11 | 13 |
+
+### 문구를 고친 곳 (cpp · rust 각각)
 `panes/01-lang.html` hero · `parts/12-tabbar.html` #hello 배너 ·
-`parts/11-sidebar.html` 브랜드 · `parts/00-head.html` title/description ·
-`web/src/router/index.ts` 의 `key:'cpp'` 블록(label · title · heading · desc · tags · stats).
+`parts/11-sidebar.html` 브랜드 · `parts/00-head.html` title/description/og ·
+`web/src/router/index.ts` 의 해당 블록(label · title · heading · desc · tags · stats).
+
+- 전 가이드 `npm run verify:guide` 통과 · svgcheck 0건 · integrity 0건 · smoke 통과 · `vue-tsc -b` 통과
 
 ---
 
@@ -30,39 +42,42 @@ C++ 가이드가 **탭 9 → 13 · 섹션 88 → 165 · 다이어그램 63 → 1
 집필용 지침서와 자동 등록 스크립트가 **이미 준비되어 있습니다.** 새 세션에서는
 `(A) 지침서 읽기 → (B) 에이전트에 과제 주기 → (C) reg.mjs 로 등록 → (D) 검증` 만 반복하면 됩니다.
 
-> **주의:** 지침서·스크립트는 세션 스크래치패드에 있어 **세션이 바뀌면 사라집니다.**
-> 아래 §도구 에 전체 내용을 다시 만드는 방법을 적어 두었습니다.
+> **주의:** 지침서(`BRIEF.md`)와 등록 스크립트(`reg.mjs`)는 세션 스크래치패드에 있습니다.
+> 세션이 바뀌어 사라졌다면 아래 §도구 를 보고 다시 만드세요.
 
-### 1. C++ 가이드 — 남은 탭 3개 (이번 세션에 착수했다가 토큰 한도로 중단)
+### 1. C++ 가이드 — 남은 탭 1개
 | 탭 | pane 파일 | 접두사 | 섹션 | 그룹 |
 |---|---|---|---|---|
-| 🖥️ 데스크톱 앱 · GUI | `panes/11-app.html` | `g` | g01~g12 | 4 (실전), after `deep` |
 | ☕ 자바 · 코틀린 모듈 | `panes/15-jvm.html` | `v` | v01~v12 | 1 (모듈), after `node` |
-| 🟣 C# · .NET 모듈 | `panes/16-cs.html` | `k` | k01~k12 | 1 (모듈), after `jvm` |
 
-- **app**: Qt 6(설치·Widgets·QML·배포) · Dear ImGui · SDL3/raylib · wxWidgets · Win32/WinUI · 로그 뷰어 실전 프로젝트
-- **jvm**: **JNI 를 중심으로**(FFM 이 아직 미완성이므로) — jni 첫 모듈 · 타입/문자열 · DirectByteBuffer 제로카피 · 콜백/예외 · Panama FFM · jextract · JNA/JNR · Gradle+CMake · 안드로이드 NDK · 실전
-- **cs**: P/Invoke `LibraryImport` · 마샬링 · `Span`/`GCHandle` 제로카피 · SafeHandle · `UnmanagedCallersOnly` 콜백 · C++/CLI · CppSharp · Unity 플러그인 · NuGet `runtimes/` 배포
-- app 이 들어가면 그룹 4 의 `groupIcs` 를 `🖥️🌐🎮🚀`, `groupTitle` 을 "데스크톱 앱 · 백엔드 서버 · 게임 서버 · 고성능" 으로 되돌릴 것
+- **jvm**: **JNI 를 중심으로**(FFM 이 아직 미완성이므로) — jni 첫 모듈 · 타입/문자열 · DirectByteBuffer 제로카피 ·
+  콜백/예외 · Panama FFM · jextract · JNA/JNR · Gradle+CMake · 안드로이드 NDK · 실전
+- 넣은 뒤 그룹 1 의 `groupIcs` 를 `🐍🟨☕🟣🔗`, `groupTitle` 을
+  "파이썬 모듈 · Node 애드온 · 자바 · C# · C ABI" 로 되돌리고, `cs` 탭의 순서를 jvm 뒤로 옮길 것
+  (지금은 jvm 이 없어 `cs` 가 `node` 바로 뒤에 있습니다)
 
-### 2. Rust 가이드 — 탭 5개 (하나도 못 넣었습니다)
+### 2. Rust 가이드 — 남은 탭 5개
 | 탭 | pane 파일 | 접두사 | 섹션 | 그룹 |
 |---|---|---|---|---|
-| 🧰 설치 · 환경 세팅 | `panes/10-setup.html` | `s` | s01~s11 | 0, after `^`(맨 앞) |
 | 🌐 백엔드 서버 · Axum | `panes/11-web.html` | `w` | w01~w13 | 4 (실전 · 서비스), after `tool` |
 | 🚀 고성능 서비스 · 시스템 | `panes/12-svc.html` | `h` | h01~h13 | 4, after `web` |
 | 🖥️ Tauri · 데스크톱 · GUI | `panes/13-tauri.html` | `u` | u01~u13 | 4, after `svc` |
 | ☕ 자바 · 코틀린 모듈 | `panes/14-jvm.html` | `v` | v01~v12 | 1 (모듈), after `node` |
 | 🟣 C# · .NET 모듈 | `panes/15-cs.html` | `k` | k01~k12 | 1, after `jvm` |
 
-- **setup**: rustup · Windows MSVC 링커 · cargo · rust-analyzer · clippy/nextest · 타깃/툴체인 · 링커(mold/lld) · 문제 사전
-- **web**: Axum 0.8 구조 · 워크스페이스 골격 · sqlx · tower 미들웨어 · JWT/OAuth2 · utoipa · WebSocket · tonic · tracing/OTel · testcontainers · cargo-chef Docker · URL 단축 실전
+그룹 4 는 아직 없습니다 — 첫 탭(web) 등록 때 `groupLabel` "실전 · 서비스", `groupIcs` `🧰🌐🚀🖥️`,
+`groupTitle` "생태계 · 백엔드 서버 · 고성능 서비스 · Tauri", `sheetLabel` "실전" 로 만들어집니다.
+
+- **web**: Axum 0.8 구조 · 워크스페이스 골격 · sqlx · tower 미들웨어 · JWT/OAuth2 · utoipa · WebSocket ·
+  tonic · tracing/OTel · testcontainers · cargo-chef Docker · URL 단축 실전
   (기존 `09-tool.html` 의 t01~t12 가 입문 수준이므로 **그 위 단계로**, 겹치면 "t0X 참고" 로 넘길 것)
-- **svc**: Tokio 내부 · 채널/액터 · 락 선택 · bytes 제로카피 · quinn/QUIC · rdkafka · Polars/DataFusion · CLI · 할당자 · 프로파일 · no_std/WASM · 로그 수집 실전
-- **tauri**: Tauri 2 전 과정(command/IPC · state/event · 트레이 · capabilities 권한 · sidecar · 서명·updater · 모바일) + egui/iced/Slint/Dioxus 비교
+- **svc**: Tokio 내부 · 채널/액터 · 락 선택 · bytes 제로카피 · quinn/QUIC · rdkafka · Polars/DataFusion ·
+  CLI · 할당자 · 프로파일 · no_std/WASM · 로그 수집 실전
+- **tauri**: Tauri 2 전 과정(command/IPC · state/event · 트레이 · capabilities 권한 · sidecar ·
+  서명·updater · 모바일) + egui/iced/Slint/Dioxus 비교
 - **jvm/cs**: UniFFI · csbindgen 을 "가장 간편한 길" 로 추천
-- **Rust 소개 문구도 함께 고칠 것** — `panes/01-lang.html` hero, `12-tabbar.html` #hello, `11-sidebar.html` 브랜드,
-  `00-head.html` title/desc, `src/router/index.ts` 의 `key:'rust'` 블록. 지금은 아직 **"앱을 만들지 않습니다"** 로 남아 있습니다.
+- 이 탭들이 들어가면 rust 의 hero·#hello·head·router 문구에 **서버 · Tauri** 를 추가할 것
+  (지금 문구는 "설치 → 기초 → 모듈" 까지만 말합니다)
 
 ### 3. 나머지 언어 — 설치 · 환경 세팅 탭 6개
 전부 **맨 앞 탭**(`after: "^"`), 접두사 `st`, cls `st`, grad `["#10b981","#065f46"]`, 아이콘 🧰.
@@ -88,7 +103,7 @@ db(pgvector·DuckDB·ClickHouse). 오류·설명 오점·시각화 결함도 같
 
 ### 5. 브라우저 실측 (계속 밀려 있음)
 Chrome MCP 가 있는 세션에서 열 가이드에 아래 스크립트를 한 번씩. 정적 검사(svgcheck)는
-**±5px 안쪽 차이를 못 잡습니다.** 미실측 누적 = 2차 290 + 3차 224 + 이번 **68** = **582건**.
+**±5px 안쪽 차이를 못 잡습니다.** 미실측 누적 = 2차 290 + 3차 224 + 4차 68 + 이번 **63** = **645건**.
 
 ### 6. 마지막에 할 것
 - `npm run verify:guide` · svgcheck · integrity · smoke · `vue-tsc -b`
@@ -147,14 +162,14 @@ npx vue-tsc -b                                                       # router �
 - svgcheck 지적의 대부분은 **좌우 316폭 박스에 긴 한 줄** — 두 줄로 쪼개고 박스 높이 52→68
 - 넘침은 **x 를 옮기지 말고 문구를 줄여서** 해결 (옮기면 LAP 이 생깁니다)
 
-## 다이어그램 현황 — 총 985개
+## 다이어그램 현황 — 총 1,062개
 | 가이드 | 개수 | | 가이드 | 개수 |
 |---|---|---|---|---|
-| **cpp** | **131** | | python | 119 |
+| **cpp** | **156** | | python | 119 |
 | server | 114 | | cs | 106 |
 | js-ts | 105 | | java | 98 |
 | kotlin | 93 | | db | 84 |
-| csharp | 71 | | rust | 63 |
+| **rust** | **76** | | csharp | 71 |
 
 **모든 가이드의 모든 탭이 7개 이상**입니다.
 
@@ -225,4 +240,4 @@ panes.forEach((p,i)=>p.className=prev[i]);
 ## 목표
 열 가이드(`web/guide-src/*` → `web/public/*-web/index.html`)를
 **"기초부터 전문가까지 이 페이지만 보고 실서비스를 만들 수 있는"** 수준으로.
-이번에 C/C++ 가 그 모양을 갖췄습니다. 다음은 **Rust** 와 **각 언어 설치·환경 세팅 탭**입니다.
+C/C++ 가 그 모양을 갖췄고 Rust 가 설치 탭까지 왔습니다. 다음은 **Rust 실전 탭 5개** 와 **각 언어 설치·환경 세팅 탭 6개** 입니다.
