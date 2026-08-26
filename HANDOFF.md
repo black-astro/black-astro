@@ -1,4 +1,4 @@
-# 핸드오프 — 언어 가이드 확장 (2026-08-26 5차 갱신)
+# 핸드오프 — 언어 가이드 확장 (2026-08-26 6차 갱신)
 
 ## 최근 세션 결과 — C/C++ · Rust 가이드 확장
 
@@ -38,6 +38,9 @@
 ---
 
 ## 🔴 남은 일 — 순서대로 (이어서 하면 됩니다)
+
+> 2026-08-26 에 1·2번(cpp jvm · rust web/svc/tauri/jvm)과 4번(PySide6 QML)을 **착수했다가 초기 단계에서 중단**했습니다.
+> 저장소에 남은 부분 산출물은 없습니다 — 처음부터 다시 쓰면 됩니다.
 
 집필용 지침서와 자동 등록 스크립트가 **이미 준비되어 있습니다.** 새 세션에서는
 `(A) 지침서 읽기 → (B) 에이전트에 과제 주기 → (C) reg.mjs 로 등록 → (D) 검증` 만 반복하면 됩니다.
@@ -95,17 +98,42 @@
 (python `기본 · BASIC`/🧰🐍📦 · java `언어 · JAVA`/🧰☕ · kotlin `언어 · KOTLIN`/🧰🟠 ·
 js-ts `언어 · LANGUAGE`/🧰🟨🔷 · csharp `언어 · C#`/🧰🟣 · db `시작 · START`/🧰🚀).
 
-### 4. 전 가이드 기술 스택 점검 (아직 못 함)
+### 4. 파이썬 PySide6 — QML · Qt Quick 확장 (사용자 요청 · 2026-08-26)
+
+기존 `panes/07-qt.html` 의 q01~q16 은 **QWidget 계열만** 다룹니다. 여기에
+**q17~q28 (12개)** 를 append 로 붙여 PySide6 의 현대적 UI 축을 채웁니다.
+탭은 그대로 `qt`, meta 는 `"append": true` 로 두고 sections 에 q17~q28 만 기록합니다.
+hero 의 stats 숫자 16 → 28 만 고치고 기존 섹션은 손대지 않습니다. 기준은 **PySide6 / Qt 6.9**.
+
+| 섹션 | 내용 |
+|---|---|
+| q17 ★ | QML · Qt Quick 이란 — QWidget vs QML 비교표, 선택 흐름도, QML 엔진·씬 그래프 구조 |
+| q18 ★ | 첫 QML 앱 — `QQmlApplicationEngine` · main.qml · 프로젝트 구조 · qmllint · 핫 리로드 |
+| q19 ★ | QML 문법 — 오브젝트 트리 · **프로퍼티 바인딩** · id · 시그널 핸들러 · property 선언 |
+| q20 ★ | 레이아웃 — anchors · Row/Column/Grid · RowLayout 등 `Layout.*` · Repeater · 반응형 |
+| q21 ★ | **Qt Quick Controls 2** — Button~SplitView 카탈로그, ApplicationWindow, background/contentItem 교체 |
+| q22 ★ | **스타일** — Basic·Fusion·**Material**·Universal·**FluentWinUI3**(6.8+)·macOS 비교, 지정 3가지 방법(qtquickcontrols2.conf · QT_QUICK_CONTROLS_STYLE · QQuickStyle), Material theme/accent, 다크 모드 |
+| q23 ★ | 파이썬 ↔ QML — `@Property(notify=)`·`@Slot`·Signal, setContextProperty vs **@QmlElement**(권장) |
+| q24 ★ | 모델 — ListView/GridView/TableView + delegate, `QAbstractListModel` 구현, DataFrame 띄우기, 성능 |
+| q25 ★ | 애니메이션 · 상태 — NumberAnimation · Behavior on · states/transitions · Easing · 페이지 전환 |
+| q26 ★ | **Qt Quick Effects · 셰이더** — `MultiEffect`(6.5+, blur/shadow/colorization), 유리 효과 카드, `ShaderEffect`+qsb, Canvas, Shape |
+| q27 ★ | **아이콘 · 디자인 시스템** — **Material Symbols**(가변 폰트·FontLoader·codepoint) vs **Lucide**(SVG·IconImage·MultiEffect 색 입히기), AppIcon.qml, qrc 폰트 임베딩, 색 토큰 |
+| q28 ★ | 실전 · 배포 — 폴더 구조, `pyside6-rcc` qrc, PyInstaller 로 QML 앱 배포 시 빠지는 것들(`--collect-all PySide6`), QQuickWidget 로 위젯과 섞기 |
+
+- 분량 총 130KB 이상, 시각화 최소 9개
+- 코드는 QML 과 파이썬을 나란히. `data-lang` 은 QML 에 `qml`(미지원이면 `js`), 파이썬은 `python`
+
+### 5. 전 가이드 기술 스택 점검 (아직 못 함)
 언어별 강점 프레임워크·라이브러리에 빠진 것이 없는지 훑고 보강 — 예:
 java(Virtual Thread·Spring AI·Testcontainers) · kotlin(Ktor·Arrow·Compose Multiplatform) ·
 js-ts(Hono·Bun·Drizzle·TanStack) · csharp(Blazor·Aspire·MAUI) · python(Polars·LangGraph) ·
 db(pgvector·DuckDB·ClickHouse). 오류·설명 오점·시각화 결함도 같이 고칩니다.
 
-### 5. 브라우저 실측 (계속 밀려 있음)
+### 6. 브라우저 실측 (계속 밀려 있음)
 Chrome MCP 가 있는 세션에서 열 가이드에 아래 스크립트를 한 번씩. 정적 검사(svgcheck)는
 **±5px 안쪽 차이를 못 잡습니다.** 미실측 누적 = 2차 290 + 3차 224 + 4차 68 + 이번 **63** = **645건**.
 
-### 6. 마지막에 할 것
+### 7. 마지막에 할 것
 - `npm run verify:guide` · svgcheck · integrity · smoke · `vue-tsc -b`
 - `src/router/index.ts` 의 stats(탭 수 · 섹션 수) 를 실제 값으로 맞추기
 - HANDOFF 갱신 후 커밋 · 푸시
