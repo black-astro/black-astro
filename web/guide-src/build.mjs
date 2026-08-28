@@ -123,7 +123,13 @@ async function buildAll(opts = {}) {
 }
 
 /** shared/ 에 아무 가이드도 쓰지 않는 조각이 남아 있으면 알린다.
- *  (전체 빌드일 때만 본다 — 한 가이드만 빌드하면 판단할 근거가 없다) */
+ *  (전체 빌드일 때만 본다 — 한 가이드만 빌드하면 판단할 근거가 없다)
+ *
+ *  shared/models/ 는 예외다. 가이드에 이어 붙이는 조각이 아니라
+ *  시각화 모델의 본보기 라이브러리이고(DIAGRAM-MODELS.md),
+ *  tools/lab.mjs 가 읽어 public/diag-lab/ 갤러리를 만든다. */
+const SHARED_NOT_PARTS = ['models/']
+
 async function checkShared() {
   const dir = join(HERE, 'shared')
   if (!existsSync(dir)) return true
@@ -133,7 +139,9 @@ async function checkShared() {
     const order = Array.isArray(manifest) ? manifest : manifest.parts
     for (const p of order) if (p.startsWith(SHARED_PREFIX)) used.add(p.slice(SHARED_PREFIX.length))
   }
-  const unused = (await listParts(dir)).filter((p) => !used.has(p))
+  const unused = (await listParts(dir))
+    .filter((p) => !SHARED_NOT_PARTS.some((prefix) => p.startsWith(prefix)))
+    .filter((p) => !used.has(p))
   if (!unused.length) return true
   console.error(`✗ shared/ 에 어느 가이드도 쓰지 않는 조각이 있습니다\n  ${unused.join('\n  ')}`)
   return false

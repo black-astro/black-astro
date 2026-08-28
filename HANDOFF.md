@@ -1,7 +1,9 @@
-# 핸드오프 — 언어 가이드 확장 (2026-08-28 11차 갱신)
+# 핸드오프 — 언어 가이드 확장 (2026-08-28 12차 갱신)
 
-> **새 세션이라면 여기부터** — §남은 일 1번(브라우저 실측) 또는 2번(C# 엔터프라이즈 3탭)이 다음 작업입니다.
+> **새 세션이라면 여기부터** — §남은 일 2번(C# 엔터프라이즈 3탭)이 다음 작업입니다.
 > 집필 지침서와 등록 스크립트는 **저장소에 있습니다**: `web/guide-src/AUTHORING.md` · `web/guide-src/tools/reg.mjs`
+> **시각화 모델 30종 카탈로그가 새로 생겼습니다**: `web/guide-src/DIAGRAM-MODELS.md` ·
+> 본보기 `web/guide-src/shared/models/*.html` · 갤러리 `npm run diag:lab` → `public/diag-lab/index.html`
 
 ## 현재 상태
 
@@ -21,6 +23,50 @@
 | **csharp** | **12** | **166** | **100** |
 
 **총 시각화 1,439개 · 총 섹션 2,072개.**
+
+### 이번 회차 — 시각화 모델 30종 카탈로그 (사용자 요청)
+
+> "매번 똑같은 것만 쓰지 말고 다양한 시각화 모델로. 나중에 다른 곳에도 적용할 수 있게, 최소 20가지."
+
+**먼저 실측했습니다** — 기존 다이어그램 1,340개를 구성 요소로 분류한 결과:
+
+| 모양 | 개수 | 비율 |
+|---|---|---|
+| 사각 박스 + 직선 화살표 | 835 | 62% |
+| 사각 박스 나열 | 458 | 34% |
+| 원 노드 | 17 | 1.3% |
+| 그 밖 | 30 | 2% |
+
+`<ellipse>` 6개 · `<polygon>` 1개 · **좌표축과 채워진 영역은 0개**였습니다.
+그림 종류가 부족한 게 아니라 **CSS 어휘가 없어서** 매번 같은 걸 그린 것이었습니다.
+
+**만든 것**
+
+| 무엇 | 어디 |
+|---|---|
+| 모델 30종 본보기 (복붙용) | `web/guide-src/shared/models/{10-structure,20-relation,30-time,40-quantity,50-concept}.html` |
+| 카탈로그 문서 (언제 쓰고 언제 피하나 · 이식 방법) | `web/guide-src/DIAGRAM-MODELS.md` |
+| CSS 어휘 60여 개 (§7 모델 라이브러리) | `web/guide-src/shared/css/06-diag.css` |
+| 화살촉 마커 3종 추가 `#ar-vi` `#ar-sm` `#ar-op` | 열 가이드 `parts/10-body-open.html` |
+| 갤러리 빌더 | `web/guide-src/tools/lab.mjs` · `npm run diag:lab` / `npm run check:lab` |
+| 렌더된 갤러리 | `web/public/diag-lab/index.html` (300 KB · 30종 한 페이지) |
+
+**30종** — 구조 8 `flow layer pipe swim seq state tree graph` ·
+관계 5 `matrix quad venn hub orbit` · 시간 4 `timeline gantt waterfall cycle` ·
+수량 8 `bar line stack sankey funnel scatter gauge spark` ·
+개념 5 `memory pyramid decision compare anatomy`
+
+- 계열 색 `.s1~.s4`(청록→호박→보라→초록)는 **색각 이상 시뮬레이션 검증 통과**
+  (인접 쌍 최소 ΔE 19.5 deutan · 27.0 정상). 5번째 색은 만들지 않습니다.
+- 30종 전부 `check:lab` 0건 · **브라우저 실측 OVER/BOX/LAP/CUT 0건**.
+- `AUTHORING.md` §0·§2, `DIAGRAM-STYLE.md` 머리말, `.claude/skills/diag/SKILL.md` §0·§7,
+  `tools/README.md` 에 전부 연결해 두었으므로 **집필 에이전트가 자동으로 읽습니다.**
+- 새 클래스 이름이 기존 다이어그램과 충돌하지 않는지 확인했습니다(충돌 0건).
+
+**다른 프로젝트로 옮기려면** 세 가지만 있으면 됩니다 —
+CSS 토큰 12개 · `shared/css/06-diag.css` · 마커 `<defs>` 블록. 자세한 건 `DIAGRAM-MODELS.md` 마지막 절.
+
+---
 
 ### 이번 회차 — 기술 스택 공백 5개 (언급 빈도를 실측해 고름)
 | 가이드 | 새 탭 | 섹션 | 그림 | 왜 |
@@ -147,9 +193,11 @@ meta 파일명 `csharp-ent.meta.json`
 12. e12 **테스트** — xUnit, `WebApplicationFactory`↔@SpringBootTest, Testcontainers 로 실제 DB, 인증 우회 핸들러, 데이터 빌더, 통합 테스트 격리(트랜잭션 롤백)
 13. e13 ★ **실전 — 사내 결재 시스템 API** 끝까지: 프로젝트 구조 · 도메인 모델 · EF Core 매핑 · 권한 정책 · 결재선 트랜잭션 · 감사 로그 · 통합 테스트 · Docker. 같은 기능의 Spring Boot 코드와 나란히 비교
 
-**시각화 최소 9개** — Spring↔.NET 개념 대응 지도 · 미들웨어 파이프라인 vs 서블릿 필터 체인 ·
-DI 수명 3종과 captive dependency · 계층/의존 방향 · ChangeTracker 상태 전이 ·
-N+1 발생과 해소 · 트랜잭션 경계와 아웃박스 · 인증/인가 통과 경로 · 테스트 격리 구조
+**시각화 최소 9개 — 괄호 안이 쓸 모델**(`DIAGRAM-MODELS.md` · 본보기 `shared/models/`)
+Spring↔.NET 개념 대응 지도(`compare`) · 미들웨어 파이프라인 vs 서블릿 필터 체인(`compare`+`pipe`) ·
+DI 수명 3종의 생존 구간(`gantt`) · 계층과 참조 방향(`layer`·`tree`) · ChangeTracker 상태 전이(`state`) ·
+N+1 이 만드는 지연 분해(`waterfall`) · 트랜잭션 경계와 아웃박스(`seq`) ·
+인증/인가를 통과하며 걸러지는 요청(`funnel`) · 테스트 격리 구조(`pyramid`)
 
 ---
 
@@ -174,9 +222,12 @@ meta 파일명 `csharp-batch.meta.json`
 12. f12 **배치 운영** — 실행 로그·알림(실패 시 메일/슬랙), 재처리 관리 화면, 실행 이력 대시보드, 야간 배치 창(window) 설계와 SLA, 성능 측정, 운영 이관 체크리스트
 13. f13 ★ **실전 — 일별 정산 배치 + 대용량 파일 연계** 끝까지: SFTP 로 3GB 거래 파일 수신 → 검증 → 청크 처리(체크포인트) → 벌크 적재 → 집계 → 결과 파일 생성·송신 → 실패 재처리. 전체 코드·성능 수치·운영 절차
 
-**시각화 최소 9개** — 배치 선택 흐름도 · Worker 수명주기 · 스케줄러 중복 실행 방지 ·
-청크 처리 루프와 체크포인트 · 스트리밍 vs 전체 로드 메모리 곡선 · 청크 업로드/이어받기 ·
-파일 연계 원자적 이동 · HttpClientFactory 핸들러 수명 · Channels 백프레셔 · 정산 배치 전체 흐름
+**시각화 최소 9개 — 괄호 안이 쓸 모델**
+배치 선택 흐름도(`decision`) · Worker 수명주기(`state`) · 스케줄러 중복 실행 방지(`seq`) ·
+청크 처리 루프와 체크포인트(`cycle`) · 스트리밍 vs 전체 로드 메모리 곡선(`line`) ·
+청크 업로드·이어받기(`gantt`) · 파일 연계 원자적 이동(`flow`) ·
+HttpClientFactory 핸들러 수명(`gantt`) · Channels 백프레셔(`sankey`) ·
+정산 배치 전체 흐름(`pipe`) · 단계별 생존 건수(`funnel`)
 
 ---
 
@@ -203,10 +254,13 @@ Windows(IIS) 와 Linux(systemd+Nginx) 두 갈래를 모두 끝까지.
 13. h13 ★ **운영 · 문제 해결 사전** — 502.5/500.30(ANCM 시작 실패), 504 타임아웃, 포트 점유(`netstat`·`ss`), 권한 거부, 인증서 신뢰 실패, 메모리 누수 진단(덤프 분석), 높은 CPU, 한글 로그 깨짐, **증상 → 원인 → 해결 표 20행 이상** + 진단 흐름도
 14. h14 ★ **실전 — 사내 서버에 올리기 처음부터 끝까지** (A) Windows Server + IIS 버전 · (B) Ubuntu + Nginx + systemd 버전 두 벌. 방화벽·도메인·인증서·배포 스크립트·모니터링·백업까지 체크리스트로
 
-**시각화 최소 10개** — 자바 톰캣 구조 vs .NET Kestrel 구조 대조 · 요청이 Nginx→Kestrel→앱 으로 가는 경로 ·
-IIS ANCM in-process/out-of-process 비교 · Windows Service 등록 구조 · systemd 유닛 관계 ·
-ForwardedHeaders 없을 때 IP 가 사라지는 그림 · YARP 라우팅 · publish 옵션 4종 비교(크기·시작시간) ·
-무중단 배포 시간축 · GC 모드별 힙 · 진단 도구 선택 흐름 · 문제 진단 사다리
+**시각화 최소 10개 — 괄호 안이 쓸 모델**
+톰캣 구조 vs Kestrel 구조(`compare`) · 요청이 Nginx→Kestrel→앱 으로 가는 경로(`flow`) ·
+ANCM in-process/out-of-process(`compare`) · Windows Service 등록 구조(`layer`) ·
+systemd 유닛 파일 해부(`anatomy`) · ForwardedHeaders 없을 때 IP 가 사라지는 왕복(`seq`) ·
+YARP 라우팅(`hub`) · publish 옵션 4종 크기·시작시간(`bar`) · 무중단 배포 시간축(`gantt`) ·
+GC 모드별 힙 곡선(`line`) · 진단 도구 선택(`decision`) · 증상→원인 갈래(`tree`) ·
+자원 사용률 현재 상태(`gauge`)
 
 ---
 
@@ -217,6 +271,10 @@ ForwardedHeaders 없을 때 IP 가 사라지는 그림 · YARP 라우팅 · publ
 - 기존 서버 탭들이 **게임 관점**이라는 점을 활용해, 이 세 탭은 **업무 시스템 관점**으로 각도를 틀 것.
 - 2026 기준: **.NET 10 LTS · C# 14 · EF Core 10 · Visual Studio 2026**.
 - Java/Spring 대조를 **모든 섹션에서** 유지 — 사용자가 자바 개발자입니다.
+- **시각화는 `DIAGRAM-MODELS.md` 30종에서 골라 씁니다.** 본보기 `shared/models/*.html` 를
+  복사해 라벨과 좌표만 바꾸는 것이 가장 빠릅니다. **한 탭에서 같은 모델 3회 초과 금지** —
+  세 탭 합쳐 최소 12종 이상이 나와야 합니다(위 괄호대로 하면 자동으로 충족됩니다).
+  갤러리를 먼저 열어 보세요: `npm run diag:lab` → `http://localhost:8899/diag-lab/index.html`
 
 **등록 후 할 일** — 새 그룹 5 는 reg.mjs 가 첫 탭 등록 때 만들어 줍니다.
 세 탭을 `ent` → `batch` → `host` **순서대로** 등록하세요(after 가 앞 탭을 참조합니다).
@@ -244,7 +302,8 @@ npm run verify:guide                             # ① 빌드 + 정합성 (열 �
 node guide-src/tools/svgcheck.mjs guide-src/<가이드>/parts/panes   # ② 넘침·겹침 0건
 node guide-src/tools/integrity.mjs               # ③ NUL·미이스케이프 (인자 없으면 전체)
 node guide-src/tools/smoke.mjs public/<가이드>-web/index.html      # ④ 탭 정합성
-npx vue-tsc -b                                   # ⑤ router 고쳤으면
+node guide-src/tools/lab.mjs --check             # ⑤ 모델 본보기를 고쳤으면
+npx vue-tsc -b                                   # ⑥ router 고쳤으면
 ```
 - [ ] 새 탭이 기존 그룹에 들어갔다면 `11-sidebar.html` 의 `data-g="N"` 버튼 `title`·`ics` 갱신
 - [ ] `src/router/index.ts` 의 stats(탭 수·섹션 수)를 `verify:guide` 출력값으로 맞추기
@@ -265,7 +324,10 @@ npx vue-tsc -b                                   # ⑤ router 고쳤으면
 | `web/guide-src/AUTHORING.md` | **집필 지침서** — 집필 에이전트에게 그대로 읽히는 단일 지침(pane 골격 · 컴포넌트 · .diag SVG 규칙 · 금지사항 · meta 스키마 · 검증 · 보고 형식) |
 | `web/guide-src/tools/reg.mjs` | **탭 등록 스크립트** — meta.json 하나로 7곳 자동 등록 |
 | `web/guide-src/tools/README.md` | 검사 도구 5종 + reg.mjs 사용법 |
-| `web/guide-src/DIAGRAM-STYLE.md` | 시각화 디자인 기준 원문 |
+| `web/guide-src/DIAGRAM-STYLE.md` | 시각화 디자인 기준 원문 — **어떻게** 그리나 (색·글자·viewBox) |
+| `web/guide-src/DIAGRAM-MODELS.md` | **시각화 모델 30종 카탈로그** — **무엇을** 그리나 (고르는 기준 · 이식 방법) |
+| `web/guide-src/shared/models/*.html` | 모델 본보기 소스 (복사해서 라벨·좌표만 바꿔 쓴다) |
+| `web/guide-src/tools/lab.mjs` | 갤러리 빌더 · `npm run diag:lab` / `npm run check:lab` |
 | `.claude/skills/diag/SKILL.md` | 시각화 제작 절차 스킬 |
 
 **집필 에이전트에게 줄 프롬프트 뼈대** (이 형태로 주면 됩니다):
@@ -326,6 +388,9 @@ npx vue-tsc -b                                                       # router �
 
 **모든 가이드의 모든 탭이 7개 이상**입니다.
 
+앞으로 새로 그리는 그림은 `DIAGRAM-MODELS.md` 의 30종에서 골라 씁니다 —
+**한 탭에서 같은 모델을 3번 넘게 쓰지 않는 것**이 규칙입니다.
+
 ## 시각화 공통 인프라 (2026-08-10 확정 — 유지)
 1. 스타일 단일 기준 `shared/css/06-diag.css` (가이드 css 의 .diag 는 옛 사본, 공통이 이긴다)
 2. 모션 `shared/js/06-diag-motion.js` · 탭 paneIn · SVG 0.45s 전환 · reduced-motion 존중
@@ -353,6 +418,9 @@ npx vue-tsc -b                                                       # router �
 17. **bash 안에서 node -e 에 백틱이 든 템플릿 리터럴을 넣지 말 것** — 셸이 먼저 해석해 깨집니다
 18. **동시 에이전트는 5개까지** — 19개를 한 번에 돌리면 세션 토큰 한도에 걸려 전부 날아갑니다
 19. **여러 에이전트가 같은 스크래치패드를 쓰면 파일명이 충돌한다** — 에이전트마다 전용 하위 폴더를 지정할 것
+20. **`shared/models/` 는 가이드 조각이 아니다** — `build.mjs` 의 shared 고아 검사에서 제외돼 있다(`SHARED_NOT_PARTS`)
+21. **`svgcheck.mjs` 는 `<section class="sec" id=...>` 단위로만 읽는다** — 조각만 검사하려면 감싸야 한다(`lab.mjs` 가 그렇게 한다)
+22. **rotate 로 세운 텍스트는 svgcheck 가 가로 폭으로 잘못 잰다** — `writing-mode` 를 쓰거나 가로로 눕힐 것
 
 ## 관련 파일/명령어
 ```bash

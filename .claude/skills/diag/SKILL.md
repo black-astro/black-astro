@@ -11,9 +11,11 @@ description: 학습 가이드(.diag 인라인 SVG)의 시각화 모델을 만들
 ## 0. 먼저 읽을 것 (순서대로)
 
 1. `web/guide-src/DIAGRAM-STYLE.md` — 디자인 기준 원문 (박스·색·화살촉·글자·viewBox)
-2. `web/guide-src/shared/css/06-diag.css` — 공통 테마 실제 값. **스타일 수정은 이 파일에만.**
+2. `web/guide-src/DIAGRAM-MODELS.md` — **모델 30종 카탈로그**. 무엇을 그릴지는 여기서 고른다.
+   본보기 `web/guide-src/shared/models/*.html` · 갤러리 `npm run diag:lab` → `public/diag-lab/index.html`
+3. `web/guide-src/shared/css/06-diag.css` — 공통 테마 실제 값. **스타일 수정은 이 파일에만.**
    (각 가이드 `css/06-*.css`의 .diag 블록은 과거 사본 — 공통 파일이 뒤에 로드되어 이김)
-3. 잘 된 예시: `web/guide-src/server/parts/panes/13-kafka.html` k02(구조) ·
+4. 잘 된 예시: `web/guide-src/server/parts/panes/13-kafka.html` k02(구조) ·
    `db/parts/panes/08-tune.html` t07(읽는 순서) · `cs` 알고리즘 탭(단계별 상태)
 
 ## 1. 마크업 골격
@@ -90,6 +92,21 @@ document.querySelectorAll('.pane, .sec').forEach(e=>e.style.contentVisibility='v
 ## 7. 무엇을 그리나 (판단 기준)
 
 - **데이터 이동 · 구조 · 상태 변화**를 글 열 줄 대신 한 장으로 — 장식 금지.
-- 참고 기준은 algomaster.io: 단계별 상태 변화 · 셀 · 포인터 · 색으로 구분한 상태.
-- vs 비교(나쁨|좋음 2단), 타임라인(레인+틱), 상태 기계(박스+전이 화살표),
-  깔때기/팬아웃(층별 걸러짐), 폭포수(트레이스) — 검증된 레이아웃을 재사용할 것.
+- **모델은 `DIAGRAM-MODELS.md` 의 30종에서 고른다.** 직접 새 레이아웃을 짜지 말고
+  `shared/models/*.html` 의 본보기를 복사해 라벨과 좌표만 바꾼다 (가장 빠르고 검사도 통과한다).
+
+| 전할 말이 | 고를 모델 |
+|---|---|
+| 무엇이 무엇과 이어져 있나 | `flow` `layer` `pipe` `swim` `seq` `state` `tree` `graph` |
+| 두 축으로 어디에 놓이나 | `matrix` `quad` `venn` `hub` `orbit` |
+| 언제 · 얼마나 걸리나 | `timeline` `gantt` `waterfall` `cycle` |
+| 얼마나 되나 (숫자) | `bar` `line` `stack` `sankey` `funnel` `scatter` `gauge` `spark` |
+| 이것을 뜯어 보면 | `memory` `pyramid` `decision` `compare` `anatomy` |
+
+- 고르는 순서: ① 전할 **한 문장**을 먼저 적는다 → ② 위 표에서 줄을 고른다 → ③ 모델을 고른다
+  → ④ 다 그린 뒤 ①의 문장이 `.cap` 에 그대로 들어가는지 본다. 안 들어가면 모델이 틀린 것.
+- **한 탭에서 같은 모델을 3번 넘게 쓰지 않는다.** 기존 1,340개 중 96%가 "박스+직선"이었다.
+- 계열 색 `.s1~.s4`(청록→호박→보라→초록, 순서 고정)는 **구분**용이고
+  `.bx-ok`/`.bx-warn` 같은 **의미** 색과 섞지 않는다. 색만으로 구분하게 두지 말고 라벨·범례를 함께 둔다.
+
+검사: `npm run check:lab` (모델 30종) · `svgcheck.mjs` (pane) · 브라우저 실측(§6).

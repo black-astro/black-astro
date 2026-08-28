@@ -7,6 +7,7 @@
 // 글자폭: 한글/CJK = fs × 1.10 · 그 밖 = fs × 0.60  (기존 232개로 보정)
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const CJK_W = 0.95, ASCII_W = 0.60;
 const FS = { ann: 9, stpn: 9.5, lbl: 10.5, ttl: 10.5, val: 11.5 };
@@ -83,7 +84,9 @@ export function checkFile(file, onlyIds) {
   return out;
 }
 
-if (process.argv[2]) {
+// 다른 스크립트가 checkFile 만 가져다 쓸 때 CLI 가 돌지 않도록 직접 실행인지 본다
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain && process.argv[2]) {
   const target = process.argv[2];
   const only = process.argv[3] ? new Set(process.argv[3].split(',')) : null;
   const files = fs.statSync(target).isDirectory()

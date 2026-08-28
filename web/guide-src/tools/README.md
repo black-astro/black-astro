@@ -89,3 +89,15 @@ meta.json 스키마:
   `11-sidebar.html` 의 해당 버튼을 직접 고치세요.
 
 집필 지침은 `web/guide-src/AUTHORING.md` 입니다.
+
+## lab.mjs — 시각화 모델 갤러리
+
+```bash
+npm run diag:lab      # shared/models/*.html → public/diag-lab/index.html
+npm run check:lab     # 모델 30종 넘침·겹침 검사 (svgcheck 재사용)
+node guide-src/tools/lab.mjs --list   # 모델 목록
+```
+
+시각화 모델 30종의 본보기를 모아 한 페이지로 만듭니다.
+어떤 그림을 그릴지 고를 때 이 페이지를 먼저 열고, 소스를 복사해 라벨만 바꿔 씁니다.
+카탈로그 문서는 `guide-src/DIAGRAM-MODELS.md` 입니다.

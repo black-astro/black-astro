@@ -12,9 +12,11 @@
 
 ## 0. 먼저 읽을 것 (반드시, 순서대로)
 1. `web/guide-src/cpp/parts/panes/01-lang.html` 의 **처음 500줄** — hero · 섹션 · 다이어그램 · 카드 · 코드 · note · cheat 표의 실제 모양. 이 문체와 밀도를 그대로 따릅니다.
-2. `web/guide-src/DIAGRAM-STYLE.md` 전체 — 시각화(.diag SVG) 규칙.
-3. `.claude/skills/diag/SKILL.md` — 시각화 절차(색 클래스 의미 · 화살촉 · 글자 폭 한계).
-4. 대상 가이드의 다른 pane 하나(예: `.../panes/03-py.html`)를 300줄쯤 더 훑어 컴포넌트 활용 폭을 익히세요.
+2. `web/guide-src/DIAGRAM-STYLE.md` 전체 — 시각화(.diag SVG) **규칙**(색·글자·viewBox).
+3. `web/guide-src/DIAGRAM-MODELS.md` 전체 — 시각화 **모델 30종 카탈로그**(무엇을 그릴지 고르는 기준).
+   본보기 소스는 `web/guide-src/shared/models/*.html`, 렌더된 갤러리는 `public/diag-lab/index.html` 입니다.
+4. `.claude/skills/diag/SKILL.md` — 시각화 절차(색 클래스 의미 · 화살촉 · 글자 폭 한계).
+5. 대상 가이드의 다른 pane 하나(예: `.../panes/03-py.html`)를 300줄쯤 더 훑어 컴포넌트 활용 폭을 익히세요.
 
 ## 1. pane 파일 골격
 
@@ -98,7 +100,17 @@
 - 그라디언트·drop-shadow·굵은 테두리 금지. `height="0"` 빈 rect 남기지 말 것.
 - 단계 배지: `<circle class="stp" cx cy r="11"/>` + `<text class="stpn" text-anchor="middle">1</text>`.
 - 흐름 점(선택): `<circle class="pk" r="3.5"><animateMotion dur="2.4s" repeatCount="indefinite" path="M.. L.."/></circle>`.
-- 무엇을 그리나: 구조(요청이 흐르는 경로) · 단계(순서) · 비교(좌우 두 박스) · 메모리 레이아웃 · 시간축 · 선택 흐름도(if 분기) — 섹션의 핵심 메커니즘을 그림 없이 읽어도 이해되게.
+- **무엇을 그리나 — 모델을 골라 쓰세요.** `DIAGRAM-MODELS.md` 의 30종에서 고릅니다.
+  순서: ① 이 그림으로 전할 **한 문장**을 먼저 적는다 → ② 그 문장이 구조·관계·시간·수량·개념 중
+  무엇인지 정한다 → ③ 그 묶음의 모델을 고른다 → ④ 다 그린 뒤 ①의 문장이 `.cap` 에 그대로 들어가는지 본다.
+  들어가지 않으면 모델 선택이 틀린 것입니다.
+- **한 탭 안에서 같은 모델을 3번 넘게 쓰지 마세요.** 기존 가이드의 다이어그램 1,340개 중 96%가
+  "사각 박스 + 직선 화살표"였습니다. 시간 이야기는 `timeline`/`gantt`/`waterfall`,
+  수량은 `bar`/`line`/`stack`/`sankey`, 호출 왕복은 `seq`, 역할 분담은 `swim`,
+  선택 기준은 `decision`/`quad`, Java↔C# 대조는 `compare` 를 씁니다.
+  **본보기 소스를 복사해 라벨과 좌표만 바꾸는 것이 가장 빠르고 안전합니다.**
+- 계열 색 `.s1~.s4` 는 "구분"이 목적일 때만 쓰고, 의미 색(`.bx-ok`/`.bx-warn`)과 섞지 않습니다.
+  색만으로 구분하게 두지 말고 직접 라벨이나 범례를 함께 둡니다.
 
 ## 3. 금지 사항 (실제로 겪은 사고)
 - **이모지: Windows 10 은 Emoji 12 까지** — U+1FA70~1FAFF 범위(🪟 🫠 🩵 🪄 🪛 🫧 등) 절대 금지. 🖥️ 🧰 🌐 🎮 🚀 ☕ 🟣 🔧 ⚙️ 📦 🔗 등만.
