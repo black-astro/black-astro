@@ -1,4 +1,7 @@
-# 핸드오프 — 언어 가이드 확장 (2026-08-28 10차 갱신)
+# 핸드오프 — 언어 가이드 확장 (2026-08-28 11차 갱신)
+
+> **새 세션이라면 여기부터** — §남은 일 1번(브라우저 실측) 또는 2번(C# 엔터프라이즈 3탭)이 다음 작업입니다.
+> 집필 지침서와 등록 스크립트는 **저장소에 있습니다**: `web/guide-src/AUTHORING.md` · `web/guide-src/tools/reg.mjs`
 
 ## 현재 상태
 
@@ -49,27 +52,178 @@
 ## 🔴 남은 일 — 순서대로 (이어서 하면 됩니다)
 
 
-집필용 지침서와 자동 등록 스크립트가 **이미 준비되어 있습니다.** 새 세션에서는
-`(A) 지침서 읽기 → (B) 에이전트에 과제 주기 → (C) reg.mjs 로 등록 → (D) 검증` 만 반복하면 됩니다.
+**새 세션에서 바로 시작할 수 있게 준비돼 있습니다.** 지침서와 등록 스크립트를
+**저장소에 영구 보관**했으므로(§도구) 세션이 바뀌어도 사라지지 않습니다.
 
-> **주의:** 지침서(`BRIEF.md`)와 등록 스크립트(`reg.mjs`)는 세션 스크래치패드에 있습니다.
-> 세션이 바뀌어 사라졌다면 아래 §도구 를 보고 다시 만드세요.
+새 세션 첫 5분에 할 일:
+```bash
+cd D:/gibis/workTool/astro/black-astro
+cat HANDOFF.md                      # 이 파일 (현재 상태 · 남은 일)
+cat web/guide-src/AUTHORING.md      # 집필 지침서 (에이전트에게 그대로 읽힘)
+cat web/guide-src/tools/README.md   # 검사 도구 5종 + reg.mjs
+git log --oneline -5                # 최근 작업 확인
+cd web && npm run verify:guide      # 현재 상태가 깨끗한지
+```
+그다음은 `(A) 에이전트에 과제 주기 → (B) reg.mjs 로 등록 → (C) 검증 → (D) 커밋` 반복입니다.
 
 ### 1. 브라우저 실측 — **이제 할 수 있습니다** 🔴
+
 **크롬 MCP 를 이 PC 에 등록해 두었습니다**(2026-08-28):
 ```bash
 claude mcp add chrome-devtools -s user -- npx -y chrome-devtools-mcp@latest
 ```
 `claude mcp list` 에서 `chrome-devtools ✔ Connected` 로 확인됩니다.
-**MCP 도구는 세션 시작 때 로드되므로 새 세션에서만 잡힙니다.**
+**MCP 도구는 세션 시작 때 로드되므로 새 세션에서만 잡힙니다.** 세션을 새로 열면
+`mcp__chrome-devtools__*` 도구가 잡힙니다(`ToolSearch` 로 이름 확인 후 사용).
 
-절차 — ① `web/public` 에서 8899 로컬 서버 띄우기(아래 §관련 명령어)
-② `http://localhost:8899/<가이드>-web/index.html?v=N` 을 열고
-③ §관련 명령어의 실측 스크립트를 실행해 **OVER/BOX/LAP 이 none 이 될 때까지** 문구를 줄입니다.
-정적 검사(svgcheck)는 통과했지만 **±5px 안쪽 차이는 못 잡습니다.**
-**미실측 누적 = 2차 290 + 3차 224 + 4차 68 + 5차 63 + 6차 90 + 7차 175 + 8차 163 + 이번 **88** = **1,161건**.
+#### 절차
+1. **로컬 서버 띄우기** — `web/public` 에서 8899 (§관련 명령어의 한 줄 서버). 백그라운드로 돌리세요.
+2. **페이지 열기** — `http://localhost:8899/<가이드>-web/index.html?v=1`
+   (재빌드 후에는 **`?v=` 숫자를 반드시 올릴 것** — 안 그러면 옛 파일을 봅니다)
+3. **측정 스크립트 실행** — §관련 명령어의 SVG 실측 스크립트를 페이지에서 evaluate.
+   결과가 `OVER: none | BOX: none | LAP: none` 이 될 때까지 아래를 반복합니다.
+4. **고치기** — 지적된 섹션의 pane 소스(`guide-src/<가이드>/parts/panes/*.html`)에서
+   **x 좌표를 옮기지 말고 문구를 줄입니다**(옮기면 LAP 이 새로 생깁니다).
+   좌우 316폭 박스에 긴 한 줄이면 두 줄로 쪼개고 박스 높이 52→68.
+5. **재빌드 후 재측정** — `npm run build:guide -- <가이드>` → `?v=2` 로 다시 열어 확인.
 
-### 2. 기술 스택 — 큰 공백은 다 메웠습니다
+#### 측정 순서 (미실측이 많은 것부터)
+`cpp`(169) → `server`(150) → `js-ts`(146) → `python`(144) → `rust`(142) →
+`cs`(133) → `java`(123) → `kotlin`(118) → `db`(114) → `csharp`(100)
+
+한 가이드가 100~170개라 **한 세션에 2~3개 가이드**가 현실적입니다.
+끝낸 가이드는 이 문단에 체크로 남기세요 — 예: `- [x] cpp 실측 완료(2026-09-01, 수정 12건)`
+
+- [ ] cpp · [ ] server · [ ] js-ts · [ ] python · [ ] rust
+- [ ] cs · [ ] java · [ ] kotlin · [ ] db · [ ] csharp
+
+#### 왜 필요한가
+정적 검사(`svgcheck.mjs`)는 글자 폭을 **한글 ×0.95 / ASCII ×0.6 으로 근사**합니다.
+전 가이드가 0건을 통과했지만 **±5px 안쪽 차이는 못 잡습니다** — 실제 폰트로 렌더한
+`getBBox()` 값과는 다릅니다. 그래서 브라우저 실측이 마지막 관문입니다.
+**미실측 누적 = 2차 290 + 3차 224 + 4차 68 + 5차 63 + 6차 90 + 7차 175 + 8차 163 + 9차 88 = 1,161건.**
+
+> 주의: `content-visibility` 때문에 화면 밖 요소는 `getBBox()` 가 0 을 반환합니다.
+> 측정 스크립트가 이를 강제로 풀어 주지만, **측정 후에는 페이지를 새로고침**하세요.
+
+### 2. 🔴 C# 엔터프라이즈 서버 3개 탭 (사용자 요청 · 2026-08-28)
+
+> **배경(사용자 원문 요지)** — "Java → C# 으로 갈아탈 생각이 있다. Java 로 치면 Spring 특화 같은 걸
+> .NET 으로 하는 내용이 필요하다. 백엔드 서버 · DB · **배치 서버** · **대규모 파일 및 API 통신** ·
+> 그리고 **C# 전용 서버 구축 방법**. 자바는 그냥 Nginx/Apache + 톰캣이면 끝인데 C# 은 아예 모른다.
+> 아주 자세하고 시각화 모델도 잘 만들어 달라."
+
+**왜 진짜 공백인가** — csharp 가이드의 기존 서버 탭은 전부 **게임 백엔드 관점**입니다:
+`net`(게임 서버 소켓·룸·틱), `api`(게임 백엔드 API — 재화/인벤토리 설계, GM 도구),
+`scale`(게임 서버 스케일링). **엔터프라이즈 업무 시스템 관점이 통째로 비어 있습니다** —
+Spring 대응 개념 지도도, 배치 서버도, 대용량 파일 연계도, IIS/Kestrel/Windows Service 호스팅도 없습니다.
+
+**새 그룹 하나를 만듭니다** — csharp 가이드에 `data-g="5"`,
+groupLabel `"엔터프라이즈 · 서버"`, groupIcs `🏢🗂️🖧`,
+groupTitle `"엔터프라이즈 백엔드 · 배치·파일·통신 · 서버 구축"`, sheetLabel `"엔터프라이즈"`.
+세 탭 모두 이 그룹입니다. 접두사 `e` `f` `h` 는 csharp 가이드에서 미사용임을 확인했습니다
+(기존: a c d g k n st t u w z b).
+
+---
+
+#### 탭 ① 🏢 엔터프라이즈 백엔드 — Spring 을 .NET 으로
+pane `web/guide-src/csharp/parts/panes/12-ent.html` · 탭 id `ent` · 접두사 `e` (e01~e13) ·
+`<span class="no">ENT 01</span>` · cls `en` · grad `["#0284c7","#075985"]` · after `blazor`
+meta 파일명 `csharp-ent.meta.json`
+
+**주제** — Spring/JPA 를 아는 사람이 .NET 10 으로 같은 시스템을 짓는 법. 계속 1:1 대조.
+
+1. e01 ★ **Spring ↔ .NET 대응 지도** — @Component/@Autowired↔DI 등록, @Transactional↔TransactionScope/SaveChanges, AOP↔미들웨어·필터·인터셉터, application.yml↔appsettings.json, Actuator↔HealthChecks, Maven/Gradle↔NuGet/csproj, 톰캣↔Kestrel. **큰 대응표 하나 + 개념 지도 그림**
+2. e02 ★ **호스팅 모델 · 앱 부팅** — `Program.cs` 최소 호스팅, `WebApplicationBuilder`, 미들웨어 파이프라인이 서블릿 필터 체인과 다른 점(순서가 곧 코드), `IHost` 수명주기, `IHostedService`, 종료 신호 처리
+3. e03 ★ **DI 컨테이너 심화** — Singleton/Scoped/Transient 와 Spring scope 대조, captive dependency 함정, 키드 서비스(.NET 8+), `IOptions<T>`·검증, Scrutor 로 어셈블리 스캔(@ComponentScan 대응), 팩토리·데코레이터
+4. e04 ★ **계층 아키텍처** — Controller-Service-Repository 를 .NET 으로, 클린 아키텍처 폴더 구조, MediatR 로 CQRS, `Result<T>` 패턴 vs 예외, 도메인 이벤트, 프로젝트 분리(`.csproj` 참조 방향)
+5. e05 ★ **EF Core 심화 vs JPA** — ChangeTracker↔영속성 컨텍스트, 지연 로딩 차이, **N+1 진단과 `Include`/Split Query**, `AsNoTracking`, 컴파일 쿼리, 인터셉터(@EntityListeners 대응), 마이그레이션 운영(운영 DB 에 `Update-Database` 를 쓰지 않는 법), 낙관적 동시성(`RowVersion`)
+6. e06 ★ **트랜잭션** — `SaveChanges` 단위, 명시적 `BeginTransaction`, `TransactionScope` 와 격리 수준, @Transactional 전파(REQUIRES_NEW 등) 대응 패턴, 분산 트랜잭션이 없는 세계 → **아웃박스 패턴**·보상 트랜잭션, 데드락 재시도
+7. e07 **Dapper · 저장 프로시저 · 멀티 DB** — MyBatis 대응으로 Dapper, 복잡 조회는 SQL 로, `SqlBulkCopy`, 저장 프로시저 호출, 멀티 테넌시(DB per tenant vs 스키마 분리), 읽기 전용 복제본 라우팅
+8. e08 **검증 · 매핑 · 예외** — FluentValidation↔Bean Validation, DataAnnotations, `ProblemDetails` 표준 에러 응답, 전역 예외 핸들러(`IExceptionHandler`), Mapperly(소스 생성기)↔MapStruct, DTO 설계
+9. e09 **설정 · 프로파일 · 시크릿** — `appsettings.{Environment}.json`↔application-{profile}.yml, 환경 변수 이중 밑줄 규약, User Secrets, Azure Key Vault/AWS Secrets Manager, `IOptionsMonitor` 로 런타임 갱신, 설정 검증 실패 시 기동 중단
+10. e10 ★ **인증 · 인가 (엔터프라이즈)** — ASP.NET Core Identity, JWT 발급·검증, OIDC/Entra ID(구 Azure AD)·Keycloak 연동, **정책 기반 권한**(`AddPolicy`)↔@PreAuthorize, 다중 인증 스킴, API Key, 사내 AD 통합(Windows 인증·Negotiate)
+11. e11 **관측 · 헬스체크** — Serilog 구조화 로그(+싱크), `ILogger` 스코프, OpenTelemetry 계측, `AddHealthChecks`↔Actuator, 메트릭, 상관 관계 ID (서버기술 가이드 🔭 관측 탭과 겹치는 인프라 이야기는 그쪽으로 넘길 것)
+12. e12 **테스트** — xUnit, `WebApplicationFactory`↔@SpringBootTest, Testcontainers 로 실제 DB, 인증 우회 핸들러, 데이터 빌더, 통합 테스트 격리(트랜잭션 롤백)
+13. e13 ★ **실전 — 사내 결재 시스템 API** 끝까지: 프로젝트 구조 · 도메인 모델 · EF Core 매핑 · 권한 정책 · 결재선 트랜잭션 · 감사 로그 · 통합 테스트 · Docker. 같은 기능의 Spring Boot 코드와 나란히 비교
+
+**시각화 최소 9개** — Spring↔.NET 개념 대응 지도 · 미들웨어 파이프라인 vs 서블릿 필터 체인 ·
+DI 수명 3종과 captive dependency · 계층/의존 방향 · ChangeTracker 상태 전이 ·
+N+1 발생과 해소 · 트랜잭션 경계와 아웃박스 · 인증/인가 통과 경로 · 테스트 격리 구조
+
+---
+
+#### 탭 ② 🗂️ 배치 · 대용량 파일 · 통신
+pane `web/guide-src/csharp/parts/panes/13-batch.html` · 탭 id `batch` · 접두사 `f` (f01~f13) ·
+`<span class="no">BATCH 01</span>` · cls `bt` · grad `["#7c3aed","#4c1d95"]` · after `ent`
+meta 파일명 `csharp-batch.meta.json`
+
+**주제** — Spring Batch·Quartz 자리에 무엇을 놓는가, 그리고 수백만 건·수 GB 를 다루는 실제 코드.
+
+1. f01 ★ **배치 서버 선택지 지도** — Worker Service vs Hangfire vs Quartz.NET vs Windows 작업 스케줄러 vs 클라우드 함수 비교표, **Spring Batch 대응**은 무엇인가(정답: 직접 구성), 선택 흐름도, 온프레미스 사내 환경 기준 권장
+2. f02 ★ **Worker Service 만들기** — `BackgroundService`·`IHostedService`, 수명주기와 graceful stop, `CancellationToken` 전파, Windows Service/systemd 로 등록, **단일 실행 보장**(뮤텍스·DB 락)
+3. f03 ★ **스케줄링** — Quartz.NET(크론·미스파이어·잡 스토어 DB), Hangfire(대시보드·재시도·큐·연속 작업), 분산 환경 중복 실행 방지, 시간대(KST/UTC)와 서머타임 함정
+4. f04 ★ **청크 처리 패턴 (Spring Batch 대응)** — Reader-Processor-Writer 를 직접 구현, 커밋 단위 설계, **재시작 가능성**(체크포인트 테이블), 실패 건 스킵·재처리 큐, 배치 실행 이력 스키마, 멱등성
+5. f05 ★ **대용량 DB 처리** — `SqlBulkCopy`·EFCore.BulkExtensions, 키셋 페이징(OFFSET 이 느린 이유), `ExecuteUpdate/ExecuteDelete`(EF7+), 배치 커밋 단위와 로그 증가, 인덱스 비활성화·재구성, 임시 테이블 활용
+6. f06 ★ **대용량 파일 읽기·쓰기** — `StreamReader`/`PipeReader`, CsvHelper 로 수백만 행, 엑셀(ClosedXML·EPPlus 라이선스 주의)과 대용량 시 스트리밍 방식, 고정폭 레코드, **한글 인코딩(EUC-KR/CP949)** 과 BOM, 메모리 사용량 실측·`ArrayPool`
+7. f07 ★ **파일 업로드 · 다운로드** — 멀티파트 버퍼링을 피하는 스트리밍 업로드(`DisableFormValueModelBinding`·`MultipartReader`), 크기 제한 3곳(Kestrel·IIS·앱), **청크 업로드와 이어받기(Range)**, 대용량 다운로드 스트리밍, 저장소(로컬·S3·Azure Blob) 추상화, 바이러스 검사 연계, 임시 파일 정리
+8. f08 **파일 연계 · EAI** — FTP/SFTP(SSH.NET), `FileSystemWatcher` 의 함정(누락·중복·잠김)과 폴링 대안, **원자적 이동**(임시 확장자 → rename), 인터페이스 파일 규약(헤더·트레일러·건수 검증), 재전송·중복 방지, 배치 인터페이스 설계 문서화
+9. f09 ★ **HTTP 클라이언트 · 외부 API** — `IHttpClientFactory`(소켓 고갈·DNS 문제), Polly 재시도·서킷 브레이커·타임아웃·벌크헤드, Refit 로 인터페이스 선언, 대용량 응답 스트리밍(`HttpCompletionOption`), 인증서·프록시·mTLS, 레이트 리밋 대응
+10. f10 ★ **gRPC · 메시징** — gRPC 서버/클라이언트와 스트리밍(서버 간 대량 전송), RabbitMQ·Kafka + MassTransit, **아웃박스와 멱등 소비**, DLQ 재처리, Spring 의 @KafkaListener 대응
+11. f11 ★ **병렬 파이프라인** — `System.Threading.Channels` 생산자-소비자, 백프레셔(BoundedChannel), `Parallel.ForEachAsync` 병렬도 제어, `IAsyncEnumerable` 스트리밍, CPU/IO 바운드 구분, 실측 튜닝
+12. f12 **배치 운영** — 실행 로그·알림(실패 시 메일/슬랙), 재처리 관리 화면, 실행 이력 대시보드, 야간 배치 창(window) 설계와 SLA, 성능 측정, 운영 이관 체크리스트
+13. f13 ★ **실전 — 일별 정산 배치 + 대용량 파일 연계** 끝까지: SFTP 로 3GB 거래 파일 수신 → 검증 → 청크 처리(체크포인트) → 벌크 적재 → 집계 → 결과 파일 생성·송신 → 실패 재처리. 전체 코드·성능 수치·운영 절차
+
+**시각화 최소 9개** — 배치 선택 흐름도 · Worker 수명주기 · 스케줄러 중복 실행 방지 ·
+청크 처리 루프와 체크포인트 · 스트리밍 vs 전체 로드 메모리 곡선 · 청크 업로드/이어받기 ·
+파일 연계 원자적 이동 · HttpClientFactory 핸들러 수명 · Channels 백프레셔 · 정산 배치 전체 흐름
+
+---
+
+#### 탭 ③ 🖧 C# 서버 구축 · 호스팅 · 배포
+pane `web/guide-src/csharp/parts/panes/14-host.html` · 탭 id `host` · 접두사 `h` (h01~h14) ·
+`<span class="no">HOST 01</span>` · cls `hs` · grad `["#0f766e","#134e4a"]` · after `batch`
+meta 파일명 `csharp-host.meta.json`
+
+**주제** — **"자바는 Nginx/Apache + 톰캣이면 끝인데 C# 은 무엇을 깔아야 하나"** 에 정면으로 답합니다.
+Windows(IIS) 와 Linux(systemd+Nginx) 두 갈래를 모두 끝까지.
+
+1. h01 ★ **톰캣이 없는 세상 — .NET 호스팅 지도** — 자바 1:1 대응표(톰캣↔**Kestrel(앱에 내장)**, WAR 배포↔publish 폴더, Nginx/Apache↔여전히 리버스 프록시, IIS↔Windows 전용 프론트, 서블릿 컨테이너 개념이 왜 사라졌나), 배포 형태 결정 흐름도
+2. h02 ★ **Kestrel 파고들기** — 엔드포인트·포트·유닉스 소켓, HTTP/1.1·2·3 켜기, 커넥션/요청 제한, 요청 본문 크기, 타임아웃(KeepAlive·RequestHeaders), 스레드풀과 비동기 모델, 단독 노출해도 되는가에 대한 실무 답
+3. h03 ★ **Windows ① IIS 에 올리기** — ASP.NET Core Hosting Bundle 설치, **ASP.NET Core Module(ANCM)** 이 하는 일, in-process vs out-of-process, 앱 풀(ID·유휴 타임아웃·재활용) 설정, `web.config`, 사이트/바인딩 만들기, 폴더 권한(`IIS AppPool\<이름>`), 배포 절차 화면 단계별
+4. h04 ★ **Windows ② Windows Service** — `AddWindowsService()`, `sc.exe create`, 실행 계정·자동 시작·복구 옵션, 이벤트 로그, IIS 없이 서비스로 띄우는 경우(내부 API·배치 서버), 방화벽 인바운드
+5. h05 ★ **Linux 에 올리기** — 런타임 설치, publish 결과 배치, **systemd 유닛 파일 전문**(User·WorkingDirectory·Restart·Environment), `journalctl` 로그, 권한·SELinux, 배포 스크립트, 파일 디스크립터 한계
+6. h06 ★ **리버스 프록시** — Nginx 설정 전문(proxy_pass·헤더·타임아웃·버퍼·WebSocket 업그레이드), IIS ARR, **`ForwardedHeaders` 미들웨어를 반드시 켜야 하는 이유**(실제 IP·스킴), 정적 파일은 누가 서빙하나, 압축·캐시 헤더
+7. h07 **YARP — C# 으로 만드는 게이트웨이** — 라우트·클러스터 설정, 경로 재작성·헤더 변환, 로드밸런싱 정책·헬스체크, 인증 통합, Spring Cloud Gateway 대응, 언제 Nginx 대신 YARP 인가
+8. h08 ★ **HTTPS · 인증서** — 개발 인증서(`dotnet dev-certs`), Windows 인증서 저장소와 IIS 바인딩, PFX 파일과 Kestrel 설정, Let's Encrypt(certbot·win-acme) 자동 갱신, **사내 CA·자체 서명** 배포, TLS 종료 지점 결정, HSTS
+9. h09 ★ **게시(publish) 옵션** — framework-dependent vs **self-contained**(런타임 설치 불필요), `--runtime win-x64/linux-x64`, single-file, ReadyToRun, **NativeAOT**, 트리밍 주의, 각 조합의 크기·시작 시간·제약 비교표, 어떤 걸 고를 것인가
+10. h10 ★ **무중단 배포** — IIS 앱 풀 오버랩 재활용·`app_offline.htm`, systemd 재시작 중 커넥션 처리, 블루그린·롤링(로드밸런서 뒤 2대), 헬스 체크 연동, 마이그레이션과 배포 순서(하위 호환 스키마), 롤백 절차
+11. h11 **컨테이너로 올리기** — 멀티스테이지 Dockerfile, `mcr.microsoft.com/dotnet/aspnet` 태그 고르기(chiseled·alpine), 비루트 사용자, **컨테이너 메모리 제한과 GC**, 환경 변수 설정 주입, 이미지 크기 줄이기
+12. h12 ★ **성능 튜닝** — 서버 GC vs 워크스테이션 GC(언제 바꾸나), TieredPGO, ThreadPool 최소 스레드, 커넥션 풀(DB·HTTP), 응답 압축·출력 캐싱, 부하 테스트(bombardier·k6), `dotnet-counters`/`dotnet-trace`/`dotnet-dump` 로 병목 찾기
+13. h13 ★ **운영 · 문제 해결 사전** — 502.5/500.30(ANCM 시작 실패), 504 타임아웃, 포트 점유(`netstat`·`ss`), 권한 거부, 인증서 신뢰 실패, 메모리 누수 진단(덤프 분석), 높은 CPU, 한글 로그 깨짐, **증상 → 원인 → 해결 표 20행 이상** + 진단 흐름도
+14. h14 ★ **실전 — 사내 서버에 올리기 처음부터 끝까지** (A) Windows Server + IIS 버전 · (B) Ubuntu + Nginx + systemd 버전 두 벌. 방화벽·도메인·인증서·배포 스크립트·모니터링·백업까지 체크리스트로
+
+**시각화 최소 10개** — 자바 톰캣 구조 vs .NET Kestrel 구조 대조 · 요청이 Nginx→Kestrel→앱 으로 가는 경로 ·
+IIS ANCM in-process/out-of-process 비교 · Windows Service 등록 구조 · systemd 유닛 관계 ·
+ForwardedHeaders 없을 때 IP 가 사라지는 그림 · YARP 라우팅 · publish 옵션 4종 비교(크기·시작시간) ·
+무중단 배포 시간축 · GC 모드별 힙 · 진단 도구 선택 흐름 · 문제 진단 사다리
+
+---
+
+**세 탭 공통 주의**
+- 기존 `api`(w01~w14)·`scale`(k01~k12)·`net`(n01~n15)·`tool`(t01~t12)·`deep` 을 **먼저 읽고**
+  겹치는 곳은 `(🔷 w03 참고)` 형식으로 넘길 것. 특히 api 탭의 EF Core 기초·JWT·Docker 배포,
+  tool 탭의 Serilog·Polly/Refit·xUnit·Testcontainers·CI/CD 와 중복 주의.
+- 기존 서버 탭들이 **게임 관점**이라는 점을 활용해, 이 세 탭은 **업무 시스템 관점**으로 각도를 틀 것.
+- 2026 기준: **.NET 10 LTS · C# 14 · EF Core 10 · Visual Studio 2026**.
+- Java/Spring 대조를 **모든 섹션에서** 유지 — 사용자가 자바 개발자입니다.
+
+**등록 후 할 일** — 새 그룹 5 는 reg.mjs 가 첫 탭 등록 때 만들어 줍니다.
+세 탭을 `ent` → `batch` → `host` **순서대로** 등록하세요(after 가 앞 탭을 참조합니다).
+등록 뒤 `csharp` 의 head description·router desc/tags/stats 를 갱신하고,
+소개 문구에 "엔터프라이즈 백엔드"를 추가하세요.
+
+### 3. 기술 스택 — 그 밖의 공백은 다 메웠습니다
 남은 것은 우선순위가 낮은 후보뿐입니다. 필요하면 그때 판단하세요.
 
 | 가이드 | 후보 | 현재 상태 |
@@ -83,51 +237,72 @@ claude mcp add chrome-devtools -s user -- npx -y chrome-devtools-mcp@latest
 **점검 방법**(다음에 또 할 때): `grep -o -i "키워드" public/<가이드>-web/index.html | sort | uniq -c` 로
 언급 빈도를 세고, **한 자릿수면 공백 · 전용 탭 없음이면 후보**로 봅니다.
 
-### 3. 마지막에 할 것
-- `npm run verify:guide` · svgcheck · integrity · smoke · `vue-tsc -b`
-- `src/router/index.ts` 의 stats(탭 수 · 섹션 수) 를 실제 값으로 맞추기
-- HANDOFF 갱신 후 커밋 · 푸시
-
----
-
-## 도구 — 지침서와 자동 등록 스크립트 (세션이 바뀌면 다시 만들 것)
-
-이번 세션에서 만든 두 가지가 작업 속도를 결정했습니다.
-
-**(1) 집필 지침서 `BRIEF.md`** — 집필 에이전트에게 주는 단일 지침.
-담아야 할 것: ①에이전트별 전용 작업 폴더 규칙(파일명 충돌 방지) ②먼저 읽을 파일 4개
-(`cpp/parts/panes/01-lang.html` 앞 500줄 · `guide-src/DIAGRAM-STYLE.md` · `.claude/skills/diag/SKILL.md` · 대상 가이드의 다른 pane)
-③pane 골격(hero/section/sec-head/diag/grid2·card/note/cheat/ez) ④.diag SVG 규칙(viewBox 680 · 색 클래스 의미 ·
-`.fl.ar` 화살촉 · 경계 4px · 글자 폭 한글 ×0.95/ASCII ×0.6) ⑤금지사항(U+1FA70+ 이모지 · 히어독 · `\$` · CRLF ·
-코드블록 `<` `>` `&` 미이스케이프) ⑥meta.json 스키마 ⑦검증 명령 ⑧보고 형식.
-
-**(2) 등록 스크립트 `reg.mjs`** — meta.json 하나로 **7곳을 한 번에** 등록합니다:
-`parts.json` · `11-sidebar.html`(navgrp + navset) · `12-tabbar.html`(tabrow + tabsl + tabsg + **단축키 재부여**) ·
-`js/20-tab-switch.js`(TAB_LABEL · SEC_LV · EZ · CAP · TAB_ORDER) · `js/00-core.js`(TAB_KW · SEC_KW) · 탭 색 CSS.
-`"append": true` 면 기존 탭에 섹션만 더합니다. `after` 에 기존 탭 id 를 주면 그 뒤에, `"^"` 면 맨 앞에 꽂힙니다.
-
-meta.json 스키마:
-```json
-{ "guide":"cpp", "tab":"srv", "pane":"panes/12-srv.html",
-  "label":"🌐 백엔드 서버", "short":"백엔드 서버", "icon":"🌐", "cls":"wb",
-  "grad":["#0ea5e9","#0c4a6e"], "group":4, "groupLabel":"실전 · 서버 · 성능",
-  "groupIcs":"🌐🎮🚀", "groupTitle":"...", "sheetLabel":"실전", "after":"deep",
-  "tabkw":"검색 키워드 40개 이상",
-  "sections":[{"id":"w01","title":"사이드바 제목","star":true,"lv":"b",
-               "ez":"쉽게 말하면 한 문장","cap":["p","도달점 한 문장"],"kw":"섹션 키워드"}] }
+### 4. 매 작업 마무리 체크리스트 (커밋 전 필수)
+```bash
+cd D:/gibis/workTool/astro/black-astro/web
+npm run verify:guide                             # ① 빌드 + 정합성 (열 가이드 전부 ✓ 여야)
+node guide-src/tools/svgcheck.mjs guide-src/<가이드>/parts/panes   # ② 넘침·겹침 0건
+node guide-src/tools/integrity.mjs               # ③ NUL·미이스케이프 (인자 없으면 전체)
+node guide-src/tools/smoke.mjs public/<가이드>-web/index.html      # ④ 탭 정합성
+npx vue-tsc -b                                   # ⑤ router 고쳤으면
 ```
-`lv` = b/i/a · `cap[0]` = s(학습)/p(실무)/e(대규모) · `star` = 사이드바 ★.
-
-**에이전트 운용 요령** — 탭 하나에 에이전트 하나. **동시에 5개 정도**가 안전합니다
-(19개를 한꺼번에 돌렸다가 세션 토큰 한도로 전부 중단됐습니다). 한 탭이 대략 20만 토큰 · 30분.
+- [ ] 새 탭이 기존 그룹에 들어갔다면 `11-sidebar.html` 의 `data-g="N"` 버튼 `title`·`ics` 갱신
+- [ ] `src/router/index.ts` 의 stats(탭 수·섹션 수)를 `verify:guide` 출력값으로 맞추기
+- [ ] 가이드 성격이 바뀌었으면 hero·`#hello` 배너·사이드바 브랜드·`00-head.html` title/description/og 도 함께
+- [ ] HANDOFF 의 현황표·다이어그램 수·미실측 누적 갱신
+- [ ] 커밋 → `git fetch && git rebase origin/main` → push
+      (원격에 GitHub Action 커밋이 수시로 들어와 그냥 push 하면 거부됩니다.
+       `web/src/App.vue` 에 세션 이전부터 있던 수정이 남아 있으면 `git stash` 로 잠시 빼고 리베이스)
 
 ---
+
+## 도구 — 저장소에 영구 보관되어 있습니다 ✅
+
+세션이 바뀌어도 사라지지 않습니다. **새 세션은 이 두 파일만 읽으면 바로 시작할 수 있습니다.**
+
+| 파일 | 무엇 |
+|---|---|
+| `web/guide-src/AUTHORING.md` | **집필 지침서** — 집필 에이전트에게 그대로 읽히는 단일 지침(pane 골격 · 컴포넌트 · .diag SVG 규칙 · 금지사항 · meta 스키마 · 검증 · 보고 형식) |
+| `web/guide-src/tools/reg.mjs` | **탭 등록 스크립트** — meta.json 하나로 7곳 자동 등록 |
+| `web/guide-src/tools/README.md` | 검사 도구 5종 + reg.mjs 사용법 |
+| `web/guide-src/DIAGRAM-STYLE.md` | 시각화 디자인 기준 원문 |
+| `.claude/skills/diag/SKILL.md` | 시각화 제작 절차 스킬 |
+
+**집필 에이전트에게 줄 프롬프트 뼈대** (이 형태로 주면 됩니다):
+```
+당신은 한국어 학습 가이드(<가이드명>)의 새 탭을 집필합니다.
+먼저 `web/guide-src/AUTHORING.md` 를 끝까지 읽고 거기 적힌 "먼저 읽을 것"을 읽은 뒤 작업하세요.
+예시 pane 은 <대상 가이드의 비슷한 탭 경로> 를 읽고 문체·컴포넌트를 맞추세요.
+당신의 작업 폴더는 <스크래치패드>/<가이드>-<탭>/ 입니다.
+
+## 과제
+- 가이드 `X` · 탭 id `Y` · pane `...` · 접두사 `z` (z01~z13) · <span class="no">LABEL 01</span>
+- meta.json: 스크래치패드 최상위 `X-Y.meta.json`. label/short/icon/cls/grad/group/groupLabel/
+  groupIcs/groupTitle/sheetLabel/after 값 지정
+- 주제: ...
+
+## 섹션 (13개)   ← 한 줄씩 제목 + 다룰 내용을 구체적으로
+1. z01 ★ ...
+
+## 분량·시각화
+- 섹션당 9~15KB, 총 140KB 이상. 시각화 최소 9개(무엇을 그릴지 나열)
+- 검증(AUTHORING §5) 후 §6 형식으로 보고.
+```
+
+**에이전트 운용 요령** — 탭 하나에 에이전트 하나. **동시에 5개까지**가 안전합니다
+(19개를 한꺼번에 돌렸다가 세션 토큰 한도로 전부 중단됐습니다). 한 탭이 대략 20만 토큰 · 30분.
+완료되면 통합 담당(메인 세션)이 `reg.mjs` 로 등록 → 검증 → 그룹 라벨 보정 → router stats → 커밋.
+
+**통합할 때 잊기 쉬운 것 두 가지**
+1. `reg.mjs` 는 **이미 있는 그룹 버튼을 안 고칩니다.** 새 탭이 기존 그룹에 들어가면
+   `11-sidebar.html` 의 `data-g="N"` 버튼 `title`·`ics` 를 손으로 갱신하세요.
+2. `src/router/index.ts` 의 stats(탭 수·섹션 수)는 `verify:guide` 출력값으로 맞추세요.
 
 ## 작업 흐름 (검증된 절차)
 ```bash
 cd D:/gibis/workTool/astro/black-astro/web
 # 1) 에이전트가 pane 파일 + meta.json 작성 (다른 파일은 절대 건드리지 않음)
-node <스크래치패드>/reg.mjs <스크래치패드>/<가이드>-<탭>.meta.json   # 등록 7곳
+node guide-src/tools/reg.mjs <스크래치패드>/<가이드>-<탭>.meta.json   # 등록 7곳
 npm run build:guide -- <가이드>
 node guide-src/tools/fixcut.mjs   guide-src/<가이드>/parts/panes    # 높이 보정 (먼저)
 node guide-src/tools/svgcheck.mjs guide-src/<가이드>/parts/panes    # 넘침·겹침

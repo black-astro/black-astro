@@ -60,3 +60,32 @@ node guide-src/tools/ins.mjs guide-src/js-ts/parts/panes/01-js.html 조각.html
 큰 HTML 조각은 bash 히어독에서 깨지므로 **Write 도구로 조각 파일을 만들고 이걸로 넣는 방식**이 안전합니다.
 
 **한 조각 파일은 pane 하나만 다룹니다** — 다른 pane 의 섹션이 섞여 있으면 아무것도 쓰지 않고 멈춥니다(원자적).
+
+## ⑥ 탭 등록 자동화 — reg.mjs
+
+```bash
+node guide-src/tools/reg.mjs <meta.json 경로>
+```
+
+meta.json 하나로 **7곳을 한 번에** 등록합니다 —
+`parts.json` · `11-sidebar.html`(navgrp + navset) · `12-tabbar.html`(tabrow + tabsl + tabsg + **단축키 재부여**) ·
+`js/20-tab-switch.js`(TAB_LABEL · SEC_LV · EZ · CAP · TAB_ORDER) · `js/00-core.js`(TAB_KW · SEC_KW) · 탭 색 CSS.
+
+meta.json 스키마:
+```json
+{ "guide":"cpp", "tab":"srv", "pane":"panes/12-srv.html",
+  "label":"🌐 백엔드 서버", "short":"백엔드 서버", "icon":"🌐", "cls":"wb",
+  "grad":["#0ea5e9","#0c4a6e"], "group":4, "groupLabel":"실전 · 서버 · 성능",
+  "groupIcs":"🌐🎮🚀", "groupTitle":"...", "sheetLabel":"실전", "after":"deep",
+  "tabkw":"검색 키워드 40개 이상",
+  "sections":[{"id":"w01","title":"사이드바 제목","star":true,"lv":"b",
+               "ez":"쉽게 말하면 한 문장","cap":["p","도달점 한 문장"],"kw":"섹션 키워드"}] }
+```
+
+- `lv` = b(기초)/i(중급)/a(고급) · `cap[0]` = s(학습)/p(실무)/e(대규모) · `star` = 사이드바 ★
+- `after` 에 기존 탭 id 를 주면 그 **뒤**에, `"^"` 면 **맨 앞**에 꽂힙니다
+- `"append": true` 면 기존 탭에 **섹션만** 더합니다(label·cls·group 등은 생략 가능)
+- **주의:** 이미 있는 그룹 버튼(`data-g="N"`)은 건드리지 않습니다. 그룹 아이콘·설명을 바꾸려면
+  `11-sidebar.html` 의 해당 버튼을 직접 고치세요.
+
+집필 지침은 `web/guide-src/AUTHORING.md` 입니다.
