@@ -1,0 +1,3661 @@
+<!-- ============================================================
+     배치 · 대용량 파일 · 통신 PANE
+     ============================================================ -->
+<div class="pane" id="pane-batch">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> .NET 10 LTS · C# 14 · EF CORE 10 · 업무 시스템 관점</div>
+  <h1>야간 배치<br>3 GB 파일<br>그리고 연계</h1>
+  <p class="tx">
+    Spring Batch 도 Quartz 도 없는 세계에서 <b>같은 일을 어떻게 하는지</b> 끝까지 봅니다.
+    <b>Worker Service · Hangfire · Quartz.NET</b> 중 무엇을 고르고,
+    수백만 행을 <b>메모리 40 MB 안에서</b> 흘려보내고, EUC-KR 로 온 고정폭 파일을 읽고,
+    SFTP 로 받은 3 GB 를 <b>체크포인트를 남기며</b> 적재합니다.
+    <b>여기까지 마치면 사내 정산 배치 한 벌을 혼자 설계하고 운영 이관까지 할 수 있습니다.</b>
+    Java 로 하던 방식과 계속 나란히 놓고 봅니다 — 대응이 없는 자리는 "없다"고 분명히 말합니다.
+  </p>
+  <div class="stats">
+    <div><b>13</b><span>SECTIONS</span></div>
+    <div><b>.NET 10</b><span>LTS 기준</span></div>
+    <div><b>3 GB</b><span>실전 파일 크기</span></div>
+    <div><b>0</b><span>Spring Batch</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== f01 ==================== -->
+<section class="sec" id="f01">
+  <div class="sec-head rv">
+    <span class="no">BATCH 01</span>
+    <h2>배치 서버 <span class="t">선택지 지도</span> — Spring Batch 자리에 무엇을 놓나</h2>
+    <p class="lead">
+      자바에서 배치라고 하면 <b>Spring Batch + Quartz</b> 가 거의 정답이었습니다.
+      .NET 에는 그 자리를 통째로 채우는 프레임워크가 <b>없습니다</b>.
+      대신 조각들이 있고, 조각을 고르는 기준이 있습니다. 이 섹션이 그 기준입니다.
+    </p>
+  </div>
+
+  <div class="note warn">
+    <b>먼저 사실부터 — Spring Batch 에 1:1 대응하는 것은 없습니다.</b>
+    "닷넷 배치 프레임워크"를 검색하면 나오는 것들(Hangfire · Quartz.NET · Coravel)은 전부
+    <b>스케줄러</b>이거나 <b>작업 큐</b>입니다. Spring Batch 의 핵심인
+    <b>Job/Step/Chunk · ItemReader-Processor-Writer · JobRepository · 재시작</b> 은
+    .NET 에서 <b>직접 구성</b>합니다. 나쁜 소식처럼 들리지만,
+    실제로 해 보면 코드 300줄이면 되고 <b>내 도메인에 맞게 정확히</b> 만들 수 있습니다.
+    이 탭의 f04 가 그 300줄입니다.
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 452" role="img" aria-label="배치 실행 방식 선택 흐름도. 정해진 시각에 도는 일이 아니면 Worker Service를 쓴다. 정해진 시각에 돈다면 사내 온프레미스 환경인지 묻고, 아니면 클라우드 스케줄러를 쓴다. 온프레미스라면 재시도와 이력, 대시보드가 필요한지 묻고 필요하면 Hangfire를, 필요 없고 크론 규칙이 복잡하면 Quartz.NET을, 그것도 아니면 윈도우 작업 스케줄러와 콘솔 앱을 쓴다">
+      <text x="16" y="18" class="lbl">배치를 무엇으로 돌릴 것인가 — 마름모가 질문, 상자가 결론</text>
+
+      <polygon class="dia" points="130,32 240,62 130,92 20,62"/>
+      <text x="130" y="59" class="ann" text-anchor="middle">정해진 시각에</text>
+      <text x="130" y="71" class="ann" text-anchor="middle">도는 일인가?</text>
+
+      <path class="ln ar" d="M244 62 L292 62"/>
+      <text x="250" y="56" class="ann">아니오</text>
+      <rect class="bx bx-ok" x="296" y="42" width="170" height="44"/>
+      <text x="381" y="60" class="ann ok-t" text-anchor="middle">Worker Service</text>
+      <text x="381" y="74" class="ann" text-anchor="middle">큐 · 폴더를 상시 감시</text>
+      <text x="474" y="58" class="ann">@Scheduled 가 아니라</text>
+      <text x="474" y="72" class="ann">상주 프로세스입니다</text>
+
+      <path class="ln ar" d="M130 96 L130 118"/>
+      <text x="138" y="112" class="ann">예</text>
+
+      <polygon class="dia" points="130,122 240,152 130,182 20,152"/>
+      <text x="130" y="149" class="ann" text-anchor="middle">사내 온프레미스</text>
+      <text x="130" y="161" class="ann" text-anchor="middle">환경인가?</text>
+
+      <path class="ln ar" d="M244 152 L292 152"/>
+      <text x="250" y="146" class="ann">아니오</text>
+      <rect class="bx" x="296" y="132" width="170" height="44"/>
+      <text x="381" y="150" class="ann" text-anchor="middle">클라우드 스케줄러</text>
+      <text x="381" y="164" class="ann" text-anchor="middle">Functions · EventBridge</text>
+      <text x="474" y="148" class="ann">서버를 안 켜 둡니다</text>
+      <text x="474" y="162" class="ann">대신 실행 시간 제한</text>
+
+      <path class="ln ar" d="M130 186 L130 208"/>
+      <text x="138" y="202" class="ann">예</text>
+
+      <polygon class="dia" points="130,212 240,242 130,272 20,242"/>
+      <text x="130" y="239" class="ann" text-anchor="middle">재시도 · 이력 ·</text>
+      <text x="130" y="251" class="ann" text-anchor="middle">대시보드가 필요?</text>
+
+      <path class="ln ar" d="M244 242 L292 242"/>
+      <text x="250" y="236" class="ann">예</text>
+      <rect class="bx bx-ok" x="296" y="222" width="170" height="44"/>
+      <text x="381" y="240" class="ann ok-t" text-anchor="middle">Hangfire</text>
+      <text x="381" y="254" class="ann" text-anchor="middle">DB 한 벌이면 끝납니다</text>
+      <text x="474" y="238" class="ann">사내 배치의 기본값</text>
+      <text x="474" y="252" class="ann">— 화면이 딸려 옵니다</text>
+
+      <path class="ln ar" d="M130 276 L130 298"/>
+      <text x="138" y="292" class="ann">아니오</text>
+
+      <polygon class="dia" points="130,302 240,332 130,362 20,332"/>
+      <text x="130" y="329" class="ann" text-anchor="middle">크론 규칙이</text>
+      <text x="130" y="341" class="ann" text-anchor="middle">복잡한가?</text>
+
+      <path class="ln ar" d="M244 332 L292 332"/>
+      <text x="250" y="326" class="ann">예</text>
+      <rect class="bx" x="296" y="312" width="170" height="44"/>
+      <text x="381" y="330" class="ann" text-anchor="middle">Quartz.NET</text>
+      <text x="381" y="344" class="ann" text-anchor="middle">미스파이어 정책 제공</text>
+      <text x="474" y="328" class="ann">달력 · 영업일 계산이</text>
+      <text x="474" y="342" class="ann">필요하면 이쪽</text>
+
+      <path class="ln ar" d="M130 366 L130 388"/>
+      <text x="138" y="382" class="ann">아니오</text>
+
+      <rect class="bx bx-mut" x="20" y="392" width="246" height="44"/>
+      <text x="143" y="410" class="ann" text-anchor="middle">작업 스케줄러 + 콘솔 앱</text>
+      <text x="143" y="424" class="ann" text-anchor="middle">가장 단순 · 이력은 직접</text>
+
+      <text x="296" y="410" class="lbl">모든 갈래가 결론에 닿아야 합니다</text>
+      <text x="296" y="428" class="lbl">— 답 없는 가지를 남기지 마세요</text>
+    </svg>
+    <div class="cap">배치 선택 흐름도 — 사내 온프레미스라면 <b>Hangfire 가 기본값</b>, 특수한 달력 규칙만 Quartz.NET.</div>
+  </div>
+
+  <h3 class="sub" data-lv="e">다섯 선택지를 <span class="t">한 표로</span> <span class="lvl e">🟢 기초</span></h3>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead>
+        <tr><th>선택지</th><th>Java 대응</th><th>스케줄</th><th>재시도 · 이력</th><th>운영 화면</th><th>이럴 때</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>Worker Service</b><br>(BackgroundService)</td><td>@Scheduled 상주 빈 · 무한 루프 스레드</td><td>직접 <code>Task.Delay</code> · <code>PeriodicTimer</code></td><td>직접 구현</td><td>없음</td><td>큐 · 폴더를 <b>계속 지켜보는</b> 일. 상시 대기형</td></tr>
+        <tr><td><b>Hangfire</b></td><td>Spring Batch Admin + Quartz JDBC 잡스토어</td><td>크론 · 지연 · 연속(continuation)</td><td><b>내장</b> — 자동 재시도 · 실행 이력 DB</td><td><b>내장 대시보드</b></td><td>사내 배치의 <b>기본값</b>. DB 하나만 더 주면 됨</td></tr>
+        <tr><td><b>Quartz.NET</b></td><td>Quartz (그대로)</td><td>크론 · <b>미스파이어 정책</b> · 캘린더</td><td>잡스토어(ADO.NET) 필요</td><td>없음(유료 CrystalQuartz)</td><td>영업일 · 공휴일 · 밀린 실행 처리 규칙이 중요할 때</td></tr>
+        <tr><td><b>작업 스케줄러</b><br>(Windows) / cron</td><td>OS crontab</td><td>OS 가 담당</td><td>없음 — 종료 코드만</td><td>OS 도구</td><td>하루 한 번 · 실패해도 다음날 다시 돌면 되는 일</td></tr>
+        <tr><td><b>클라우드 함수</b></td><td>AWS Lambda + EventBridge</td><td>서비스가 담당</td><td>서비스가 담당</td><td>콘솔</td><td>서버를 켜 두기 아까운 <b>드문 실행</b>. 실행 시간 제한 주의</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Hangfire — 3분이면 붙습니다</h4>
+      <pre class="code" data-lang="bash"><code>dotnet add package Hangfire.AspNetCore
+dotnet add package Hangfire.SqlServer</code></pre>
+      <pre class="code" data-lang="csharp"><code>// Program.cs
+builder.Services.AddHangfire(cfg =&gt; cfg
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UseSqlServerStorage(cs, new SqlServerStorageOptions
+    {
+        // 큐 폴링 간격 — 기본 15초는 배치엔 느립니다
+        QueuePollInterval  = TimeSpan.FromSeconds(5),
+        UseRecommendedIsolationLevel = true,
+        DisableGlobalLocks = true
+    }));
+
+// 이 프로세스가 잡을 "실행"까지 할 것인가
+builder.Services.AddHangfireServer(o =&gt;
+{
+    o.Queues       = ["settle", "default"];  // 큐 우선순위 (앞이 높음)
+    o.WorkerCount  = 4;                      // 동시 실행 수
+    o.ServerName   = $"{Environment.MachineName}-batch";
+});
+
+var app = builder.Build();
+app.UseHangfireDashboard("/jobs");           // 운영 화면
+RecurringJob.AddOrUpdate&lt;SettleJob&gt;(
+    "daily-settle",
+    j =&gt; j.RunAsync(CancellationToken.None),
+    "0 10 2 * * *",                          // 매일 02:10 (초 6자리 크론)
+    new RecurringJobOptions { TimeZone = KstTz });</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Hangfire 크론은 6자리도 5자리도 받습니다.</b>
+        <code>"0 10 2 * * *"</code> 는 초를 포함한 6자리(02:10:00),
+        <code>"10 2 * * *"</code> 는 5자리(분부터)입니다.
+        <b>자바의 Spring 크론도 6자리</b>라 헷갈리지 않지만,
+        표준 유닉스 crontab 은 5자리입니다 — 문서를 보고 자리 수부터 세세요.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Quartz.NET — 미스파이어가 필요할 때</h4>
+      <pre class="code" data-lang="csharp"><code>builder.Services.AddQuartz(q =&gt;
+{
+    q.UsePersistentStore(s =&gt;              // 잡스토어를 DB 로
+    {
+        s.UseSqlServer(cs);
+        s.UseNewtonsoftJsonSerializer();
+        s.UseProperties = true;
+        s.UseClustering();                 // 여러 대여도 한 번만 실행
+    });
+
+    var key = new JobKey("settle");
+    q.AddJob&lt;SettleJob&gt;(o =&gt; o.WithIdentity(key));
+    q.AddTrigger(t =&gt; t
+        .ForJob(key)
+        .WithIdentity("settle-trigger")
+        .WithCronSchedule("0 10 2 * * ?",
+            x =&gt; x.InTimeZone(KstTz)
+                  // 서버가 꺼져 있어 놓친 실행을 어떻게 할지
+                  .WithMisfireHandlingInstructionFireAndProceed()));
+});
+
+builder.Services.AddQuartzHostedService(o =&gt;
+    o.WaitForJobsToComplete = true);       // 종료 시 진행 중 잡을 기다림</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>미스파이어(misfire)</b> — 서버가 꺼져 있던 사이 실행 시각을 놓쳤을 때의 정책입니다.
+        <b>놓친 만큼 다 실행</b>(<code>IgnoreMisfires</code>) ·
+        <b>한 번만 실행하고 정상 궤도로</b>(<code>FireAndProceed</code>) ·
+        <b>그냥 건너뛰기</b>(<code>DoNothing</code>) 세 가지.
+        정산 배치는 대개 <b>FireAndProceed</b> 입니다 — 3일치가 한꺼번에 돌면 안 되니까요.
+        Hangfire 에는 이 개념이 없고, 놓친 실행은 서버가 뜨면 <b>즉시 한 번</b> 돕니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">Spring Batch 를 <span class="t">.NET 으로 옮기면</span> 무엇이 어디로 가나 <span class="lvl m">🟡 중급</span></h3>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>Spring Batch 구성 요소</th><th>하는 일</th><th>.NET 에서는</th></tr></thead>
+      <tbody>
+        <tr><td><code>Job</code> / <code>JobLauncher</code></td><td>실행 단위와 기동</td><td>Hangfire <code>RecurringJob</code> 또는 <code>BackgroundService</code> 메서드 하나</td></tr>
+        <tr><td><code>Step</code> · <code>Flow</code></td><td>단계 분할 · 조건 분기</td><td><b>직접</b> — 메서드로 나누고 <code>if</code> 로 분기 (f04)</td></tr>
+        <tr><td><code>ItemReader</code></td><td>한 건씩 읽기</td><td><code>IAsyncEnumerable&lt;T&gt;</code> + <code>yield return</code> (f06)</td></tr>
+        <tr><td><code>ItemProcessor</code></td><td>변환 · 필터</td><td>LINQ <code>Select</code> / <code>Where</code> 또는 <code>Channel</code> 스테이지 (f11)</td></tr>
+        <tr><td><code>ItemWriter</code></td><td>묶어서 쓰기</td><td><code>SqlBulkCopy</code> · <code>ExecuteUpdate</code> (f05)</td></tr>
+        <tr><td><code>chunk(1000)</code></td><td>커밋 단위</td><td><code>Chunk(1000)</code> 확장 메서드 + 트랜잭션 (f04)</td></tr>
+        <tr><td><code>JobRepository</code></td><td>실행 이력 · 재시작 지점</td><td><b>직접</b> — <code>BatchRun</code>/<code>BatchCheckpoint</code> 테이블 (f04)</td></tr>
+        <tr><td><code>skip-limit</code> · <code>retry-limit</code></td><td>실패 허용치</td><td><b>직접</b> 세거나 Polly 재시도 (f09)</td></tr>
+        <tr><td><code>JobParameters</code></td><td>실행 파라미터 · 중복 방지 키</td><td>잡 인자 + <code>BatchRun</code> 유니크 인덱스</td></tr>
+        <tr><td>Spring Batch Admin</td><td>운영 화면</td><td><b>Hangfire 대시보드</b> — 여기만 .NET 이 더 편합니다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="vs">
+    <div class="bad">
+      <h5>이렇게 시작하면 후회합니다</h5>
+      <p>
+        "Spring Batch 같은 걸 먼저 만들자"며 <b>범용 배치 프레임워크</b>부터 짓는 것.
+        Job 메타 테이블 12개, XML 설정, 리스너 인터페이스 8개…
+        정작 도는 배치는 두 개뿐인데 프레임워크 유지보수가 더 무거워집니다.
+        실제로 사내 프로젝트에서 흔히 벌어지는 일입니다.
+      </p>
+    </div>
+    <div class="good">
+      <h5>이 순서가 안전합니다</h5>
+      <p>
+        ① Hangfire 로 <b>스케줄과 이력·화면</b>을 사 옵니다(직접 만들지 않음).
+        ② 배치 본문은 그냥 <b>평범한 서비스 클래스</b>로 씁니다.
+        ③ 청크·체크포인트가 실제로 필요해진 배치에만 f04 의 300줄을 붙입니다.
+        ④ 같은 패턴이 세 번째 나오면 그때 공통 클래스로 뽑습니다.
+      </p>
+    </div>
+  </div>
+
+  <div class="note tip">
+    <b>온프레미스 사내 환경 권장 조합 (2026 기준)</b> —
+    <b>ASP.NET Core 웹앱 1대 + Hangfire 서버 2대</b>(같은 SQL Server 를 잡스토어로).
+    배치 본문은 별도 클래스 라이브러리에 두고 웹앱과 배치가 <b>같은 도메인 코드</b>를 씁니다.
+    스케줄은 Hangfire, 파일 감시는 <code>BackgroundService</code>,
+    수동 재실행은 Hangfire 대시보드의 "Trigger now".
+    이 조합이면 <b>새로 배울 것이 Hangfire 하나</b>뿐입니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> .NET 에 Spring Batch 는 없습니다. <b>스케줄·이력·화면은 Hangfire 에서 사 오고</b>, 청크·체크포인트만 직접 만듭니다. 특수한 달력 규칙이 필요할 때만 Quartz.NET 을 꺼냅니다.</div>
+</section>
+
+
+<!-- ==================== f02 ==================== -->
+<section class="sec" id="f02">
+  <div class="sec-head rv">
+    <span class="no">BATCH 02</span>
+    <h2>Worker Service — <span class="t">상주하는 배치 프로세스</span> 만들기</h2>
+    <p class="lead">
+      스프링에서 <code>@Scheduled</code> 를 단 빈이나 <code>ApplicationRunner</code> 로 하던 일입니다.
+      .NET 에서는 <b><code>BackgroundService</code></b> 한 클래스가 그 자리를 다 맡습니다.
+      중요한 것은 <b>어떻게 멈추는가</b> 와 <b>두 번 뜨지 않게 하는가</b> 입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 306" role="img" aria-label="Worker Service 수명주기 상태 기계. 생성된 워커는 StartAsync로 실행 중 상태가 되고 ExecuteAsync 루프를 반복한다. 종료 신호를 받으면 중지 중 상태로 넘어가고 StopAsync가 끝나면 종료된다. 실행 중 미처리 예외가 나면 오류 정지 상태가 되며 재시작 정책이 없으면 프로세스가 그대로 죽는다">
+      <text x="16" y="18" class="lbl">Worker 하나의 일생 — 원이 상태, 화살표에 적힌 것이 전이 조건</text>
+
+      <circle class="nd" cx="86" cy="102" r="38"/>
+      <text x="86" y="99" class="val" text-anchor="middle">생성</text>
+      <text x="86" y="114" class="ann" text-anchor="middle">DI 주입</text>
+
+      <circle class="nd nd-fw" cx="252" cy="102" r="38"/>
+      <text x="252" y="99" class="val" text-anchor="middle">실행 중</text>
+      <text x="252" y="114" class="ann" text-anchor="middle">루프</text>
+
+      <circle class="nd" cx="428" cy="102" r="38"/>
+      <text x="428" y="99" class="val" text-anchor="middle">중지 중</text>
+      <text x="428" y="114" class="ann" text-anchor="middle">정리</text>
+
+      <circle class="nd nd-mut" cx="596" cy="102" r="38"/>
+      <text x="596" y="99" class="val" text-anchor="middle">종료</text>
+      <text x="596" y="114" class="ann" text-anchor="middle">코드 0</text>
+
+      <circle class="nd" cx="252" cy="222" r="38"/>
+      <text x="252" y="219" class="val" text-anchor="middle">오류 정지</text>
+      <text x="252" y="234" class="ann" text-anchor="middle">코드 133</text>
+
+      <path class="ln ar" d="M128 102 L210 102"/>
+      <text x="169" y="94" class="ann" text-anchor="middle">StartAsync</text>
+
+      <path class="ln ar" d="M294 102 L386 102"/>
+      <text x="340" y="94" class="ann" text-anchor="middle">SIGTERM · Ctrl+C</text>
+
+      <path class="ln ar" d="M470 102 L554 102"/>
+      <text x="512" y="94" class="ann" text-anchor="middle">정리 완료</text>
+
+      <path class="ln ar" d="M252 144 L252 180"/>
+      <text x="260" y="166" class="ann rs-t">미처리 예외</text>
+
+      <path class="ln ar" d="M294 232 L596 232 L596 144"/>
+      <text x="302" y="226" class="ann">재시작 정책이 없으면 프로세스가 그대로 죽습니다</text>
+
+      <path class="ln ar" d="M234 66 A 30 30 0 1 1 272 68"/>
+      <text x="252" y="40" class="ann" text-anchor="middle">await Task.Delay(주기) — 한 바퀴가 배치 1주기</text>
+
+      <text x="16" y="272" class="lbl">중지 중 구간에 기본 30초(ShutdownTimeout)만 주어집니다 — 넘기면 강제 종료됩니다</text>
+      <text x="16" y="292" class="lbl">그래서 긴 배치는 "중간에 안전하게 멈출 수 있는 지점"을 코드가 알고 있어야 합니다</text>
+    </svg>
+    <div class="cap">Worker 수명주기 — <b>종료 신호를 받고도 30초</b>. 그 안에 끝나거나, 체크포인트를 남기고 나가야 합니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가장 작은 Worker</h4>
+      <pre class="code" data-lang="bash"><code>dotnet new worker -o Settle.Batch
+cd Settle.Batch &amp;&amp; dotnet run</code></pre>
+      <pre class="code" data-lang="csharp"><code>public sealed class SettleWorker(
+    ILogger&lt;SettleWorker&gt; log,
+    IServiceScopeFactory scopes) : BackgroundService
+{
+    // 5분마다 한 바퀴. PeriodicTimer 가 Task.Delay 보다 정확합니다
+    private readonly PeriodicTimer _tick =
+        new(TimeSpan.FromMinutes(5));
+
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        log.LogInformation("워커 기동 {Machine}", Environment.MachineName);
+
+        // 첫 바퀴를 바로 돌지, 5분 뒤에 돌지 — 의도적으로 고르세요
+        while (await _tick.WaitForNextTickAsync(ct))
+        {
+            // ★ 스코프를 매 바퀴 새로 엽니다 (아래 note 참고)
+            using var scope = scopes.CreateScope();
+            var svc = scope.ServiceProvider
+                           .GetRequiredService&lt;ISettleService&gt;();
+            try
+            {
+                await svc.RunOnceAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;                       // 종료 신호는 그대로 올려보냅니다
+            }
+            catch (Exception ex)
+            {
+                // ★ 삼키지 않으면 프로세스가 죽습니다
+                log.LogError(ex, "한 바퀴 실패 — 다음 주기에 다시 시도합니다");
+            }
+        }
+    }
+
+    public override async Task StopAsync(CancellationToken ct)
+    {
+        log.LogInformation("종료 신호 수신 — 정리 시작");
+        _tick.Dispose();
+        await base.StopAsync(ct);
+    }
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">등록과 종료 시간 조정</h4>
+      <pre class="code" data-lang="csharp"><code>var builder = Host.CreateApplicationBuilder(args);
+
+builder.Services.AddHostedService&lt;SettleWorker&gt;();
+builder.Services.AddScoped&lt;ISettleService, SettleService&gt;();
+
+// 종료 유예 시간 — 기본 30초. 긴 배치는 늘립니다
+builder.Services.Configure&lt;HostOptions&gt;(o =&gt;
+{
+    o.ShutdownTimeout = TimeSpan.FromMinutes(3);
+
+    // .NET 8+ : 한 워커가 죽어도 호스트를 내리지 않게
+    o.BackgroundServiceExceptionBehavior =
+        BackgroundServiceExceptionBehavior.Ignore;
+});
+
+builder.Services.AddWindowsService(o =&gt;      // Windows 서비스로도 뜨게
+    o.ServiceName = "SettleBatch");
+builder.Services.AddSystemd();               // Linux systemd 알림 지원
+
+var host = builder.Build();
+await host.RunAsync();</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>BackgroundServiceExceptionBehavior.Ignore</code> 는 신중히.</b>
+        기본값 <code>StopHost</code> 는 <b>워커가 예외로 죽으면 프로세스 전체를 내립니다</b>.
+        컨테이너·systemd 환경에서는 이게 오히려 <b>정답</b>입니다 — 죽으면 재시작해 주니까요.
+        <code>Ignore</code> 로 두면 워커만 조용히 사라지고 <b>프로세스는 살아 있어</b>
+        헬스체크는 초록인데 배치는 안 도는 최악의 상태가 됩니다.
+        <b>Ignore 를 쓸 거면 반드시 "루프가 살아 있는지" 헬스체크</b>를 따로 두세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">스코프 — <span class="t">DbContext 를 워커 필드에 두면 안 되는 이유</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <p class="tx">
+    <code>BackgroundService</code> 는 <b>싱글턴</b>입니다. 생성자에 <code>DbContext</code> 를 받으면
+    그 인스턴스가 <b>프로세스가 사는 내내</b> 유지됩니다.
+    스프링에서 <code>@Scheduled</code> 메서드에 <code>EntityManager</code> 를 필드로 물고 있는 것과 같은 사고입니다 —
+    ChangeTracker 가 계속 커지고, 커넥션이 붙잡히고, 한 번 예외가 나면
+    그 컨텍스트가 오염되어 이후 전부 실패합니다.
+    이것을 <b>captive dependency(가둔 의존성)</b> 라고 부릅니다.
+  </p>
+
+  <div class="vs">
+    <div class="bad">
+      <h5>❌ 생성자에서 받기</h5>
+      <pre class="code" data-lang="csharp"><code>public class BadWorker(AppDbContext db)   // Scoped 를 Singleton 이 붙잡음
+    : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            // 24시간 뒤 이 db 의 ChangeTracker 에는
+            // 추적 엔티티 400만 개가 쌓여 있습니다
+            var rows = await db.Orders.ToListAsync(ct);
+            ...
+        }
+    }
+}</code></pre>
+      <p><b>런타임에 예외조차 안 납니다.</b> 그냥 메모리가 새고 느려집니다 — 제일 찾기 어려운 종류.</p>
+    </div>
+    <div class="good">
+      <h5>✅ 바퀴마다 스코프 열기</h5>
+      <pre class="code" data-lang="csharp"><code>public class GoodWorker(IServiceScopeFactory scopes)
+    : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            using var scope = scopes.CreateScope();   // ★
+            var db = scope.ServiceProvider
+                          .GetRequiredService&lt;AppDbContext&gt;();
+            ...
+            // using 이 끝나면 DbContext 도 커넥션도 반납
+        }
+    }
+}</code></pre>
+      <p>스프링의 <b>요청 스코프</b>를 배치 한 바퀴에 수동으로 여는 것이라고 보면 정확합니다.</p>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">단일 실행 보장 — <span class="t">두 대가 동시에 돌면 정산이 두 배</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <p class="tx">
+    배치 서버를 이중화하면 <b>같은 배치가 두 번 도는 사고</b>가 반드시 한 번은 납니다.
+    막는 방법은 셋인데, <b>상황에 따라 정답이 다릅니다</b>.
+  </p>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>방법</th><th>범위</th><th>서버가 죽으면</th><th>Java 대응</th><th>쓸 곳</th></tr></thead>
+      <tbody>
+        <tr><td><code>Mutex</code> (Windows 전역)</td><td><b>한 대 안</b>에서만</td><td>OS 가 자동 해제</td><td>파일 락 · <code>FileLock</code></td><td>같은 서버에서 두 번 실행 방지(작업 스케줄러 중복 기동)</td></tr>
+        <tr><td><b>DB 애플리케이션 락</b><br><code>sp_getapplock</code></td><td>DB 를 공유하는 <b>모든 서버</b></td><td>세션이 끊기면 <b>자동 해제</b></td><td>ShedLock · Quartz 클러스터</td><td><b>가장 안전.</b> 사내 배치의 기본값</td></tr>
+        <tr><td>락 테이블 <code>UPDATE</code></td><td>모든 서버</td><td><b>안 풀립니다</b> — 만료 시각 필요</td><td>ShedLock JDBC</td><td>DB 가 애플리케이션 락을 지원 안 할 때(PostgreSQL 은 <code>pg_advisory_lock</code>)</td></tr>
+        <tr><td>Redis <code>SET NX PX</code></td><td>모든 서버</td><td>TTL 로 만료</td><td>Redisson</td><td>이미 Redis 를 쓰고 있고 배치가 짧을 때</td></tr>
+        <tr><td>Hangfire <code>DisableConcurrentExecution</code></td><td>모든 서버</td><td>타임아웃으로 해제</td><td>Quartz <code>@DisallowConcurrentExecution</code></td><td>Hangfire 를 쓰면 <b>이거면 끝</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SQL Server 애플리케이션 락 — 실제 코드</h4>
+      <pre class="code" data-lang="csharp"><code>public sealed class SqlAppLock : IAsyncDisposable
+{
+    private readonly SqlConnection _cn;
+    private SqlAppLock(SqlConnection cn) =&gt; _cn = cn;
+
+    /// &lt;summary&gt;못 잡으면 null — 이미 다른 서버가 돌고 있다는 뜻&lt;/summary&gt;
+    public static async Task&lt;SqlAppLock?&gt; TryAcquireAsync(
+        string cs, string name, TimeSpan wait, CancellationToken ct)
+    {
+        var cn = new SqlConnection(cs);
+        await cn.OpenAsync(ct);
+
+        await using var cmd = cn.CreateCommand();
+        cmd.CommandText = "sp_getapplock";
+        cmd.CommandType = CommandType.StoredProcedure;
+        cmd.Parameters.AddWithValue("@Resource", name);
+        cmd.Parameters.AddWithValue("@LockMode", "Exclusive");
+        cmd.Parameters.AddWithValue("@LockOwner", "Session");
+        cmd.Parameters.AddWithValue("@LockTimeout", (int)wait.TotalMilliseconds);
+
+        var rv = cmd.Parameters.Add("@rv", SqlDbType.Int);
+        rv.Direction = ParameterDirection.ReturnValue;
+        await cmd.ExecuteNonQueryAsync(ct);
+
+        // 0 = 즉시 획득, 1 = 대기 후 획득, 음수 = 실패
+        if ((int)rv.Value &lt; 0) { await cn.DisposeAsync(); return null; }
+        return new SqlAppLock(cn);
+    }
+
+    // 커넥션을 닫으면 락도 풀립니다 — 서버가 죽어도 자동 해제
+    public ValueTask DisposeAsync() =&gt; _cn.DisposeAsync();
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">워커에서 쓰기</h4>
+      <pre class="code" data-lang="csharp"><code>await using var mine = await SqlAppLock.TryAcquireAsync(
+    cs, "batch:daily-settle", TimeSpan.Zero, ct);
+
+if (mine is null)
+{
+    log.LogInformation("다른 서버가 이미 정산 중 — 이번 바퀴는 건너뜁니다");
+    return;                    // ★ 예외를 던지지 마세요. 정상 상황입니다
+}
+
+await settle.RunAsync(ct);     // 여기부터는 나 혼자입니다</code></pre>
+      <div class="note tip">
+        <b><code>LockOwner = "Session"</code> 이 핵심입니다.</b>
+        <code>"Transaction"</code> 으로 잡으면 트랜잭션이 끝날 때 풀리는데,
+        배치는 트랜잭션을 여러 번 나눠 커밋하므로 중간에 락이 사라집니다.
+        <b>세션(커넥션) 수명 = 배치 수명</b> 으로 맞추는 것이 맞습니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Windows <code>Mutex</code> 는 서버 간 중복을 못 막습니다.</b>
+        <code>new Mutex(true, @"Global\SettleBatch")</code> 는 <b>그 머신 안에서만</b> 유일합니다.
+        이중화한 배치 서버 2대는 서로를 전혀 모릅니다.
+        "뮤텍스 걸었는데 두 번 돌았다"는 사고가 여기서 나옵니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="h">종료 신호를 <span class="t">끝까지 전파하기</span> <span class="lvl h">🔴 고급</span></h3>
+
+  <p class="tx">
+    <code>CancellationToken</code> 은 <b>인자로 계속 넘기지 않으면 아무 일도 안 합니다</b>.
+    자바의 <code>Thread.interrupt()</code> 와 달리 스레드를 건드리는 것이 아니라
+    <b>"멈춰 달라"는 값</b>일 뿐이라, 받는 쪽이 확인해야 멈춥니다.
+    아래 세 곳을 빠뜨리면 <b>Ctrl+C 를 눌러도 안 죽는 배치</b>가 됩니다.
+  </p>
+
+  <pre class="code" data-lang="csharp"><code>// ① 모든 async 호출에 토큰을 넘긴다 — 하나라도 빠지면 거기서 멈춥니다
+await db.SaveChangesAsync(ct);
+await http.GetAsync(url, ct);
+await stream.ReadAsync(buf, ct);
+await foreach (var row in ReadCsvAsync(path).WithCancellation(ct)) { ... }
+
+// ② 루프 안에서 스스로 확인한다 (CPU 바운드 구간엔 await 가 없으므로)
+foreach (var chunk in chunks)
+{
+    ct.ThrowIfCancellationRequested();     // 여기서 던져 나갑니다
+    Process(chunk);
+}
+
+// ③ 긴 배치는 "안전 지점"에서만 나간다 — 청크 경계
+foreach (var chunk in chunks)
+{
+    await ProcessAndCommitAsync(chunk, CancellationToken.None); // 이 안은 끝까지
+    await SaveCheckpointAsync(chunk.LastId, CancellationToken.None);
+
+    if (ct.IsCancellationRequested)        // 커밋 직후에만 빠져나옵니다
+    {
+        log.LogWarning("종료 요청 — {Id} 까지 처리하고 중단", chunk.LastId);
+        break;                             // 다음 실행이 여기서 이어받습니다
+    }
+}</code></pre>
+
+  <div class="note info">
+    <b>왜 ③에서 <code>CancellationToken.None</code> 을 쓰나요?</b>
+    청크 <b>한 개를 처리하는 도중</b>에 취소되면 DB 는 커밋됐는데 체크포인트는 안 남는
+    <b>어중간한 상태</b>가 됩니다. 그래서 "한 청크는 무조건 끝까지, 대신 청크 경계에서만 나간다"로 설계합니다.
+    <code>ShutdownTimeout</code> 을 <b>청크 하나의 최대 소요 시간보다 길게</b> 잡아야 하는 이유이기도 합니다.
+    Spring Batch 의 <code>StepExecution</code> 종료 처리도 같은 원리로 <b>청크 경계</b>에서만 멈춥니다.
+  </div>
+
+  <div class="note tip">
+    <b>Windows 서비스 · systemd 로 등록하는 방법은 🖧 서버 구축 탭(h04 · h05)</b> 에서
+    <code>sc.exe create</code> · 유닛 파일 전문과 함께 다룹니다.
+    여기서는 <code>AddWindowsService()</code> / <code>AddSystemd()</code> 한 줄이면
+    <b>같은 실행 파일이 콘솔로도 서비스로도 뜬다</b>는 것만 기억하세요 —
+    개발 중에는 <code>dotnet run</code>, 운영에서는 서비스입니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>BackgroundService</code> 는 싱글턴이니 <b>바퀴마다 스코프를 열고</b>, 종료 토큰을 <b>끝까지 인자로 넘기며</b>, 이중화했다면 <b><code>sp_getapplock</code> 으로 한 대만</b> 돌게 합니다.</div>
+</section>
+
+
+<!-- ==================== f03 ==================== -->
+<section class="sec" id="f03">
+  <div class="sec-head rv">
+    <span class="no">BATCH 03</span>
+    <h2>스케줄링 — <span class="t">크론 · 미스파이어 · 시간대</span></h2>
+    <p class="lead">
+      "매일 새벽 2시 10분"을 적는 것은 쉽습니다. 어려운 것은
+      <b>서버가 두 대일 때 · 그 시각에 서버가 꺼져 있었을 때 · 서머타임이 낀 나라일 때</b> 입니다.
+      운영 사고는 전부 이 세 곳에서 납니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 312" role="img" aria-label="배치 서버 두 대가 같은 시각에 깨어나 하나만 실행하는 시퀀스. 두 서버가 거의 동시에 스케줄러 신호를 받고 데이터베이스에 애플리케이션 락을 요청하면, 먼저 도착한 A 서버만 락을 얻어 정산을 수행하고 B 서버는 즉시 거절되어 건너뛴다. 정산이 끝나면 A가 커넥션을 닫아 락이 자동 해제된다">
+      <text x="16" y="18" class="lbl">02:10:00 — 두 대가 동시에 깨어납니다. 세로가 시간</text>
+
+      <rect class="actr" x="26" y="30" width="120" height="28"/>
+      <text x="86" y="49" class="ann" text-anchor="middle">배치서버 A</text>
+      <rect class="actr" x="196" y="30" width="120" height="28"/>
+      <text x="256" y="49" class="ann" text-anchor="middle">배치서버 B</text>
+      <rect class="actr" x="376" y="30" width="120" height="28"/>
+      <text x="436" y="49" class="ann" text-anchor="middle">SQL Server</text>
+      <rect class="actr" x="546" y="30" width="112" height="28"/>
+      <text x="602" y="49" class="ann" text-anchor="middle">정산 대상 DB</text>
+
+      <path class="life" d="M86 60 L86 268"/>
+      <path class="life" d="M256 60 L256 268"/>
+      <path class="life" d="M436 60 L436 268"/>
+      <path class="life" d="M602 60 L602 268"/>
+
+      <rect class="actv" x="81" y="76" width="10" height="164"/>
+      <rect class="actv" x="251" y="90" width="10" height="34"/>
+
+      <path class="msg" d="M86 82 L428 82"/>
+      <text x="94" y="77" class="ann">1. sp_getapplock 'daily-settle' (Exclusive · Session)</text>
+
+      <path class="msg-a" d="M428 104 L94 104"/>
+      <text x="100" y="99" class="ann ok-t">2. 반환 0 — 획득 성공</text>
+
+      <path class="msg" d="M256 122 L428 122"/>
+      <text x="264" y="117" class="ann">3. 같은 락 요청 (Timeout 0)</text>
+
+      <path class="msg-a" d="M428 144 L264 144"/>
+      <text x="270" y="139" class="ann rs-t">4. 반환 −1 — 즉시 거절</text>
+
+      <text x="264" y="164" class="ann">5. B 는 로그만 남기고 종료 (예외 아님)</text>
+
+      <path class="msg" d="M96 186 L594 186"/>
+      <text x="104" y="181" class="ann">6. A 만 정산 수행 — 400만 건 청크 처리</text>
+
+      <path class="msg-a" d="M594 214 L104 214"/>
+      <text x="110" y="209" class="ann">7. 커밋 완료 · BatchRun 상태 = Success</text>
+
+      <path class="msg" d="M96 240 L428 240"/>
+      <text x="104" y="235" class="ann ok-t">8. 커넥션 Close — 락 자동 해제 (A 가 죽어도 동일)</text>
+
+      <text x="16" y="288" class="lbl">B 를 예외로 죽이면 알림이 매일 울립니다 — 건너뛴 것은 "정상"으로 로그만 남기세요</text>
+      <text x="16" y="304" class="lbl">실선은 요청 · 점선은 응답 · 세로 막대는 그 서버가 일하는 구간</text>
+    </svg>
+    <div class="cap">중복 실행 방지 — <b>락은 커넥션에 매답니다</b>. 서버가 통째로 죽어도 세션이 끊기면 풀립니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="e">크론 표현식 — <span class="t">자리 수부터 세기</span> <span class="lvl e">🟢 기초</span></h3>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>표현식</th><th>자리</th><th>뜻</th><th>Spring 대응</th></tr></thead>
+      <tbody>
+        <tr><td><code>0 10 2 * * *</code></td><td>초 분 시 일 월 요일 (6)</td><td>매일 02:10:00</td><td><code>@Scheduled(cron="0 10 2 * * *")</code> — 동일</td></tr>
+        <tr><td><code>10 2 * * *</code></td><td>분 시 일 월 요일 (5)</td><td>매일 02:10 (표준 crontab)</td><td>없음 — Spring 은 항상 6자리</td></tr>
+        <tr><td><code>0 */10 * * * *</code></td><td>6</td><td>10분마다</td><td>동일</td></tr>
+        <tr><td><code>0 0 3 1 * *</code></td><td>6</td><td>매월 1일 03:00</td><td>동일</td></tr>
+        <tr><td><code>0 0 3 L * ?</code></td><td>Quartz 전용</td><td><b>매월 말일</b> 03:00</td><td>Quartz 동일 (<code>L</code> = Last)</td></tr>
+        <tr><td><code>0 0 3 ? * MON-FRI</code></td><td>Quartz 전용</td><td>평일만 03:00</td><td>Quartz 동일</td></tr>
+        <tr><td><code>0 0 3 ? * 6#3</code></td><td>Quartz 전용</td><td>매월 <b>셋째 금요일</b></td><td>Quartz 동일</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note warn">
+    <b><code>L</code> · <code>W</code> · <code>#</code> 는 Quartz.NET 에서만 됩니다.</b>
+    Hangfire 는 <a href="#f03">Cronos</a> 라이브러리를 쓰는데 <code>L</code> 을 지원하지만
+    <code>W</code>(가장 가까운 평일) · <code>#</code>(n번째 요일)은 지원하지 않습니다.
+    <b>"말일 정산" · "셋째 금요일 마감"</b> 같은 사내 규칙이 있으면
+    Hangfire 로는 <b>매일 돌리고 코드에서 날짜를 판단</b>하는 편이 안전합니다 —
+    공휴일 테이블을 봐야 하는 순간 어차피 크론으로는 못 적습니다.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">시간대 — 한국은 서머타임이 없지만</h4>
+      <pre class="code" data-lang="csharp"><code>// ★ .NET 8+ 부터 Windows/Linux 양쪽에서 이 ID 가 다 통합니다
+static readonly TimeZoneInfo Kst =
+    TimeZoneInfo.FindSystemTimeZoneById("Asia/Seoul");
+
+// Hangfire
+RecurringJob.AddOrUpdate&lt;SettleJob&gt;(
+    "daily-settle", j =&gt; j.RunAsync(default),
+    "0 10 2 * * *",
+    new RecurringJobOptions { TimeZone = Kst });
+
+// Quartz
+.WithCronSchedule("0 10 2 * * ?", x =&gt; x.InTimeZone(Kst))</code></pre>
+      <div class="note tip">
+        <b>서버 시간대에 의존하지 마세요.</b>
+        컨테이너는 대개 UTC 로 뜹니다. 코드에서 KST 를 <b>명시</b>하지 않으면
+        운영은 02:10, 개발 PC 는 11:10 에 도는 상태가 됩니다.
+        <b>로그는 UTC, 스케줄은 KST</b> — 이렇게 나누는 것이 사고가 적습니다.
+      </div>
+      <pre class="code" data-lang="csharp"><code>// 배치 안에서 "오늘"을 정할 때 — 이게 정답입니다
+var kstNow  = TimeZoneInfo.ConvertTimeFromUtc(
+                  DateTime.UtcNow, Kst);
+var bizDate = kstNow.AddHours(-3).Date;   // 02:10 실행 → 전날 마감분
+
+// DateTime.Now 는 서버 설정에 따라 값이 달라집니다. 쓰지 마세요.</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Hangfire — 재시도 · 큐 · 연속 작업</h4>
+      <pre class="code" data-lang="csharp"><code>public sealed class SettleJob(ISettleService svc)
+{
+    // 실패하면 20초 · 5분 · 30분 뒤 세 번 더
+    [AutomaticRetry(Attempts = 3,
+        DelaysInSeconds = [20, 300, 1800],
+        OnAttemptsExceeded = AttemptsExceededAction.Fail)]
+    [DisableConcurrentExecution(timeoutInSeconds: 3 * 60 * 60)]
+    [Queue("settle")]
+    public async Task RunAsync(CancellationToken ct)
+        =&gt; await svc.RunAsync(ct);
+}
+
+// 연속 작업 — A 가 성공해야 B 가 돕니다 (Spring Batch 의 Step 연결)
+var loadId = BackgroundJob.Enqueue&lt;LoadJob&gt;(j =&gt; j.RunAsync(default));
+var aggId  = BackgroundJob.ContinueJobWith&lt;AggJob&gt;(
+                 loadId, j =&gt; j.RunAsync(default));
+BackgroundJob.ContinueJobWith&lt;SendJob&gt;(
+                 aggId,  j =&gt; j.RunAsync(default));</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>[DisableConcurrentExecution]</code> 의 timeout 은 "락을 기다리는 시간"</b>입니다.
+        3시간짜리 배치에 60초를 주면 두 번째 호출이 <b>60초 기다리다 예외</b>로 실패합니다.
+        <b>배치 최장 소요 시간보다 길게</b> 잡거나,
+        건너뛰는 것이 정상인 배치라면 f02 의 <code>sp_getapplock</code> 을 직접 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">놓친 실행을 <span class="t">어떻게 처리할 것인가</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <p class="tx">
+    배치 서버를 3일간 점검하느라 내렸습니다. 다시 켰습니다.
+    <b>밀린 3번의 실행을 어떻게 할까요?</b> 이 질문에 답을 정해 두지 않으면
+    복구하자마자 두 번째 사고가 납니다. 정산이 3일치 겹쳐서 도는 것이 대표적입니다.
+  </p>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>정책</th><th>Quartz.NET</th><th>Hangfire</th><th>결과</th><th>이럴 때</th></tr></thead>
+      <tbody>
+        <tr><td>밀린 것 전부 실행</td><td><code>WithMisfireHandlingInstructionIgnoreMisfires()</code></td><td>불가</td><td>3번 연속 실행</td><td>날짜별로 <b>독립</b>인 집계 (일별 통계)</td></tr>
+        <tr><td>한 번만 실행하고 정상 궤도</td><td><code>...FireAndProceed()</code></td><td><b>기본 동작</b></td><td>1번 실행</td><td><b>대부분의 정산 배치.</b> 안전한 기본값</td></tr>
+        <tr><td>건너뛰기</td><td><code>...DoNothing()</code></td><td>불가</td><td>0번, 다음 정시부터</td><td>실시간성이 전부인 알림 발송</td></tr>
+        <tr><td><b>날짜를 인자로 받아 직접 루프</b></td><td colspan="2">두 엔진 모두 이 방식이 가능</td><td>내가 정한 만큼</td><td><b>실무 권장.</b> 아래 코드</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre class="code" data-lang="csharp"><code>// ★ 실무에서 가장 안전한 형태 — 스케줄러는 "깨우기만" 하고
+//    무엇을 처리할지는 배치가 DB 를 보고 스스로 판단합니다
+public async Task RunAsync(CancellationToken ct)
+{
+    var today = KstToday();
+
+    // 아직 성공하지 않은 영업일을 오래된 것부터 가져옵니다
+    var pending = await db.BusinessDays
+        .Where(d =&gt; d.Date &lt; today &amp;&amp; d.SettleState != SettleState.Done)
+        .OrderBy(d =&gt; d.Date)
+        .Take(7)                    // ★ 한 번에 최대 7일치만 (폭주 방지)
+        .ToListAsync(ct);
+
+    if (pending.Count == 0) { log.LogInformation("처리할 영업일 없음"); return; }
+
+    foreach (var day in pending)
+    {
+        log.LogInformation("정산 시작 {Date} (밀린 {N}일 중)", day.Date, pending.Count);
+        await SettleOneDayAsync(day.Date, ct);
+        if (ct.IsCancellationRequested) break;   // 남은 날은 다음 실행이 맡습니다
+    }
+}</code></pre>
+
+  <div class="note tip">
+    <b>이 패턴을 "멱등한 캐치업(catch-up)" 이라고 부릅니다.</b>
+    스케줄러의 미스파이어 정책에 <b>전혀 의존하지 않습니다</b> —
+    5분마다 깨워도, 하루 한 번 깨워도, 수동으로 눌러도 결과가 같습니다.
+    Spring Batch 의 <code>JobParameters</code> 유니크 제약으로 중복 실행을 막던 것을
+    <b>업무 데이터 자신의 상태</b>로 옮긴 형태입니다.
+    <b>배치를 언제 눌러도 안전하다</b>는 것은 운영 이관 때 가장 크게 칭찬받는 성질입니다.
+  </div>
+
+  <div class="note warn">
+    <b>서머타임이 있는 나라의 배치를 짜야 한다면.</b>
+    미국·유럽 시간대에서 <b>새벽 2:30 은 1년에 한 번 존재하지 않고, 한 번은 두 번 존재</b>합니다.
+    존재하지 않는 시각에 걸린 잡은 건너뛰고, 두 번 있는 시각의 잡은 두 번 돕니다.
+    해결책은 하나뿐입니다 — <b>배치 시각을 01:00~01:59 또는 03:00 이후로</b> 잡으세요.
+    한국(KST)은 서머타임이 없어 이 문제가 없지만, 해외 법인 데이터를 다루면 만납니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 크론은 <b>자리 수와 시간대를 명시</b>하고, 중복 실행은 <b>DB 락</b>으로 막고, 밀린 실행은 스케줄러 정책이 아니라 <b>업무 데이터 상태</b>로 판단합니다.</div>
+</section>
+
+
+<!-- ==================== f04 ==================== -->
+<section class="sec" id="f04">
+  <div class="sec-head rv">
+    <span class="no">BATCH 04</span>
+    <h2>청크 처리 — <span class="t">Spring Batch 를 300줄로</span> 다시 짓기</h2>
+    <p class="lead">
+      Reader-Processor-Writer, 커밋 단위, 재시작 지점.
+      <b>Spring Batch 가 대신 해 주던 것을 직접 만드는</b> 섹션입니다.
+      만들고 나면 오히려 "이게 다였나" 싶어집니다 — 대신 <b>내 도메인에 정확히 맞습니다</b>.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="청크 처리 순환. 읽기, 변환, 쓰기, 커밋과 체크포인트 네 단계가 원을 이루며 반복되고, 커밋이 끝나면 다시 읽기로 돌아가 다음 청크를 가져온다. 가운데에 청크 하나가 천 건이고 커밋 한 번에 걸리는 시간이 적혀 있다. 실패하면 마지막 체크포인트부터 다시 시작한다">
+      <text x="16" y="18" class="lbl">청크 한 바퀴 — 커밋과 체크포인트는 반드시 같은 트랜잭션 안에서</text>
+
+      <circle class="nd nd-fw" cx="340" cy="76" r="44"/>
+      <text x="340" y="72" class="ann" text-anchor="middle">① 읽기</text>
+      <text x="340" y="86" class="ann" text-anchor="middle">1,000건</text>
+
+      <circle class="nd" cx="506" cy="158" r="44"/>
+      <text x="506" y="154" class="ann" text-anchor="middle">② 변환</text>
+      <text x="506" y="168" class="ann" text-anchor="middle">검증 · 필터</text>
+
+      <circle class="nd" cx="340" cy="240" r="44"/>
+      <text x="340" y="236" class="ann" text-anchor="middle">③ 쓰기</text>
+      <text x="340" y="250" class="ann" text-anchor="middle">벌크 적재</text>
+
+      <circle class="nd nd-ok" cx="174" cy="158" r="44"/>
+      <text x="174" y="154" class="ann" text-anchor="middle">④ 커밋</text>
+      <text x="174" y="168" class="ann" text-anchor="middle">+ 체크포인트</text>
+
+      <path class="ln ar" d="M385 96 A 104 104 0 0 1 466 136"/>
+      <path class="ln ar" d="M466 180 A 104 104 0 0 1 385 220"/>
+      <path class="ln ar" d="M295 220 A 104 104 0 0 1 214 180"/>
+      <path class="ln ar" d="M214 136 A 104 104 0 0 1 295 96"/>
+
+      <text x="340" y="152" class="val" text-anchor="middle">1,000건 / 1.2초</text>
+      <text x="340" y="168" class="ann" text-anchor="middle">한 바퀴의 비용</text>
+      <text x="340" y="184" class="ann" text-anchor="middle">400만 건 = 4,000바퀴</text>
+
+      <path class="ln ar" d="M130 158 L60 158 L60 262"/>
+      <text x="16" y="146" class="ann rs-t">실패하면</text>
+      <text x="16" y="280" class="ann">마지막 체크포인트의 LastId 부터 ①로 다시 — 이미 커밋된 건은 건드리지 않습니다</text>
+    </svg>
+    <div class="cap">청크 루프 — <b>커밋과 체크포인트가 한 트랜잭션</b>이어야 "어디까지 했는지"가 절대 어긋나지 않습니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="e">이력 · 체크포인트 <span class="t">스키마</span> — JobRepository 를 손으로 <span class="lvl e">🟢 기초</span></h3>
+
+  <pre class="code" data-lang="sql"><code>-- 배치 실행 1회 = 1행. Spring Batch 의 BATCH_JOB_EXECUTION 에 해당
+CREATE TABLE BatchRun (
+    RunId        BIGINT       IDENTITY PRIMARY KEY,
+    JobName      VARCHAR(60)  NOT NULL,
+    BizDate      DATE         NOT NULL,      -- 처리 대상 영업일
+    Status       VARCHAR(12)  NOT NULL,      -- Running / Success / Failed / Stopped
+    StartedAt    DATETIME2(3) NOT NULL,
+    FinishedAt   DATETIME2(3) NULL,
+    ReadCount    INT          NOT NULL DEFAULT 0,
+    WriteCount   INT          NOT NULL DEFAULT 0,
+    SkipCount    INT          NOT NULL DEFAULT 0,
+    LastError    NVARCHAR(2000) NULL,
+    MachineName  VARCHAR(60)  NOT NULL,
+    -- ★ 같은 잡 + 같은 영업일은 성공 1건만 — 중복 정산을 DB 가 막습니다
+    CONSTRAINT UX_BatchRun UNIQUE (JobName, BizDate, Status)
+        -- SQL Server 라면 필터 인덱스가 더 정확합니다:
+        -- CREATE UNIQUE INDEX ... WHERE Status = 'Success'
+);
+
+-- 재시작 지점. Spring Batch 의 ExecutionContext 에 해당
+CREATE TABLE BatchCheckpoint (
+    JobName      VARCHAR(60)  NOT NULL,
+    BizDate      DATE         NOT NULL,
+    StepName     VARCHAR(60)  NOT NULL,
+    LastKey      VARCHAR(120) NOT NULL,      -- 키셋 페이징의 마지막 키
+    DoneCount    BIGINT       NOT NULL,
+    UpdatedAt    DATETIME2(3) NOT NULL,
+    PRIMARY KEY (JobName, BizDate, StepName)
+);
+
+-- 스킵된 건. 버리지 말고 반드시 남깁니다 (f12 재처리 화면의 원천)
+CREATE TABLE BatchSkip (
+    SkipId    BIGINT IDENTITY PRIMARY KEY,
+    RunId     BIGINT       NOT NULL,
+    LineNo    BIGINT       NOT NULL,
+    RawLine   NVARCHAR(MAX) NULL,            -- 원문 그대로 보관
+    Reason    NVARCHAR(400) NOT NULL,
+    CreatedAt DATETIME2(3) NOT NULL
+);</code></pre>
+
+  <div class="note tip">
+    <b>왜 <code>LastKey</code> 를 문자열로 두나요?</b>
+    단계마다 재시작 키가 다르기 때문입니다 —
+    파일 읽기 단계는 <b>바이트 오프셋</b>, DB 처리 단계는 <b>마지막 PK</b>,
+    API 호출 단계는 <b>페이지 토큰</b>.
+    <code>BIGINT</code> 로 못 박으면 첫 번째 예외에서 스키마를 바꿔야 합니다.
+    Spring Batch 의 <code>ExecutionContext</code> 가 <b>키-값 문자열 맵</b>인 것과 같은 이유입니다.
+  </div>
+
+  <h3 class="sub" data-lv="m">Reader-Processor-Writer — <span class="t">C# 다운 형태</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <p class="tx">
+    자바에서는 인터페이스 세 개를 구현했습니다. C# 에서는 <b>인터페이스가 하나도 필요 없습니다</b> —
+    <code>IAsyncEnumerable&lt;T&gt;</code> 하나로 Reader 가 되고, LINQ 가 Processor 가 되고,
+    Writer 만 메서드로 남습니다.
+  </p>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Reader — yield return 이 곧 ItemReader</h4>
+      <pre class="code" data-lang="csharp"><code>// ★ 400만 행이어도 메모리에 1건씩만 올라옵니다
+public static async IAsyncEnumerable&lt;TradeRow&gt; ReadAsync(
+    string path,
+    long skipLines,                              // 체크포인트에서 이어받기
+    [EnumeratorCancellation] CancellationToken ct = default)
+{
+    using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
+                                  FileShare.Read, 64 * 1024,
+                                  FileOptions.SequentialScan);
+    using var sr = new StreamReader(fs, Encoding.UTF8);
+
+    long lineNo = 0;
+    while (await sr.ReadLineAsync(ct) is { } line)
+    {
+        lineNo++;
+        if (lineNo &lt;= skipLines) continue;       // 이미 처리한 구간은 건너뜀
+        if (line.Length == 0) continue;
+
+        yield return TradeRow.Parse(line, lineNo);
+    }
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>[EnumeratorCancellation]</code> 를 빠뜨리면</b>
+        호출부의 <code>.WithCancellation(ct)</code> 가 <b>조용히 무시</b>됩니다.
+        컴파일 경고도 안 납니다(분석기를 켜면 CA2016 이 잡아 줍니다).
+        <code>IAsyncEnumerable</code> 을 쓸 때 <b>가장 흔한 실수</b>입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Chunk — 청크 자르기 확장 메서드</h4>
+      <pre class="code" data-lang="csharp"><code>public static async IAsyncEnumerable&lt;List&lt;T&gt;&gt; ChunkAsync&lt;T&gt;(
+    this IAsyncEnumerable&lt;T&gt; src, int size,
+    [EnumeratorCancellation] CancellationToken ct = default)
+{
+    var buf = new List&lt;T&gt;(size);
+    await foreach (var item in src.WithCancellation(ct))
+    {
+        buf.Add(item);
+        if (buf.Count &lt; size) continue;
+        yield return buf;
+        buf = new List&lt;T&gt;(size);     // ★ 재사용하지 말 것 — 아래 warn
+    }
+    if (buf.Count &gt; 0) yield return buf;
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>buf.Clear()</code> 로 재사용하면 버그입니다.</b>
+        소비자가 그 리스트를 <b>비동기로 붙잡고 있는 사이</b>
+        생산자가 지워 버립니다. 실제로 "가끔 몇 백 건이 사라지는" 사고가
+        이 한 줄에서 납니다. GC 압박이 걱정되면
+        <code>ArrayPool&lt;T&gt;</code> 로 명시적으로 빌리고 반납하세요 (f06).
+      </div>
+      <pre class="code" data-lang="csharp"><code>// .NET 10 표준 LINQ 에도 Chunk 가 있습니다 (동기 IEnumerable 전용)
+foreach (var page in list.Chunk(1000)) { ... }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="h">전체 청크 루프 — <span class="t">재시작 가능한 배치 본문</span> <span class="lvl h">🔴 고급</span></h3>
+
+  <pre class="code" data-lang="csharp"><code>public sealed class ChunkRunner(
+    IDbContextFactory&lt;AppDbContext&gt; dbf,
+    IBatchJournal journal,
+    ILogger&lt;ChunkRunner&gt; log)
+{
+    public async Task&lt;BatchResult&gt; RunAsync(
+        string job, DateOnly bizDate, string step,
+        Func&lt;string?, IAsyncEnumerable&lt;TradeRow&gt;&gt; readFrom,
+        int chunkSize, int skipLimit, CancellationToken ct)
+    {
+        var run  = await journal.StartAsync(job, bizDate, ct);
+        var last = await journal.LoadCheckpointAsync(job, bizDate, step, ct);
+        long read = 0, wrote = 0, skipped = 0;
+
+        log.LogInformation("재시작 지점 {Key} 부터 시작", last?.LastKey ?? "(처음)");
+
+        try
+        {
+            await foreach (var chunk in readFrom(last?.LastKey)
+                                        .ChunkAsync(chunkSize, ct))
+            {
+                read += chunk.Count;
+
+                // ── ② 변환 · 검증 : 실패 건은 버리지 말고 모읍니다
+                var good = new List&lt;Trade&gt;(chunk.Count);
+                var bad  = new List&lt;(TradeRow Row, string Why)&gt;();
+                foreach (var row in chunk)
+                {
+                    if (Validate(row) is { } why) bad.Add((row, why));
+                    else good.Add(Map(row));
+                }
+
+                // ── ③ + ④ 쓰기와 체크포인트를 한 트랜잭션으로
+                await using var db = await dbf.CreateDbContextAsync(ct);
+                await using var tx = await db.Database
+                                             .BeginTransactionAsync(ct);
+
+                await db.BulkInsertAsync(good, ct);          // f05
+                await journal.AppendSkipsAsync(db, run.RunId, bad, ct);
+                await journal.SaveCheckpointAsync(
+                    db, job, bizDate, step,
+                    lastKey: chunk[^1].Key, done: read, ct);  // ★ 같은 tx
+
+                await tx.CommitAsync(ct);                    // 여기서 원자적 확정
+
+                wrote   += good.Count;
+                skipped += bad.Count;
+
+                if (skipped &gt; skipLimit)
+                    throw new BatchAbortException(
+                        $"스킵 한도 초과 {skipped} &gt; {skipLimit}");
+
+                if (read % 100_000 == 0)
+                    log.LogInformation("진행 {Read}건 · 적재 {Wrote} · 스킵 {Skip}",
+                                        read, wrote, skipped);
+
+                if (ct.IsCancellationRequested)              // 청크 경계에서만 탈출
+                {
+                    await journal.StopAsync(run.RunId, read, wrote, skipped, ct);
+                    return BatchResult.Stopped(read, wrote, skipped);
+                }
+            }
+
+            await journal.SucceedAsync(run.RunId, read, wrote, skipped, ct);
+            return BatchResult.Success(read, wrote, skipped);
+        }
+        catch (Exception ex)
+        {
+            // 체크포인트는 이미 커밋되어 있으므로 다음 실행이 이어받습니다
+            await journal.FailAsync(run.RunId, ex, read, wrote, skipped,
+                                    CancellationToken.None);
+            throw;
+        }
+    }
+}</code></pre>
+
+  <div class="note tip">
+    <b>이 코드에서 진짜 중요한 줄은 딱 두 개입니다.</b>
+    ① <code>SaveCheckpointAsync</code> 가 <b><code>BulkInsert</code> 와 같은 트랜잭션</b> 안에 있다는 것,
+    ② 예외가 나도 <b>이미 커밋된 청크는 되돌리지 않는다</b>는 것.
+    나머지는 로깅과 카운팅입니다.
+    Spring Batch 도 정확히 이 두 가지를 <code>JobRepository</code> 로 보장하고 있었습니다.
+  </div>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>결정</th><th>작게(100)</th><th>보통(1,000)</th><th>크게(10,000)</th><th>기준</th></tr></thead>
+      <tbody>
+        <tr><td>커밋 횟수</td><td>많음 — 트랜잭션 로그 부담</td><td>적정</td><td>적음</td><td>DB 로그 디스크 여유</td></tr>
+        <tr><td>재시작 손실</td><td>거의 없음</td><td>최대 1,000건 재처리</td><td>최대 1만 건 재처리</td><td>1건 처리 비용이 비싸면 작게</td></tr>
+        <tr><td>메모리</td><td>수 KB</td><td>수 MB</td><td>수십 MB</td><td>행 하나가 크면(BLOB) 작게</td></tr>
+        <tr><td>락 유지 시간</td><td>짧음</td><td>보통</td><td><b>길다 — 온라인 서비스 방해</b></td><td>야간 전용이면 크게 가능</td></tr>
+        <tr><td><b>권장</b></td><td>외부 API 호출이 낀 단계</td><td><b>기본값. 여기서 시작</b></td><td>순수 벌크 적재 전용</td><td>재 보고 조정</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note warn">
+    <b>멱등성 — "두 번 돌아도 결과가 같은가"를 반드시 자문하세요.</b>
+    체크포인트가 있어도 <b>마지막 청크는 재실행될 수 있습니다</b>
+    (커밋 직후 프로세스가 죽으면 체크포인트는 남지만, 그 반대 순서로 죽으면 청크가 다시 옵니다).
+    그래서 Writer 는 <b>INSERT 가 아니라 MERGE(UPSERT)</b> 이거나,
+    <b>업무 키에 유니크 제약</b>이 걸려 있어야 합니다.
+    "이번엔 괜찮겠지"로 넘어간 배치는 정확히 <b>운영 3개월째</b>에 중복 정산으로 돌아옵니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> Reader 는 <code>IAsyncEnumerable</code>, Processor 는 LINQ, Writer 는 벌크. <b>커밋과 체크포인트를 한 트랜잭션</b>으로 묶고, 스킵 건은 버리지 말고 테이블에 남깁니다.</div>
+</section>
+
+
+<!-- ==================== f05 ==================== -->
+<section class="sec" id="f05">
+  <div class="sec-head rv">
+    <span class="no">BATCH 05</span>
+    <h2>대용량 DB 처리 — <span class="t">400만 행을 넣고 고치고 지우기</span></h2>
+    <p class="lead">
+      JPA 로 <code>saveAll()</code> 을 돌려 본 적 있다면 결말을 압니다.
+      EF Core 도 똑같이 느립니다. <b>대용량에서는 ORM 을 비켜 가는 길</b>이 따로 있고,
+      .NET 에는 그 길이 <b>아주 잘</b> 닦여 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="400만 행 적재 방식별 소요 시간 막대 그래프. EF Core로 한 건씩 SaveChanges를 부르면 3120초가 걸리고, 천 건씩 묶어 커밋하면 980초, EFCore.BulkExtensions는 96초, SqlBulkCopy는 41초가 걸린다. 가장 느린 방식과 가장 빠른 방식의 차이가 76배다">
+      <text x="16" y="18" class="lbl">거래 400만 행 적재 — 방식별 소요 시간 (같은 서버 · 같은 인덱스)</text>
+
+      <path class="gr" d="M300 34 L300 200"/>
+      <path class="gr" d="M410 34 L410 200"/>
+      <path class="gr" d="M520 34 L520 200"/>
+      <path class="gr" d="M630 34 L630 200"/>
+      <path class="ax" d="M190 34 L190 200"/>
+      <path class="ax" d="M190 200 L648 200"/>
+
+      <text x="190" y="216" class="tk" text-anchor="middle">0</text>
+      <text x="300" y="216" class="tk" text-anchor="middle">800</text>
+      <text x="410" y="216" class="tk" text-anchor="middle">1600</text>
+      <text x="520" y="216" class="tk" text-anchor="middle">2400</text>
+      <text x="630" y="216" class="tk" text-anchor="middle">3200초</text>
+
+      <text x="16" y="53" class="ann">건별 SaveChanges</text>
+      <rect class="bar" x="190" y="40" width="429" height="18"/>
+      <text x="613" y="53" class="tk" text-anchor="end">3,120초 (52분)</text>
+
+      <text x="16" y="85" class="ann">1,000건씩 커밋</text>
+      <rect class="bar" x="190" y="72" width="135" height="18"/>
+      <text x="331" y="85" class="tk">980초</text>
+
+      <text x="16" y="117" class="ann">BulkExtensions</text>
+      <rect class="bar" x="190" y="104" width="13" height="18"/>
+      <text x="209" y="117" class="tk">96초</text>
+
+      <text x="16" y="149" class="ann ok-t">SqlBulkCopy</text>
+      <rect class="bar" x="190" y="136" width="6" height="18"/>
+      <text x="202" y="149" class="tk ok-t">41초 — 권장</text>
+
+      <text x="196" y="182" class="ann">차이는 76배 — 왕복 횟수와 트랜잭션 로그 기록량의 차이입니다</text>
+
+      <text x="16" y="236" class="lbl">막대가 안 보일 만큼 짧은 것이 결론입니다 — 축을 로그로 바꿔 예쁘게 만들지 마세요</text>
+      <text x="16" y="252" class="lbl">단, SqlBulkCopy 는 트리거와 제약 검사를 건너뜁니다. 그래서 빠릅니다(아래 warn)</text>
+    </svg>
+    <div class="cap">적재 방식 비교 — <b>ORM 을 통과하는 순간 76배</b>. 대용량 적재에 EF Core 를 쓰지 않습니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="e"><span class="t">SqlBulkCopy</span> — .NET 이 가진 가장 강한 카드 <span class="lvl e">🟢 기초</span></h3>
+
+  <p class="tx">
+    자바에는 <code>rewriteBatchedStatements</code> · <code>LOAD DATA INFILE</code> 같은
+    드라이버별 우회로가 있었지만 표준이 없었습니다.
+    .NET 은 <b><code>SqlBulkCopy</code> 가 BCL 에 들어 있습니다</b>(<code>Microsoft.Data.SqlClient</code>).
+    SQL Server 의 <b>대량 복사 프로토콜</b>을 그대로 씁니다 — INSERT 문을 만들지 않습니다.
+  </p>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">IAsyncEnumerable 을 그대로 붓기</h4>
+      <pre class="code" data-lang="csharp"><code>public static async Task BulkCopyAsync(
+    string cs, IEnumerable&lt;Trade&gt; rows, CancellationToken ct)
+{
+    await using var cn = new SqlConnection(cs);
+    await cn.OpenAsync(ct);
+
+    using var bulk = new SqlBulkCopy(cn, SqlBulkCopyOptions.TableLock, null)
+    {
+        DestinationTableName = "dbo.Trade_Stage",
+        BatchSize            = 10_000,   // 한 번에 서버로 넘길 행 수
+        BulkCopyTimeout      = 0,        // 0 = 무제한 (배치에서는 이게 맞습니다)
+        EnableStreaming      = true      // ★ 전체를 메모리에 안 올립니다
+    };
+
+    // 열 이름이 다르면 반드시 매핑 — 순서만 믿으면 언젠가 깨집니다
+    bulk.ColumnMappings.Add(nameof(Trade.TradeNo),  "TRADE_NO");
+    bulk.ColumnMappings.Add(nameof(Trade.TradedAt), "TRADED_AT");
+    bulk.ColumnMappings.Add(nameof(Trade.Amount),   "AMT");
+
+    // FastMember 로 객체 목록을 IDataReader 로 감쌉니다
+    using var reader = ObjectReader.Create(rows,
+        nameof(Trade.TradeNo), nameof(Trade.TradedAt), nameof(Trade.Amount));
+
+    await bulk.WriteToServerAsync(reader, ct);
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>ObjectReader</code></b> 는 <code>FastMember</code> 패키지(NuGet)의 것입니다.
+        <code>DataTable</code> 을 만들어 넣어도 되지만, <b>400만 행짜리 DataTable 은 그 자체로 수 GB</b> 입니다.
+        <code>ObjectReader</code> + <code>EnableStreaming</code> 조합이면
+        <b>메모리 사용량이 행 수와 무관</b>해집니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스테이징 → MERGE 패턴 (실무 표준)</h4>
+      <pre class="code" data-lang="sql"><code>-- ① 스테이징 테이블은 인덱스도 제약도 없이 비워 둡니다
+TRUNCATE TABLE dbo.Trade_Stage;
+
+-- ② SqlBulkCopy 로 붓기 (위 코드) — 41초
+
+-- ③ 한 문장으로 본 테이블에 반영. 멱등합니다
+MERGE dbo.Trade AS t
+USING (SELECT TRADE_NO, MAX(TRADED_AT) TRADED_AT, SUM(AMT) AMT
+       FROM dbo.Trade_Stage GROUP BY TRADE_NO) AS s
+   ON t.TradeNo = s.TRADE_NO
+WHEN MATCHED AND t.Amount &lt;&gt; s.AMT THEN
+     UPDATE SET t.Amount = s.AMT, t.UpdatedAt = SYSUTCDATETIME()
+WHEN NOT MATCHED BY TARGET THEN
+     INSERT (TradeNo, TradedAt, Amount, CreatedAt)
+     VALUES (s.TRADE_NO, s.TRADED_AT, s.AMT, SYSUTCDATETIME());</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>왜 바로 본 테이블에 붓지 않나요?</b>
+        ① 본 테이블에는 <b>인덱스와 제약</b>이 걸려 있어 벌크가 느려집니다.
+        ② 파일이 중간에 끊기면 <b>반쯤 들어간 상태</b>가 남습니다.
+        ③ 재실행하면 중복됩니다.
+        스테이징을 거치면 <b>①②③ 이 한꺼번에</b> 해결됩니다 —
+        Spring Batch 로 짜도 결국 같은 구조로 갑니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <b><code>SqlBulkCopy</code> 는 기본적으로 트리거·CHECK 제약·기본값을 건너뜁니다.</b>
+    빠른 이유가 그것입니다. 필요하면 옵션으로 켜야 하는데
+    (<code>SqlBulkCopyOptions.FireTriggers | CheckConstraints | KeepNulls</code>)
+    <b>켜는 만큼 느려집니다</b>.
+    본 테이블에 직접 부으면서 트리거를 끄면 <b>감사 로그가 통째로 빕니다</b> —
+    사내 시스템에서 실제로 자주 나는 사고입니다.
+    <b>스테이징 테이블에는 트리거를 두지 않고</b>, 트리거가 필요한 반영은 MERGE 로 하세요.
+  </div>
+
+  <h3 class="sub" data-lv="m">EF Core 로 <span class="t">대량 UPDATE · DELETE</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <p class="tx">
+    EF Core 7 부터 <code>ExecuteUpdate</code> / <code>ExecuteDelete</code> 가 들어왔습니다.
+    JPA 의 <code>@Modifying @Query</code> 에 해당하는데, <b>LINQ 로 쓴다</b>는 점이 다릅니다.
+    엔티티를 <b>메모리에 올리지 않고</b> SQL 한 문장으로 내려갑니다.
+  </p>
+
+  <div class="vs">
+    <div class="bad">
+      <h5>❌ 예전 방식 — 400만 건을 올렸다 내림</h5>
+      <pre class="code" data-lang="csharp"><code>var olds = await db.Trades
+    .Where(t =&gt; t.TradedAt &lt; cutoff)
+    .ToListAsync(ct);          // 메모리에 400만 개
+
+foreach (var t in olds) t.Archived = true;
+await db.SaveChangesAsync(ct); // UPDATE 400만 번</code></pre>
+      <p>메모리 3 GB · 52분 · 트랜잭션 로그 폭발.</p>
+    </div>
+    <div class="good">
+      <h5>✅ ExecuteUpdate — SQL 한 문장</h5>
+      <pre class="code" data-lang="csharp"><code>var n = await db.Trades
+    .Where(t =&gt; t.TradedAt &lt; cutoff &amp;&amp; !t.Archived)
+    .ExecuteUpdateAsync(s =&gt; s
+        .SetProperty(t =&gt; t.Archived,  true)
+        .SetProperty(t =&gt; t.UpdatedAt, DateTime.UtcNow), ct);
+
+log.LogInformation("{N}건 보관 처리", n);</code></pre>
+      <p>메모리 수 KB · 8초. <b>단, ChangeTracker 를 우회</b>하므로 이미 추적 중인 엔티티는 낡은 값을 갖습니다.</p>
+    </div>
+  </div>
+
+  <pre class="code" data-lang="csharp"><code>// 대량 삭제는 반드시 "나눠서" — 한 방에 지우면 락이 테이블 전체로 승격됩니다
+int deleted, total = 0;
+do
+{
+    deleted = await db.Trades
+        .Where(t =&gt; t.TradedAt &lt; cutoff)
+        .OrderBy(t =&gt; t.Id)
+        .Take(50_000)                          // ★ 5만 건씩
+        .ExecuteDeleteAsync(ct);
+
+    total += deleted;
+    await Task.Delay(200, ct);                 // 온라인 서비스에 숨통을 틔워 줍니다
+}
+while (deleted &gt; 0 &amp;&amp; !ct.IsCancellationRequested);</code></pre>
+
+  <div class="note warn">
+    <b>한 트랜잭션에서 100만 행을 지우면 락 에스컬레이션이 일어납니다.</b>
+    SQL Server 는 한 문장이 <b>약 5,000개 이상의 행/페이지 락</b>을 잡으면
+    <b>테이블 락으로 승격</b>합니다. 그 순간 온라인 조회가 전부 멈춥니다.
+    "새벽 배치 돌 때만 화면이 느려요"의 90% 가 이것입니다.
+    <b>나눠 지우고 · 사이에 쉬는</b> 위 패턴이 정답입니다.
+  </div>
+
+  <h3 class="sub" data-lv="h">키셋 페이징 — <span class="t">OFFSET 이 뒤로 갈수록 느려지는 이유</span> <span class="lvl h">🔴 고급</span></h3>
+
+  <p class="tx">
+    <code>Skip(n).Take(1000)</code> 은 SQL 의 <code>OFFSET n ROWS</code> 가 됩니다.
+    DB 는 <b>n 개를 실제로 읽어서 버린 다음</b> 1,000개를 줍니다.
+    400만 행의 마지막 페이지를 읽으려면 <b>400만 행을 읽고 버립니다</b>.
+    총합으로 보면 <b>O(n²)</b> — 이것이 "배치가 뒤로 갈수록 느려지는" 정체입니다.
+  </p>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>페이지</th><th>OFFSET 방식 읽는 행</th><th>키셋 방식 읽는 행</th><th>OFFSET 소요</th><th>키셋 소요</th></tr></thead>
+      <tbody>
+        <tr><td>1페이지</td><td>1,000</td><td>1,000</td><td>0.01초</td><td>0.01초</td></tr>
+        <tr><td>1,000페이지</td><td>1,001,000</td><td>1,000</td><td>1.4초</td><td>0.01초</td></tr>
+        <tr><td>4,000페이지</td><td>4,001,000</td><td>1,000</td><td>5.8초</td><td>0.01초</td></tr>
+        <tr><td><b>전체 4,000페이지 합</b></td><td><b>80억 행 읽음</b></td><td><b>400만 행</b></td><td><b>3시간 12분</b></td><td><b>47초</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">키셋 페이징 — 마지막 키를 기억</h4>
+      <pre class="code" data-lang="csharp"><code>public static async IAsyncEnumerable&lt;List&lt;Trade&gt;&gt; ReadByKeysetAsync(
+    AppDbContext db, long startAfterId, int size,
+    [EnumeratorCancellation] CancellationToken ct = default)
+{
+    var lastId = startAfterId;                 // 체크포인트에서 받은 값
+    while (true)
+    {
+        var page = await db.Trades
+            .AsNoTracking()                    // ★ 배치 읽기는 항상 이것
+            .Where(t =&gt; t.Id &gt; lastId)         // ★ OFFSET 대신 부등호
+            .OrderBy(t =&gt; t.Id)                // ★ 인덱스와 같은 순서
+            .Take(size)
+            .ToListAsync(ct);
+
+        if (page.Count == 0) yield break;
+
+        yield return page;
+        lastId = page[^1].Id;                  // 다음 페이지의 시작점
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복합 키셋 — 정렬 키가 유일하지 않을 때</h4>
+      <pre class="code" data-lang="csharp"><code>// (TradedAt, Id) 로 정렬 — TradedAt 이 같은 행이 여럿 있습니다
+var page = await db.Trades.AsNoTracking()
+    .Where(t =&gt; t.TradedAt &gt;  lastAt
+             || (t.TradedAt == lastAt &amp;&amp; t.Id &gt; lastId))
+    .OrderBy(t =&gt; t.TradedAt).ThenBy(t =&gt; t.Id)
+    .Take(size)
+    .ToListAsync(ct);
+
+// EF Core 9+ 에서는 튜플 비교가 그대로 번역됩니다
+// .Where(t =&gt; ValueTuple.Create(t.TradedAt, t.Id)
+//           &gt; ValueTuple.Create(lastAt, lastId))</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>정렬 키가 유일하지 않으면 행이 빠지거나 겹칩니다.</b>
+        <code>TradedAt</code> 만으로 자르면 같은 시각의 행 3개가
+        페이지 경계에 걸릴 때 <b>일부가 사라집니다</b>.
+        키셋 페이징의 <b>마지막 정렬 키는 반드시 유일</b>해야 합니다 —
+        보통 PK 를 맨 뒤에 붙입니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>(TradedAt, Id)</code> 복합 인덱스가 없으면 소용없습니다.</b>
+        키셋 페이징의 전제는 <b>정렬 순서 = 인덱스 순서</b> 입니다.
+        인덱스가 없으면 매 페이지마다 전체 정렬이 일어나 <b>OFFSET 보다 느려집니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="h">인덱스 · 로그 · 임시 테이블 <span class="lvl h">🔴 고급</span></h3>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>기법</th><th>효과</th><th>대가</th><th>쓸 때</th></tr></thead>
+      <tbody>
+        <tr><td>적재 전 <b>비클러스터 인덱스 DISABLE</b><br>→ 적재 → REBUILD</td><td>적재 2~4배 빠름</td><td>재구성 중 그 인덱스로 조회 불가</td><td>스테이징이 아닌 <b>본 테이블</b>에 대량 적재할 때</td></tr>
+        <tr><td>복구 모델 <b>BULK_LOGGED</b></td><td>트랜잭션 로그 급감</td><td>시점 복구 불가 구간 발생</td><td>DBA 합의 필수. 초기 이관에만</td></tr>
+        <tr><td><code>TABLOCK</code> 힌트</td><td>최소 로깅 조건 충족</td><td>동시 접근 차단</td><td>야간 전용 배치</td></tr>
+        <tr><td><b>파티션 스위칭</b></td><td>수억 행 삭제가 <b>메타데이터 변경</b>으로 끝남</td><td>파티션 설계 필요</td><td>일별 파티션 + 보관 정책</td></tr>
+        <tr><td>임시 테이블 <code>#tmp</code></td><td>중간 결과를 세션 안에 격리</td><td>tempdb 부담</td><td>여러 단계 조인이 필요한 집계</td></tr>
+        <tr><td><b>테이블 반환 파라미터(TVP)</b></td><td>수천 건을 한 번에 프로시저로</td><td>1만 건 넘으면 벌크가 나음</td><td>중간 규모(1천~1만) 배치 갱신</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre class="code" data-lang="csharp"><code>// TVP — MyBatis 의 foreach INSERT 대신 쓰는 .NET 방식
+var tvp = new DataTable();
+tvp.Columns.Add("TradeNo", typeof(string));
+tvp.Columns.Add("Amount",  typeof(decimal));
+foreach (var t in batch) tvp.Rows.Add(t.TradeNo, t.Amount);
+
+await using var cmd = cn.CreateCommand();
+cmd.CommandText = "dbo.usp_ApplyTrades";
+cmd.CommandType = CommandType.StoredProcedure;
+
+var p = cmd.Parameters.AddWithValue("@Trades", tvp);
+p.SqlDbType = SqlDbType.Structured;
+p.TypeName  = "dbo.TradeTableType";       // CREATE TYPE ... AS TABLE
+await cmd.ExecuteNonQueryAsync(ct);</code></pre>
+
+  <div class="note info">
+    <b>EF Core 기초(DbContext · 마이그레이션 · 관계 매핑)는 🔷 w03 (API 탭)</b> 에서 다뤘습니다.
+    이 섹션은 <b>"EF Core 를 언제 쓰지 않을 것인가"</b> 에 집중합니다.
+    실무 감각으로 정리하면 — <b>화면이 쓰는 조회·저장은 EF Core</b>,
+    <b>1만 건 넘는 적재·갱신은 벌크나 SQL</b>. 이 경계를 팀 규칙으로 못 박아 두면
+    "왜 배치가 느리죠?" 라는 질문 자체가 사라집니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 적재는 <b>스테이징 + SqlBulkCopy + MERGE</b>, 갱신·삭제는 <b><code>ExecuteUpdate</code>/<code>ExecuteDelete</code> 를 나눠서</b>, 페이징은 <b>OFFSET 이 아니라 키셋</b>.</div>
+</section>
+
+
+<!-- ==================== f06 ==================== -->
+<section class="sec" id="f06">
+  <div class="sec-head rv">
+    <span class="no">BATCH 06</span>
+    <h2>대용량 파일 — <span class="t">3 GB 를 40 MB 안에서</span> 읽기</h2>
+    <p class="lead">
+      사내 인터페이스 파일은 여전히 <b>고정폭 텍스트</b>거나 <b>CP949 CSV</b> 입니다.
+      <code>File.ReadAllLines()</code> 한 줄이면 서버가 죽습니다.
+      <b>스트리밍으로 읽고, 인코딩을 정확히 지정하고, 메모리를 실제로 재는</b> 방법을 봅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 250" role="img" aria-label="3기가바이트 거래 파일을 처리하는 동안의 메모리 사용량 곡선. 파일 전체를 한 번에 읽는 방식은 시간이 갈수록 계속 올라 6분 시점에 1.8기가바이트에 도달하지만, 스트리밍 방식은 처음부터 끝까지 40메가바이트 근처에서 평평하게 유지된다">
+      <text x="16" y="18" class="lbl">3 GB 거래 파일 처리 중 프로세스 메모리 — 전체 로드 vs 스트리밍</text>
+
+      <path class="ax" d="M60 40 L60 190"/>
+      <path class="ax" d="M60 190 L648 190"/>
+      <path class="gr" d="M60 152 L648 152"/>
+      <path class="gr" d="M60 114 L648 114"/>
+      <path class="gr" d="M60 76 L648 76"/>
+
+      <text x="52" y="194" class="tk" text-anchor="end">0</text>
+      <text x="52" y="156" class="tk" text-anchor="end">0.5</text>
+      <text x="52" y="118" class="tk" text-anchor="end">1.0</text>
+      <text x="52" y="80" class="tk" text-anchor="end">1.5</text>
+      <text x="52" y="46" class="tk" text-anchor="end">GB</text>
+
+      <path class="area" d="M60 190 L144 156 L228 128 L312 100 L396 76 L480 62 L564 56 L648 54 L648 190 Z"/>
+      <path class="li s2-l" style="stroke-width:2" d="M60 190 L144 156 L228 128 L312 100 L396 76 L480 62 L564 56 L648 54"/>
+      <circle class="dot" cx="648" cy="54" r="4" style="fill:#fbbf24"/>
+      <text x="500" y="44" class="ann s2-t">ReadAllLines — 1.8 GB 에서 OOM</text>
+
+      <path class="li s1-l" style="stroke-width:2" d="M60 190 L144 182 L228 179 L312 181 L396 178 L480 180 L564 179 L648 180"/>
+      <circle class="dot" cx="648" cy="180" r="4"/>
+      <text x="420" y="172" class="ann s1-t">StreamReader — 40 MB 에서 평평</text>
+
+      <text x="60" y="206" class="tk" text-anchor="middle">0분</text>
+      <text x="228" y="206" class="tk" text-anchor="middle">2분</text>
+      <text x="396" y="206" class="tk" text-anchor="middle">4분</text>
+      <text x="564" y="206" class="tk" text-anchor="middle">6분</text>
+
+      <text x="16" y="228" class="lbl">평평한 선이 결론입니다 — 파일이 10 GB 로 커져도 이 선은 그대로입니다</text>
+      <text x="16" y="242" class="lbl">우상향 곡선은 "지금은 되는데 내년에 터지는" 코드입니다</text>
+    </svg>
+    <div class="cap">스트리밍 vs 전체 로드 — <b>메모리가 입력 크기와 무관</b>해야 대용량 배치입니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="e">한글 인코딩 — <span class="t">EUC-KR · CP949 · BOM</span> <span class="lvl e">🟢 기초</span></h3>
+
+  <div class="note warn">
+    <b>.NET Core 부터는 CP949 가 기본으로 없습니다.</b>
+    <code>Encoding.GetEncoding(949)</code> 를 그냥 부르면
+    <code>NotSupportedException</code> 이 납니다.
+    <b>패키지 하나를 넣고 한 줄을 등록</b>해야 합니다 — 사내 파일 연계에서 100% 만나는 함정입니다.
+    (.NET Framework 시절에는 그냥 됐기 때문에 이관할 때 반드시 걸립니다.)
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CP949 등록 — 앱 시작 시 딱 한 번</h4>
+      <pre class="code" data-lang="bash"><code>dotnet add package System.Text.Encoding.CodePages</code></pre>
+      <pre class="code" data-lang="csharp"><code>// Program.cs 맨 앞
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
+// 이제 이게 됩니다
+var cp949 = Encoding.GetEncoding(949);      // = EUC-KR 확장
+var euckr = Encoding.GetEncoding("euc-kr"); // 같은 객체
+
+using var sr = new StreamReader(path, cp949);</code></pre>
+      <div class="note info">
+        <b>EUC-KR 과 CP949 는 같지 않습니다.</b>
+        EUC-KR 은 완성형 2,350자, CP949(=UHC)는 <b>확장 8,822자</b>입니다.
+        "똠 · 뷁 · 홥" 같은 글자는 CP949 에만 있습니다.
+        <b>.NET 에서 <code>949</code> 를 쓰면 자동으로 CP949</b> 이므로
+        EUC-KR 파일도 문제없이 읽힙니다. 반대(CP949 파일을 순수 EUC-KR 로 읽기)는 깨집니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">인코딩 자동 판별 — 실무에서 쓰는 방식</h4>
+      <pre class="code" data-lang="csharp"><code>static Encoding DetectEncoding(string path)
+{
+    Span&lt;byte&gt; head = stackalloc byte[4];
+    using (var fs = File.OpenRead(path)) fs.ReadExactly(head);
+
+    // ① BOM 이 있으면 그 말을 믿습니다
+    if (head[0] == 0xEF &amp;&amp; head[1] == 0xBB &amp;&amp; head[2] == 0xBF)
+        return new UTF8Encoding(false);
+    if (head[0] == 0xFF &amp;&amp; head[1] == 0xFE) return Encoding.Unicode;
+    if (head[0] == 0xFE &amp;&amp; head[1] == 0xFF) return Encoding.BigEndianUnicode;
+
+    // ② BOM 이 없으면 — UTF-8 로 엄격하게 디코딩을 시도해 봅니다
+    var strict = new UTF8Encoding(false, throwOnInvalidBytes: true);
+    try
+    {
+        using var sr = new StreamReader(path, strict, false);
+        for (int i = 0; i &lt; 200 &amp;&amp; sr.ReadLine() is not null; i++) { }
+        return strict;                         // 200줄이 멀쩡하면 UTF-8
+    }
+    catch (DecoderFallbackException)
+    {
+        return Encoding.GetEncoding(949);      // 아니면 CP949 로 봅니다
+    }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>더 정확한 판별이 필요하면 <code>UTF.Unknown</code> 패키지</b>
+        (Mozilla 의 universalchardet 이식)를 씁니다.
+        하지만 <b>인터페이스 규약서에 인코딩을 못 박는 것</b>이 진짜 해법입니다 —
+        판별은 언젠가 틀립니다. f08 의 규약 설계를 보세요.
+      </div>
+    </div>
+  </div>
+
+  <pre class="code" data-lang="csharp"><code>// 쓸 때 — BOM 을 넣을지 말지는 받는 쪽 규약에 맞춥니다
+// ★ new UTF8Encoding(false) 를 쓰세요. Encoding.UTF8 은 BOM 을 붙입니다
+using var sw = new StreamWriter(outPath, false, new UTF8Encoding(false));
+
+// 대외 기관에 CP949 로 내보낼 때 — 표현 못 하는 글자를 어떻게 할지 정합니다
+var out949 = Encoding.GetEncoding(949,
+    EncoderFallback.ExceptionFallback,     // 못 쓰면 예외 (조용히 '?' 되는 것 방지)
+    DecoderFallback.ExceptionFallback);
+using var sw949 = new StreamWriter(outPath, false, out949);</code></pre>
+
+  <div class="note warn">
+    <b><code>Encoding.UTF8</code> 은 BOM 을 붙입니다.</b>
+    이 파일을 자바의 <code>BufferedReader</code> 로 읽으면 <b>첫 줄 맨 앞에 <code>﻿</code></b> 가 붙어
+    <code>"﻿HDR"</code> 이 되고, <code>equals("HDR")</code> 이 실패합니다.
+    "헤더 검증만 계속 틀린다"는 연계 사고의 단골 원인입니다.
+    <b>대외 송신 파일은 <code>new UTF8Encoding(false)</code></b> 로 BOM 없이 쓰세요.
+  </div>
+
+  <h3 class="sub" data-lv="m">CsvHelper 로 <span class="t">수백만 행</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">읽기 — 스트리밍 그대로</h4>
+      <pre class="code" data-lang="bash"><code>dotnet add package CsvHelper</code></pre>
+      <pre class="code" data-lang="csharp"><code>var cfg = new CsvConfiguration(CultureInfo.InvariantCulture)
+{
+    HasHeaderRecord   = true,
+    Delimiter         = "|",              // 사내 파일은 파이프가 많습니다
+    TrimOptions       = TrimOptions.Trim,
+    BadDataFound      = null,             // 예외 대신 직접 처리
+    MissingFieldFound = null,
+    DetectColumnCountChanges = true
+};
+
+using var sr  = new StreamReader(path, Encoding.GetEncoding(949));
+using var csv = new CsvReader(sr, cfg);
+csv.Context.RegisterClassMap&lt;TradeRowMap&gt;();
+
+// ★ GetRecordsAsync 는 지연 스트리밍입니다 — ToListAsync 를 붙이지 마세요
+await foreach (var row in csv.GetRecordsAsync&lt;TradeRow&gt;(ct))
+{
+    // 여기서 한 건씩 흘러옵니다
+}</code></pre>
+      <pre class="code" data-lang="csharp"><code>public sealed class TradeRowMap : ClassMap&lt;TradeRow&gt;
+{
+    public TradeRowMap()
+    {
+        Map(m =&gt; m.TradeNo).Name("거래번호");         // 한글 헤더도 됩니다
+        Map(m =&gt; m.TradedAt).Name("거래일시")
+           .TypeConverterOption.Format("yyyyMMddHHmmss");
+        Map(m =&gt; m.Amount).Name("금액")
+           .TypeConverterOption.NumberStyles(NumberStyles.AllowThousands);
+    }
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고정폭 레코드 — 사내 파일의 절반</h4>
+      <pre class="code" data-lang="csharp"><code>// 규약: 거래번호(20) 일시(14) 금액(15) 상태(2) = 51바이트
+// ★ 한글이 섞이면 "글자 수"가 아니라 "바이트 수"입니다
+public static TradeRow ParseFixed(ReadOnlySpan&lt;byte&gt; line, Encoding enc)
+{
+    static string Cut(ReadOnlySpan&lt;byte&gt; s, int off, int len, Encoding e)
+        =&gt; e.GetString(s.Slice(off, len)).TrimEnd();
+
+    return new TradeRow
+    {
+        TradeNo  = Cut(line,  0, 20, enc),
+        TradedAt = DateTime.ParseExact(Cut(line, 20, 14, enc),
+                       "yyyyMMddHHmmss", CultureInfo.InvariantCulture),
+        Amount   = decimal.Parse(Cut(line, 34, 15, enc)) / 100m,  // 소수점 없음
+        Status   = Cut(line, 49, 2, enc)
+    };
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>고정폭 + 한글 = 바이트로 잘라야 합니다.</b>
+        <code>string.Substring(0, 20)</code> 은 <b>글자 수</b>로 자릅니다.
+        CP949 에서 한글 한 글자는 <b>2바이트</b>라, 이름 칸에 한글이 들어오면
+        그 뒤 칸이 전부 밀립니다. <b>파일을 <code>byte[]</code> 로 읽어 <code>Span</code> 으로 자르고,
+        그 다음에 디코딩</b>하는 순서가 맞습니다.
+        자바에서 <code>new String(bytes, off, len, "EUC-KR")</code> 로 하던 것과 같습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="h">엑셀 · <span class="t">ArrayPool</span> · 메모리 실측 <span class="lvl h">🔴 고급</span></h3>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>라이브러리</th><th>라이선스</th><th>대용량</th><th>Java 대응</th><th>판단</th></tr></thead>
+      <tbody>
+        <tr><td><b>ClosedXML</b></td><td>MIT (무료)</td><td>△ 전체를 메모리에 (10만 행 = 1 GB+)</td><td>Apache POI (XSSF)</td><td>읽기/쓰기 편의성 최고. <b>10만 행 이하</b></td></tr>
+        <tr><td><b>EPPlus 8</b></td><td><b>상용 — 비상업만 무료</b></td><td>△ 비슷</td><td>POI</td><td>사내라도 <b>회사 업무면 유료</b>. 법무 확인 필수</td></tr>
+        <tr><td><b>OpenXmlWriter</b><br>(DocumentFormat.OpenXml)</td><td>MIT</td><td>◎ <b>스트리밍 쓰기</b></td><td>POI SXSSF</td><td><b>100만 행 내보내기</b>는 이것뿐</td></tr>
+        <tr><td><b>MiniExcel</b></td><td>Apache 2.0</td><td>◎ 읽기·쓰기 모두 스트리밍</td><td>EasyExcel</td><td>대용량이면 <b>1순위 후보</b></td></tr>
+        <tr><td><b>CsvHelper</b></td><td>MS-PL/Apache</td><td>◎</td><td>OpenCSV</td><td>가능하면 <b>엑셀 대신 CSV 로 규약을 바꾸세요</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note tip">
+    <b>가장 좋은 해법은 "엑셀을 안 쓰는 것"입니다.</b>
+    100만 행 엑셀은 시트 한 장 한계(1,048,576행)에도 걸리고,
+    받는 쪽이 열다가 PC 가 멈춥니다.
+    <b>CSV(UTF-8 BOM 포함)로 주고 "엑셀에서 열립니다"라고 안내</b>하는 편이
+    모두에게 낫습니다. 이때만은 <b>BOM 을 붙여야</b> 엑셀이 한글을 안 깨뜨립니다 —
+    앞의 warn 과 반대이니 <b>받는 쪽이 사람인지 시스템인지</b>로 나누세요.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ArrayPool — GC 를 안 건드리고 버퍼 쓰기</h4>
+      <pre class="code" data-lang="csharp"><code>// 400만 번 new byte[64*1024] 하면 Gen2 가 계속 커집니다
+var pool = ArrayPool&lt;byte&gt;.Shared;
+byte[] buf = pool.Rent(64 * 1024);          // 빌리고
+try
+{
+    int n;
+    while ((n = await fs.ReadAsync(buf.AsMemory(), ct)) &gt; 0)
+        Process(buf.AsSpan(0, n));           // ★ 빌린 길이보다 클 수 있으니 Slice
+}
+finally { pool.Return(buf); }                // 반드시 반납 (clearArray 는 기본 false)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>Rent(65536)</code> 이 정확히 65,536바이트를 주지 않습니다.</b>
+        더 큰 배열이 올 수 있으므로 <b>항상 <code>buf.Length</code> 가 아니라 실제 읽은 길이</b>로 다루세요.
+        여기서 나오는 버그는 <b>파일 끝에 쓰레기 데이터가 붙는</b> 형태로 나타납니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">메모리를 실제로 재기</h4>
+      <pre class="code" data-lang="csharp"><code>// 배치 안에 이걸 심어 두면 운영에서 그래프를 그릴 수 있습니다
+var proc = Process.GetCurrentProcess();
+log.LogInformation(
+    "메모리 관리힙 {Heap:N0} MB · 작업집합 {WS:N0} MB · Gen2 {G2}회",
+    GC.GetTotalMemory(false) / 1024 / 1024,
+    proc.WorkingSet64        / 1024 / 1024,
+    GC.CollectionCount(2));</code></pre>
+      <pre class="code" data-lang="bash"><code># 밖에서 붙어서 보기 (설치: dotnet tool install -g dotnet-counters)
+dotnet-counters monitor -p 12345 \
+  --counters System.Runtime[gc-heap-size,gen-2-gc-count,working-set]
+
+# 힙 덤프 떠서 무엇이 살아 있는지
+dotnet-gcdump collect -p 12345</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>"메모리 40 MB"는 자랑이 아니라 회귀 테스트 기준입니다.</b>
+        배치 로그에 매 실행 최대 메모리를 남겨 두면,
+        누군가 <code>ToListAsync()</code> 를 하나 끼워 넣은 날 <b>숫자가 바로 튑니다</b>.
+        코드 리뷰보다 이 로그 한 줄이 잘 잡습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>절대 전부 읽지 않습니다</b>. CP949 는 등록 한 줄이 필요하고, 고정폭은 바이트로 자르고, 대용량 엑셀은 MiniExcel 이나 CSV 로 피해 갑니다.</div>
+</section>
+
+
+<!-- ==================== f07 ==================== -->
+<section class="sec" id="f07">
+  <div class="sec-head rv">
+    <span class="no">BATCH 07</span>
+    <h2>파일 업로드 · 다운로드 — <span class="t">1 GB 를 메모리에 안 올리고</span></h2>
+    <p class="lead">
+      스프링에서 <code>MultipartFile</code> 을 받으면 <b>이미 디스크나 메모리에 다 올라온 뒤</b>였습니다.
+      ASP.NET Core 도 기본은 같습니다. <b>그 기본을 끄고 직접 스트림을 받는</b> 방법,
+      그리고 크기 제한이 걸려 있는 <b>세 곳</b>을 봅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 288" role="img" aria-label="1.2기가바이트 파일을 200메가바이트씩 여섯 청크로 나눠 올리는 일정. 청크 1과 2는 정상 업로드되고 청크 3을 올리던 중 4분 30초 지점에 네트워크가 끊긴다. 3분 뒤 이어받기로 재개해 청크 3부터 다시 보내고 나머지를 마친 뒤 서버에서 병합한다. 이미 올린 청크 1과 2는 다시 보내지 않는다">
+      <text x="16" y="18" class="lbl">1.2 GB 를 200 MB × 6청크로 — 가로가 시간, 붉은 막대가 실패한 청크</text>
+
+      <path class="gr" d="M248 34 L248 218"/>
+      <path class="gr" d="M346 34 L346 218"/>
+      <path class="gr" d="M444 34 L444 218"/>
+      <path class="gr" d="M542 34 L542 218"/>
+      <path class="ax" d="M150 218 L648 218"/>
+
+      <text x="150" y="234" class="tk" text-anchor="middle">0분</text>
+      <text x="248" y="234" class="tk" text-anchor="middle">3분</text>
+      <text x="346" y="234" class="tk" text-anchor="middle">6분</text>
+      <text x="444" y="234" class="tk" text-anchor="middle">9분</text>
+      <text x="542" y="234" class="tk" text-anchor="middle">12분</text>
+      <text x="640" y="234" class="tk" text-anchor="middle">15분</text>
+
+      <text x="16" y="50" class="ann">청크 1 (200MB)</text>
+      <rect class="bar" x="150" y="38" width="60" height="16"/>
+
+      <text x="16" y="76" class="ann">청크 2</text>
+      <rect class="bar" x="210" y="64" width="60" height="16"/>
+
+      <text x="16" y="102" class="ann rs-t">청크 3 — 중단</text>
+      <rect x="270" y="90" width="34" height="16" style="fill:rgba(251,113,133,.22);stroke:rgba(251,113,133,.55);stroke-width:1;rx:3"/>
+      <text x="312" y="102" class="tk rs-t">네트워크 단절</text>
+
+      <text x="16" y="128" class="ann">청크 3 재전송</text>
+      <rect class="bar" x="380" y="116" width="60" height="16"/>
+
+      <text x="16" y="154" class="ann">청크 4 · 5 · 6</text>
+      <rect class="bar" x="440" y="142" width="160" height="16"/>
+
+      <text x="16" y="180" class="ann ok-t">병합 · 검증</text>
+      <rect class="bar" x="600" y="168" width="40" height="16"/>
+
+      <path class="dim-ln" d="M304 200 L380 200"/>
+      <text x="342" y="196" class="ann" text-anchor="middle">3분 대기</text>
+
+      <text x="150" y="212" class="ann">청크 1 · 2 는 다시 보내지 않습니다 — 서버가 받은 청크 목록을 기억합니다</text>
+
+      <text x="16" y="264" class="lbl">이어받기가 없으면 4분 30초 지점의 단절 하나로 처음부터 다시 — 사용자는 포기합니다</text>
+      <text x="16" y="280" class="lbl">막대의 시작 x 가 곧 시작 시각입니다. 왼쪽 끝을 맞추면 안 됩니다</text>
+    </svg>
+    <div class="cap">청크 업로드 — <b>실패 단위가 파일 전체가 아니라 청크 하나</b>가 되는 것이 전부입니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="e">크기 제한이 걸려 있는 <span class="t">세 곳</span> <span class="lvl e">🟢 기초</span></h3>
+
+  <p class="tx">
+    "500 MB 업로드했더니 413 이 떨어져요" — 원인이 <b>셋 중 어디인지</b> 모르면 반나절이 갑니다.
+    셋을 <b>모두</b> 풀어야 통과합니다.
+  </p>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>층</th><th>설정</th><th>기본값</th><th>넘으면</th><th>Java 대응</th></tr></thead>
+      <tbody>
+        <tr><td><b>① Kestrel</b></td><td><code>KestrelServerLimits.MaxRequestBodySize</code></td><td>30 MB</td><td>413 Payload Too Large</td><td>톰캣 <code>maxSwallowSize</code></td></tr>
+        <tr><td><b>② IIS / ANCM</b></td><td><code>web.config</code> 의 <code>maxAllowedContentLength</code></td><td>~28.6 MB</td><td>404.13 (IIS 가 먼저 끊음)</td><td>Nginx <code>client_max_body_size</code></td></tr>
+        <tr><td><b>③ 폼 바인딩</b></td><td><code>FormOptions.MultipartBodyLengthLimit</code></td><td>128 MB</td><td><code>InvalidDataException</code></td><td><code>spring.servlet.multipart.max-file-size</code></td></tr>
+        <tr><td>④ 리버스 프록시</td><td>Nginx <code>client_max_body_size</code></td><td>1 MB</td><td>413</td><td>동일</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">셋 다 풀기</h4>
+      <pre class="code" data-lang="csharp"><code>// ① Kestrel — null 이면 무제한 (프록시가 막는다면 이게 편합니다)
+builder.WebHost.ConfigureKestrel(o =&gt;
+{
+    o.Limits.MaxRequestBodySize = 2L * 1024 * 1024 * 1024;   // 2 GB
+    o.Limits.MinRequestBodyDataRate = new MinDataRate(
+        bytesPerSecond: 100, gracePeriod: TimeSpan.FromSeconds(30));
+});
+
+// ③ 폼 — 엔드포인트별로 거는 편이 안전합니다
+builder.Services.Configure&lt;FormOptions&gt;(o =&gt;
+{
+    o.MultipartBodyLengthLimit = 2L * 1024 * 1024 * 1024;
+    o.ValueLengthLimit         = int.MaxValue;
+    o.MultipartHeadersLengthLimit = int.MaxValue;
+});</code></pre>
+      <pre class="code" data-lang="xml"><code>&lt;!-- ② IIS 아래에서 돌 때 web.config --&gt;
+&lt;configuration&gt;
+  &lt;system.webServer&gt;
+    &lt;security&gt;&lt;requestFiltering&gt;
+      &lt;!-- 바이트 단위. 2 GB --&gt;
+      &lt;requestLimits maxAllowedContentLength="2147483648" /&gt;
+    &lt;/requestFiltering&gt;&lt;/security&gt;
+  &lt;/system.webServer&gt;
+&lt;/configuration&gt;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>MinRequestBodyDataRate</code> 를 잊지 마세요.</b>
+        기본은 <b>초당 240바이트 미만이면 끊습니다</b>.
+        느린 사내망이나 VPN 에서 대용량을 올리면
+        <b>"아무 이유 없이 중간에 끊긴다"</b>가 여기서 납니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스트리밍 업로드 — 버퍼링을 끕니다</h4>
+      <pre class="code" data-lang="csharp"><code>[HttpPost("upload")]
+[DisableFormValueModelBinding]          // ★ 자동 폼 파싱을 끕니다
+[RequestSizeLimit(2L * 1024 * 1024 * 1024)]
+public async Task&lt;IActionResult&gt; UploadAsync(CancellationToken ct)
+{
+    if (!MultipartRequestHelper.IsMultipartContentType(Request.ContentType))
+        return BadRequest("multipart/form-data 가 아닙니다");
+
+    var boundary = MultipartRequestHelper.GetBoundary(
+        MediaTypeHeaderValue.Parse(Request.ContentType), lengthLimit: 128);
+
+    var reader  = new MultipartReader(boundary, Request.Body);
+    var section = await reader.ReadNextSectionAsync(ct);
+
+    while (section is not null)
+    {
+        var cd = section.GetContentDispositionHeader();
+        if (cd is not null &amp;&amp; cd.IsFileDisposition())
+        {
+            var name = Path.GetRandomFileName();
+            var tmp  = Path.Combine(_tempDir, name + ".part");
+
+            // ★ 여기가 핵심 — 요청 스트림에서 파일 스트림으로 바로 흘립니다
+            await using (var fs = new FileStream(tmp, FileMode.Create,
+                             FileAccess.Write, FileShare.None,
+                             1024 * 1024, useAsync: true))
+            {
+                await section.Body.CopyToAsync(fs, 1024 * 1024, ct);
+            }
+
+            await _scanner.ScanAsync(tmp, ct);        // 바이러스 검사 (아래)
+            await _store.CommitAsync(tmp, cd.FileName.Value!, ct);
+        }
+        section = await reader.ReadNextSectionAsync(ct);
+    }
+    return Ok();
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>IFormFile</code> 을 파라미터로 받는 순간 버퍼링됩니다.</b>
+        64 KB 를 넘으면 임시 디스크에 저장되므로 OOM 은 안 나지만,
+        <b>디스크에 한 번 다 쓰고 다시 읽는</b> 왕복이 생깁니다.
+        수십 MB 까지는 <code>IFormFile</code> 로 충분하고,
+        <b>수백 MB 부터 <code>MultipartReader</code></b> 로 갑니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">청크 업로드 · <span class="t">이어받기(Range)</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <pre class="code" data-lang="csharp"><code>// ── 서버: 청크 하나를 받아 지정 위치에 씁니다 ──────────────────
+// PUT /uploads/{uploadId}/chunks/{index}
+app.MapPut("/uploads/{id}/chunks/{index:int}", async (
+    string id, int index, HttpRequest req, IUploadStore store,
+    CancellationToken ct) =&gt;
+{
+    var meta = await store.GetAsync(id, ct);
+    if (meta is null) return Results.NotFound();
+
+    // 이미 받은 청크면 그냥 성공 — ★ 멱등성
+    if (meta.Received.Contains(index)) return Results.Ok(meta.Progress());
+
+    var path = store.ChunkPath(id, index);
+    await using (var fs = File.Create(path))
+        await req.Body.CopyToAsync(fs, 1024 * 1024, ct);
+
+    // 체크섬으로 무결성 확인 (클라이언트가 헤더로 보냅니다)
+    if (req.Headers.TryGetValue("X-Chunk-SHA256", out var want))
+    {
+        var got = Convert.ToHexString(
+            await SHA256.HashDataAsync(File.OpenRead(path), ct));
+        if (!got.Equals(want!, StringComparison.OrdinalIgnoreCase))
+        { File.Delete(path); return Results.StatusCode(422); }
+    }
+
+    await store.MarkReceivedAsync(id, index, ct);
+    return Results.Ok(meta.Progress());
+});
+
+// 클라이언트가 재개 전에 물어보는 곳 — "어디까지 받았니?"
+app.MapGet("/uploads/{id}", async (string id, IUploadStore store, CancellationToken ct)
+    =&gt; await store.GetAsync(id, ct) is {} m
+       ? Results.Ok(new { m.Total, Received = m.Received.Order(), m.Missing })
+       : Results.NotFound());
+
+// 모두 받으면 합칩니다
+app.MapPost("/uploads/{id}/complete", async (
+    string id, IUploadStore store, CancellationToken ct) =&gt;
+{
+    var meta = await store.GetAsync(id, ct);
+    if (meta!.Missing.Count &gt; 0)
+        return Results.BadRequest(new { meta.Missing });   // 빠진 청크를 알려 줌
+
+    var final = store.FinalPath(id);
+    await using (var outFs = File.Create(final))
+        for (var i = 0; i &lt; meta.Total; i++)
+            await using (var inFs = File.OpenRead(store.ChunkPath(id, i)))
+                await inFs.CopyToAsync(outFs, ct);
+
+    store.CleanupChunks(id);
+    return Results.Ok(new { path = final });
+});</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다운로드 — Range 를 그냥 켜기</h4>
+      <pre class="code" data-lang="csharp"><code>app.MapGet("/files/{id}", async (string id, IFileStore store, CancellationToken ct) =&gt;
+{
+    var f = await store.OpenAsync(id, ct);            // Stream 을 그대로
+    return Results.File(
+        f.Stream,
+        contentType: "application/octet-stream",
+        fileDownloadName: f.Name,
+        lastModified: f.ModifiedAt,
+        entityTag: new EntityTagHeaderValue($"\"{f.ETag}\""),
+        enableRangeProcessing: true);                 // ★ 이 한 줄이 이어받기
+});</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>enableRangeProcessing: true</code></b> 만 켜면
+        프레임워크가 <code>Accept-Ranges</code> · <code>206 Partial Content</code> ·
+        <code>Content-Range</code> 를 <b>전부 처리</b>합니다.
+        스프링에서 <code>ResourceHttpRequestHandler</code> 가 해 주던 것과 같습니다.
+        <b>직접 파싱하지 마세요</b> — 다중 범위 요청까지 정확히 구현하는 것은 까다롭습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">저장소 추상화 — 로컬 · S3 · Blob</h4>
+      <pre class="code" data-lang="csharp"><code>public interface IFileStore
+{
+    Task&lt;string&gt; PutAsync(Stream src, string key, CancellationToken ct);
+    Task&lt;Stream&gt; GetAsync(string key, CancellationToken ct);
+    Task&lt;Uri&gt;    GetPresignedUrlAsync(string key, TimeSpan ttl, CancellationToken ct);
+    Task DeleteAsync(string key, CancellationToken ct);
+}
+
+// 구현 셋 — DI 로 갈아 끼웁니다
+builder.Services.AddSingleton&lt;IFileStore&gt;(sp =&gt;
+    cfg["Storage:Kind"] switch
+    {
+        "s3"    =&gt; new S3FileStore(sp.GetRequiredService&lt;IAmazonS3&gt;(), bucket),
+        "blob"  =&gt; new BlobFileStore(sp.GetRequiredService&lt;BlobServiceClient&gt;()),
+        _       =&gt; new LocalFileStore(cfg["Storage:Root"]!)
+    });</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>가능하면 파일이 앱 서버를 통과하지 않게 하세요.</b>
+        S3/Blob 의 <b>사전 서명 URL</b>(presigned URL)을 발급해 주면
+        브라우저가 <b>스토리지와 직접</b> 주고받습니다.
+        앱 서버 대역폭·메모리·타임아웃 문제가 통째로 사라집니다.
+        사내 온프레미스라면 MinIO 로 같은 구조를 만들 수 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <b>업로드 파일은 전부 위험하다고 가정합니다.</b>
+    ① <b>원래 파일명을 절대 경로에 쓰지 마세요</b> —
+    <code>..\..\web.config</code> 같은 이름이 옵니다(<code>Path.GetFileName()</code> 으로 정제).
+    ② 저장 이름은 <b>서버가 만든 GUID</b>, 원래 이름은 DB 컬럼에.
+    ③ 확장자가 아니라 <b>매직 넘버</b>로 형식을 확인.
+    ④ 정적 파일로 서빙되는 폴더에 쓰지 않기.
+    ⑤ 검사 전 파일은 <code>.part</code> 로 두고, <b>통과한 것만 rename</b> (f08 의 원자적 이동).
+    ⑥ 임시 폴더는 <b>매일 청소하는 배치</b>를 따로 두기 — 실패한 업로드가 디스크를 채웁니다.
+  </div>
+
+  <pre class="code" data-lang="csharp"><code>// 바이러스 검사 — 사내는 대개 ClamAV 나 백신 에이전트 폴더 감시입니다
+public sealed class ClamAvScanner(IOptions&lt;ScanOptions&gt; opt) : IFileScanner
+{
+    public async Task ScanAsync(string path, CancellationToken ct)
+    {
+        using var clam = new ClamClient(opt.Value.Host, opt.Value.Port);
+        await using var fs = File.OpenRead(path);
+        var r = await clam.SendAndScanFileAsync(fs, ct);
+
+        if (r.Result == ClamScanResults.VirusDetected)
+        {
+            File.Delete(path);
+            throw new SecurityException($"악성코드 탐지: {r.InfectedFiles![0].VirusName}");
+        }
+        if (r.Result == ClamScanResults.Error)
+            throw new IOException($"검사 실패 — 파일을 통과시키지 않습니다: {r.RawResult}");
+        // ★ "검사 실패"를 통과로 처리하지 마세요. 열려 있는 문이 됩니다
+    }
+}</code></pre>
+
+  <div class="ez mid"><b>정리 —</b> 크기 제한은 <b>Kestrel · IIS · 폼 세 곳</b>을 다 풀고, 수백 MB 부터는 <b><code>MultipartReader</code> 로 직접</b> 흘리고, 이어받기는 <b>청크 + 받은 목록</b>으로 만듭니다.</div>
+</section>
+
+
+<!-- ==================== f08 ==================== -->
+<section class="sec" id="f08">
+  <div class="sec-head rv">
+    <span class="no">BATCH 08</span>
+    <h2>파일 연계 · EAI — <span class="t">SFTP · 감시 · 원자적 이동</span></h2>
+    <p class="lead">
+      사내 시스템 사이의 데이터 교환은 2026년에도 <b>파일</b>이 가장 많습니다.
+      API 보다 느리지만 <b>망 분리를 넘고, 감사 흔적이 남고, 재전송이 쉽기 때문</b>입니다.
+      여기서 사고가 나는 지점은 언제나 <b>"덜 써진 파일을 읽었다"</b> 하나입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 268" role="img" aria-label="파일 연계의 원자적 이동 흐름. 송신 측은 임시 확장자로 파일을 쓰고 닫은 뒤 정식 이름으로 이름을 바꾼다. 수신 측은 정식 확장자만 감지해 작업 폴더로 이름을 바꿔 옮기고, 처리한 뒤 완료 폴더로 보관한다. 이름 변경은 같은 볼륨 안에서 원자적이라 반쯤 써진 파일을 읽는 일이 생기지 않는다">
+      <text x="16" y="18" class="lbl">송신 — 임시 이름으로 쓰고, 다 쓴 뒤에 이름을 바꿉니다</text>
+
+      <rect class="bx" x="16" y="40" width="180" height="62"/>
+      <text x="106" y="60" class="val" text-anchor="middle">① 임시 이름으로 쓰기</text>
+      <text x="106" y="76" class="ann" text-anchor="middle">TRD_20260828.dat.tmp</text>
+      <text x="106" y="90" class="ann" text-anchor="middle">수신측은 .tmp 를 무시</text>
+
+      <path class="fl ar" d="M200 71 L228 71"/>
+
+      <rect class="bx" x="236" y="40" width="180" height="62"/>
+      <text x="326" y="60" class="val" text-anchor="middle">② 닫고 플러시</text>
+      <text x="326" y="76" class="ann" text-anchor="middle">Flush + Dispose</text>
+      <text x="326" y="90" class="ann" text-anchor="middle">버퍼가 디스크에 닿음</text>
+
+      <path class="fl ar" d="M420 71 L448 71"/>
+
+      <rect class="bx bx-ok" x="456" y="40" width="180" height="62"/>
+      <text x="546" y="60" class="val ok-t" text-anchor="middle">③ 이름 바꾸기</text>
+      <text x="546" y="76" class="ann" text-anchor="middle">TRD_20260828.dat</text>
+      <text x="546" y="90" class="ann" text-anchor="middle">이 순간이 원자적</text>
+
+      <path class="ln ar" d="M546 106 L546 124 L106 124 L106 142"/>
+      <text x="326" y="119" class="ann" text-anchor="middle">여기서부터 수신측 — 정식 확장자만 봅니다</text>
+
+      <rect class="bx" x="16" y="146" width="180" height="62"/>
+      <text x="106" y="166" class="val" text-anchor="middle">④ 감지</text>
+      <text x="106" y="182" class="ann" text-anchor="middle">폴링 또는 Watcher</text>
+      <text x="106" y="196" class="ann" text-anchor="middle">*.dat 만 대상</text>
+
+      <path class="fl ar" d="M200 177 L228 177"/>
+
+      <rect class="bx bx-fw" x="236" y="146" width="180" height="62"/>
+      <text x="326" y="166" class="val" text-anchor="middle">⑤ work 로 이동</text>
+      <text x="326" y="182" class="ann" text-anchor="middle">File.Move — 실패하면</text>
+      <text x="326" y="196" class="ann" text-anchor="middle">남이 가져간 것</text>
+
+      <path class="fl ar" d="M420 177 L448 177"/>
+
+      <rect class="bx" x="456" y="146" width="180" height="62"/>
+      <text x="546" y="166" class="val" text-anchor="middle">⑥ 처리 후 보관</text>
+      <text x="546" y="182" class="ann" text-anchor="middle">done/20260828/</text>
+      <text x="546" y="196" class="ann" text-anchor="middle">실패는 error/ 로</text>
+
+      <text x="16" y="238" class="lbl">⑤의 Move 가 곧 "내가 이 파일을 맡았다"는 선언입니다 — 배치 서버가 두 대여도 하나만 성공합니다</text>
+      <text x="16" y="256" class="lbl">rename 은 같은 볼륨 안에서만 원자적입니다. 네트워크 드라이브를 건너뛰면 복사가 되어 깨집니다</text>
+    </svg>
+    <div class="cap">원자적 이동 — <b>이름 바꾸기 한 번</b>이 "쓰는 중"과 "다 썼음"을 가릅니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="e">SFTP — <span class="t">SSH.NET</span> 으로 받고 보내기 <span class="lvl e">🟢 기초</span></h3>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">수신 — 호스트 키까지 검증</h4>
+      <pre class="code" data-lang="bash"><code>dotnet add package SSH.NET</code></pre>
+      <pre class="code" data-lang="csharp"><code>var auth = new PrivateKeyAuthenticationMethod(
+    user, new PrivateKeyFile(keyPath, passphrase));
+var cinfo = new ConnectionInfo(host, port, user, auth)
+{
+    Timeout = TimeSpan.FromMinutes(5)
+};
+
+using var sftp = new SftpClient(cinfo);
+
+// ★ 호스트 키 검증 — 이걸 안 하면 중간자 공격에 그대로 노출됩니다
+sftp.HostKeyReceived += (_, e) =&gt;
+    e.CanTrust = Convert.ToHexString(e.FingerPrint)
+                        .Equals(expectedFingerprint, StringComparison.OrdinalIgnoreCase);
+
+sftp.Connect();
+sftp.OperationTimeout  = TimeSpan.FromMinutes(30);
+sftp.BufferSize        = 64 * 1024;      // 기본 32KB — 올리면 눈에 띄게 빨라집니다
+
+foreach (var f in sftp.ListDirectory(remoteDir))
+{
+    if (f.IsDirectory || !f.Name.EndsWith(".dat")) continue;
+
+    var tmp = Path.Combine(localDir, f.Name + ".downloading");
+    await using (var fs = File.Create(tmp))
+        await Task.Factory.FromAsync(
+            sftp.BeginDownloadFile(f.FullName, fs), sftp.EndDownloadFile);
+
+    // ★ 크기 검증 후 정식 이름으로 — 여기도 원자적 이동
+    if (new FileInfo(tmp).Length != f.Length)
+    { File.Delete(tmp); throw new IOException($"크기 불일치 {f.Name}"); }
+
+    File.Move(tmp, Path.Combine(localDir, f.Name), overwrite: false);
+    sftp.RenameFile(f.FullName, $"{remoteDone}/{f.Name}");   // 원격도 정리
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">FTP vs SFTP vs FTPS — 고르기</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th></th><th>포트</th><th>암호화</th><th>방화벽</th><th>.NET 지원</th></tr></thead>
+          <tbody>
+            <tr><td><b>SFTP</b><br>(SSH 위)</td><td>22</td><td>◎</td><td><b>단일 포트 — 쉬움</b></td><td>SSH.NET (외부)</td></tr>
+            <tr><td>FTPS<br>(FTP+TLS)</td><td>21 + 데이터</td><td>◎</td><td>△ 패시브 포트 범위 필요</td><td>FluentFTP (외부)</td></tr>
+            <tr><td>FTP</td><td>21 + 데이터</td><td>✕ 평문</td><td>△</td><td><code>FtpWebRequest</code> (사용 중단)</td></tr>
+            <tr><td>공유 폴더<br>(SMB)</td><td>445</td><td>△</td><td>사내망 전용</td><td><b>그냥 파일 API</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>사내에서는 UNC 공유 폴더(<code>\\\\nas\\if\\in</code>)가 여전히 가장 많습니다.</b>
+        이 경우 코드는 <b>그냥 <code>File.Move</code></b> 이고 별도 라이브러리가 없습니다.
+        다만 <b>서비스 계정에 그 공유의 권한</b>이 있어야 합니다 —
+        개발 PC 에서는 되는데 Windows 서비스로 띄우면
+        <code>UnauthorizedAccessException</code> 이 나는 사고의 원인입니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>FtpWebRequest</code> 는 .NET 6부터 공식 사용 중단</b>(obsolete)입니다.
+        새로 쓰지 마세요. FTPS 가 필요하면 <b>FluentFTP</b>, SFTP 는 <b>SSH.NET</b> 입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m"><span class="t">FileSystemWatcher</span> 의 함정과 폴링 대안 <span class="lvl m">🟡 중급</span></h3>
+
+  <div class="note warn">
+    <b><code>FileSystemWatcher</code> 하나만 믿는 연계는 반드시 사고가 납니다.</b>
+    ① <b>이벤트를 놓칩니다</b> — 내부 버퍼(기본 8 KB)가 넘치면 <code>Error</code> 이벤트만 오고 그 사이 파일들은 사라집니다.
+    ② <b>중복으로 옵니다</b> — 한 파일에 <code>Created</code> 와 <code>Changed</code> 가 여러 번.
+    ③ <b>다 써지기 전에 옵니다</b> — 파일을 만드는 순간 알려 주지, 다 쓴 순간이 아닙니다.
+    ④ <b>네트워크 드라이브에서 불안정</b>합니다 — SMB 알림은 유실이 흔합니다.
+    ⑤ 프로세스가 잠깐 죽어 있던 사이의 파일은 <b>영원히 모릅니다</b>.
+  </div>
+
+  <div class="vs">
+    <div class="bad">
+      <h5>❌ Watcher 만</h5>
+      <pre class="code" data-lang="csharp"><code>var w = new FileSystemWatcher(dir, "*.dat");
+w.Created += async (_, e) =&gt; await Process(e.FullPath);
+w.EnableRaisingEvents = true;
+// 놓친 파일은 아무도 모릅니다</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 폴링이 본체, Watcher 는 촉진제</h5>
+      <pre class="code" data-lang="csharp"><code>// 30초마다 폴더를 훑는 것이 "정답"입니다.
+// Watcher 는 "지금 바로 한 번 더 훑어라" 신호로만 씁니다
+var wake = new SemaphoreSlim(0, 1);
+w.Created += (_, _) =&gt; { try { wake.Release(); } catch { } };
+
+while (!ct.IsCancellationRequested)
+{
+    await ScanFolderAsync(ct);                     // ★ 이게 진짜 감지
+    await wake.WaitAsync(TimeSpan.FromSeconds(30), ct);
+}</code></pre>
+    </div>
+  </div>
+
+  <pre class="code" data-lang="csharp"><code>// 폴더 스캔 — "다 써졌는가"를 판정하는 두 가지 방법
+async Task ScanFolderAsync(CancellationToken ct)
+{
+    foreach (var path in Directory.EnumerateFiles(_in, "*.dat"))
+    {
+        // ① 배타 열기 시도 — 송신측이 아직 쓰고 있으면 실패합니다 (Windows)
+        if (!TryOpenExclusive(path, out var fs)) continue;
+        fs!.Dispose();
+
+        // ② 크기가 두 번 연속 같은지 (리눅스·NFS 에서는 이 방법이 필요)
+        var len1 = new FileInfo(path).Length;
+        await Task.Delay(1000, ct);
+        if (new FileInfo(path).Length != len1) continue;   // 아직 자라는 중
+
+        // ③ 내가 맡는다 — work 폴더로 이동. 실패하면 남이 가져간 것
+        var work = Path.Combine(_work, Path.GetFileName(path));
+        try { File.Move(path, work, overwrite: false); }
+        catch (IOException) { continue; }                  // 정상 — 경쟁에서 짐
+
+        await HandleAsync(work, ct);
+    }
+}
+
+static bool TryOpenExclusive(string path, out FileStream? fs)
+{
+    try { fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None); return true; }
+    catch (IOException) { fs = null; return false; }       // 잠겨 있음
+}</code></pre>
+
+  <div class="note info">
+    <b>가장 확실한 방법은 "송신측과 규약을 정하는 것"입니다.</b>
+    ① <b>임시 확장자로 쓰고 rename</b>(위 그림) — 최선.
+    ② <b>완료 표시 파일</b>(<code>TRD_20260828.dat</code> 를 다 쓰면 <code>TRD_20260828.ok</code> 를 만든다) —
+    송신측을 못 고칠 때 차선. <b><code>.ok</code> 를 보고 <code>.dat</code> 를 읽습니다.</b>
+    Spring Integration 의 <code>FileReadingMessageSource</code> 에서도
+    <code>AcceptOnceFileListFilter</code> + <code>LastModifiedFileListFilter</code> 로
+    같은 문제를 다룹니다 — <b>프레임워크가 달라도 문제는 동일</b>합니다.
+  </div>
+
+  <h3 class="sub" data-lv="h">인터페이스 파일 <span class="t">규약 설계</span> <span class="lvl h">🔴 고급</span></h3>
+
+  <p class="tx">
+    연계 규약서에 <b>아래 항목이 다 적혀 있지 않으면</b> 반드시 나중에 다툽니다.
+    "우리는 다 보냈는데요"와 "우리는 못 받았는데요"가 반복되는 이유는
+    <b>완료의 정의가 문서에 없기 때문</b>입니다.
+  </p>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>항목</th><th>정해야 할 것</th><th>예시</th></tr></thead>
+      <tbody>
+        <tr><td>파일명 규칙</td><td>시스템코드 · 업무코드 · 영업일 · 일련번호</td><td><code>ERP_TRD_20260828_001.dat</code></td></tr>
+        <tr><td>인코딩 · 개행</td><td>못 박기. "자동 판별"은 규약이 아님</td><td>CP949 · CRLF · BOM 없음</td></tr>
+        <tr><td>레코드 구조</td><td>고정폭이면 바이트 오프셋표, 구분자면 구분자와 이스케이프</td><td>파이프 <code>|</code> · 값 안 파이프 금지</td></tr>
+        <tr><td><b>헤더 레코드</b></td><td>파일 유형 · 생성일시 · 송신 시스템</td><td><code>H|ERP|20260828021000</code></td></tr>
+        <tr><td><b>트레일러 레코드</b></td><td><b>총 건수 · 금액 합계</b> — 검증의 핵심</td><td><code>T|4000000|123456789.00</code></td></tr>
+        <tr><td>완료 판정</td><td>임시 확장자 rename 또는 <code>.ok</code> 파일</td><td><code>.tmp</code> → <code>.dat</code></td></tr>
+        <tr><td>전송 시각 · SLA</td><td>몇 시까지 · 늦으면 누구에게 연락</td><td>매일 01:30 까지 · 02:00 미착시 알림</td></tr>
+        <tr><td><b>재전송 규약</b></td><td>같은 이름 재전송인가, 일련번호 증가인가</td><td>일련번호 +1 · 이전 건은 무효 처리</td></tr>
+        <tr><td>중복 판정 키</td><td>수신측이 무엇으로 중복을 거르는가</td><td>파일명 + SHA-256</td></tr>
+        <tr><td>보관 기간</td><td>원본 · 처리 결과 각각</td><td>원본 90일 · 결과 5년</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre class="code" data-lang="csharp"><code>// 트레일러 검증 — 이 30줄이 "데이터가 잘렸다"를 100% 잡습니다
+public static async Task&lt;FileStats&gt; VerifyAsync(
+    string path, Encoding enc, CancellationToken ct)
+{
+    string? header = null, trailer = null;
+    long body = 0; decimal sum = 0m;
+
+    using var sr = new StreamReader(path, enc);
+    while (await sr.ReadLineAsync(ct) is { } line)
+    {
+        if (line.Length == 0) continue;
+        switch (line[0])
+        {
+            case 'H': header  = line; break;
+            case 'T': trailer = line; break;
+            default:
+                body++;
+                sum += decimal.Parse(line.Split('|')[3],
+                                     CultureInfo.InvariantCulture);
+                break;
+        }
+    }
+
+    if (header  is null) throw new BatchAbortException("헤더 레코드 없음 — 파일이 잘렸습니다");
+    if (trailer is null) throw new BatchAbortException("트레일러 없음 — 전송이 완료되지 않았습니다");
+
+    var t = trailer.Split('|');
+    var declaredCount = long.Parse(t[1]);
+    var declaredSum   = decimal.Parse(t[2], CultureInfo.InvariantCulture);
+
+    if (declaredCount != body)
+        throw new BatchAbortException($"건수 불일치 — 선언 {declaredCount:N0} / 실제 {body:N0}");
+    if (declaredSum != sum)
+        throw new BatchAbortException($"합계 불일치 — 선언 {declaredSum:N2} / 실제 {sum:N2}");
+
+    return new FileStats(body, sum);
+}</code></pre>
+
+  <div class="note tip">
+    <b>중복 전송 방지는 "파일명"이 아니라 "내용 해시"로.</b>
+    같은 이름으로 다시 보내는 규약이면 <b>SHA-256 이 같으면 무시</b>,
+    다르면 <b>이전 건을 취소하고 재적재</b> 합니다.
+    수신 이력 테이블에 <code>(FileName, Sha256, ReceivedAt, Status)</code> 를 남기면
+    "이 파일 처리했나요?"라는 문의에 <b>1초 만에</b> 답할 수 있습니다.
+    운영 이관 후 가장 자주 오는 문의가 정확히 그것입니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 파일 연계의 전부는 <b>임시 이름 → rename</b> 과 <b>트레일러 검증</b> 두 가지입니다. Watcher 는 <b>폴링의 보조</b>로만 쓰고, 규약서에는 <b>완료의 정의</b>를 반드시 적습니다.</div>
+</section>
+
+
+<!-- ==================== f09 ==================== -->
+<section class="sec" id="f09">
+  <div class="sec-head rv">
+    <span class="no">BATCH 09</span>
+    <h2>HTTP 클라이언트 — <span class="t">외부 API 를 수만 번 부를 때</span></h2>
+    <p class="lead">
+      배치는 API 를 <b>한 번</b> 부르지 않습니다. <b>4만 번</b> 부릅니다.
+      그때 드러나는 것이 <b>소켓 고갈 · DNS 캐시 · 상대방 레이트 리밋</b> 입니다.
+      <code>new HttpClient()</code> 한 줄이 왜 운영 장애가 되는지부터 봅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 286" role="img" aria-label="HttpClientFactory의 핸들러 수명 일정. HttpClient 인스턴스는 수십 밀리초만 살고 계속 새로 만들어지지만, 그 아래의 메시지 핸들러는 2분 동안 유지되다가 만료되고, 아직 쓰이는 중인 요청이 끝날 때까지 폐기 대기 상태로 남는다. TCP 커넥션 풀은 핸들러 안에 있어 핸들러가 살아 있는 동안 재사용된다">
+      <text x="16" y="18" class="lbl">HttpClientFactory — 짧게 사는 것과 오래 사는 것이 층으로 나뉩니다</text>
+
+      <path class="gr" d="M264 34 L264 218"/>
+      <path class="gr" d="M358 34 L358 218"/>
+      <path class="gr" d="M452 34 L452 218"/>
+      <path class="gr" d="M546 34 L546 218"/>
+      <path class="ax" d="M170 218 L648 218"/>
+
+      <text x="170" y="234" class="tk" text-anchor="middle">0분</text>
+      <text x="264" y="234" class="tk" text-anchor="middle">2분</text>
+      <text x="358" y="234" class="tk" text-anchor="middle">4분</text>
+      <text x="452" y="234" class="tk" text-anchor="middle">6분</text>
+      <text x="546" y="234" class="tk" text-anchor="middle">8분</text>
+      <text x="640" y="234" class="tk" text-anchor="middle">10분</text>
+
+      <text x="16" y="50" class="ann">HttpClient 개체</text>
+      <rect class="bar" x="172" y="38" width="6" height="16"/>
+      <rect class="bar" x="198" y="38" width="6" height="16"/>
+      <rect class="bar" x="236" y="38" width="6" height="16"/>
+      <rect class="bar" x="290" y="38" width="6" height="16"/>
+      <rect class="bar" x="352" y="38" width="6" height="16"/>
+      <rect class="bar" x="424" y="38" width="6" height="16"/>
+      <rect class="bar" x="498" y="38" width="6" height="16"/>
+      <rect class="bar" x="588" y="38" width="6" height="16"/>
+
+      <text x="16" y="76" class="ann">핸들러 #1 활성</text>
+      <rect class="bar" x="170" y="64" width="94" height="16"/>
+
+      <text x="16" y="102" class="ann">핸들러 #1 폐기 대기</text>
+      <rect class="bar-mut" x="264" y="90" width="60" height="16"/>
+
+      <text x="16" y="128" class="ann">핸들러 #2 활성</text>
+      <rect class="bar" x="264" y="116" width="94" height="16"/>
+
+      <text x="16" y="154" class="ann">핸들러 #2 폐기 대기</text>
+      <rect class="bar-mut" x="358" y="142" width="52" height="16"/>
+
+      <text x="16" y="180" class="ann">핸들러 #3 활성</text>
+      <rect class="bar" x="358" y="168" width="94" height="16"/>
+
+      <text x="16" y="206" class="ann ok-t">TCP 커넥션 풀</text>
+      <rect class="bar" x="170" y="194" width="94" height="16"/>
+      <rect class="bar" x="264" y="194" width="94" height="16"/>
+      <rect class="bar" x="358" y="194" width="94" height="16"/>
+      <text x="462" y="206" class="ann">핸들러 안에 삽니다 — 바뀌면 새로 맺습니다</text>
+
+      <text x="16" y="262" class="lbl">HttpClient 를 매번 새로 만들어도 괜찮은 이유 — 비싼 것은 그 아래 핸들러이고, 팩토리가 그걸 재사용합니다</text>
+      <text x="16" y="278" class="lbl">핸들러가 2분마다 갈리므로 DNS 변경도 2분 안에 반영됩니다. 이것이 싱글턴 HttpClient 와의 차이입니다</text>
+    </svg>
+    <div class="cap">핸들러 수명 — <b>HttpClient 는 싸고 핸들러는 비쌉니다</b>. 이 층이 나뉜 것이 팩토리의 전부입니다.</div>
+  </div>
+
+  <div class="note warn">
+    <b>두 가지 정반대 실수가 둘 다 장애를 만듭니다.</b><br>
+    ① <code>using var http = new HttpClient()</code> 를 요청마다 —
+    <b>소켓 고갈</b>. 닫은 커넥션이 <code>TIME_WAIT</code> 로 240초 남아
+    수천 번 호출하면 <code>SocketException: 사용 중인 포트</code> 가 납니다.<br>
+    ② <code>static readonly HttpClient</code> 싱글턴 —
+    소켓 고갈은 없지만 <b>DNS 를 영원히 캐시</b>합니다.
+    상대 시스템이 IP 를 바꾸면 <b>앱을 재시작할 때까지</b> 옛 IP 로 붙습니다.
+    사내 DR 전환·로드밸런서 교체 때 실제로 겪는 사고입니다.<br>
+    <b>정답은 <code>IHttpClientFactory</code></b> — 핸들러를 풀링하되 주기적으로 갈아 줍니다.
+  </div>
+
+  <h3 class="sub" data-lv="e">등록과 <span class="t">기본 설정</span> <span class="lvl e">🟢 기초</span></h3>
+
+  <pre class="code" data-lang="csharp"><code>builder.Services
+    .AddHttpClient("bank", c =&gt;
+    {
+        c.BaseAddress = new Uri("https://api.bank.example/");
+        c.Timeout     = TimeSpan.FromSeconds(30);      // ★ 전체 시도의 총합 시간
+        c.DefaultRequestHeaders.Add("X-System-Id", "SETTLE-BATCH");
+        c.DefaultRequestVersion = HttpVersion.Version20;
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(2))       // 핸들러 회전 주기
+    .ConfigurePrimaryHttpMessageHandler(() =&gt; new SocketsHttpHandler
+    {
+        // 커넥션당 최대 수명 — 로드밸런서 뒤에서 분산이 쏠리는 것을 막습니다
+        PooledConnectionLifetime     = TimeSpan.FromMinutes(2),
+        PooledConnectionIdleTimeout  = TimeSpan.FromSeconds(90),
+        MaxConnectionsPerServer      = 32,             // ★ 배치는 이걸 올립니다
+        AutomaticDecompression       = DecompressionMethods.All,
+        EnableMultipleHttp2Connections = true
+    });
+
+// 쓸 때
+var http = factory.CreateClient("bank");    // 매번 새로 만들어도 됩니다</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Refit — 인터페이스로 선언 (FeignClient 대응)</h4>
+      <pre class="code" data-lang="csharp"><code>public interface IBankApi
+{
+    [Get("/v1/settlements/{date}")]
+    Task&lt;SettlementDto&gt; GetAsync(string date, CancellationToken ct);
+
+    [Post("/v1/settlements")]
+    Task&lt;ApiResponse&lt;ResultDto&gt;&gt; SubmitAsync(
+        [Body] SubmitDto body, CancellationToken ct);
+
+    [Get("/v1/trades/export")]
+    Task&lt;HttpResponseMessage&gt; ExportAsync(   // 대용량은 이 형태로 받습니다
+        [Query] string date, CancellationToken ct);
+}
+
+builder.Services
+    .AddRefitClient&lt;IBankApi&gt;()
+    .ConfigureHttpClient(c =&gt; c.BaseAddress = new Uri(baseUrl))
+    .AddStandardResilienceHandler();     // ★ .NET 8+ 표준 회복력 파이프라인</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>Refit · Polly 의 기본 사용법은 🔷 t03 (도구 탭)</b> 에서 다뤘습니다.
+        여기서는 <b>배치 관점</b>만 봅니다 —
+        수만 번 호출할 때의 <b>동시성 · 레이트 리밋 · 스트리밍 응답</b>.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">회복력 — 배치용으로 조정하기</h4>
+      <pre class="code" data-lang="csharp"><code>.AddResilienceHandler("batch", b =&gt;
+{
+    // ① 전체 시도의 총 시간 — 이게 없으면 무한정 매답니다
+    b.AddTimeout(TimeSpan.FromMinutes(2));
+
+    // ② 재시도 — 배치는 웹보다 넉넉하게 잡아도 됩니다
+    b.AddRetry(new HttpRetryStrategyOptions
+    {
+        MaxRetryAttempts = 5,
+        BackoffType      = DelayBackoffType.Exponential,
+        UseJitter        = true,                     // ★ 동시 재시도 쏠림 방지
+        Delay            = TimeSpan.FromSeconds(2),
+        ShouldHandle = args =&gt; ValueTask.FromResult(
+            args.Outcome.Result?.StatusCode is
+                HttpStatusCode.TooManyRequests or         // 429
+                HttpStatusCode.ServiceUnavailable or      // 503
+                HttpStatusCode.GatewayTimeout             // 504
+            || args.Outcome.Exception is HttpRequestException)
+    });
+
+    // ③ 서킷 브레이커 — 상대가 죽었는데 4만 번 두드리지 않게
+    b.AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
+    {
+        FailureRatio     = 0.5,
+        SamplingDuration = TimeSpan.FromSeconds(30),
+        MinimumThroughput = 20,
+        BreakDuration    = TimeSpan.FromSeconds(60)
+    });
+
+    // ④ 시도 1회의 시간
+    b.AddTimeout(TimeSpan.FromSeconds(20));
+});</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>순서가 곧 의미입니다.</b> 바깥이 <b>총 타임아웃</b>,
+        안쪽이 <b>1회 타임아웃</b> 입니다. 반대로 두면
+        "20초 타임아웃인데 5분째 안 끝나는" 상태가 됩니다.
+        그리고 <b><code>HttpClient.Timeout</code> 과 겹칩니다</b> —
+        회복력 파이프라인을 쓰면 <code>HttpClient.Timeout</code> 은
+        <code>Timeout.InfiniteTimeSpan</code> 으로 두는 편이 헷갈리지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">대용량 응답을 <span class="t">스트리밍으로</span> 받기 <span class="lvl m">🟡 중급</span></h3>
+
+  <div class="vs">
+    <div class="bad">
+      <h5>❌ 800 MB 를 문자열로</h5>
+      <pre class="code" data-lang="csharp"><code>var json = await http.GetStringAsync(url, ct);
+var list = JsonSerializer
+    .Deserialize&lt;List&lt;TradeDto&gt;&gt;(json);
+// 문자열 1.6 GB(UTF-16) + 객체 800 MB
+// = LOH 폭발 → OutOfMemoryException</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 헤더만 받고 흘려보내기</h5>
+      <pre class="code" data-lang="csharp"><code>using var res = await http.GetAsync(url,
+    HttpCompletionOption.ResponseHeadersRead, ct);  // ★
+res.EnsureSuccessStatusCode();
+
+await using var s = await res.Content
+    .ReadAsStreamAsync(ct);
+
+// ① 파일로 바로 흘리기
+await using var fs = File.Create(path);
+await s.CopyToAsync(fs, 1024 * 1024, ct);
+
+// ② 또는 JSON 배열을 한 건씩
+await foreach (var dto in JsonSerializer
+    .DeserializeAsyncEnumerable&lt;TradeDto&gt;(s, ct))
+{ ... }</code></pre>
+    </div>
+  </div>
+
+  <div class="note tip">
+    <b><code>HttpCompletionOption.ResponseHeadersRead</code></b> 는
+    "<b>본문을 다 받기 전에</b> 응답 객체를 돌려 달라"는 뜻입니다.
+    기본값(<code>ResponseContentRead</code>)은 본문 전체가 메모리에 올 때까지 <code>await</code> 가 안 끝납니다.
+    자바의 <code>HttpResponse.BodyHandlers.ofInputStream()</code> 과 같은 역할입니다.
+    다만 <b>반드시 <code>using</code> 으로 응답을 폐기</b>해야 합니다 —
+    안 그러면 커넥션이 풀로 안 돌아옵니다.
+  </div>
+
+  <h3 class="sub" data-lv="h">동시성 · 레이트 리밋 · <span class="t">인증서</span> <span class="lvl h">🔴 고급</span></h3>
+
+  <pre class="code" data-lang="csharp"><code>// ── 상대방이 "초당 20건" 이라고 했을 때 ──────────────────────
+// .NET 7+ 의 표준 레이트 리미터를 클라이언트 쪽에 겁니다
+var limiter = new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
+{
+    TokenLimit           = 20,
+    TokensPerPeriod      = 20,
+    ReplenishmentPeriod  = TimeSpan.FromSeconds(1),
+    QueueLimit           = 1000,
+    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+    AutoReplenishment    = true
+});
+
+await Parallel.ForEachAsync(ids,
+    new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = ct },
+    async (id, token) =&gt;
+    {
+        using var lease = await limiter.AcquireAsync(1, token);
+        if (!lease.IsAcquired) throw new BatchAbortException("레이트 리밋 큐 초과");
+
+        var dto = await api.GetAsync(id, token);
+        await sink.WriteAsync(dto, token);
+    });</code></pre>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>증상</th><th>진짜 원인</th><th>확인</th><th>해결</th></tr></thead>
+      <tbody>
+        <tr><td><code>SocketException</code> 포트 부족</td><td><code>new HttpClient()</code> 반복</td><td><code>netstat -an | find "TIME_WAIT"</code></td><td><code>IHttpClientFactory</code> 로</td></tr>
+        <tr><td>배포했는데 옛 서버로 감</td><td>싱글턴 <code>HttpClient</code> 의 DNS 캐시</td><td><code>nslookup</code> 결과와 실제 접속 IP 비교</td><td><code>PooledConnectionLifetime</code> 설정</td></tr>
+        <tr><td>동시 호출이 안 늘어남</td><td><code>MaxConnectionsPerServer</code> 기본값</td><td>동시 진행 수를 세어 보기</td><td>32~64 로 올림</td></tr>
+        <tr><td><code>TaskCanceledException</code></td><td>대개 <b>타임아웃</b>(취소가 아님)</td><td><code>ex.InnerException is TimeoutException</code></td><td>타임아웃 조정 · 스트리밍</td></tr>
+        <tr><td>사내 API 만 SSL 오류</td><td>사내 루트 CA 미신뢰</td><td><code>openssl s_client -connect</code></td><td>OS 신뢰 저장소에 CA 등록</td></tr>
+        <tr><td>프록시 뒤에서 407</td><td>프록시 인증</td><td><code>HTTP_PROXY</code> 환경 변수 확인</td><td><code>WebProxy</code> + 자격 증명 명시</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre class="code" data-lang="csharp"><code>// mTLS — 대외 기관 연계에서 자주 요구합니다
+.ConfigurePrimaryHttpMessageHandler(() =&gt;
+{
+    var h = new SocketsHttpHandler();
+    h.SslOptions.ClientCertificates = new X509Certificate2Collection(
+        X509CertificateLoader.LoadPkcs12FromFile(pfxPath, pfxPassword));
+
+    // ★ 인증서 검증을 통째로 끄지 마세요. 특정 지문만 허용합니다
+    h.SslOptions.RemoteCertificateValidationCallback = (_, cert, _, errors) =&gt;
+        errors == SslPolicyErrors.None ||
+        (cert is X509Certificate2 c2 &amp;&amp;
+         c2.Thumbprint.Equals(pinnedThumbprint, StringComparison.OrdinalIgnoreCase));
+    return h;
+});
+
+// 사내 프록시
+h.Proxy    = new WebProxy("http://proxy.corp:8080")
+             { Credentials = CredentialCache.DefaultNetworkCredentials };
+h.UseProxy = true;</code></pre>
+
+  <div class="note warn">
+    <b><code>RemoteCertificateValidationCallback = (_,_,_,_) =&gt; true</code> 는 금지입니다.</b>
+    개발 중에 넣었다가 그대로 운영에 나가는 것이 <b>보안 점검에서 가장 많이 지적</b>되는 항목입니다.
+    사내 CA 를 <b>OS 신뢰 저장소에 등록</b>하는 것이 정답이고,
+    그게 정말 불가능할 때만 <b>지문 고정(pinning)</b> 으로 좁혀서 허용하세요.
+    <code>#if DEBUG</code> 로 감싸는 것도 한 방법입니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b><code>IHttpClientFactory</code> + 회복력 파이프라인</b>이 기본이고, 대용량 응답은 <b><code>ResponseHeadersRead</code> 로 흘리며</b>, 상대의 레이트 리밋은 <b>내 쪽에서 먼저</b> 지킵니다.</div>
+</section>
+
+
+<!-- ==================== f10 ==================== -->
+<section class="sec" id="f10">
+  <div class="sec-head rv">
+    <span class="no">BATCH 10</span>
+    <h2>gRPC · 메시징 — <span class="t">아웃박스와 멱등 소비</span></h2>
+    <p class="lead">
+      서버끼리 대량으로 주고받을 때 REST 는 낭비입니다.
+      <b>gRPC 스트리밍</b>으로 밀어 넣고, 비동기 연계는 <b>메시지 브로커</b>로 끊습니다.
+      그리고 반드시 만나는 질문 — <b>"DB 커밋과 메시지 발행 중 하나만 성공하면?"</b>
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 314" role="img" aria-label="아웃박스 패턴 스윔레인. 주문 서비스가 주문과 아웃박스 행을 한 트랜잭션으로 저장하면, 릴레이가 미발행 행을 폴링해 브로커로 발행하고 성공하면 발행 시각을 갱신한다. 브로커는 주문번호를 키로 파티션에 적재하고, 소비자는 메시지 아이디로 중복을 확인한 뒤 처리하고 처리 기록을 남긴다">
+      <text x="16" y="18" class="lbl">가로줄 하나가 역할 하나 — 줄을 넘는 화살표가 인수인계 지점입니다</text>
+
+      <rect class="lane" x="106" y="30" width="558" height="56"/>
+      <rect class="lane-alt" x="106" y="90" width="558" height="56"/>
+      <rect class="lane" x="106" y="150" width="558" height="56"/>
+      <rect class="lane-alt" x="106" y="210" width="558" height="56"/>
+
+      <rect class="lane-hd" x="16" y="30" width="84" height="56"/>
+      <text x="58" y="62" class="ann" text-anchor="middle">주문 서비스</text>
+      <rect class="lane-hd" x="16" y="90" width="84" height="56"/>
+      <text x="58" y="122" class="ann" text-anchor="middle">릴레이</text>
+      <rect class="lane-hd" x="16" y="150" width="84" height="56"/>
+      <text x="58" y="182" class="ann" text-anchor="middle">브로커</text>
+      <rect class="lane-hd" x="16" y="210" width="84" height="56"/>
+      <text x="58" y="242" class="ann" text-anchor="middle">소비자</text>
+
+      <rect class="bx bx-fw" x="120" y="42" width="150" height="32"/>
+      <text x="195" y="63" class="ann" text-anchor="middle">주문 + Outbox 저장</text>
+      <text x="280" y="63" class="ann">한 트랜잭션 — 둘 다 커밋되거나 둘 다 롤백</text>
+
+      <path class="fl ar" d="M195 78 L195 98"/>
+
+      <rect class="bx" x="120" y="102" width="150" height="32"/>
+      <text x="195" y="123" class="ann" text-anchor="middle">미발행 행 폴링</text>
+      <path class="fl ar" d="M274 118 L296 118"/>
+      <rect class="bx" x="300" y="102" width="150" height="32"/>
+      <text x="375" y="123" class="ann" text-anchor="middle">브로커로 발행</text>
+      <text x="460" y="123" class="ann">성공하면 PublishedAt 갱신</text>
+
+      <path class="fl ar" d="M375 138 L375 158"/>
+
+      <rect class="bx" x="300" y="162" width="150" height="32"/>
+      <text x="375" y="183" class="ann" text-anchor="middle">파티션에 적재</text>
+      <text x="460" y="183" class="ann">키 = 주문번호 → 순서 보장</text>
+
+      <path class="fl ar" d="M375 198 L375 218"/>
+
+      <rect class="bx" x="300" y="222" width="150" height="32"/>
+      <text x="375" y="243" class="ann" text-anchor="middle">MessageId 확인</text>
+      <path class="fl ar" d="M454 238 L476 238"/>
+      <rect class="bx bx-ok" x="480" y="222" width="150" height="32"/>
+      <text x="555" y="243" class="ann ok-t" text-anchor="middle">처리 + 기록 저장</text>
+      <text x="120" y="243" class="ann">이미 있으면 건너뜀</text>
+
+      <text x="16" y="288" class="lbl">줄을 넘는 화살표가 3개 — 각각이 "여기서 끊기면 어떻게 되나"를 물어야 하는 지점입니다</text>
+      <text x="16" y="306" class="lbl">발행은 최소 1회(at-least-once) — 그래서 소비자가 멱등해야만 전체가 정확히 1회처럼 보입니다</text>
+    </svg>
+    <div class="cap">아웃박스 — <b>DB 트랜잭션 하나</b>로 "저장했으면 반드시 발행된다"를 보장합니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="m">아웃박스 패턴 — <span class="t">왜 필요한가</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <p class="tx">
+    주문을 DB 에 저장하고 Kafka 에 이벤트를 발행합니다. 둘은 <b>다른 시스템</b>이라
+    <b>하나의 트랜잭션으로 묶을 수 없습니다</b>(분산 트랜잭션 · XA 는 사실상 죽었습니다).
+    그래서 <b>둘 중 하나만 성공하는 창</b>이 반드시 존재합니다.
+  </p>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>순서</th><th>중간에 죽으면</th><th>결과</th><th>판정</th></tr></thead>
+      <tbody>
+        <tr><td>DB 커밋 → 발행</td><td>커밋 직후</td><td>주문은 있는데 <b>이벤트 없음</b></td><td>배송이 안 나감 — <b>치명적</b></td></tr>
+        <tr><td>발행 → DB 커밋</td><td>발행 직후</td><td>이벤트는 갔는데 <b>주문 없음</b></td><td>없는 주문을 배송 — <b>더 치명적</b></td></tr>
+        <tr><td><b>DB 커밋(주문+아웃박스)</b><br>→ 릴레이가 발행</td><td>어디서 죽어도</td><td>아웃박스 행이 남아 <b>다음에 발행</b></td><td><b>안전</b> — 발행이 늦어질 뿐</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">아웃박스 테이블과 저장</h4>
+      <pre class="code" data-lang="sql"><code>CREATE TABLE OutboxMessage (
+    Id           UNIQUEIDENTIFIER PRIMARY KEY,   -- = MessageId
+    OccurredAt   DATETIME2(3) NOT NULL,
+    AggregateId  VARCHAR(60)  NOT NULL,          -- 파티션 키
+    Type         VARCHAR(120) NOT NULL,
+    Payload      NVARCHAR(MAX) NOT NULL,
+    PublishedAt  DATETIME2(3) NULL,              -- NULL = 아직 미발행
+    Attempts     INT NOT NULL DEFAULT 0,
+    LastError    NVARCHAR(1000) NULL
+);
+-- 미발행 행만 훑는 필터 인덱스 — 테이블이 커져도 폴링이 안 느려집니다
+CREATE INDEX IX_Outbox_Pending ON OutboxMessage(OccurredAt)
+    WHERE PublishedAt IS NULL;</code></pre>
+      <pre class="code" data-lang="csharp"><code>// EF Core 의 SaveChanges 하나에 둘 다 들어갑니다
+db.Orders.Add(order);
+db.OutboxMessages.Add(new OutboxMessage
+{
+    Id          = Guid.CreateVersion7(),      // ★ 시간 순서가 있는 GUID (.NET 9+)
+    OccurredAt  = DateTime.UtcNow,
+    AggregateId = order.OrderNo,
+    Type        = nameof(OrderPlaced),
+    Payload     = JsonSerializer.Serialize(new OrderPlaced(order))
+});
+await db.SaveChangesAsync(ct);                // ★ 하나의 트랜잭션</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">릴레이 — 미발행 행을 밀어냅니다</h4>
+      <pre class="code" data-lang="csharp"><code>while (await timer.WaitForNextTickAsync(ct))
+{
+    using var scope = scopes.CreateScope();
+    var db  = scope.ServiceProvider.GetRequiredService&lt;AppDbContext&gt;();
+    var bus = scope.ServiceProvider.GetRequiredService&lt;IPublishEndpoint&gt;();
+
+    // ★ 여러 릴레이가 같은 행을 집지 않도록 잠급니다 (SQL Server 힌트)
+    var batch = await db.OutboxMessages
+        .FromSqlRaw("""
+            SELECT TOP (200) * FROM OutboxMessage WITH (UPDLOCK, READPAST)
+            WHERE PublishedAt IS NULL ORDER BY OccurredAt
+            """)
+        .ToListAsync(ct);
+
+    foreach (var m in batch)
+    {
+        try
+        {
+            await bus.Publish(Deserialize(m), c =&gt;
+            {
+                c.MessageId    = m.Id;              // ★ 소비자 멱등의 근거
+                c.SetRoutingKey(m.AggregateId);
+            }, ct);
+            m.PublishedAt = DateTime.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            m.Attempts++;
+            m.LastError = ex.Message[..Math.Min(900, ex.Message.Length)];
+            // 발행 실패는 그대로 둡니다 — 다음 바퀴에 다시 시도
+        }
+    }
+    await db.SaveChangesAsync(ct);
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>READPAST</code></b> 가 핵심입니다 —
+        다른 릴레이가 잠근 행을 <b>기다리지 않고 건너뜁니다</b>.
+        이게 없으면 릴레이 2대가 서로를 기다리며 처리량이 1대만도 못해집니다.
+        PostgreSQL 이면 <code>FOR UPDATE SKIP LOCKED</code> 입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="h">멱등 소비 · <span class="t">DLQ 재처리</span> <span class="lvl h">🔴 고급</span></h3>
+
+  <pre class="code" data-lang="csharp"><code>// MassTransit — @KafkaListener 에 해당합니다
+public sealed class OrderPlacedConsumer(
+    AppDbContext db, IShippingService ship,
+    ILogger&lt;OrderPlacedConsumer&gt; log) : IConsumer&lt;OrderPlaced&gt;
+{
+    public async Task Consume(ConsumeContext&lt;OrderPlaced&gt; ctx)
+    {
+        var mid = ctx.MessageId!.Value;
+
+        // ★ 멱등 — 처리 기록과 실제 처리를 한 트랜잭션으로
+        await using var tx = await db.Database.BeginTransactionAsync(ctx.CancellationToken);
+
+        var already = await db.ProcessedMessages
+            .AnyAsync(p =&gt; p.MessageId == mid, ctx.CancellationToken);
+        if (already)
+        {
+            log.LogInformation("이미 처리한 메시지 {Id} — 건너뜁니다", mid);
+            return;                                     // ACK 는 정상적으로
+        }
+
+        await ship.CreateAsync(ctx.Message, ctx.CancellationToken);
+        db.ProcessedMessages.Add(new ProcessedMessage(mid, DateTime.UtcNow));
+
+        await db.SaveChangesAsync(ctx.CancellationToken);
+        await tx.CommitAsync(ctx.CancellationToken);
+    }
+}
+
+// 등록 — 재시도와 DLQ 정책
+builder.Services.AddMassTransit(x =&gt;
+{
+    x.AddConsumer&lt;OrderPlacedConsumer&gt;();
+    x.UsingRabbitMq((ctx, cfg) =&gt;
+    {
+        cfg.Host(rabbitUri, h =&gt; { h.Username(user); h.Password(pass); });
+
+        cfg.ReceiveEndpoint("order-placed", e =&gt;
+        {
+            e.PrefetchCount    = 32;
+            e.ConcurrentMessageLimit = 8;
+
+            // 즉시 재시도 → 지연 재시도 → 그래도 안 되면 _error 큐로
+            e.UseMessageRetry(r =&gt; r.Exponential(
+                retryLimit: 5,
+                minInterval: TimeSpan.FromSeconds(1),
+                maxInterval: TimeSpan.FromMinutes(5),
+                intervalDelta: TimeSpan.FromSeconds(3)));
+
+            e.ConfigureConsumer&lt;OrderPlacedConsumer&gt;(ctx);
+        });
+    });
+});</code></pre>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>주제</th><th>Spring / Java</th><th>.NET</th><th>차이</th></tr></thead>
+      <tbody>
+        <tr><td>소비자 선언</td><td><code>@KafkaListener</code> · <code>@RabbitListener</code></td><td><code>IConsumer&lt;T&gt;</code> + <code>AddConsumer</code></td><td>거의 동일. 타입으로 라우팅</td></tr>
+        <tr><td>추상화 계층</td><td>Spring Cloud Stream</td><td><b>MassTransit</b> · Wolverine</td><td>MassTransit 이 사실상 표준</td></tr>
+        <tr><td>DLQ</td><td><code>DeadLetterPublishingRecoverer</code></td><td><code>_error</code> 큐 자동 생성</td><td>.NET 이 기본 제공</td></tr>
+        <tr><td>재시도</td><td><code>RetryTemplate</code></td><td><code>UseMessageRetry</code></td><td>동일 개념</td></tr>
+        <tr><td>아웃박스</td><td>직접 or Debezium CDC</td><td><b><code>AddEntityFrameworkOutbox</code></b> 내장</td><td>MassTransit 이 릴레이까지 제공</td></tr>
+        <tr><td>스케줄 메시지</td><td>Quartz 연동</td><td><code>ScheduleSend</code> (Delayed Exchange)</td><td>동일</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note tip">
+    <b>MassTransit 은 아웃박스를 통째로 제공합니다.</b>
+    <code>x.AddEntityFrameworkOutbox&lt;AppDbContext&gt;(o =&gt; { o.UseSqlServer(); o.UseBusOutbox(); })</code>
+    한 줄이면 위의 릴레이 코드를 직접 안 짜도 됩니다.
+    <b>직접 만드는 코드를 먼저 보인 이유</b>는, 라이브러리가 내부에서 무엇을 하는지 알아야
+    "발행이 3분 늦게 되는데요" 같은 문의에 답할 수 있기 때문입니다.
+    <b>메시지 큐 자체의 개념(순서·파티션·컨슈머 그룹)은 🔷 k06</b> 에서 다룹니다.
+  </div>
+
+  <h3 class="sub" data-lv="m">gRPC 스트리밍 — <span class="t">서버 간 대량 전송</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <pre class="code" data-lang="csharp"><code>// trade.proto — 클라이언트 스트리밍: 수백만 건을 한 커넥션으로 밀어 넣습니다
+service TradeIngest {
+  rpc PushTrades (stream TradeMessage) returns (IngestResult);
+  rpc ExportTrades (ExportRequest) returns (stream TradeMessage);
+}</code></pre>
+
+  <pre class="code" data-lang="csharp"><code>// 서버 — 흘러오는 것을 청크로 모아 벌크 적재
+public override async Task&lt;IngestResult&gt; PushTrades(
+    IAsyncStreamReader&lt;TradeMessage&gt; req, ServerCallContext ctx)
+{
+    var buf = new List&lt;Trade&gt;(10_000);
+    long total = 0;
+
+    await foreach (var m in req.ReadAllAsync(ctx.CancellationToken))
+    {
+        buf.Add(Map(m));
+        if (buf.Count &lt; 10_000) continue;
+        await _bulk.CopyAsync(buf, ctx.CancellationToken);
+        total += buf.Count;
+        buf.Clear();                        // ★ 여기선 안전 — 위에서 await 가 끝났습니다
+    }
+    if (buf.Count &gt; 0) { await _bulk.CopyAsync(buf, ctx.CancellationToken); total += buf.Count; }
+
+    return new IngestResult { Accepted = total };
+}
+
+// 클라이언트
+using var call = client.PushTrades(cancellationToken: ct);
+await foreach (var row in ReadCsvAsync(path).WithCancellation(ct))
+    await call.RequestStream.WriteAsync(Map(row), ct);
+await call.RequestStream.CompleteAsync();
+var res = await call.ResponseAsync;</code></pre>
+
+  <div class="note info">
+    <b>gRPC 의 기본 메시지 크기 제한은 4 MB</b> 입니다.
+    <b>큰 메시지 하나를 보내려 하지 말고 스트리밍으로 잘게</b> 보내세요 —
+    그게 gRPC 가 의도한 사용법입니다.
+    제한을 올려야 한다면 <code>MaxReceiveMessageSize</code> 를 설정하되,
+    <b>메모리에 그만큼 올라온다</b>는 뜻임을 기억하세요.
+    <b>gRPC 의 기본기(proto · 코드 생성 · 인증)는 🔷 w13</b> 에서 다뤘습니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> DB 와 브로커를 한 트랜잭션으로 묶을 수 없으므로 <b>아웃박스</b>를 쓰고, 발행은 최소 1회이므로 <b>소비자를 멱등하게</b> 만듭니다. 대량 전송은 <b>gRPC 스트리밍</b>.</div>
+</section>
+
+
+<!-- ==================== f11 ==================== -->
+<section class="sec" id="f11">
+  <div class="sec-head rv">
+    <span class="no">BATCH 11</span>
+    <h2>병렬 파이프라인 — <span class="t">Channels 와 백프레셔</span></h2>
+    <p class="lead">
+      읽기는 디스크, 변환은 CPU, 쓰기는 DB. 셋을 <b>순서대로</b> 하면
+      항상 <b>둘은 놀고 하나만 일합니다</b>.
+      <code>System.Threading.Channels</code> 로 셋을 <b>동시에</b> 돌리고,
+      빨라진 생산자를 <b>일부러 막아</b> 메모리를 지킵니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 280" role="img" aria-label="바운디드 채널의 백프레셔를 보여주는 산키 다이어그램. 1초에 이론상 만 이천 건을 읽을 수 있지만 소비자는 팔천 건만 처리한다. 천 건은 채널 버퍼에 대기하고, 나머지 삼천 건은 생산자가 아예 만들지 못하도록 막힌다. 이 막힘이 백프레셔이며 메모리를 일정하게 유지한다">
+      <text x="16" y="18" class="lbl">1초 동안 — 밴드 두께가 곧 건수. 총량은 갈라져도 보존됩니다</text>
+
+      <rect class="bx bx-fw" x="40" y="44" width="34" height="186" rx="4"/>
+      <text x="16" y="34" class="ann">읽기 가능량 12,000건/초</text>
+
+      <path class="band" d="M74 44 C 300 44, 380 44, 470 44 L470 157 C 380 157, 300 157, 74 157 Z"/>
+      <path class="band-2" d="M74 157 C 300 157, 380 165, 470 165 L470 179 C 380 179, 300 171, 74 171 Z"/>
+      <path class="band-3" d="M74 171 C 300 171, 380 187, 470 187 L470 230 C 380 230, 300 214, 74 214 Z"
+            style="fill:rgba(251,191,36,.18)"/>
+
+      <rect class="bx bx-ok" x="470" y="44" width="34" height="113" rx="4"/>
+      <rect class="bx" x="470" y="165" width="34" height="14" rx="2"/>
+      <rect class="bx bx-hi" x="470" y="187" width="34" height="43" rx="4"/>
+
+      <text x="512" y="90" class="ann ok-t">소비 완료</text>
+      <text x="512" y="104" class="ann">8,000건 — 워커 4개</text>
+      <text x="512" y="170" class="ann">채널 대기</text>
+      <text x="512" y="184" class="ann">1,000건 (버퍼 상한)</text>
+      <text x="512" y="212" class="ann am-t">생산 차단</text>
+      <text x="512" y="226" class="ann">3,000건 — 백프레셔</text>
+
+      <text x="180" y="104" class="ann">67% — 실제 처리량이 파이프라인 속도입니다</text>
+      <text x="180" y="168" class="ann">8%</text>
+      <text x="180" y="206" class="ann">25% — 생산자가 여기서 기다립니다</text>
+
+      <text x="16" y="256" class="lbl">"생산 차단"은 낭비가 아니라 설계입니다 — 이게 없으면 대기 밴드가 무한히 두꺼워져 메모리가 터집니다</text>
+      <text x="16" y="272" class="lbl">파이프라인 처리량은 가장 느린 단계가 정합니다. 늘려야 할 것은 읽기가 아니라 소비자 수입니다</text>
+    </svg>
+    <div class="cap">백프레셔 — <b>버퍼가 차면 생산자를 세웁니다</b>. 메모리가 일정하게 유지되는 이유입니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="e">Channel 기본 — <span class="t">BlockingQueue 의 async 판</span> <span class="lvl e">🟢 기초</span></h3>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">만들기 — Bounded 가 기본입니다</h4>
+      <pre class="code" data-lang="csharp"><code>var ch = Channel.CreateBounded&lt;TradeRow&gt;(
+    new BoundedChannelOptions(capacity: 1_000)
+    {
+        // 가득 차면 어떻게 할지 — 이게 백프레셔의 정체
+        FullMode = BoundedChannelFullMode.Wait,   // ★ 생산자를 기다리게
+        SingleWriter = true,     // 생산자 1개 → 내부 락 생략
+        SingleReader = false,    // 소비자 여럿
+        AllowSynchronousContinuations = false
+    });
+
+// Unbounded 는 "메모리가 무한하다"는 가정입니다 — 배치에서는 쓰지 마세요
+// var bad = Channel.CreateUnbounded&lt;TradeRow&gt;();</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th>FullMode</th><th>동작</th><th>쓸 때</th></tr></thead>
+          <tbody>
+            <tr><td><code>Wait</code></td><td>생산자가 대기</td><td><b>배치의 기본값</b> — 데이터를 잃으면 안 됨</td></tr>
+            <tr><td><code>DropOldest</code></td><td>가장 오래된 것 버림</td><td>최신 상태만 중요한 모니터링</td></tr>
+            <tr><td><code>DropWrite</code></td><td>새 것을 버림</td><td>부하 시 샘플링 로그</td></tr>
+            <tr><td><code>DropNewest</code></td><td>가장 최근 것 버림</td><td>드묾</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">생산자 · 소비자</h4>
+      <pre class="code" data-lang="csharp"><code>// 생산자 — 파일을 읽어 채널에 밀어 넣습니다
+var producer = Task.Run(async () =&gt;
+{
+    try
+    {
+        await foreach (var row in ReadCsvAsync(path).WithCancellation(ct))
+            await ch.Writer.WriteAsync(row, ct);   // ★ 가득 차면 여기서 대기
+    }
+    finally
+    {
+        ch.Writer.Complete();                      // ★ 반드시 닫습니다
+    }
+}, ct);
+
+// 소비자 N개 — 같은 채널에서 나눠 가져갑니다
+var consumers = Enumerable.Range(0, 4).Select(_ =&gt; Task.Run(async () =&gt;
+{
+    var buf = new List&lt;Trade&gt;(1_000);
+    await foreach (var row in ch.Reader.ReadAllAsync(ct))
+    {
+        buf.Add(Transform(row));
+        if (buf.Count &lt; 1_000) continue;
+        await bulk.CopyAsync(buf, ct);
+        buf = new List&lt;Trade&gt;(1_000);
+    }
+    if (buf.Count &gt; 0) await bulk.CopyAsync(buf, ct);
+}, ct)).ToArray();
+
+await producer;
+await Task.WhenAll(consumers);</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>Writer.Complete()</code> 를 <code>finally</code> 에 두지 않으면</b>
+        생산자가 예외로 죽었을 때 소비자들이 <b>영원히 기다립니다</b>.
+        배치가 "끝나지도 실패하지도 않고 멈춰 있는" 상태의 1순위 원인입니다.
+        예외를 전파하려면 <code>ch.Writer.Complete(ex)</code> 로 <b>예외를 담아</b> 닫으세요 —
+        소비자 쪽 <code>ReadAllAsync</code> 가 그 예외를 다시 던집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">3단 파이프라인 — <span class="t">읽기 · 변환 · 쓰기를 동시에</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <pre class="code" data-lang="csharp"><code>public async Task RunPipelineAsync(string path, CancellationToken ct)
+{
+    // 채널 두 개로 3단을 잇습니다
+    var raw  = Channel.CreateBounded&lt;TradeRow&gt;(new BoundedChannelOptions(2_000)
+                   { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true });
+    var done = Channel.CreateBounded&lt;Trade&gt;(new BoundedChannelOptions(2_000)
+                   { FullMode = BoundedChannelFullMode.Wait });
+
+    // ── ① 읽기 (IO 바운드) — 1개면 충분합니다. 디스크는 하나니까요
+    var read = Task.Run(async () =&gt;
+    {
+        try
+        {
+            await foreach (var r in ReadCsvAsync(path).WithCancellation(ct))
+                await raw.Writer.WriteAsync(r, ct);
+        }
+        catch (Exception ex) { raw.Writer.Complete(ex); throw; }
+        raw.Writer.Complete();
+    }, ct);
+
+    // ── ② 변환 (CPU 바운드) — 코어 수만큼
+    var workers = Environment.ProcessorCount;
+    var xform = Enumerable.Range(0, workers).Select(_ =&gt; Task.Run(async () =&gt;
+    {
+        await foreach (var r in raw.Reader.ReadAllAsync(ct))
+        {
+            if (Validate(r) is { } why) { await skips.WriteAsync((r, why), ct); continue; }
+            await done.Writer.WriteAsync(Map(r), ct);
+        }
+    }, ct)).ToArray();
+
+    // 변환기가 전부 끝나야 done 을 닫을 수 있습니다
+    _ = Task.Run(async () =&gt; { await Task.WhenAll(xform); done.Writer.Complete(); }, ct);
+
+    // ── ③ 쓰기 (IO 바운드) — DB 커넥션 수에 맞춥니다
+    var write = Task.Run(async () =&gt;
+    {
+        var buf = new List&lt;Trade&gt;(5_000);
+        await foreach (var t in done.Reader.ReadAllAsync(ct))
+        {
+            buf.Add(t);
+            if (buf.Count &lt; 5_000) continue;
+            await bulk.CopyAsync(buf, ct);
+            buf = new List&lt;Trade&gt;(5_000);
+        }
+        if (buf.Count &gt; 0) await bulk.CopyAsync(buf, ct);
+    }, ct);
+
+    await Task.WhenAll(read, write);           // xform 은 위에서 대기 중
+}</code></pre>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>단계</th><th>성격</th><th>병렬도 기준</th><th>늘려도 안 빨라지는 이유</th></tr></thead>
+      <tbody>
+        <tr><td>파일 읽기</td><td>IO (순차)</td><td><b>1</b></td><td>디스크 헤드가 하나. 여럿이 읽으면 <b>느려집니다</b>(랜덤 액세스)</td></tr>
+        <tr><td>파싱 · 검증</td><td>CPU</td><td><code>ProcessorCount</code></td><td>코어보다 많으면 컨텍스트 스위칭 비용만 증가</td></tr>
+        <tr><td>외부 API 호출</td><td>IO (대기)</td><td>8~32 (상대 허용치)</td><td>상대가 레이트 리밋을 걸면 429 만 늘어남</td></tr>
+        <tr><td>DB 벌크 적재</td><td>IO + 서버 CPU</td><td><b>2~4</b></td><td>같은 테이블에 여럿이 쓰면 <b>락 경합</b>이 이득을 먹음</td></tr>
+        <tr><td>DB 커넥션 풀</td><td>—</td><td>기본 100</td><td>병렬도 &gt; 풀 크기면 <b>풀 고갈 타임아웃</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note tip">
+    <b>병렬도는 재서 정합니다.</b> 위 표는 <b>출발점</b>일 뿐입니다.
+    실제로는 병렬도를 1 → 2 → 4 → 8 로 올리며 <b>초당 처리 건수</b>를 기록하세요.
+    거의 항상 <b>어느 지점에서 늘지 않고, 그 다음에는 오히려 떨어집니다</b>.
+    떨어지기 직전 값이 답입니다. 이 숫자를 <b>설정 파일</b>로 빼 두면
+    운영 서버에서 재배포 없이 조정할 수 있습니다.
+  </div>
+
+  <h3 class="sub" data-lv="h">Parallel.ForEachAsync · <span class="t">IAsyncEnumerable</span> <span class="lvl h">🔴 고급</span></h3>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">간단한 경우는 이걸로 충분합니다</h4>
+      <pre class="code" data-lang="csharp"><code>// 채널을 만들 것도 없는 "N개를 병렬로" 는 이 한 줄
+await Parallel.ForEachAsync(
+    source: ReadIdsAsync(ct),                    // IAsyncEnumerable 도 받습니다
+    parallelOptions: new ParallelOptions
+    {
+        MaxDegreeOfParallelism = 8,
+        CancellationToken      = ct
+    },
+    body: async (id, token) =&gt;
+    {
+        using var scope = scopes.CreateScope();  // ★ 각 작업이 자기 스코프
+        var svc = scope.ServiceProvider.GetRequiredService&lt;IItemService&gt;();
+        await svc.HandleAsync(id, token);
+    });</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>Parallel.For</code>(비동기 아님) 안에서 <code>async</code> 람다를 쓰지 마세요.</b>
+        <code>Parallel.ForEach(items, async x =&gt; await F(x))</code> 는
+        <b><code>async void</code> 가 되어</b> 즉시 반환하고,
+        <b>예외가 사라지고</b> 실제로는 병렬도 제어도 안 됩니다.
+        비동기가 섞이면 <b>반드시 <code>Parallel.ForEachAsync</code></b> 입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Channel vs Parallel — 언제 무엇을</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th></th><th>Channel</th><th>Parallel.ForEachAsync</th></tr></thead>
+          <tbody>
+            <tr><td>단계 수</td><td><b>여러 단계</b>를 잇기</td><td>한 단계</td></tr>
+            <tr><td>백프레셔</td><td><b>있음</b>(Bounded)</td><td>병렬도로 간접 제어</td></tr>
+            <tr><td>입력</td><td>스트리밍 · 무한</td><td>열거 가능한 집합</td></tr>
+            <tr><td>단계별 병렬도</td><td><b>따로</b> 지정</td><td>하나만</td></tr>
+            <tr><td>코드 양</td><td>많음</td><td><b>세 줄</b></td></tr>
+            <tr><td>판단</td><td>3 GB 파일 파이프라인</td><td><b>API 4만 번 호출</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>자바 대응</b> — Channel 은 <code>BlockingQueue</code> + <code>ExecutorService</code>,
+        <code>Parallel.ForEachAsync</code> 는 <code>parallelStream()</code>
+        (다만 <code>parallelStream</code> 은 공용 ForkJoinPool 을 쓰고 병렬도 지정이 까다롭습니다).
+        .NET 쪽이 <b>병렬도를 명시적으로 주는 것</b>이 쉽습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <b>CPU 바운드 작업을 <code>async</code> 로 감싼다고 빨라지지 않습니다.</b>
+    <code>await Task.Run(() =&gt; HeavyCalc())</code> 는 <b>스레드풀 스레드로 옮길</b> 뿐입니다.
+    IO 대기(<code>await http.GetAsync</code>)는 스레드를 <b>반납</b>하지만,
+    CPU 계산은 어느 스레드에서 하든 <b>코어를 점유</b>합니다.
+    배치에서 "async 로 바꿨는데 안 빨라져요"의 답은 대개 이것입니다 —
+    <b>병목이 CPU 인지 IO 인지 먼저 재세요</b>. <code>dotnet-counters</code> 의
+    <code>cpu-usage</code> 와 <code>threadpool-queue-length</code> 를 함께 보면 바로 압니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 단계가 여럿이면 <b>Bounded Channel</b> 로 잇고, 한 단계면 <b><code>Parallel.ForEachAsync</code></b>. 병렬도는 <b>단계마다 다르게, 재서</b> 정합니다.</div>
+</section>
+
+
+<!-- ==================== f12 ==================== -->
+<section class="sec" id="f12">
+  <div class="sec-head rv">
+    <span class="no">BATCH 12</span>
+    <h2>배치 운영 — <span class="t">야간 창 · 알림 · 재처리</span></h2>
+    <p class="lead">
+      배치는 <b>만드는 것보다 넘기는 것</b>이 어렵습니다.
+      "실패하면 누가 어떻게 아는가" · "다시 돌리려면 무엇을 누르는가" ·
+      "5시까지 안 끝나면 어떻게 되는가" 에 <b>문서로 답이 있어야</b> 운영 이관이 끝납니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="야간 배치 창 일정. 자정부터 새벽 5시까지 다섯 작업이 순서대로 배치되어 있고 정산 집계는 스테이징 적재가 끝나야 시작할 수 있다. 마감 시각인 새벽 5시에 붉은 선이 있고 마지막 작업은 4시 45분에 끝나 15분 여유가 있다. 인덱스 재구성은 다른 작업과 겹쳐도 되는 여유 작업이다">
+      <text x="16" y="18" class="lbl">야간 배치 창 — 세로 붉은 선이 마감(05:00), 그 뒤는 온라인 서비스 시간</text>
+
+      <path class="gr" d="M248 34 L248 200"/>
+      <path class="gr" d="M346 34 L346 200"/>
+      <path class="gr" d="M444 34 L444 200"/>
+      <path class="gr" d="M542 34 L542 200"/>
+      <path class="ax" d="M150 200 L648 200"/>
+
+      <text x="150" y="216" class="tk" text-anchor="middle">00:00</text>
+      <text x="248" y="216" class="tk" text-anchor="middle">01:00</text>
+      <text x="346" y="216" class="tk" text-anchor="middle">02:00</text>
+      <text x="444" y="216" class="tk" text-anchor="middle">03:00</text>
+      <text x="542" y="216" class="tk" text-anchor="middle">04:00</text>
+      <text x="640" y="216" class="tk" text-anchor="middle">05:00</text>
+
+      <text x="16" y="50" class="ann">SFTP 파일 수신</text>
+      <rect class="bar" x="150" y="38" width="82" height="16"/>
+
+      <text x="16" y="76" class="ann">검증 · 트레일러</text>
+      <rect class="bar" x="232" y="64" width="66" height="16"/>
+
+      <text x="16" y="102" class="ann">스테이징 적재</text>
+      <rect class="bar" x="298" y="90" width="180" height="16"/>
+
+      <text x="16" y="128" class="ann">정산 집계</text>
+      <rect class="bar" x="478" y="116" width="98" height="16"/>
+
+      <text x="16" y="154" class="ann">결과 파일 송신</text>
+      <rect class="bar" x="576" y="142" width="42" height="16"/>
+
+      <text x="16" y="180" class="ann">인덱스 재구성</text>
+      <rect class="bar-mut" x="150" y="168" width="148" height="16"/>
+
+      <path class="ln" d="M478 106 L478 116" style="opacity:.6"/>
+      <text x="386" y="112" class="ann" text-anchor="middle">적재가 끝나야 집계가 시작됩니다 — 임계 경로</text>
+
+      <path d="M640 34 L640 200" style="stroke:#fb7185;stroke-width:1.4;stroke-dasharray:4 3;fill:none"/>
+      <path class="dim-ln" d="M620 60 L638 60"/>
+      <text x="556" y="56" class="ann rs-t">여유 15분</text>
+
+      <text x="16" y="238" class="lbl">흐린 막대는 겹쳐도 되는 작업 — 마감에 영향을 주지 않으므로 언제 돌려도 됩니다</text>
+      <text x="16" y="254" class="lbl">여유가 15분뿐이면 SLA 가 아니라 도박입니다. 적재를 30% 줄이거나 창을 넓혀야 합니다</text>
+    </svg>
+    <div class="cap">야간 배치 창 — <b>마감선과 여유</b>를 같이 그려야 일정 그림이 됩니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="e">알림 — <span class="t">무엇을 언제 누구에게</span> <span class="lvl e">🟢 기초</span></h3>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>사건</th><th>심각도</th><th>알림</th><th>받는 사람</th><th>대응</th></tr></thead>
+      <tbody>
+        <tr><td>배치 실패(예외 종료)</td><td>🔴 높음</td><td>슬랙 + 메일 + (야간은) 전화</td><td>담당자 · 당직</td><td>즉시 원인 확인 · 재실행 판단</td></tr>
+        <tr><td>정시에 <b>시작조차 안 함</b></td><td>🔴 높음</td><td>슬랙 + 전화</td><td>인프라 · 담당자</td><td>서버·스케줄러 상태 확인. <b>가장 놓치기 쉬운 알림</b></td></tr>
+        <tr><td>마감 초과(05:00 미완)</td><td>🟠 중간</td><td>슬랙</td><td>담당자 · 업무팀</td><td>온라인 영향 확인 · 다음날 창 조정</td></tr>
+        <tr><td>스킵 건수 임계 초과</td><td>🟠 중간</td><td>슬랙</td><td>업무팀</td><td>송신처에 데이터 품질 문의</td></tr>
+        <tr><td>파일 미착(01:30 까지)</td><td>🟠 중간</td><td>슬랙 + 메일</td><td>연계 담당자</td><td>송신 시스템에 확인</td></tr>
+        <tr><td>정상 완료</td><td>🟢 정보</td><td>슬랙(요약 1줄)</td><td>채널</td><td>없음 — 다만 <b>조용하면 이상하다</b>는 감각을 만듭니다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note warn">
+    <b>"실패 알림"만 걸면 절반만 지킨 것입니다.</b>
+    <b>프로세스가 죽어서 아예 시작을 못 한</b> 경우에는 <b>아무 알림도 안 옵니다</b>.
+    아침에 업무팀이 "정산 결과가 없는데요"라고 전화할 때까지 아무도 모릅니다.
+    반드시 <b>"02:30 까지 성공 기록이 없으면 알림"</b> 이라는
+    <b>바깥에서 감시하는 잡</b>(dead man's switch)을 따로 두세요.
+    이 잡은 <b>배치 서버가 아닌 다른 곳</b>(웹 서버·모니터링 시스템)에서 돌아야 의미가 있습니다.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">감시 잡 — 30줄이면 됩니다</h4>
+      <pre class="code" data-lang="csharp"><code>// 웹 서버 쪽에서 10분마다 도는 잡
+public async Task CheckAsync(CancellationToken ct)
+{
+    var kstNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Kst);
+    var today  = DateOnly.FromDateTime(kstNow);
+
+    foreach (var w in _watch)          // 설정 파일에서 읽습니다
+    {
+        if (kstNow.TimeOfDay &lt; w.ExpectedBy) continue;   // 아직 기한 전
+
+        var ok = await db.BatchRuns.AnyAsync(r =&gt;
+            r.JobName == w.JobName &amp;&amp;
+            r.BizDate == today.AddDays(w.BizDateOffset) &amp;&amp;
+            r.Status  == "Success", ct);
+
+        if (ok) continue;
+
+        // 하루에 한 번만 울리게 (중복 알림은 알림을 무시하게 만듭니다)
+        if (await _alerts.AlreadySentAsync(w.JobName, today, ct)) continue;
+
+        await _notify.SendAsync(new Alert(
+            Level : AlertLevel.High,
+            Title : $"[배치 미완료] {w.JobName}",
+            Body  : $"{w.ExpectedBy:hh\\:mm} 까지 성공 기록이 없습니다. "
+                  + $"마지막 실행: {await LastRunSummaryAsync(w.JobName, ct)}"), ct);
+
+        await _alerts.MarkSentAsync(w.JobName, today, ct);
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">슬랙 · 메일 발송</h4>
+      <pre class="code" data-lang="csharp"><code>public sealed class SlackNotifier(IHttpClientFactory f,
+    IOptions&lt;SlackOptions&gt; opt) : INotifier
+{
+    public async Task SendAsync(Alert a, CancellationToken ct)
+    {
+        var http = f.CreateClient("slack");
+        var color = a.Level switch
+        {
+            AlertLevel.High   =&gt; "#e11d48",
+            AlertLevel.Medium =&gt; "#f59e0b",
+            _                 =&gt; "#10b981"
+        };
+
+        var payload = new
+        {
+            attachments = new[] { new {
+                color, title = a.Title, text = a.Body,
+                fields = new[] {
+                    new { title = "서버",  value = Environment.MachineName, @short = true },
+                    new { title = "환경",  value = _env.EnvironmentName,     @short = true }
+                },
+                ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+            }}
+        };
+
+        // ★ 알림 실패가 배치를 죽이면 안 됩니다
+        try { await http.PostAsJsonAsync(opt.Value.WebhookUrl, payload, ct); }
+        catch (Exception ex) { _log.LogWarning(ex, "슬랙 알림 실패 — 무시하고 진행"); }
+    }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>알림 코드는 절대 배치를 실패시키면 안 됩니다.</b>
+        슬랙이 잠깐 죽었다고 정산이 롤백되면 본말전도입니다.
+        <b>알림은 항상 <code>try/catch</code> 로 감싸고 로그만</b> 남기세요.
+        같은 이유로 알림은 <b>트랜잭션 밖</b>에서 보냅니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">재처리 화면 — <span class="t">운영자가 스스로 할 수 있게</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <p class="tx">
+    운영 이관의 실질적 기준은 하나입니다 — <b>개발자를 부르지 않고 처리할 수 있는가</b>.
+    아래 네 가지가 화면에 있으면 대부분의 야간 호출이 사라집니다.
+  </p>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>기능</th><th>화면 요소</th><th>서버 동작</th><th>안전장치</th></tr></thead>
+      <tbody>
+        <tr><td><b>실행 이력 조회</b></td><td>날짜 · 잡 · 상태 · 건수 · 소요 시간</td><td><code>BatchRun</code> 조회</td><td>읽기 전용</td></tr>
+        <tr><td><b>수동 재실행</b></td><td>영업일 선택 + 실행 버튼</td><td>Hangfire <code>Enqueue</code></td><td><b>중복 확인</b> · 권한 · 감사 로그</td></tr>
+        <tr><td><b>스킵 건 조회 · 다운로드</b></td><td>사유별 건수 + CSV 내려받기</td><td><code>BatchSkip</code> 조회</td><td>개인정보 마스킹</td></tr>
+        <tr><td><b>스킵 건 재처리</b></td><td>수정 후 재투입 / 무시 처리</td><td>단건 파이프라인 재실행</td><td>재처리 이력 남기기</td></tr>
+        <tr><td>진행 상황</td><td>현재 처리 건수 · 예상 완료</td><td>체크포인트 <code>DoneCount</code> 조회</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre class="code" data-lang="csharp"><code>// 수동 재실행 엔드포인트 — 안전장치가 코드의 절반입니다
+app.MapPost("/admin/batch/{job}/rerun", async (
+    string job, [FromBody] RerunRequest req,
+    AppDbContext db, ClaimsPrincipal user, IAuditLog audit,
+    CancellationToken ct) =&gt;
+{
+    // ① 권한
+    if (!user.IsInRole("BatchOperator")) return Results.Forbid();
+
+    // ② 이미 도는 중인가
+    var running = await db.BatchRuns.AnyAsync(r =&gt;
+        r.JobName == job &amp;&amp; r.Status == "Running", ct);
+    if (running) return Results.Conflict(new { message = "이미 실행 중입니다" });
+
+    // ③ 이미 성공했는데 또 돌리려는가 — 확인 문구를 요구합니다
+    var done = await db.BatchRuns.AnyAsync(r =&gt;
+        r.JobName == job &amp;&amp; r.BizDate == req.BizDate &amp;&amp; r.Status == "Success", ct);
+    if (done &amp;&amp; !req.ForceConfirmed)
+        return Results.BadRequest(new {
+            message = $"{req.BizDate:yyyy-MM-dd} 는 이미 성공했습니다. "
+                    + "재실행하려면 confirm 을 보내세요",
+            requiresConfirm = true });
+
+    // ④ 누가 무엇을 왜 눌렀는지 남깁니다
+    await audit.WriteAsync(user.Identity!.Name!, "BATCH_RERUN",
+                           $"{job} {req.BizDate:yyyy-MM-dd} 사유:{req.Reason}", ct);
+
+    var id = BackgroundJob.Enqueue&lt;SettleJob&gt;(j =&gt; j.RunAsync(req.BizDate, default));
+    return Results.Accepted($"/admin/batch/runs/{id}", new { jobId = id });
+});</code></pre>
+
+  <h3 class="sub" data-lv="h">운영 이관 <span class="t">체크리스트</span> <span class="lvl h">🔴 고급</span></h3>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문서에 반드시 적을 것</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th>항목</th><th>예시</th></tr></thead>
+          <tbody>
+            <tr><td>실행 시각 · 소요 시간</td><td>매일 02:10 · 평균 47분 · 최대 1시간 20분</td></tr>
+            <tr><td>선행 조건</td><td>ERP 파일이 01:30 까지 도착</td></tr>
+            <tr><td>후행 영향</td><td>05:30 온라인 조회 화면이 이 결과를 씀</td></tr>
+            <tr><td><b>실패 시 조치</b></td><td>① 로그 확인 위치 ② 재실행 방법 ③ 에스컬레이션 대상</td></tr>
+            <tr><td><b>재실행 가능 여부</b></td><td>멱등 — 몇 번 돌려도 안전</td></tr>
+            <tr><td>중단 가능 여부</td><td>청크 경계에서 안전하게 중단, 재실행 시 이어짐</td></tr>
+            <tr><td>데이터 보관</td><td>원본 90일 · 스킵 1년 · 결과 5년</td></tr>
+            <tr><td>연락처</td><td>담당 · 백업 담당 · 송신처 담당</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">성능 로그 — 매 실행 남기기</h4>
+      <pre class="code" data-lang="csharp"><code>var sw = Stopwatch.StartNew();
+var mem0 = GC.GetTotalAllocatedBytes();
+
+// ... 배치 본문 ...
+
+log.LogInformation(
+    "배치완료 job={Job} date={Date} 읽기={Read} 적재={Write} 스킵={Skip} " +
+    "소요={Sec:F1}초 처리율={Rate:N0}건/초 할당={Alloc:N0}MB 최대힙={Heap:N0}MB",
+    job, bizDate, read, wrote, skipped,
+    sw.Elapsed.TotalSeconds, read / sw.Elapsed.TotalSeconds,
+    (GC.GetTotalAllocatedBytes() - mem0) / 1024 / 1024,
+    GC.GetTotalMemory(false) / 1024 / 1024);</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 한 줄이 성능 회귀를 잡습니다.</b>
+        <b>처리율(건/초)</b> 을 매일 기록해 두면
+        데이터가 늘어서 느려진 것인지, 코드가 나빠진 것인지 <b>구분</b>할 수 있습니다.
+        처리율이 같은데 총 시간이 늘었으면 <b>데이터 증가</b>,
+        처리율 자체가 떨어졌으면 <b>코드나 인덱스</b> 문제입니다.
+        <b>구조화 로그와 Serilog 설정은 🔷 t02</b> 를 보세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="note info">
+    <b>야간 배치 창(window) 설계 — 실무 계산법.</b>
+    ① 온라인 서비스 종료 시각과 시작 시각 사이가 <b>물리적 창</b>입니다(예: 00:00~06:00, 6시간).
+    ② 여기서 <b>백업 · 인덱스 재구성 · 통계 갱신</b> 시간을 뺍니다(보통 1~2시간).
+    ③ 남은 시간이 <b>배치 창</b>입니다. 여기에 <b>1.5배 안전 계수</b>를 곱해 계획하세요 —
+    데이터는 매년 20~40% 늘어납니다. <b>"지금 딱 맞는" 배치는 1년 뒤 마감을 넘깁니다.</b>
+    창이 부족해지면 순서는 ① 임계 경로 최적화 → ② 병렬화 → ③ 증분 처리로 전환 →
+    ④ 창 자체를 넓히는 협의입니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 실패 알림만으로는 부족하고 <b>"시작조차 안 함"을 잡는 감시 잡</b>이 있어야 합니다. 재처리는 <b>운영자가 화면에서</b> 하게 만들고, 매 실행 <b>처리율</b>을 기록합니다.</div>
+</section>
+
+
+<!-- ==================== f13 ==================== -->
+<section class="sec" id="f13">
+  <div class="sec-head rv">
+    <span class="no">BATCH 13</span>
+    <h2>실전 — <span class="t">일별 정산 배치</span> 를 처음부터 끝까지</h2>
+    <p class="lead">
+      SFTP 로 <b>3.1 GB · 400만 행</b> 거래 파일을 받아 검증하고,
+      청크로 처리해 벌크 적재하고, 집계해 결과 파일을 만들어 되돌려 보냅니다.
+      <b>앞의 12개 섹션이 여기서 한 덩어리로 합쳐집니다.</b>
+      코드 · 실측 수치 · 운영 절차까지.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 186" role="img" aria-label="일별 정산 배치 파이프라인. 파일 수신, 검증, 청크 처리, 벌크 적재, 집계, 결과 송신 여섯 단계가 화살표 모양으로 이어져 있고 각 단계 아래에 규모와 소요 시간이 적혀 있다. 적재까지 실패하면 체크포인트에서 다시 시작할 수 있다">
+      <text x="16" y="18" class="lbl">단계마다 앞의 결과만 받습니다 — 되돌아가지 않습니다</text>
+
+      <polygon class="chev" points="16,40 115,40 131,64 115,88 16,88 32,64"/>
+      <text x="73" y="61" class="val" text-anchor="middle">수신</text>
+      <text x="73" y="76" class="ann" text-anchor="middle">3.1 GB</text>
+
+      <polygon class="chev" points="125,40 224,40 240,64 224,88 125,88 141,64"/>
+      <text x="182" y="61" class="val" text-anchor="middle">검증</text>
+      <text x="182" y="76" class="ann" text-anchor="middle">트레일러</text>
+
+      <polygon class="chev" points="234,40 333,40 349,64 333,88 234,88 250,64"/>
+      <text x="291" y="61" class="val" text-anchor="middle">청크 처리</text>
+      <text x="291" y="76" class="ann" text-anchor="middle">400만 행</text>
+
+      <polygon class="chev" points="343,40 442,40 458,64 442,88 343,88 359,64"/>
+      <text x="400" y="61" class="val" text-anchor="middle">벌크 적재</text>
+      <text x="400" y="76" class="ann" text-anchor="middle">41초</text>
+
+      <polygon class="chev" points="452,40 551,40 567,64 551,88 452,88 468,64"/>
+      <text x="509" y="61" class="val" text-anchor="middle">집계</text>
+      <text x="509" y="76" class="ann" text-anchor="middle">MERGE</text>
+
+      <polygon class="chev s4" points="561,40 660,40 676,64 660,88 561,88 577,64"/>
+      <text x="618" y="61" class="val" text-anchor="middle">송신</text>
+      <text x="618" y="76" class="ann" text-anchor="middle">결과 파일</text>
+
+      <path class="brk" d="M16 100 L16 106 L458 106 L458 100"/>
+      <text x="237" y="122" class="ann" text-anchor="middle">여기까지 실패하면 체크포인트에서 재시작합니다 — 이미 적재된 청크는 건드리지 않습니다</text>
+
+      <text x="16" y="152" class="lbl">셰브론은 "앞으로만 간다"는 뜻을 도형이 대신 말해 줍니다 — 화살표를 따로 그리지 않습니다</text>
+      <text x="16" y="170" class="lbl">전체 47분 · 임계 경로는 청크 처리(31분)입니다. 줄여야 할 곳이 그림에 이미 보입니다</text>
+    </svg>
+    <div class="cap">정산 배치 전체 흐름 — <b>단방향 6단계</b>. 되돌아오는 경로가 없어야 재시작이 단순해집니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="e">프로젝트 구조와 <span class="t">잡 정의</span> <span class="lvl e">🟢 기초</span></h3>
+
+  <pre class="code" data-lang="text"><code>Settle.sln
+├─ Settle.Domain/          엔티티 · 값 객체 · 정산 규칙 (참조 없음)
+├─ Settle.Application/     유스케이스 · 인터페이스 (Domain 만 참조)
+│   └─ Batch/              SettleJob · ChunkRunner · IBatchJournal
+├─ Settle.Infrastructure/  EF Core · SFTP · 파일 저장소 · 슬랙
+├─ Settle.Batch/           Worker Service + Hangfire 서버  ← 배포 대상 ①
+└─ Settle.Admin/           ASP.NET Core 관리 화면          ← 배포 대상 ②</code></pre>
+
+  <pre class="code" data-lang="csharp"><code>// Settle.Batch/Program.cs
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);   // ★ CP949
+
+var builder = Host.CreateApplicationBuilder(args);
+builder.Services.Configure&lt;HostOptions&gt;(o =&gt;
+    o.ShutdownTimeout = TimeSpan.FromMinutes(5));                // 청크 하나보다 길게
+
+builder.Services
+    .AddInfrastructure(builder.Configuration)
+    .AddApplication()
+    .AddHangfire(cfg =&gt; cfg.UseSqlServerStorage(cs))
+    .AddHangfireServer(o =&gt; { o.Queues = ["settle"]; o.WorkerCount = 2; });
+
+builder.Services.AddWindowsService(o =&gt; o.ServiceName = "SettleBatch");
+
+var host = builder.Build();
+
+RecurringJob.AddOrUpdate&lt;SettleJob&gt;("daily-settle",
+    "settle", j =&gt; j.RunAsync(null, CancellationToken.None),
+    "0 10 2 * * *", new RecurringJobOptions { TimeZone = Kst });
+
+await host.RunAsync();</code></pre>
+
+  <h3 class="sub" data-lv="m">잡 본문 — <span class="t">여섯 단계</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <pre class="code" data-lang="csharp"><code>[DisableConcurrentExecution(timeoutInSeconds: 4 * 60 * 60)]
+[AutomaticRetry(Attempts = 0)]        // ★ 재시도는 우리가 통제합니다
+public sealed class SettleJob(
+    ISftpGateway sftp, IFileVerifier verify, ChunkRunner chunks,
+    ISettleAggregator agg, IResultWriter writer, IBatchJournal journal,
+    INotifier notify, ILogger&lt;SettleJob&gt; log)
+{
+    public async Task RunAsync(DateOnly? forDate, CancellationToken ct)
+    {
+        var bizDate = forDate ?? KstToday().AddDays(-1);
+        var sw = Stopwatch.StartNew();
+
+        // 다른 서버가 돌고 있으면 조용히 물러납니다 (f02)
+        await using var mine = await SqlAppLock.TryAcquireAsync(
+            _cs, $"batch:settle:{bizDate:yyyyMMdd}", TimeSpan.Zero, ct);
+        if (mine is null) { log.LogInformation("다른 서버가 처리 중"); return; }
+
+        var run = await journal.StartAsync("daily-settle", bizDate, ct);
+        try
+        {
+            // ── ① 수신 : SFTP → 로컬 (임시 확장자 → rename)
+            var local = await sftp.DownloadAsync(
+                $"/out/TRD_{bizDate:yyyyMMdd}.dat", ct);
+            log.LogInformation("수신 완료 {Bytes:N0} 바이트 ({Sec:F0}초)",
+                new FileInfo(local).Length, sw.Elapsed.TotalSeconds);
+
+            // ── ② 검증 : 헤더 · 트레일러 · 건수 · 합계 (f08)
+            var stats = await verify.VerifyAsync(local, Cp949, ct);
+            log.LogInformation("검증 통과 {Rows:N0}행 합계 {Sum:N2}",
+                stats.Rows, stats.Sum);
+
+            // ── ③④ 청크 처리 + 벌크 적재 (f04 · f05)
+            var r = await chunks.RunAsync(
+                job: "daily-settle", bizDate, step: "load",
+                readFrom: key =&gt; TradeFileReader.ReadAsync(local, key, Cp949),
+                chunkSize: 5_000, skipLimit: 10_000, ct);
+
+            if (r.Kind == ResultKind.Stopped)      // 종료 신호로 중단
+            { log.LogWarning("중단됨 — 다음 실행이 이어받습니다"); return; }
+
+            // ── ⑤ 집계 : 스테이징 → 본 테이블 MERGE + 수수료 계산
+            var summary = await agg.AggregateAsync(bizDate, ct);
+
+            // ── ⑥ 송신 : 결과 파일 생성 후 SFTP 업로드
+            var outPath = await writer.WriteAsync(bizDate, summary, ct);
+            await sftp.UploadAsync(outPath, $"/in/STL_{bizDate:yyyyMMdd}.dat", ct);
+
+            await journal.SucceedAsync(run.RunId, r.Read, r.Wrote, r.Skipped, ct);
+            await notify.SendAsync(Alert.Info("정산 완료",
+                $"{bizDate:yyyy-MM-dd} · {r.Wrote:N0}건 · {sw.Elapsed.TotalMinutes:F0}분"), ct);
+        }
+        catch (Exception ex)
+        {
+            await journal.FailAsync(run.RunId, ex, CancellationToken.None);
+            await notify.SendAsync(Alert.High("정산 실패",
+                $"{bizDate:yyyy-MM-dd}\n{ex.Message}"), CancellationToken.None);
+            throw;                                  // Hangfire 대시보드에 빨갛게
+        }
+    }
+}</code></pre>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 282" role="img" aria-label="정산 단계별 생존 건수 깔때기. 수신한 400만 건 중 형식과 필수값 검증에서 6만 건이 걸러지고, 중복 제거에서 34만 건, 정산 대상 기간이 아닌 75만 건, 수수료 면제 가맹점 71만 건이 차례로 빠져 최종 214만 건에 수수료가 부과된다. 전체의 53.5퍼센트가 살아남는다">
+      <text x="16" y="18" class="lbl">400만 건이 수수료 부과 대상까지 좁혀지는 과정</text>
+
+      <polygon class="s1" points="100,36 480,36 477,72 103,72"/>
+      <text x="290" y="59" class="val" text-anchor="middle">수신 4,000,000</text>
+      <text x="496" y="59" class="ann">원본 파일 그대로</text>
+
+      <polygon class="s1" points="105,76 475,76 461,112 119,112"/>
+      <text x="290" y="99" class="val" text-anchor="middle">형식 · 필수값 3,940,000</text>
+      <text x="496" y="99" class="ann rs-t">−60,000 필수값 누락</text>
+
+      <polygon class="s1" points="121,116 459,116 425,152 154,152"/>
+      <text x="290" y="139" class="val" text-anchor="middle">중복 제거 3,600,000</text>
+      <text x="496" y="139" class="ann rs-t">−340,000 재전송 중복</text>
+
+      <polygon class="s1" points="156,156 423,156 391,192 188,192"/>
+      <text x="290" y="179" class="val" text-anchor="middle">당월 대상 2,850,000</text>
+      <text x="496" y="179" class="ann rs-t">−750,000 기간 외</text>
+
+      <polygon class="s4" points="190,196 389,196 389,232 190,232"/>
+      <text x="290" y="219" class="val" text-anchor="middle">수수료 부과 2,140,000</text>
+      <text x="496" y="219" class="ann rs-t">−710,000 면제 가맹점</text>
+
+      <path class="dim-ln" d="M88 40 L88 228"/>
+      <text x="80" y="128" class="ann" text-anchor="end">53.5%</text>
+      <text x="80" y="142" class="ann" text-anchor="end">생존</text>
+
+      <text x="16" y="256" class="lbl">탈락분은 버리지 말고 사유별로 남깁니다 — 그 건수가 재처리 화면의 설계 근거입니다</text>
+      <text x="16" y="274" class="lbl">폭의 줄어듦이 실제 비율과 맞아야 합니다. 눈대중으로 그리면 그림이 거짓말을 합니다</text>
+    </svg>
+    <div class="cap">단계별 생존 건수 — <b>탈락 사유를 옆에 적어야</b> 어디를 고칠지 보입니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="h">집계 · 결과 파일 · <span class="t">실측 수치</span> <span class="lvl h">🔴 고급</span></h3>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">집계 — 한 문장으로 끝냅니다</h4>
+      <pre class="code" data-lang="sql"><code>-- 가맹점별 일 정산. 400만 행 → 8,200행. 인덱스가 있으면 12분
+INSERT INTO dbo.SettleDaily
+      (BizDate, MerchantId, TxCount, GrossAmt, FeeAmt, NetAmt, CreatedAt)
+SELECT  @BizDate,
+        t.MerchantId,
+        COUNT_BIG(*),
+        SUM(t.Amount),
+        SUM(ROUND(t.Amount * m.FeeRate, 0)),
+        SUM(t.Amount - ROUND(t.Amount * m.FeeRate, 0)),
+        SYSUTCDATETIME()
+FROM    dbo.Trade      t WITH (INDEX(IX_Trade_BizDate_Merchant))
+JOIN    dbo.Merchant   m ON m.Id = t.MerchantId
+WHERE   t.BizDate  = @BizDate
+  AND   t.Status   = 'N'          -- 정상 거래만
+  AND   m.FeeExempt = 0           -- 면제 가맹점 제외
+GROUP BY t.MerchantId
+OPTION (MAXDOP 4);                -- 병렬도 제한 — 온라인에 여유를 남깁니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>재실행을 대비해 <code>DELETE</code> 를 먼저 두세요.</b>
+        <code>DELETE FROM SettleDaily WHERE BizDate=@BizDate;</code> 를
+        같은 트랜잭션 앞에 놓으면 <b>몇 번 돌려도 결과가 같아집니다</b>.
+        이것이 f04 에서 말한 <b>멱등성</b>의 가장 실용적인 형태입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">결과 파일 — 헤더 · 본문 · 트레일러</h4>
+      <pre class="code" data-lang="csharp"><code>public async Task&lt;string&gt; WriteAsync(
+    DateOnly bizDate, IAsyncEnumerable&lt;SettleRow&gt; rows, CancellationToken ct)
+{
+    var tmp   = Path.Combine(_out, $"STL_{bizDate:yyyyMMdd}.dat.tmp");
+    var final = tmp[..^4];                       // .tmp 떼기
+
+    long n = 0; decimal sum = 0m;
+
+    // ★ 대외 규약: CP949 · CRLF · BOM 없음
+    await using (var fs = File.Create(tmp))
+    await using (var sw = new StreamWriter(fs, Cp949) { NewLine = "\r\n" })
+    {
+        await sw.WriteLineAsync(
+            $"H|SETTLE|{DateTime.UtcNow.AddHours(9):yyyyMMddHHmmss}|{bizDate:yyyyMMdd}");
+
+        await foreach (var r in rows.WithCancellation(ct))
+        {
+            // 고정폭: 가맹점(10) 건수(9) 총액(15) 수수료(15) 정산액(15)
+            await sw.WriteLineAsync(
+                $"D{r.MerchantId,10}{r.TxCount,9:D9}" +
+                $"{(long)(r.GrossAmt * 100),15:D15}" +
+                $"{(long)(r.FeeAmt   * 100),15:D15}" +
+                $"{(long)(r.NetAmt   * 100),15:D15}");
+            n++; sum += r.NetAmt;
+        }
+
+        await sw.WriteLineAsync($"T|{n}|{sum:F2}");
+    }
+
+    File.Move(tmp, final, overwrite: true);      // ★ 원자적 공개 (f08)
+    return final;
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>단계</th><th>규모</th><th>소요</th><th>메모리</th><th>핵심 기법</th><th>실패 시</th></tr></thead>
+      <tbody>
+        <tr><td>① SFTP 수신</td><td>3.1 GB</td><td>6분 20초</td><td>64 KB</td><td>SSH.NET · 크기 검증 · rename</td><td>재시도 3회 → 미착 알림</td></tr>
+        <tr><td>② 검증</td><td>400만 행</td><td>2분 10초</td><td>8 MB</td><td>스트리밍 · 트레일러 대조</td><td><b>즉시 중단</b> — 송신처 문의</td></tr>
+        <tr><td>③ 청크 처리</td><td>400만 행</td><td><b>31분</b></td><td>42 MB</td><td>5,000건 청크 · 체크포인트</td><td>체크포인트에서 재시작</td></tr>
+        <tr><td>④ 벌크 적재</td><td>394만 행</td><td>41초</td><td>포함</td><td>SqlBulkCopy → 스테이징</td><td>스테이징 비우고 재실행</td></tr>
+        <tr><td>⑤ 집계</td><td>8,200행 산출</td><td>5분 40초</td><td>—</td><td>MERGE · MAXDOP 4</td><td>DELETE 후 재실행(멱등)</td></tr>
+        <tr><td>⑥ 결과 송신</td><td>1.2 MB</td><td>18초</td><td>2 MB</td><td>CP949 · 트레일러 · rename</td><td>재업로드(동일 파일)</td></tr>
+        <tr><td><b>합계</b></td><td>—</td><td><b>46분 29초</b></td><td><b>최대 42 MB</b></td><td>—</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note tip">
+    <b>이 표가 곧 운영 문서입니다.</b>
+    "몇 분 걸리나요" · "메모리 얼마나 쓰나요" · "실패하면 어떻게 하나요" 세 질문에
+    <b>표 하나로 답</b>이 됩니다.
+    그리고 <b>임계 경로가 ③ 청크 처리(31분)</b> 라는 것도 보입니다 —
+    창이 부족해지면 <b>거기부터</b> 손대면 됩니다.
+    ⑤를 아무리 빠르게 만들어도 전체는 6분밖에 안 줄어듭니다.
+  </div>
+
+  <h3 class="sub" data-lv="h">Java · Spring 으로 짰다면 <span class="t">무엇이 달랐을까</span> <span class="lvl h">🔴 고급</span></h3>
+
+  <div class="tw">
+    <table class="cheat">
+      <thead><tr><th>부분</th><th>Spring Batch</th><th>.NET 10</th><th>체감</th></tr></thead>
+      <tbody>
+        <tr><td>Job/Step 정의</td><td><code>@Bean Job</code> · <code>StepBuilder</code></td><td>메서드 하나 + Hangfire 등록</td><td><b>.NET 이 코드가 적음</b>. 대신 규칙도 없음</td></tr>
+        <tr><td>Reader</td><td><code>FlatFileItemReader</code> (설정으로)</td><td><code>IAsyncEnumerable</code> (코드로)</td><td>비슷. .NET 이 디버깅하기 쉬움</td></tr>
+        <tr><td>재시작</td><td><b>무료</b> — <code>JobRepository</code></td><td><b>직접</b> — 체크포인트 테이블</td><td><b>Spring 승</b>. 다만 300줄이면 만듦</td></tr>
+        <tr><td>스킵 · 재시도 정책</td><td><code>faultTolerant().skipLimit()</code></td><td>직접 세기</td><td><b>Spring 승</b></td></tr>
+        <tr><td>대량 적재</td><td>JdbcBatchItemWriter (드라이버 의존)</td><td><b><code>SqlBulkCopy</code> 표준</b></td><td><b>.NET 승</b>. 성능 차이가 큼</td></tr>
+        <tr><td>비동기 스트리밍</td><td>리액티브를 따로 도입</td><td><b><code>IAsyncEnumerable</code>·Channels 표준</b></td><td><b>.NET 승</b></td></tr>
+        <tr><td>운영 화면</td><td>Spring Batch Admin(사실상 방치)</td><td><b>Hangfire 대시보드</b></td><td><b>.NET 승</b></td></tr>
+        <tr><td>인코딩(CP949)</td><td>기본 지원</td><td>패키지 + 등록 한 줄</td><td><b>Spring 승</b>(사소함)</td></tr>
+        <tr><td>스케줄 클러스터링</td><td>Quartz JDBC 잡스토어</td><td>Hangfire / Quartz.NET 동일</td><td>무승부</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note info">
+    <b>솔직한 총평.</b>
+    <b>배치 프레임워크의 완성도는 Spring Batch 가 앞섭니다</b> — 재시작·스킵 정책을 공짜로 줍니다.
+    반면 <b>대용량 IO 와 비동기 스트리밍은 .NET 이 확실히 앞섭니다</b> —
+    <code>SqlBulkCopy</code> · <code>IAsyncEnumerable</code> · <code>Channels</code> 가
+    <b>표준 라이브러리</b>에 있고, 메모리 제어(<code>Span</code> · <code>ArrayPool</code>)가 훨씬 정밀합니다.
+    실무 결론은 이렇습니다 — <b>Spring Batch 를 그리워하지 말고,
+    f04 의 300줄을 사내 공통 라이브러리로 한 번 만들어 두세요.</b>
+    그 뒤로는 .NET 쪽이 더 빠르고 더 가볍습니다.
+  </div>
+
+  <div class="note warn">
+    <b>운영 첫 달에 반드시 겪을 다섯 가지 — 미리 대비하세요.</b>
+    ① <b>파일이 안 옵니다</b>(송신처 장애) → 미착 알림과 수동 실행 경로.
+    ② <b>인코딩이 바뀝니다</b>(송신처가 UTF-8 로 전환) → 판별 로직 + 규약 재확인.
+    ③ <b>건수가 두 배가 됩니다</b>(프로모션) → 창 여유 15분이 사라짐. 미리 재 두기.
+    ④ <b>중복 파일이 옵니다</b>(재전송) → 해시 기반 중복 판정.
+    ⑤ <b>디스크가 찹니다</b>(원본 90일 보관) → 정리 배치를 <b>같이</b> 만들어 두기.
+    다섯 개 다 <b>코드가 아니라 운영 설계</b> 문제입니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> SFTP 수신 → 트레일러 검증 → 청크 처리(체크포인트) → 벌크 적재 → MERGE 집계 → 원자적 송신. <b>3.1 GB 를 42 MB 메모리로 47분</b>에 처리하고, 어디서 죽어도 <b>이어서 다시</b> 돕니다.</div>
+</section>
+
+</div><!-- /pane-batch -->

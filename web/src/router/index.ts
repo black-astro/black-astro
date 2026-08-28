@@ -151,6 +151,8 @@ export const guides: Guide[] = [
     desc:
       'C# 문법과 비동기·메모리부터 Unity 게임 개발과 최적화·출시, ' +
       '실시간 게임 서버(UDP·권위 서버·클라이언트 예측)와 ASP.NET Core 게임 백엔드, ' +
+      'Spring 을 .NET 으로 옮기는 엔터프라이즈 백엔드와 배치·대용량 파일 연계, ' +
+      'IIS·systemd 서버 구축과 무중단 배포, ' +
       'WPF 데스크탑 앱과 CLR·GC 내부까지 한 언어로 이어지는 단일 페이지 가이드입니다.',
     tags: [
       'C#',
@@ -158,13 +160,16 @@ export const guides: Guide[] = [
       '게임 서버',
       '실시간 동기화',
       'ASP.NET Core',
+      '엔터프라이즈 백엔드',
+      '배치 · 대용량 파일',
+      'IIS · systemd 배포',
       'WPF',
       '대규모 트래픽',
       'CLR · GC 내부',
     ],
     stats: [
-      { value: '12', label: '주제 탭' },
-      { value: '166', label: '섹션' },
+      { value: '15', label: '주제 탭' },
+      { value: '206', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
