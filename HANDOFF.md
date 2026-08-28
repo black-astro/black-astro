@@ -1,41 +1,46 @@
-# 핸드오프 — 언어 가이드 확장 (2026-08-28 9차 갱신)
+# 핸드오프 — 언어 가이드 확장 (2026-08-28 10차 갱신)
 
-## 현재 상태 — 열 가이드 전부 "설치부터 실전까지"
+## 현재 상태
 
-모든 언어 가이드에 🧰 **설치 · 환경 세팅** 탭이 있고, 언어별 강점 스택까지 이어집니다.
+열 가이드 전부 **설치 → 기초 → 실전** 축을 갖췄고, 2026 기준 기술 스택 공백도 메웠습니다.
 
 | 가이드 | 탭 | 섹션 | 다이어그램 |
 |---|---|---|---|
 | python | 18 | 280 | 144 |
-| **js-ts** | **17** | **258** | **131** |
-| **java** | **16** | **246** | **123** |
+| **js-ts** | **18** | **271** | **146** |
+| **server** | **17** | **225** | **150** |
+| java | 16 | 246 | 123 |
 | cpp | 16 | 201 | 169 |
-| **server** | **16** | **212** | **136** |
 | rust | 15 | 174 | 142 |
-| **kotlin** | **14** | **219** | **118** |
-| db | 13 | 191 | 97 |
-| cs | 12 | 173 | 106 |
-| csharp | 11 | 153 | 85 |
+| **db** | **14** | **204** | **114** |
+| kotlin | 14 | 219 | 118 |
+| **cs** | **13** | **186** | **133** |
+| **csharp** | **12** | **166** | **100** |
 
-**전체 시각화 1,351개.** 굵게 표시한 넷은 이번 회차에 늘어난 것입니다.
+**총 시각화 1,439개 · 총 섹션 2,072개.**
 
-### 이번 회차 — 기술 스택 공백 메우기 (전 가이드 언급 빈도로 실측해 고름)
+### 이번 회차 — 기술 스택 공백 5개 (언급 빈도를 실측해 고름)
 | 가이드 | 새 탭 | 섹션 | 그림 | 왜 |
 |---|---|---|---|---|
-| js-ts | ▲ **Next.js** | f01~f13 | 14 | React 탭은 있는데 Next.js 는 전체 7회 언급뿐이었습니다 |
-| java | 🧵 **최신 Java · 가상 스레드** | v01~v13 | 13 | Loom 1회 · 구조적 동시성/Spring AI 0회 |
-| kotlin | 🚀 **Ktor 서버** | kt01~kt13 | 14 | 코틀린 대표 서버 프레임워크인데 전용 탭이 없었습니다 |
-| server | ☸️ **도커 · 쿠버네티스** | d01~d14 | 22 | 흩어진 언급만 있고 전용 탭이 없었습니다 |
+| cs | 🤖 **머신러닝 · 딥러닝 이론** | m01~m13 | 27 | 머신러닝 5회 · 신경망 2회뿐 — CS 기본기의 한 축이 비어 있었습니다 |
+| db | 📊 **분석 · 벡터 DB** | v01~v13 | 17 | ClickHouse·DuckDB **0회** · pgvector 9회뿐 |
+| csharp | 🔥 **Blazor · Aspire** | b01~b13 | 15 | Blazor 7회 · Aspire 3회 |
+| js-ts | 🔥 **Hono · Bun · Deno · 엣지** | g01~g13 | 15 | Hono 2회 — 엣지·서버리스 축 공백 |
+| server | 🔭 **관측 · 모니터링** | y01~y13 | 14 | Grafana 3회 — 장애 대응 체계가 흩어져 있었습니다 |
 
-- java 탭은 Java 21~25(가상 스레드 · 구조적 동시성 · 스코프 값 · 패턴 매칭 · FFM · ZGC/AOT · **Spring AI**)와 마이그레이션까지
-- server 탭은 도커 기본기 · Dockerfile · Compose · 레지스트리 · K8s 개념/배포 · 설정·스토리지 · 무중단 · 오토스케일 · 관측 · Helm/GitOps · **CI/CD** · 문제 진단까지
+- **cs ML 탭**은 파이썬 가이드(라이브러리 사용법)와 갈라 **원리와 수학**만 다룹니다 —
+  경사하강 · 편향/분산 · 역전파 계산 그래프 · 옵티마이저 궤적 · CNN/LSTM · **트랜스포머 어텐션** · PAC/VC.
+  선형대수 탭과 겹치는 수학(최소제곱 유도 · 고유값 · 엔트로피 · 베이즈)은 전부 그쪽으로 넘겼습니다.
+- **db 분석 탭**은 행/컬럼 저장 원리 · DuckDB · Parquet · ClickHouse MergeTree · 시계열 ·
+  **벡터 검색 원리(HNSW/IVFFlat)** · pgvector 인덱스 파라미터 · 하이브리드 검색(RRF) · RAG 스키마 · CDC.
 
 ### 그 앞 회차 (요약)
 - **cpp** 9→16탭 — 설치 · 데스크톱 앱 · 백엔드 서버 · 게임 서버 · 고성능 · 자바 모듈(JNI) · C# 모듈, C 언어 탭 12→26섹션
-- **rust** 9→15탭 — 설치 · Axum 서버 · 고성능 서비스 · Tauri · 자바 모듈(UniFFI) · C# 모듈(csbindgen)
-- **python** — PySide6 탭에 **QML/Qt Quick 12섹션**(Controls 2 · Material/FluentWinUI3 · MultiEffect/ShaderEffect · Material Symbols/Lucide) 확장
-- cpp · rust 는 "앱을 만들지 않습니다" 소개 문구를 **강점 소개**로 교체
-- java · kotlin · js-ts · csharp · db 에 설치 · 환경 세팅 탭 신설
+- **rust** 9→15탭 — 설치 · Axum · 고성능 서비스 · Tauri · 자바 모듈(UniFFI) · C# 모듈(csbindgen)
+- **python** — PySide6 탭에 QML/Qt Quick 12섹션(Controls 2 · Material/FluentWinUI3 · MultiEffect · Material Symbols/Lucide)
+- 여덟 가이드에 🧰 **설치 · 환경 세팅** 탭 신설
+- **js-ts** ▲ Next.js · **java** 🧵 최신 Java(가상 스레드·Spring AI) · **kotlin** 🚀 Ktor · **server** ☸️ 도커·쿠버네티스
+- cpp · rust 소개 문구를 "앱을 만들지 않습니다" → **강점 소개**로 교체
 
 - 전 가이드 `verify:guide` 통과 · svgcheck 0건 · integrity 0건 · smoke 통과 · `vue-tsc -b` 통과
 
@@ -62,25 +67,21 @@ claude mcp add chrome-devtools -s user -- npx -y chrome-devtools-mcp@latest
 ② `http://localhost:8899/<가이드>-web/index.html?v=N` 을 열고
 ③ §관련 명령어의 실측 스크립트를 실행해 **OVER/BOX/LAP 이 none 이 될 때까지** 문구를 줄입니다.
 정적 검사(svgcheck)는 통과했지만 **±5px 안쪽 차이는 못 잡습니다.**
-**미실측 누적 = 1,073건** (2차 290 + 3차 224 + 4차 68 + 5차 63 + 6차 90 + 7차 175 + 이번 163).
+**미실측 누적 = 2차 290 + 3차 224 + 4차 68 + 5차 63 + 6차 90 + 7차 175 + 8차 163 + 이번 **88** = **1,161건**.
 
-### 2. 기술 스택 공백 — 다음 후보 (이번에 4개는 메웠습니다)
-| 가이드 | 후보 탭 | 근거(현재 언급 빈도) |
+### 2. 기술 스택 — 큰 공백은 다 메웠습니다
+남은 것은 우선순위가 낮은 후보뿐입니다. 필요하면 그때 판단하세요.
+
+| 가이드 | 후보 | 현재 상태 |
 |---|---|---|
-| db | 🧠 **벡터 · 분석 DB** | pgvector 9회 · ClickHouse/DuckDB 0회 — RAG 시대 필수 |
-| server | 🔭 **관측 · 모니터링** | Grafana 3회 · Prometheus 6회 (K8s 탭 d11 에 일부 들어감, 독립 탭은 여전히 여지) |
-| js-ts | 🔥 **Hono · Bun · Deno** | Hono 2회 — 엣지/경량 런타임 축이 비어 있음 |
-| js-ts | 🧪 **테스트 · Vitest·Playwright** | Playwright 9회, 전용 탭 없음 |
-| csharp | 🔥 **Blazor · Aspire** | Blazor 7회 · Aspire 3회 — **이번에 착수했다 중단**, 기획안은 아래 |
-| kotlin | 🎨 Compose Multiplatform 데스크톱 | KMP 탭에 일부만 |
-| java | 🧪 테스트 · 품질 | Testcontainers 5회 (도구 탭에 일부) |
+| kotlin | 🎨 Compose Multiplatform 데스크톱 | Composable 43회 · CMP 18회 — Android·KMP 탭에 이미 상당량, **중복 위험** |
+| java | 🧪 테스트 · 품질 | JUnit·Mockito·Testcontainers 가 도구 탭에 이미 있음 |
+| js-ts | 🧪 테스트 | o05(Vitest) · o06(Playwright) 섹션이 이미 있음 |
+| python | Polars · RAG | Polars 21회 · DuckDB 14회 · RAG 30회 — 이미 다뤄짐 |
+| cpp/rust | — | 16 · 15탭으로 포화 |
 
-**csharp Blazor 탭 기획안**(중단분 — 그대로 쓰면 됩니다):
-탭 id `blazor` · pane `panes/11-blazor.html` · 접두사 `b`(b01~b13) · group 2 · after `api` ·
-label "🔥 Blazor · 웹 UI" · cls `bz` · grad `["#e11d48","#881337"]`.
-내용 — 렌더 모드 4종 비교 / 첫 앱 / Razor 컴포넌트 문법 / 상태·수명주기 / 폼·검증 /
-데이터(IDbContextFactory·Virtualize) / 인증 / **JS 상호운용** / SignalR 회로 /
-성능·WASM AOT·배포 / **.NET Aspire** / MAUI Blazor Hybrid / 재고 대시보드 실전.
+**점검 방법**(다음에 또 할 때): `grep -o -i "키워드" public/<가이드>-web/index.html | sort | uniq -c` 로
+언급 빈도를 세고, **한 자릿수면 공백 · 전용 탭 없음이면 후보**로 봅니다.
 
 ### 3. 마지막에 할 것
 - `npm run verify:guide` · svgcheck · integrity · smoke · `vue-tsc -b`
@@ -139,14 +140,14 @@ npx vue-tsc -b                                                       # router �
 - svgcheck 지적의 대부분은 **좌우 316폭 박스에 긴 한 줄** — 두 줄로 쪼개고 박스 높이 52→68
 - 넘침은 **x 를 옮기지 말고 문구를 줄여서** 해결 (옮기면 LAP 이 생깁니다)
 
-## 다이어그램 현황 — 총 1,351개
+## 다이어그램 현황 — 총 1,439개
 | 가이드 | 개수 | | 가이드 | 개수 |
 |---|---|---|---|---|
-| cpp | 169 | | python | 144 |
-| rust | 142 | | **server** | **136** |
-| **js-ts** | **131** | | **java** | **123** |
-| **kotlin** | **118** | | cs | 106 |
-| db | 97 | | csharp | 85 |
+| cpp | 169 | | **server** | **150** |
+| **js-ts** | **146** | | python | 144 |
+| rust | 142 | | **cs** | **133** |
+| java | 123 | | kotlin | 118 |
+| **db** | **114** | | **csharp** | **100** |
 
 **모든 가이드의 모든 탭이 7개 이상**입니다.
 

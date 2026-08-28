@@ -47,6 +47,7 @@ const TAB_LABEL = {
   tool:"🧰 실전 도구",
   deep:"🔬 전문가 · CLR 내부",
   setup:"🧰 설치 · 환경 세팅",
+  blazor:"🔥 Blazor · 웹 UI",
 };
 
 function tabDrop(force){
@@ -88,6 +89,7 @@ const SEC_LV = {
   /* 전문가       */ z01:"a", z02:"a", z03:"a", z04:"a", z05:"a", z06:"a",
                  z07:"a", z08:"a", z09:"a", z10:"a", z11:"a", z12:"i",
   /* setup */ st01:"b", st02:"b", st03:"b", st04:"b", st05:"b", st06:"i", st07:"b", st08:"b", st09:"i", st10:"i", st11:"a", st12:"i",
+  /* blazor */ b01:"b", b02:"b", b03:"b", b04:"i", b05:"b", b06:"i", b07:"i", b08:"i", b09:"i", b10:"a", b11:"i", b12:"a", b13:"a",
 };
 
 
@@ -257,6 +259,20 @@ const EZ = {
   st10:"쉽게 말하면 <b>dev-certs 신뢰 · dotnet ef 설치 · DB 고르기</b> 세 가지면 웹 API 개발 준비가 끝납니다.",
   st11:"쉽게 말하면 <b>nullable 켜기 · 분석기 켜기 · dotnet format · CI</b> 네 가지로 사람 대신 컴파일러가 잔소리하게 만듭니다.",
   st12:"쉽게 말하면 <b>NETSDK 는 버전, NU 는 패키지, CS 는 코드</b> 문제입니다. 막히면 dotnet --info 부터 봅니다.",
+  /* ── blazor ── */
+  b01:"같은 <b>.razor 파일</b>이 서버에서 도느냐 브라우저에서 도느냐 — 그 네 가지 경우를 구분하는 것이 Blazor 학습의 절반입니다.",
+  b02:"<b>dotnet new blazor</b> 한 줄이면 시작합니다. App.razor · Routes.razor · _Imports.razor 세 파일의 역할만 잡으면 됩니다.",
+  b03:"HTML 을 쓰다가 <b>@ 를 만나면 C#</b> 입니다. 값은 아래로 [Parameter], 알림은 위로 EventCallback.",
+  b04:"사용자가 만든 일은 <b>자동으로 다시 그려지고</b>, 타이머·서버가 만든 일은 <b>InvokeAsync(StateHasChanged)</b> 로 직접 알려야 합니다.",
+  b05:"<b>EditForm + DataAnnotationsValidator + Input 계열</b>이 전부입니다. 검증 속성을 서버 모델에 한 번만 적고 화면과 API 가 같이 씁니다.",
+  b06:"Server 는 <b>IDbContextFactory 로 짧게 쓰고 버리기</b>, WASM·Auto 는 <b>HttpClient 로 API 호출</b>. 행이 많으면 Virtualize.",
+  b07:"인증 상태는 <b>AuthenticationStateProvider</b> 에서 나와 트리 전체로 내려갑니다. 화면을 가리는 것은 편의일 뿐, 방어선은 서버입니다.",
+  b08:"<b>IJSRuntime 으로 모듈을 import</b> 하고, JS 가 C# 을 부를 때는 <b>DotNetObjectReference + [JSInvokable]</b>. 정리는 반드시 Dispose 에서.",
+  b09:"Interactive Server 는 <b>회로가 곧 화면</b>입니다. 끊김을 어떻게 다루느냐가 사용자 경험을 통째로 좌우합니다.",
+  b10:"WASM 은 <b>트리밍 + InvariantGlobalization</b> 으로 1MB 대까지, <b>AOT 는 속도용이지 크기용이 아닙니다</b>. Server 는 회로 수가 곧 메모리.",
+  b11:"<b>AppHost 프로젝트 하나</b>가 DB·캐시 컨테이너를 띄우고 연결 정보를 자동으로 주입합니다. 로그·트레이스·메트릭은 대시보드에서 한 번에.",
+  b12:"<b>Razor 클래스 라이브러리 하나</b>에 화면을 모으고 웹 · MAUI · WPF 세 껍데기가 참조합니다. 기기 기능만 인터페이스로 갈라 냅니다.",
+  b13:"Auto 렌더 모드 · EF Core · Identity · SignalR · Virtualize · Aspire · Docker 를 <b>한 프로젝트로</b> 묶어 배포까지 갑니다.",
 };
 
 
@@ -427,6 +443,20 @@ const CAP = {
   st10:["p","웹 API 프로젝트를 만들어 HTTPS 경고 없이 띄우고 실제 데이터베이스에 마이그레이션까지 적용할 수 있습니다."],
   st11:["e","팀 저장소에 공통 빌드 규칙과 CI 를 세워 스타일 논쟁과 사소한 버그를 리뷰 전에 자동으로 걸러 냅니다."],
   st12:["p","환경 오류를 증상만 보고 원인을 좁혀 5분 안에 스스로 해결하고, 남에게 물을 때도 필요한 정보를 정확히 첨부할 수 있습니다."],
+  /* ── blazor ── */
+  b01:["p","새 화면을 만들 때 Static SSR · Interactive Server · WASM · Auto 중 무엇을 쓸지 근거를 대고 고를 수 있습니다."],
+  b02:["s","빈 폴더에서 시작해 Blazor 프로젝트를 만들고, 렌더 모드를 지정해 동작하는 화면을 띄울 수 있습니다."],
+  b03:["p","화면을 재사용 가능한 컴포넌트로 쪼개고, 부모와 자식 사이의 데이터 흐름을 규칙대로 설계할 수 있습니다."],
+  b04:["p","화면이 안 갱신되는 문제와 회로 메모리 누수를 원인부터 짚어 고칠 수 있습니다."],
+  b05:["p","검증과 오류 표시가 갖춰진 등록·수정 폼을, 서버가 돌려준 오류까지 필드에 붙여 완성할 수 있습니다."],
+  b06:["p","5만 건짜리 표를 끊김 없이 그리고, 렌더 모드에 맞는 데이터 접근 방식을 고를 수 있습니다."],
+  b07:["p","Identity 로그인을 붙이고 역할·정책으로 화면과 API 를 함께 보호할 수 있습니다."],
+  b08:["p","차트·지도 같은 기존 JS 라이브러리를 컴포넌트로 감싸 안전하게 재사용할 수 있습니다."],
+  b09:["e","회로 옵션과 재연결 UI를 다듬고, 별도 허브로 실시간 알림을 붙여 여러 대로 확장할 수 있습니다."],
+  b10:["e","게시 크기와 동시 회로 수를 실제로 측정하고, Nginx·IIS·Docker·PWA 배포 설정을 스스로 맞출 수 있습니다."],
+  b11:["e","여러 프로젝트와 인프라를 명령 한 줄로 띄우고, 트레이스로 요청 한 건의 전 구간 지연을 짚을 수 있습니다."],
+  b12:["p","웹에서 만든 컴포넌트를 데스크톱·모바일 앱에 그대로 담고, 무엇을 공유하고 무엇을 갈라 놓을지 판단할 수 있습니다."],
+  b13:["p","사내에 실제로 배포할 수 있는 형태의 Blazor 앱을 폴더 구조부터 배포 순서까지 혼자 완성할 수 있습니다."],
 };
 
 
@@ -467,7 +497,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (0 = 10번째 탭) */
-const TAB_ORDER = ["setup","lang","adv","unity","ugame","net","api","scale","desk","tool"];
+const TAB_ORDER = ["setup","lang","adv","unity","ugame","net","api","blazor","scale","desk"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;

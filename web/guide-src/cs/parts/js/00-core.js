@@ -172,6 +172,7 @@ const TAB_KW = {
   sec:"보안 암호 cia 기밀성 무결성 가용성 최소권한 심층방어 해시 sha256 md5 충돌 무결성검증 hmac 비밀번호 솔트 bcrypt scrypt argon2 레인보우테이블 대칭키 aes 블록암호 cbc gcm 스트림암호 iv 논스 공개키 rsa ecc 타원곡선 키교환 디피헬만 전방향비밀성 디지털서명 인증서 pki 루트ca 체인 tls https 인증 인가 세션 쿠키 jwt oauth oidc 리프레시토큰 xss csrf sqli 인젝션 sop cors 버퍼오버플로 스택스매싱 aslr dep 카나리 useafterfree 난수 csprng 엔트로피 키관리 kms 공급망 의존성 시크릿 위협모델링 stride 체크리스트",
   dist:"분산 동시성 병렬 concurrency parallelism 경쟁상태 레이스컨디션 원자성 atomic 임계구역 메모리모델 가시성 재정렬 메모리배리어 acquire release 캐시일관성 mesi 락프리 cas compareandswap aba 액터 csp 채널 goroutine 이벤트루프 코루틴 분산시스템 오해 fallacies cap 정리 pacelc 일관성 강한일관성 최종일관성 선형화 순차일관성 읽기내쓰기 합의 raft paxos 리더선출 쿼럼 복제 리플리케이션 샤딩 파티셔닝 일관해시 분산트랜잭션 2pc 사가 saga 보상 아웃박스 램포트시계 벡터시계 인과관계 멱등성 재시도 백오프 서킷브레이커 타임아웃 장애",
   se:"소프트웨어공학 설계 추상화 결합도 응집도 캡슐화 모듈화 solid srp ocp lsp isp dip 디자인패턴 싱글턴 팩토리 빌더 프로토타입 어댑터 데코레이터 퍼사드 프록시 컴포지트 전략 옵서버 커맨드 상태 템플릿메서드 방문자 아키텍처 레이어드 헥사고날 클린아키텍처 포트어댑터 마이크로서비스 모놀리스 ddd 도메인 애그리거트 바운디드컨텍스트 유비쿼터스언어 테스트 단위테스트 통합테스트 e2e 테스트피라미드 tdd 모킹 커버리지 리팩터링 코드스멜 기술부채 git 브랜치 gitflow 트렁크 머지 리베이스 시맨틱버전 ci cd 파이프라인 블루그린 카나리 롤백 피처플래그 관측가능성 로그 메트릭 트레이스 slo sli 코드리뷰 문서 adr 협업",
+  ml:"머신러닝 딥러닝 ML DL machine learning deep learning 인공지능 AI 신경망 뉴럴넷 neural network 학습이론 지도학습 비지도학습 강화학습 자기지도 손실함수 loss 경사하강 gradient descent 역전파 backpropagation 자동미분 autograd 최적화 optimizer SGD 모멘텀 Adam AdamW RMSProp 학습률 learning rate 워밍업 코사인 과적합 overfitting 과소적합 정규화 regularization L1 L2 라쏘 릿지 드롭아웃 dropout 조기종료 편향 분산 bias variance 이중하강 double descent 선형회귀 로지스틱회귀 시그모이드 소프트맥스 교차엔트로피 cross entropy 결정트리 랜덤포레스트 random forest 배깅 부스팅 boosting XGBoost LightGBM GBM SVM 커널 kernel kNN 나이브베이즈 naive bayes k-means 군집 클러스터링 clustering PCA 차원축소 t-SNE UMAP 이상탐지 anomaly CNN 합성곱 convolution 풀링 수용영역 RNN LSTM GRU 게이트 시퀀스 트랜스포머 transformer 어텐션 attention 셀프어텐션 멀티헤드 QKV 위치인코딩 RoPE 인코더 디코더 BERT GPT LLM 대규모언어모델 토크나이저 KV캐시 FlashAttention 활성화함수 ReLU GELU SwiGLU 배치정규화 층정규화 batchnorm layernorm 잔차연결 residual 초기화 He Xavier 기울기소실 vanishing gradient 폭발 클리핑 혼동행렬 정밀도 재현율 F1 ROC AUC PR-AUC 데이터누수 leakage 교차검증 cross validation 실험관리 재현성 PAC VC차원 공정성 fairness 설명가능성 SHAP LIME 적대적예제 adversarial 스케일링법칙 scaling law 분포이동 drift 엠엘 머신런닝 딥러링 어탠션 역전퍼",
 };
 
 const FIND_CHIPS = ["빅오 읽는 법","해시 충돌","캐시 미스","데드락 조건",
@@ -348,6 +349,19 @@ const SEC_KW = {
   e11:"ci cd 파이프라인 빌드 자동테스트 아티팩트 배포전략 블루그린 카나리 롤링 롤백 피처플래그 마이그레이션 무중단",
   e12:"관측가능성 observability 로그 구조화로그 메트릭 히스토그램 분산트레이싱 스팬 상관관계id 알림 slo sli 에러버짓 대시보드",
   e13:"코드리뷰 리뷰기준 피드백 pr크기 문서 adr 아키텍처결정기록 온보딩 지식공유 페어프로그래밍 협업",
+  m01:"학습 정의 지도학습 비지도학습 자기지도 강화학습 가설공간 손실함수 최적화 일반화 과적합 과소적합 교차검증 홀드아웃 k겹 계층분할 그룹분할 시계열분할",
+  m02:"선형회귀 최소제곱 정규방정식 해석해 경사하강 학습률 발산 진동 비용함수 볼록 특성스케일링 표준화 조건수 다항특성 기저함수 Huber",
+  m03:"로지스틱회귀 시그모이드 로그오즈 오즈비 교차엔트로피 제곱오차 기울기소실 결정경계 소프트맥스 다중분류 다중레이블 클래스불균형 임계값 가중치 SMOTE",
+  m04:"편향 분산 분해 정규화 L1 L2 라쏘 릿지 엘라스틱넷 희소성 soft-thresholding 드롭아웃 조기종료 데이터증강 앙상블 이중하강 암묵적정규화 람다 튜닝",
+  m05:"결정트리 지니 엔트로피 정보이득 가지치기 배깅 랜덤포레스트 OOB 부스팅 그래디언트부스팅 XGBoost LightGBM 잔차 SVM 마진 힌지손실 커널트릭 RBF kNN 나이브베이즈 정형데이터",
+  m06:"비지도학습 k-means EM GMM 실루엣 엘보 계층군집 덴드로그램 DBSCAN PCA 주성분 고유값 SVD 스크리 t-SNE UMAP 이상탐지 IsolationForest LOF 오토인코더",
+  m07:"퍼셉트론 다층 MLP XOR 비선형 활성화함수 ReLU LeakyReLU GELU SiLU Swish SwiGLU tanh 보편근사정리 깊이 폭 죽은뉴런 은닉층 특징학습",
+  m08:"역전파 backprop 연쇄법칙 계산그래프 자동미분 정방향모드 역방향모드 micrograd 기울기검산 수치미분 기울기소실 폭발 클리핑 He Xavier 초기화 배치정규화 층정규화 잔차연결 체크포인팅 혼합정밀도",
+  m09:"SGD 미니배치 모멘텀 Nesterov AdaGrad RMSProp Adam AdamW 편향보정 가중치감쇠 weight decay 학습률스케줄 워밍업 코사인 원사이클 배치크기 선형스케일링 손실지형 안장점 평평한최소 SAM",
+  m10:"CNN 합성곱 커널 필터 파라미터공유 지역성 평행이동 등변 불변 풀링 스트라이드 패딩 수용영역 확장합성곱 귀납편향 RNN BPTT LSTM GRU 게이트 셀상태 장기의존성 ViT ConvNeXt",
+  m11:"트랜스포머 어텐션 셀프어텐션 QKV 질의 키 값 스케일드닷프로덕트 멀티헤드 인과마스크 위치인코딩 사인 RoPE 인코더 디코더 BERT GPT T5 잔차 PreLN 피드포워드 SwiGLU O(n²) FlashAttention KV캐시 MQA GQA 어텐션싱크 토크나이저 RLHF",
+  m12:"혼동행렬 정밀도 재현율 F1 특이도 MCC 균형정확도 ROC AUC PR-AUC 평균정밀도 임계값 보정 calibration Brier macro micro weighted 데이터누수 leakage 시간분할 그룹분할 부트스트랩 신뢰구간 다중비교 재현성 실험관리",
+  m13:"PAC학습 VC차원 shattering 공짜점심없음 NFL 스케일링법칙 편향 공정성 fairness 불가능성정리 대리변수 설명가능성 SHAP LIME 섀플리 적대적예제 FGSM 적대적훈련 데이터오염 모델추출 프롬프트주입 공변량이동 개념이동 피드백루프 학습서빙왜곡 체크리스트",
 };
 let FIDX = null;
 
