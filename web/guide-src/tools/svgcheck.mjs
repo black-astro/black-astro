@@ -79,6 +79,20 @@ export function checkFile(file, onlyIds) {
         if (gap > 2) out.push(`${id} LAP "${A.raw.slice(0, 18)}" × "${B.raw.slice(0, 18)}"`);
       }
       if (maxY + 4 > vbH) out.push(`${id} CUT 높이 ${vbH} < ${maxY + 8}`);
+
+      // 겹침이 곧 그림의 뜻인 경우(중첩·포함 표현)는 <svg data-ovl="ok"> 로 표시해 건너뛴다
+      const ovlOk = /data-ovl="ok"/.test(svg);
+      // OVL : 박스끼리 부분적으로 겹침 — 대개 위아래 두 묶음이 서로 침범한 것이다.
+      // (완전히 포함하는 경우는 테두리 강조·중첩 표현이므로 뺀다)
+      for (let a = 0; a < rects.length; a++) for (let b = a + 1; b < rects.length; b++) {
+        const A = rects[a], B = rects[b];
+        const ox = Math.min(A.x + A.w, B.x + B.w) - Math.max(A.x, B.x);
+        const oy = Math.min(A.y + A.h, B.y + B.h) - Math.max(A.y, B.y);
+        if (ovlOk || ox <= 4 || oy <= 4) continue;
+        const inside = (P, Q) => P.x <= Q.x && P.y <= Q.y && P.x + P.w >= Q.x + Q.w && P.y + P.h >= Q.y + Q.h;
+        if (inside(A, B) || inside(B, A)) continue;
+        out.push(`${id} OVL 박스 겹침 ${ox.toFixed(0)}×${oy.toFixed(0)} (${A.x},${A.y} ↔ ${B.x},${B.y})`);
+      }
     }
   }
   return out;
