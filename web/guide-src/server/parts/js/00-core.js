@@ -290,6 +290,7 @@ const TAB_KW = {
   kafka:"카프카 kafka 메시지큐 브로커 broker 토픽 topic 파티션 partition 오프셋 offset 컨슈머 consumer 프로듀서 producer 컨슈머그룹 리밸런싱 rebalancing 랙 lag kraft zookeeper 설치 도커 acks 멱등성 idempotence 키 순서보장 커밋 commit 중복 유실 at least once exactly once 정확히한번 dlq 데드레터 아웃박스 outbox cdc debezium 복제 replication isr 리더 팔로워 min.insync.replicas 고가용성 스트림 streams flink 이벤트소싱 파이프라인 데이터레이크 rabbitmq 래빗엠큐 redis 레디스 비교 선택 대용량 대규모 데이터처리 이벤트",
   win:"윈도우 windows 서버 사내 내부망 인트라넷 배포 공개 아이피 ip 포트 port 8080 방화벽 firewall 인바운드 netsh 규칙 서비스등록 nssm sc.exe 작업스케줄러 자동시작 재부팅 0.0.0.0 localhost 127.0.0.1 바인딩 listen netstat 공유기 라우터 iptime 아이피타임 포트포워딩 포트포워드 nat 사설ip 공인ip 고정ip dhcp 예약 mac 게이트웨이 ddns iptime.org 도메인 이중nat 브리지 dmz upnp isp차단 헤어핀 보안 관리자비밀번호 원격관리 3389 rdp 원격데스크톱 vpn 접속제한 remoteaddress 로그인 basic auth caddy https 인증서 로그 백업 절전 체크리스트 문제해결 접속불가",
   scale:"대규모 트래픽 대용량 확장 스케일 scale rps tps dau 동시접속 백만 무상태 stateless 세션 jwt 캐시 cache cdn 브라우저캐시 cache-control redis 레디스 스탬피드 stampede 관통 핫키 ttl db확장 리드레플리카 replica 복제지연 샤딩 sharding 샤드키 큐 queue 피크 비동기 평탄화 선착순 쿠폰 티켓팅 rate limit 처리율제한 토큰버킷 429 셰딩 shedding 백프레셔 대기열 오토스케일링 autoscaling hpa keda 쿠버네티스 서버리스 부하테스트 k6 jmeter ngrinder wrk p99 병목 용량산정 capacity 아키텍처 시스템설계 면접 팬아웃 타임라인 랭킹 런북",
+  k8s:"도커 docker 쿠버네티스 kubernetes k8s 쿠베 큐브 kubectl 컨테이너 container 이미지 image 도커파일 dockerfile 컴포즈 compose 멀티스테이지 multistage 레이어 layer 레지스트리 registry ghcr ecr harbor 태그 tag latest 파드 pod 디플로이먼트 deployment 레플리카셋 replicaset 서비스 service 인그레스 ingress 컨피그맵 configmap 시크릿 secret pvc pv 스토리지 statefulset 프로브 probe readiness liveness startup 롤링업데이트 rolling 무중단 카나리 canary 블루그린 bluegreen hpa 오토스케일 autoscaling requests limits oomkilled 스로틀 throttle pdb affinity taint toleration 프로메테우스 prometheus 그라파나 grafana loki tempo opentelemetry otel 관측 observability 헬름 helm 차트 chart kustomize argocd gitops 깃옵스 cicd 파이프라인 pipeline github actions trivy cosign crashloopbackoff imagepullbackoff pending evicted 진단 트러블슈팅 troubleshooting kind minikube k3s containerd podman distroless alpine 볼륨 volume 네임스페이스 namespace cgroup 오케스트레이션 orchestration 배포 deploy 롤백 rollback",
 };
 const FIND_CHIPS = ["502 에러가 나요","리버스 프록시 설정","HTTPS 인증서 발급","로드밸런싱 구성",
                     "정적 파일 서빙","Nginx 설정 문법","톰캣 연동","업로드 용량 제한",
@@ -508,6 +509,20 @@ const SEC_KW = {
   v10:"보안 공유기비밀번호 원격관리 dmz금지 3389 445 db포트 ip제한 remoteaddress vpn 백업 절전 업데이트",
   v11:"로그인 basic auth caddy 리버스프록시 https 인증서 자동발급 로그 접속기록 4625 무차별대입",
   v12:"체크리스트 문제해결 증상 연결할수없음 연결거부 어제까지됐는데 진단순서도",
+  d01:"컨테이너 도커 VM 가상머신 커널공유 네임스페이스 cgroup overlayfs 이미지 컨테이너차이 PID1 시그널 tini 도입판단 언제쓰나",
+  d02:"docker run ps logs exec stop rm 포트매핑 볼륨 바인드마운트 tmpfs 환경변수 restart prune system df podman containerd nerdctl dockershim",
+  d03:"dockerfile 레이어캐시 캐시무효화 멀티스테이지 multistage alpine slim distroless scratch 비루트 nonroot dockerignore buildkit 캐시마운트 buildx 멀티아키텍처 이미지크기",
+  d04:"compose docker-compose 서비스이름 DNS 네트워크 depends_on healthcheck 헬스체크 env 환경변수 override 운영분리 로그로테이션 볼륨백업 pg_dump",
+  d05:"레지스트리 dockerhub ghcr ecr harbor 태그전략 semver 커밋sha 다이제스트 digest latest금지 imagePullPolicy trivy 스캔 sbom cosign 서명 사내레지스트리",
+  d06:"쿠버네티스 클러스터 컨트롤플레인 apiserver etcd 스케줄러 컨트롤러매니저 kubelet kubeproxy 파드 replicaset deployment service ingress 선언형 컨트롤러루프 네임스페이스",
+  d07:"kind minikube k3s kubectl 명령 apply describe logs portforward deployment service clusterip nodeport loadbalancer headless ingress nginx엔드포인트 selector 라벨",
+  d08:"configmap secret 환경변수 envfrom 볼륨마운트 base64 vault externalsecrets sealedsecrets sops pv pvc storageclass 동적프로비저닝 rwo rwx statefulset 오퍼레이터",
+  d09:"readiness liveness startup 프로브 probe 롤링업데이트 maxsurge maxunavailable minreadyseconds terminationgraceperiod preStop sigterm graceful shutdown 카나리 블루그린 argorollouts 기능플래그",
+  d10:"requests limits oomkilled 137 cpu스로틀 throttle guaranteed burstable hpa 오토스케일 vpa clusterautoscaler karpenter keda 커스텀메트릭 pdb 노드분산 affinity antiaffinity taint toleration topologyspread",
+  d11:"관측 observability 로그 loki fluentbit json로깅 prometheus kubestatemetrics servicemonitor promql grafana 대시보드 alertmanager 알림 slo opentelemetry otel tempo jaeger 추적 traceid 샘플링 카디널리티",
+  d12:"helm 차트 values 템플릿 upgrade rollback atomic kustomize base overlays 패치 argocd gitops 깃옵스 sync drift selfheal prune syncwave appofapps 환경분리 매니페스트저장소 마이그레이션",
+  d13:"cicd github actions 워크플로 빌드 테스트 캐시 buildx 이미지push 시크릿 oidc permissions 태그릴리스 environment 승인 롤백 revert 스모크테스트 배포체크",
+  d14:"crashloopbackoff imagepullbackoff pending oomkilled evicted 종료코드 137 143 describe events logs previous debug netshoot dns coredns endpointslice 진단순서 네트워크디버깅 배포체크리스트 트러블슈팅",
 };
 
 let FIDX = null;

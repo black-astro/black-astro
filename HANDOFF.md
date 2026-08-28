@@ -1,41 +1,43 @@
-# 핸드오프 — 언어 가이드 확장 (2026-08-26 8차 갱신)
+# 핸드오프 — 언어 가이드 확장 (2026-08-28 9차 갱신)
 
-## 최근 결과 — 열 가이드 전부 "설치부터 실전까지"
+## 현재 상태 — 열 가이드 전부 "설치부터 실전까지"
 
-**모든 언어 가이드에 🧰 설치 · 환경 세팅 탭이 생겼습니다.** 빈 PC 에서 시작해
-설치 → 기초 → 실전(서버 · 앱 · 모듈)까지 한 페이지로 이어집니다.
+모든 언어 가이드에 🧰 **설치 · 환경 세팅** 탭이 있고, 언어별 강점 스택까지 이어집니다.
 
 | 가이드 | 탭 | 섹션 | 다이어그램 |
 |---|---|---|---|
-| **cpp** | 9 → **16** | 88 → **201** | 63 → **169** |
-| **rust** | 9 → **15** | 100 → **174** | 63 → **142** |
-| **python** | 17 → **18** | 256 → **280** | 119 → **144** |
-| **js-ts** | 15 → **16** | 233 → **245** | 105 → **117** |
-| **java** | 14 → **15** | 221 → **233** | 98 → **110** |
-| **kotlin** | 12 → **13** | 195 → **206** | 93 → **104** |
-| **db** | 12 → **13** | 179 → **191** | 84 → **97** |
-| **csharp** | 10 → **11** | 141 → **153** | 71 → **85** |
-| server · cs | 그대로 | 198 · 173 | 114 · 106 |
+| python | 18 | 280 | 144 |
+| **js-ts** | **17** | **258** | **131** |
+| **java** | **16** | **246** | **123** |
+| cpp | 16 | 201 | 169 |
+| **server** | **16** | **212** | **136** |
+| rust | 15 | 174 | 142 |
+| **kotlin** | **14** | **219** | **118** |
+| db | 13 | 191 | 97 |
+| cs | 12 | 173 | 106 |
+| csharp | 11 | 153 | 85 |
 
-### 새로 만든 탭 (전부 이번 작업)
-| 가이드 | 탭 | 섹션 | 그림 |
-|---|---|---|---|
-| cpp | 🧰 설치 · 🖥️ 데스크톱 앱 · 🌐 백엔드 서버 · 🎮 게임 서버 · 🚀 고성능 · ☕ 자바 모듈 · 🟣 C# 모듈 | 각 12~13 | 12~14 |
-| cpp | 🅲 C 언어 **확장** (12→26섹션) | +14 | 7→21 |
-| rust | 🧰 설치 · 🌐 Axum 서버 · 🚀 고성능 서비스 · 🖥️ Tauri · ☕ 자바 모듈 · 🟣 C# 모듈 | 각 11~13 | 13~14 |
-| python | 🧰 설치 · **PySide6 탭에 QML/Qt Quick 12섹션 확장**(q17~q28) | 12 · 12 | 12 · 12 |
-| java · kotlin · js-ts · csharp · db | 🧰 설치 · 환경 세팅 | 11~12 | 11~14 |
+**전체 시각화 1,351개.** 굵게 표시한 넷은 이번 회차에 늘어난 것입니다.
 
-- cpp · rust 는 **"앱을 만들지 않습니다" 소개 문구를 강점 소개로 교체**했습니다
-- 설치 탭은 전부 **맨 앞 탭**, 접두사 `st`(cpp·rust 만 `s`), cls `st`, 그룹 0 아이콘 앞에 🧰
+### 이번 회차 — 기술 스택 공백 메우기 (전 가이드 언급 빈도로 실측해 고름)
+| 가이드 | 새 탭 | 섹션 | 그림 | 왜 |
+|---|---|---|---|---|
+| js-ts | ▲ **Next.js** | f01~f13 | 14 | React 탭은 있는데 Next.js 는 전체 7회 언급뿐이었습니다 |
+| java | 🧵 **최신 Java · 가상 스레드** | v01~v13 | 13 | Loom 1회 · 구조적 동시성/Spring AI 0회 |
+| kotlin | 🚀 **Ktor 서버** | kt01~kt13 | 14 | 코틀린 대표 서버 프레임워크인데 전용 탭이 없었습니다 |
+| server | ☸️ **도커 · 쿠버네티스** | d01~d14 | 22 | 흩어진 언급만 있고 전용 탭이 없었습니다 |
+
+- java 탭은 Java 21~25(가상 스레드 · 구조적 동시성 · 스코프 값 · 패턴 매칭 · FFM · ZGC/AOT · **Spring AI**)와 마이그레이션까지
+- server 탭은 도커 기본기 · Dockerfile · Compose · 레지스트리 · K8s 개념/배포 · 설정·스토리지 · 무중단 · 오토스케일 · 관측 · Helm/GitOps · **CI/CD** · 문제 진단까지
+
+### 그 앞 회차 (요약)
+- **cpp** 9→16탭 — 설치 · 데스크톱 앱 · 백엔드 서버 · 게임 서버 · 고성능 · 자바 모듈(JNI) · C# 모듈, C 언어 탭 12→26섹션
+- **rust** 9→15탭 — 설치 · Axum 서버 · 고성능 서비스 · Tauri · 자바 모듈(UniFFI) · C# 모듈(csbindgen)
+- **python** — PySide6 탭에 **QML/Qt Quick 12섹션**(Controls 2 · Material/FluentWinUI3 · MultiEffect/ShaderEffect · Material Symbols/Lucide) 확장
+- cpp · rust 는 "앱을 만들지 않습니다" 소개 문구를 **강점 소개**로 교체
+- java · kotlin · js-ts · csharp · db 에 설치 · 환경 세팅 탭 신설
+
 - 전 가이드 `verify:guide` 통과 · svgcheck 0건 · integrity 0건 · smoke 통과 · `vue-tsc -b` 통과
-
-### PySide6 QML 확장 (사용자 요청분 — 완료)
-`python/panes/07-qt.html` q17~q28 — QML·Qt Quick 개념/첫 앱/문법·바인딩/앵커·Layout,
-**Qt Quick Controls 2**, **스타일 6종(Material · FluentWinUI3 포함) 과 지정 3가지 방법**,
-파이썬↔QML(`@QmlElement`), 모델·ListView, 애니메이션·상태,
-**Qt Quick Effects(MultiEffect · ShaderEffect · Shape)**, **Material Symbols vs Lucide 아이콘**,
-qrc·PyInstaller 배포.
 
 ---
 
@@ -48,15 +50,37 @@ qrc·PyInstaller 배포.
 > **주의:** 지침서(`BRIEF.md`)와 등록 스크립트(`reg.mjs`)는 세션 스크래치패드에 있습니다.
 > 세션이 바뀌어 사라졌다면 아래 §도구 를 보고 다시 만드세요.
 
-### 1. 전 가이드 기술 스택 점검 (아직 못 함)
-언어별 강점 프레임워크·라이브러리에 빠진 것이 없는지 훑고 보강 — 예:
-java(Virtual Thread·Spring AI·Testcontainers) · kotlin(Ktor·Arrow·Compose Multiplatform) ·
-js-ts(Hono·Bun·Drizzle·TanStack) · csharp(Blazor·Aspire·MAUI) · python(Polars·LangGraph) ·
-db(pgvector·DuckDB·ClickHouse). 오류·설명 오점·시각화 결함도 같이 고칩니다.
+### 1. 브라우저 실측 — **이제 할 수 있습니다** 🔴
+**크롬 MCP 를 이 PC 에 등록해 두었습니다**(2026-08-28):
+```bash
+claude mcp add chrome-devtools -s user -- npx -y chrome-devtools-mcp@latest
+```
+`claude mcp list` 에서 `chrome-devtools ✔ Connected` 로 확인됩니다.
+**MCP 도구는 세션 시작 때 로드되므로 새 세션에서만 잡힙니다.**
 
-### 2. 브라우저 실측 (계속 밀려 있음)
-Chrome MCP 가 있는 세션에서 열 가이드에 아래 스크립트를 한 번씩. 정적 검사(svgcheck)는
-**±5px 안쪽 차이를 못 잡습니다.** 미실측 누적 = 2차 290 + 3차 224 + 4차 68 + 5차 63 + 6차 90 + 이번 **175** = **910건**.
+절차 — ① `web/public` 에서 8899 로컬 서버 띄우기(아래 §관련 명령어)
+② `http://localhost:8899/<가이드>-web/index.html?v=N` 을 열고
+③ §관련 명령어의 실측 스크립트를 실행해 **OVER/BOX/LAP 이 none 이 될 때까지** 문구를 줄입니다.
+정적 검사(svgcheck)는 통과했지만 **±5px 안쪽 차이는 못 잡습니다.**
+**미실측 누적 = 1,073건** (2차 290 + 3차 224 + 4차 68 + 5차 63 + 6차 90 + 7차 175 + 이번 163).
+
+### 2. 기술 스택 공백 — 다음 후보 (이번에 4개는 메웠습니다)
+| 가이드 | 후보 탭 | 근거(현재 언급 빈도) |
+|---|---|---|
+| db | 🧠 **벡터 · 분석 DB** | pgvector 9회 · ClickHouse/DuckDB 0회 — RAG 시대 필수 |
+| server | 🔭 **관측 · 모니터링** | Grafana 3회 · Prometheus 6회 (K8s 탭 d11 에 일부 들어감, 독립 탭은 여전히 여지) |
+| js-ts | 🔥 **Hono · Bun · Deno** | Hono 2회 — 엣지/경량 런타임 축이 비어 있음 |
+| js-ts | 🧪 **테스트 · Vitest·Playwright** | Playwright 9회, 전용 탭 없음 |
+| csharp | 🔥 **Blazor · Aspire** | Blazor 7회 · Aspire 3회 — **이번에 착수했다 중단**, 기획안은 아래 |
+| kotlin | 🎨 Compose Multiplatform 데스크톱 | KMP 탭에 일부만 |
+| java | 🧪 테스트 · 품질 | Testcontainers 5회 (도구 탭에 일부) |
+
+**csharp Blazor 탭 기획안**(중단분 — 그대로 쓰면 됩니다):
+탭 id `blazor` · pane `panes/11-blazor.html` · 접두사 `b`(b01~b13) · group 2 · after `api` ·
+label "🔥 Blazor · 웹 UI" · cls `bz` · grad `["#e11d48","#881337"]`.
+내용 — 렌더 모드 4종 비교 / 첫 앱 / Razor 컴포넌트 문법 / 상태·수명주기 / 폼·검증 /
+데이터(IDbContextFactory·Virtualize) / 인증 / **JS 상호운용** / SignalR 회로 /
+성능·WASM AOT·배포 / **.NET Aspire** / MAUI Blazor Hybrid / 재고 대시보드 실전.
 
 ### 3. 마지막에 할 것
 - `npm run verify:guide` · svgcheck · integrity · smoke · `vue-tsc -b`
@@ -115,14 +139,14 @@ npx vue-tsc -b                                                       # router �
 - svgcheck 지적의 대부분은 **좌우 316폭 박스에 긴 한 줄** — 두 줄로 쪼개고 박스 높이 52→68
 - 넘침은 **x 를 옮기지 말고 문구를 줄여서** 해결 (옮기면 LAP 이 생깁니다)
 
-## 다이어그램 현황 — 총 1,288개
+## 다이어그램 현황 — 총 1,351개
 | 가이드 | 개수 | | 가이드 | 개수 |
 |---|---|---|---|---|
-| **cpp** | **169** | | **python** | **144** |
-| **rust** | **142** | | **js-ts** | **117** |
-| server | 114 | | **java** | **110** |
-| cs | 106 | | **kotlin** | **104** |
-| **db** | **97** | | **csharp** | **85** |
+| cpp | 169 | | python | 144 |
+| rust | 142 | | **server** | **136** |
+| **js-ts** | **131** | | **java** | **123** |
+| **kotlin** | **118** | | cs | 106 |
+| db | 97 | | csharp | 85 |
 
 **모든 가이드의 모든 탭이 7개 이상**입니다.
 
@@ -193,4 +217,4 @@ panes.forEach((p,i)=>p.className=prev[i]);
 ## 목표
 열 가이드(`web/guide-src/*` → `web/public/*-web/index.html`)를
 **"기초부터 전문가까지 이 페이지만 보고 실서비스를 만들 수 있는"** 수준으로.
-열 가이드 전부가 **설치 → 기초 → 실전** 축을 갖췄습니다. 남은 것은 기술 스택 공백 점검과 브라우저 실측입니다.
+열 가이드 전부가 **설치 → 기초 → 실전** 축을 갖췄습니다. 다음은 **브라우저 실측**(크롬 MCP 준비됨)과 남은 기술 스택 공백입니다.

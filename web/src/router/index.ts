@@ -82,8 +82,8 @@ export const guides: Guide[] = [
       'JVM 내부',
     ],
     stats: [
-      { value: '15', label: '주제 탭' },
-      { value: '233', label: '섹션' },
+      { value: '16', label: '주제 탭' },
+      { value: '246', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -109,8 +109,8 @@ export const guides: Guide[] = [
       'K2 내부',
     ],
     stats: [
-      { value: '13', label: '주제 탭' },
-      { value: '206', label: '섹션' },
+      { value: '14', label: '주제 탭' },
+      { value: '219', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -136,8 +136,8 @@ export const guides: Guide[] = [
       'WebRTC · OSR',
     ],
     stats: [
-      { value: '16', label: '주제 탭' },
-      { value: '245', label: '섹션' },
+      { value: '17', label: '주제 탭' },
+      { value: '258', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -217,8 +217,8 @@ export const guides: Guide[] = [
       '보안 운영',
     ],
     stats: [
-      { value: '14', label: '주제 탭' },
-      { value: '186', label: '섹션' },
+      { value: '16', label: '주제 탭' },
+      { value: '212', label: '섹션' },
       { value: '3', label: 'MSA·Kafka·대규모' },
     ],
   },
