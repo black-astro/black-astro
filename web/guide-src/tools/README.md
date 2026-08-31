@@ -101,3 +101,24 @@ node guide-src/tools/lab.mjs --list   # 모델 목록
 시각화 모델 30종의 본보기를 모아 한 페이지로 만듭니다.
 어떤 그림을 그릴지 고를 때 이 페이지를 먼저 열고, 소스를 복사해 라벨만 바꿔 씁니다.
 카탈로그 문서는 `guide-src/DIAGRAM-MODELS.md` 입니다.
+
+## preview.mjs — 손본 그림만 모은 미리보기
+
+```bash
+node guide-src/tools/preview.mjs server/y09 rust/b10   # → public/diag-preview/index.html
+```
+
+본문 페이지는 1.5~3MB 라 브라우저 캡처가 자주 타임아웃됩니다(getBBox 실측은 됩니다).
+손본 그림 몇 개만 뽑아 작은 페이지로 만들어 눈으로 확인할 때 씁니다. 확인 후 폴더는 지워도 됩니다.
+
+## chartcand.mjs — 차트로 바꿀 만한 그림 찾기
+
+```bash
+node guide-src/tools/chartcand.mjs            # 전체
+node guide-src/tools/chartcand.mjs server rust
+node guide-src/tools/chartcand.mjs --all      # 조건을 넓혀서
+```
+
+같은 단위의 서로 다른 수치가 3개 이상인데 차트 어휘를 안 쓴 그림을 찾습니다.
+대개는 축·눈금을 붙이고 `.bx`→`.bar`, `.ln`→`.ax`/`.gr`, `.ann`→`.tk` 로 바꾸는 것으로 충분합니다.
+자세한 것은 `guide-src/DIAGRAM-MODELS.md`.
