@@ -1,0 +1,625 @@
+
+
+<!-- ==================== lg05 ==================== -->
+<section class="sec" id="lg05">
+  <div class="sec-head rv">
+    <span class="no">LOG 05</span>
+    <h2><span class="t">syslog · journald</span> — OS 가 관리하는 로그</h2>
+    <p class="lead">
+      웹서버 로그는 우리가 만든 것이지만, <b>sshd · cron · sudo · systemd · 커널</b>이 남기는 로그는
+      OS 가 관리합니다. 여기에는 40년 된 규칙(<b>시설 · 심각도</b>)과
+      요즘 리눅스의 <b>journald</b>가 겹쳐 있습니다. 둘 다 알아야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 308" role="img" aria-label="왼쪽에는 syslog 의 심각도 여덟 단계를 위에서 아래로 emerg alert crit err warning notice info debug 순서로 색이 옅어지게 배치했고, 오른쪽에는 로그가 systemd-journald 를 거쳐 원통 모양의 저널 파일에 저장되고 다시 rsyslog 를 통해 구름으로 표시된 원격 로그 서버로 전달되는 경로를 그렸다. 실무에서 실제로 쓰는 심각도는 err, warning, info 세 가지이며 나머지는 거의 쓰이지 않는다.">
+      <text x="16" y="18" class="lbl">심각도 8단계와 저널이 흘러가는 길</text>
+
+      <rect class="cel h5" x="16" y="30" width="210" height="22"/>
+      <text x="26" y="46" class="ann">0 emerg — 시스템을 못 씀</text>
+      <rect class="cel h4" x="16" y="54" width="210" height="22"/>
+      <text x="26" y="70" class="ann">1 alert — 즉시 조치 필요</text>
+      <rect class="cel h4" x="16" y="78" width="210" height="22"/>
+      <text x="26" y="94" class="ann">2 crit — 치명적 상태</text>
+      <rect class="cel h3" x="16" y="102" width="210" height="22"/>
+      <text x="26" y="118" class="ann">3 err — 오류 ★ 여기부터 봅니다</text>
+      <rect class="cel h2" x="16" y="126" width="210" height="22"/>
+      <text x="26" y="142" class="ann">4 warning — 경고 ★</text>
+      <rect class="cel h1" x="16" y="150" width="210" height="22"/>
+      <text x="26" y="166" class="ann">5 notice — 정상이지만 특이</text>
+      <rect class="cel h1" x="16" y="174" width="210" height="22"/>
+      <text x="26" y="190" class="ann">6 info — 정보 ★ 대부분 여기</text>
+      <rect class="cel h0" x="16" y="198" width="210" height="22"/>
+      <text x="26" y="214" class="ann">7 debug — 운영에서는 끕니다</text>
+
+      <text x="16" y="238" class="ann">PRI = 시설 × 8 + 심각도 (예: local7.info = 23×8+6 = 190)</text>
+
+      <rect class="bx" x="250" y="30" width="170" height="42"/>
+      <text x="264" y="48" class="val">① 앱 · 데몬 · 커널</text>
+      <text x="264" y="64" class="ann">/dev/log · stdout · kmsg</text>
+      <path class="fl ar" d="M335 76 L335 94"/>
+
+      <rect class="bx bx-fw" x="250" y="98" width="170" height="62"/>
+      <text x="264" y="118" class="val rs-t">② systemd-journald</text>
+      <text x="264" y="134" class="ann">구조화 필드로 저장</text>
+      <text x="264" y="150" class="ann">RateLimit 넘으면 버림</text>
+      <path class="fl ar" d="M424 128 L446 128"/>
+
+      <path class="cyl" d="M450 116 A100 12 0 0 1 650 116 L650 152 A100 12 0 0 1 450 152 Z"/>
+      <path class="ln" d="M450 116 A100 12 0 0 0 650 116"/>
+      <text x="550" y="140" class="val" text-anchor="middle">/var/log/journal</text>
+      <text x="550" y="180" class="ann" text-anchor="middle">Storage=persistent · SystemMaxUse=1G</text>
+
+      <path class="fl ar" d="M335 164 L335 194"/>
+
+      <rect class="bx" x="250" y="198" width="170" height="46"/>
+      <text x="264" y="218" class="val">③ rsyslog (선택)</text>
+      <text x="264" y="234" class="ann">ForwardToSyslog=yes</text>
+      <path class="fl ar" d="M424 220 L452 220"/>
+
+      <path class="cld" d="M478 254 C 456 254, 452 232, 472 226 C 466 204, 494 194, 510 204 C 522 188, 558 188, 568 206 C 592 198, 614 214, 606 230 C 628 236, 624 254, 604 254 Z"/>
+      <text x="542" y="228" class="val" text-anchor="middle">원격 수집 서버</text>
+      <text x="542" y="244" class="ann" text-anchor="middle">SIEM · 규정 보관</text>
+
+      <text x="16" y="272" class="lbl">journald 는 바이너리로 저장합니다 — grep 이 아니라 journalctl 로 봅니다</text>
+      <text x="16" y="290" class="lbl">텍스트 파일이 꼭 필요하면 rsyslog 를 함께 돌려 /var/log/*.log 를 만듭니다</text>
+    </svg>
+    <div class="cap">journald 는 <b>필드가 붙은 데이터베이스</b>에 가깝습니다 — 그래서 조회가 쿼리처럼 됩니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">시설(facility) — 40년째 그대로인 24칸</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:16%">번호</th><th style="width:24%">이름</th><th>누가 씁니까</th></tr>
+        <tr><td>0</td><td><code>kern</code></td><td>커널 (사용자 프로세스는 못 씀)</td></tr>
+        <tr><td>1</td><td><code>user</code></td><td>일반 프로그램 <b>기본값</b></td></tr>
+        <tr><td>2</td><td><code>mail</code></td><td>메일 시스템</td></tr>
+        <tr><td>3</td><td><code>daemon</code></td><td>백그라운드 데몬</td></tr>
+        <tr><td>4</td><td><code>auth</code></td><td>인증 (로그인·su)</td></tr>
+        <tr><td>5</td><td><code>syslog</code></td><td>syslog 자기 자신</td></tr>
+        <tr><td>9</td><td><code>cron</code></td><td>cron · at</td></tr>
+        <tr><td>10</td><td><code>authpriv</code></td><td class="ok"><b>민감한 인증</b> — 파일 권한이 다릅니다</td></tr>
+        <tr><td>16~23</td><td><code>local0~7</code></td><td class="ok"><b>자유롭게 쓰라고 비워 둔 8칸</b> ★</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>local0~7</code> 을 팀 규칙으로 정해 두세요.</b>
+        예를 들어 <code>local5</code>=웹서버 액세스, <code>local6</code>=배치,
+        <code>local7</code>=애플리케이션 식으로요.
+        원격 rsyslog 서버에서 <b>시설만 보고 파일을 나눌 수 있게</b> 됩니다 —
+        Nginx 의 <code>access_log syslog:...,facility=local7</code> 이 바로 이 이야기입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>journalctl</code> — 실제로 치는 명령들</h4>
+      <pre class="code" data-lang="bash"><code># ① 유닛 하나 따라가기 (가장 많이 씁니다)
+journalctl -u nginx -f                    # tail -f
+journalctl -u nginx -n 200 --no-pager
+
+# ② 시간으로 좁히기 ★ 장애 조사의 시작
+journalctl -u nginx --since "2026-08-31 15:00" --until "2026-08-31 15:30"
+journalctl --since "1 hour ago"
+journalctl --since yesterday --until today
+
+# ③ 심각도로 좁히기 (숫자 또는 이름)
+journalctl -p err -b                      # 이번 부팅에서 err 이상
+journalctl -p warning..err                # 범위도 됩니다
+
+# ④ 부팅 단위로 — 재부팅 원인을 찾을 때
+journalctl --list-boots
+journalctl -b -1 -p err                   # 직전 부팅의 오류만 ★
+journalctl -k -b -1 | grep -i "out of memory"   # OOM Killer 추적
+
+# ⑤ 필드로 질의 — journald 의 진짜 힘입니다
+journalctl _SYSTEMD_UNIT=nginx.service _PID=1234
+journalctl _COMM=sshd _UID=0
+journalctl -u nginx -o json-pretty | head -40    # 붙어 있는 필드 전부 보기
+journalctl -F _SYSTEMD_UNIT               # 이 서버에 있는 유닛 목록
+
+# ⑥ 출력 형식 — 수집기에 넘길 때는 json
+journalctl -u nginx -o cat                # 메시지 본문만
+journalctl -u nginx -o short-iso          # 시각을 ISO8601 로
+journalctl -f -o json                     # 스트리밍 JSON
+
+# ⑦ 용량 — 이것부터 확인하세요
+journalctl --disk-usage
+sudo journalctl --vacuum-size=500M
+sudo journalctl --vacuum-time=7d
+sudo journalctl --verify                  # 손상 검사</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">journald 가 디스크를 먹는 문제 — <span class="t">기본값이 관대합니다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">journald.conf — 실제로 손대는 항목</h4>
+      <pre class="code" data-lang="ini"><code># /etc/systemd/journald.conf.d/00-limits.conf  (원본을 고치지 말고 드롭인으로)
+[Journal]
+Storage=persistent          # auto=디렉터리가 있을 때만 영구. persistent 로 못 박습니다
+Compress=yes
+SystemMaxUse=1G             # ★ 기본은 "파일시스템의 10%, 최대 4G" — 관대합니다
+SystemKeepFree=2G           # 이만큼은 항상 비워 둡니다
+SystemMaxFileSize=128M      # 한 조각 파일의 크기
+SystemMaxFiles=100
+MaxRetentionSec=14day       # 기간 상한 (용량 상한과 함께 걸립니다)
+MaxFileSec=1day             # 하루마다 새 조각 파일
+
+# 폭주 방지 — 이걸 모르면 "로그가 없어졌다"고 착각합니다 ★
+RateLimitIntervalSec=30s
+RateLimitBurst=10000        # 30초에 10,000줄 넘으면 그 뒤는 버립니다
+
+ForwardToSyslog=no          # rsyslog 를 안 쓰면 꺼서 중복 저장을 막습니다
+ForwardToWall=no</code></pre>
+      <pre class="code" data-lang="bash"><code>sudo systemctl restart systemd-journald
+journalctl --disk-usage
+
+# 폭주로 버려진 줄이 있었는지 확인 ★ 이 문구를 꼭 기억하세요
+journalctl | grep -i "Suppressed .* messages"</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>"로그가 중간에 비었다"의 범인이 대개 <code>RateLimitBurst</code> 입니다.</b>
+        장애 순간에는 로그가 폭발하는데, 바로 그때 journald 가
+        <b>초과분을 조용히 버립니다</b>. 유닛별로 풀 수도 있습니다 —
+        서비스 유닛에 <code>LogRateLimitIntervalSec=0</code> 을 주면 그 유닛만 제한이 풀립니다.
+        <b>가장 중요한 서비스에만</b> 예외를 주세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">rsyslog — 원격 전송과 파일 만들기</h4>
+      <pre class="code" data-lang="text"><code># /etc/rsyslog.d/10-remote.conf  (RainerScript · rsyslog 8.x)
+
+# ① 원격으로 보내기 — 디스크 큐를 반드시 함께 씁니다 ★
+*.* action(type="omfwd"
+           target="10.0.0.9" port="514" protocol="tcp"
+           queue.type="LinkedList"
+           queue.filename="fwd_q"          # 디스크로 넘칠 때 쓸 파일
+           queue.maxdiskspace="1g"
+           queue.saveonshutdown="on"       # 재시작해도 안 잃습니다
+           action.resumeRetryCount="-1")   # 무한 재시도
+
+# ② 시설별로 파일 나누기 (Nginx 를 local7 로 보냈다면)
+local7.*   /var/log/nginx-remote.log
+authpriv.* /var/log/secure
+
+# ③ 파일을 읽어서 보내기 — 웹서버 로그를 rsyslog 로 실어 나를 때
+module(load="imfile")
+input(type="imfile"
+      File="/var/log/nginx/access.json"
+      Tag="nginx-access"
+      Severity="info" Facility="local7"
+      PersistStateInterval="100")         # 어디까지 읽었는지 저장
+
+# ④ 더 확실하게 — RELP 는 응답을 받고서야 지웁니다(TCP 만으로는 유실 가능)
+module(load="omrelp")
+action(type="omrelp" target="10.0.0.9" port="20514")</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>2026년에 새로 만드는 시스템이라면 rsyslog 로 파일을 실어 나르지 않습니다.</b>
+        그 일은 <b>Fluent Bit·Vector 같은 수집기</b>가 더 잘합니다(lg07).
+        rsyslog 가 여전히 필요한 자리는 <b>① 네트워크 장비·어플라이언스가 syslog 로만 보내는 경우</b>,
+        <b>② 규정상 syslog 서버로 즉시 전송해야 하는 감사 로그</b>(lg11),
+        <b>③ 텍스트 <code>/var/log/*.log</code> 를 꼭 유지해야 하는 오래된 운영 절차</b> 셋입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="note tip rv" style="margin-bottom:0">
+    <b>systemd 유닛에서 로그를 어디로 보낼지 정하는 것도 설정입니다.</b>
+    <code>StandardOutput=journal</code>(기본) · <code>append:/var/log/app.log</code> ·
+    <code>null</code> 중에서 고를 수 있고, <code>SyslogIdentifier=</code> 로 이름을 붙이면
+    <code>journalctl -t 이름</code> 으로 바로 뽑힙니다.
+    <code>StandardOutput=append:</code> 를 쓰면 <b>systemd 가 파일을 열어 주므로</b>
+    앱이 파일 경로를 몰라도 되고, logrotate 후 재오픈은
+    <code>systemctl restart</code> 또는 <code>copytruncate</code> 가 필요해집니다(다음 섹션).
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> syslog 의 <b>시설 24칸 · 심각도 8단계</b>는 지금도 프로토콜의 뼈대입니다.
+    요즘 리눅스에서는 <b>journald 가 먼저 받고</b>, 필요하면 rsyslog 로 넘깁니다.
+    <b><code>journalctl -u ... --since ... -p err</code></b> 세 옵션이면 조사의 90%가 되고,
+    <b><code>SystemMaxUse</code> 와 <code>RateLimitBurst</code></b> 두 개는 반드시 손대야 하는 기본값입니다.</div>
+</section>
+
+
+<!-- ==================== lg06 ==================== -->
+<section class="sec" id="lg06">
+  <div class="sec-head rv">
+    <span class="no">LOG 06</span>
+    <h2><span class="t">logrotate</span> — 로그를 잃는 가장 흔한 경로</h2>
+    <p class="lead">
+      로그 파일은 이름을 바꿔도 <b>프로세스는 옛 파일에 계속 씁니다</b>.
+      유닉스에서 파일의 정체는 이름이 아니라 <b>inode</b> 이기 때문입니다.
+      이 한 가지를 모르면 회전할 때마다 <b>로그가 조용히 사라집니다</b>.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 288" role="img" aria-label="logrotate 가 도는 동안 벌어지는 일을 시퀀스 다이어그램으로 그린 그림. logrotate 가 로그 파일 이름을 바꾸면 nginx 워커는 이름이 바뀐 것을 모르고 같은 아이노드에 계속 쓴다. 이 구간에 들어간 줄은 회전된 파일 쪽에 적히고, 압축 시점에 따라 사라질 수 있다. 그다음 postrotate 스크립트가 USR1 신호를 보내면 nginx 가 새 파일을 열고, 마지막으로 다음 회전 때 이전 파일을 압축한다.">
+      <text x="16" y="18" class="lbl">회전하는 그 몇 초 — 로그는 어디로 가고 있나</text>
+
+      <rect class="actr" x="60" y="30" width="140" height="26"/>
+      <text x="130" y="48" class="val" text-anchor="middle">logrotate</text>
+      <rect class="actr" x="290" y="30" width="140" height="26"/>
+      <text x="360" y="48" class="val" text-anchor="middle">nginx 워커</text>
+      <rect class="actr" x="510" y="30" width="140" height="26"/>
+      <text x="580" y="48" class="val" text-anchor="middle">파일 (inode)</text>
+
+      <path class="life" d="M130 58 L130 236"/>
+      <path class="life" d="M360 58 L360 236"/>
+      <path class="life" d="M580 58 L580 236"/>
+
+      <text x="140" y="76" class="ann">① rename : access.log → access.log.1</text>
+      <path class="msg" d="M130 84 L574 84"/>
+
+      <rect class="hl" x="100" y="94" width="520" height="46"/>
+      <text x="112" y="114" class="ann am-t">이름만 바뀌었을 뿐 inode 는 그대로 — nginx 는 눈치채지 못합니다</text>
+      <text x="112" y="132" class="ann">이 구간의 줄은 access.log.1 에 들어갑니다. 바로 압축하면 그 줄을 잃습니다</text>
+
+      <text x="140" y="158" class="ann">② postrotate : kill -USR1 $(cat /run/nginx.pid)</text>
+      <path class="msg" d="M130 166 L354 166"/>
+
+      <text x="372" y="186" class="ann ok-t">③ nginx 가 새 access.log 를 엽니다</text>
+      <path class="msg" d="M360 194 L574 194"/>
+
+      <text x="140" y="214" class="ann">④ delaycompress : 다음 회전 때 access.log.1 을 gzip</text>
+      <path class="msg" d="M130 222 L574 222"/>
+
+      <text x="16" y="256" class="lbl">delaycompress 가 없으면 ②가 끝나기 전에 압축이 시작될 수 있습니다</text>
+      <text x="16" y="274" class="lbl">그래서 "회전 · 신호 · 압축"의 순서가 설정 세 줄에 그대로 담겨 있어야 합니다</text>
+    </svg>
+    <div class="cap">시퀀스 — <b>이름과 inode 가 다른 것</b>이 로그 회전 사고의 뿌리입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설정 문법 — 실제로 쓰는 지시어 전부</h4>
+      <pre class="code" data-lang="text"><code># /etc/logrotate.d/nginx
+/var/log/nginx/*.log /var/log/nginx/*.json {
+    daily                 # hourly · daily · weekly · monthly · yearly
+    rotate 14             # 몇 개를 보관할지 (14일치)
+    size 100M             # 이 크기 넘으면 주기와 무관하게 회전
+    maxsize 500M          # 주기 전이라도 이 크기면 회전 (size 와 조합)
+    minsize 1M            # 이보다 작으면 주기가 와도 회전 안 함
+
+    missingok             # 파일이 없어도 오류 내지 않음
+    notifempty            # 비어 있으면 회전 안 함
+    compress              # gzip (기본 gzip, compresscmd 로 변경 가능)
+    delaycompress         # ★ 한 세대 미루고 압축 — 재오픈 전에 압축하는 사고 방지
+    compresscmd /usr/bin/zstd
+    compressoptions -19 --rm
+    compressext .zst
+
+    dateext               # access.log-20260831 형태로 (숫자 대신 날짜)
+    dateformat -%Y%m%d
+    dateyesterday         # 새벽에 도니 "어제 날짜"로 붙이는 게 자연스럽습니다
+
+    create 0640 www-data adm      # 새 파일을 이 권한·소유자로 미리 만듦
+    su root adm                   # 디렉터리 소유자가 root 가 아닐 때 필요
+    olddir /var/log/nginx/old     # 회전본을 다른 디렉터리로
+    sharedscripts                 # ★ 여러 파일이어도 스크립트는 한 번만
+    postrotate
+        [ -f /run/nginx.pid ] &amp;&amp; kill -USR1 "$(cat /run/nginx.pid)"
+    endscript
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">서버별 "재오픈" 방법</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">대상</th><th>회전 뒤에 할 일</th></tr>
+        <tr><td><b>Nginx</b></td><td><code>kill -USR1 $(cat /run/nginx.pid)</code></td></tr>
+        <tr><td><b>Apache</b></td><td><code>apachectl graceful</code> (또는 파이프 <code>rotatelogs</code> 로 아예 회피)</td></tr>
+        <tr><td><b>HAProxy</b></td><td>보통 syslog 로 보내므로 해당 없음</td></tr>
+        <tr><td><b>rsyslog</b></td><td><code>systemctl kill -s HUP rsyslog</code></td></tr>
+        <tr><td><b>Tomcat</b> <code>catalina.out</code></td><td class="warn">재오픈 수단 없음 → <code>copytruncate</code> 또는 아예 안 만들기</td></tr>
+        <tr><td><b>Caddy</b></td><td class="ok">필요 없음 — 자체 회전</td></tr>
+        <tr><td><b>journald</b></td><td class="ok">필요 없음 — <code>SystemMaxUse</code> 로 관리</td></tr>
+        <tr><td><b>컨테이너</b></td><td class="ok">필요 없음 — kubelet·도커가 회전(lg12)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># 검증 — 실제로 돌리기 전에 반드시
+sudo logrotate -d /etc/logrotate.d/nginx    # -d : 예행연습(아무것도 안 바꿈)
+sudo logrotate -vf /etc/logrotate.d/nginx   # -f : 지금 강제로 한 번
+cat /var/lib/logrotate/status               # 마지막 회전 시각 기록
+
+# 언제 도나 — 배포판마다 다릅니다
+systemctl list-timers logrotate.timer       # systemd 계열
+ls -l /etc/cron.daily/logrotate             # 옛 방식
+
+# ★ cron.daily 는 보통 새벽에 "한꺼번에" 돕니다.
+#   size 100M 을 걸어도 하루에 한 번만 검사하므로
+#   폭주하는 날엔 디스크가 먼저 찹니다 → 타이머를 시간마다로 바꾸세요.
+sudo systemctl edit logrotate.timer         # OnCalendar=hourly</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a"><span class="t">copytruncate</span> 가 로그를 잃는 이유 <span class="lvl h">🔴 실무</span></h3>
+  <div class="vs rv d1">
+    <div class="bad">
+      <h5>copytruncate — 신호를 못 줄 때만</h5>
+      <pre class="code" data-lang="text" style="margin:6px 0 0"><code>/opt/tomcat/logs/catalina.out {
+    daily rotate 7 compress
+    copytruncate
+}</code></pre>
+      <span class="ann">
+      ① 원본을 <b>복사</b>하고 ② 원본을 <b>0바이트로 자릅니다</b>.<br>
+      · ①과 ② <b>사이에 들어온 줄은 사라집니다</b> — 큰 파일일수록 그 틈이 깁니다<br>
+      · 앱이 <code>O_APPEND</code> 없이 열었다면 <b>오프셋이 그대로라</b> 잘린 파일 앞부분이
+        <b>널 바이트(sparse)</b>로 채워집니다<br>
+      · 복사하는 동안 <b>디스크를 두 배</b>로 씁니다</span>
+    </div>
+    <div class="good">
+      <h5>rename + 신호 — 정석</h5>
+      <pre class="code" data-lang="text" style="margin:6px 0 0"><code>/var/log/nginx/*.log {
+    daily rotate 14 compress delaycompress
+    missingok notifempty
+    create 0640 www-data adm
+    sharedscripts
+    postrotate
+        [ -f /run/nginx.pid ] &amp;&amp; \
+          kill -USR1 "$(cat /run/nginx.pid)"
+    endscript
+}</code></pre>
+      <span class="ann">
+      · <b>한 줄도 잃지 않습니다</b> — rename 은 원자적이고, 신호 전까지의 줄은
+        회전본에 온전히 들어갑니다<br>
+      · <code>delaycompress</code> 가 <b>압축을 한 세대 미뤄</b> 재오픈 전에 건드리지 않게 합니다<br>
+      · 디스크 여유가 없어도 안전합니다</span>
+    </div>
+  </div>
+
+  <div class="note warn rv d1">
+    <b>회전 뒤에 수집기가 파일을 다시 찾지 못하는 사고도 흔합니다.</b>
+    Fluent Bit·Vector·Filebeat 는 <b>inode 로 파일을 추적</b>하기 때문에
+    rename 방식에서는 문제가 없지만, <code>copytruncate</code> 를 쓰면
+    <b>같은 inode 의 크기가 갑자기 줄어든 것</b>으로 보여 처음부터 다시 읽거나
+    (중복!) 그 지점부터 건너뜁니다(유실!). 수집기를 쓴다면
+    <b><code>copytruncate</code> 를 피하는 이유가 하나 더</b> 생기는 셈입니다.
+    회전 주기를 <b>수집기의 <code>Refresh_Interval</code> 보다 충분히 길게</b> 잡는 것도 중요합니다 —
+    회전본이 압축되어 사라지기 전에 다 읽어야 하니까요.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 파일의 정체는 <b>이름이 아니라 inode</b> 입니다.
+    그래서 정석은 <b>rename → 재오픈 신호(USR1) → 한 세대 뒤 압축</b> 순서이고,
+    설정에 <code>delaycompress · sharedscripts · postrotate</code> 세 줄이 반드시 들어갑니다.
+    <b><code>copytruncate</code> 는 신호를 줄 방법이 없을 때만</b>(catalina.out) 쓰는 최후 수단입니다.</div>
+</section>
+
+
+<!-- ==================== lg07 ==================== -->
+<section class="sec" id="lg07">
+  <div class="sec-head rv">
+    <span class="no">LOG 07</span>
+    <h2>수집기 <span class="t">다섯 개</span> — 무엇을 언제 고르나</h2>
+    <p class="lead">
+      로그 파일을 읽어 파싱하고 라벨을 붙여 저장소로 보내는 프로그램을 <b>수집기</b>라고 합니다.
+      다섯 개가 사실상의 후보이고, <b>고르는 기준은 성능이 아니라
+      "얼마나 변환할 것인가"와 "이미 무엇을 쓰고 있는가"</b> 입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 282" role="img" aria-label="로그 수집기 다섯 종을 여섯 가지 기준으로 비교한 히트맵. 기준은 메모리 효율, 처리량, 변환 능력, 디스크 버퍼, 플러그인 수, 채택 정도이며 모든 칸은 높을수록 좋은 방향으로 맞췄고 색이 진할수록 강하다는 뜻이다. Fluent Bit 은 메모리 효율과 채택 정도가 가장 높고, Vector 는 처리량과 변환 능력과 디스크 버퍼가 가장 높으며, Fluentd 는 플러그인 수가 압도적이지만 메모리 효율이 낮고, Promtail 은 후속 제품인 Grafana Alloy 로 대체되어 신규 채택이 드물다.">
+      <text x="16" y="18" class="lbl">수집기 비교 — 모든 칸은 "높을수록 좋음"으로 맞췄습니다</text>
+
+      <text x="152" y="44" class="tk" text-anchor="middle">메모리 효율</text>
+      <text x="244" y="44" class="tk" text-anchor="middle">처리량</text>
+      <text x="336" y="44" class="tk" text-anchor="middle">변환 능력</text>
+      <text x="428" y="44" class="tk" text-anchor="middle">디스크 버퍼</text>
+      <text x="520" y="44" class="tk" text-anchor="middle">플러그인</text>
+      <text x="612" y="44" class="tk" text-anchor="middle">채택 정도</text>
+
+      <text x="16" y="72" class="ann ok-t">Fluent Bit</text>
+      <rect class="cel h5" x="106" y="52" width="88" height="28"/><text x="150" y="71" class="tk" text-anchor="middle">매우 높음</text>
+      <rect class="cel h4" x="198" y="52" width="88" height="28"/><text x="242" y="71" class="tk" text-anchor="middle">높음</text>
+      <rect class="cel h3" x="290" y="52" width="88" height="28"/><text x="334" y="71" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h4" x="382" y="52" width="88" height="28"/><text x="426" y="71" class="tk" text-anchor="middle">높음</text>
+      <rect class="cel h3" x="474" y="52" width="88" height="28"/><text x="518" y="71" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h5" x="566" y="52" width="88" height="28"/><text x="610" y="71" class="tk" text-anchor="middle">사실상 표준</text>
+
+      <text x="16" y="104" class="ann">Vector</text>
+      <rect class="cel h3" x="106" y="84" width="88" height="28"/><text x="150" y="103" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h5" x="198" y="84" width="88" height="28"/><text x="242" y="103" class="tk" text-anchor="middle">매우 높음</text>
+      <rect class="cel h5" x="290" y="84" width="88" height="28"/><text x="334" y="103" class="tk" text-anchor="middle">매우 높음</text>
+      <rect class="cel h5" x="382" y="84" width="88" height="28"/><text x="426" y="103" class="tk" text-anchor="middle">매우 높음</text>
+      <rect class="cel h3" x="474" y="84" width="88" height="28"/><text x="518" y="103" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h3" x="566" y="84" width="88" height="28"/><text x="610" y="103" class="tk" text-anchor="middle">빠르게 증가</text>
+
+      <text x="16" y="136" class="ann">Filebeat</text>
+      <rect class="cel h3" x="106" y="116" width="88" height="28"/><text x="150" y="135" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h3" x="198" y="116" width="88" height="28"/><text x="242" y="135" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h2" x="290" y="116" width="88" height="28"/><text x="334" y="135" class="tk" text-anchor="middle">낮음</text>
+      <rect class="cel h3" x="382" y="116" width="88" height="28"/><text x="426" y="135" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h3" x="474" y="116" width="88" height="28"/><text x="518" y="135" class="tk" text-anchor="middle">모듈 다수</text>
+      <rect class="cel h4" x="566" y="116" width="88" height="28"/><text x="610" y="135" class="tk" text-anchor="middle">ES 쓰면</text>
+
+      <text x="16" y="168" class="ann">Fluentd</text>
+      <rect class="cel h1" x="106" y="148" width="88" height="28"/><text x="150" y="167" class="tk" text-anchor="middle">낮음</text>
+      <rect class="cel h2" x="198" y="148" width="88" height="28"/><text x="242" y="167" class="tk" text-anchor="middle">낮음</text>
+      <rect class="cel h4" x="290" y="148" width="88" height="28"/><text x="334" y="167" class="tk" text-anchor="middle">높음</text>
+      <rect class="cel h4" x="382" y="148" width="88" height="28"/><text x="426" y="167" class="tk" text-anchor="middle">높음</text>
+      <rect class="cel h5" x="474" y="148" width="88" height="28"/><text x="518" y="167" class="tk" text-anchor="middle">압도적</text>
+      <rect class="cel h2" x="566" y="148" width="88" height="28"/><text x="610" y="167" class="tk" text-anchor="middle">유지 위주</text>
+
+      <text x="16" y="200" class="ann">Promtail</text>
+      <rect class="cel h4" x="106" y="180" width="88" height="28"/><text x="150" y="199" class="tk" text-anchor="middle">높음</text>
+      <rect class="cel h3" x="198" y="180" width="88" height="28"/><text x="242" y="199" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h2" x="290" y="180" width="88" height="28"/><text x="334" y="199" class="tk" text-anchor="middle">낮음</text>
+      <rect class="cel h1" x="382" y="180" width="88" height="28"/><text x="426" y="199" class="tk" text-anchor="middle">아주 낮음</text>
+      <rect class="cel h1" x="474" y="180" width="88" height="28"/><text x="518" y="199" class="tk" text-anchor="middle">Loki 전용</text>
+      <rect class="cel h1" x="566" y="180" width="88" height="28"/><text x="610" y="199" class="tk" text-anchor="middle">Alloy 로 이전</text>
+
+      <rect class="cel h0" x="106" y="216" width="16" height="12"/>
+      <rect class="cel h2" x="126" y="216" width="16" height="12"/>
+      <rect class="cel h4" x="146" y="216" width="16" height="12"/>
+      <rect class="cel h5" x="166" y="216" width="16" height="12"/>
+      <text x="16" y="226" class="ann">약함 → 강함</text>
+
+      <text x="16" y="252" class="lbl">색은 훑어보기용, 칸 안의 말이 확인용입니다 — 정확한 수치는 직접 재세요</text>
+      <text x="16" y="270" class="lbl">채택 정도는 CNCF 연례 설문과 GitHub 스타 추이로 스스로 확인할 수 있습니다</text>
+    </svg>
+    <div class="cap">히트맵 — <b>Fluent Bit 은 가볍고, Vector 는 변환이 강합니다.</b> 나머지는 "이미 쓰는 스택"이 정합니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다섯 개의 성격 한 줄씩</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:20%">이름</th><th style="width:14%">언어</th><th>성격</th></tr>
+        <tr><td><b>Fluent Bit</b></td><td>C</td><td class="ok"><b>가장 가벼움.</b> 노드마다 하나 띄우는 에이전트의 사실상 표준. 파서·필터가 내장이라 설정만으로 대부분 해결</td></tr>
+        <tr><td><b>Vector</b></td><td>Rust</td><td class="ok"><b>변환이 압도적.</b> VRL 이라는 전용 언어로 파싱·마스킹·라우팅을 다 씁니다. 종단 확인(ack)과 디스크 버퍼가 튼튼</td></tr>
+        <tr><td><b>Filebeat</b></td><td>Go</td><td>Elastic 스택 전용에 가깝습니다. 변환은 ES 의 ingest pipeline 에 맡기는 설계. <b>이미 ES 를 쓰면 가장 편함</b></td></tr>
+        <tr><td><b>Fluentd</b></td><td>Ruby+C</td><td>플러그인이 압도적으로 많습니다. 무겁고 느려서 <b>요즘은 에지가 아니라 중앙 취합기</b> 자리에 남습니다</td></tr>
+        <tr><td><b>Promtail</b></td><td>Go</td><td class="warn">Loki 전용 에이전트. <b>Grafana Alloy 로 대체</b>되어 신규 채택은 드묾. 기존 설치는 Alloy 마이그레이션 대상</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>채택 정도를 숫자로 말하지 않는 이유</b> — 공개된 정확한 점유율 통계가 없습니다.
+        <b>2026년 8월 기준 대략</b>의 감으로는 쿠버네티스 노드 에이전트에서
+        Fluent Bit 이 가장 흔하고 Vector 가 빠르게 따라붙는 모양새인데,
+        <b>직접 확인하는 방법</b>이 있습니다 —
+        <b>CNCF 연례 설문(Annual Survey)의 관측 도구 문항</b>,
+        <b>각 저장소의 GitHub 스타·릴리스 빈도 추이</b>,
+        그리고 <b>주요 매니지드 쿠버네티스의 기본 로깅 애드온이 무엇인지</b>.
+        이 세 가지면 시점에 맞는 판단을 스스로 내릴 수 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Fluent Bit — 파일을 읽어 Loki 로</h4>
+      <pre class="code" data-lang="ini"><code># /etc/fluent-bit/fluent-bit.conf
+[SERVICE]
+    Flush            5
+    Daemon           Off
+    Log_Level        info
+    Parsers_File     parsers.conf
+    storage.path     /var/lib/fluent-bit/storage   # ★ 디스크 버퍼
+    storage.sync     normal
+    storage.max_chunks_up 128
+
+[INPUT]
+    Name             tail
+    Path             /var/log/nginx/access.json
+    Tag              nginx.access
+    Parser           json
+    DB               /var/lib/fluent-bit/tail.db   # ★ 어디까지 읽었는지
+    DB.locking       true
+    Mem_Buf_Limit    32MB
+    storage.type     filesystem                    # 메모리 넘치면 디스크로
+    Skip_Long_Lines  On
+    Refresh_Interval 10
+
+[FILTER]
+    Name             modify
+    Match            nginx.*
+    Add              env prod
+    Add              host ${HOSTNAME}
+
+[FILTER]
+    Name             lua
+    Match            nginx.*
+    script           mask.lua
+    call             mask_token
+
+[OUTPUT]
+    Name             loki
+    Match            nginx.*
+    host             loki.internal
+    port             3100
+    labels           job=nginx, env=$env, host=$host
+    label_keys       $status
+    line_format      json
+    Retry_Limit      False                          # 무한 재시도</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>storage.type filesystem</code> 을 안 켜면 메모리 버퍼가 전부입니다.</b>
+        저장소가 10분만 죽어도 <code>Mem_Buf_Limit</code> 를 넘긴 순간부터
+        <b>새 줄을 조용히 버립니다</b>(그리고 <code>tail</code> 이 멈춥니다).
+        디스크 버퍼를 켜고, 그 디스크에도 <b>상한과 알림</b>을 거세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">Vector — <span class="t">VRL 로 파싱 · 마스킹 · 라우팅을 한곳에서</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">vector.toml</h4>
+      <pre class="code" data-lang="toml"><code>[sources.nginx]
+type = "file"
+include = ["/var/log/nginx/access.json"]
+read_from = "beginning"
+fingerprint.strategy = "checksum"       # inode 대신 내용으로 파일을 식별
+
+[sources.journal]
+type = "journald"
+include_units = ["nginx.service", "sshd.service"]
+
+[transforms.parse]
+type = "remap"
+inputs = ["nginx"]
+source = '''
+  . = parse_json!(.message)
+  .ts       = parse_timestamp!(.ts, "%+")
+  .rt       = to_float!(.rt)
+  .status   = to_int!(.status)
+  # 업스트림 시간은 "-" 이거나 "0.01, 1.40" 일 수 있습니다
+  .urt = if is_string(.urt) &amp;&amp; .urt != "-" {
+            to_float(split(.urt, ", ")[0]) ?? null
+          } else { null }
+  # 토큰·인증 헤더 마스킹 — 저장되기 전에 지웁니다
+  .uri = replace(.uri, r'token=[^&amp;]+', "token=[REDACTED]")
+  del(.agent)                            # User-Agent 는 아예 버림
+'''
+
+[transforms.sample]
+type = "sample"
+inputs = ["parse"]
+rate = 20                                # 20건 중 1건
+exclude = '''.status &gt;= 400'''           # ★ 오류는 전부 통과
+
+[sinks.loki]
+type = "loki"
+inputs = ["sample", "journal"]
+endpoint = "http://loki.internal:3100"
+compression = "snappy"
+labels = { job = "nginx", env = "prod", host = "{{ host }}" }
+  [sinks.loki.buffer]
+  type = "disk"                          # ★ 디스크 버퍼
+  max_size = 1073741824                  # 1GiB
+  when_full = "block"                    # drop_newest 대신 block (유실 방지)
+  [sinks.loki.batch]
+  max_bytes = 1048576
+  timeout_secs = 2</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Vector 를 쓸 때 실제로 편한 것들</h4>
+      <pre class="code" data-lang="bash"><code># ① 설정을 실제로 돌려 보지 않고 검사
+vector validate --config /etc/vector/vector.toml
+
+# ② VRL 한 줄을 즉석에서 시험 ★ 이게 정말 편합니다
+echo '{"uri":"/a?token=abc123","status":"500"}' \
+  | vector vrl 'parse_json!(.) | .status = to_int!(.status)'
+
+# ③ 지금 흐르는 이벤트를 실시간으로 들여다보기
+vector tap --outputs-of parse
+vector top                        # 파이프라인별 처리량 · 오류 · 버퍼 사용률
+
+# ④ 설정 안에 단위 테스트를 넣을 수 있습니다
+#    [[tests]] 블록에 입력과 기대 출력을 적고
+vector test --config /etc/vector/vector.toml</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>수집기를 두 층으로 두는 구성이 흔합니다.</b>
+        노드마다 <b>가벼운 에이전트</b>(Fluent Bit)를 두고,
+        중앙에 <b>취합기</b>(Vector 또는 Fluentd)를 몇 대 두어
+        <b>변환·샘플링·라우팅은 중앙에서</b> 합니다.
+        노드 에이전트를 가볍게 유지할 수 있고, <b>변환 규칙을 한곳에서 바꿀 수</b> 있어서
+        수백 대에 재배포하지 않아도 됩니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>수집기 자체의 로그와 지표를 반드시 수집하세요.</b>
+        수집기가 죽으면 <b>"로그가 안 들어온다"는 사실을 로그로는 알 수 없습니다</b>.
+        Fluent Bit·Vector 모두 Prometheus 지표를 내보내니
+        <b>"수집기가 마지막으로 보낸 시각"에 알림</b>을 거는 것이 정석입니다(🔭 관측 탭).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 노드 에이전트는 <b>Fluent Bit</b>, 변환이 많으면 <b>Vector</b>,
+    이미 Elastic 을 쓰면 <b>Filebeat</b>, 플러그인이 꼭 필요하면 <b>Fluentd</b>,
+    Promtail 은 <b>Grafana Alloy 로 넘어가는 중</b>입니다.
+    무엇을 고르든 <b>디스크 버퍼를 켜고 · 오프셋 DB 를 영구 볼륨에 두고 ·
+    수집기 자체를 감시</b>하는 세 가지는 똑같이 해야 합니다.</div>
+</section>

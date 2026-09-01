@@ -1,0 +1,410 @@
+
+
+<!-- ==================== lg07 ==================== -->
+<section class="sec" id="lg07">
+  <div class="sec-head rv">
+    <span class="no">LOG 07</span>
+    <h2>회전과 보존 — <span class="t">디스크</span>가 차서 죽는 사고를 막기</h2>
+    <p class="lead">
+      로그로 서비스를 죽이는 가장 흔한 방법은 <b>디스크를 채우는 것</b>입니다.
+      회전은 “파일을 나눈다”가 아니라 <b>총량에 상한을 씌운다</b>는 뜻이고,
+      그 상한을 모르면 용량 계획이 없는 것입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 188" role="img" aria-label="크기 기준 회전에서 로그 파일이 밀려나는 모습. 지금 쓰는 app.log 가 5메가바이트를 넘으면 app.1.log 로 이름이 바뀌고 기존 app.1.log 는 app.2.log 로 밀립니다. 보존 개수 3을 넘어선 가장 오래된 파일은 지워지며 복구할 수 없습니다. 디스크에 남는 최대치는 5메가바이트 곱하기 4로 20메가바이트입니다">
+      <text x="16" y="18" class="lbl">rotating_file_sink("app.log", 5 MB, 3) — 파일이 오른쪽으로 밀려납니다</text>
+
+      <path class="cyl" d="M24 46 L24 104 A54 9 0 0 0 132 104 L132 46 Z"/>
+      <ellipse class="cyl" cx="78" cy="46" rx="54" ry="9"/>
+      <text x="78" y="76" class="val" text-anchor="middle">app.log</text>
+      <text x="78" y="92" class="ann" text-anchor="middle">지금 쓰는 파일</text>
+
+      <path class="ln ar" d="M136 75 L164 75"/>
+
+      <path class="cyl" d="M168 46 L168 104 A54 9 0 0 0 276 104 L276 46 Z"/>
+      <ellipse class="cyl" cx="222" cy="46" rx="54" ry="9"/>
+      <text x="222" y="76" class="val" text-anchor="middle">app.1.log</text>
+      <text x="222" y="92" class="ann" text-anchor="middle">직전 5 MB</text>
+
+      <path class="ln ar" d="M280 75 L308 75"/>
+
+      <path class="cyl" d="M312 46 L312 104 A54 9 0 0 0 420 104 L420 46 Z"/>
+      <ellipse class="cyl" cx="366" cy="46" rx="54" ry="9"/>
+      <text x="366" y="76" class="val" text-anchor="middle">app.2.log</text>
+      <text x="366" y="92" class="ann" text-anchor="middle">그 앞 5 MB</text>
+
+      <path class="ln ar" d="M424 75 L452 75"/>
+
+      <path class="cyl" d="M456 46 L456 104 A54 9 0 0 0 564 104 L564 46 Z"/>
+      <ellipse class="cyl" cx="510" cy="46" rx="54" ry="9"/>
+      <text x="510" y="76" class="val" text-anchor="middle">app.3.log</text>
+      <text x="510" y="92" class="ann" text-anchor="middle">가장 오래된 것</text>
+
+      <path class="ln ar" d="M568 75 L594 75"/>
+      <text x="600" y="72" class="ann rs-t">지워집니다</text>
+      <text x="600" y="88" class="ann">복구 불가</text>
+
+      <path class="dim-ln" d="M24 130 L564 130"/>
+      <text x="294" y="124" class="ann" text-anchor="middle">디스크에 남는 최대치 = 5 MB × 4 = 20 MB — 이 값을 모르면 용량 계획이 없는 것입니다</text>
+
+      <text x="16" y="164" class="lbl">회전 순간에는 짧은 정지가 생깁니다 — 이름 바꾸기 여러 번 + 새 파일 열기</text>
+      <text x="16" y="180" class="lbl">보존 개수는 "며칠치가 필요한가"가 아니라 "몇 MB 를 줄 수 있나"로 정합니다</text>
+    </svg>
+    <div class="cap">회전 — <b>파일 개수 × 파일 크기가 곧 상한</b>. 이 곱을 먼저 정하고 나머지를 맞춥니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크기 기준과 날짜 기준</h4>
+      <pre class="code" data-lang="cpp"><code>#include &lt;spdlog/sinks/rotating_file_sink.h&gt;
+#include &lt;spdlog/sinks/daily_file_sink.h&gt;
+
+// ① 크기 기준 — 상한이 확실합니다. 서버의 기본값
+auto rot = std::make_shared&lt;spdlog::sinks::rotating_file_sink_mt&gt;(
+    "logs/app.log",
+    50 * 1024 * 1024,   // 파일 하나 50 MB
+    5);                 // app.log + app.1~5.log = 최대 300 MB
+//   rotate_on_open 을 주면 프로세스가 뜰 때마다 새 파일이 됩니다
+//   (4번째 인자, 기본 false)
+
+// ② 날짜 기준 — 사람이 찾기 쉽습니다. 배치·분석 로그에
+auto daily = std::make_shared&lt;spdlog::sinks::daily_file_sink_mt&gt;(
+    "logs/app.log",
+    0, 0,               // 매일 00:00 에 새 파일
+    false,
+    14);                // 최근 14개만 남기고 삭제
+//   → logs/app_2026-09-01.log 처럼 이름이 만들어집니다
+
+// ③ 둘 다 필요하면 싱크를 두 개 붙입니다 (lg03)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>날짜 기준의 함정</b> — 하루치 상한이 없습니다.
+        <b>장애가 나서 에러 로그가 폭주하는 날</b>, 하루 파일 하나가 디스크를 다 먹습니다.
+        운영 서비스라면 <b>크기 기준을 기본</b>으로 하고 날짜는 부가로 두세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">디스크가 차면 실제로 무슨 일이 나나</h4>
+      <pre class="code" data-lang="text"><code>ENOSPC (No space left on device) 가 나면 —
+
+  · write() 가 실패합니다
+  · spdlog 는 기본적으로 예외(spdlog_ex)를 던집니다
+  · 그 예외가 요청 처리 경로에서 나면? 요청이 실패합니다
+  · block 정책의 비동기 큐라면? 전부 멈춥니다 (lg05)
+
+★ 그래서 두 겹으로 막습니다
+  ① 상한을 코드로   회전 크기 × 개수 = 최대치
+  ② 여유를 감시로   디스크 사용률 80% 알림
+                    (로그 볼륨은 데이터 볼륨과 분리하세요)
+
+★ 그리고 로깅 실패가 서비스를 죽이지 않게
+  spdlog::set_error_handler([](const std::string&amp; msg){
+      // 여기서 다시 로깅하면 무한 재귀입니다 ★
+      fputs(msg.c_str(), stderr);
+  });</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>로그 볼륨을 따로 두라는 말의 뜻</b> — 로그가 <code>/var/log</code>(별도 파티션)에 있으면
+        디스크가 차도 <b>DB 와 애플리케이션은 계속 돕니다</b>.
+        같은 파티션이면 <b>로그가 서비스 데이터를 밀어냅니다.</b>
+        컨테이너라면 <b>로그를 파일로 안 쓰는 쪽</b>이 더 낫습니다(lg10).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">Windows 와 POSIX 는 회전이 다릅니다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 다른가</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%"></th><th>POSIX (Linux · macOS)</th><th>Windows</th></tr>
+        <tr><td>열린 파일 이름 바꾸기</td><td>됩니다</td><td><b>공유 플래그가 있어야</b></td></tr>
+        <tr><td>열린 파일 지우기</td><td>됩니다 (이름만 사라짐)</td><td><b>기본적으로 안 됩니다</b></td></tr>
+        <tr><td>지운 뒤 디스크 반환</td><td>모든 fd 가 닫힐 때</td><td>즉시</td></tr>
+        <tr><td>다른 도구의 회전</td><td>logrotate 가 흔함</td><td>거의 없음 — 앱이 직접</td></tr>
+        <tr><td>경로 길이</td><td>넉넉함</td><td>기본 260자 제한(설정으로 해제)</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># POSIX 에서 가장 흔한 사고 — "로그가 안 남아요"
+rm /var/log/app.log            # 이름만 사라집니다
+#   프로세스는 같은 inode 에 계속 씁니다.
+#   파일은 안 보이는데 디스크는 계속 찹니다 ★
+lsof +L1 | grep deleted        # 이걸로 찾습니다
+
+# 올바른 방법 — 비우기
+: &gt; /var/log/app.log           # truncate. inode 유지
+
+# logrotate 를 쓴다면 copytruncate 또는 재열기 시그널
+#   /etc/logrotate.d/app
+#     /var/log/app/*.log {
+#         daily rotate 14 compress missingok notifempty
+#         copytruncate
+#     }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">양쪽에서 다 도는 설정</h4>
+      <pre class="code" data-lang="cpp"><code>// ① 회전은 "라이브러리에게" 맡기고 외부 도구를 섞지 않습니다
+//    spdlog 의 rotating_file_sink 는 스스로 닫고 · 이름 바꾸고 · 다시 엽니다
+//    → Windows 에서도 그대로 돕니다
+
+// ② 경로는 상대경로로 두지 말고 명시적으로
+//    (서비스로 등록하면 작업 디렉터리가 예상과 다릅니다)
+std::filesystem::path base =
+#ifdef _WIN32
+    std::filesystem::path(std::getenv("PROGRAMDATA")) / "myapp" / "logs";
+#else
+    "/var/log/myapp";
+#endif
+std::filesystem::create_directories(base);
+
+auto sink = std::make_shared&lt;spdlog::sinks::rotating_file_sink_mt&gt;(
+    (base / "app.log").string(), 50 * 1024 * 1024, 5);
+
+// ③ 파일 이름에 프로세스 ID 를 넣으면 멀티프로세스에서 안전합니다 (lg09)
+//    (base / std::format("app-{}.log", getpid())).string()</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>UTF-8 파일 이름</b> — Windows 에서 한글 경로를 쓰면 인코딩 문제로 열리지 않는 일이 있습니다.
+        <b>로그 경로에는 ASCII 만</b> 쓰는 것이 가장 안전하고,
+        메시지 안의 한글은 <b>UTF-8 로 통일</b>하고 콘솔에서는 <code>chcp 65001</code> 로 봅니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 회전의 목적은 <b>총량 상한</b>입니다 — <code>파일 크기 × 개수</code>가 그 값이고,
+    이 곱을 먼저 정하세요. <b>날짜 기준은 하루 상한이 없습니다</b>.
+    디스크가 차면 로깅이 <b>예외를 던져 요청을 죽일 수 있으므로</b> <code>set_error_handler</code> 를 걸고,
+    <b>로그 볼륨을 서비스 데이터와 분리</b>하세요.
+    POSIX 에서 <code>rm</code> 한 로그는 <b>사라진 게 아니라 안 보이는 것</b>입니다.</div>
+</section>
+
+
+<!-- ==================== lg08 ==================== -->
+<section class="sec" id="lg08">
+  <div class="sec-head rv">
+    <span class="no">LOG 08</span>
+    <h2>크래시 로그 — <span class="t">죽는 순간</span>에도 흔적을 남기기</h2>
+    <p class="lead">
+      가장 알고 싶은 순간은 프로세스가 죽는 순간인데, 하필 그때 <b>로거를 부를 수 없습니다.</b>
+      시그널 핸들러 안에서는 <code>malloc</code> 조차 금지입니다.
+      그래서 <b>흔적을 남기고 빨리 죽는</b> 전략을 따로 짭니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 224" role="img" aria-label="크래시가 났을 때의 처리 파이프라인. 시그널이 들어오면 핸들러가 async-signal-safe 한 write 호출만으로 최소한의 흔적을 남기고, 미니덤프나 코어 덤프를 남긴 뒤 재기동 이후 별도 프로세스가 외부 수집 서비스로 업로드한다. 핸들러 안에서 금지된 것과 허용된 것이 아래에 나란히 정리되어 있다">
+      <text x="16" y="18" class="lbl">크래시 순간에 할 수 있는 일 — async-signal-safe 한 것만 허용됩니다</text>
+
+      <polygon class="chev" points="16,40 116,40 132,64 116,88 16,88 32,64"/>
+      <text x="74" y="58" class="val" text-anchor="middle">시그널</text>
+      <text x="74" y="74" class="ann" text-anchor="middle">SIGSEGV · SIGABRT</text>
+
+      <polygon class="chev" points="142,40 242,40 258,64 242,88 142,88 158,64"/>
+      <text x="200" y="58" class="val" text-anchor="middle">핸들러</text>
+      <text x="200" y="74" class="ann" text-anchor="middle">write(2) 만 안전</text>
+
+      <polygon class="chev" points="268,40 368,40 384,64 368,88 268,88 284,64"/>
+      <text x="326" y="58" class="val" text-anchor="middle">덤프</text>
+      <text x="326" y="74" class="ann" text-anchor="middle">미니덤프 · core</text>
+
+      <polygon class="chev s4" points="394,40 494,40 510,64 494,88 394,88 410,64"/>
+      <text x="452" y="58" class="val" text-anchor="middle">업로드</text>
+      <text x="452" y="74" class="ann" text-anchor="middle">재기동 뒤에</text>
+
+      <path class="ln ar" d="M514 64 L528 64"/>
+
+      <path class="cld" d="M536 88 a20 20 0 0 1 4 -39 a26 26 0 0 1 48 -10 a24 24 0 0 1 44 18 a17 17 0 0 1 -4 31 Z"/>
+      <text x="584" y="62" class="ann" text-anchor="middle">Crashpad 서버</text>
+      <text x="584" y="76" class="ann" text-anchor="middle">Sentry · 사내 수집기</text>
+
+      <rect class="bx bx-warn" x="16" y="112" width="310" height="76"/>
+      <text x="32" y="132" class="ann rs-t">핸들러 안에서 하면 안 되는 것</text>
+      <text x="32" y="148" class="ann">malloc · printf · std::string · 로거 호출</text>
+      <text x="32" y="164" class="ann">락을 잡는 모든 것 — 데드락으로 멈춥니다</text>
+      <text x="32" y="180" class="ann">예외를 던지는 모든 것</text>
+
+      <rect class="bx bx-ok" x="344" y="112" width="320" height="76"/>
+      <text x="360" y="132" class="ann ok-t">대신 이것만</text>
+      <text x="360" y="148" class="ann">write(2) 로 미리 만들어 둔 바이트 쓰기</text>
+      <text x="360" y="164" class="ann">_exit(2) · 별도 프로세스에 알리기</text>
+      <text x="360" y="180" class="ann">무거운 일은 재기동 뒤 다른 프로세스가</text>
+
+      <text x="16" y="214" class="lbl">핸들러는 흔적을 남기고 빨리 죽는 일만 합니다 — 분석은 재기동 뒤에</text>
+    </svg>
+    <div class="cap">파이프라인 — <b>핸들러는 최소한만</b>. 사람이 읽을 보고서는 다음 프로세스가 만듭니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최소한의 시그널 핸들러 (POSIX)</h4>
+      <pre class="code" data-lang="cpp"><code>#include &lt;csignal&gt;
+#include &lt;unistd.h&gt;
+
+// 메시지를 "미리" 만들어 둡니다 — 핸들러 안에서는 만들 수 없습니다
+static const char kMsg[] = "\n*** FATAL: signal caught, see core dump ***\n";
+static int g_log_fd = -1;      // 미리 열어 둔 파일 디스크립터
+
+extern "C" void on_fatal(int sig) {
+    // ① async-signal-safe 한 write 만 씁니다
+    (void)!write(g_log_fd, kMsg, sizeof(kMsg) - 1);
+    (void)!write(STDERR_FILENO, kMsg, sizeof(kMsg) - 1);
+
+    // ② 기본 동작으로 되돌리고 자기 자신에게 다시 보냅니다
+    //    → 커널이 core dump 를 남깁니다 ★
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+int main() {
+    g_log_fd = ::open("/var/log/myapp/crash.log",
+                      O_WRONLY | O_CREAT | O_APPEND, 0644);
+    struct sigaction sa{};
+    sa.sa_handler = on_fatal;
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = SA_RESETHAND;          // 재진입 방지
+    for (int s : {SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL})
+        sigaction(s, &amp;sa, nullptr);
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>backtrace()</code> 를 부르고 싶겠지만</b> — <code>backtrace_symbols()</code> 는
+        내부에서 <code>malloc</code> 을 씁니다. <b>힙이 망가져서 죽은 상황이라면 여기서 또 멈춥니다.</b>
+        <code>backtrace()</code>(주소만 채우기)까지는 대체로 안전하고,
+        <b>주소를 심볼로 바꾸는 일은 나중에 <code>addr2line</code> 으로</b> 하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코어 덤프 — 사실 이게 가장 강력합니다</h4>
+      <pre class="code" data-lang="bash"><code># ① 코어 덤프 켜기 (기본은 꺼져 있는 배포판이 많습니다)
+ulimit -c unlimited
+# systemd 서비스라면 유닛 파일에
+#   LimitCORE=infinity
+
+# ② 어디에 떨어지는지 확인
+cat /proc/sys/kernel/core_pattern
+#   |/usr/lib/systemd/systemd-coredump ...   ← systemd 가 받습니다
+coredumpctl list
+coredumpctl gdb 12345          # 그 프로세스의 코어로 gdb 진입
+
+# 파일로 받고 싶다면
+sudo sysctl -w kernel.core_pattern=/var/crash/core.%e.%p.%t
+
+# ③ 심볼이 있어야 읽힙니다 — Release 라도 -g 를 켜세요
+#    g++ -O2 -g          (최적화는 그대로, 디버그 정보만 추가)
+#    빌드 후 분리해서 보관하면 배포 크기가 안 늘어납니다
+objcopy --only-keep-debug app app.debug
+objcopy --strip-debug --add-gnu-debuglink=app.debug app
+
+# ④ 분석
+gdb ./app /var/crash/core.app.12345.1756...
+(gdb) bt full
+(gdb) thread apply all bt</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">Windows 의 미니덤프</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SetUnhandledExceptionFilter + MiniDumpWriteDump</h4>
+      <pre class="code" data-lang="cpp"><code>#include &lt;windows.h&gt;
+#include &lt;dbghelp.h&gt;          // -ldbghelp / dbghelp.lib
+
+LONG WINAPI on_crash(EXCEPTION_POINTERS* ep) {
+    HANDLE h = CreateFileW(L"crash.dmp", GENERIC_WRITE, 0, nullptr,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h != INVALID_HANDLE_VALUE) {
+        MINIDUMP_EXCEPTION_INFORMATION mei{};
+        mei.ThreadId          = GetCurrentThreadId();
+        mei.ExceptionPointers = ep;
+        mei.ClientPointers    = FALSE;
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), h,
+                          MiniDumpWithIndirectlyReferencedMemory,
+                          &amp;mei, nullptr, nullptr);
+        CloseHandle(h);
+    }
+    return EXCEPTION_EXECUTE_HANDLER;   // 프로세스를 끝냅니다
+}
+
+int main() {
+    SetUnhandledExceptionFilter(on_crash);
+}
+// ★ .dmp 는 .pdb 와 짝입니다. 빌드마다 pdb 를 반드시 보관하세요.
+//   Visual Studio 나 WinDbg 에서 .dmp 를 열면 그 자리의 콜스택이 나옵니다.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>같은 프로세스 안에서 덤프를 뜨는 것은 원래 위험합니다</b> —
+        이미 망가진 프로세스의 힙과 로더 락을 다시 건드리기 때문입니다.
+        <b>Crashpad</b> 가 널리 쓰이는 이유가 이것입니다 —
+        <b>별도의 감시 프로세스</b>가 밖에서 덤프를 뜹니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C++ 쪽의 마지막 그물</h4>
+      <pre class="code" data-lang="cpp"><code>#include &lt;exception&gt;
+#include &lt;cstdlib&gt;
+
+// ① 처리되지 않은 예외 — 여기는 아직 "정상" 상태입니다
+//    로거를 불러도 됩니다 (시그널 핸들러가 아닙니다)
+std::set_terminate([]{
+    if (auto e = std::current_exception()) {
+        try { std::rethrow_exception(e); }
+        catch (const std::exception&amp; x) {
+            spdlog::critical("unhandled exception: {}", x.what());
+        }
+        catch (...) { spdlog::critical("unhandled unknown exception"); }
+    }
+    spdlog::shutdown();          // ★ 큐를 비웁니다
+    std::abort();                // 그다음 코어 덤프로
+});
+
+// ② 정상 종료 경로에서도 반드시 flush
+std::atexit([]{ spdlog::shutdown(); });
+
+// ③ 마지막 몇 줄만이라도 살리는 값싼 방법
+lg-&gt;flush_on(spdlog::level::err);          // error 이상은 즉시 디스크로
+spdlog::flush_every(std::chrono::seconds(1));</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 셋의 역할이 다릅니다</b> —
+        <code>set_terminate</code> 는 <b>C++ 예외</b>(아직 안전),
+        시그널 핸들러는 <b>메모리 오류</b>(아무것도 못 함),
+        <code>flush_on</code> 은 <b>둘 중 어느 쪽이든 직전 줄을 살리는</b> 보험입니다.
+        <b>세 개를 다 걸어 두세요.</b> 셋 다 몇 줄이면 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">Breakpad · Crashpad</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">덤프를 모아서 보는 체계</h4>
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:20%"></th><th>Breakpad</th><th>Crashpad</th></tr>
+      <tr><td>덤프 시점</td><td>죽는 프로세스 <b>안에서</b></td><td><b>별도 핸들러 프로세스</b>가</td></tr>
+      <tr><td>안정성</td><td>망가진 상태에서 동작</td><td><b>더 안전</b></td></tr>
+      <tr><td>업로드</td><td>직접 구현하는 편</td><td><b>내장</b> · 재시도 · 큐</td></tr>
+      <tr><td>플랫폼</td><td>Win · Linux · macOS</td><td>Win · Linux · macOS · iOS/Android</td></tr>
+      <tr><td>현재 위치</td><td>유지 보수 위주</td><td><b>Chrome 계열의 현행</b></td></tr>
+    </table></div>
+    <pre class="code" data-lang="text"><code>흐름 (플랫폼 무관하게 같습니다)
+
+  ① 빌드에서 심볼을 뽑아 보관합니다
+       Linux/macOS : dump_syms ./app &gt; app.sym
+       Windows     : app.pdb 를 그대로 보관
+       ★ 커밋 해시별로 보관하세요. 버전이 안 맞으면 스택이 거짓말합니다
+
+  ② 앱에는 핸들러만 붙입니다 (몇 줄)
+  ③ 크래시가 나면 .dmp 가 로컬 큐에 쌓입니다
+  ④ 다음 실행 때 업로드합니다 (네트워크가 없어도 안 잃습니다)
+  ⑤ 서버(Sentry · 사내 수집기)가 심볼을 붙여 스택을 복원합니다
+
+이때 로그가 함께 있어야 쓸모가 있습니다
+  · 덤프와 같은 폴더에 마지막 로그 파일을 함께 올립니다
+  · 로그에 세션 ID / 빌드 해시를 찍어 두면 덤프와 짝지을 수 있습니다 ★</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>데스크톱 앱이라면 거의 필수입니다</b> — 사용자가 “가끔 꺼져요”라고 말할 때
+      <b>덤프가 없으면 할 수 있는 일이 없습니다.</b>
+      서버라면 코어 덤프 + 로그로 충분한 경우가 많지만,
+      <b>배포 대상이 남의 컴퓨터</b>라면 Crashpad 를 붙이는 편이 결국 더 쌉니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 죽는 순간에는 <b>로거를 부를 수 없습니다</b> —
+    시그널 핸들러에서는 <code>write(2)</code> 로 <b>미리 만들어 둔 바이트</b>만 쓰고 바로 죽입니다.
+    진짜 정보는 <b>코어 덤프(POSIX) · 미니덤프(Windows)</b>에 있고, <b>심볼을 빌드별로 보관</b>해야 읽힙니다.
+    <code>set_terminate</code> · 시그널 핸들러 · <code>flush_on(err)</code> <b>셋을 다 걸어 두세요.</b></div>
+</section>

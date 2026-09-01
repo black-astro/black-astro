@@ -1,12 +1,12 @@
-# 핸드오프 — 언어 가이드 확장 (2026-09-01 20차 갱신)
+# 핸드오프 — 언어 가이드 확장 (2026-09-01 21차 갱신)
 
-> **새 세션이라면 여기부터** — 큰 숙제(§1 실측 · §2 C# 3탭 · §3 역적용)가 **전부 끝났습니다.**
-> 남은 일은 둘입니다 — **§5 자잘한 것 3건**(실측 스크립트 1줄 · 본문 불일치 3건 · App.vue 정리)과
-> **§6 시각화 품질**(모델 다양성 · 좁은 화면 표시 · 애니메이션 다듬기 — 실측값과 함께 등록해 두었습니다).
-> **브라우저 실측은 열 가이드 1,388개 전부 완료**(2026-08-28) — 미실측 0.
-> 집필 지침서와 등록 스크립트는 **저장소에 있습니다**: `web/guide-src/AUTHORING.md` · `web/guide-src/tools/reg.mjs`
-> **시각화 모델 30종 카탈로그가 새로 생겼습니다**: `web/guide-src/DIAGRAM-MODELS.md` ·
-> 본보기 `web/guide-src/shared/models/*.html` · 갤러리 `npm run diag:lab` → `public/diag-lab/index.html`
+> **새 세션이라면 여기부터** — §1~§5 가 **전부 끝났습니다.** §6 도 4개 중 3개가 끝났습니다.
+> **지금 바로 이어서 할 일은 §8 하나입니다 — 로깅 탭 10개 집필(중단된 상태로 초안이 저장소에 있습니다).**
+> 초안은 `web/guide-src/_wip/log-tabs/<가이드>/` 에 조각 HTML 로 보존돼 있고,
+> **csharp · python 두 개는 pane 파일이 이미 완성**돼 `parts/panes/` 에 들어 있습니다(등록만 남음).
+> 집필 지침서와 등록 스크립트는 저장소에 있습니다: `web/guide-src/AUTHORING.md` · `web/guide-src/tools/reg.mjs`
+> 시각화 모델 30종 카탈로그: `web/guide-src/DIAGRAM-MODELS.md` · 본보기 `web/guide-src/shared/models/*.html`
+> 갤러리 `npm run diag:lab` → `public/diag-lab/index.html`
 
 ## 현재 상태
 
@@ -29,7 +29,38 @@
 (시각화는 `class="diag"` 카드 수로 셉니다 — 이전 표의 1,439 는 집계 기준이 섞인 값이었습니다.
  지금은 `class="diag"` 와 `<svg viewBox` 개수가 열 가이드 전부에서 일치합니다.)
 
-### 이번 회차 — 카탈로그 역적용 11차 (그림 8개) · **§3 백로그 소진**
+### 이번 회차 — §5 소진 · §6 절반 처리 · 로깅 탭 착수 (2026-09-01)
+
+**§5(자잘한 것 3건)를 전부 끝냈고, §6 의 넷 중 셋을 처리했습니다.** 그리고 사용자 요청으로
+**로깅 탭 10개 집필에 착수했다가 토큰 사정으로 중단**했습니다 — 초안은 전부 저장소에 보존했습니다(§8).
+
+| 무엇 | 결과 |
+|---|---|
+| §5-1 실측 스크립트 | `data-ovl="ok"` 건너뛰기 한 줄 추가 — §관련 명령어의 스크립트 본문도 같이 갱신 ✅ |
+| §5-2 본문 불일치 4건 | 전부 처리 ✅ (아래 표) |
+| §5-3 `App.vue` | 포맷 드리프트 되돌림 ✅ — **§7 체크리스트의 stash/pop 항목이 사라졌습니다** |
+| §6-2-1 애니메이션 속도 | `dur` **11종 → 3종**(1.8s · 2.6s · 3.4s) · 60개 파일 168곳 ✅ |
+| §6-3-2 좁은 화면 | `.diag svg` 의 `min-width` **440px → 680px** ✅ |
+| §6-3-3 viewBox 폭 | 680 이 아니던 그림 **16개 전부 통일** (cs 4 · csharp 8 · js-ts 3 · rust 1) ✅ |
+
+**§5-2 네 건은 이렇게 정했습니다** (사용자 확인을 받고 일괄 처리):
+
+| 어디 | 어떻게 |
+|---|---|
+| `server/d03` 이미지 크기 세 벌 | bash 실측값 `1.14GB → 186MB` 한 벌로 통일. **그림의 막대 축을 0~800 → 0~1200MB 로 다시 잡고** 막대 3개를 1140 · 186 · 28MB 로 비례 재계산. lead 도 `1.1GB → 186MB` |
+| `server/d03` 베이스 이미지 | 그림을 `21-jre` → **`21-jre-alpine`**. 아래 코드카드가 `addgroup -S`(BusyBox 문법)를 쓰므로 alpine 이 맞습니다 |
+| `cpp/g02` 첫 빌드 시간 | 그림 `1~3시간` → **`30분~2시간`** (같은 파일 두 곳과 일치). `aria-label` 도 같이 |
+| `python/q25` 응답 시간 | **잣대가 둘**이었습니다 — 본문과 그림에 "값 하나 바뀌는 미세 피드백 100ms 안쪽 / 화면 전환 150~300ms" 구분을 넣었습니다 |
+
+**`min-width` 를 680 으로 올린 이유** — viewBox 폭이 680 인데 440 까지 줄어들면 9px 글자(`.tk` 눈금 ·
+`.ann` 곁주석)가 **5.8px** 이 되어 읽을 수 없습니다. 축소 대신 `.diag` 의 `overflow-x` 로 **가로 스크롤**해
+원래 크기로 읽게 했습니다(`body{overflow-x:hidden}` 이라 페이지 자체는 안 밀립니다).
+**아직 브라우저로 실제 좁은 창에서 보지는 않았습니다 — §6-3-1 이 그대로 남아 있습니다.**
+
+**`dur` 3종 매핑** (가까운 값으로, 동률이면 보통으로): 1.6→1.8 · 2→1.8 · 2.2~3→**2.6** · 3.2~4→3.4.
+결과는 1.8s 4개 · 2.6s 147개 · 3.4s 18개입니다. 앞으로 새 그림도 **이 셋만** 쓰세요.
+
+### 그 앞 회차 ⓪ — 카탈로그 역적용 11차 (그림 8개) · **§3 백로그 소진**
 
 `chartcand` 후보가 **22 → 14개**로 줄었고, **남은 14개는 전부 §3 의 "손대지 않기로 한 것"** 입니다.
 즉 바꿀 만한 것은 다 바꿨습니다. §3 은 이제 ✅ 입니다.
@@ -180,6 +211,9 @@ git log --oneline -5                # 최근 작업 확인
 cd web && npm run verify:guide      # 현재 상태가 깨끗한지
 ```
 그다음은 `(A) 에이전트에 과제 주기 → (B) reg.mjs 로 등록 → (C) 검증 → (D) 커밋` 반복입니다.
+
+**§1~§5 는 전부 ✅ 이고, §6 은 넷 중 셋이 끝났습니다. 지금 손댈 것은 §8(로깅 탭 10개)입니다.**
+§8 에 어디까지 돼 있는지 · 제원 · 다시 시작하는 순서가 전부 적혀 있습니다.
 
 ### 1. ✅ 브라우저 실측 — 열 가이드 전부 완료 (2026-08-28)
 
@@ -381,62 +415,38 @@ node guide-src/tools/chartcand.mjs --all       # 조건을 넓혀서
 **점검 방법**(다음에 또 할 때): `grep -o -i "키워드" public/<가이드>-web/index.html | sort | uniq -c` 로
 언급 빈도를 세고, **한 자릿수면 공백 · 전용 탭 없음이면 후보**로 봅니다.
 
-### 5. 🔵 남은 자잘한 것 3건 (2026-09-01 등록 · 큰 숙제는 전부 끝난 상태)
+### 5. ✅ 자잘한 것 3건 — 전부 완료 (2026-09-01)
 
-§1~3 이 전부 ✅ 이고 §4 는 판정 종료라, **지금 남은 일은 이 셋뿐입니다.**
-
-#### 5-1. 실측 스크립트가 `data-ovl="ok"` 를 안 읽습니다 (1줄 · 바로 할 수 있음)
-
-`js-ts/c08`(쌓임 맥락 · 의도적 중첩)에는 **이미 `data-ovl="ok"` 가 붙어 있고 `svgcheck` 는 이걸 존중합니다.**
-그런데 **§관련 명령어의 브라우저 실측 스크립트는 이 표시를 안 봅니다.** 그래서 실측할 때마다
-`BOX: c08 +104 / c08 +138` 이 나오고, 매번 "기존 거라 괜찮다"를 사람이 다시 확인해야 합니다.
-2026-09-01 세션에서만 두 번 겪었습니다.
-
-**고치는 법** — 실측 스크립트의 `document.querySelectorAll('.diag svg').forEach(svg=>{` 다음 줄에
-아래 한 줄을 넣으면 끝입니다.
-```js
-if (svg.getAttribute('data-ovl') === 'ok') return;   // 의도적 중첩은 건너뛴다
-```
-고친 뒤 §관련 명령어의 스크립트 본문도 같이 갱신해 두세요 — 안 그러면 다음 세션이 또 옛 버전을 씁니다.
-
-#### 5-2. 축을 붙이자 드러난 본문 불일치 3건 — **내용 판단이 필요합니다**
-
-11차에서 그림에 축을 붙이자 나온 것들입니다. 그림은 정직하게 그려 뒀고,
-**글을 어떻게 고칠지는 사람이 정해야 해서 일부러 남겼습니다.** (같은 회차의 다른 2건은 이미 처리)
-
-| 어디 | 무엇 | 생각해 볼 것 |
-|---|---|---|
-| `server/d03` | 한 섹션 안에 이미지 크기 기준선이 **세 벌** — lead 는 `1.2GB → 90MB`, bash 카드는 `1.14GB → 186MB`, 그림은 `800 → 190MB` | 한 벌로 통일할지, 셋이 서로 다른 사례임을 밝힐지 |
-| `server/d03` | 그림은 `eclipse-temurin:21-jre` 인데 **바로 아래 코드카드는 `21-jre-alpine`** | 둘 중 하나로 맞추기 (alpine 은 musl 이라 주의가 따로 필요) |
-| `cpp/g02` | vcpkg 첫 빌드 — 같은 파일 표는 `30분~2시간`, 그림은 `1~3시간` | 표기 하나로 |
-| `python/q25` | 그림이 "적정 150~300ms" 라는데 **같은 절 예시가 110·140ms** | 값 하나 바뀌는 미세 피드백과 화면 전환은 잣대가 달라야 합니다 — 본문에 한 줄 구분을 넣는 안 |
-
-#### 5-3. `web/src/App.vue` 미커밋 변경 — 정리 필요
-
-세션 이전부터 계속 떠 있어 **push 할 때마다 `git stash` / `pop` 을 하고 있습니다**(§7 체크리스트에도 적혀 있음).
-내용을 보면 **순전히 포맷 드리프트**입니다 — import 3줄이 작은따옴표→큰따옴표 + 세미콜론 추가.
-저장소 컨벤션(작은따옴표 · 세미콜론 없음)과 **반대 방향**이라 에디터/Prettier 설정이 어긋나 생긴 것으로 보입니다.
-실질 변경은 0입니다.
-
-- **권하는 것**: `git checkout -- web/src/App.vue` 로 되돌리고, 에디터 포맷 설정을 저장소에 맞추기
-- 되돌리면 §7 체크리스트의 "stash 로 잠시 빼고 리베이스" 항목도 지울 수 있습니다
-- (사용자 작업 트리라 임의로 버리지 않고 남겨 두었습니다)
+- **5-1 실측 스크립트** — `document.querySelectorAll('.diag svg').forEach(svg=>{` 다음 줄에
+  `if (svg.getAttribute('data-ovl') === 'ok') return;` 를 넣었습니다. §관련 명령어의 스크립트 본문도 갱신했습니다.
+  이제 `js-ts/c08`(의도적 중첩)이 매번 BOX 로 뜨지 않습니다.
+- **5-2 본문 불일치 4건** — 전부 처리했습니다. 무엇을 어떻게 정했는지는 §현재 상태의 "이번 회차" 표에 있습니다.
+- **5-3 `App.vue`** — 되돌렸습니다(`git checkout -- web/src/App.vue`). 순전히 포맷 드리프트였고 실질 변경 0이었습니다.
+  **§7 체크리스트에서 stash/pop 항목을 지웠습니다.** 에디터/Prettier 설정이 저장소 컨벤션(작은따옴표 · 세미콜론 없음)과
+  반대 방향이라 생긴 것이므로, 또 뜨면 에디터 설정을 저장소에 맞추세요.
 
 #### 지금은 필요 없다고 본 것 — 페이지 크기
 
 `cpp-web/index.html` 이 **3.26MB 단일 HTML** 입니다(rust 2.83 · python 2.47 · csharp 2.19).
 "본문 페이지는 캡처가 타임아웃된다"(§3 각주)의 원인이 이것입니다.
 다만 **실제 사용자 로딩에 문제가 되는지는 측정해 본 적이 없고**, 쪼개는 건 빌드 구조를 손대는 큰 작업입니다.
-느리다는 근거가 생기면 그때 판단하세요.
+느리다는 근거가 생기면 그때 판단하세요. **로깅 탭 10개가 들어가면 여기서 더 커집니다** — 그때 다시 보세요.
 
-### 6. 🎨 시각화 품질 — 모델 다양성 · 배치/표시 · 애니메이션 (2026-09-01 실측 후 등록)
+### 6. 🎨 시각화 품질 — 넷 중 셋 완료 (2026-09-01)
 
 > 사용자 요청: "시각화모델 디자인 위치 및 표시 문제 개선 · 다양한 시각화 모델 사용 가능한지 보고
 > 가능하면 다양하게 · 애니메이션 효과도 조금 더 잘 다듬기"
 
-**막연히 손대지 말고 아래 실측값을 기준으로 하세요.** 2026-09-01 에 조각 파일 전체를 세었습니다.
+| 항목 | 상태 |
+|---|---|
+| 6-1 모델 다양성 | 🔵 **남음** — 다만 §8 로깅 탭이 미사용 4계열을 쓰도록 지시돼 있어 같이 해결됩니다 |
+| 6-2-1 애니메이션 속도 통일 | ✅ `dur` 11종 → 3종 (1.8s · 2.6s · 3.4s) |
+| 6-2-2 모델별 모션 · 6-2-3 성능 | 🔵 **남음** |
+| 6-3-1 좁은 화면 **브라우저 실측** | 🔵 **남음 — CSS 는 고쳤지만 눈으로 확인은 안 했습니다** |
+| 6-3-2 좁은 화면 CSS | ✅ `min-width` 440 → 680px |
+| 6-3-3 viewBox 폭 통일 | ✅ 16개 전부 680 |
 
-#### 6-1. 모델 다양성 — 카탈로그 30종을 만들었지만 실제로는 **수량 계열만** 씁니다
+#### 6-1. 모델 다양성 — 🔵 남음 (아래 실측값은 2026-09-01 기준, 로깅 탭 반영 전)
 
 | 잘 정착한 것 | 횟수 | | 거의 안 쓴 것 | 횟수 |
 |---|---|---|---|---|
@@ -446,74 +456,60 @@ if (svg.getAttribute('data-ovl') === 'ok') return;   // 의도적 중첩은 건�
 | `ax` 축선 | 119 | | `lg`/`lg-t` 범례 · `nd-ok` | 2 |
 | `ghost` · `bar-mut` | 65 · 55 | | `dot-o` 빈 점 | 1 |
 
-**한 번도 안 쓴 계열이 넷 있습니다 (전부 0회)**
-- `cel` + `h0~h5` — **매트릭스 · 히트맵**. 쓸 자리가 많습니다: "어느 DB가 어느 기능을 지원하나",
-  성능 등급표, 언어별 지원 표처럼 **지금 사각형 표로 그린 것**이 전부 후보입니다.
-- `d-n2~d-p2` — **발산 램프**(좋음↔나쁨 양극, 가운데 무채색). 트레이드오프 비교에 맞습니다.
-- `cyl` — **원통(저장소)**. DB·스토리지가 나오는 아키텍처 그림이 수백 개인데 **전부 사각형**입니다.
-- `cld` — **구름(외부 경계)**. 외부 API·서드파티가 나오는 그림(server · csharp · js-ts 에 많음).
+**한 번도 안 쓴 계열이 넷 있습니다 (전부 0회)** — `cel`+`h0~h5` 매트릭스/히트맵 ·
+`d-n2~d-p2` 발산 램프 · `cyl` 원통(저장소) · `cld` 구름(외부 경계).
+CSS 는 `shared/css/06-diag.css` 에 이미 다 있습니다(172~215줄 근처).
 
-시퀀스(`life` 11 · `msg` 19) · 스윔레인(`lane` 14) 도 30종에 있는데 거의 안 씁니다.
+**§8 로깅 탭 10개는 이 넷을 반드시 쓰도록 지시해 두었습니다** —
+라이브러리 비교표가 히트맵에, 로그 저장소가 원통에, 수집기·SaaS 가 구름에, 트레이드오프가 발산 램프에
+자연스럽게 맞습니다. 로깅 탭이 끝나면 이 수치를 다시 세어 보고 남은 것만 §3 방식(기존 그림 역적용)으로 처리하세요.
+
+그 밖에 시퀀스(`life` 11 · `msg` 19) · 스윔레인(`lane` 14) 도 거의 안 씁니다.
 계열색도 편중돼 있습니다 — `s1` 18 · `s2` 9 · `s4` 9 인데 **`s3` 은 3**.
 
-**할 일** — 새로 그릴 때 고르는 게 아니라, **이미 있는 그림 중 바꿔야 할 것을 찾는** 방식이
-§3 에서 잘 통했습니다(58개). 같은 방식으로:
-1. `grep -c 'class="bx"' <가이드>/parts/panes/*.html` 로 **사각형만 쓴 탭**을 찾습니다.
-2. 그중 표 성격(매트릭스) · 저장소가 나오는 것 · 외부 경계가 있는 것을 고릅니다.
-3. **한 탭에서 같은 모델 3번 초과 금지** 규칙은 그대로입니다.
+**찾는 법** — `grep -c 'class="bx"' <가이드>/parts/panes/*.html` 로 사각형만 쓴 탭을 찾고,
+그중 표 성격(매트릭스) · 저장소가 나오는 것 · 외부 경계가 있는 것을 고릅니다.
+**한 탭에서 같은 모델 3번 초과 금지** 규칙은 그대로입니다.
 
-#### 6-2. 애니메이션 — 지금 **한 가지 패턴뿐**이고 속도 기준이 없습니다
+#### 6-2. 애니메이션 — 속도는 통일했고(✅), 모션 종류는 그대로입니다(🔵)
 
-| 무엇 | 실측 |
-|---|---|
-| `.pk` 흐름 점 | 184개 |
-| `animateMotion` | 168개 |
-| `<animate>` 직접 사용 | **0** |
-| `<animateTransform>` | **0** |
-| 움직이는 그림 비율 | **1,388개 중 약 12%** |
-| `dur` 값 종류 | **11종** (1.6s ~ 4s) — 2.6s 38 · 2.4s 36 · 3s 35 · 2.2s 19 · 2.8s 18 · … |
+**끝난 것** — `dur` 이 **11종(1.6s~4s)에서 3종으로** 줄었습니다.
+가까운 값으로 옮기되 동률이면 보통으로: 1.6→1.8 · 2→1.8 · 2.2~3→**2.6** · 3.2~4→3.4.
+지금은 **1.8s 4개 · 2.6s 147개 · 3.4s 18개**입니다. 새 그림도 이 셋만 쓰세요.
 
-즉 **"점 하나가 경로를 따라 흐른다"가 유일한 모션**이고, 속도는 그때그때 손으로 적었습니다.
-`shared/js/06-diag-motion.js` 는 26줄인데, 하는 일은 `.pk` 가 경로 끝에서 순간이동하는 걸
-opacity 페이드로 가리는 **보정 하나뿐**입니다. (reduced-motion 존중은 이미 됩니다 ✓)
+**남은 것** — 모션이 여전히 **"점 하나가 경로를 따라 흐른다" 한 가지뿐**입니다.
+`.pk` 흐름 점 184개 · `animateMotion` 168개 · `<animate>` 0 · `<animateTransform>` 0 ·
+움직이는 그림 비율 1,388개 중 약 12%.
+`shared/js/06-diag-motion.js` 는 26줄이고 하는 일은 `.pk` 의 순간이동을 opacity 로 가리는 보정 하나뿐입니다
+(reduced-motion 존중은 이미 됩니다 ✓).
 
-**할 일**
-1. **속도를 3종으로 통일** — 빠름 1.8s · 보통 2.6s · 느림 3.4s 를 제안합니다.
-   지금 11종이 흩어져 있어 같은 화면의 두 그림이 서로 다른 박자로 움직입니다.
-2. **모델에 맞는 모션을 붙입니다** — 전부 점을 흘릴 필요가 없습니다.
-   - `bar` → 좌에서 우로 자라기 (`width` 또는 `stroke-dasharray`)
-   - `li`/`area` → 선 그려지기 (`stroke-dashoffset`)
-   - `ring` 게이지 → 각도 채우기
-   - 시퀀스 → 메시지가 위에서 아래로 차례로 등장
-3. **성능을 먼저 확인하세요** — SMIL 은 화면 밖에서도 계속 돕니다.
-   한 페이지에 그림이 144~169개라(cpp 169) 모션을 늘리면 CPU 를 씁니다.
-   `IntersectionObserver` 로 **보이는 것만** 돌리는 걸 같이 검토하세요.
+1. **모델에 맞는 모션을 붙입니다** — `bar` → 좌에서 우로 자라기(`width`/`stroke-dasharray`) ·
+   `li`/`area` → 선 그려지기(`stroke-dashoffset`) · `ring` 게이지 → 각도 채우기 ·
+   시퀀스 → 메시지가 위에서 아래로 차례로 등장.
+2. **성능을 먼저 확인하세요** — SMIL 은 화면 밖에서도 계속 돕니다. 한 페이지에 그림이 144~169개라
+   모션을 늘리면 CPU 를 씁니다. `IntersectionObserver` 로 **보이는 것만** 돌리는 걸 같이 검토하세요.
 
-#### 6-3. 배치 · 표시 — **좁은 화면을 한 번도 재지 않았습니다**
+#### 6-3. 배치 · 표시 — CSS 는 고쳤고(✅), **브라우저 확인이 남았습니다**(🔵)
 
 ```css
-.diag svg{ width:100%; max-width:1000px; min-width:440px }   /* 06-diag.css:24 */
+.diag svg{ width:100%; max-width:1000px; min-width:680px }   /* 06-diag.css:24 — 440px 였음 */
 ```
-viewBox 는 680 인데 실제로는 **440~1000px 사이에서 늘고 줍니다.**
+**왜 바꿨나** — viewBox 폭이 680 인데 440 까지 줄면 9px 글자가 **5.8px** 이 됩니다.
+`.tk`(눈금)·`.ann`(곁주석)이 전부 9px 이라 **좁은 화면에서 축 눈금이 먼저 뭉갭니다.**
+축소하는 대신 `.diag` 의 `overflow-x:auto` 로 **가로 스크롤**해 원래 크기로 읽게 했습니다.
+`body{overflow-x:hidden}`(`01-tokens-base-layout.css:54`) 이라 페이지 자체는 안 밀립니다.
 
-- 1000px 로 늘면 9px 글자가 **13.2px** — 괜찮습니다.
-- **440px 로 줄면 9px 글자가 5.8px** — 읽을 수 없습니다.
-  `.tk`(눈금) · `.ann`(곁주석)이 전부 9px 이라 **좁은 화면에서 축 눈금이 먼저 뭉갭니다.**
-  이번 회차에 축과 눈금을 대량으로 붙였으므로 **영향 범위가 커졌습니다.**
-- 지금까지 브라우저 실측은 **넓은 창에서만** 했습니다. **좁은 폭 실측이 0회입니다.**
-
-**할 일 (순서대로)**
-1. 8899 로 연 뒤 창을 좁혀(또는 Chrome 기기 에뮬레이션) **440~600px 에서 `.tk` 가 읽히는지** 봅니다.
+**🔵 남은 일 — 실제로 좁은 창에서 보세요.** 지금까지 좁은 폭 실측이 **0회**입니다.
+1. 8899 로 연 뒤 창을 좁혀(또는 Chrome 기기 에뮬레이션) **360~600px** 에서 봅니다.
    Chrome MCP `resize_window` 는 최대화 창에서 안 먹으니(§조심할 것 10) 창을 먼저 복원하세요.
-2. 안 읽히면 선택지는 둘입니다 — `min-width` 를 올리고 가로 스크롤을 허용하거나,
-   좁은 폭에서 `.tk`/`.ann` 만 `font-size` 를 키우는 미디어 쿼리를 넣거나.
-3. **viewBox 폭이 680 이 아닌 그림 16개**를 정리하세요 — cs 4 · csharp 6 · js-ts 1 · rust 1.
-   AUTHORING 규칙 위반이고, 같은 화면에서 그림마다 축척이 달라집니다.
-   ```bash
-   grep -rnE 'viewBox="0 0 [0-9]+ [0-9]+"' */parts/panes/*.html | grep -v '0 0 680 '
-   ```
-4. 높이 편차도 봐 두세요 — viewBox 높이는 **150~452, 중앙 262**이고 360 이상이 42개입니다
-   (11차에서 늘어난 것 포함). 지나치게 긴 그림은 둘로 쪼개는 편이 읽기 좋습니다.
+2. 볼 것 — ① `.diag` 안에서만 가로 스크롤이 생기는가(페이지 전체가 밀리면 안 됨)
+   ② 스크롤이 가능하다는 게 눈에 보이는가(잘린 느낌만 주면 어포던스를 하나 넣어야 합니다)
+   ③ `.grid2` 안의 `.diag`(카드 2열)에서도 정상인가 — 1열로 접히는 폭(`05-responsive.css:39`)과의 상호작용
+3. 아니면 되돌리고 대안으로 가세요 — 좁은 폭에서 `.tk`/`.ann` 만 키우는 미디어 쿼리.
+   **다만 svgcheck 의 폭 계산이 9px 기준이라 글자를 키우면 LAP 이 새로 생길 수 있습니다.**
+
+**높이 편차**도 봐 두세요 — viewBox 높이는 **150~452, 중앙 262**이고 360 이상이 42개입니다.
+지나치게 긴 그림은 둘로 쪼개는 편이 읽기 좋습니다.
 
 ### 7. 매 작업 마무리 체크리스트 (커밋 전 필수)
 ```bash
@@ -531,7 +527,158 @@ npx vue-tsc -b                                   # ⑥ router 고쳤으면
 - [ ] HANDOFF 의 현황표·다이어그램 수·미실측 누적 갱신
 - [ ] 커밋 → `git fetch && git rebase origin/main` → push
       (원격에 GitHub Action 커밋이 수시로 들어와 그냥 push 하면 거부됩니다.
-       `web/src/App.vue` 에 세션 이전부터 있던 수정이 남아 있으면 `git stash` 로 잠시 빼고 리베이스)
+       `App.vue` stash 항목은 2026-09-01 에 되돌려서 없앴습니다 — 또 뜨면 에디터 포맷 설정을 저장소에 맞추세요)
+
+### 8. 🔴 **지금 바로 이어서 할 일** — 로깅 탭 10개 (2026-09-01 착수 · 중단)
+
+> 사용자 요청: "로그 관련해서도 추가해주는 게 좋을 것 같아. 각 언어별로 로그 정말 중요하잖아.
+> 다양한 라이브러리와 사용율과 좋은점 장단점 사용 예시코드 적용방법 등등."
+
+에이전트 **10개를 동시에** 돌렸고, 토큰 사정으로 **중단**했습니다. **작업물은 전부 저장소에 보존했습니다.**
+
+#### 8-1. 지금 어디까지 돼 있나
+
+| 가이드 | 섹션 진행 | diag | 어디에 |
+|---|---|---|---|
+| **csharp** | **12/12 완성** | 14 | `_wip/log-tabs/csharp/15-log.html` + **`meta.json` 있음** |
+| **python** | **12/12 완성** | 12 | `_wip/log-tabs/python/19-log.html` · **meta.json 없음** |
+| server | 10/12 | 12 | `_wip/log-tabs/server/p1~p4.html` |
+| java | 10/12 | 11 | `_wip/log-tabs/java/part1~3.html` |
+| rust | 9/12 | 9 | `_wip/log-tabs/rust/p1~p3.html` |
+| cpp | 8/12 | 9 | `_wip/log-tabs/cpp/p1~p4.html` |
+| js-ts | 8/12 | 9 | `_wip/log-tabs/js-ts/p1~p4.html` |
+| cs | 8/12 | 8 | `_wip/log-tabs/cs/p1~p3.html` |
+| db | 6/12 | 9 | `_wip/log-tabs/db/p1~p3.html` |
+| kotlin | 6/12 | 6 | `_wip/log-tabs/kotlin/p1~p2.html` |
+
+- 조각은 **파일 이름 순서대로 이어 붙이면 됩니다**(`cat p1.html p2.html ... >> pane.html`).
+- 완성된 두 개는 `fixcut` · `svgcheck` · `integrity` **전부 통과**했습니다(OVER/BOX/LAP/CUT 0건).
+- **⚠️ 완성된 pane 을 `<가이드>/parts/panes/` 에 두면 `verify:guide` 가 깨집니다** —
+  `"파일은 있는데 parts.json 에 없음"` 으로 ✗ 가 뜹니다. 그래서 완성본도 `_wip` 에 두었습니다.
+  **pane 을 `panes/` 로 옮기는 것과 `reg.mjs` 등록은 한 번에 하세요.**
+- 지금 상태에서 `verify:guide` 는 열 가이드 전부 ✓ 입니다(2026-09-01 확인).
+- `web/guide-src/_wip/` 는 **집필 중 초안 보관용**입니다. 다 끝나면 폴더째 지우세요.
+
+#### 8-2. 각 탭의 확정된 제원 (에이전트에게 그대로 주면 됩니다)
+
+공통 — tab `log` · pane div `pane-log` · 섹션 id `lg01`~`lg12` · `<span class="no">` 는 `LOG 01` 형식 ·
+label `📝 로깅 · 로그` (server 는 `📝 로그 운영`, db 는 `📝 로그 · 감사`, cs 는 `📝 로그와 관측`) ·
+icon `📝` · cls **`lgx`** (`lg` 는 server 의 `lang` 탭이 이미 씁니다) · grad `["#a78bfa","#4c1d95"]` ·
+섹션 10~12개 · 다이어그램 최소 8개.
+
+| 가이드 | pane 파일 | group | after |
+|---|---|---|---|
+| python | `panes/19-log.html` | 2 | `test` |
+| js-ts | `panes/18-log.html` | 3 | `tool` |
+| server | `panes/18-log.html` | 3 | `obs` |
+| java | `panes/13-log.html` | 4 | `tool` |
+| cpp | `panes/17-log.html` | 2 | `perf` |
+| rust | `panes/16-log.html` | 4 | `tool` |
+| db | `panes/14-log.html` | 3 | `app` |
+| kotlin | `panes/14-log.html` | 4 | `tool` |
+| cs | `panes/14-log.html` | 3 | `se` |
+| csharp | `panes/15-log.html` | 3 | `tool` |
+
+#### 8-3. 내용에서 지켰던 원칙 두 가지 (그대로 이어 가세요)
+
+1. **"사용율"을 지어내지 않습니다.** 정확한 다운로드 수치 대신 ① 상대적 위치("사실상 표준" /
+   "널리 씀" / "특정 상황에서만" / "신규 채택은 드묾")로 쓰고, ② 숫자를 쓸 때는 `2026년 8월 기준 대략` 처럼
+   시점과 근사임을 밝히며 자릿수 수준으로만, ③ 독자가 직접 확인할 방법(npm trends · PyPI Stats ·
+   mvnrepository · crates.io · NuGet · DB-Engines)을 한 줄 알려 줍니다.
+2. **§6-1 의 미사용 모델 넷을 반드시 씁니다.** `cel`+`h0~h5` 히트맵(라이브러리 비교표에 최소 1개 필수) ·
+   `d-n2~d-p2` 발산 램프(트레이드오프) · `cyl` 원통(로그 저장소) · `cld` 구름(수집기·SaaS).
+   `dur` 은 `1.8s`/`2.6s`/`3.4s` 셋만. viewBox 폭 680 고정.
+
+#### 8-4. 다시 시작하는 순서
+
+```bash
+cd D:/gibis/workTool/astro/black-astro/web
+ls guide-src/_wip/log-tabs/*                 # 어디까지 돼 있는지 확인
+```
+1. **csharp 부터 등록해 보세요** — pane 과 meta.json 이 둘 다 있어 한 방에 끝나고,
+   등록 흐름 전체를 한 번 검증할 수 있습니다.
+   ```bash
+   cp guide-src/_wip/log-tabs/csharp/15-log.html guide-src/csharp/parts/panes/15-log.html
+   node guide-src/tools/reg.mjs guide-src/_wip/log-tabs/csharp/meta.json   # pane 이 panes/15-log.html 인지 먼저 확인
+   npm run verify:guide && node guide-src/tools/smoke.mjs public/csharp-web/index.html
+   ```
+2. **python 은 meta.json 만 쓰면 됩니다** — pane 은 이미 완성돼 있습니다
+   (`_wip/log-tabs/python/19-log.html` → `python/parts/panes/19-log.html` 로 복사).
+   섹션 12개의 `title`/`star`/`lv`/`ez`/`cap`/`kw` 를 pane 을 읽어 채우세요(`AUTHORING.md` §4).
+   csharp 의 `meta.json` 을 본보기로 쓰면 빠릅니다.
+3. 나머지 8개는 조각을 이어 붙여 마무리하거나, **가이드별로 에이전트를 나눠 병렬로** 돌립니다
+   (가이드가 서로 달라 파일 충돌이 없습니다 — 이번에 10개 동시에 문제없었습니다).
+   에이전트에게는 **8-2 표의 제원 + 8-3 원칙 + `AUTHORING.md`** 를 그대로 주세요.
+   **`parts.json`·`11-sidebar.html`·`12-tabbar.html`·`js/*` 는 에이전트가 건드리지 못하게 하고,
+   `reg.mjs` 등록은 메인 세션이 순서대로** 돌립니다(공유 파일이라 동시에 쓰면 깨집니다).
+4. 등록 뒤 §7 체크리스트 — 특히 **`11-sidebar.html` 의 `data-g="N"` 버튼 `title`·`ics` 에 로깅을 더하고**
+   (아래 표), `src/router/index.ts` 의 stats 를 `verify:guide` 출력값으로 맞추세요.
+
+**사이드바 그룹 버튼 — 로깅 탭을 넣을 그룹** (`title` 뒤에 ` · 로깅` 을, `ics` 에 `📝` 를 더하세요)
+
+| 가이드 | 줄 | 지금 title | 지금 ics |
+|---|---|---|---|
+| python | 10 | 웹·API · DB 연동 · 테스트 | 🌐🗄️🧪 |
+| js-ts | 12 | 대규모 · 전문가 · 도구 | ⚡🧬🧰 |
+| java | 12 | 도구 · JavaFX | 🧰🖥️ |
+| csharp | 11 | 데스크탑 · 실전 도구 | 🖥️🧰 |
+| rust | 12 | serde · clap · tokio · axum · sqlx · tracing | 🧰 |
+| cpp | 10 | 빌드 · 배포 · 성능 최적화 | 🛠️⚡ |
+| kotlin | 12 | 실전 도구 | 🧰 |
+| server | 11 | 성능·튜닝 · 보안·운영 · 전문가 · 관측 | ⚡🛡️🧬🔭 |
+| db | 11 | 설계·튜닝 · 전문가 · 앱 연동 · 분석/벡터 DB | ⚙️🧬🔌📊 |
+| cs | 11 | 컴파일러 · 보안 · 분산 · 소프트웨어 공학 | 🔧🔐🕸️🏛️ |
+
+#### 8-5. 각 가이드에서 다루기로 했던 것 (에이전트에 준 목차)
+
+- **python** — `logging` 구조(Logger·Handler·Formatter·Filter·전파) · 레벨 설계 · `dictConfig` ·
+  **비교**(표준 `logging` · `structlog` · `loguru` · `picologging` · `python-json-logger`) · 구조적 로깅 ·
+  로테이션(`RotatingFileHandler`/`TimedRotating`/`logrotate`) · `QueueHandler` 비동기 · lazy 포매팅 ·
+  Django/Flask/FastAPI 연동(uvicorn 중복 출력) · `contextvars` 로 request-id · 마스킹 · Sentry/OTel · `logger.exception`
+- **js-ts** — `console.*` 의 한계 · **비교**(`pino` · `winston` · `bunyan` · `roarr` · `debug` · `tslog` · `consola`) ·
+  `pino` 가 빠른 이유 · 구조적 로깅 필드(ECS/OTel) · Express/Nest/Fastify/Next(엣지 런타임 제약) ·
+  `AsyncLocalStorage` 로 request-id · TS 타입 안전 · 이벤트 루프를 막는 동기 쓰기 · 브라우저 로깅/Sentry ·
+  `redact` 마스킹 · stdout → 수집기
+- **java** — 파사드+구현 두 겹 구조 · **비교**(`Logback` · `Log4j2` · `j.u.l` · `tinylog`) · SLF4J `{}` 바인딩 ·
+  **의존성 지옥**(중복 바인딩 · 브리지 · exclude) · `logback-spring.xml` · Log4j2 **AsyncLogger**(Disruptor) ·
+  `logstash-logback-encoder` · **MDC 와 가상 스레드/@Async 누수** · Actuator 로 런타임 레벨 변경 ·
+  **Log4Shell 교훈** · 예외 로깅
+- **kotlin** — 로거 선언 관용구 · `kotlin-logging` 의 **람다 지연 평가** · **비교**(+ `Timber` · `Napier`) ·
+  SLF4J 의존성 정리(Gradle KTS) · Logback · **코루틴 `MDCContext`** · Ktor `CallLogging`/`CallId` ·
+  Spring Boot(Kotlin) · **안드로이드**(`android.util.Log` 제약 · Timber · R8 로 릴리스 로그 제거 · Logcat) ·
+  KMP(`expect`/`actual` · Kermit) · 마스킹
+- **csharp** — `Microsoft.Extensions.Logging` 구조와 DI · 레벨/카테고리 필터(가장 긴 접두사 승) ·
+  **비교**(내장 · `Serilog` · `NLog` · `log4net` · `ZLogger`) · **메시지 템플릿 구조적 로깅** ·
+  `[LoggerMessage]` 소스 제너레이터 · `Host.UseSerilog` + sink/enricher · `nlog.config` ·
+  ASP.NET Core(HTTP logging · `BeginScope`) · `ActivitySource` 와 TraceId · 할당/GC · 마스킹 · 배포 환경별
+- **cpp** — 표준에 로거가 없다 · `std::print`(C++23)가 바꾼 것 · **비교**(`spdlog` · `quill` · `glog` ·
+  `Boost.Log` · `log4cplus`) · `spdlog` 실전(싱크·패턴·`SPDLOG_ACTIVE_LEVEL`) · **매크로 vs 함수** ·
+  **비동기 로깅**(큐가 가득 찼을 때 블록 vs 유실) · 로깅 한 줄의 실제 비용 · 로테이션 ·
+  **크래시 로그**(async-signal-safe · 미니덤프/core dump · Crashpad) · 멀티프로세스/`fork` · CMake 통합
+- **rust** — `println!` 을 버리는 이유 · **`log` 파사드 + 구현체** · **`tracing` 의 span 이 다른 점** ·
+  `tracing-subscriber`(`fmt` · `EnvFilter` · 레이어 합성) · **비교**(`env_logger` · `tracing` · `fern` ·
+  `slog` · `flexi_logger` · `defmt`) · JSON · `#[instrument]` · Tokio 에서 span 이 `.await` 를 건너는 원리 ·
+  `tracing-appender` 의 **`WorkerGuard` 함정** · 컴파일 타임 레벨 제거 · `tracing-opentelemetry` ·
+  `anyhow`/panic 훅 · `defmt`(no_std)
+- **server** (인프라 관점 · `17-obs` 와 중복 금지) — 로그의 전체 지도 · **Nginx `log_format`**
+  (`$request_time` · `$upstream_response_time` · `$request_id` · JSON · `map`+`if=` 로 헬스체크 소음 제거) ·
+  Apache/Tomcat/Caddy · **syslog/journald**(`SystemMaxUse`) · **logrotate**(`copytruncate` 가 로그를 잃는 이유 ·
+  `USR1`) · **수집기 비교**(Fluent Bit · Vector · Filebeat · Fluentd · Promtail) ·
+  **저장소 비교**(Loki · OpenSearch · ClickHouse · 클라우드) · `X-Request-Id` 잇기 · **비용과 샘플링** ·
+  마스킹·감사·보존 · 쿠버네티스 로그 · **장애 조사 절차**(시간→상태코드→경로→업스트림→요청 ID)
+- **db** (두 얼굴 — 진단 로그 vs 트랜잭션 로그) — **WAL 원리**(왜 데이터보다 로그 먼저 · `fsync` · 복구) ·
+  PostgreSQL(`log_min_duration_statement` · `auto_explain` · `pg_stat_statements` · WAL 설정) ·
+  MySQL(슬로우 쿼리 · **binlog** ROW/STATEMENT · redo/undo) · Oracle(alert/trace/redo · AWR/ASH) ·
+  SQLite(rollback journal vs **WAL 모드**) · Redis(`slowlog` · AOF `appendfsync`) · MongoDB(프로파일러 · oplog) ·
+  **슬로우 쿼리 잡는 절차**(`pt-query-digest`/`pgBadger`) · **감사 로그**(`pgaudit` 등) ·
+  **CDC**(Debezium 이 binlog/WAL 을 읽는 원리) · 운영(디스크 가득 참 · PITR)
+- **cs** (이론 가이드 · `11-dist` 의 Raft 와 이어서) — **로그 = append-only ordered sequence** ·
+  **상태와 이벤트의 이중성**(`state = fold(apply, init, events)`) · WAL 과 원자성 ·
+  **Lamport 논리 시계 · 벡터 시계 · happens-before** · 상태 기계 복제와 로그 매칭 ·
+  **로그 기반 아키텍처**(이벤트 소싱 · CQRS · CDC · 카프카의 파티션된 로그) · 정보량과 카디널리티 ·
+  **관측 가능성의 이론**(제어이론에서 온 말) · 구조적 로깅과 스키마 진화 · 로그 컴팩션과 보존 ·
+  **무결성**(해시 체인 · 머클 트리 · Certificate Transparency) · 로그로 못 잡는 것
+
 
 ---
 
@@ -617,6 +764,10 @@ npx vue-tsc -b                                                       # router �
 3. 마커 defs 는 각 가이드 `parts/10-body-open.html`
 4. 작업 절차 `.claude/skills/diag/SKILL.md` + `web/guide-src/DIAGRAM-STYLE.md`
 5. **Windows 10 은 Emoji 12까지** — U+1FA70~1FAFF 금지 (🪟 U+1FA9F 도 금지 — 🖥️ 를 씀)
+6. **애니메이션 `dur` 은 세 값만** — 빠름 `1.8s` · 보통 `2.6s` · 느림 `3.4s` (2026-09-01 통일)
+7. **`.diag svg{min-width:680px}`** — viewBox 폭과 같게. 좁은 화면에서는 축소하지 말고
+   `.diag` 의 `overflow-x` 로 가로 스크롤합니다 (2026-09-01 변경 · 브라우저 확인은 §6-3 에 남음)
+8. **viewBox 폭은 예외 없이 680** — 2026-09-01 에 16개를 마저 맞춰 지금은 전부 680 입니다
 
 ## 조심할 것 (실제로 겪은 실패 — 누적)
 1. `</section>` 누락 — verify:guide 가 잡아 줌
@@ -665,6 +816,7 @@ document.documentElement.style.scrollBehavior='auto';
 const panes=[...document.querySelectorAll('.pane')];const prev=panes.map(p=>p.className);panes.forEach(p=>p.classList.add('on'));
 const over=[],lap=[],box=[];
 document.querySelectorAll('.diag svg').forEach(svg=>{
+  if (svg.getAttribute('data-ovl') === 'ok') return;   // 의도적 중첩은 건너뛴다
   const vb=svg.viewBox.baseVal, sec=svg.closest('section')?.id||'?';
   const rects=[...svg.querySelectorAll('rect')].map(r=>{try{return r.getBBox()}catch(e){return null}}).filter(Boolean);
   const ts=[...svg.querySelectorAll('text')].map(t=>{let b;try{b=t.getBBox()}catch(e){return null}return b&&b.width?{b,s:t.textContent.slice(0,14)}:null}).filter(Boolean);
@@ -687,5 +839,9 @@ panes.forEach((p,i)=>p.className=prev[i]);
 열 가이드(`web/guide-src/*` → `web/public/*-web/index.html`)를
 **"기초부터 전문가까지 이 페이지만 보고 실서비스를 만들 수 있는"** 수준으로.
 열 가이드 전부가 **설치 → 기초 → 실전** 축을 갖췄고, 브라우저 실측(1,388개)과 기술 스택 공백도 끝났습니다.
-**내용을 채우는 단계는 마무리됐습니다.** 다음은 **보여 주는 방식의 품질**입니다 —
-§6 의 세 가지(모델 다양성 · 좁은 화면 표시 · 애니메이션)가 그 축이고, 실측값과 함께 등록돼 있습니다.
+**내용을 채우는 단계는 한 번 마무리됐다가, 사용자 요청으로 축이 하나 더 생겼습니다 — 로그(§8).**
+지금 축은 둘입니다.
+1. **§8 로깅 탭 10개** — 언어마다 로그 라이브러리 · 채택 정도 · 장단점 · 예시 코드 · 적용법.
+   초안이 `web/guide-src/_wip/log-tabs/` 에 보존돼 있습니다. **이걸 먼저 끝내세요.**
+2. **§6 보여 주는 방식의 품질** — 남은 것은 모델 다양성(§6-1 · §8 이 상당 부분 해결) ·
+   모델별 모션(§6-2) · 좁은 화면 브라우저 확인(§6-3-1) 셋입니다.

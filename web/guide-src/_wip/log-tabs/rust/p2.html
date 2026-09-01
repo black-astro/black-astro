@@ -1,0 +1,664 @@
+
+
+<!-- ==================== lg04 ==================== -->
+<section class="sec" id="lg04">
+  <div class="sec-head rv">
+    <span class="no">LOG 04</span>
+    <h2><code>tracing-subscriber</code> 실전 — <span class="t">레이어를 겹쳐</span> 내 구독자를 조립합니다</h2>
+    <p class="lead">
+      <code>tracing</code> 은 <b>기록만</b> 하고, 그걸 받아 처리하는 쪽이 <b>구독자(Subscriber)</b> 입니다.
+      <code>tracing-subscriber</code> 는 구독자를 통째로 주는 대신 <b><code>Registry</code> 위에 레이어를 끼우는 방식</b>을 씁니다 —
+      포맷 하나, 필터 하나, OTel 하나… 필요한 만큼 겹칩니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 238" role="img" aria-label="tracing-subscriber 의 레이어 합성을 파이프라인으로 그린 그림. 이벤트가 Registry 를 지나 EnvFilter 로 걸러지고 fmt 레이어에서 포맷된 뒤 Writer 로 나간다. 아래에는 추가로 끼워 넣을 수 있는 층으로 ErrorLayer, OpenTelemetry, console_subscriber, JsonFields 가 있다.">
+      <text x="16" y="18" class="lbl">Registry 하나에 레이어를 겹쳐 끼웁니다 — with() 를 부를 때마다 한 겹</text>
+
+      <polygon class="chev" points="16,40 116,40 132,64 116,88 16,88 32,64"/>
+      <text x="76" y="61" class="val" text-anchor="middle">이벤트</text>
+      <text x="76" y="76" class="ann" text-anchor="middle">info!(...)</text>
+
+      <polygon class="chev" points="142,40 242,40 258,64 242,88 142,88 158,64"/>
+      <text x="202" y="61" class="val" text-anchor="middle">Registry</text>
+      <text x="202" y="76" class="ann" text-anchor="middle">span 저장소</text>
+
+      <polygon class="chev s1" points="268,40 368,40 384,64 368,88 268,88 284,64"/>
+      <text x="328" y="61" class="val" text-anchor="middle">EnvFilter</text>
+      <text x="328" y="76" class="ann" text-anchor="middle">RUST_LOG</text>
+
+      <polygon class="chev" points="394,40 494,40 510,64 494,88 394,88 410,64"/>
+      <text x="454" y="61" class="val" text-anchor="middle">fmt::layer</text>
+      <text x="454" y="76" class="ann" text-anchor="middle">포맷 · 색</text>
+
+      <polygon class="chev s4" points="520,40 620,40 636,64 620,88 520,88 536,64"/>
+      <text x="578" y="61" class="val" text-anchor="middle">Writer</text>
+      <text x="578" y="76" class="ann" text-anchor="middle">stdout · 파일</text>
+
+      <path class="brk" d="M142 100 L142 106 L636 106 L636 100"/>
+      <text x="389" y="124" class="ann" text-anchor="middle">registry().with(filter).with(fmt).init() — 이 한 줄이 위 그림 전체입니다</text>
+
+      <text x="16" y="152" class="ttl">끼워 넣을 수 있는 층 — 순서는 자유지만 필터는 앞쪽이 이득입니다</text>
+
+      <rect class="bx" x="16" y="162" width="156" height="46"/>
+      <text x="94" y="182" class="val" text-anchor="middle">ErrorLayer</text>
+      <text x="94" y="198" class="ann" text-anchor="middle">span 백트레이스</text>
+
+      <rect class="bx" x="184" y="162" width="156" height="46"/>
+      <text x="262" y="182" class="val" text-anchor="middle">OpenTelemetry</text>
+      <text x="262" y="198" class="ann" text-anchor="middle">TraceId 부착</text>
+
+      <rect class="bx" x="352" y="162" width="156" height="46"/>
+      <text x="430" y="182" class="val" text-anchor="middle">console_subscriber</text>
+      <text x="430" y="198" class="ann" text-anchor="middle">tokio-console</text>
+
+      <rect class="bx" x="520" y="162" width="144" height="46"/>
+      <text x="592" y="182" class="val" text-anchor="middle">JsonFields</text>
+      <text x="592" y="198" class="ann" text-anchor="middle">필드 보관</text>
+
+      <text x="16" y="228" class="lbl">필터를 앞에 두면 뒤쪽 레이어가 아예 불리지 않습니다 — 순서가 곧 비용입니다</text>
+    </svg>
+    <div class="cap">구독자는 <b>완성품이 아니라 조립품</b>입니다 — <code>with()</code> 한 번이 층 하나입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가장 짧은 것부터 실무형까지</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# "env-filter" 없이는 EnvFilter 를 못 씁니다 ★ 가장 흔한 컴파일 에러</code></pre>
+      <pre class="code" data-lang="rust"><code>// ① 한 줄 — 실습·예제용
+tracing_subscriber::fmt::init();
+
+// ② 필터를 붙인 한 줄 — 작은 CLI 라면 여기까지로 충분합니다
+tracing_subscriber::fmt()
+    .with_env_filter("info,hyper=warn")
+    .init();
+
+// ③ 레이어 합성 — 서비스는 이 모양이 기본값입니다 ★
+use tracing_subscriber::{fmt, EnvFilter, prelude::*};
+
+pub fn init_log() {
+    let filter = EnvFilter::builder()
+        .with_default_directive(tracing::level_filters::LevelFilter::INFO.into())
+        .from_env_lossy();          // RUST_LOG 가 이상해도 죽지 않습니다
+
+    let json = std::env::var("LOG_FORMAT").as_deref() == Ok("json");
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer()
+            .with_target(true)
+            .with_thread_ids(!json)
+            .with_ansi(!json &amp;&amp; std::io::IsTerminal::is_terminal(&amp;std::io::stdout())))
+        .init();
+    // json 이면 아래 LOG 05 의 .json() 갈래로 갑니다
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>from_env_lossy()</code> 를 쓰세요</b> — <code>from_env()</code> 는 <code>RUST_LOG</code> 에
+        오타가 있으면 <b>에러를 돌려주고</b>, 그걸 <code>unwrap()</code> 하면 <b>서비스가 시작도 못 합니다</b>.
+        <code>lossy</code> 는 이상한 지시자만 버리고 나머지를 살립니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>fmt::layer()</code> 의 손잡이들</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">메서드</th><th>효과</th></tr>
+        <tr><td><code>.with_target(true)</code></td><td>모듈 경로 표시</td></tr>
+        <tr><td><code>.with_thread_ids(true)</code></td><td>스레드 번호</td></tr>
+        <tr><td><code>.with_thread_names(true)</code></td><td>스레드 이름</td></tr>
+        <tr><td><code>.with_file(true).with_line_number(true)</code></td><td>소스 위치</td></tr>
+        <tr><td><code>.with_ansi(false)</code></td><td><b>색 끄기</b> — 파일·수집기용</td></tr>
+        <tr><td><code>.with_span_events(FmtSpan::CLOSE)</code></td><td><b>구간 소요 시간</b></td></tr>
+        <tr><td><code>.compact()</code></td><td>한 줄로 촘촘히</td></tr>
+        <tr><td><code>.pretty()</code></td><td>여러 줄로 읽기 좋게</td></tr>
+        <tr><td><code>.json()</code></td><td>구조적 로깅 (<b>LOG 05</b>)</td></tr>
+        <tr><td><code>.with_writer(w)</code></td><td>출력 대상 바꾸기</td></tr>
+        <tr><td><code>.with_test_writer()</code></td><td>테스트 캡처로</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>use tracing_subscriber::fmt::format::FmtSpan;
+
+fmt::layer()
+    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+    // 출력 예:
+    //   INFO handle{req_id=7781}: new
+    //   INFO handle{req_id=7781}: close time.busy=1.2ms time.idle=84ms
+    //                                     ↑ CPU     ↑ .await 대기 ★
+    .with_writer(std::io::stderr)      // 로그는 stderr 가 안전합니다</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>with_ansi</code> 는 자동이 아닙니다</b> — 파이프로 넘겨도 색 코드가 그대로 나갑니다.
+        <code>std::io::IsTerminal</code> 로 판단하거나(Rust 1.70+), 운영에서는 <b>무조건 끄세요</b>.
+        <code>ESC[32m</code> 같은 쓰레기가 로그 저장소에 쌓이는 것을 막습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i"><code>RUST_LOG</code> 문법 전부 — <span class="t">이 표 하나면 끝납니다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">지시자(directive) 의 문법</h4>
+      <pre class="code" data-lang="text"><code>RUST_LOG = 지시자[,지시자,...]
+
+지시자 = target[span{field=value}]=level
+         └────┘ └──────────────┘ └───┘
+          모듈 경로   span 이름·필드    레벨
+         (전부 생략 가능 — 레벨만 써도 됩니다)
+
+level = error &lt; warn &lt; info &lt; debug &lt; trace   (또는 off)
+        숫자 1~5 로도 씁니다 (1=error … 5=trace)
+
+★ 왼쪽에서 오른쪽으로 읽지 말고 "가장 구체적인 지시자가 이긴다"로 읽으세요</code></pre>
+      <pre class="code" data-lang="bash"><code># ── 레벨만 ────────────────────────────────
+RUST_LOG=info                    # 전부 info 이상
+RUST_LOG=off                     # 전부 끄기
+
+# ── 모듈별 ────────────────────────────────
+RUST_LOG=warn,myapp=debug        # 기본 warn, 내 크레이트만 debug ★가장 흔함
+RUST_LOG=myapp::db=trace         # 특정 모듈만
+RUST_LOG=info,hyper=off,h2=off   # 시끄러운 크레이트 입막음
+RUST_LOG=debug,sqlx::query=info  # sqlx 가 쿼리를 전부 찍는 걸 막기
+
+# ── span 이름으로 (tracing 전용) ───────────
+RUST_LOG=[request]=debug         # request 라는 span 안에서만 debug
+RUST_LOG=myapp[db]=trace         # myapp 크레이트의 db span 안에서만
+
+# ── span 필드 값으로 (tracing 전용) ★ ──────
+RUST_LOG=[request{user_id=42}]=trace   # 특정 사용자 요청만 trace
+RUST_LOG=[request{path}]=debug         # path 필드가 있기만 하면</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>필드 값 필터가 진짜 무기입니다</b> — 운영에서 “특정 고객만 이상하다”일 때
+        <b>그 고객 요청만 trace 로</b> 켤 수 있습니다. 전체를 trace 로 켰다가
+        디스크를 채우는 사고를 막아 줍니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 구현의 차이와 실행 중 변경</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">문법</th><th>env_logger</th><th>EnvFilter</th></tr>
+        <tr><td><code>info</code></td><td>✔</td><td>✔</td></tr>
+        <tr><td><code>myapp=debug</code></td><td>✔</td><td>✔</td></tr>
+        <tr><td><code>a::b=trace</code></td><td>✔</td><td>✔</td></tr>
+        <tr><td><code>[span]=debug</code></td><td>✗</td><td><b>✔</b></td></tr>
+        <tr><td><code>[span{k=v}]</code></td><td>✗</td><td><b>✔</b></td></tr>
+        <tr><td><code>=debug/정규식</code></td><td><b>✔</b></td><td>✗</td></tr>
+        <tr><td>실행 중 변경</td><td>✗</td><td><b>reload 로</b></td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// 실행 중에 레벨을 바꾸기 — reload 레이어
+use tracing_subscriber::{reload, EnvFilter, prelude::*};
+
+let (filter, handle) = reload::Layer::new(EnvFilter::new("info"));
+tracing_subscriber::registry()
+    .with(filter)
+    .with(tracing_subscriber::fmt::layer())
+    .init();
+
+// 나중에 (예: 관리용 HTTP 엔드포인트에서)
+async fn set_level(body: String) -&gt; StatusCode {
+    match handle.modify(|f| *f = EnvFilter::new(&amp;body)) {
+        Ok(_)  =&gt; StatusCode::OK,        // 재배포 없이 debug 로 전환 ★
+        Err(_) =&gt; StatusCode::BAD_REQUEST,
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>이 엔드포인트는 반드시 보호하세요</b> — 누구나 부를 수 있으면
+        <code>trace</code> 로 올려 <b>디스크를 채우는 공격</b>이 됩니다.
+        내부망 전용 포트에 두거나 관리자 인증 뒤에 두고, <b>일정 시간 뒤 자동 복귀</b>를 넣는 것이 안전합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">레이어별 필터와 “두 곳으로 동시에 쓰기” <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전역 필터 vs 레이어별 필터</h4>
+      <pre class="code" data-lang="rust"><code>use tracing_subscriber::{fmt, filter, EnvFilter, Layer, prelude::*};
+
+// 터미널에는 사람이 읽을 것만, 파일에는 debug 까지 전부
+let (file_w, _guard) = tracing_appender::non_blocking(
+    tracing_appender::rolling::daily("logs", "app.log"));
+
+tracing_subscriber::registry()
+    // ① 콘솔 — info 이상만, 색 있음
+    .with(fmt::layer()
+        .with_ansi(true)
+        .with_filter(EnvFilter::new("info")))
+    // ② 파일 — debug 까지, 색 없음, JSON
+    .with(fmt::layer()
+        .json()
+        .with_ansi(false)
+        .with_writer(file_w)
+        .with_filter(EnvFilter::new("debug,hyper=warn")))
+    // ③ 지표용 — 특정 target 만 골라서
+    .with(MetricsLayer::new()
+        .with_filter(filter::filter_fn(|m| m.target().starts_with("biz::"))))
+    .init();</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>전역 필터와 레이어 필터는 곱해집니다</b> — <code>.with(EnvFilter)</code> 는
+        <b>구독자 전체</b>에, <code>.with_filter(...)</code> 는 <b>그 레이어에만</b> 걸립니다.
+        전역이 <code>info</code> 인데 레이어가 <code>debug</code> 를 원하면 <b>debug 는 안 옵니다</b> —
+        전역을 <code>trace</code> 로 열고 레이어별로 좁히는 것이 정석입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">조건부 레이어 — 타입이 안 맞을 때</h4>
+      <pre class="code" data-lang="rust"><code>// ✗ 이건 컴파일 안 됩니다 — if 의 두 갈래 타입이 다릅니다
+// let layer = if json { fmt::layer().json() } else { fmt::layer() };
+
+// ✔ 방법 1 — Boxed 로 타입을 지웁니다
+use tracing_subscriber::Layer;
+let layer = if json {
+    fmt::layer().json().boxed()
+} else {
+    fmt::layer().pretty().boxed()
+};
+
+// ✔ 방법 2 — Option&lt;Layer&gt; 도 Layer 입니다 (None 이면 없는 셈)
+let otel = if otel_on { Some(otel_layer()) } else { None };
+
+tracing_subscriber::registry()
+    .with(EnvFilter::from_default_env())
+    .with(layer)
+    .with(otel)                      // None 이어도 그대로 넘깁니다 ★
+    .init();</code></pre>
+      <pre class="code" data-lang="rust"><code>// 라이브러리에서 구독자를 설치하면 안 됩니다.
+// 대신 "레이어를 돌려주는 함수"를 공개하세요 ★
+pub fn my_layer&lt;S&gt;() -&gt; impl Layer&lt;S&gt;
+where S: tracing::Subscriber + for&lt;'a&gt; tracing_subscriber::registry::LookupSpan&lt;'a&gt;
+{ ... }</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>구독자도 프로세스당 하나</b>입니다. <code>init()</code> 은 두 번째 호출에서 패닉하고
+        <code>try_init()</code> 은 <code>Err</code> 를 돌려줍니다.
+        <b>라이브러리는 절대 구독자를 설치하지 마세요</b> — 앱의 로깅 설정을 통째로 빼앗는 셈입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 구독자는 <b><code>registry()</code> + <code>with()</code> 반복</b>으로 조립합니다.
+    <b>필터는 앞에</b>(뒤 레이어가 아예 안 불립니다), <b>색은 터미널일 때만</b>,
+    <code>RUST_LOG</code> 는 <b><code>target[span{field}]=level</code></b> 한 줄 문법이 전부이고
+    <b>span 필드 필터</b>가 운영에서 가장 강력한 손잡이입니다.</div>
+</section>
+
+
+<!-- ==================== lg05 ==================== -->
+<section class="sec" id="lg05">
+  <div class="sec-head rv">
+    <span class="no">LOG 05</span>
+    <h2>구조적 로깅 — <span class="t">문자열이 아니라 필드</span>로 남깁니다</h2>
+    <p class="lead">
+      <code>"주문 7781 이 12000원 결제됨"</code> 은 사람만 읽습니다.
+      <code>{order_id: 7781, amount: 12000}</code> 은 <b>기계가 집계하고 정렬하고 알람을 겁니다.</b>
+      같은 정보를 어떻게 담느냐가 <b>“grep 밖에 못 하는 로그”와 “질의할 수 있는 로그”</b>를 가릅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 212" role="img" aria-label="JSON 으로 출력된 로그 한 줄을 부분별로 해부한 그림. 위쪽 콜아웃은 시각은 구독자가 채우고 레벨은 EnvFilter 가 보는 곳이며 target 은 기본이 모듈 경로임을 가리킨다. 가운데 상자에 실제 JSON 세 줄이 들어 있고 아래 콜아웃은 값이 문자열이 아니라 숫자라는 점, span 필드가 자동으로 붙는다는 점, 사람이 읽는 메시지는 맨 뒤에 온다는 점을 가리킨다.">
+      <text x="16" y="18" class="lbl">JSON 로그 한 줄 — 어느 조각을 누가 채우는가</text>
+
+      <text x="30" y="42" class="ann">① subscriber 가 채웁니다</text>
+      <text x="200" y="42" class="ann">② EnvFilter 가 보는 곳</text>
+      <text x="400" y="42" class="ann">③ 기본값은 모듈 경로</text>
+      <path class="lead-ln" d="M72 66 L72 48"/>
+      <path class="lead-ln" d="M265 66 L255 48"/>
+      <path class="lead-ln" d="M352 66 L450 48"/>
+
+      <rect class="bx" x="16" y="70" width="648" height="56"/>
+      <text x="28" y="88" class="ann">{"timestamp":"2026-09-01T04:12:33.481Z","level":"INFO","target":"pay::api",</text>
+      <text x="28" y="102" class="ann">  "span":{"name":"place_order","order_id":7781},</text>
+      <text x="28" y="116" class="ann">  "fields":{"amount":12000,"attempt":2,"message":"결제를 승인했습니다"}}</text>
+
+      <path class="lead-ln" d="M98 126 L88 144"/>
+      <path class="lead-ln" d="M200 126 L280 144"/>
+      <path class="lead-ln" d="M300 126 L470 144"/>
+      <text x="32" y="158" class="ann">④ 값은 문자열이 아니라 숫자</text>
+      <text x="210" y="158" class="ann">⑤ span 필드는 자동으로 붙습니다</text>
+      <text x="410" y="158" class="ann">⑥ 사람이 읽는 메시지는 맨 뒤</text>
+
+      <text x="16" y="186" class="lbl">%value 는 Display · ?value 는 Debug · 시길이 없으면 값 그대로(숫자 · bool)</text>
+      <text x="16" y="202" class="lbl">이 한 줄을 만드는 것은 fmt::layer().json() 하나 — 개발에서는 pretty() 를 씁니다</text>
+    </svg>
+    <div class="cap">구조적 로깅의 요점은 <b>message 를 줄이고 필드를 늘리는 것</b>입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">필드 문법 — 시길 세 가지</h4>
+      <pre class="code" data-lang="rust"><code>use tracing::info;
+
+let id: u64 = 7781;
+let user = User { id: 42, name: "kim".into() };
+let path = std::path::Path::new("/tmp/a.csv");
+
+// ① 시길 없음 — 값을 그대로 (숫자 · bool · &amp;str · char 등)
+info!(order_id = id, retried = true, "결제 완료");
+
+// ② % — Display 로 문자열화
+info!(file = %path.display(), "파일을 읽었습니다");
+
+// ③ ? — Debug 로 문자열화
+info!(user = ?user, "사용자 조회");
+
+// ④ 변수 이름을 그대로 필드 이름으로 (축약형) ★
+let amount = 12000;
+info!(amount, "금액 확인");        // amount = 12000
+
+// ⑤ 점이 들어간 이름은 따옴표로
+info!(http.status = 200, "응답");  // ✗ 컴파일 에러
+info!("http.status" = 200, "응답"); // ✔
+
+// ⑥ 메시지는 사실 message 라는 필드일 뿐입니다
+info!(message = "결제 완료", order_id = id);   // 위 ①과 같습니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>?</code> 를 함부로 쓰지 마세요</b> — <code>Debug</code> 는 구조체를 통째로 찍습니다.
+        <code>?req</code> 한 번에 <b>비밀번호와 카드번호가 로그로 새어 나갑니다</b>.
+        민감한 필드는 <code>#[derive(Debug)]</code> 대신 <b>손으로 <code>Debug</code> 를 구현</b>해
+        <code>"[redacted]"</code> 을 찍게 하는 것이 가장 확실합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JSON 으로 내보내기</h4>
+      <pre class="code" data-lang="rust"><code>use tracing_subscriber::{fmt, EnvFilter, prelude::*};
+
+tracing_subscriber::registry()
+    .with(EnvFilter::from_default_env())
+    .with(fmt::layer()
+        .json()
+        .flatten_event(true)        // fields 를 최상위로 펼칩니다
+        .with_current_span(true)    // 현재 span 을 포함
+        .with_span_list(true)       // 조상 span 전부를 배열로 ★
+        .with_timer(fmt::time::UtcTime::rfc_3339()))
+    .init();</code></pre>
+      <pre class="code" data-lang="json"><code>{
+  "timestamp": "2026-09-01T04:12:33.481Z",
+  "level": "INFO",
+  "target": "pay::api",
+  "amount": 12000,
+  "attempt": 2,
+  "message": "결제를 승인했습니다",
+  "span":  { "name": "place_order", "order_id": 7781 },
+  "spans": [ { "name": "http", "req_id": "0f2a" },
+             { "name": "place_order", "order_id": 7781 } ]
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>수집기가 정해진 스키마를 원한다면</b> — <code>tracing-bunyan-formatter</code>(Bunyan 규격),
+        <code>tracing-logfmt</code>(logfmt), 또는 <code>fmt::layer().event_format(내 포맷)</code> 으로
+        직접 구현합니다. <b>ECS·GELF 같은 사내 규격이 있으면 포맷 구현체를 한 번 만들어 두고 재사용</b>하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">좋은 로그 한 줄의 모양 <span class="lvl m">🟡 중급</span></h3>
+  <div class="vs rv d1">
+    <div class="bad">
+      <h5>이렇게 쓰지 마세요</h5>
+      <pre class="code" data-lang="rust"><code>info!("주문 {} 를 사용자 {} 가 {}원에 결제했고 재시도 {}회 만에 성공",
+      order.id, user.id, amount, attempt);
+
+// 문제
+//  · 집계 불가 — "금액 합계"를 내려면 문자열을 파싱해야 합니다
+//  · 알람 불가 — "재시도 3회 이상"을 조건으로 걸 수 없습니다
+//  · 카디널리티 폭발 — 같은 사건인데 문자열이 전부 다릅니다
+//  · 번역·문구 변경이 곧 대시보드 파손입니다</code></pre>
+    </div>
+    <div class="good">
+      <h5>이렇게 쓰세요</h5>
+      <pre class="code" data-lang="rust"><code>info!(
+    order_id = order.id,
+    user_id  = user.id,
+    amount,                    // 숫자는 숫자로
+    attempt,                   // 재시도 횟수도 필드로
+    outcome  = "success",      // 값 종류가 적은 것은 라벨로
+    "결제 완료"                 // 메시지는 '사건 이름'만
+);
+
+// 얻는 것
+//  · sum(amount) · avg(attempt) 가 바로 됩니다
+//  · outcome="failure" 로 알람을 겁니다
+//  · 메시지가 같으니 같은 사건끼리 묶입니다 ★</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">필드 이름 규칙 — 팀에서 미리 정하세요</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:32%">필드</th><th>규칙</th></tr>
+        <tr><td><code>*_id</code></td><td>식별자는 접미사 통일</td></tr>
+        <tr><td><code>outcome</code></td><td><code>success</code>/<code>failure</code>/<code>skipped</code></td></tr>
+        <tr><td><code>duration_ms</code></td><td><b>단위를 이름에</b> 넣습니다</td></tr>
+        <tr><td><code>error.kind</code></td><td>에러 분류 (문구 아님)</td></tr>
+        <tr><td><code>attempt</code></td><td>1부터 세는 정수</td></tr>
+        <tr><td>❌ 자유 문자열</td><td>카디널리티를 폭발시킴</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>카디널리티가 왜 문제인가</b> — 로그 저장소는 필드 값의 <b>종류 수</b>만큼 색인을 만듭니다.
+        <code>user_id</code> 처럼 값이 수백만인 필드를 <b>대시보드의 그룹 기준</b>으로 쓰면
+        저장소가 죽습니다. <b>조회용 식별자</b>와 <b>집계용 라벨</b>을 구분하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">민감 정보를 구조적으로 막기</h4>
+      <pre class="code" data-lang="rust"><code>use std::fmt;
+
+pub struct Secret(String);
+
+// Debug 도 Display 도 절대 원본을 내놓지 않습니다 ★
+impl fmt::Debug for Secret {
+    fn fmt(&amp;self, f: &amp;mut fmt::Formatter&lt;'_&gt;) -&gt; fmt::Result {
+        f.write_str("Secret([redacted])")
+    }
+}
+impl fmt::Display for Secret {
+    fn fmt(&amp;self, f: &amp;mut fmt::Formatter&lt;'_&gt;) -&gt; fmt::Result {
+        f.write_str("[redacted]")
+    }
+}
+
+// 이러면 ?req 로 통째로 찍어도 안전합니다
+#[derive(Debug)]
+struct LoginReq { user: String, password: Secret }
+
+// 카드번호처럼 일부만 남겨야 하면
+fn mask_card(s: &amp;str) -&gt; String {
+    format!("****-****-****-{}", &amp;s[s.len().saturating_sub(4)..])
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>검토가 아니라 타입으로 막으세요</b> — “로그에 비밀번호 찍지 말기”는 코드 리뷰로 지켜지지 않습니다.
+        <code>Secret&lt;T&gt;</code> 같은 래퍼를 만들어 <b>타입 시스템이 강제</b>하게 하면
+        새로 들어온 사람도 사고를 못 냅니다. <code>secrecy</code> 크레이트가 이 패턴을 구현해 둔 것입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 메시지는 <b>사건의 이름</b>만 담고, 나머지는 전부 <b>필드</b>로 뺍니다.
+    시길은 셋 — <b>없음(값 그대로) · <code>%</code>(Display) · <code>?</code>(Debug)</b>.
+    <code>?</code> 는 통째로 찍히니 민감 타입은 <code>Debug</code> 를 직접 구현해 막고,
+    <b>단위는 필드 이름에</b>(<code>duration_ms</code>) 넣는 습관을 팀 규칙으로 정하세요.</div>
+</section>
+
+
+<!-- ==================== lg06 ==================== -->
+<section class="sec" id="lg06">
+  <div class="sec-head rv">
+    <span class="no">LOG 06</span>
+    <h2>크레이트 비교 — <span class="t">여섯 갈래</span>, 어떤 상황에 무엇을 고르나</h2>
+    <p class="lead">
+      러스트 로깅 크레이트는 많아 보이지만 <b>계보는 세 줄기</b>입니다 —
+      <code>log</code> 파사드 위의 구현체들, <code>tracing</code>, 그리고 임베디드 전용 <code>defmt</code>.
+      아래 표는 <b>강도</b>를 보여 줍니다. 정확한 다운로드 수치가 아니라 <b>상대적 위치</b>로 읽으세요.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 288" role="img" aria-label="로깅 크레이트 여섯 개를 다섯 항목으로 비교한 히트맵. 행은 log 와 env_logger 조합, tracing, fern, slog, flexi_logger, defmt 이고 열은 span 지원, 성능, 설정 유연성, 생태계, 도입 쉬움이다. tracing 은 span 과 생태계와 설정 유연성이 가장 강하고 도입 난이도만 보통이다. log 와 env_logger 조합은 도입이 가장 쉽지만 span 이 없다. defmt 는 성능이 가장 강하지만 임베디드 전용이다. 각 칸에는 색과 함께 글자로도 강도가 적혀 있다.">
+      <text x="16" y="18" class="lbl">로깅 크레이트 여섯 갈래 — 색이 진할수록 그 항목이 강하다는 뜻입니다</text>
+
+      <text x="190" y="40" class="tk" text-anchor="middle">span</text>
+      <text x="278" y="40" class="tk" text-anchor="middle">성능</text>
+      <text x="366" y="40" class="tk" text-anchor="middle">설정 유연성</text>
+      <text x="454" y="40" class="tk" text-anchor="middle">생태계</text>
+      <text x="542" y="40" class="tk" text-anchor="middle">도입 쉬움</text>
+
+      <text x="16" y="66" class="ann">log + env_logger</text>
+      <rect class="cel h0" x="150" y="48" width="80" height="28"/><text x="190" y="66" class="tk" text-anchor="middle">없음</text>
+      <rect class="cel h4" x="238" y="48" width="80" height="28"/><text x="278" y="66" class="tk" text-anchor="middle">높음</text>
+      <rect class="cel h1" x="326" y="48" width="80" height="28"/><text x="366" y="66" class="tk" text-anchor="middle">낮음</text>
+      <rect class="cel h4" x="414" y="48" width="80" height="28"/><text x="454" y="66" class="tk" text-anchor="middle">넓음</text>
+      <rect class="cel h5" x="502" y="48" width="80" height="28"/><text x="542" y="66" class="tk" text-anchor="middle">아주 쉬움</text>
+
+      <text x="16" y="98" class="ann">tracing</text>
+      <rect class="cel h5" x="150" y="80" width="80" height="28"/><text x="190" y="98" class="tk" text-anchor="middle">있음</text>
+      <rect class="cel h4" x="238" y="80" width="80" height="28"/><text x="278" y="98" class="tk" text-anchor="middle">높음</text>
+      <rect class="cel h5" x="326" y="80" width="80" height="28"/><text x="366" y="98" class="tk" text-anchor="middle">아주 높음</text>
+      <rect class="cel h5" x="414" y="80" width="80" height="28"/><text x="454" y="98" class="tk" text-anchor="middle">가장 넓음</text>
+      <rect class="cel h2" x="502" y="80" width="80" height="28"/><text x="542" y="98" class="tk" text-anchor="middle">보통</text>
+
+      <text x="16" y="130" class="ann">fern</text>
+      <rect class="cel h0" x="150" y="112" width="80" height="28"/><text x="190" y="130" class="tk" text-anchor="middle">없음</text>
+      <rect class="cel h3" x="238" y="112" width="80" height="28"/><text x="278" y="130" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h5" x="326" y="112" width="80" height="28"/><text x="366" y="130" class="tk" text-anchor="middle">아주 높음</text>
+      <rect class="cel h2" x="414" y="112" width="80" height="28"/><text x="454" y="130" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h4" x="502" y="112" width="80" height="28"/><text x="542" y="130" class="tk" text-anchor="middle">쉬움</text>
+
+      <text x="16" y="162" class="ann">slog</text>
+      <rect class="cel h2" x="150" y="144" width="80" height="28"/><text x="190" y="162" class="tk" text-anchor="middle">부분</text>
+      <rect class="cel h4" x="238" y="144" width="80" height="28"/><text x="278" y="162" class="tk" text-anchor="middle">높음</text>
+      <rect class="cel h4" x="326" y="144" width="80" height="28"/><text x="366" y="162" class="tk" text-anchor="middle">높음</text>
+      <rect class="cel h1" x="414" y="144" width="80" height="28"/><text x="454" y="162" class="tk" text-anchor="middle">좁음</text>
+      <rect class="cel h1" x="502" y="144" width="80" height="28"/><text x="542" y="162" class="tk" text-anchor="middle">어려움</text>
+
+      <text x="16" y="194" class="ann">flexi_logger</text>
+      <rect class="cel h0" x="150" y="176" width="80" height="28"/><text x="190" y="194" class="tk" text-anchor="middle">없음</text>
+      <rect class="cel h3" x="238" y="176" width="80" height="28"/><text x="278" y="194" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h4" x="326" y="176" width="80" height="28"/><text x="366" y="194" class="tk" text-anchor="middle">높음</text>
+      <rect class="cel h2" x="414" y="176" width="80" height="28"/><text x="454" y="194" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel h4" x="502" y="176" width="80" height="28"/><text x="542" y="194" class="tk" text-anchor="middle">쉬움</text>
+
+      <text x="16" y="226" class="ann">defmt (임베디드)</text>
+      <rect class="cel h2" x="150" y="208" width="80" height="28"/><text x="190" y="226" class="tk" text-anchor="middle">부분</text>
+      <rect class="cel h5" x="238" y="208" width="80" height="28"/><text x="278" y="226" class="tk" text-anchor="middle">아주 높음</text>
+      <rect class="cel h1" x="326" y="208" width="80" height="28"/><text x="366" y="226" class="tk" text-anchor="middle">낮음</text>
+      <rect class="cel h1" x="414" y="208" width="80" height="28"/><text x="454" y="226" class="tk" text-anchor="middle">임베디드만</text>
+      <rect class="cel h2" x="502" y="208" width="80" height="28"/><text x="542" y="226" class="tk" text-anchor="middle">보통</text>
+
+      <text x="16" y="256" class="ann">강도</text>
+      <rect class="cel h0" x="60" y="246" width="16" height="12"/>
+      <rect class="cel h2" x="78" y="246" width="16" height="12"/>
+      <rect class="cel h3" x="96" y="246" width="16" height="12"/>
+      <rect class="cel h5" x="114" y="246" width="16" height="12"/>
+      <text x="140" y="256" class="ann">약함 → 강함 · 색은 훑어보기용이고 판단은 글자로 합니다</text>
+
+      <text x="16" y="278" class="lbl">채택 정도는 crates.io 다운로드 · lib.rs 순위 · GitHub star 추이로 확인하세요</text>
+    </svg>
+    <div class="cap">기준이 다섯이면 표가 정직합니다 — <b>한 줄로 좋은 것은 없습니다</b>.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">여섯 갈래를 한 줄씩</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">크레이트</th><th>정체</th><th>채택 정도</th></tr>
+        <tr><td><code>log</code></td><td>파사드(인터페이스)</td><td><b>사실상 모든 곳</b></td></tr>
+        <tr><td><code>env_logger</code></td><td><code>log</code> 의 기본 구현체</td><td><b>널리 씀</b>(예제·CLI)</td></tr>
+        <tr><td><code>tracing</code></td><td>span 이 있는 다음 세대</td><td><b>서비스의 사실상 표준</b></td></tr>
+        <tr><td><code>fern</code></td><td><code>log</code> 용 빌더 API</td><td>특정 취향에서</td></tr>
+        <tr><td><code>slog</code></td><td>구조적 로깅의 원조</td><td>신규 채택은 드묾</td></tr>
+        <tr><td><code>flexi_logger</code></td><td>파일 회전이 강한 구현체</td><td>데스크톱·온프렘</td></tr>
+        <tr><td><code>defmt</code></td><td>임베디드 전용 · 지연 포맷</td><td><b>임베디드의 표준</b></td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>수치를 직접 확인하는 법</b> — crates.io 의 각 크레이트 페이지에 <b>최근 90일 다운로드</b>가 있고,
+        <b>lib.rs</b> 는 카테고리별 순위를 매겨 둡니다. GitHub star 는 <b>추이</b>만 보세요(절대값은 오래된 크레이트에 유리합니다).
+        2026년 8월 기준 대략 <b><code>log</code> 가 억 단위, <code>tracing</code> 이 그에 준하는 자릿수</b>이고
+        <code>slog</code>·<code>fern</code> 은 <b>두 자릿수 배 적습니다</b>.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">상황별로 고르기</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">이런 상황이면</th><th>고르세요</th></tr>
+        <tr><td>라이브러리 크레이트를 만든다</td><td><code>log</code> <b>만</b> 의존</td></tr>
+        <tr><td>작은 CLI · 예제 · 학습</td><td><code>log</code>+<code>env_logger</code></td></tr>
+        <tr><td>비동기 서버 · 마이크로서비스</td><td><b><code>tracing</code></b></td></tr>
+        <tr><td>분산 추적이 필요하다</td><td><b><code>tracing</code></b>+OTel</td></tr>
+        <tr><td>파일 회전·압축·보관이 필수</td><td><code>flexi_logger</code> 또는<br><code>tracing-appender</code></td></tr>
+        <tr><td>이미 <code>slog</code> 로 짜여 있다</td><td>유지 — 이관은 신중히</td></tr>
+        <tr><td>MCU · <code>no_std</code></td><td><b><code>defmt</code></b></td></tr>
+        <tr><td>WASM(브라우저)</td><td><code>tracing-wasm</code> ·<br><code>console_log</code></td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>새 프로젝트라면 고민할 필요가 거의 없습니다</b> — <b>실행 파일은 <code>tracing</code>,
+        내가 만드는 라이브러리는 <code>log</code></b>. 이 둘은 브리지로 이어지므로 섞여도 됩니다.
+        나머지는 <b>이미 그걸 쓰고 있을 때</b>나 <b>특수 요구가 있을 때</b>의 선택지입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">각 크레이트의 실제 코드 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>env_logger</code> · <code>fern</code></h4>
+      <pre class="code" data-lang="rust"><code>// ── env_logger 0.11 — 설정은 빌더로 ──────────────
+use env_logger::{Builder, Env, Target};
+use std::io::Write;
+
+Builder::from_env(Env::default().default_filter_or("info"))
+    .target(Target::Stderr)
+    .format(|buf, r| {
+        writeln!(buf, "{} [{}] {}: {}",
+            chrono::Local::now().format("%H:%M:%S%.3f"),
+            r.level(), r.target(), r.args())
+    })
+    .init();</code></pre>
+      <pre class="code" data-lang="rust"><code>// ── fern — 체이닝으로 여러 출구를 만듭니다 ─────────
+fern::Dispatch::new()
+    .level(log::LevelFilter::Info)
+    .level_for("myapp::db", log::LevelFilter::Debug)
+    .chain(std::io::stderr())                    // 출구 ①
+    .chain(fern::log_file("app.log")?)           // 출구 ②
+    .format(|out, msg, rec| {
+        out.finish(format_args!("[{}] {}", rec.level(), msg))
+    })
+    .apply()?;
+// 장점 — log 만 쓰면서도 '여러 출구'가 쉽습니다
+// 한계 — span 이 없습니다. 비동기 문맥은 여전히 손으로 나릅니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>slog</code> · <code>flexi_logger</code></h4>
+      <pre class="code" data-lang="rust"><code>// ── slog — 로거를 '값으로' 들고 다닙니다 ───────────
+let drain = slog_json::Json::default(std::io::stderr()).fuse();
+let drain = slog_async::Async::new(drain).build().fuse();
+let root = slog::Logger::root(drain, slog::o!("svc" =&gt; "pay"));
+
+let req_log = root.new(slog::o!("req_id" =&gt; 7781));  // 자식 로거
+slog::info!(req_log, "결제 시작"; "amount" =&gt; 12000);
+// ★ 문맥을 '로거 객체'로 나릅니다 — 함수 인자로 계속 넘겨야 합니다
+//   tracing 은 이걸 '현재 span' 으로 바꿔 인자를 없앤 것입니다</code></pre>
+      <pre class="code" data-lang="rust"><code>// ── flexi_logger — 파일 회전·보관이 기본 탑재 ──────
+use flexi_logger::{Logger, Criterion, Naming, Cleanup, FileSpec};
+
+Logger::try_with_str("info, myapp=debug")?
+    .log_to_file(FileSpec::default().directory("logs"))
+    .rotate(Criterion::Size(10_000_000),   // 10MB 마다
+            Naming::Timestamps,
+            Cleanup::KeepLogFiles(7))      // 7개만 보관 ★
+    .append()
+    .start()?;
+// 데스크톱 앱·온프렘 설치형에서 '수집기가 없을 때' 좋은 선택입니다</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>slog</code> 는 왜 밀렸나</b> — 아이디어(구조적 로깅)는 옳았지만
+        <b>로거 객체를 인자로 나르는 방식</b>이 비동기와 잘 맞지 않았습니다.
+        <code>tracing</code> 이 같은 아이디어를 <b>암묵적 현재 span</b> 으로 바꾸면서
+        생태계(tokio·tower·axum·sqlx)가 통째로 그쪽으로 갔습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 계보는 셋입니다 — <b><code>log</code> 파사드 + 구현체</b>, <b><code>tracing</code></b>, <b><code>defmt</code></b>.
+    새 서비스는 <code>tracing</code>, 새 라이브러리는 <code>log</code>, 임베디드는 <code>defmt</code> 로 시작하면
+    거의 항상 맞습니다. <b>채택 정도는 crates.io 다운로드와 lib.rs 순위로 직접 확인</b>하세요 —
+    남의 숫자를 옮겨 적지 말고요.</div>
+</section>

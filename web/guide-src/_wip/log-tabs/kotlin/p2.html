@@ -1,0 +1,697 @@
+
+
+<!-- ==================== lg04 ==================== -->
+<section class="sec" id="lg04">
+  <div class="sec-head rv">
+    <span class="no">LOG 04</span>
+    <h2><span class="t">SLF4J 파사드</span> — 로그가 안 나오거나 두 번 나오는 이유</h2>
+    <p class="lead">
+      “로그가 하나도 안 나옵니다”와 “로그가 두 줄씩 나옵니다”는 코틀린 서버에서 가장 흔한 두 가지 사고이고,
+      원인은 거의 항상 같습니다 — <b>의존성 트리에 구현이 없거나 둘 이상</b>입니다.
+      이걸 이해하려면 SLF4J 의 <b>세 층(파사드 · 바인딩 · 브리지)</b>을 구분할 줄 알아야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 288" role="img" aria-label="SLF4J 의 계층 구조를 보여 주는 그림. 위에서부터 내 코드와 kotlin-logging, slf4j-api 파사드, 바인딩 하나, 실제 출력 appender 순으로 쌓여 있고 호출은 위에서 아래로만 흐른다. 오른쪽에는 옛 로깅 API 를 SLF4J 로 넘겨 주는 브리지 세 가지가 있고 그 아래에 같이 넣으면 안 되는 조합이 붉게 표시되어 있다. 맨 아래에는 클래스패스에 여러 SLF4J 프로바이더가 있다는 경고 메시지가 나오면 어느 설정이 적용되는지 알 수 없으므로 반드시 하나로 줄여야 한다고 적혀 있다.">
+      <text x="16" y="18" class="lbl">SLF4J 는 세 층입니다 — 이름이 비슷해서 자꾸 두 개를 같이 넣게 됩니다</text>
+
+      <path class="ln ar" d="M52 38 L52 194"/>
+      <text x="16" y="110" class="ann">호출</text>
+      <text x="16" y="122" class="ann">방향</text>
+
+      <rect class="bx" x="72" y="34" width="244" height="38"/>
+      <text x="88" y="50" class="val">내 코드 · kotlin-logging</text>
+      <text x="88" y="65" class="ann">logger.info { } 만 부릅니다</text>
+
+      <rect class="bx bx-fw" x="72" y="76" width="244" height="38"/>
+      <text x="88" y="92" class="val rs-t">slf4j-api — 파사드뿐</text>
+      <text x="88" y="107" class="ann">인터페이스만 있고 출력은 못 합니다</text>
+
+      <rect class="bx bx-ok" x="72" y="118" width="244" height="38"/>
+      <text x="88" y="134" class="val ok-t">바인딩 — 딱 하나만</text>
+      <text x="88" y="149" class="ann">logback-classic 또는 log4j-slf4j2-impl</text>
+
+      <rect class="bx bx-mut" x="72" y="160" width="244" height="38"/>
+      <text x="88" y="176" class="val">appender — 콘솔 · 파일 · JSON</text>
+      <text x="88" y="191" class="ann">여기부터 Logback 설정이 정합니다</text>
+
+      <path class="fl ar" d="M356 90 L320 90"/>
+
+      <rect class="bx" x="360" y="34" width="304" height="72"/>
+      <text x="376" y="52" class="val">브리지 — 옛 API 를 넘기기</text>
+      <text x="376" y="70" class="ann">jcl-over-slf4j — 옛 commons-logging</text>
+      <text x="376" y="83" class="ann">log4j-over-slf4j — Log4j 1.x 코드</text>
+      <text x="376" y="96" class="ann">jul-to-slf4j — java.util.logging</text>
+
+      <rect class="bx bx-warn" x="360" y="118" width="304" height="80"/>
+      <text x="376" y="136" class="val rs-t">같이 넣으면 안 되는 짝</text>
+      <text x="376" y="152" class="ann">log4j-over-slf4j + log4j-to-slf4j → 무한 루프</text>
+      <text x="376" y="165" class="ann">바인딩 두 개 → 실행마다 다른 것이 잡힙니다</text>
+      <text x="376" y="178" class="ann">해결은 gradle 의 exclude 하나뿐입니다</text>
+      <text x="376" y="191" class="ann">./gradlew :app:dependencies 로 먼저 확인</text>
+
+      <rect class="bx bx-warn" x="16" y="212" width="648" height="46"/>
+      <text x="32" y="230" class="val rs-t">SLF4J: Class path contains multiple SLF4J providers.</text>
+      <text x="32" y="246" class="ann">이 줄이 보이면 로그는 나오지만 어느 설정이 먹는지 아무도 모릅니다 — 반드시 하나로 줄이세요</text>
+
+      <text x="16" y="278" class="lbl">파사드 · 바인딩 · 브리지 셋을 구분하면 의존성 사고의 대부분이 사라집니다</text>
+    </svg>
+    <div class="cap">기억할 규칙 하나 — <b>파사드는 여러 개여도 되고, 바인딩은 정확히 하나</b>여야 합니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">증상으로 원인 찾기</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">보이는 증상</th><th>원인</th></tr>
+        <tr><td>아무것도 안 나옴 + <code>No SLF4J providers were found</code></td><td>바인딩 <b>0개</b></td></tr>
+        <tr><td><code>multiple SLF4J providers</code></td><td>바인딩 <b>2개 이상</b></td></tr>
+        <tr><td>같은 줄이 두 번 찍힘</td><td>appender 중복 · <b>additivity</b></td></tr>
+        <tr><td><code>StackOverflowError</code> 로 부팅 실패</td><td><b>브리지 순환</b></td></tr>
+        <tr><td>내 <code>logback.xml</code> 이 무시됨</td><td>다른 바인딩이 이김</td></tr>
+        <tr><td>라이브러리 로그만 안 나옴</td><td>브리지 <b>누락</b></td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash" style="margin-bottom:0"><code># 무엇이 들어왔는지 눈으로 보기 ★ 가장 먼저 할 일
+./gradlew :app:dependencies --configuration runtimeClasspath | grep -E 'slf4j|logback|log4j|logging'
+
+# 특정 라이브러리가 '왜' 들어왔는지
+./gradlew :app:dependencyInsight --configuration runtimeClasspath \
+  --dependency logback-classic</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Gradle Kotlin DSL 로 정리하기</h4>
+      <pre class="code" data-lang="kotlin"><code>dependencies {
+    // ① 특정 의존성에서만 빼기
+    implementation("com.example:legacy-sdk:2.4.0") {
+        exclude(group = "org.slf4j", module = "slf4j-simple")
+        exclude(group = "log4j",     module = "log4j")
+    }
+
+    // ② Spring Boot 의 기본 Logback 을 통째로 걷어내고 Log4j2 로
+    implementation("org.springframework.boot:spring-boot-starter-web") {
+        exclude(group = "org.springframework.boot",
+                module = "spring-boot-starter-logging")
+    }
+    implementation("org.springframework.boot:spring-boot-starter-log4j2")
+}
+
+// ③ 프로젝트 전체에서 영구 추방 — 가장 확실합니다 ★
+configurations.all {
+    exclude(group = "org.slf4j", module = "slf4j-log4j12")
+    exclude(group = "org.slf4j", module = "slf4j-simple")
+    exclude(group = "log4j",     module = "log4j")
+    exclude(group = "commons-logging", module = "commons-logging")
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>configurations.all</code> 은 테스트까지 포함합니다</b> —
+        테스트에서 <code>slf4j-simple</code> 을 쓰고 있었다면 같이 사라집니다.
+        범위를 좁히려면 <code>configurations.named("runtimeClasspath") { exclude(...) }</code>
+        처럼 <b>설정 이름을 지정</b>하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">브리지를 제대로 거는 법</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">옛 API 를 쓰는 라이브러리 길들이기</h4>
+      <pre class="code" data-lang="kotlin"><code>dependencies {
+    // 원본 API 를 '제거'하고 같은 이름의 껍데기를 넣는 것이 핵심입니다
+    implementation("org.slf4j:jcl-over-slf4j:2.0.17")   // commons-logging 대체
+    implementation("org.slf4j:log4j-over-slf4j:2.0.17") // Log4j 1.x 대체
+    implementation("org.slf4j:jul-to-slf4j:2.0.17")     // java.util.logging
+}
+
+configurations.all {
+    // 진짜 원본은 반드시 빼야 합니다 — 안 그러면 둘 다 클래스패스에
+    exclude(group = "commons-logging", module = "commons-logging")
+    exclude(group = "log4j", module = "log4j")
+}</code></pre>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// jul-to-slf4j 는 코드 한 줄이 더 필요합니다 (부팅 시)
+import org.slf4j.bridge.SLF4JBridgeHandler
+
+fun main() {
+    SLF4JBridgeHandler.removeHandlersForRootLogger()
+    SLF4JBridgeHandler.install()      // ★ 이걸 빼먹으면 아무 효과 없습니다
+    // ...
+}
+// logback.xml 에 LevelChangePropagator 를 두면 JUL 쪽 비용도 줄어듭니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이름이 비슷해서 헷갈리는 짝 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:46%">아티팩트</th><th>방향</th></tr>
+        <tr><td><code>log4j-over-slf4j</code></td><td>Log4j <b>1.x</b> → SLF4J</td></tr>
+        <tr><td><code>log4j-to-slf4j</code></td><td>Log4j <b>2.x API</b> → SLF4J</td></tr>
+        <tr><td><code>log4j-slf4j2-impl</code></td><td>SLF4J → <b>Log4j2</b> (바인딩)</td></tr>
+        <tr><td><code>slf4j-log4j12</code></td><td>SLF4J → Log4j 1.x <b>(폐기)</b></td></tr>
+        <tr><td><code>jcl-over-slf4j</code></td><td>commons-logging → SLF4J</td></tr>
+        <tr><td><code>jcl-to-slf4j</code></td><td>이런 건 <b>없습니다</b></td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>절대 같이 넣으면 안 되는 조합</b> —
+        <code>log4j-to-slf4j</code>(Log4j2 API 를 SLF4J 로) 와
+        <code>log4j-slf4j2-impl</code>(SLF4J 를 Log4j2 로) 를 함께 넣으면
+        <b>서로를 부르며 무한 루프</b>에 빠져 <code>StackOverflowError</code> 로 부팅이 죽습니다.
+        Spring Boot 기본은 앞의 것, Log4j2 스타터는 뒤의 것을 씁니다 —
+        <b>스타터를 갈아 끼울 때 앞의 것을 빼는 것</b>이 <code>spring-boot-starter-logging</code> exclude 의 진짜 이유입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">CI 에서 자동으로 막기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드가 깨지게 만들기</h4>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts — 바인딩이 둘 이상이면 빌드 실패
+val forbidden = listOf(
+    "slf4j-simple", "slf4j-log4j12", "slf4j-jdk14", "slf4j-jcl"
+)
+
+tasks.register("checkLoggingDeps") {
+    val rt = configurations.named("runtimeClasspath")
+    doLast {
+        val names = rt.get().resolvedConfiguration
+            .resolvedArtifacts.map { it.name }
+        val hits = names.filter { it in forbidden }
+        val bindings = names.count {
+            it == "logback-classic" || it == "log4j-slf4j2-impl"
+        }
+        check(hits.isEmpty()) { "금지된 SLF4J 바인딩: $hits" }
+        check(bindings == 1) { "SLF4J 바인딩이 ${bindings}개입니다" }
+    }
+}
+tasks.named("check") { dependsOn("checkLoggingDeps") }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">런타임에서 확인하기</h4>
+      <pre class="code" data-lang="kotlin"><code>// 부팅 로그 맨 앞에 '무엇이 잡혔는지' 남기기
+import org.slf4j.LoggerFactory
+
+fun logLoggingSetup() {
+    val f = LoggerFactory.getILoggerFactory()
+    println("SLF4J 구현: ${f.javaClass.name}")
+    //  ch.qos.logback.classic.LoggerContext        ← Logback
+    //  org.apache.logging.slf4j.Log4jLoggerFactory ← Log4j2
+    //  org.slf4j.helpers.NOPLoggerFactory          ← 아무것도 없음 ★
+}</code></pre>
+      <pre class="code" data-lang="bash" style="margin-bottom:0"><code># Logback 이 어느 설정 파일을 읽었는지 보기
+java -Dlogback.debug=true -jar app.jar 2&gt;&amp;1 | head -30
+#   |-INFO in ch.qos.logback...  Found resource [logback.xml] at [jar:file:/...]
+#   ↑ 여러 개가 찍히면 라이브러리가 자기 logback.xml 을 끼워 넣은 것입니다.
+
+# Spring Boot 라면 프로파일별 설정 확인
+java -Dlogging.config=classpath:logback-prod.xml -jar app.jar</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 로그가 안 나오면 <b>바인딩 0개</b>, 두 번 나오면 <b>appender 중복</b>,
+    부팅이 죽으면 <b>브리지 순환</b>입니다. 무엇을 하기 전에
+    <code>./gradlew :app:dependencies</code> 부터 보세요 —
+    <b>추측으로 의존성을 지우면 다른 곳이 조용히 망가집니다.</b></div>
+</section>
+
+
+<!-- ==================== lg05 ==================== -->
+<section class="sec" id="lg05">
+  <div class="sec-head rv">
+    <span class="no">LOG 05</span>
+    <h2>Logback 설정 — <span class="t">언제 자르고 언제 지우나</span></h2>
+    <p class="lead">
+      Logback 설정 파일은 처음 보면 어렵지만 사실 <b>세 가지</b>만 정하면 끝납니다 —
+      <b>무엇을 적을지(encoder) · 어디에 쌓을지(appender) · 언제 자르고 지울지(rollingPolicy)</b>.
+      나머지는 전부 이 셋의 변주입니다. 그리고 <b>디스크가 꽉 차서 서비스가 죽는 사고</b>는
+      거의 항상 마지막 하나를 안 걸어서 납니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 286" role="img" aria-label="Logback 이 로그 한 줄을 파일로 만드는 과정을 보여 주는 그림. 로거가 만든 이벤트를 appender 와 encoder 가 문자열로 바꾸고, 지금 쓰는 파일인 app.log 원통에 쌓인다. 파일 크기가 한계를 넘거나 날짜가 바뀌면 이름에 날짜와 순번이 붙은 압축 파일로 밀려나고, maxHistory 를 넘긴 오래된 파일은 조용히 지워진다. 아래에는 언제 자르나, 얼마나 남기나, 무엇을 적나 세 가지 결정 항목이 정리되어 있다.">
+      <text x="16" y="18" class="lbl">로그 한 줄이 파일이 되는 길 — 자르는 기준과 지우는 기준은 다릅니다</text>
+
+      <rect class="bx" x="16" y="40" width="120" height="44"/>
+      <text x="76" y="60" class="val" text-anchor="middle">Logger</text>
+      <text x="76" y="76" class="ann" text-anchor="middle">이름 · 레벨</text>
+
+      <path class="fl ar" d="M140 62 L172 62"/>
+
+      <rect class="bx bx-fw" x="176" y="40" width="164" height="44"/>
+      <text x="258" y="60" class="val" text-anchor="middle">Appender + Encoder</text>
+      <text x="258" y="76" class="ann" text-anchor="middle">패턴 · JSON 을 여기서 정합니다</text>
+
+      <path class="fl ar" d="M344 62 L392 62"/>
+
+      <path class="cyl" d="M396 48 L396 96 A56 12 0 0 0 508 96 L508 48 Z"/>
+      <ellipse class="cyl" cx="452" cy="48" rx="56" ry="12"/>
+      <text x="452" y="70" class="val" text-anchor="middle">app.log</text>
+      <text x="452" y="86" class="ann" text-anchor="middle">지금 쓰는 파일 하나</text>
+
+      <text x="524" y="56" class="ann">maxFileSize 를 넘거나</text>
+      <text x="524" y="70" class="ann">날짜가 바뀌면 아래로 밀립니다</text>
+
+      <path class="fl ar" d="M452 112 L452 132"/>
+
+      <text x="16" y="132" class="ttl">롤오버된 파일 — 이름에 날짜와 순번이 붙습니다</text>
+
+      <path class="cyl" d="M20 152 L20 190 A76 11 0 0 0 172 190 L172 152 Z"/>
+      <ellipse class="cyl" cx="96" cy="152" rx="76" ry="11"/>
+      <text x="96" y="172" class="ann" text-anchor="middle">app.2026-08-31.0.gz</text>
+      <text x="96" y="186" class="ann" text-anchor="middle">어제</text>
+
+      <path class="cyl" d="M194 152 L194 190 A76 11 0 0 0 346 190 L346 152 Z"/>
+      <ellipse class="cyl" cx="270" cy="152" rx="76" ry="11"/>
+      <text x="270" y="172" class="ann" text-anchor="middle">app.2026-08-30.0.gz</text>
+      <text x="270" y="186" class="ann" text-anchor="middle">그저께</text>
+
+      <path class="cyl" d="M368 152 L368 190 A76 11 0 0 0 520 190 L520 152 Z"/>
+      <ellipse class="cyl" cx="444" cy="152" rx="76" ry="11"/>
+      <text x="444" y="172" class="ann" text-anchor="middle">app.2026-08-01.0.gz</text>
+      <text x="444" y="186" class="ann" text-anchor="middle">30일 전</text>
+
+      <path class="fl ar" d="M524 170 L540 170"/>
+
+      <rect class="bx bx-warn" x="544" y="146" width="120" height="48"/>
+      <text x="604" y="166" class="val rs-t" text-anchor="middle">삭제</text>
+      <text x="604" y="182" class="ann" text-anchor="middle">maxHistory 초과</text>
+
+      <rect class="bx" x="16" y="208" width="210" height="52"/>
+      <text x="32" y="228" class="val">언제 자르나</text>
+      <text x="32" y="246" class="ann">SizeAndTimeBased — 날짜+크기</text>
+
+      <rect class="bx" x="235" y="208" width="210" height="52"/>
+      <text x="251" y="228" class="val">얼마나 남기나</text>
+      <text x="251" y="246" class="ann">maxHistory · totalSizeCap</text>
+
+      <rect class="bx" x="454" y="208" width="210" height="52"/>
+      <text x="470" y="228" class="val">무엇을 적나</text>
+      <text x="470" y="246" class="ann">pattern 또는 JSON 인코더</text>
+
+      <text x="16" y="278" class="lbl">용량이 찼다와 오래됐다는 다른 기준입니다 — 둘 다 걸어야 디스크가 안 찹니다</text>
+    </svg>
+    <div class="cap">원통이 파일입니다 — <b>지금 쓰는 것은 하나</b>, 나머지는 압축되어 밀려나고 결국 지워집니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복사해서 쓰는 <code>logback-spring.xml</code></h4>
+      <pre class="code" data-lang="xml"><code>&lt;!-- src/main/resources/logback-spring.xml
+     ★ 파일 이름이 -spring 이어야 &lt;springProfile&gt; 이 동작합니다 --&gt;
+&lt;configuration scan="false"&gt;
+  &lt;property name="LOG_DIR" value="${LOG_DIR:-./logs}"/&gt;
+
+  &lt;appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender"&gt;
+    &lt;encoder&gt;
+      &lt;pattern&gt;%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} %X{callId} - %msg%n&lt;/pattern&gt;
+    &lt;/encoder&gt;
+  &lt;/appender&gt;
+
+  &lt;appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender"&gt;
+    &lt;file&gt;${LOG_DIR}/app.log&lt;/file&gt;
+    &lt;rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy"&gt;
+      &lt;fileNamePattern&gt;${LOG_DIR}/app.%d{yyyy-MM-dd}.%i.log.gz&lt;/fileNamePattern&gt;
+      &lt;maxFileSize&gt;100MB&lt;/maxFileSize&gt;     &lt;!-- 이만큼 차면 자름 --&gt;
+      &lt;maxHistory&gt;30&lt;/maxHistory&gt;          &lt;!-- 30일 치만 --&gt;
+      &lt;totalSizeCap&gt;5GB&lt;/totalSizeCap&gt;     &lt;!-- ★ 이게 진짜 안전장치 --&gt;
+    &lt;/rollingPolicy&gt;
+    &lt;encoder&gt;
+      &lt;pattern&gt;%d{ISO8601} %-5level [%X{callId}] %logger{40} - %msg%n&lt;/pattern&gt;
+    &lt;/encoder&gt;
+  &lt;/appender&gt;
+
+  &lt;springProfile name="local"&gt;
+    &lt;root level="DEBUG"&gt;&lt;appender-ref ref="CONSOLE"/&gt;&lt;/root&gt;
+  &lt;/springProfile&gt;
+  &lt;springProfile name="prod"&gt;
+    &lt;root level="INFO"&gt;&lt;appender-ref ref="FILE"/&gt;&lt;/root&gt;
+  &lt;/springProfile&gt;
+&lt;/configuration&gt;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 가지 설정이 각각 무엇을 막나</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">설정</th><th>없으면 생기는 일</th></tr>
+        <tr><td><code>maxFileSize</code></td><td>파일 하나가 <b>수십 GB</b>가 되어 열리지 않음</td></tr>
+        <tr><td><code>maxHistory</code></td><td>파일이 <b>영원히</b> 쌓임</td></tr>
+        <tr><td><code>totalSizeCap</code></td><td>트래픽이 튀는 날 <b>디스크 full</b></td></tr>
+        <tr><td><code>.gz</code> 확장자</td><td>압축이 안 되어 용량 <b>수 배</b></td></tr>
+        <tr><td><code>cleanHistoryOnStart</code></td><td>재시작 잦은 배치에서 잔여물</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>maxHistory</code> 만 걸면 안전하지 않습니다</b> —
+        30일을 남기라고 했는데 하루에 200GB 가 쌓이면 그대로 디스크가 찹니다.
+        <b><code>totalSizeCap</code> 이 진짜 안전장치</b>입니다.
+        컨테이너라면 여기에 <b>볼륨 크기의 70% 정도</b>를 넣으세요.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>컨테이너에서는 파일을 안 쓰는 편이 낫습니다</b> —
+        <b>표준 출력으로만 찍고</b> 수집은 플랫폼(도커 로그 드라이버 · Fluent Bit · Loki)에 맡깁니다.
+        그러면 위 설정이 전부 필요 없어지고, 대신 <b>JSON 인코더</b>가 중요해집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">JSON 으로 찍기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조화 로그 — 검색이 필요해지는 순간</h4>
+      <pre class="code" data-lang="xml"><code>&lt;!-- ① Spring Boot 3.4+ 는 설정 한 줄이면 됩니다 (다음 섹션) --&gt;
+
+&lt;!-- ② 순수 Logback 이면 logstash-logback-encoder --&gt;
+&lt;appender name="JSON" class="ch.qos.logback.core.ConsoleAppender"&gt;
+  &lt;encoder class="net.logstash.logback.encoder.LogstashEncoder"&gt;
+    &lt;includeMdcKeyName&gt;callId&lt;/includeMdcKeyName&gt;
+    &lt;includeMdcKeyName&gt;userId&lt;/includeMdcKeyName&gt;
+    &lt;customFields&gt;{"service":"order-api","env":"prod"}&lt;/customFields&gt;
+    &lt;fieldNames&gt;
+      &lt;timestamp&gt;@timestamp&lt;/timestamp&gt;
+      &lt;message&gt;msg&lt;/message&gt;
+    &lt;/fieldNames&gt;
+  &lt;/encoder&gt;
+&lt;/appender&gt;</code></pre>
+      <pre class="code" data-lang="json" style="margin-bottom:0"><code>{"@timestamp":"2026-08-31T10:22:41.113Z","level":"INFO",
+ "logger_name":"com.example.OrderService","msg":"주문 완료",
+ "callId":"7f3a-91","userId":"u-2210","service":"order-api"}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 JSON 으로 바꾸나 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">상황</th><th>권장</th></tr>
+        <tr><td>로컬 개발</td><td><b>패턴</b> (사람이 읽음)</td></tr>
+        <tr><td>단일 서버 · grep 으로 충분</td><td>패턴</td></tr>
+        <tr><td>인스턴스 3대 이상</td><td><b>JSON</b></td></tr>
+        <tr><td>Loki · ELK · Datadog</td><td><b>JSON</b></td></tr>
+        <tr><td>요청 ID 로 추적해야 함</td><td><b>JSON</b> + MDC</td></tr>
+        <tr><td>규제 감사 로그</td><td>JSON + 별도 appender</td></tr>
+      </table></div>
+      <pre class="code" data-lang="xml" style="margin-bottom:0"><code>&lt;!-- 로컬은 사람용, 운영은 기계용 — 프로파일로 가릅니다 --&gt;
+&lt;springProfile name="local"&gt;
+  &lt;root level="DEBUG"&gt;&lt;appender-ref ref="CONSOLE"/&gt;&lt;/root&gt;
+&lt;/springProfile&gt;
+&lt;springProfile name="prod,stage"&gt;
+  &lt;root level="INFO"&gt;&lt;appender-ref ref="JSON"/&gt;&lt;/root&gt;
+&lt;/springProfile&gt;</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">비동기 appender 와 그 대가</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">AsyncAppender — 기본값이 위험합니다</h4>
+      <pre class="code" data-lang="xml"><code>&lt;appender name="ASYNC" class="ch.qos.logback.classic.AsyncAppender"&gt;
+  &lt;appender-ref ref="FILE"/&gt;
+
+  &lt;!-- 기본값 256. 트래픽이 있으면 너무 작습니다 --&gt;
+  &lt;queueSize&gt;8192&lt;/queueSize&gt;
+
+  &lt;!-- ★★ 기본값 20 = 큐가 80% 차면 INFO 이하를 조용히 버립니다 --&gt;
+  &lt;discardingThreshold&gt;0&lt;/discardingThreshold&gt;
+
+  &lt;!-- 큐가 꽉 차면? false=블로킹(느려짐) true=버림(로그 손실) --&gt;
+  &lt;neverBlock&gt;false&lt;/neverBlock&gt;
+
+  &lt;!-- 종료할 때 남은 큐를 비울 시간 --&gt;
+  &lt;maxFlushTime&gt;3000&lt;/maxFlushTime&gt;
+&lt;/appender&gt;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“장애 때 로그가 없다”의 범인</b> — <code>discardingThreshold</code> 기본값입니다.
+        부하가 몰려 큐가 차면 <b>바로 그 순간의 INFO 로그를 버립니다.</b>
+        정작 필요한 시점의 로그가 사라지는 셈이라,
+        <b>0 으로 두고 큐 크기로 조절</b>하는 편이 낫습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가상 스레드 · 코루틴 환경에서</h4>
+      <pre class="code" data-lang="text"><code>Java 21+ 의 가상 스레드에서 로깅이 문제가 되는 이유
+
+  Logback 의 오래된 버전은 appender 안에서 synchronized 를 썼습니다.
+  가상 스레드가 synchronized 블록에서 막히면 캐리어 스레드까지
+  함께 묶입니다(pinning). 로그 한 줄 때문에 처리량이 무너집니다.
+
+  → Logback 1.5.x 는 내부 잠금을 ReentrantLock 으로 바꿨습니다.
+    가상 스레드를 쓴다면 반드시 1.5 이상으로 올리세요.
+
+  → 코루틴은 캐리어 개념이 없어 pinning 은 없지만,
+    로그 I/O 가 Dispatchers.Default 스레드를 붙잡는 것은 같습니다.
+    파일/네트워크 appender 는 비동기로 빼는 편이 안전합니다.
+
+확인 방법
+  java -Djdk.tracePinnedThreads=full -jar app.jar
+  #  가상 스레드가 핀된 지점의 스택이 찍힙니다.
+  #  거기에 ch.qos.logback 이 보이면 버전부터 올리세요.</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> Logback 설정은 <b>encoder · appender · rollingPolicy</b> 셋입니다.
+    <b><code>totalSizeCap</code> 을 반드시 걸고</b>, 인스턴스가 여러 대면 <b>JSON</b> 으로 바꾸고,
+    <code>AsyncAppender</code> 를 쓴다면 <b><code>discardingThreshold</code> 를 0</b> 으로 두세요.
+    컨테이너라면 <b>표준 출력에만 찍고 수집은 플랫폼에 맡기는 것</b>이 가장 단순합니다.</div>
+</section>
+
+
+<!-- ==================== lg06 ==================== -->
+<section class="sec" id="lg06">
+  <div class="sec-head rv">
+    <span class="no">LOG 06</span>
+    <h2>코루틴과 <span class="t">MDC</span> — 요청 ID 가 사라지는 진짜 이유</h2>
+    <p class="lead">
+      MDC(Mapped Diagnostic Context)는 “이 요청에 붙는 꼬리표”를 담는 곳입니다. 문제는
+      <b>MDC 가 <code>ThreadLocal</code> 로 만들어져 있다</b>는 점입니다.
+      코루틴은 <b>스레드를 옮겨 다니는 것이 존재 이유</b>이므로, 아무 조치 없이 쓰면
+      <code>launch</code> 하나 넘어가는 순간 요청 ID 가 증발합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 296" role="img" aria-label="코루틴에서 MDC 가 사라지는 과정과 고치는 방법을 시간 순서로 보여 주는 시퀀스 그림. HTTP 스레드가 MDC 에 요청 아이디를 넣고 코루틴을 시작하면, 코루틴은 다른 스레드에서 돌기 때문에 MDC 를 조회해도 비어 있고 로그에 요청 아이디가 남지 않는다. 아래쪽에서는 MDCContext 를 문맥에 얹어 코루틴을 시작하면 디스패치할 때마다 MDC 가 복원되어 요청 아이디가 살아 있는 모습을 보여 준다.">
+      <text x="16" y="18" class="lbl">세로가 시간 — MDC 는 스레드에 붙어 있어 코루틴이 옮겨 가면 사라집니다</text>
+
+      <rect class="actr" x="26" y="30" width="130" height="28"/>
+      <text x="91" y="49" class="ann" text-anchor="middle">HTTP 스레드</text>
+      <rect class="actr" x="216" y="30" width="130" height="28"/>
+      <text x="281" y="49" class="ann" text-anchor="middle">코루틴 (IO 풀)</text>
+      <rect class="actr" x="406" y="30" width="130" height="28"/>
+      <text x="471" y="49" class="ann" text-anchor="middle">MDC (ThreadLocal)</text>
+      <rect class="actr" x="548" y="30" width="116" height="28"/>
+      <text x="606" y="49" class="ann" text-anchor="middle">로그 출력</text>
+
+      <path class="life" d="M91 60 L91 268"/>
+      <path class="life" d="M281 60 L281 268"/>
+      <path class="life" d="M471 60 L471 268"/>
+      <path class="life" d="M606 60 L606 268"/>
+
+      <rect class="actv" x="86" y="76" width="10" height="140"/>
+      <rect class="actv" x="276" y="100" width="10" height="146"/>
+
+      <path class="msg" d="M91 84 L463 84"/>
+      <text x="99" y="79" class="ann">1. MDC.put("callId","7f3a")</text>
+
+      <path class="msg" d="M91 110 L273 110"/>
+      <text x="99" y="105" class="ann">2. launch(Dispatchers.IO)</text>
+
+      <path class="msg" d="M281 136 L463 136"/>
+      <text x="289" y="131" class="ann">3. callId 를 찾는다</text>
+
+      <path class="msg-a" d="M463 160 L289 160"/>
+      <text x="297" y="155" class="ann rs-t">4. 비어 있음 — 다른 스레드니까</text>
+
+      <path class="msg" d="M281 184 L598 184"/>
+      <text x="289" y="179" class="ann rs-t">5. callId 없이 찍힙니다</text>
+
+      <path class="msg" d="M91 212 L273 212" style="stroke:#34d399"/>
+      <text x="99" y="207" class="ann ok-t">6. launch(MDCContext()) 로 감싸면</text>
+
+      <path class="msg" d="M281 238 L598 238" style="stroke:#34d399"/>
+      <text x="289" y="233" class="ann ok-t">7. 디스패치마다 MDC 를 복원합니다</text>
+
+      <text x="16" y="286" class="lbl">MDC 는 ThreadLocal 입니다 — 코루틴에서는 문맥을 명시적으로 들고 다녀야 합니다</text>
+    </svg>
+    <div class="cap">고치는 방법은 한 줄입니다 — <b><code>MDCContext()</code> 를 코루틴 문맥에 얹기</b>.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문제와 해법을 나란히</h4>
+      <pre class="code" data-lang="kotlin"><code>dependencies {
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-slf4j:1.10.2")
+}</code></pre>
+      <pre class="code" data-lang="kotlin"><code>import kotlinx.coroutines.slf4j.MDCContext
+import org.slf4j.MDC
+
+// ❌ 사라집니다
+suspend fun handleBad(id: Long) {
+    MDC.put("callId", newId())
+    log.info { "시작" }                 // callId 있음
+    withContext(Dispatchers.IO) {
+        log.info { "DB 조회" }          // callId 없음 ★
+    }
+}
+
+// ✅ 이어집니다
+suspend fun handleGood(id: Long) = withContext(MDCContext()) {
+    log.info { "시작" }
+    withContext(Dispatchers.IO) {
+        log.info { "DB 조회" }          // callId 살아 있음
+    }
+}
+
+// ✅ 문맥을 새로 만들면서 값을 넣기
+suspend fun handleWith(id: Long) =
+    withContext(MDCContext(mapOf("callId" to newId(), "orderId" to "$id"))) {
+        log.info { "주문 처리" }
+    }</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>MDCContext()</code> 가 하는 일</b> — 만들어지는 <b>그 순간</b>의 MDC 맵을 복사해 두었다가,
+        코루틴이 어느 스레드에 올라갈 때마다 그 스레드의 MDC 에 <b>넣고 · 끝나면 되돌립니다</b>.
+        <code>ThreadContextElement</code> 인터페이스의 구현체이고,
+        같은 방식으로 <b>보안 컨텍스트나 트랜잭션 컨텍스트</b>도 전파할 수 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">놓치기 쉬운 다섯 자리 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">자리</th><th>결과</th></tr>
+        <tr><td><code>launch</code>/<code>async</code> 시작</td><td>문맥 <b>없으면 잃음</b></td></tr>
+        <tr><td><code>withContext(IO)</code></td><td>부모 문맥은 <b>상속됨</b></td></tr>
+        <tr><td>MDCContext <b>뒤에</b> MDC.put</td><td>자식에 <b>안 보임</b></td></tr>
+        <tr><td><code>GlobalScope.launch</code></td><td>전부 <b>잃음</b></td></tr>
+        <tr><td>콜백 · CompletableFuture</td><td>전부 <b>잃음</b></td></tr>
+        <tr><td>Flow 의 <code>flowOn</code></td><td>업스트림에서 <b>잃음</b></td></tr>
+      </table></div>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// ⚠ 순서 함정 — 이건 안 됩니다
+withContext(MDCContext()) {          // 이 시점의 MDC 를 스냅샷
+    MDC.put("step", "2")             // 스냅샷 이후라 자식은 못 봄
+    launch { log.info { "..." } }    // step 없음
+}
+
+// ✅ 값을 넣고 나서 문맥을 만듭니다
+MDC.put("step", "2")
+withContext(MDCContext()) {
+    launch { log.info { "..." } }    // step 있음
+}
+
+// ✅ 또는 맵으로 직접 주기 (가장 명확합니다)
+withContext(MDCContext(MDC.getCopyOfContextMap().orEmpty() + ("step" to "2"))) {
+    launch { log.info { "..." } }
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">서버 진입점에서 한 번만</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Spring WebFlux · 코루틴 컨트롤러</h4>
+      <pre class="code" data-lang="kotlin"><code>// 필터에서 한 번 심고, 컨트롤러는 아무것도 몰라도 됩니다
+@Component
+class CallIdFilter : WebFilter {
+    override fun filter(ex: ServerWebExchange, chain: WebFilterChain): Mono&lt;Void&gt; {
+        val id = ex.request.headers.getFirst("X-Request-Id")
+            ?: UUID.randomUUID().toString().take(8)
+        return chain.filter(ex)
+            .contextWrite { it.put("callId", id) }      // Reactor 컨텍스트
+    }
+}
+
+// 코루틴 컨트롤러에서 받아 MDC 로 옮기기
+@GetMapping("/orders/{id}")
+suspend fun get(@PathVariable id: Long): OrderDto {
+    val callId = currentCoroutineContext()[ReactorContext]
+        ?.context?.getOrDefault("callId", "-") ?: "-"
+    return withContext(MDCContext(mapOf("callId" to callId))) {
+        log.info { "조회 $id" }
+        service.find(id)
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>WebFlux 는 두 겹입니다</b> — Reactor 의 <code>Context</code> 와 MDC 를
+        <b>둘 다</b> 다뤄야 합니다. 서블릿 기반 MVC 라면
+        <code>OncePerRequestFilter</code> 에서 <code>MDC.put</code> 만 하면 되므로 훨씬 단순합니다.
+        <b>이 복잡도가 WebFlux 를 고를 때 계산에 넣어야 할 비용</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">서블릿 MVC — 이쪽이 훨씬 쉽습니다</h4>
+      <pre class="code" data-lang="kotlin"><code>@Component
+class MdcFilter : OncePerRequestFilter() {
+    override fun doFilterInternal(
+        req: HttpServletRequest,
+        res: HttpServletResponse,
+        chain: FilterChain,
+    ) {
+        val id = req.getHeader("X-Request-Id")
+            ?: UUID.randomUUID().toString().take(8)
+        MDC.put("callId", id)
+        MDC.put("path", req.requestURI)
+        res.setHeader("X-Request-Id", id)      // 응답에도 돌려주기 ★
+        try {
+            chain.doFilter(req, res)
+        } finally {
+            MDC.clear()                        // ★ 반드시. 스레드 풀이라 남습니다
+        }
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>MDC.clear()</code> 를 <code>finally</code> 에 넣지 않으면</b> —
+        톰캣 스레드가 재사용되면서 <b>다음 사용자의 로그에 앞 사람의 ID</b>가 붙습니다.
+        조사할 때 완전히 잘못된 결론으로 이어지므로,
+        <b>이건 버그가 아니라 사고</b>로 취급하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">직접 ThreadContextElement 만들기</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">MDCContext 가 실제로 하는 일</h4>
+      <pre class="code" data-lang="kotlin"><code>// 개념적으로는 이 정도입니다 (실제 구현은 라이브러리를 보세요)
+class MyMdcContext(
+    private val snapshot: Map&lt;String, String&gt;? = MDC.getCopyOfContextMap(),
+) : ThreadContextElement&lt;Map&lt;String, String&gt;?&gt;,
+    AbstractCoroutineContextElement(Key) {
+
+    companion object Key : CoroutineContext.Key&lt;MyMdcContext&gt;
+
+    // 코루틴이 이 스레드에 올라갈 때
+    override fun updateThreadContext(context: CoroutineContext): Map&lt;String, String&gt;? {
+        val old = MDC.getCopyOfContextMap()
+        if (snapshot == null) MDC.clear() else MDC.setContextMap(snapshot)
+        return old
+    }
+
+    // 코루틴이 이 스레드에서 내려올 때
+    override fun restoreThreadContext(
+        context: CoroutineContext,
+        oldState: Map&lt;String, String&gt;?,
+    ) {
+        if (oldState == null) MDC.clear() else MDC.setContextMap(oldState)
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비용과 대안</h4>
+      <pre class="code" data-lang="text"><code>MDCContext 의 비용
+
+  · 디스패치할 때마다 맵을 두 번 바꿔 끼웁니다.
+  · 코루틴 하나가 수천 번 중단/재개하면 그만큼 반복됩니다.
+  · 값이 3~4개면 무시할 수준이지만,
+    수십 개를 넣어 두면 눈에 띄기 시작합니다.
+
+줄이는 법
+  ① MDC 에는 '검색 키'만 넣습니다 (callId, userId, tenantId)
+     — 본문 데이터는 로그 메시지나 구조화 필드로.
+  ② 뜨거운 루프 안에서 코루틴을 만들지 않습니다.
+  ③ 정말 많은 값이 필요하면 CoroutineContext 에 직접 담고
+     로그를 찍는 지점에서만 MDC 로 옮깁니다.
+
+대안 — OpenTelemetry
+  분산 추적을 이미 쓴다면 traceId/spanId 가 자동으로 MDC 에 들어옵니다.
+  (logging.pattern 에 %mdc{trace_id} 를 넣기만 하면 됩니다)
+  요청 ID 를 직접 만들기 전에 이미 있는지부터 확인하세요.</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> MDC 는 <b>스레드에 붙는 꼬리표</b>라서 코루틴에서는 그냥 두면 끊깁니다.
+    <b><code>kotlinx-coroutines-slf4j</code> 의 <code>MDCContext()</code></b> 를 코루틴 문맥에 얹으면 이어지고,
+    서블릿 기반이면 <b>필터에서 <code>MDC.put</code> + <code>finally { MDC.clear() }</code></b> 로 끝납니다.
+    MDC 에는 <b>검색에 쓸 키만</b> 넣으세요.</div>
+</section>

@@ -1,0 +1,596 @@
+
+
+<!-- ==================== lg08 ==================== -->
+<section class="sec" id="lg08">
+  <div class="sec-head rv">
+    <span class="no">LOG 08</span>
+    <h2>ASP.NET Core 연동 — <span class="t">요청 로그</span>와 스코프</h2>
+    <p class="lead">
+      웹 앱에서 로그의 90%는 <b>요청과 함께</b> 나옵니다. 문제는 두 가지입니다 —
+      <b>기본 요청 로그가 너무 시끄럽고</b>, <b>줄마다 어느 요청인지 알 수 없다</b>는 것.
+      전자는 필터로, 후자는 <b>스코프</b>로 해결합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 256" role="img" aria-label="HTTP 요청 하나가 지나가며 로그가 만들어지는 과정을 세 개의 스윔레인으로 나눈 그림. 위 레인은 미들웨어로 HttpLogging, TraceId 부여, BeginScope 가 차례로 실행된다. 가운데 레인은 앱 코드로 주문 처리 로그와 예외 발생 로그가 나온다. 아래 레인은 남는 로그로, 요청 요약 한 줄과 스코프 값이 자동으로 붙은 로그가 남는다.">
+      <text x="16" y="18" class="lbl">가로줄 하나가 역할 하나 — 값이 어디서 붙는지 보세요</text>
+
+      <rect class="lane" x="106" y="34" width="558" height="56"/>
+      <rect class="lane-alt" x="106" y="94" width="558" height="56"/>
+      <rect class="lane" x="106" y="154" width="558" height="56"/>
+
+      <rect class="lane-hd" x="16" y="34" width="84" height="56"/>
+      <text x="58" y="67" class="val" text-anchor="middle">미들웨어</text>
+      <rect class="lane-hd" x="16" y="94" width="84" height="56"/>
+      <text x="58" y="127" class="val" text-anchor="middle">앱 코드</text>
+      <rect class="lane-hd" x="16" y="154" width="84" height="56"/>
+      <text x="58" y="187" class="val" text-anchor="middle">남는 로그</text>
+
+      <rect class="bx" x="120" y="44" width="118" height="36"/>
+      <text x="179" y="60" class="ann" text-anchor="middle">UseHttpLogging</text>
+      <text x="179" y="74" class="ann" text-anchor="middle">요청/응답 기록</text>
+
+      <path class="fl ar" d="M242 62 L258 62"/>
+
+      <rect class="bx" x="262" y="44" width="118" height="36"/>
+      <text x="321" y="60" class="ann" text-anchor="middle">TraceId 부여</text>
+      <text x="321" y="74" class="ann" text-anchor="middle">Activity 시작</text>
+
+      <path class="fl ar" d="M384 62 L400 62"/>
+
+      <rect class="bx bx-fw" x="404" y="44" width="134" height="36"/>
+      <text x="471" y="60" class="ann" text-anchor="middle">BeginScope</text>
+      <text x="471" y="74" class="ann" text-anchor="middle">요청 ID · 사용자</text>
+
+      <path class="fl ar" d="M471 84 L471 100"/>
+
+      <rect class="bx" x="404" y="102" width="134" height="36"/>
+      <text x="471" y="118" class="ann" text-anchor="middle">주문 처리</text>
+      <text x="471" y="132" class="ann" text-anchor="middle">LogInformation</text>
+
+      <path class="fl ar" d="M542 120 L558 120"/>
+
+      <rect class="bx bx-warn" x="562" y="102" width="102" height="36"/>
+      <text x="613" y="118" class="ann rs-t" text-anchor="middle">예외 발생</text>
+      <text x="613" y="132" class="ann" text-anchor="middle">LogError</text>
+
+      <path class="fl ar" d="M613 142 L613 158"/>
+      <path class="ln ar" d="M179 84 L179 158" style="opacity:.55"/>
+
+      <rect class="bx" x="120" y="162" width="180" height="36"/>
+      <text x="210" y="178" class="ann" text-anchor="middle">요청 요약 1줄</text>
+      <text x="210" y="192" class="ann" text-anchor="middle">200 · 34 ms</text>
+
+      <rect class="bx bx-ok" x="430" y="162" width="234" height="36"/>
+      <text x="547" y="178" class="ann ok-t" text-anchor="middle">TraceId · 요청 ID · 사용자</text>
+      <text x="547" y="192" class="ann" text-anchor="middle">스코프가 자동으로 붙습니다</text>
+
+      <text x="16" y="232" class="lbl">스코프를 한 번 열어 두면 그 안의 모든 로그에 같은 값이 붙습니다</text>
+      <text x="16" y="248" class="lbl">레인을 넘는 화살표마다 무엇이 더해졌는지 적어 두세요</text>
+    </svg>
+    <div class="cap">스윔레인 — <b>줄을 넘는 화살표</b>가 값이 붙는 지점입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 요청 로그의 소음 줄이기</h4>
+      <pre class="code" data-lang="json"><code>{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.AspNetCore.Hosting.Diagnostics": "Information",
+      "Microsoft.AspNetCore.Routing.EndpointMiddleware": "Warning",
+      "Microsoft.AspNetCore.Mvc.Infrastructure": "Warning",
+      "Microsoft.AspNetCore.StaticFiles": "Warning",
+      "Microsoft.Hosting.Lifetime": "Information"
+    }
+  }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>요청 하나에 기본 로그가 5~8줄</b> 나옵니다 —
+        "요청 시작 · 라우트 매칭 · 액션 실행 · 결과 실행 · 요청 완료".
+        위처럼 <code>Microsoft.AspNetCore</code> 를 <code>Warning</code> 으로 누르고
+        <b>필요한 하나만 되살리는 것</b>이 정석입니다.
+        Serilog 를 쓴다면 <code>UseSerilogRequestLogging()</code> 이 이 전부를 <b>한 줄</b>로 대체합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">HTTP 로깅 미들웨어 (내장)</h4>
+      <pre class="code" data-lang="csharp"><code>builder.Services.AddHttpLogging(o =&gt;
+{
+    o.LoggingFields = HttpLoggingFields.RequestPath
+                    | HttpLoggingFields.RequestMethod
+                    | HttpLoggingFields.ResponseStatusCode
+                    | HttpLoggingFields.Duration;        // ★ 본문은 빼세요
+
+    o.RequestHeaders.Add("X-Client-Version");             // 허용 목록 방식
+    o.ResponseHeaders.Add("X-Trace-Id");
+    o.CombineLogs = true;                                 // 요청/응답을 한 줄로
+});
+
+var app = builder.Build();
+app.UseHttpLogging();
+
+// 특정 엔드포인트만 본문까지 (진단용 · 임시)
+app.MapPost("/orders", Handler)
+   .WithHttpLogging(HttpLoggingFields.RequestBody);</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>헤더는 기본이 마스킹입니다</b> — <code>Authorization</code>·<code>Cookie</code> 는
+        <code>[Redacted]</code> 로 나옵니다. 허용 목록에 <b>직접 추가하지 마세요</b>.
+        <b><code>RequestBody</code>·<code>ResponseBody</code> 는 운영에서 켜지 마세요</b> —
+        비밀번호·카드번호가 그대로 남고, 큰 본문은 메모리도 먹습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">스코프 — <span class="t">요청 하나를 끝까지 따라가기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>BeginScope</code> 미들웨어</h4>
+      <pre class="code" data-lang="csharp"><code>app.Use(async (ctx, next) =&gt;
+{
+    var log = ctx.RequestServices.GetRequiredService&lt;ILogger&lt;Program&gt;&gt;();
+
+    var traceId = Activity.Current?.TraceId.ToString()
+                  ?? ctx.TraceIdentifier;
+
+    ctx.Response.Headers["X-Trace-Id"] = traceId;   // ★ 클라이언트에도 돌려줍니다
+
+    using (log.BeginScope(new Dictionary&lt;string, object?&gt;
+    {
+        ["TraceId"]  = traceId,
+        ["UserId"]   = ctx.User.FindFirst("sub")?.Value,
+        ["TenantId"] = ctx.Request.Headers["X-Tenant"].ToString()
+    }))
+    {
+        await next(ctx);
+    }
+});</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>스코프 값을 실제로 출력하려면 provider 설정이 필요합니다</b> —
+        <code>Console</code> 은 <code>IncludeScopes</code>(기본 <code>false</code>),
+        JSON 포매터는 자동, Serilog 는 <code>Enrich.FromLogContext()</code>.
+        "스코프를 넣었는데 안 보인다"의 원인은 대부분 여기입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스코프를 켜는 설정</h4>
+      <pre class="code" data-lang="json"><code>{
+  "Logging": {
+    "Console": {
+      "FormatterName": "json",
+      "IncludeScopes": true,
+      "JsonWriterOptions": { "Indented": false },
+      "FormatterOptions": {
+        "TimestampFormat": "yyyy-MM-ddTHH:mm:ss.fffZ",
+        "UseUtcTimestamp": true
+      }
+    }
+  }
+}</code></pre>
+      <pre class="code" data-lang="csharp"><code>// 코드로 켤 때
+builder.Logging.AddJsonConsole(o =&gt;
+{
+    o.IncludeScopes = true;
+    o.UseUtcTimestamp = true;
+});
+
+// 사람이 보는 콘솔이라면 SimpleConsole 이 읽기 좋습니다
+builder.Logging.AddSimpleConsole(o =&gt;
+{
+    o.SingleLine = true;
+    o.IncludeScopes = true;
+    o.TimestampFormat = "HH:mm:ss ";
+});</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>컨테이너에는 JSON, 개발 PC 에는 SimpleConsole</b> 이 좋습니다.
+        컨테이너 로그는 사람이 아니라 <b>수집기가 읽습니다</b> — 여러 줄로 예쁘게 찍으면
+        수집기가 한 줄씩 다른 이벤트로 오해합니다.
+        <b>스택트레이스가 여러 줄로 쪼개져 검색이 안 되는 사고</b>가 여기서 나옵니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">감사 로그가 필요할 때 — <span class="t"><code>W3CLogger</code></span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="csharp"><code>// 애플리케이션 로그와 별개로, 웹 서버 형식(W3C Extended)의 접근 로그를
+// 파일로 남깁니다. 보안 감사·트래픽 분석 요구가 있을 때 씁니다.
+builder.Services.AddW3CLogging(o =&gt;
+{
+    o.LoggingFields   = W3CLoggingFields.All &amp; ~W3CLoggingFields.UserName;
+    o.LogDirectory    = @"C:\logs\w3c";
+    o.FlushInterval   = TimeSpan.FromSeconds(2);
+    o.FileSizeLimit   = 50 * 1024 * 1024;
+    o.RetainedFileCountLimit = 30;
+    o.FileName        = "access-";
+    o.AdditionalRequestHeaders.Add("X-Tenant");
+});
+
+var app = builder.Build();
+app.UseW3CLogging();</code></pre>
+    <div class="note tip">
+      <b>언제 쓰나</b> — IIS 접근 로그와 같은 형식이 필요할 때, 또는
+      <b>"누가 언제 어떤 URL 을 호출했는가"</b>를 감사 목적으로 별도 보관해야 할 때입니다.
+      애플리케이션 로그와 <b>보관 기간·권한이 다른</b> 경우가 많아 파일을 분리하는 것이 맞습니다.
+      쿠버네티스에 배포한다면 보통 <b>Ingress/프록시의 접근 로그</b>가 이 역할을 대신하므로
+      앱에서 또 남길 이유가 없습니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 요청 로그는 <b>줄이는 것</b>과 <b>묶는 것</b> 두 가지입니다.
+    <code>Microsoft.AspNetCore</code> 를 <code>Warning</code> 으로 누르고 요약 한 줄만 남기고,
+    <code>BeginScope</code> 로 <b>TraceId · UserId</b> 를 붙여 두면 조사 시간이 열 배 줄어듭니다.</div>
+</section>
+
+
+<!-- ==================== lg09 ==================== -->
+<section class="sec" id="lg09">
+  <div class="sec-head rv">
+    <span class="no">LOG 09</span>
+    <h2><code>Activity</code> 와 분산 추적 — <span class="t">TraceId 는 어떻게 자동으로 붙나</span></h2>
+    <p class="lead">
+      서비스가 하나면 로그만으로 충분합니다. 둘만 되어도 <b>"이 요청이 저쪽에서 뭘 했나"</b>를
+      이어 붙일 방법이 필요합니다. .NET 은 <code>System.Diagnostics.Activity</code> 로
+      <b>표준 W3C Trace Context</b> 를 처리하고, 로거는 그 값을 <b>알아서 읽어 씁니다</b>.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 286" role="img" aria-label="분산 추적에서 TraceId 가 전파되는 시퀀스 다이어그램. 브라우저가 주문 API 를 호출하면 주문 API 가 Activity 를 시작하며 TraceId 를 만든다. 주문 API 는 결제 API 를 호출할 때 traceparent 헤더를 그대로 전달하고, 결제 API 의 로그에는 같은 TraceId 와 다른 SpanId 가 찍힌다. 두 서비스의 로그가 로그 수집기에서 같은 TraceId 로 묶인다.">
+      <text x="16" y="18" class="lbl">세로가 시간 — TraceId 는 헤더를 타고 넘어갑니다</text>
+
+      <rect class="actr" x="26" y="30" width="112" height="28"/>
+      <text x="82" y="49" class="ann" text-anchor="middle">브라우저</text>
+      <rect class="actr" x="196" y="30" width="112" height="28"/>
+      <text x="252" y="49" class="ann" text-anchor="middle">주문 API</text>
+      <rect class="actr" x="376" y="30" width="112" height="28"/>
+      <text x="432" y="49" class="ann" text-anchor="middle">결제 API</text>
+      <rect class="actr" x="546" y="30" width="112" height="28"/>
+      <text x="602" y="49" class="ann" text-anchor="middle">로그 수집기</text>
+
+      <path class="life" d="M82 60 L82 244"/>
+      <path class="life" d="M252 60 L252 244"/>
+      <path class="life" d="M432 60 L432 244"/>
+      <path class="life" d="M602 60 L602 244"/>
+
+      <rect class="actv" x="247" y="74" width="10" height="150"/>
+      <rect class="actv" x="427" y="110" width="10" height="60"/>
+
+      <path class="msg" d="M82 78 L244 78"/>
+      <text x="90" y="73" class="ann">1. GET /orders — traceparent 없음</text>
+
+      <text x="262" y="96" class="ann cy-t">2. Activity 시작 → TraceId 생성</text>
+
+      <path class="msg" d="M260 118 L424 118"/>
+      <text x="266" y="113" class="ann">3. traceparent 헤더를 그대로 전달</text>
+
+      <path class="msg" d="M440 140 L594 140"/>
+      <text x="446" y="135" class="ann">4. 결제 로그 — 같은 TraceId, 다른 SpanId</text>
+
+      <path class="msg-a" d="M424 162 L266 162"/>
+      <text x="272" y="157" class="ann">5. 응답</text>
+
+      <path class="msg" d="M260 184 L594 184"/>
+      <text x="266" y="179" class="ann">6. 주문 로그 — 같은 TraceId</text>
+
+      <path class="msg-a" d="M244 210 L90 210"/>
+      <text x="96" y="205" class="ann ok-t">7. 200 OK · 응답 헤더에 TraceId</text>
+
+      <text x="16" y="262" class="lbl">TraceId 는 헤더로 전파되고 로거는 Activity.Current 에서 읽어 붙입니다</text>
+      <text x="16" y="278" class="lbl">그래서 서비스가 몇 개든 로그 한 줄에서 전체 요청을 되짚을 수 있습니다</text>
+    </svg>
+    <div class="cap">시퀀스 — <b>TraceId 는 같고 SpanId 만 다릅니다</b>. 그것이 "같은 요청"의 정의입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">원리 — 헤더 한 줄이 전부입니다</h4>
+      <pre class="code" data-lang="text"><code>traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+             │  │                                │                │
+             │  │                                │                └ 플래그(샘플링됨)
+             │  │                                └ SpanId  — 이 구간 하나의 ID
+             │  └ TraceId — 요청 전체에 하나. 서비스를 넘어가도 같습니다
+             └ 버전
+
+# .NET 은 이 헤더를 자동으로 읽고(수신), 자동으로 붙입니다(HttpClient 송신).
+# 코드를 한 줄도 안 써도 이미 동작합니다 — .NET 5 부터 기본이 W3C 형식입니다.</code></pre>
+      <pre class="code" data-lang="csharp"><code>// 지금 요청의 추적 값 읽기
+var act = Activity.Current;
+string? traceId = act?.TraceId.ToString();   // 32자리 hex
+string? spanId  = act?.SpanId.ToString();    // 16자리 hex
+
+// 내 코드 구간을 하나의 span 으로 만들기
+private static readonly ActivitySource Source = new("MyApp.Orders", "1.0.0");
+
+using var activity = Source.StartActivity("주문 검증");
+activity?.SetTag("order.id", orderId);
+activity?.SetTag("order.total", total);
+// ... 작업 ...
+activity?.SetStatus(ActivityStatusCode.Error, "재고 부족");</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>ActivitySource</code> 는 <code>static readonly</code> 로 한 번만 만듭니다.</b>
+        이름은 보통 <b>어셈블리 이름</b>을 씁니다 — 나중에 OpenTelemetry 에서
+        <code>AddSource("MyApp.Orders")</code> 로 <b>이 이름을 지정해야</b> 수집됩니다.
+        <code>StartActivity</code> 는 <b>아무도 안 듣고 있으면 <code>null</code></b> 을 돌려줍니다(그래서 <code>?.</code>).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로그에 TraceId 를 자동으로 넣기</h4>
+      <pre class="code" data-lang="csharp"><code>// ① 내장 Console — 그냥 켜면 됩니다
+builder.Logging.AddJsonConsole();
+builder.Services.Configure&lt;LoggerFilterOptions&gt;(_ =&gt; { });
+// JSON 포매터는 TraceId·SpanId 를 이벤트에 넣어 줍니다.
+// (ActivityTrackingOptions 기본값이 TraceId|SpanId|ParentId)
+
+// ② 스코프에 명시적으로 넣기
+builder.Logging.Configure(o =&gt; o.ActivityTrackingOptions =
+      ActivityTrackingOptions.TraceId
+    | ActivityTrackingOptions.SpanId
+    | ActivityTrackingOptions.ParentId
+    | ActivityTrackingOptions.Baggage);</code></pre>
+      <pre class="code" data-lang="csharp"><code>// ③ Serilog — enricher 하나면 끝
+//    dotnet add package Serilog.Enrichers.Span (또는 직접 작성)
+Log.Logger = new LoggerConfiguration()
+    .Enrich.FromLogContext()
+    .Enrich.WithProperty("service.name", "order-api")
+    .Enrich.With&lt;TraceEnricher&gt;()
+    .WriteTo.Seq("http://seq:5341")
+    .CreateLogger();
+
+public sealed class TraceEnricher : ILogEventEnricher
+{
+    public void Enrich(LogEvent e, ILogEventPropertyFactory f)
+    {
+        var a = Activity.Current;
+        if (a is null) return;
+        e.AddPropertyIfAbsent(f.CreateProperty("TraceId", a.TraceId.ToString()));
+        e.AddPropertyIfAbsent(f.CreateProperty("SpanId",  a.SpanId.ToString()));
+    }
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>왜 로그에 TraceId 가 있어야 하나</b> — 추적(trace)은 <b>어디서 시간이 갔는지</b>를,
+        로그는 <b>무슨 일이 있었는지</b>를 말합니다. 둘을 잇는 열쇠가 TraceId 입니다.
+        "느린 요청 찾기 → 그 요청의 로그 보기" 가 <b>클릭 한 번</b>이 되느냐,
+        <b>시각으로 뒤지느냐</b>의 차이입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">OpenTelemetry 로 내보내기 <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배선 — 로그·추적·지표를 한 번에</h4>
+      <pre class="code" data-lang="csharp"><code>// dotnet add package OpenTelemetry.Extensions.Hosting
+// dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+// dotnet add package OpenTelemetry.Instrumentation.AspNetCore
+// dotnet add package OpenTelemetry.Instrumentation.Http
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r =&gt; r.AddService("order-api", serviceVersion: "1.4.2"))
+    .WithTracing(t =&gt; t
+        .AddAspNetCoreInstrumentation(o =&gt;
+            o.Filter = ctx =&gt; !ctx.Request.Path.StartsWithSegments("/health"))
+        .AddHttpClientInstrumentation()
+        .AddSource("MyApp.Orders")            // ★ 내 ActivitySource 이름
+        .AddOtlpExporter())
+    .WithMetrics(m =&gt; m
+        .AddAspNetCoreInstrumentation()
+        .AddRuntimeInstrumentation()
+        .AddOtlpExporter());
+
+// 로그도 같은 파이프라인으로
+builder.Logging.AddOpenTelemetry(o =&gt;
+{
+    o.IncludeScopes = true;
+    o.IncludeFormattedMessage = true;
+    o.ParseStateValues = true;
+    o.AddOtlpExporter();
+});</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>OTLP 로 내보내면 백엔드를 나중에 고를 수 있습니다</b> —
+        Jaeger · Tempo · Honeycomb · Datadog · Application Insights 가 전부 OTLP 를 받습니다.
+        <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> 환경 변수만 바꾸면 목적지가 바뀝니다.
+        <b>벤더 SDK 를 코드에 심지 마세요</b> — 그것이 OpenTelemetry 의 존재 이유입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로그와 추적, 무엇을 어디에 담나</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">담을 것</th><th>어디에</th></tr>
+        <tr><td>업무 사건 (주문 접수)</td><td><b>로그</b> — 사람이 읽을 문장 + 필드</td></tr>
+        <tr><td>구간 소요 시간</td><td><b>추적(span)</b> — 로그로 재지 마세요</td></tr>
+        <tr><td>초당 처리량 · 오류율</td><td><b>지표(metric)</b> — 로그를 세는 것보다 훨씬 쌉니다</td></tr>
+        <tr><td>예외 스택</td><td><b>로그</b> + span 에 <code>SetStatus(Error)</code></td></tr>
+        <tr><td>요청 식별자</td><td><b>양쪽 모두</b> — TraceId 로 잇습니다</td></tr>
+        <tr><td>개인정보</td><td><b>어느 쪽에도 안 됩니다</b></td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>흔한 낭비</b> — 처리량을 세려고 <b>요청마다 Information 로그</b>를 남기고
+        수집기에서 <code>count(*)</code> 를 돌리는 것.
+        같은 일을 <code>Meter</code> 카운터 하나로 하면
+        <b>저장 비용이 자릿수 단위로 줄어듭니다</b>.
+        로그는 <b>세는 도구가 아니라 읽는 도구</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>traceparent</code> 헤더 한 줄이 서비스 사이를 잇고,
+    .NET 은 그것을 <code>Activity.Current</code> 로 들고 있습니다.
+    로거가 그 값을 읽어 붙이므로 <b>우리가 할 일은 켜 두는 것뿐</b>입니다.
+    시간은 span, 사건은 로그, 개수는 지표 — <b>담을 곳을 나누면 비용이 내려갑니다</b>.</div>
+</section>
+
+
+<!-- ==================== lg10 ==================== -->
+<section class="sec" id="lg10">
+  <div class="sec-head rv">
+    <span class="no">LOG 10</span>
+    <h2>성능과 비용 — <span class="t">로그는 공짜가 아닙니다</span></h2>
+    <p class="lead">
+      로그 한 줄에는 <b>문자열 할당 · 직렬화 · 파일 I/O · 네트워크 · 저장 요금</b>이 붙습니다.
+      대부분은 무시해도 되지만, <b>어디서 대가를 치르는지</b>는 알아야
+      "로그를 더 남길까 말까"를 감이 아니라 <b>선택</b>으로 할 수 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 264" role="img" aria-label="로깅 설정 다섯 가지를 응답 지연, 유실 위험, 저장 비용, 장애 조사 가치 네 기준으로 평가한 발산 색 매트릭스. 초록일수록 이득, 붉을수록 대가다. 동기 파일 쓰기는 유실 위험이 낮지만 지연이 나쁘고, 비동기 큐는 지연이 좋지만 종료 시 유실 위험이 크며, Trace 를 항상 켜면 지연과 비용이 모두 나쁘고 조사 가치만 높다. 완벽한 줄은 없다.">
+      <text x="16" y="18" class="lbl">무엇을 얻고 무엇을 내주는가 — 완벽한 줄은 없습니다</text>
+
+      <text x="228" y="40" class="ann" text-anchor="middle">응답 지연</text>
+      <text x="356" y="40" class="ann" text-anchor="middle">유실 위험</text>
+      <text x="484" y="40" class="ann" text-anchor="middle">저장 비용</text>
+      <text x="612" y="40" class="ann" text-anchor="middle">조사 가치</text>
+
+      <text x="16" y="66" class="ann">동기 파일 쓰기</text>
+      <rect class="cel d-n1" x="168" y="48" width="120" height="28"/><text x="228" y="66" class="tk" text-anchor="middle">느림</text>
+      <rect class="cel d-p2" x="296" y="48" width="120" height="28"/><text x="356" y="66" class="tk" text-anchor="middle">안전</text>
+      <rect class="cel d-0" x="424" y="48" width="120" height="28"/><text x="484" y="66" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel d-p1" x="552" y="48" width="120" height="28"/><text x="612" y="66" class="tk" text-anchor="middle">좋음</text>
+
+      <text x="16" y="98" class="ann">비동기 큐 sink</text>
+      <rect class="cel d-p2" x="168" y="80" width="120" height="28"/><text x="228" y="98" class="tk" text-anchor="middle">빠름</text>
+      <rect class="cel d-n2" x="296" y="80" width="120" height="28"/><text x="356" y="98" class="tk" text-anchor="middle">종료 시 유실</text>
+      <rect class="cel d-0" x="424" y="80" width="120" height="28"/><text x="484" y="98" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel d-p1" x="552" y="80" width="120" height="28"/><text x="612" y="98" class="tk" text-anchor="middle">좋음</text>
+
+      <text x="16" y="130" class="ann">콘솔 + 수집기</text>
+      <rect class="cel d-p1" x="168" y="112" width="120" height="28"/><text x="228" y="130" class="tk" text-anchor="middle">양호</text>
+      <rect class="cel d-n1" x="296" y="112" width="120" height="28"/><text x="356" y="130" class="tk" text-anchor="middle">버퍼 넘침</text>
+      <rect class="cel d-n1" x="424" y="112" width="120" height="28"/><text x="484" y="130" class="tk" text-anchor="middle">요금 발생</text>
+      <rect class="cel d-p2" x="552" y="112" width="120" height="28"/><text x="612" y="130" class="tk" text-anchor="middle">최고</text>
+
+      <text x="16" y="162" class="ann">Trace 를 항상 켬</text>
+      <rect class="cel d-n2" x="168" y="144" width="120" height="28"/><text x="228" y="162" class="tk" text-anchor="middle">매우 느림</text>
+      <rect class="cel d-0" x="296" y="144" width="120" height="28"/><text x="356" y="162" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel d-n2" x="424" y="144" width="120" height="28"/><text x="484" y="162" class="tk" text-anchor="middle">폭증</text>
+      <rect class="cel d-p2" x="552" y="144" width="120" height="28"/><text x="612" y="162" class="tk" text-anchor="middle">최고</text>
+
+      <text x="16" y="194" class="ann">샘플링 · 조건부</text>
+      <rect class="cel d-p2" x="168" y="176" width="120" height="28"/><text x="228" y="194" class="tk" text-anchor="middle">빠름</text>
+      <rect class="cel d-0" x="296" y="176" width="120" height="28"/><text x="356" y="194" class="tk" text-anchor="middle">의도적 누락</text>
+      <rect class="cel d-p2" x="424" y="176" width="120" height="28"/><text x="484" y="194" class="tk" text-anchor="middle">낮음</text>
+      <rect class="cel d-n1" x="552" y="176" width="120" height="28"/><text x="612" y="194" class="tk" text-anchor="middle">일부 누락</text>
+
+      <rect class="cel d-n2" x="16" y="206" width="14" height="12"/>
+      <text x="36" y="216" class="lg-t">대가</text>
+      <rect class="cel d-0" x="96" y="206" width="14" height="12"/>
+      <text x="116" y="216" class="lg-t">중간</text>
+      <rect class="cel d-p2" x="176" y="206" width="14" height="12"/>
+      <text x="196" y="216" class="lg-t">이득</text>
+
+      <text x="16" y="240" class="lbl">가운데 회색이 기준입니다 — 붉을수록 대가, 초록일수록 이득</text>
+      <text x="16" y="256" class="lbl">한 줄이 전부 초록인 설정은 없습니다. 무엇을 포기할지 고르세요</text>
+    </svg>
+    <div class="cap">발산 매트릭스 — <b>양극이 있는 값</b>은 한 색 명도가 아니라 두 색으로 그립니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비싼 자리 넷</h4>
+      <ul class="tx">
+        <li><b>문자열 만들기</b> — 보간 · <code>ToString()</code> · <code>JsonSerializer</code>.
+            레벨이 꺼져 있어도 인자를 준비하면 이미 비용입니다.</li>
+        <li><b>박싱</b> — <code>int</code>·<code>DateTime</code> 을 <code>object[]</code> 에 담을 때.
+            <code>[LoggerMessage]</code> 로 없앱니다.</li>
+        <li><b>동기 I/O</b> — 파일 <code>flush</code> 나 네트워크 전송이 요청 스레드를 붙잡는 경우.</li>
+        <li><b>저장 · 색인 요금</b> — 수집기는 <b>수집량으로 과금</b>합니다.
+            로그 한 줄이 곧 돈이 되는 구간입니다.</li>
+      </ul>
+      <pre class="code" data-lang="csharp"><code>// 인자를 만드는 비용이 큰 경우에만 IsEnabled 로 감쌉니다
+if (_log.IsEnabled(LogLevel.Debug))
+{
+    // 이 직렬화가 비싼 것이지, 로그 호출이 비싼 게 아닙니다
+    _log.LogDebug("응답 원문 {Body}", JsonSerializer.Serialize(dto));
+}
+
+// 반대로 이런 건 감쌀 필요 없습니다 (인자 준비 비용이 0)
+_log.LogDebug("주문 {OrderId} 검증 통과", orderId);</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>IsEnabled</code> 를 모든 로그에 붙이지 마세요.</b>
+        로거 내부가 이미 같은 검사를 합니다. <b>인자를 만드는 데 비용이 드는 경우에만</b> 감쌉니다 —
+        직렬화 · 큰 컬렉션 순회 · 문자열 결합 같은 것들입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비동기 sink 와 유실</h4>
+      <pre class="code" data-lang="csharp"><code>// dotnet add package Serilog.Sinks.Async
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Async(a =&gt; a.File("logs/app-.ndjson",
+                               rollingInterval: RollingInterval.Day),
+                   bufferSize: 10_000,
+                   blockWhenFull: false)   // ★ 여기가 선택 지점
+    .CreateLogger();
+
+//  blockWhenFull: false  → 큐가 차면 로그를 버립니다 (앱은 안 느려짐)
+//  blockWhenFull: true   → 큐가 찰 때까지 요청 스레드가 기다립니다 (로그는 안 잃음)
+//
+//  ※ 어느 쪽이든 프로세스가 강제 종료되면 큐에 남은 것은 사라집니다.
+//     Log.CloseAndFlush() 를 반드시 호출하세요.</code></pre>
+      <pre class="code" data-lang="csharp"><code>// 종료 시 확실히 비우기 — 호스트 종료 훅에 연결
+var app = builder.Build();
+app.Lifetime.ApplicationStopped.Register(Log.CloseAndFlush);
+
+// 컨테이너라면 종료 유예 시간도 늘려 둡니다
+builder.Services.Configure&lt;HostOptions&gt;(o =&gt;
+    o.ShutdownTimeout = TimeSpan.FromSeconds(15));</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 아픈 유실</b> — 앱이 죽는 순간의 로그가 <b>바로 그 이유</b>인데,
+        비동기 큐에 있다가 함께 사라지는 경우입니다.
+        <b>Error 이상은 동기 sink 로도 한 벌 더 남기는</b> 구성이 안전합니다
+        (<code>WriteTo.Logger(l =&gt; l.Filter.ByIncludingOnly(...).WriteTo.File(...))</code>).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">재는 법 — <span class="t">감이 아니라 숫자로</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">돌고 있는 프로세스에서 바로 보기</h4>
+      <pre class="code" data-lang="bash"><code>dotnet tool install -g dotnet-counters
+dotnet tool install -g dotnet-trace
+
+# ① 할당률·GC 를 실시간으로 — 로그를 껐다 켜며 차이를 봅니다
+dotnet-counters monitor --process-id 1234 \
+  --counters System.Runtime[alloc-rate,gen-0-gc-count,time-in-gc]
+
+# ② 로깅이 실제로 얼마나 도는지 이벤트로 세기
+dotnet-trace collect --process-id 1234 \
+  --providers Microsoft-Extensions-Logging:4:4
+
+# ③ 결과를 speedscope 로 열어 봅니다
+dotnet-trace convert trace.nettrace --format speedscope</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>가장 정직한 실험</b> — 부하를 준 상태에서 <b>로그 레벨만 Warning 으로 올려 보고</b>
+        p99 지연과 alloc-rate 가 얼마나 떨어지는지 봅니다.
+        떨어지지 않으면 <b>로깅은 병목이 아닙니다</b> — 다른 데를 보세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">양을 줄이는 실제 수단</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">수단</th><th>효과 · 주의</th></tr>
+        <tr><td><b>카테고리 필터</b></td><td>가장 싸고 확실합니다. <code>Microsoft.*</code> 를 Warning 으로</td></tr>
+        <tr><td><b>헬스체크·정적파일 제외</b></td><td>수집량이 눈에 띄게 줄어듭니다</td></tr>
+        <tr><td><b>요약 한 줄</b></td><td>요청당 6줄 → 1줄. <code>UseSerilogRequestLogging</code></td></tr>
+        <tr><td><b>샘플링</b></td><td>성공 요청은 10%만, 오류는 100%</td></tr>
+        <tr><td><b>지표로 대체</b></td><td>"세기"는 <code>Meter</code> 로. 로그보다 훨씬 쌉니다</td></tr>
+        <tr><td><b>보관 기간 단축</b></td><td>90일 → 14일. 대부분 <b>7일이면 충분</b>합니다</td></tr>
+        <tr><td><b>압축 · 아카이브</b></td><td>오래된 것은 객체 스토리지로 내리기</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>줄이기 전에 "이 로그로 무엇을 조사했는가"를 물어보세요.</b>
+        1년 동안 아무도 열어 보지 않은 로그는 <b>지워도 됩니다</b>.
+        반대로 <b>사고 때마다 찾게 되는 로그</b>는 오히려 더 자세히 남길 값어치가 있습니다.
+        양이 아니라 <b>쓰임</b>으로 판단하는 것이 유일하게 통하는 기준입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 비싼 자리는 <b>문자열 만들기 · 박싱 · 동기 I/O · 저장 요금</b> 넷입니다.
+    <b>필터로 앞에서 자르고</b>, 인자가 비쌀 때만 <code>IsEnabled</code> 로 감싸고,
+    비동기 sink 를 쓴다면 <b>종료 시 flush</b> 를 반드시 챙기세요.
+    그리고 <b>줄이기 전에 재세요</b> — 대개 로깅은 병목이 아닙니다.</div>
+</section>

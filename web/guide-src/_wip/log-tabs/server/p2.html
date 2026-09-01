@@ -1,0 +1,519 @@
+
+
+<!-- ==================== lg03 ==================== -->
+<section class="sec" id="lg03">
+  <div class="sec-head rv">
+    <span class="no">LOG 03</span>
+    <h2>JSON 로그 · <span class="t">error_log</span> · 그리고 소음 지우기</h2>
+    <p class="lead">
+      로그를 기계가 읽게 만들려면 <b>JSON 한 줄</b>이 정답이고,
+      비용을 줄이려면 <b>헬스체크와 정적 파일을 아예 안 남기는 것</b>이 첫 수입니다.
+      Nginx 는 두 가지를 <code>escape=json</code> 과 <code>map</code> + <code>if=</code> 로 해결합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 266" role="img" aria-label="하루 요청 천만 건이 조건부 로깅과 샘플링을 거쳐 실제로 남는 줄 수로 줄어드는 과정을 밴드 두께로 보여 주는 산키 다이어그램. 헬스체크와 메트릭 요청 백팔십만 건은 if 조건으로 아예 기록하지 않고, 정적 파일 삼백이십만 건은 access_log off 로 끄며, 성공 응답 사백오십만 건은 이십분의 일만 샘플링해 이십이만 오천 줄만 남기고, 사백번대와 오백번대 오류 오십만 건은 전부 남긴다. 결과적으로 남는 줄은 칠십이만 오천 줄로 전체의 칠 퍼센트지만 조사에 필요한 정보는 그대로 남는다.">
+      <text x="16" y="18" class="lbl">하루 요청 1,000만 건 — 무엇을 남기고 무엇을 버리나</text>
+      <text x="16" y="34" class="ann">들어온 요청</text>
+
+      <rect class="bx bx-fw" x="48" y="40" width="30" height="170" rx="4"/>
+
+      <path class="band" style="fill:rgba(251,113,133,.16)" d="M78 40 C 250 40, 300 40, 440 40 L440 71 C 300 71, 250 71, 78 71 Z"/>
+      <path class="band-3" d="M78 71 C 250 71, 300 77, 440 77 L440 131 C 300 131, 250 125, 78 125 Z"/>
+      <path class="band" d="M78 125 C 250 125, 300 137, 440 137 L440 214 C 300 214, 250 202, 78 202 Z"/>
+      <path class="band-2" d="M78 202 C 250 202, 300 220, 440 220 L440 228 C 300 228, 250 210, 78 210 Z"/>
+
+      <rect class="bx bx-warn" x="440" y="40" width="30" height="31" rx="3"/>
+      <rect class="bx bx-warn" x="440" y="77" width="30" height="54" rx="3"/>
+      <rect class="bx" x="440" y="137" width="30" height="77" rx="3"/>
+      <rect class="bx bx-ok" x="440" y="220" width="30" height="8" rx="2"/>
+
+      <text x="482" y="54" class="ann rs-t">헬스체크 · /metrics — 180만</text>
+      <text x="482" y="68" class="ann">if=$loggable 로 아예 안 씁니다</text>
+
+      <text x="482" y="96" class="ann rs-t">정적 파일 · 이미지 — 320만</text>
+      <text x="482" y="110" class="ann">location 에 access_log off;</text>
+
+      <text x="482" y="160" class="ann">2xx 성공 — 450만</text>
+      <text x="482" y="176" class="ann">split_clients 로 1/20 샘플링</text>
+      <text x="482" y="192" class="ann">남는 줄 22.5만</text>
+
+      <text x="482" y="228" class="ann ok-t">4xx · 5xx 50만 — 전부 남김</text>
+
+      <text x="16" y="252" class="lbl">1,000만 → 72.5만 줄(7%). 버린 것은 전부 "봐도 아무것도 안 나오는 줄"입니다</text>
+    </svg>
+    <div class="cap">산키 — <b>밴드 두께가 곧 요금</b>입니다. 굵은 두 갈래는 조사에 쓰이지 않습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JSON 액세스 로그 — 실전 그대로</h4>
+      <pre class="code" data-lang="text"><code># http 블록. escape=json 이 핵심입니다 (1.11.8+)
+log_format json escape=json
+'{'
+  '"ts":"$time_iso8601",'
+  '"host":"$host",'
+  '"method":"$request_method",'
+  '"uri":"$uri",'
+  '"args":"$args",'
+  '"status":$status,'
+  '"len":$body_bytes_sent,'
+  '"reqlen":$request_length,'
+  '"rt":$request_time,'
+  '"uct":"$upstream_connect_time",'
+  '"uht":"$upstream_header_time",'
+  '"urt":"$upstream_response_time",'
+  '"ua":"$upstream_addr",'
+  '"us":"$upstream_status",'
+  '"cache":"$upstream_cache_status",'
+  '"cip":"$remote_addr",'
+  '"xff":"$http_x_forwarded_for",'
+  '"ref":"$http_referer",'
+  '"agent":"$http_user_agent",'
+  '"id":"$request_id",'
+  '"tls":"$ssl_protocol"'
+'}';
+
+access_log /var/log/nginx/access.json json buffer=64k flush=5s;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>따옴표를 붙일 자리와 안 붙일 자리가 갈립니다.</b>
+        <code>$status</code>·<code>$body_bytes_sent</code>·<code>$request_time</code> 는
+        <b>항상 숫자</b>라 따옴표 없이 두어야 저장소에서 <code>rt &gt; 1</code> 같은 비교가 됩니다.
+        반대로 <code>$upstream_response_time</code> 계열은
+        <b>값이 없으면 <code>-</code>, 재시도하면 <code>"0.01, 1.40"</code></b> 이라
+        <b>반드시 문자열</b>로 두어야 JSON 이 안 깨집니다. 이 구분을 틀리면
+        수집기가 <b>하루치를 통째로 파싱 실패</b>로 버립니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>error_log</code> — 레벨과 실제로 보게 될 문구</h4>
+      <pre class="code" data-lang="text"><code># error_log 경로 [레벨];
+#   debug &lt; info &lt; notice &lt; warn &lt; error &lt; crit &lt; alert &lt; emerg
+#   "그 레벨 이상"이 기록됩니다. 기본은 error(빌드에 따라 warn).
+error_log /var/log/nginx/error.log warn;
+
+# 특정 서버 블록만 자세히 보고 싶을 때 (server · location 에도 쓸 수 있습니다)
+server { error_log /var/log/nginx/api_debug.log info; }
+
+# debug 는 --with-debug 로 빌드된 nginx 에서만 동작합니다
+nginx -V 2&gt;&amp;1 | tr ' ' '\n' | grep debug
+
+# 소음 줄이기 — 없는 파일 404 를 error_log 에 안 남기기
+log_not_found off;          # favicon.ico · robots.txt 로 error.log 가 뒤덮이는 것 방지
+log_subrequest off;         # 내부 서브요청까지 액세스 로그에 남기지 않기</code></pre>
+      <div class="tw"><table class="cheat" style="margin:8px 0 0">
+        <tr><th style="width:52%">error_log 에서 보게 될 문구</th><th>뜻</th></tr>
+        <tr><td><code>upstream timed out (110: ...)</code></td><td class="warn">앱이 <code>proxy_read_timeout</code> 안에 응답 못 함 → 504</td></tr>
+        <tr><td><code>connect() failed (111: Connection refused)</code></td><td class="warn">앱이 죽었거나 포트가 다름 → 502</td></tr>
+        <tr><td><code>no live upstreams</code></td><td class="warn">모든 백엔드가 실패 처리됨</td></tr>
+        <tr><td><code>upstream prematurely closed connection</code></td><td>앱이 응답 도중 끊음(크래시·keepalive 불일치)</td></tr>
+        <tr><td><code>worker_connections are not enough</code></td><td class="warn">동시 연결 상한 — 설정을 올려야 함</td></tr>
+        <tr><td><code>too many open files</code></td><td class="warn">파일 디스크립터 상한(<code>LimitNOFILE</code>)</td></tr>
+        <tr><td><code>client intended to send too large body</code></td><td><code>client_max_body_size</code> 초과 → 413</td></tr>
+        <tr><td><code>a client request body is buffered to a temporary file</code></td><td>디스크로 새는 중 — 버퍼 크기 조정</td></tr>
+        <tr><td><code>SSL_do_handshake() failed</code></td><td>TLS 협상 실패(구형 클라이언트·SNI)</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">조건부 로깅 — <span class="t">map + if=</span> 로 소음 지우기 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">헬스체크·정적 파일·성공 요청 걷어 내기</h4>
+      <pre class="code" data-lang="text"><code># http 블록 — map 은 "변수를 만드는 표"입니다. 실행 시점에 계산됩니다.
+# ① 헬스체크·메트릭 제외 (첫 매치가 이깁니다)
+map $request_uri $not_probe {
+    ~^/healthz    0;
+    ~^/readyz     0;
+    ~^/metrics    0;
+    default       1;
+}
+
+# ② 성공 응답만 1/20 샘플링 — split_clients 가 해시로 균등하게 나눕니다
+split_clients "$request_id" $sample_ok {
+    5%      1;      # 5% = 20건 중 1건
+    *       0;
+}
+
+# ③ 두 개를 합쳐 최종 판단 변수를 만듭니다
+map $status $keep_by_status {
+    ~^[45]  1;      # 4xx · 5xx 는 무조건 남김
+    default $sample_ok;
+}
+map $not_probe$keep_by_status $loggable {
+    "11"    1;      # 프로브가 아니고 + 남길 대상일 때만
+    default 0;      # ★ if= 는 값이 0 이거나 빈 문자열이면 기록하지 않습니다
+}
+
+# server 블록
+access_log /var/log/nginx/access.json json buffer=64k flush=5s if=$loggable;
+
+location ~* \.(js|css|png|jpg|svg|woff2?)$ {
+    access_log off;                 # 정적 파일은 CDN·웹서버 지표로 충분합니다
+    expires 30d;
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>split_clients</code> 의 기준 변수를 잘 고르세요.</b>
+        <code>$request_id</code> 를 쓰면 <b>요청마다 무작위</b>로 뽑히고,
+        <code>$remote_addr</code> 를 쓰면 <b>같은 IP 는 항상 뽑히거나 항상 안 뽑힙니다</b>.
+        "특정 사용자의 흐름을 통째로 보고 싶다"면 후자가,
+        "전체 분포를 대표하게 뽑고 싶다"면 전자가 맞습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">더 쓸 만한 조건들</h4>
+      <pre class="code" data-lang="text"><code># ① 느린 요청만 따로 파일로 — 사후 분석이 훨씬 편해집니다
+map $request_time $slow {
+    default   0;
+    ~^[1-9]   1;        # 1초 이상 (문자열 비교라 이 트릭을 씁니다)
+}
+access_log /var/log/nginx/slow.json json if=$slow;
+
+# ② 사내 IP 나 모니터링 봇 제외
+geo $is_internal { default 0; 10.0.0.0/8 1; 172.16.0.0/12 1; }
+map $is_internal $ext_only { 1 0; default 1; }
+
+# ③ 봇 트래픽 분리 (합치면 통계가 망가집니다)
+map $http_user_agent $is_bot {
+    default                       0;
+    ~*(bot|crawler|spider|curl)   1;
+}
+
+# ④ 로그에 사업 구분을 직접 붙이기 — 나중에 비용 배분에 씁니다
+map $host $tenant {
+    hostnames;
+    shop.example.com   shop;
+    admin.example.com  admin;
+    default            etc;
+}
+#   log_format 에 '"tenant":"$tenant",' 를 넣으면 그대로 필드가 됩니다
+
+# 적용
+nginx -t &amp;&amp; systemctl reload nginx</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>map</code> 은 공짜가 아닙니다 — 하지만 거의 공짜입니다.</b>
+        정확 일치는 해시 조회라 사실상 비용이 없고,
+        <b><code>~</code> 정규식은 요청마다 실행</b>됩니다.
+        정규식 map 을 열 개씩 쌓으면 초당 수만 요청에서 체감됩니다.
+        <b>정확 일치와 <code>hostnames</code> 를 먼저</b> 쓰고, 정규식은 꼭 필요한 곳만 남기세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">액세스 로그를 끄기 전에 — <span class="t">잃는 것</span>을 알고 끄기 <span class="lvl h">🔴 실무</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>이렇게 끄면 나중에 후회합니다</h5>
+      <pre class="code" data-lang="text" style="margin:6px 0 0"><code>server {
+    access_log off;          # "용량이 커서" 통째로 끔
+    ...
+}</code></pre>
+      <span class="ann">· 5xx 가 언제 시작됐는지 <b>영영 모릅니다</b><br>
+      · 공격 흔적(스캔·크리덴셜 스터핑)이 남지 않습니다<br>
+      · 국내 개인정보 규정의 <b>접속기록 보관 의무</b>를 못 지킵니다<br>
+      · 용량 문제는 <b>보존 기간</b>으로 풀 문제였습니다</span>
+    </div>
+    <div class="good">
+      <h5>이렇게 줄입니다</h5>
+      <pre class="code" data-lang="text" style="margin:6px 0 0"><code>access_log /var/log/nginx/access.json json
+           buffer=64k flush=5s if=$loggable;
+# + 정적 파일 location 만 off
+# + 4xx/5xx 는 100% · 2xx 는 1/20
+# + 보존 14일(뜨거움) + 1년(감사용 원본)</code></pre>
+      <span class="ann">· 조사에 필요한 줄은 <b>전부 남습니다</b><br>
+      · 용량은 <b>10분의 1 이하</b>로 떨어집니다<br>
+      · 규정 대응용 원본은 <b>따로 압축 보관</b>합니다</span>
+    </div>
+  </div>
+
+  <div class="note info rv d1" style="margin-bottom:0">
+    <b>샘플링한 로그로 "비율"을 계산할 때는 반드시 가중치를 되돌리세요.</b>
+    2xx 를 1/20 로 남겼는데 그대로 세면 <b>에러율이 20배로 부풀어</b> 보입니다.
+    로그에 <code>"sample_rate":20</code> 같은 필드를 함께 넣어 두고
+    집계할 때 곱해 주는 것이 정석입니다. 애초에 <b>에러율 같은 비율은
+    메트릭(Prometheus)으로 재는 것이 맞습니다</b> — 로그는 "그 한 건"을 찾는 도구입니다(🔭 관측 탭).
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 액세스 로그는 <b><code>escape=json</code> 으로 JSON 한 줄</b>,
+    숫자 필드에는 따옴표를 빼고 <b><code>upstream_*</code> 는 반드시 문자열</b>로 둡니다.
+    소음은 <b><code>map</code> + <code>if=</code></b> 로 지우고, 성공 요청은 <b><code>split_clients</code> 로 샘플링</b>합니다.
+    <b>절대 통째로 끄지는 마세요</b> — 끄는 대신 줄이는 수단이 이렇게 많습니다.</div>
+</section>
+
+
+<!-- ==================== lg04 ==================== -->
+<section class="sec" id="lg04">
+  <div class="sec-head rv">
+    <span class="no">LOG 04</span>
+    <h2>Apache · Tomcat · Caddy — <span class="t">같은 일을 다른 문법</span>으로</h2>
+    <p class="lead">
+      네 서버가 하는 일은 같습니다 — "요청 한 건에 한 줄". 그런데
+      <b>Caddy 는 처음부터 JSON</b>이고, <b>Tomcat 은 자기가 로그를 회전</b>시키고,
+      <b>Apache 는 파이프로 외부 프로그램에 넘깁니다</b>. 이 차이가 운영 방식을 바꿉니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 254" role="img" aria-label="Nginx, Apache, Tomcat, Caddy 네 서버의 로그 기능을 여섯 가지 항목으로 비교한 매트릭스. 항목은 기본 포맷, JSON 지원, 응답 시간 필드, 조건부 로깅, 자체 로테이션, 원격 전송이다. 칸 색이 진할수록 기본으로 잘 갖춰져 있다는 뜻이며 칸 안에 실제 설정 이름이 적혀 있다. Caddy 는 JSON 과 자체 로테이션이 기본으로 가장 진하고, Nginx 는 조건부 로깅과 응답 시간 변수가 가장 강하지만 자체 로테이션이 없어 logrotate 가 필요하다.">
+      <text x="16" y="18" class="lbl">네 서버의 로그 기능 — 진할수록 "기본으로 갖춰져 있음"</text>
+
+      <text x="146" y="44" class="tk" text-anchor="middle">기본 포맷</text>
+      <text x="238" y="44" class="tk" text-anchor="middle">JSON</text>
+      <text x="330" y="44" class="tk" text-anchor="middle">응답 시간</text>
+      <text x="422" y="44" class="tk" text-anchor="middle">조건부</text>
+      <text x="514" y="44" class="tk" text-anchor="middle">자체 회전</text>
+      <text x="606" y="44" class="tk" text-anchor="middle">원격 전송</text>
+
+      <text x="16" y="72" class="ann">Nginx</text>
+      <rect class="cel h2" x="100" y="52" width="88" height="28"/><text x="144" y="71" class="tk" text-anchor="middle">combined</text>
+      <rect class="cel h4" x="192" y="52" width="88" height="28"/><text x="236" y="71" class="tk" text-anchor="middle">escape=json</text>
+      <rect class="cel h5" x="284" y="52" width="88" height="28"/><text x="328" y="71" class="tk" text-anchor="middle">변수 6종</text>
+      <rect class="cel h5" x="376" y="52" width="88" height="28"/><text x="420" y="71" class="tk" text-anchor="middle">map + if=</text>
+      <rect class="cel h0" x="468" y="52" width="88" height="28"/><text x="512" y="71" class="tk" text-anchor="middle">없음</text>
+      <rect class="cel h3" x="560" y="52" width="88" height="28"/><text x="604" y="71" class="tk" text-anchor="middle">syslog:</text>
+
+      <text x="16" y="104" class="ann">Apache</text>
+      <rect class="cel h2" x="100" y="84" width="88" height="28"/><text x="144" y="103" class="tk" text-anchor="middle">LogFormat</text>
+      <rect class="cel h1" x="192" y="84" width="88" height="28"/><text x="236" y="103" class="tk" text-anchor="middle">직접 조립</text>
+      <rect class="cel h4" x="284" y="84" width="88" height="28"/><text x="328" y="103" class="tk" text-anchor="middle">%D %T</text>
+      <rect class="cel h4" x="376" y="84" width="88" height="28"/><text x="420" y="103" class="tk" text-anchor="middle">env=</text>
+      <rect class="cel h3" x="468" y="84" width="88" height="28"/><text x="512" y="103" class="tk" text-anchor="middle">rotatelogs</text>
+      <rect class="cel h2" x="560" y="84" width="88" height="28"/><text x="604" y="103" class="tk" text-anchor="middle">파이프</text>
+
+      <text x="16" y="136" class="ann">Tomcat</text>
+      <rect class="cel h2" x="100" y="116" width="88" height="28"/><text x="144" y="135" class="tk" text-anchor="middle">Valve</text>
+      <rect class="cel h3" x="192" y="116" width="88" height="28"/><text x="236" y="135" class="tk" text-anchor="middle">JsonValve</text>
+      <rect class="cel h3" x="284" y="116" width="88" height="28"/><text x="328" y="135" class="tk" text-anchor="middle">%D %F</text>
+      <rect class="cel h3" x="376" y="116" width="88" height="28"/><text x="420" y="135" class="tk" text-anchor="middle">condition</text>
+      <rect class="cel h4" x="468" y="116" width="88" height="28"/><text x="512" y="135" class="tk" text-anchor="middle">날짜별 내장</text>
+      <rect class="cel h0" x="560" y="116" width="88" height="28"/><text x="604" y="135" class="tk" text-anchor="middle">없음</text>
+
+      <text x="16" y="168" class="ann ok-t">Caddy</text>
+      <rect class="cel h5" x="100" y="148" width="88" height="28"/><text x="144" y="167" class="tk" text-anchor="middle">JSON 기본</text>
+      <rect class="cel h5" x="192" y="148" width="88" height="28"/><text x="236" y="167" class="tk" text-anchor="middle">기본값</text>
+      <rect class="cel h5" x="284" y="148" width="88" height="28"/><text x="328" y="167" class="tk" text-anchor="middle">duration</text>
+      <rect class="cel h3" x="376" y="148" width="88" height="28"/><text x="420" y="167" class="tk" text-anchor="middle">matcher</text>
+      <rect class="cel h5" x="468" y="148" width="88" height="28"/><text x="512" y="167" class="tk" text-anchor="middle">roll_size</text>
+      <rect class="cel h1" x="560" y="148" width="88" height="28"/><text x="604" y="167" class="tk" text-anchor="middle">플러그인</text>
+
+      <rect class="cel h0" x="100" y="186" width="16" height="12"/>
+      <rect class="cel h2" x="120" y="186" width="16" height="12"/>
+      <rect class="cel h4" x="140" y="186" width="16" height="12"/>
+      <rect class="cel h5" x="160" y="186" width="16" height="12"/>
+      <text x="16" y="196" class="ann">없음 → 기본 제공</text>
+
+      <text x="16" y="222" class="lbl">색은 훑어보기용, 칸 안의 설정 이름이 확인용입니다 — 둘 다 있어야 읽힙니다</text>
+      <text x="16" y="240" class="lbl">Nginx 만 자체 회전이 없습니다. 그래서 logrotate 이야기가 항상 따라옵니다(lg06)</text>
+    </svg>
+    <div class="cap">매트릭스 — <b>Caddy 는 기본이 JSON, Nginx 는 기본이 최소</b>. 손댈 곳이 정반대입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Apache 2.4 — <code>LogFormat</code> 과 <code>ErrorLogFormat</code></h4>
+      <pre class="code" data-lang="text"><code># 액세스 로그 — %기호가 Nginx 의 $변수 자리입니다
+LogFormat "%h %l %u %t \"%r\" %&gt;s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+CustomLog ${APACHE_LOG_DIR}/access.log combined
+
+# 실무용 — 시간·업스트림·요청 ID 를 더한 버전
+LogFormat "%{%Y-%m-%dT%H:%M:%S%z}t %a %{X-Forwarded-For}i %v %m %U%q \
+%&gt;s %O %I %{ms}T %{UNIQUE_ID}e \"%{User-Agent}i\"" ext
+CustomLog ${APACHE_LOG_DIR}/access.log ext
+
+#  %h 원격 호스트   %a 클라이언트 IP     %A 서버 IP
+#  %t 시각          %{포맷}t strftime 지정
+#  %r 요청 줄 전체  %m 메서드  %U 경로  %q 쿼리스트링  %H 프로토콜
+#  %&gt;s 최종 상태코드 (%s 는 리다이렉트 전 최초 상태) ★ 거의 항상 %&gt;s
+#  %b 본문 바이트(0이면 -)   %B 본문 바이트(0이면 0)
+#  %O 보낸 총 바이트  %I 받은 총 바이트   (mod_logio 필요)
+#  %D 소요 마이크로초  %T 초  %{ms}T 밀리초  %{us}T 마이크로초
+#  %L 로그 ID ★ error_log 의 같은 ID 와 짝지어집니다
+#  %{UNIQUE_ID}e 요청 고유 ID (mod_unique_id)
+#  %v 정규 서버명   %p 포트   %X 연결 종료 상태(X=중단, +=유지, -=닫힘)
+#  %{Foo}i 요청 헤더  %{Foo}o 응답 헤더  %{Foo}e 환경변수  %{Foo}C 쿠키
+
+# 에러 로그 — 포맷도 바꿀 수 있습니다(2.4부터)
+ErrorLogFormat "[%{u}t] [%-m:%l] [pid %P:tid %T] %7F: %E: [client %a] %M, referer %{Referer}i"
+LogLevel warn
+LogLevel info ssl:warn rewrite:trace3     # ★ 모듈별로 따로 줄 수 있습니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>%L</code> 하나가 Apache 의 숨은 무기입니다.</b>
+        액세스 로그와 에러 로그에 <b>같은 로그 ID</b>가 찍혀서,
+        "이 500 응답이 남긴 에러 줄"을 <b>정확히</b> 짝지을 수 있습니다.
+        Nginx 에는 이에 해당하는 기능이 없어 <code>$request_id</code> 를 직접 넣어야 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Apache — 조건부 로깅과 파이프 로그</h4>
+      <pre class="code" data-lang="text"><code># ① 조건부 — 환경변수를 세우고 env= 로 거릅니다
+SetEnvIf Request_URI "^/(healthz|metrics)$"     dontlog
+SetEnvIf Request_URI "\.(gif|jpg|png|css|js)$"  dontlog
+SetEnvIf Remote_Addr "^10\."                    dontlog
+CustomLog ${APACHE_LOG_DIR}/access.log ext env=!dontlog
+
+# 2.4.19+ 는 표현식도 됩니다 — 훨씬 읽기 좋습니다
+CustomLog ${APACHE_LOG_DIR}/slow.log ext "expr=%{TIME_MS} &gt; 1000"
+
+# ② 파이프 로그 — 로그를 파일이 아니라 프로그램의 stdin 으로 넘깁니다
+#    Apache 가 그 프로그램을 자식으로 띄우고 죽으면 다시 띄웁니다
+CustomLog "|/usr/bin/rotatelogs -l ${APACHE_LOG_DIR}/access.%Y%m%d.log 86400" ext
+#    -l = 로컬시간 기준  ·  86400 = 하루마다  ·  100M 처럼 크기로도 가능
+#    → logrotate 없이 회전이 끝납니다. 대신 오래된 파일 삭제는 따로 해야 합니다
+
+# ③ syslog 로 바로 (에러 로그)
+ErrorLog "syslog:local7"
+
+# ④ 문법 검사 → 무중단 재적용 (USR1 = graceful)
+apachectl configtest &amp;&amp; apachectl graceful</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>파이프 로그의 대가</b> — 그 프로그램이 <b>느리거나 멈추면 Apache 가 같이 멈춥니다</b>.
+        파이프는 버퍼가 가득 차면 쓰기가 블록되기 때문입니다.
+        <code>rotatelogs</code> 처럼 <b>단순하고 검증된 프로그램</b>만 물리세요.
+        수집기로 보내고 싶다면 파이프 대신 <b>파일로 쓰고 수집기가 tail 하게</b> 하는 것이 안전합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">Tomcat — <span class="t">액세스 로그는 Valve, 앱 로그는 catalina.out</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>AccessLogValve</code> — server.xml</h4>
+      <pre class="code" data-lang="xml"><code>&lt;!-- conf/server.xml 의 &lt;Host&gt; 안 --&gt;
+&lt;Valve className="org.apache.catalina.valves.AccessLogValve"
+       directory="logs"
+       prefix="access" suffix=".log"
+       fileDateFormat=".yyyy-MM-dd"
+       rotatable="true"
+       renameOnRotate="false"
+       buffered="true"
+       maxDays="14"
+       requestAttributesEnabled="true"
+       condition="dontlog"
+       pattern="%{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}t %a %{X-Forwarded-For}i %m %U%q %s %b %D %S %{X-Request-Id}i" /&gt;
+
+&lt;!-- Tomcat 10.1+ · 9.0.x 후반 — JSON 으로 바로 뱉는 Valve --&gt;
+&lt;Valve className="org.apache.catalina.valves.JsonAccessLogValve"
+       directory="logs" prefix="access" suffix=".json"
+       maxDays="14"
+       pattern="%h %l %u %t %r %s %b %D %{X-Request-Id}i" /&gt;</code></pre>
+      <pre class="code" data-lang="text"><code># 패턴 기호 (Apache 와 비슷하지만 다른 것들이 있습니다)
+#  %a 클라이언트 IP   %h 호스트   %l 항상 -   %u 인증 사용자
+#  %t 시각  %{포맷}t  ·  %r 요청 줄  %s 상태코드  %b 본문 바이트
+#  %D 처리 시간(밀리초) ★  %T 초  %F 첫 바이트까지의 시간
+#  %S 세션 ID   %I 스레드 이름 ★ 스레드 고갈 추적에 유용
+#  %{헤더}i 요청 헤더  %{헤더}o 응답 헤더  %{속성}r 요청 속성
+#  common · combined 는 미리 정의된 이름입니다
+
+# requestAttributesEnabled="true" 를 켜면
+#   RemoteIpValve 가 복원한 진짜 클라이언트 IP 를 %a 가 씁니다
+#   (프록시 뒤에 있는 Tomcat 이라면 사실상 필수)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>catalina.out</code> 이 계속 커지는 문제</h4>
+      <pre class="code" data-lang="text"><code># catalina.out 은 "로그 파일"이 아니라 그냥 stdout 리다이렉트입니다.
+#   bin/catalina.sh:  ... &gt;&gt; "$CATALINA_OUT" 2&gt;&amp;1 &amp;
+# 그래서 ① 회전이 없고 ② 이름을 바꿔도 Tomcat 은 옛 파일에 계속 씁니다.
+
+# 해법 A — 애초에 안 만들기 (systemd 로 띄우고 journald 에 맡기기) ★ 권장
+#   /etc/systemd/system/tomcat.service
+[Service]
+Environment=CATALINA_OUT=/dev/null
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tomcat
+
+# 해법 B — logrotate 에 copytruncate 를 씁니다(다음 섹션에서 왜 위험한지 설명)
+/opt/tomcat/logs/catalina.out {
+    daily rotate 7 compress missingok notifempty copytruncate
+}
+
+# 해법 C — conf/logging.properties 로 java.util.logging 을 파일로 분리
+handlers = 1catalina.org.apache.juli.AsyncFileHandler, java.util.logging.ConsoleHandler
+1catalina.org.apache.juli.AsyncFileHandler.maxDays = 14
+1catalina.org.apache.juli.AsyncFileHandler.level = FINE
+# Spring Boot 내장 Tomcat 이면 이 파일 자체가 없습니다 — 앱 로거(logback)가 담당</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Tomcat 로그가 세 군데로 흩어지는 것이 진짜 문제입니다</b> —
+        <code>access.log</code>(Valve) · <code>catalina.out</code>(stdout) ·
+        <code>catalina.YYYY-MM-DD.log</code>(JULI). 여기에 앱의 logback 까지 더하면 넷입니다.
+        <b>전부 stdout 한 곳으로 모으고 나머지를 끄는 것</b>이 컨테이너 시대의 정답이고,
+        VM 이라면 최소한 <b>수집기가 네 경로를 모두 읽게</b> 설정해 두세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">Caddy — <span class="t">아무것도 안 해도 JSON</span> 입니다 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Caddyfile — 로그 블록 전부</h4>
+      <pre class="code" data-lang="text"><code>shop.example.com {
+    reverse_proxy 10.0.1.5:8080
+
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size     100MiB      # 이 크기가 되면 회전 (기본 100MiB)
+            roll_keep     10          # 보관 개수 (기본 10)
+            roll_keep_for 720h        # 보관 기간 (기본 90일)
+            roll_uncompressed         # 붙이면 gzip 안 함 (기본은 압축)
+        }
+        format json                   # 기본값 — 안 써도 JSON 입니다
+        level  INFO
+    }
+}
+
+# 사람이 볼 때만 한시적으로
+log { format console }
+
+# 전역(런타임) 로그는 따로입니다 — 액세스 로그가 아닙니다
+{
+    log {
+        output file /var/log/caddy/caddy.log
+        level ERROR
+    }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Caddy 는 logrotate 가 필요 없습니다.</b> 회전이 프로세스 안에 들어 있어서
+        <b>파일 핸들 문제도, USR1 신호도 없습니다</b>(lg06 의 고민이 통째로 사라집니다).
+        대신 <b>회전 정책이 Caddyfile 안에</b> 있으니 서버마다 흩어지지 않게
+        공통 스니펫으로 관리하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Caddy 의 <code>filter</code> — 로그에서 값 가리기</h4>
+      <pre class="code" data-lang="text"><code>log {
+    output file /var/log/caddy/access.log
+    format filter {
+        wrap json
+        fields {
+            request&gt;headers&gt;Authorization delete
+            request&gt;headers&gt;Cookie       delete
+            request&gt;remote_ip            ip_mask 16 32
+            request&gt;uri                  query {
+                replace token REDACTED
+                delete  sid
+            }
+            request&gt;headers&gt;User-Agent   hash
+        }
+    }
+}
+#  delete   — 필드를 통째로 제거
+#  replace  — 값을 고정 문자열로 치환
+#  ip_mask  — IPv4 상위 16비트만 남김 / IPv6 상위 32비트
+#  hash     — 값 대신 해시(같은 값인지 비교는 되고 원본은 모름) ★
+#  query / cookie — 쿼리스트링·쿼키 안의 특정 키만 골라 처리
+#  regexp   — 정규식으로 부분 치환</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>이 <code>filter</code> 가 다른 서버에는 없습니다.</b>
+        Nginx·Apache 에서 같은 일을 하려면 <b>수집기 단계에서</b> 지워야 하고,
+        그 사이에 <b>디스크에는 원본이 이미 적힌</b> 상태가 됩니다.
+        개인정보 관점에서는 <b>웹서버가 애초에 안 적는 것</b>이 한 단계 앞선 방어입니다(lg11).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>Apache</b> 는 <code>%</code> 기호와 <code>env=</code>,
+    <b>Tomcat</b> 은 <code>AccessLogValve</code> 와 흩어진 네 개의 로그 파일,
+    <b>Caddy</b> 는 <b>손대지 않아도 JSON + 자체 회전</b>입니다.
+    Nginx 만 회전 기능이 없어서 다음 두 섹션(syslog · logrotate)이 특히 중요해집니다.</div>
+</section>

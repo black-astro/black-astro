@@ -1,0 +1,428 @@
+
+
+<!-- ==================== lg07 ==================== -->
+<section class="sec" id="lg07">
+  <div class="sec-head rv">
+    <span class="no">LOG 07</span>
+    <h2>요청 추적 — <span class="t">AsyncLocalStorage</span> 로 ID 를 자동으로 붙입니다</h2>
+    <p class="lead">
+      요청 ID 를 함수 인자로 계속 나르는 코드는 <b>세 번째 계층에서 무너집니다.</b>
+      Node 는 “지금 처리 중인 요청”을 <b>비동기 호출을 따라 들고 다니는 저장소</b>를 표준으로 제공합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 276" role="img" aria-label="AsyncLocalStorage 로 요청 아이디를 전파하는 시퀀스. 클라이언트가 주문 생성을 요청하면 미들웨어가 x-request-id 를 확인하고 als.run 으로 컨텍스트를 시작한다. 그 다음 서비스와 DAO 를 부를 때 reqId 를 인자로 넘기지 않는데도, 로거의 mixin 이 저장소에서 reqId 를 꺼내 모든 줄에 자동으로 붙인다. 마지막에 완료 훅이 상태코드와 소요 시간을 한 줄로 남긴다">
+      <text x="16" y="18" class="lbl">세로가 시간 — reqId 는 인자로 나르지 않고 저장소가 들고 다닙니다</text>
+
+      <rect class="actr" x="26" y="30" width="112" height="28"/>
+      <text x="82" y="49" class="ann" text-anchor="middle">클라이언트</text>
+      <rect class="actr" x="196" y="30" width="112" height="28"/>
+      <text x="252" y="49" class="ann" text-anchor="middle">미들웨어</text>
+      <rect class="actr" x="376" y="30" width="112" height="28"/>
+      <text x="432" y="49" class="ann" text-anchor="middle">서비스 · DAO</text>
+      <rect class="actr" x="546" y="30" width="112" height="28"/>
+      <text x="602" y="49" class="ann" text-anchor="middle">로거</text>
+
+      <path class="life" d="M82 60 L82 236"/>
+      <path class="life" d="M252 60 L252 236"/>
+      <path class="life" d="M432 60 L432 236"/>
+      <path class="life" d="M602 60 L602 236"/>
+
+      <rect class="actv" x="247" y="88" width="10" height="140"/>
+      <rect class="actv" x="427" y="124" width="10" height="60"/>
+
+      <path class="msg" d="M82 78 L244 78"/>
+      <text x="90" y="73" class="ann">1. POST /orders — x-request-id 확인</text>
+
+      <path class="msg" d="M258 96 L340 96 L340 108 L258 108"/>
+      <text x="266" y="91" class="ann">2. als.run({ reqId }, next) — 컨텍스트 시작</text>
+
+      <path class="msg" d="M260 130 L424 130"/>
+      <text x="266" y="125" class="ann">3. createOrder(dto) — reqId 를 넘기지 않습니다</text>
+
+      <path class="msg" d="M440 152 L594 152"/>
+      <text x="446" y="147" class="ann">4. logger.info({ orderId }, 'created')</text>
+
+      <path class="msg-a" d="M594 174 L446 174"/>
+      <text x="446" y="169" class="ann ok-t">5. mixin() 이 reqId 를 자동으로 붙임</text>
+
+      <path class="msg-a" d="M424 196 L266 196"/>
+      <text x="272" y="191" class="ann">6. 응답 201 Created</text>
+
+      <path class="msg" d="M260 218 L594 218"/>
+      <text x="266" y="213" class="ann">7. 완료 훅 — statusCode · durationMs 한 줄</text>
+
+      <text x="16" y="252" class="lbl">3번에서 reqId 를 안 넘겼는데 4번 로그에는 들어 있습니다 — 그게 저장소의 일입니다</text>
+      <text x="16" y="268" class="lbl">실선은 요청 · 점선은 응답 — 세로 막대는 그 참가자가 일하고 있는 구간</text>
+    </svg>
+    <div class="cap">시퀀스 — <b>인자로 나르지 않는데 붙어 있는 것</b>이 이 절의 전부입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">저장소 만들기 — 표준 모듈, 의존성 0</h4>
+      <pre class="code" data-lang="ts"><code>// src/request-context.ts
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+export interface RequestContext {
+  reqId: string;
+  userId?: string;
+  traceId?: string;
+}
+
+const als = new AsyncLocalStorage&lt;RequestContext&gt;();
+
+/** 이 콜백 안에서 일어나는 모든 비동기 작업이 같은 문맥을 봅니다 */
+export function runWithContext&lt;T&gt;(ctx: RequestContext, fn: () =&gt; T): T {
+  return als.run(ctx, fn);
+}
+
+/** 어디서든 꺼내 씁니다. 문맥 밖이면 undefined */
+export const getContext = () =&gt; als.getStore();
+
+/** 처리 도중에 알게 된 값을 덧붙이기 (로그인 후 userId 등) */
+export function setContext(patch: Partial&lt;RequestContext&gt;) {
+  const cur = als.getStore();
+  if (cur) Object.assign(cur, patch);   // ★ 같은 객체를 고칩니다. 새로 run 하지 않습니다
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>이게 왜 되나</b> — Node 는 <code>await</code>·<code>setTimeout</code>·이벤트 콜백을 만들 때
+        <b>지금의 문맥을 함께 기억</b>해 둡니다. 그래서 몇 겹을 들어가도 같은 저장소가 보입니다.
+        <b>Node 22~24 를 거치며 내부 구현이 바뀌어 비용이 크게 줄었습니다</b> —
+        예전에 “ALS 는 느리다”고 들은 이야기는 대부분 <b>낡은 정보</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로거에 붙이기 — <code>mixin</code> 한 줄</h4>
+      <pre class="code" data-lang="ts"><code>// src/logger.ts
+import pino from 'pino';
+import { getContext } from './request-context.js';
+
+export const logger = pino({
+  level: process.env.LOG_LEVEL ?? 'info',
+  base: { service: 'checkout-api', env: process.env.NODE_ENV },
+
+  // ★ 줄을 쓸 때마다 호출됩니다 — 여기서 문맥을 꺼내 붙입니다
+  mixin() {
+    const ctx = getContext();
+    return ctx ? { reqId: ctx.reqId, userId: ctx.userId, traceId: ctx.traceId } : {};
+  },
+});
+
+// 이제 앱 어디서든 그냥 이렇게 씁니다
+logger.info({ orderId: 8821 }, 'order paid');
+// → { ..., reqId: "req_01J8Q", userId: "u_8821", orderId: 8821, msg: "order paid" }</code></pre>
+      <pre class="code" data-lang="ts"><code>// Express 에 연결
+app.use((req, res, next) =&gt; {
+  const reqId = String(req.headers['x-request-id'] ?? randomUUID());
+  res.setHeader('x-request-id', reqId);
+  runWithContext({ reqId }, () =&gt; next());   // ★ next() 를 감싸는 것이 핵심
+});
+
+// Fastify
+app.addHook('onRequest', (req, reply, done) =&gt; {
+  runWithContext({ reqId: req.id }, () =&gt; done());
+});
+
+// NestJS — 미들웨어로 같은 모양
+export class ContextMiddleware implements NestMiddleware {
+  use(req: Request, res: Response, next: NextFunction) {
+    runWithContext({ reqId: String(req.headers['x-request-id'] ?? randomUUID()) },
+      () =&gt; next());
+  }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>mixin</code> 과 <code>child</code> 중 무엇을 쓰나</b> —
+        문맥을 <b>로거 인스턴스를 넘기지 않고</b> 쓰고 싶으면 <code>mixin</code>,
+        <b>로거를 명시적으로 넘길 수 있으면</b> <code>child</code> 가 더 빠릅니다(고정 필드를 미리 굳혀 두므로).
+        실무에서는 <b>둘을 같이</b> 씁니다 — 요청 로거는 child, 깊은 곳은 mixin.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">문맥이 사라지는 자리 — <span class="t">여기서만 조심하면 됩니다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">끊기는 네 가지 경우</h4>
+      <pre class="code" data-lang="ts"><code>// ① 서버 시작 시 한 번 만든 타이머·구독 — 애초에 문맥 밖입니다
+setInterval(() =&gt; logger.info('heartbeat'), 60_000);   // reqId 없음. 정상입니다
+
+// ② 요청 밖으로 "떠난" 작업 — 응답을 보내고 나서도 도는 코드
+app.post('/orders', (req, res) =&gt; {
+  res.json({ ok: true });
+  queueMicrotask(() =&gt; heavyAudit());   // 문맥은 살아 있습니다(같은 비동기 사슬)
+  setTimeout(() =&gt; heavyAudit(), 0);    // 이것도 살아 있습니다
+});
+
+// ③ ✗ 진짜로 끊기는 곳 — 다른 사슬에 등록된 콜백
+const emitter = new EventEmitter();          // 앱 시작 때 만든 객체
+emitter.on('done', () =&gt; logger.info('x'));  // ← 등록 시점의 문맥(=없음)을 씁니다
+// 해결: 값을 미리 꺼내서 클로저에 담습니다
+const { reqId } = getContext() ?? {};
+emitter.on('done', () =&gt; logger.info({ reqId }, 'x'));
+
+// ④ ✗ 워커 스레드 · 자식 프로세스 — 메모리를 공유하지 않습니다
+worker.postMessage({ reqId, payload });      // 값으로 직접 넘겨야 합니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>판단 기준 한 줄</b> — <b>“이 콜백은 요청 처리 중에 만들어졌는가?”</b>
+        요청 처리 중에 만든 프로미스·타이머·스트림은 문맥을 물려받고,
+        <b>서버 시작 때 만들어 둔 객체에 나중에 등록한 콜백</b>은 물려받지 못합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한 줄로 요청 전체를 되짚기</h4>
+      <pre class="code" data-lang="bash"><code># 장애 신고: "결제가 안 됐어요. 오후 3시 12분쯤"
+# ① 사용자에게 응답 헤더의 x-request-id 를 물어봅니다 (또는 에러 화면에 표시)
+# ② 그 ID 하나로 전 구간을 긁습니다
+
+# Loki (LogQL)
+{service="checkout-api"} | json | reqId="req_01J8QK4T9"
+
+# OpenSearch / Elasticsearch
+GET logs-*/_search
+{ "query": { "term": { "reqId": "req_01J8QK4T9" } },
+  "sort": [{ "time": "asc" }] }
+
+# 그냥 파일이라면
+jq -c 'select(.reqId=="req_01J8QK4T9")' app.log</code></pre>
+      <div class="note tip">
+        <b>ID 를 사용자에게 보여 주세요</b> — 500 에러 화면에
+        <b>“오류 코드: req_01J8QK4T9”</b> 한 줄을 넣어 두면
+        고객센터에서 <b>스크린샷 한 장으로 조사가 시작됩니다.</b>
+        이것 하나가 장애 대응 시간을 크게 줄입니다.
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>ID 는 앞단에서 이어받으세요</b> — 로드밸런서·CDN·API 게이트웨이가
+        이미 <code>x-request-id</code>(또는 <code>traceparent</code>)를 붙여 보냅니다.
+        <b>있으면 쓰고 없으면 만드는 것</b>이 규칙입니다.
+        새로 만들어 버리면 <b>앞단 로그와 이어지지 않습니다.</b>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">여러 서비스를 하나로 잇기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">우리 서비스가 다른 서비스를 부를 때 ID 를 함께 보냅니다</h4>
+    <pre class="code" data-lang="ts"><code>// src/http-client.ts — 모든 바깥 호출이 이 함수를 거치게 합니다
+import { getContext } from './request-context.js';
+import { logger } from './logger.js';
+
+export async function call(url: string, init: RequestInit = {}) {
+  const ctx = getContext();
+  const t0 = performance.now();
+
+  const headers = new Headers(init.headers);
+  if (ctx?.reqId) headers.set('x-request-id', ctx.reqId);   // ★ 그대로 전달
+  if (ctx?.traceId) headers.set('traceparent',
+    `00-${ctx.traceId}-${ctx.spanId ?? '0'.repeat(16)}-01`); // W3C Trace Context
+
+  try {
+    const res = await fetch(url, { ...init, headers });
+    logger.info({
+      event: 'http.call', url, statusCode: res.status,
+      durationMs: Math.round(performance.now() - t0),
+    }, 'outbound call');
+    return res;
+  } catch (err) {
+    logger.error({ event: 'http.call_failed', url, err }, 'outbound call failed');
+    throw err;
+  }
+}</code></pre>
+    <div class="note tip">
+      <b>이 함수 하나가 세 가지를 동시에 해결합니다</b> —
+      ① 다음 서비스의 로그가 <b>같은 reqId</b> 를 갖습니다
+      ② 바깥 호출의 <b>지연이 자동으로 측정</b>됩니다
+      ③ 실패가 <b>한 곳에서만</b> 기록되어 중복 로그가 사라집니다.
+      <b>바깥으로 나가는 길을 하나로 모으는 것</b>이 관측의 첫걸음입니다.
+    </div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>OpenTelemetry 를 이미 쓴다면</b> ID 를 직접 만들지 마세요 —
+      <code>@opentelemetry/api</code> 의 <code>trace.getActiveSpan()?.spanContext()</code> 에서
+      <code>traceId</code>·<code>spanId</code> 를 꺼내 <code>mixin</code> 에 넣으면
+      <b>로그와 트레이스가 대시보드에서 한 번에 이어집니다</b>(<b>lg12</b>).
+      OTel 도 내부적으로 같은 비동기 문맥 전파를 씁니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>AsyncLocalStorage</code> 로 요청 문맥을 담고
+  pino 의 <code>mixin</code> 으로 꺼내 붙이면 <b>reqId 를 인자로 나를 필요가 없습니다.</b>
+  끊기는 곳은 <b>서버 시작 때 만든 객체의 콜백</b>과 <b>워커 스레드</b>뿐입니다.</div>
+</section>
+
+
+<!-- ==================== lg08 ==================== -->
+<section class="sec" id="lg08">
+  <div class="sec-head rv">
+    <span class="no">LOG 08</span>
+    <h2>TypeScript — <span class="t">로그도 타입으로</span> 잠글 수 있습니다</h2>
+    <p class="lead">
+      로그 필드는 <b>공개 API</b>입니다. 그런데 대부분 <code>Record&lt;string, any&gt;</code> 로 열어 두고
+      <b>오타를 6개월 뒤 대시보드에서 발견</b>합니다. 컴파일러에게 시키면 될 일입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 230" role="img" aria-label="타입이 없는 로거와 타입으로 잠근 로거를 좌우로 대조한 그림. 왼쪽은 문자열을 이어 붙이거나 필드 이름에 오타가 있거나 숫자를 문자열로 넣어도 아무 경고가 없다. 오른쪽은 레벨과 사건 이름을 리터럴 유니온으로, 필드를 인터페이스로 고정해 이름이 틀리면 컴파일이 막힌다">
+      <text x="16" y="18" class="lbl">같은 코드, 다른 안전장치 — 왼쪽은 전부 통과합니다</text>
+
+      <rect class="bx bx-warn" x="16" y="36" width="316" height="152"/>
+      <text x="174" y="56" class="val rs-t" text-anchor="middle">타입이 없는 로거</text>
+      <text x="28" y="80" font-size="9.5">log.info('paid ' + id)</text>
+      <text x="28" y="98" font-size="9.5">log.info({ userid: id })</text>
+      <text x="28" y="116" font-size="9.5">log.info({ ms: '37' })</text>
+      <text x="28" y="134" font-size="9.5">log.error(err.message)</text>
+      <text x="28" y="152" font-size="9.5">log.info(user)</text>
+      <text x="28" y="176" class="ann rs-t">오타 · 타입 · 이름 — 전부 런타임까지 안 보입니다</text>
+
+      <rect class="bx bx-ok" x="348" y="36" width="316" height="152"/>
+      <text x="506" y="56" class="val ok-t" text-anchor="middle">타입으로 잠근 로거</text>
+      <text x="360" y="80" font-size="9.5">type Ev = 'order.paid' | 'user.login'</text>
+      <text x="360" y="98" font-size="9.5">interface F { reqId: string;</text>
+      <text x="372" y="116" font-size="9.5">userId?: string; ms?: number }</text>
+      <text x="360" y="134" font-size="9.5">function log(f: F, e: Ev): void</text>
+      <text x="360" y="152" font-size="9.5">log({ userId, ms: 37 }, 'order.paid')</text>
+      <text x="360" y="176" class="ann ok-t">이름이 틀리면 컴파일이 막습니다</text>
+
+      <text x="16" y="206" class="lbl">타입은 로그를 느리게 만들지 않습니다 — 컴파일 뒤에는 사라집니다</text>
+      <text x="16" y="222" class="lbl">대시보드가 깨지는 것을 배포 전에 잡는 것이 목적입니다</text>
+    </svg>
+    <div class="cap">좌우 대조 — <b>로그 필드는 공개 API</b>입니다. API 를 <code>any</code> 로 두지는 않잖아요.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">레벨과 사건 이름을 리터럴 유니온으로</h4>
+      <pre class="code" data-lang="ts"><code>// src/log-types.ts
+export type Level = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+
+// 사건 이름 목록 — 대시보드가 이 위에 세워집니다
+export const EVENTS = [
+  'order.created', 'order.paid', 'order.cancelled',
+  'payment.failed', 'payment.retried',
+  'user.login', 'user.login_failed',
+  'http.call', 'http.call_failed',
+] as const;
+export type Event = (typeof EVENTS)[number];
+
+// 필드 사전 — 여기 없는 키는 못 넣습니다
+export interface LogFields {
+  event?: Event;
+  reqId?: string;
+  traceId?: string;
+  userId?: string;         // ★ 내부 식별자만. 이메일이 들어오면 lg10 의 사고
+  orderId?: number;
+  statusCode?: number;
+  durationMs?: number;     // 단위를 이름에 (lg05)
+  component?: 'db' | 'http' | 'queue' | 'cache';
+  err?: unknown;
+}
+
+// 타입 안전한 얇은 래퍼
+import { logger } from './logger.js';
+export const log = {
+  info : (f: LogFields, msg: string) =&gt; logger.info(f, msg),
+  warn : (f: LogFields, msg: string) =&gt; logger.warn(f, msg),
+  error: (f: LogFields, msg: string) =&gt; logger.error(f, msg),
+  debug: (f: LogFields, msg: string) =&gt; logger.debug(f, msg),
+};
+
+log.info({ event: 'order.paid', orderId: 8821, durationMs: 37 }, 'order paid');
+log.info({ userid: 1 }, 'x');   // ✗ 컴파일 에러 — 'userid' 는 LogFields 에 없습니다
+log.info({ event: 'order.payed' }, 'x');   // ✗ 오타가 여기서 잡힙니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“초과 속성 검사”가 여기서 일을 합니다</b> —
+        객체 리터럴을 <b>바로 넘길 때만</b> 없는 키를 잡아 줍니다.
+        <code>const f = { userid: 1 }; log.info(f, 'x')</code> 는 <b>통과합니다</b>.
+        그래서 <b>로그 필드는 변수에 담지 말고 그 자리에서 리터럴로</b> 넘기는 습관이 유리합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">pino 의 타입을 제대로 쓰기</h4>
+      <pre class="code" data-lang="ts"><code>import pino from 'pino';
+
+// ① 커스텀 레벨을 제네릭으로 알려 주면 자동완성에 나옵니다
+const logger = pino&lt;'audit' | 'security'&gt;({
+  customLevels: { audit: 35, security: 45 },
+  useOnlyCustomLevels: false,
+});
+logger.audit({ actor: 'u_1' }, 'permission changed');   // ○ 타입이 압니다
+logger.aduit({}, 'x');                                  // ✗ 컴파일 에러
+
+// ② 자식 로거의 타입은 그대로 이어집니다
+type AppLogger = pino.Logger&lt;'audit' | 'security'&gt;;
+export function makeReqLogger(reqId: string): AppLogger {
+  return logger.child({ reqId });
+}
+
+// ③ 직렬화기에도 타입을 답니다 — any 를 두면 여기가 구멍이 됩니다
+const logger2 = pino({
+  serializers: {
+    err: pino.stdSerializers.err,
+    req: (req: { method: string; url: string }) =&gt; ({ method: req.method, url: req.url }),
+  },
+});
+
+// ④ 로그로 나가면 안 되는 타입을 타입 시스템으로 막기 (lg10 의 예방책)
+declare const brand: unique symbol;
+export type Secret&lt;T&gt; = T &amp; { readonly [brand]: 'secret' };
+export const asSecret = &lt;T,&gt;(v: T) =&gt; v as Secret&lt;T&gt;;
+
+interface SafeFields { [k: string]: string | number | boolean | undefined }
+function safeLog(f: SafeFields, msg: string) { logger.info(f, msg); }
+
+const token = asSecret('eyJhbGciOi...');
+safeLog({ token }, 'x');   // ✗ Secret&lt;string&gt; 은 SafeFields 에 안 맞습니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>④ 가 실무에서 가장 값어치가 큽니다</b> —
+        토큰·비밀번호·주민번호를 담는 값에 <b>브랜드 타입</b>을 씌워 두면
+        <b>실수로 로그에 넣는 순간 컴파일이 막습니다.</b>
+        런타임 마스킹(<b>lg10</b>)은 <b>마지막 그물</b>이고, 이건 <b>애초에 안 담기게</b> 하는 방법입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">한 단계 더 — <span class="t">사건마다 필요한 필드를 강제하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv d1">
+    <h4 class="mini" style="margin-top:0">“결제 실패 로그에는 orderId 가 반드시 있어야 한다”를 타입으로</h4>
+    <pre class="code" data-lang="ts"><code>// 사건별로 필요한 필드를 묶습니다 (판별 유니온)
+type LogEvent =
+  | { event: 'order.paid';      orderId: number; durationMs: number }
+  | { event: 'payment.failed';  orderId: number; reason: string; err?: unknown }
+  | { event: 'user.login';      userId: string }
+  | { event: 'user.login_failed'; reason: 'bad_password' | 'locked' | 'unknown' };
+
+// 공통 필드는 자동으로 붙으니(mixin) 여기엔 사건 고유 필드만 둡니다
+export function event(e: LogEvent, msg?: string) {
+  const { event, ...rest } = e;
+  logger.info({ event, ...rest }, msg ?? event);
+}
+
+event({ event: 'order.paid', orderId: 8821, durationMs: 37 });         // ○
+event({ event: 'payment.failed', orderId: 8821 });                     // ✗ reason 이 없습니다
+event({ event: 'user.login_failed', reason: 'expired' });              // ✗ 허용된 값이 아닙니다
+
+// 대시보드 쪽 쿼리도 같은 타입에서 만들 수 있습니다
+export const EVENT_NAMES = [
+  'order.paid', 'payment.failed', 'user.login', 'user.login_failed',
+] as const satisfies readonly LogEvent['event'][];
+// ★ satisfies — 목록에 빠진 사건이 생기면 여기서 컴파일이 막습니다</code></pre>
+    <div class="note info">
+      <b>과하지 않나요?</b> — 사건이 열 개 미만인 서비스라면 과합니다.
+      하지만 <b>알림 규칙이 붙은 사건</b>이나 <b>매출·정산 분석의 근거가 되는 사건</b>은
+      이렇게 잠가 두는 편이 좋습니다. <b>“그 필드가 없어서 분석을 못 했다”</b>는
+      지난달 로그로는 되돌릴 수 없습니다.
+    </div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>타입이 런타임을 지켜 주지는 않습니다</b> —
+      외부 API 응답이나 DB 행처럼 <b>타입 주장(as)만 붙인 값</b>은
+      실제로 무엇이 들었는지 컴파일러도 모릅니다.
+      그런 값을 통째로 로그에 넣는 순간 <b>lg10 의 사고</b>가 납니다.
+      <b>필드로 골라 담는 습관</b>이 결국 답입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 레벨은 <b>리터럴 유니온</b>, 필드는 <b>인터페이스</b>,
+  사건은 <b>판별 유니온</b>으로 잠급니다. 타입은 컴파일 뒤 사라지므로 <b>런타임 비용이 0</b>이고,
+  <b>브랜드 타입</b>이면 비밀 값이 로그에 담기는 것 자체를 막을 수 있습니다.</div>
+</section>

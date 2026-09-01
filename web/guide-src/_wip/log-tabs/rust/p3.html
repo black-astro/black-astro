@@ -1,0 +1,740 @@
+
+
+<!-- ==================== lg07 ==================== -->
+<section class="sec" id="lg07">
+  <div class="sec-head rv">
+    <span class="no">LOG 07</span>
+    <h2>비동기 · Tokio — <span class="t">span 이 <code>.await</code> 를 건너</span> 이어지는 원리</h2>
+    <p class="lead">
+      비동기 태스크는 <b>스레드에 붙어 있지 않습니다.</b> <code>.await</code> 에서 양보하고,
+      다음에 깨어날 때는 <b>다른 워커 스레드</b>일 수 있습니다.
+      그래서 스레드 로컬에 문맥을 담는 옛 방식은 여기서 깨지고, <code>tracing</code> 은 그것을 구조로 풀었습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 218" role="img" aria-label="태스크가 워커 스레드를 옮겨 다녀도 span 이 따라간다는 것을 두 개의 스윔레인으로 그린 그림. 워커 A 레인에서 span 에 진입해 order_id 를 갖고 있다가 await 에서 양보하며 span 을 잠시 닫고, 워커 B 레인에서 재개될 때 같은 span 이 그대로 이어져 로그에 order_id 가 붙는다.">
+      <text x="16" y="18" class="lbl">태스크가 워커 스레드를 옮겨 다녀도 span 스택은 태스크를 따라갑니다</text>
+
+      <rect class="lane" x="120" y="34" width="544" height="66"/>
+      <rect class="lane-hd" x="16" y="34" width="96" height="66"/>
+      <text x="64" y="62" class="ann" text-anchor="middle">워커 A</text>
+      <text x="64" y="78" class="ann" text-anchor="middle">스레드 1</text>
+
+      <rect class="lane-alt" x="120" y="106" width="544" height="66"/>
+      <rect class="lane-hd" x="16" y="106" width="96" height="66"/>
+      <text x="64" y="134" class="ann" text-anchor="middle">워커 B</text>
+      <text x="64" y="150" class="ann" text-anchor="middle">스레드 2</text>
+
+      <rect class="bx bx-fw" x="136" y="46" width="150" height="42"/>
+      <text x="211" y="64" class="val" text-anchor="middle">span 진입</text>
+      <text x="211" y="80" class="ann" text-anchor="middle">order_id=7781</text>
+
+      <path class="fl ar" d="M290 67 L318 67"/>
+
+      <rect class="bx" x="322" y="46" width="160" height="42"/>
+      <text x="402" y="64" class="val" text-anchor="middle">.await 에서 양보</text>
+      <text x="402" y="80" class="ann" text-anchor="middle">span 을 잠시 닫습니다</text>
+
+      <path class="fl ar" d="M402 92 L402 118"/>
+
+      <rect class="bx bx-ok" x="322" y="122" width="160" height="42"/>
+      <text x="402" y="140" class="val ok-t" text-anchor="middle">다른 스레드에서 재개</text>
+      <text x="402" y="156" class="ann" text-anchor="middle">같은 span 이 이어집니다</text>
+
+      <path class="fl ar" d="M486 143 L518 143"/>
+
+      <rect class="bx bx-ok" x="522" y="122" width="142" height="42"/>
+      <text x="593" y="140" class="val ok-t" text-anchor="middle">로그 출력</text>
+      <text x="593" y="156" class="ann ok-t" text-anchor="middle">order_id 가 붙습니다</text>
+
+      <text x="16" y="192" class="lbl">스레드 로컬로 문맥을 나르는 방식은 여기서 깨집니다 — span 은 태스크에 붙습니다</text>
+      <text x="16" y="208" class="lbl">직접 만든 Future 라면 .instrument(span) 이 필요합니다 (async fn 은 어트리뷰트로 충분)</text>
+    </svg>
+    <div class="cap">span 은 <b>스레드가 아니라 Future 에 붙어 있습니다</b> — 그래서 워커를 옮겨도 안 끊깁니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 <code>enter()</code> 를 <code>.await</code> 너머로 들면 안 되나</h4>
+      <pre class="code" data-lang="rust"><code>// ✗ 컴파일은 되지만 틀린 코드입니다
+async fn bad(id: u64) {
+    let span = tracing::info_span!("job", id);
+    let _g = span.enter();          // 가드가 .await 를 넘어 살아 있습니다
+    do_io().await;                  // ← 여기서 태스크가 양보합니다
+    tracing::info!("끝");
+}
+// 무슨 일이 나나
+//   · 양보한 사이 그 스레드가 '다른 태스크'를 돌립니다
+//   · 그런데 현재 span 은 여전히 job{id} 로 남아 있습니다
+//   · 남의 태스크 로그에 내 id 가 붙습니다 ★ 문맥 오염</code></pre>
+      <pre class="code" data-lang="rust"><code>// ✔ 방법 1 — 어트리뷰트 (거의 항상 이걸 씁니다)
+#[tracing::instrument(skip_all, fields(id))]
+async fn good1(id: u64) {
+    do_io().await;
+    tracing::info!("끝");
+}
+
+// ✔ 방법 2 — Instrument 트레이트로 Future 를 감쌉니다
+use tracing::Instrument;
+async fn good2(id: u64) {
+    async {
+        do_io().await;
+        tracing::info!("끝");
+    }
+    .instrument(tracing::info_span!("job", id))   // ★
+    .await;
+}
+
+// ✔ 방법 3 — 동기 블록만 감쌀 때
+span.in_scope(|| { /* .await 없는 코드만 */ });</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>원리 한 줄</b> — <code>Instrumented&lt;F&gt;</code> 는 <code>poll()</code> 을 감싸서
+        <b>폴링 직전에 <code>enter</code>, 폴링이 끝나면 <code>exit</code></b> 합니다.
+        즉 span 이 <b>Future 자체에 소유</b>되므로, 어느 스레드에서 폴링되든 문맥이 정확히 그 태스크만 따릅니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">태스크를 띄울 때 문맥 잇기</h4>
+      <pre class="code" data-lang="rust"><code>use tracing::{Instrument, Span};
+
+// ① spawn 은 문맥을 자동으로 물려주지 않습니다
+tokio::spawn(async { work().await });          // ✗ 부모 span 없음
+
+// ② 현재 span 을 명시적으로 물려줍니다 ★
+tokio::spawn(work().instrument(Span::current()));
+
+// ③ 새 span 을 만들되 부모를 이어 붙입니다
+let parent = Span::current();
+tokio::spawn(async move {
+    let sp = tracing::info_span!(parent: &amp;parent, "worker", shard = 3);
+    async { work().await }.instrument(sp).await;
+});
+
+// ④ 아예 부모를 끊고 싶을 때 (배경 잡업 등)
+let sp = tracing::info_span!(parent: None, "cron");</code></pre>
+      <pre class="code" data-lang="rust"><code>// blocking 작업도 마찬가지입니다
+let sp = Span::current();
+tokio::task::spawn_blocking(move || {
+    let _g = sp.enter();          // 여기는 .await 가 없으니 enter 가 안전합니다
+    heavy_cpu_work();
+}).await?;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“요청 ID 가 배경 작업 로그에 안 붙는다”</b>는 거의 항상 ①번 실수입니다.
+        <code>tokio::spawn</code> 은 <b>완전히 독립된 태스크</b>를 만들기 때문에
+        <b><code>.instrument(Span::current())</code> 를 붙여 주지 않으면</b> 문맥이 끊깁니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">HTTP 서버에 요청 span 붙이기 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Axum · tower-http 의 <code>TraceLayer</code></h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+axum = "0.8"
+tower-http = { version = "0.6", features = ["trace", "request-id"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }</code></pre>
+      <pre class="code" data-lang="rust"><code>use tower_http::trace::TraceLayer;
+use tracing::info_span;
+
+let app = Router::new()
+    .route("/orders/{id}", get(get_order))
+    .layer(
+        TraceLayer::new_for_http()
+            // 요청마다 span 을 하나 만듭니다 ★
+            .make_span_with(|req: &amp;http::Request&lt;_&gt;| {
+                let rid = req.headers().get("x-request-id")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("-");
+                info_span!("http",
+                    method = %req.method(),
+                    path   = %req.uri().path(),
+                    request_id = %rid,
+                    status = tracing::field::Empty,   // 나중에 채웁니다
+                )
+            })
+            .on_response(|res: &amp;http::Response&lt;_&gt;, lat: std::time::Duration, sp: &amp;tracing::Span| {
+                sp.record("status", res.status().as_u16());
+                tracing::info!(duration_ms = lat.as_millis() as u64, "요청 완료");
+            })
+    );</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>레이어 순서가 중요합니다</b> — <code>TraceLayer</code> 를 <b>가장 바깥(가장 마지막 <code>.layer()</code>)</b>에 두어야
+        인증 실패·타임아웃·패닉까지 전부 기록됩니다. 안쪽에 두면 <b>그 앞에서 잘린 요청은 기록이 없습니다</b>.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이렇게 나옵니다</h4>
+      <pre class="code" data-lang="text"><code>INFO http{method=GET path=/orders/7781 request_id=0f2a}: 요청 시작
+DEBUG http{method=GET path=/orders/7781 request_id=0f2a}
+      :db{table="orders"}: sqlx: SELECT ... 실행 (4.1ms)
+WARN  http{method=GET path=/orders/7781 request_id=0f2a}
+      :db{table="orders"}: 느린 쿼리 duration_ms=412
+INFO  http{method=GET path=/orders/7781 request_id=0f2a status=200}
+      : 요청 완료 duration_ms=418
+
+# 한 요청의 모든 줄이 request_id 로 묶입니다 ★
+#   grep 0f2a app.log  →  그 요청에서 일어난 일 전부</code></pre>
+      <pre class="code" data-lang="rust"><code>// 핸들러 안에서는 아무것도 안 해도 됩니다
+#[tracing::instrument(skip(state))]      // 부모는 http span
+async fn get_order(State(state): State&lt;App&gt;, Path(id): Path&lt;u64&gt;)
+    -&gt; Result&lt;Json&lt;Order&gt;, AppError&gt;
+{
+    let o = state.repo.find(id).await?;  // repo 안의 로그에도 전부 붙습니다
+    Ok(Json(o))
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>요청 ID 는 직접 만들지 마세요</b> — <code>tower-http</code> 의
+        <code>SetRequestIdLayer</code>/<code>PropagateRequestIdLayer</code> 가
+        <b>없으면 만들고 있으면 그대로 전달</b>합니다.
+        프록시·게이트웨이가 이미 붙여 주는 경우가 많으니 <b>덮어쓰지 않는 것</b>이 중요합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a"><code>tokio-console</code> — <span class="t">태스크가 어디서 막혔는지</span> 실시간으로 <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">붙이는 법</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+console-subscriber = "0.4"
+tokio = { version = "1", features = ["full", "tracing"] }   # ★ tracing 피처
+
+[build]                       # .cargo/config.toml 에
+rustflags = ["--cfg", "tokio_unstable"]</code></pre>
+      <pre class="code" data-lang="rust"><code>use tracing_subscriber::prelude::*;
+
+fn main() {
+    tracing_subscriber::registry()
+        .with(console_subscriber::spawn())     // 6669 포트로 노출
+        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
+    // 앱 실행 …
+}</code></pre>
+      <pre class="code" data-lang="bash"><code>cargo install --locked tokio-console
+tokio-console                       # 기본 http://127.0.0.1:6669
+
+# 보이는 것
+#   · 살아 있는 태스크 목록과 각각의 폴링 횟수 · busy/idle 시간
+#   · '오래 안 깨어난' 태스크 경고 (누수 후보)
+#   · 한 번 폴링에 너무 오래 머문 태스크 경고 (블로킹 의심) ★
+#   · 뮤텍스·세마포어 대기 시간</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>운영에는 켜지 마세요</b> — <code>tokio_unstable</code> 은 <b>ABI 안정성이 보장되지 않고</b>,
+        계측 자체가 오버헤드입니다. <b>개발·부하 시험 환경에서만</b> 켜는 것이 정석이고,
+        빌드 프로파일을 따로 두어 실수로 배포되지 않게 하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실제로 잡히는 문제들</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">console 이 보여 주는 것</th><th>진짜 원인</th></tr>
+        <tr><td>한 폴링이 수십 ms</td><td><b>비동기 안에서 블로킹</b><br>(파일 I/O · <code>std::sync::Mutex</code>)</td></tr>
+        <tr><td>태스크 수가 계속 증가</td><td>완료되지 않는 태스크 <b>누수</b></td></tr>
+        <tr><td>idle 만 길다</td><td>외부 호출 대기 — <b>내 잘못 아님</b></td></tr>
+        <tr><td>busy 만 길다</td><td>CPU 작업 — <code>spawn_blocking</code> 으로</td></tr>
+        <tr><td>세마포어 대기 급증</td><td>커넥션 풀 고갈</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// 가장 흔한 범인 — 비동기 안의 동기 잠금
+use std::sync::Mutex;                 // ✗ .await 를 넘어 들면 워커가 멈춥니다
+use tokio::sync::Mutex as AsyncMutex; // ✔ 대기 중 양보합니다
+
+// 잠금을 .await 너머로 안 들면 std::sync 가 더 빠릅니다 ★
+{
+    let mut g = std_mutex.lock().unwrap();
+    *g += 1;
+}                                      // 여기서 반드시 놓습니다
+do_io().await;</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>tracing</code> 만으로도 절반은 잡힙니다</b> —
+        <code>FmtSpan::CLOSE</code> 로 <code>time.busy</code> 와 <code>time.idle</code> 을 찍으면
+        “느린데 CPU 는 안 쓴다(외부 대기)” 와 “CPU 를 다 쓴다(내 코드)” 가 구분됩니다.
+        <code>tokio-console</code> 은 그다음 단계의 도구입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 비동기에서 문맥이 유지되는 이유는 span 이 <b>스레드가 아니라 Future 에 붙기</b> 때문입니다.
+    <code>async fn</code> 은 <b><code>#[instrument]</code></b>, 수동 Future 는 <b><code>.instrument(span)</code></b>,
+    <code>tokio::spawn</code> 은 <b><code>.instrument(Span::current())</code></b> 를 반드시 붙이세요.
+    <code>enter()</code> 가드를 <code>.await</code> 너머로 들면 <b>남의 로그에 내 문맥이 새어 나갑니다</b>.</div>
+</section>
+
+
+<!-- ==================== lg08 ==================== -->
+<section class="sec" id="lg08">
+  <div class="sec-head rv">
+    <span class="no">LOG 08</span>
+    <h2>파일 출력과 로테이션 — <span class="t"><code>WorkerGuard</code></span> 를 놓치면 로그가 사라집니다</h2>
+    <p class="lead">
+      컨테이너가 아니라면(데스크톱 앱 · 온프렘 설치형 · 배치 작업) <b>파일로 남겨야 합니다.</b>
+      그때 필요한 두 가지가 <b>회전(rotation)</b> 과 <b>비동기 쓰기</b> 이고,
+      비동기 쓰기에는 <b>거의 모두가 한 번씩 당하는 함정</b>이 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 234" role="img" aria-label="비동기 파일 로깅의 구조를 그린 그림. 앱 스레드는 info 매크로만 부르고 채널을 통해 전용 워커 스레드에 넘기며, 워커 스레드가 묶어서 파일에 쓴다. 파일은 날짜별 원통 세 개로 표현되어 자정마다 새 파일로 바뀐다. 아래에는 워커 가드를 드롭하면 버퍼가 비워지기 전에 프로세스가 끝난다는 경고가 있다.">
+      <text x="16" y="18" class="lbl">non_blocking — 로그를 쓰는 일은 전용 워커 스레드에 넘깁니다</text>
+
+      <text x="176" y="34" class="ann" text-anchor="middle">채널</text>
+      <text x="530" y="34" class="ann" text-anchor="middle">자정마다 새 파일</text>
+
+      <rect class="bx bx-fw" x="16" y="40" width="140" height="50"/>
+      <text x="86" y="62" class="val" text-anchor="middle">앱 스레드</text>
+      <text x="86" y="78" class="ann" text-anchor="middle">info! 호출만</text>
+
+      <path class="fl ar" d="M160 65 L192 65"/>
+
+      <rect class="bx" x="196" y="40" width="160" height="50"/>
+      <text x="276" y="62" class="val" text-anchor="middle">워커 스레드</text>
+      <text x="276" y="78" class="ann" text-anchor="middle">묶어서 파일에 씁니다</text>
+
+      <path class="fl ar" d="M360 65 L396 65"/>
+
+      <path class="cyl" d="M402 48 L402 92 A34 9 0 0 0 470 92 L470 48"/>
+      <ellipse class="cyl" cx="436" cy="48" rx="34" ry="9"/>
+      <path class="cyl" d="M496 48 L496 92 A34 9 0 0 0 564 92 L564 48"/>
+      <ellipse class="cyl" cx="530" cy="48" rx="34" ry="9"/>
+      <path class="cyl" d="M590 48 L590 92 A34 9 0 0 0 658 92 L658 48"/>
+      <ellipse class="cyl" cx="624" cy="48" rx="34" ry="9"/>
+
+      <path class="ln ar" d="M474 70 L492 70"/>
+      <path class="ln ar" d="M568 70 L586 70"/>
+
+      <text x="436" y="118" class="ann" text-anchor="middle">08-30</text>
+      <text x="530" y="118" class="ann" text-anchor="middle">08-31</text>
+      <text x="624" y="118" class="ann" text-anchor="middle">오늘 · 쓰는 중</text>
+      <text x="530" y="136" class="ann" text-anchor="middle">rolling::daily("logs", "app.log")</text>
+
+      <rect class="bx bx-warn" x="16" y="152" width="648" height="52"/>
+      <text x="32" y="172" class="val rs-t">_guard 를 드롭하면 버퍼가 비워지기 전에 프로세스가 끝납니다</text>
+      <text x="32" y="190" class="ann">let (nb, _guard) = non_blocking(file); — _guard 는 main 이 끝날 때까지 살아 있어야 합니다</text>
+
+      <text x="16" y="224" class="lbl">회전은 파일 이름으로만 합니다 — 오래된 파일 삭제는 max_log_files 나 배치가 맡습니다</text>
+    </svg>
+    <div class="cap">원통 셋은 <b>같은 로거가 만든 날짜별 파일</b>입니다 — 회전은 이름 바꾸기가 아닙니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>tracing-appender</code> 기본형</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+tracing-appender = "0.2"</code></pre>
+      <pre class="code" data-lang="rust"><code>use tracing_appender::{non_blocking, rolling};
+use tracing_subscriber::{fmt, EnvFilter, prelude::*};
+use tracing_appender::non_blocking::WorkerGuard;
+
+// ★ guard 를 반드시 돌려주고, main 이 끝까지 들고 있어야 합니다
+pub fn init_log() -&gt; WorkerGuard {
+    let file = rolling::daily("logs", "app.log");
+    let (writer, guard) = non_blocking(file);
+
+    tracing_subscriber::registry()
+        .with(EnvFilter::from_default_env())
+        .with(fmt::layer().with_writer(std::io::stderr))   // 사람용
+        .with(fmt::layer().json().with_ansi(false).with_writer(writer))  // 파일용
+        .init();
+
+    guard
+}
+
+fn main() {
+    let _guard = init_log();     // ★ 이름을 주세요. `let _ =` 이면 즉시 드롭!
+    run();
+}                                 // 여기서 드롭되며 남은 로그를 전부 비웁니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 많이 나는 사고</b> — <code>let _ = init_log();</code> 로 쓰면
+        <code>WorkerGuard</code> 가 <b>그 줄에서 즉시 드롭</b>되어 워커 스레드가 종료됩니다.
+        그러면 <b>파일이 만들어지긴 하는데 내용이 비거나 몇 줄만</b> 있습니다.
+        <code>_guard</code> 처럼 <b>이름 있는 변수</b>에 담으세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">회전 정책과 보관 개수</h4>
+      <pre class="code" data-lang="rust"><code>use tracing_appender::rolling::{RollingFileAppender, Rotation};
+
+// 간단형 — 네 가지가 준비돼 있습니다
+rolling::minutely("logs", "app.log");   // 개발·시험용
+rolling::hourly  ("logs", "app.log");
+rolling::daily   ("logs", "app.log");   // ★ 가장 흔함
+rolling::never   ("logs", "app.log");   // 회전 없음
+
+// 빌더형 — 이름과 보관 개수를 지정합니다 ★
+let file = RollingFileAppender::builder()
+    .rotation(Rotation::DAILY)
+    .filename_prefix("app")
+    .filename_suffix("log")
+    .max_log_files(14)              // 14개를 넘으면 오래된 것부터 지웁니다
+    .build("logs")
+    .expect("로그 디렉터리를 만들 수 없습니다");
+
+// 만들어지는 파일 이름
+//   logs/app.2026-08-31.log
+//   logs/app.2026-09-01.log</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>크기 기준 회전이 필요하면</b> — <code>tracing-appender</code> 는 <b>시간 기준만</b> 지원합니다.
+        “10MB 마다”가 필요하면 <code>flexi_logger</code>(<code>Criterion::Size</code>) 를 쓰거나,
+        리눅스라면 <b><code>logrotate</code> 에 맡기는 것</b>이 가장 단순합니다
+        (다만 <code>copytruncate</code> 를 써야 파일 핸들이 안 끊깁니다).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i"><code>non_blocking</code> 이 실제로 하는 일 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">채널 + 워커 스레드 + 유실 정책</h4>
+      <pre class="code" data-lang="rust"><code>use tracing_appender::non_blocking::NonBlockingBuilder;
+
+let (writer, guard) = NonBlockingBuilder::default()
+    .lossy(true)                 // ★ 기본값 true — 큐가 차면 '버립니다'
+    .buffered_lines_limit(128_000)
+    .thread_name("log-writer")
+    .finish(file);
+
+// lossy(true)  : 큐가 차면 로그를 버리고 앱은 안 막힙니다
+//                (버린 개수는 stderr 에 경고로 나옵니다)
+// lossy(false) : 큐가 찰 때까지 기다립니다 —
+//                디스크가 느리면 '앱이 로그 때문에 멈춥니다' ★</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">상황</th><th>고르는 값</th></tr>
+        <tr><td>온라인 서비스</td><td><code>lossy(true)</code> — 지연이 우선</td></tr>
+        <tr><td>감사 로그 · 금융</td><td><code>lossy(false)</code> — 유실 불가</td></tr>
+        <tr><td>배치 작업</td><td><code>lossy(false)</code> 로도 무방</td></tr>
+        <tr><td>큐 크기</td><td>초당 줄 수 × 최대 지연 초</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>감사 로그를 <code>lossy(true)</code> 로 두면 안 됩니다</b> —
+        “장애 때 로그가 없다”가 정확히 이때 일어납니다.
+        부하가 몰리는 순간 큐가 차고, <b>가장 중요한 그 시점의 로그부터 버려집니다</b>.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">종료 시 반드시 비우기</h4>
+      <pre class="code" data-lang="rust"><code>#[tokio::main]
+async fn main() -&gt; anyhow::Result&lt;()&gt; {
+    let _guard = init_log();            // ★ 함수 끝까지 삽니다
+
+    let server = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal());
+
+    if let Err(e) = server.await {
+        tracing::error!(error = %e, "서버 종료 실패");
+    }
+
+    tracing::info!("정상 종료");
+    Ok(())
+}                                        // _guard 드롭 → 남은 로그 flush
+
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c().await.ok();
+    tracing::info!("종료 신호를 받았습니다");
+}</code></pre>
+      <pre class="code" data-lang="rust"><code>// std::process::exit 는 드롭을 건너뜁니다 ★ 절대 주의
+fn bad() {
+    let _guard = init_log();
+    tracing::info!("이 줄은 파일에 안 남을 수 있습니다");
+    std::process::exit(1);          // ✗ 소멸자가 안 불립니다
+}
+
+// 종료 코드를 주고 싶으면 main 에서 돌려주세요
+fn main() -&gt; std::process::ExitCode {
+    let _guard = init_log();
+    ...
+    std::process::ExitCode::from(1)   // ✔ 드롭이 정상적으로 일어납니다
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>컨테이너라면 파일을 쓰지 마세요</b> — stdout 한 줄기로만 쓰고
+        수집(Fluent Bit · Vector · Promtail)과 보관은 <b>플랫폼에 맡기는 것</b>이 정석입니다.
+        파일 로깅은 <b>수집기를 둘 수 없는 환경</b>의 해법입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">디스크가 찼을 때 · 로그가 안 보일 때 <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">점검 순서 (위에서부터)</h4>
+      <pre class="code" data-lang="bash"><code># ① 그 파일에 정말 쓰고 있나 — 열린 파일 핸들 확인
+lsof -p $(pgrep myapp) | grep '\.log'
+ls -l --time-style=full-iso logs/       # 갱신 시각을 봅니다
+
+# ② 디스크·아이노드가 남았나 (아이노드 고갈이 의외로 흔합니다)
+df -h /var/log ; df -i /var/log
+
+# ③ 권한 — 컨테이너 안의 uid 가 디렉터리를 못 쓰는 경우
+id ; ls -ld logs/
+
+# ④ 필터가 다 막고 있나
+RUST_LOG=trace ./myapp 2&gt;&amp;1 | head -20
+
+# ⑤ 회전 뒤에도 같은 파일에 쓰고 있나 (logrotate 사고)
+#    → copytruncate 를 쓰거나, 앱이 스스로 회전하게 하세요</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>logrotate</code> 의 고전적 함정</b> — 기본 동작은 <code>rename</code> 입니다.
+        프로세스는 <b>이미 열어 둔 파일 핸들</b>을 계속 쓰므로,
+        새 파일은 비고 <b>지워진 옛 파일에 계속 씁니다</b>(디스크는 안 줄어듭니다).
+        <code>copytruncate</code> 를 쓰거나 <code>postrotate</code> 에서 앱에 시그널을 보내세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로그가 디스크를 채우지 않게</h4>
+      <pre class="code" data-lang="rust"><code>// ① 반복되는 경고는 '샘플링' 하거나 '뭉쳐서' 남깁니다
+use std::sync::atomic::{AtomicU64, Ordering};
+static DROPPED: AtomicU64 = AtomicU64::new(0);
+
+if let Err(e) = send(msg) {
+    let n = DROPPED.fetch_add(1, Ordering::Relaxed);
+    if n % 1000 == 0 {                        // 1000번에 한 번만
+        tracing::warn!(dropped = n + 1, error = %e, "전송 실패 누적");
+    }
+}
+
+// ② 루프 안의 debug! 는 span 밖으로 빼고 요약만 남깁니다
+tracing::info!(rows = n, elapsed_ms = t.elapsed().as_millis() as u64,
+               "배치 완료");
+
+// ③ 큰 본문은 길이만 · 해시만
+tracing::debug!(body_len = body.len(),
+                body_sha = %hex(&amp;sha256(&amp;body)[..8]), "요청 본문");</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>로그 폭주는 장애의 증상이자 원인입니다</b> — 외부 API 가 죽으면
+        초당 수만 줄의 <code>error!</code> 가 쏟아지고, 그게 디스크를 채워
+        <b>진짜 장애를 만듭니다</b>. 반복 에러에는 <b>누적 카운터 + 주기적 요약</b>을 기본으로 하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 파일 로깅의 핵심은 셋 — <b><code>WorkerGuard</code> 를 이름 있는 변수로 살려 두기</b>,
+    <b>회전 정책과 보관 개수(<code>max_log_files</code>) 정하기</b>, <b>유실 정책(<code>lossy</code>) 을 의식적으로 고르기</b>.
+    <code>std::process::exit</code> 는 소멸자를 건너뛰므로 <b>마지막 로그가 사라집니다</b>.
+    컨테이너라면 애초에 <b>stdout 한 줄기</b>가 정답입니다.</div>
+</section>
+
+
+<!-- ==================== lg09 ==================== -->
+<section class="sec" id="lg09">
+  <div class="sec-head rv">
+    <span class="no">LOG 09</span>
+    <h2>성능 — <span class="t">꺼진 로그는 얼마나 싼가</span>, 켠 로그는 얼마나 비싼가</h2>
+    <p class="lead">
+      “로그를 많이 남기면 느려진다”는 말은 절반만 맞습니다.
+      <b>꺼진 로그는 거의 공짜</b>이고(원자적 비교 한 번), <b>컴파일 타임에 지우면 완전히 0</b> 입니다.
+      비싼 것은 <b>켠 상태에서의 포맷·할당·쓰기</b>이고, 그건 측정해서 다뤄야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 266" role="img" aria-label="로그 수준을 한 단계씩 낮출 때 얻는 것과 잃는 것을 발산 색상 매트릭스로 그린 그림. 행은 TRACE 까지 전부, DEBUG 까지, INFO 운영 기본값, WARN 이상만, 컴파일 타임 제거 다섯 가지이고 열은 조사용 정보, CPU 와 지연, 디스크와 전송, 검색 속도이다. 붉을수록 나쁘고 푸를수록 좋으며 가운데는 무채색이다. 로그를 줄이면 비용은 줄지만 조사용 정보도 함께 줄어든다.">
+      <text x="16" y="18" class="lbl">로그를 한 단계 줄이면 무엇이 좋아지고 무엇을 잃는가</text>
+
+      <text x="225" y="40" class="tk" text-anchor="middle">조사용 정보</text>
+      <text x="347" y="40" class="tk" text-anchor="middle">CPU · 지연</text>
+      <text x="469" y="40" class="tk" text-anchor="middle">디스크 · 전송</text>
+      <text x="591" y="40" class="tk" text-anchor="middle">검색 속도</text>
+
+      <text x="16" y="67" class="ann">TRACE 까지 전부</text>
+      <rect class="cel d-p2" x="170" y="48" width="110" height="30"/><text x="225" y="67" class="tk" text-anchor="middle">가장 많음</text>
+      <rect class="cel d-n2" x="292" y="48" width="110" height="30"/><text x="347" y="67" class="tk" text-anchor="middle">가장 큼</text>
+      <rect class="cel d-n2" x="414" y="48" width="110" height="30"/><text x="469" y="67" class="tk" text-anchor="middle">폭증</text>
+      <rect class="cel d-n1" x="536" y="48" width="110" height="30"/><text x="591" y="67" class="tk" text-anchor="middle">느림</text>
+
+      <text x="16" y="101" class="ann">DEBUG 까지</text>
+      <rect class="cel d-p1" x="170" y="82" width="110" height="30"/><text x="225" y="101" class="tk" text-anchor="middle">많음</text>
+      <rect class="cel d-n1" x="292" y="82" width="110" height="30"/><text x="347" y="101" class="tk" text-anchor="middle">큼</text>
+      <rect class="cel d-n1" x="414" y="82" width="110" height="30"/><text x="469" y="101" class="tk" text-anchor="middle">큼</text>
+      <rect class="cel d-0" x="536" y="82" width="110" height="30"/><text x="591" y="101" class="tk" text-anchor="middle">보통</text>
+
+      <text x="16" y="135" class="ann">INFO — 운영 기본값</text>
+      <rect class="cel d-0" x="170" y="116" width="110" height="30"/><text x="225" y="135" class="tk" text-anchor="middle">충분</text>
+      <rect class="cel d-p1" x="292" y="116" width="110" height="30"/><text x="347" y="135" class="tk" text-anchor="middle">작음</text>
+      <rect class="cel d-p1" x="414" y="116" width="110" height="30"/><text x="469" y="135" class="tk" text-anchor="middle">작음</text>
+      <rect class="cel d-p1" x="536" y="116" width="110" height="30"/><text x="591" y="135" class="tk" text-anchor="middle">빠름</text>
+
+      <text x="16" y="169" class="ann">WARN 이상만</text>
+      <rect class="cel d-n1" x="170" y="150" width="110" height="30"/><text x="225" y="169" class="tk" text-anchor="middle">부족</text>
+      <rect class="cel d-p2" x="292" y="150" width="110" height="30"/><text x="347" y="169" class="tk" text-anchor="middle">거의 없음</text>
+      <rect class="cel d-p2" x="414" y="150" width="110" height="30"/><text x="469" y="169" class="tk" text-anchor="middle">아주 작음</text>
+      <rect class="cel d-p2" x="536" y="150" width="110" height="30"/><text x="591" y="169" class="tk" text-anchor="middle">가장 빠름</text>
+
+      <text x="16" y="203" class="ann">컴파일 타임 제거</text>
+      <rect class="cel d-n2" x="170" y="184" width="110" height="30"/><text x="225" y="203" class="tk" text-anchor="middle">복구 불가</text>
+      <rect class="cel d-p2" x="292" y="184" width="110" height="30"/><text x="347" y="203" class="tk" text-anchor="middle">0</text>
+      <rect class="cel d-p2" x="414" y="184" width="110" height="30"/><text x="469" y="203" class="tk" text-anchor="middle">0</text>
+      <rect class="cel d-0" x="536" y="184" width="110" height="30"/><text x="591" y="203" class="tk" text-anchor="middle">해당 없음</text>
+
+      <text x="16" y="232" class="ann">나쁨 ↔ 좋음</text>
+      <rect class="cel d-n2" x="170" y="222" width="20" height="12"/>
+      <rect class="cel d-n1" x="192" y="222" width="20" height="12"/>
+      <rect class="cel d-0" x="214" y="222" width="20" height="12"/>
+      <rect class="cel d-p1" x="236" y="222" width="20" height="12"/>
+      <rect class="cel d-p2" x="258" y="222" width="20" height="12"/>
+      <text x="292" y="232" class="ann">가운데는 무채색 — 어느 쪽도 아님. 판단은 글자로 하세요</text>
+
+      <text x="16" y="256" class="lbl">한 칸을 좋게 하면 다른 칸이 나빠집니다 — 공짜로 좋아지는 줄은 없습니다</text>
+    </svg>
+    <div class="cap">발산 램프 — <b>가운데(회색)가 기준선</b>이고 양쪽이 이득과 손해입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 컴파일 타임 제거 — 진짜 0 으로</h4>
+      <pre class="code" data-lang="toml"><code># log 크레이트 — 코드에서 아예 사라집니다
+[dependencies]
+log = { version = "0.4", features = ["max_level_debug",
+                                     "release_max_level_info"] }
+#   max_level_*          : 모든 빌드에 적용
+#   release_max_level_*  : --release 빌드에만 적용 ★ 보통 이걸 씁니다
+
+# tracing 도 같은 이름의 피처를 가집니다
+tracing = { version = "0.1", features = ["release_max_level_info"] }</code></pre>
+      <pre class="code" data-lang="rust"><code>// release 빌드에서 이 줄은 '기계어에 없습니다'
+log::debug!("무거운 {:?}", expensive_dump());
+//          ↑ expensive_dump() 도 호출되지 않습니다 ★
+
+// 확인하는 법 — 심볼이 사라졌는지 봅니다
+//   cargo build --release
+//   나 cargo asm / cargo-show-asm 으로 함수 본문을 직접 확인</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>피처는 합쳐집니다(feature unification)</b> — 의존성 중 하나가
+        <code>max_level_trace</code> 를 켜면 <b>전체가 그 값</b>이 됩니다.
+        반대로 <code>release_max_level_info</code> 를 켜 두면
+        <b>운영에서 디버그 로그를 켤 방법이 아예 없어집니다</b> — 그 대가를 알고 쓰세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 실행 중 필터 — 얼마나 싼가</h4>
+      <pre class="code" data-lang="rust"><code>// log 매크로가 펼쳐지는 모양 (개념적)
+if Level::Debug &lt;= STATIC_MAX_LEVEL          // ① 컴파일 타임 상수 비교
+   &amp;&amp; Level::Debug &lt;= log::max_level() {      // ② 원자적 로드 1회
+    /* 여기부터가 진짜 비용 */
+}
+
+// tracing 은 한 겹 더 있습니다 — 콜사이트 캐시 ★
+//   각 매크로 위치마다 'Interest' 를 한 번 계산해 캐시합니다
+//   Never  : 이 위치는 영원히 관심 없음 → 이후 분기조차 거의 없음
+//   Always : 무조건 기록
+//   Sometimes : 매번 물어봄 (span 필드 필터를 쓸 때)</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:40%">단계</th><th>대략의 비용</th></tr>
+        <tr><td>컴파일 타임에 제거</td><td><b>0</b> (코드가 없음)</td></tr>
+        <tr><td>꺼진 레벨 (Never 캐시)</td><td>나노초 단위 · 분기 하나</td></tr>
+        <tr><td>켠 이벤트 — 필드 기록</td><td>수백 나노초</td></tr>
+        <tr><td>포맷 + 문자열 할당</td><td>마이크로초 단위</td></tr>
+        <tr><td>동기 파일·터미널 쓰기</td><td><b>수십~수백 마이크로초</b></td></tr>
+        <tr><td>비동기 큐로 넘기기</td><td>채널 send 한 번</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>순서를 기억하세요</b> — 비용의 대부분은 <b>맨 아래 두 줄</b>에 있습니다.
+        “로그가 느리다”면 십중팔구 <b>동기 쓰기</b>이지 매크로 자체가 아닙니다.
+        먼저 <code>non_blocking</code> 을 붙이고, 그다음에 레벨을 줄이세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">할당을 만들지 않는 로그 <span class="lvl m">🟡 중급</span></h3>
+  <div class="vs rv d1">
+    <div class="bad">
+      <h5>매번 String 을 만듭니다</h5>
+      <pre class="code" data-lang="rust"><code>// ① format! 을 미리 만들어 넘기기
+tracing::debug!("{}", format!("row {} 처리", i));   // ✗ 항상 할당
+
+// ② to_string() 을 필드에 넣기
+tracing::info!(path = path.to_string_lossy().to_string(), "열기");  // ✗
+
+// ③ 꺼져 있어도 인자를 미리 계산
+let dump = expensive_dump();                        // ✗ 무조건 실행
+tracing::trace!(?dump, "덤프");
+
+// ④ 루프 안에서 span 을 새로 만들기
+for r in rows { let _g = info_span!("row").entered(); }   // ✗</code></pre>
+    </div>
+    <div class="good">
+      <h5>필요할 때만, 참조로</h5>
+      <pre class="code" data-lang="rust"><code>// ① 포맷은 매크로에 맡깁니다 — 꺼져 있으면 아예 안 합니다
+tracing::debug!(row = i, "행 처리");                 // ✔
+
+// ② Display 시길로 참조만 넘깁니다
+tracing::info!(path = %path.display(), "열기");      // ✔
+
+// ③ 켜져 있을 때만 계산 ★
+if tracing::enabled!(tracing::Level::TRACE) {
+    tracing::trace!(dump = ?expensive_dump(), "덤프");
+}
+
+// ④ span 은 루프 바깥에 하나, 안에서는 record 로 갱신
+let sp = info_span!("rows", done = 0u64);
+let _g = sp.enter();
+for (i, r) in rows.iter().enumerate() { /* … */ }   // ✔</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 재 보기 — 벤치 방법</h4>
+      <pre class="code" data-lang="toml"><code>[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "log_bench"
+harness = false</code></pre>
+      <pre class="code" data-lang="rust"><code>// benches/log_bench.rs
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+fn bench(c: &amp;mut Criterion) {
+    // ① 구독자가 아예 없을 때 (기준선)
+    c.bench_function("no subscriber", |b| {
+        b.iter(|| tracing::debug!(v = black_box(42), "x"))
+    });
+
+    // ② 구독자는 있는데 레벨이 꺼져 있을 때
+    let _g = tracing::subscriber::set_default(
+        tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).finish());
+    c.bench_function("filtered out", |b| {
+        b.iter(|| tracing::debug!(v = black_box(42), "x"))
+    });
+
+    // ③ 켜져 있고 io::sink 로 버릴 때 (포맷 비용만)
+    // ④ 켜져 있고 파일에 쓸 때 (전체 비용)
+}
+criterion_group!(g, bench);
+criterion_main!(g);</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>네 단계를 따로 재세요</b> — ①②의 차이가 <b>필터 비용</b>, ②③의 차이가 <b>포맷 비용</b>,
+        ③④의 차이가 <b>I/O 비용</b>입니다. 이렇게 나눠야 “무엇을 줄여야 하는지”가 나옵니다.
+        보통 ④가 나머지 셋을 합친 것보다 훨씬 큽니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">정적 디스패치와 레이어 비용</h4>
+      <pre class="code" data-lang="rust"><code>// registry().with(A).with(B) 는 Layered&lt;B, Layered&lt;A, Registry&gt;&gt; 라는
+// '구체 타입'을 만듭니다 — 가상 호출이 아니라 정적 디스패치입니다 ★
+//   장점: 인라인 가능 · 오버헤드 거의 없음
+//   단점: 타입이 길어져 컴파일 에러가 무섭게 나옵니다
+
+// .boxed() 를 쓰면 동적 디스패치로 바뀝니다 (호출당 가상 호출 한 번)
+//   조건부 레이어에는 필요하지만, 뜨거운 경로에 여러 개 쌓지는 마세요
+
+// 실측 없이 최적화하지 않는 규칙 ★
+//   1) non_blocking 을 붙였는가
+//   2) 운영 레벨이 info 인가
+//   3) 루프 안에 debug! 가 있는가
+//   이 셋을 먼저 확인하면 나머지는 대개 문제가 아닙니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>측정 없이 “로그를 줄이자”고 하지 마세요</b> — 실제 병목은 거의 항상
+        <b>동기 쓰기</b>이거나 <b>루프 안의 <code>debug!</code></b> 입니다.
+        <code>FmtSpan::CLOSE</code> 로 구간 시간을 먼저 보고,
+        그 다음 <code>criterion</code> 으로 네 단계를 나눠 재는 것이 순서입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 비용의 계단은 <b>0(컴파일 제거) → 분기 하나(꺼짐) → 필드 기록 → 포맷 → I/O</b> 입니다.
+    거의 모든 문제는 <b>맨 마지막 I/O</b>에 있으므로 <code>non_blocking</code> 을 먼저 붙이세요.
+    <code>release_max_level_info</code> 는 강력하지만 <b>운영에서 디버그를 켤 길을 없애는</b> 대가가 있습니다.</div>
+</section>

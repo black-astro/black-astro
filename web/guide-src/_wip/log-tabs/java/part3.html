@@ -1,0 +1,611 @@
+
+
+<!-- ==================== lg08 ==================== -->
+<section class="sec" id="lg08">
+  <div class="sec-head rv">
+    <span class="no">LOG 08</span>
+    <h2>MDC — <span class="t">요청 ID</span> 를 로그마다 자동으로</h2>
+    <p class="lead">
+      장애 분석의 첫 단계는 언제나 같습니다 — <b>"그 요청이 남긴 줄만 모아 보기"</b>.
+      매번 <code>traceId</code> 를 인자로 넘길 수는 없으니, <b>스레드에 붙여 두고</b> 패턴이 알아서 찍게 합니다.
+      그게 MDC 이고, <b>스레드가 바뀌는 순간 새 나갑니다.</b>
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 260" role="img" aria-label="MDC 전파를 세 역할로 나눈 스윔레인. 요청 스레드 레인에서 필터가 MDC 에 traceId 를 넣으면 그 스레드의 모든 로그에 traceId 가 붙고 마지막에 finally 에서 지운다. 아래 @Async 워커 스레드 레인으로 넘어가면 MDC 가 비어 있어 traceId 가 사라지며, TaskDecorator 로 복사해 주어야 이어진다. 맨 아래 가상 스레드 레인에서는 가상 스레드마다 ThreadLocal 사본이 생기므로 수십만 개면 메모리 부담이 되어 ScopedValue 검토가 필요하다">
+      <text x="16" y="18" class="lbl">MDC 는 스레드에 붙습니다 — 줄을 넘어가는 순간 사라집니다</text>
+
+      <rect class="lane" x="110" y="32" width="554" height="58"/>
+      <rect class="lane-alt" x="110" y="94" width="554" height="58"/>
+      <rect class="lane" x="110" y="156" width="554" height="58"/>
+
+      <rect class="lane-hd" x="16" y="32" width="88" height="58"/>
+      <text x="60" y="65" class="val" text-anchor="middle">요청 스레드</text>
+      <rect class="lane-hd" x="16" y="94" width="88" height="58"/>
+      <text x="60" y="127" class="val" text-anchor="middle">@Async 워커</text>
+      <rect class="lane-hd" x="16" y="156" width="88" height="58"/>
+      <text x="60" y="189" class="val" text-anchor="middle">가상 스레드</text>
+
+      <rect class="bx" x="124" y="44" width="140" height="34"/>
+      <text x="194" y="65" class="ann" text-anchor="middle">MDC.put(traceId)</text>
+      <path class="fl ar" d="M268 61 L284 61"/>
+      <rect class="bx bx-fw" x="288" y="44" width="150" height="34"/>
+      <text x="363" y="65" class="ann" text-anchor="middle">log.info — traceId 붙음</text>
+      <path class="fl ar" d="M442 61 L458 61"/>
+      <rect class="bx bx-ok" x="462" y="44" width="190" height="34"/>
+      <text x="557" y="65" class="ann" text-anchor="middle">MDC.clear() — finally 에서</text>
+
+      <path class="fl ar" d="M363 82 L363 102"/>
+      <rect class="bx bx-warn" x="288" y="106" width="170" height="34"/>
+      <text x="373" y="127" class="ann" text-anchor="middle">MDC 비어 있음 — traceId 없음</text>
+      <path class="fl ar" d="M462 123 L474 123"/>
+      <rect class="bx bx-ok" x="478" y="106" width="180" height="34"/>
+      <text x="568" y="127" class="ann" text-anchor="middle">TaskDecorator 로 복사</text>
+
+      <rect class="bx" x="124" y="168" width="210" height="34"/>
+      <text x="229" y="189" class="ann" text-anchor="middle">가상 스레드마다 ThreadLocal 사본</text>
+      <path class="fl ar" d="M338 185 L354 185"/>
+      <rect class="bx" x="358" y="168" width="300" height="34"/>
+      <text x="508" y="189" class="ann" text-anchor="middle">수십만 개면 메모리 부담 — ScopedValue 검토</text>
+
+      <text x="16" y="236" class="lbl">줄을 넘는 세로 화살표가 곧 MDC 가 끊기는 지점입니다 — 여기만 막으면 됩니다</text>
+      <text x="16" y="252" class="lbl">스레드풀은 스레드를 재사용합니다 — 지우지 않으면 남의 traceId 가 붙습니다</text>
+    </svg>
+    <div class="cap">스윔레인 — <b>레인을 넘는 화살표</b>가 문제의 전부입니다. 넘길 때 복사하고, 끝나면 지웁니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">필터에서 심고 finally 에서 지우기</h4>
+      <pre class="code" data-lang="java"><code>@Component
+@Order(Ordered.HIGHEST_PRECEDENCE)          // 가장 먼저 타야 합니다
+public class MdcFilter extends OncePerRequestFilter {
+
+    private static final String TRACE_ID = "traceId";
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest req,
+                                    HttpServletResponse res,
+                                    FilterChain chain) throws IOException, ServletException {
+        String traceId = req.getHeader("X-Request-Id");
+        if (traceId == null || traceId.isBlank()) {
+            traceId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        }
+        MDC.put(TRACE_ID, traceId);
+        MDC.put("path", req.getRequestURI());
+        res.setHeader("X-Request-Id", traceId);   // 클라이언트도 알 수 있게 ★
+        try {
+            chain.doFilter(req, res);
+        } finally {
+            MDC.clear();                          // ★ 반드시 finally
+        }
+    }
+}
+
+// 부분만 잠깐 넣고 자동으로 빼기 — try-with-resources
+try (MDC.MDCCloseable ignored = MDC.putCloseable("orderId", id.toString())) {
+    log.info("order.pay.start");
+    payment.pay(id);
+    log.info("order.pay.done");
+}   // 블록을 나가면 orderId 가 자동으로 제거됩니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>finally</code> 를 빼먹으면 생기는 일</b> — 톰캣 스레드는 <b>재사용</b>됩니다.
+        A 요청이 넣은 <code>traceId</code> 가 남아 있는 스레드로 B 요청이 들어오면
+        <b>B 의 로그에 A 의 traceId 가 찍힙니다</b>.
+        장애 분석 때 <b>있지도 않은 연결</b>을 보게 되니, 아예 없는 것보다 나쁩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">패턴에 꽂고 JSON 필드로 내보내기</h4>
+      <pre class="code" data-lang="xml"><code>&lt;!-- 텍스트 패턴 — 값이 없으면 빈칸(:-) --&gt;
+&lt;pattern&gt;%d{HH:mm:ss.SSS} [%thread] %-5level %logger{20} [%X{traceId:-}] - %msg%n&lt;/pattern&gt;
+
+&lt;!-- MDC 전체를 한 번에 --&gt;
+&lt;pattern&gt;... %mdc - %msg%n&lt;/pattern&gt;
+
+&lt;!-- JSON 인코더에서는 필드로 자동 승격 --&gt;
+&lt;encoder class="net.logstash.logback.encoder.LogstashEncoder"&gt;
+  &lt;includeMdc&gt;true&lt;/includeMdc&gt;
+  &lt;includeMdcKeyName&gt;traceId&lt;/includeMdcKeyName&gt;
+  &lt;includeMdcKeyName&gt;userId&lt;/includeMdcKeyName&gt;
+&lt;/encoder&gt;</code></pre>
+      <pre class="code" data-lang="text"><code>출력 예 — 같은 요청의 줄만 모으기가 쉬워집니다
+
+10:22:41.108 [exec-3] INFO  c.m.o.OrderService [3f9a1c0b] - order.pay.start
+10:22:41.191 [exec-3] INFO  c.m.p.PgClient     [3f9a1c0b] - pg.request status=200
+10:22:41.204 [exec-3] ERROR c.m.o.OrderService [3f9a1c0b] - order.pay.fail
+
+  $ grep 3f9a1c0b app.log        # 텍스트라면 이걸로 끝
+  trace.id:"3f9a1c0b"           # Kibana/Loki 라면 필드 검색</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이미 추적 시스템이 있다면 직접 만들지 마세요</b> —
+        <b>Micrometer Tracing</b>(Spring Boot 3.x) 을 넣으면
+        <code>traceId</code> · <code>spanId</code> 를 <b>MDC 에 자동으로 넣어 줍니다</b>.
+        서비스 사이를 넘어가는 전파(W3C <code>traceparent</code> 헤더)까지 처리됩니다.
+        직접 만든 <code>X-Request-Id</code> 는 <b>단일 서비스</b>일 때의 최소 구성입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">스레드가 바뀌는 세 자리</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 스레드풀 · @Async</h4>
+      <pre class="code" data-lang="java"><code>// 문제 — 워커 스레드에는 MDC 가 없습니다
+@Async
+public void sendMail(Long orderId) {
+    log.info("mail.send orderId={}", orderId);   // traceId 가 빈칸 ★
+}
+
+// 해결 — 제출하는 순간의 MDC 를 복사해 주는 TaskDecorator
+public class MdcTaskDecorator implements TaskDecorator {
+    @Override
+    public Runnable decorate(Runnable runnable) {
+        Map&lt;String, String&gt; context = MDC.getCopyOfContextMap();   // 제출 스레드에서
+        return () -&gt; {
+            Map&lt;String, String&gt; previous = MDC.getCopyOfContextMap();
+            if (context != null) MDC.setContextMap(context);        // 실행 스레드에서
+            try {
+                runnable.run();
+            } finally {
+                if (previous != null) MDC.setContextMap(previous);
+                else MDC.clear();                                   // ★ 되돌리기
+            }
+        };
+    }
+}
+
+@Configuration
+@EnableAsync
+public class AsyncConfig {
+    @Bean("appExecutor")
+    public Executor executor() {
+        ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();
+        ex.setCorePoolSize(8);
+        ex.setMaxPoolSize(32);
+        ex.setQueueCapacity(1000);
+        ex.setThreadNamePrefix("app-");
+        ex.setTaskDecorator(new MdcTaskDecorator());   // ★ 이 한 줄
+        ex.initialize();
+        return ex;
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>CompletableFuture.supplyAsync(...)</code> 도 같은 문제입니다</b> —
+        <b>기본 ForkJoinPool</b> 을 쓰면 MDC 가 비어 있습니다.
+        <b>executor 를 명시</b>해서 위 decorator 가 붙은 풀을 넘기세요.
+        <code>@Scheduled</code> · 메시지 리스너도 전부 같은 이야기입니다
+        (거기서는 <b>새 traceId 를 발급</b>하는 편이 맞습니다).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 리액티브 · ③ 가상 스레드</h4>
+      <pre class="code" data-lang="java"><code>// ② WebFlux / Reactor — MDC(ThreadLocal)는 아예 안 맞습니다
+//    한 요청이 여러 스레드를 옮겨 다니기 때문입니다.
+//    Reactor Context 에 담고, 로깅 시점에 MDC 로 옮깁니다.
+
+Mono.deferContextual(ctx -&gt; {
+    String traceId = ctx.get("traceId");
+    try (MDC.MDCCloseable c = MDC.putCloseable("traceId", traceId)) {
+        log.info("order.start");
+        return orderService.create(cmd);
+    }
+}).contextWrite(Context.of("traceId", newTraceId()));
+
+// 더 나은 방법 — micrometer-context-propagation 을 넣고
+//   Hooks.enableAutomaticContextPropagation();
+// 을 켜면 Reactor 가 스레드 전환마다 ThreadLocal 을 복원해 줍니다.</code></pre>
+      <pre class="code" data-lang="java"><code>// ③ 가상 스레드 (Java 21+ / 25 LTS)
+//    MDC 는 ThreadLocal 기반이고 가상 스레드도 ThreadLocal 을 지원하므로
+//    '동작은 합니다'. 재사용이 없으니 오히려 오염 위험도 없습니다.
+//    문제는 개수입니다 — 가상 스레드 수십만 개 × MDC 맵 사본.
+
+// Java 25 에서 정식이 된 ScopedValue — 값이 스코프에 묶입니다
+private static final ScopedValue&lt;String&gt; TRACE_ID = ScopedValue.newInstance();
+
+ScopedValue.where(TRACE_ID, traceId).run(() -&gt; {
+    handle(request);          // 이 안에서는 어디서든 TRACE_ID.get()
+});                           // 스코프를 나가면 자동으로 사라집니다 ★
+
+// 다만 로깅 라이브러리의 %X{} 는 아직 MDC 를 봅니다.
+// 당장은 MDC 를 쓰고, ScopedValue 는 지원이 붙는 대로 옮기는 것이 현실적입니다.</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>정리하면</b> — <b>서블릿 + 스레드풀</b>이면 필터 + <code>TaskDecorator</code> 로 충분하고,
+        <b>WebFlux</b> 면 Reactor Context + 자동 전파를 켜고,
+        <b>가상 스레드</b>면 지금은 MDC 그대로 쓰되
+        <b>스레드 수가 극단적으로 많은 구간</b>만 <code>ScopedValue</code> 를 검토하세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== lg09 ==================== -->
+<section class="sec" id="lg09">
+  <div class="sec-head rv">
+    <span class="no">LOG 09</span>
+    <h2>Spring Boot 로깅 — <span class="t">재시작 없이</span> 레벨 바꾸기</h2>
+    <p class="lead">
+      운영 중에 "이 부분만 DEBUG 로 보고 싶다"가 생깁니다.
+      배포하고 재시작하면 <b>그 사이 증상이 사라집니다.</b>
+      Actuator 의 <code>loggers</code> 엔드포인트는 이 문제를 <b>한 번의 POST</b> 로 끝냅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 246" role="img" aria-label="Actuator loggers 엔드포인트로 로그 레벨을 바꾸는 시퀀스. 운영자가 curl 로 로거 상태를 조회하면 현재 유효 레벨이 INFO 라고 응답하고, configuredLevel 을 DEBUG 로 POST 하면 Actuator 가 LoggingSystem 의 setLogLevel 을 호출하며 Logback Context 의 로거 캐시가 갱신되어 재시작 없이 즉시 반영된다">
+      <text x="16" y="18" class="lbl">세로가 시간 — 재시작 없이 레벨이 바뀌는 경로</text>
+
+      <rect class="actr" x="26" y="30" width="130" height="28"/>
+      <text x="91" y="49" class="ann" text-anchor="middle">운영자 · curl</text>
+      <rect class="actr" x="196" y="30" width="140" height="28"/>
+      <text x="266" y="49" class="ann" text-anchor="middle">/actuator/loggers</text>
+      <rect class="actr" x="376" y="30" width="140" height="28"/>
+      <text x="446" y="49" class="ann" text-anchor="middle">LoggingSystem</text>
+      <rect class="actr" x="546" y="30" width="118" height="28"/>
+      <text x="605" y="49" class="ann" text-anchor="middle">Logback Context</text>
+
+      <path class="life" d="M91 60 L91 210"/>
+      <path class="life" d="M266 60 L266 210"/>
+      <path class="life" d="M446 60 L446 210"/>
+      <path class="life" d="M605 60 L605 210"/>
+
+      <rect class="actv" x="261" y="76" width="10" height="118"/>
+      <rect class="actv" x="441" y="140" width="10" height="34"/>
+      <rect class="actv" x="600" y="162" width="10" height="20"/>
+
+      <path class="msg" d="M91 80 L258 80"/>
+      <text x="99" y="75" class="ann">1. GET /actuator/loggers/com.myapp</text>
+
+      <path class="msg-a" d="M258 102 L99 102"/>
+      <text x="105" y="97" class="ann">2. effectiveLevel = INFO</text>
+
+      <path class="msg" d="M91 124 L258 124"/>
+      <text x="99" y="119" class="ann">3. POST configuredLevel=DEBUG</text>
+
+      <path class="msg" d="M272 146 L438 146"/>
+      <text x="278" y="141" class="ann">4. LoggingSystem.setLogLevel()</text>
+
+      <path class="msg" d="M456 168 L597 168"/>
+      <text x="462" y="163" class="ann">5. 로거 캐시 갱신 — 재시작 없음</text>
+
+      <path class="msg-a" d="M597 190 L272 190"/>
+      <text x="278" y="185" class="ann ok-t">6. 204 No Content — 즉시 반영</text>
+
+      <text x="16" y="222" class="lbl">레벨은 재시작 없이 바뀝니다 — 대신 재시작하면 원래 설정으로 돌아갑니다</text>
+      <text x="16" y="238" class="lbl">운영에서 DEBUG 를 켤 때는 되돌릴 시각을 먼저 정해 놓으세요</text>
+    </svg>
+    <div class="cap">시퀀스 — <b>왕복 두 번</b>이면 끝납니다. 배포 없이 관측 수준을 바꾸는 가장 싼 도구입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Actuator loggers 엔드포인트</h4>
+      <pre class="code" data-lang="yaml"><code>management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,loggers,metrics   # loggers 를 열어야 합니다
+  endpoint:
+    loggers:
+      access: unrestricted                     # 읽기+쓰기 허용</code></pre>
+      <pre class="code" data-lang="bash"><code># 지금 상태 보기
+curl -s localhost:8080/actuator/loggers/com.myapp | jq
+# {"configuredLevel":null,"effectiveLevel":"INFO"}
+#   configuredLevel = 직접 지정한 값 (없으면 null)
+#   effectiveLevel  = 상속까지 계산한 실제 값 ★
+
+# DEBUG 로 올리기
+curl -s -X POST localhost:8080/actuator/loggers/com.myapp \
+     -H "Content-Type: application/json" \
+     -d '{"configuredLevel":"DEBUG"}'
+
+# 특정 클래스만 (더 좁게)
+curl -s -X POST localhost:8080/actuator/loggers/com.myapp.order.OrderService \
+     -H "Content-Type: application/json" -d '{"configuredLevel":"TRACE"}'
+
+# 되돌리기 — null 을 보내면 상속 상태로 복귀
+curl -s -X POST localhost:8080/actuator/loggers/com.myapp \
+     -H "Content-Type: application/json" -d '{"configuredLevel":null}'
+
+# 전체 로거 목록에서 지금 DEBUG 인 것만 뽑기
+curl -s localhost:8080/actuator/loggers \
+  | jq -r '.loggers | to_entries[] | select(.value.effectiveLevel=="DEBUG") | .key'</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>이 엔드포인트는 반드시 잠가야 합니다</b> —
+        레벨을 바꿀 수 있다는 것은 <b>디스크를 채우고 서비스를 느리게 만들 수 있다</b>는 뜻입니다.
+        <b>관리 포트를 따로 열고</b>(<code>management.server.port</code>),
+        <b>사내망에서만</b> 접근하게 하거나 인증을 붙이세요.
+        인터넷에 열린 <code>/actuator/loggers</code> 는 그 자체로 사고입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">부트가 이미 해 주는 것들</h4>
+      <pre class="code" data-lang="yaml"><code>logging:
+  level:
+    root: INFO
+    com.myapp: DEBUG
+    # 부트가 만들어 둔 '그룹' — 이름 하나로 여러 로거를 한 번에
+    web: DEBUG      # spring web · http codec 등
+    sql: DEBUG      # JDBC · Hibernate SQL 등
+
+  group:            # 내 그룹도 만들 수 있습니다 ★
+    payment: com.myapp.payment,com.myapp.pg,org.apache.http
+
+# 이제 이렇게 한 줄로
+# logging.level.payment=DEBUG</code></pre>
+      <pre class="code" data-lang="bash"><code># 환경변수로도 됩니다 — 컨테이너에서 유용
+LOGGING_LEVEL_COM_MYAPP=DEBUG java -jar app.jar
+
+# 커맨드라인 인자
+java -jar app.jar --logging.level.com.myapp=DEBUG
+
+# 기동 진단용 스위치
+java -jar app.jar --debug   # 자동 설정 리포트 + 선택된 로거 DEBUG
+java -jar app.jar --trace   # 더 시끄럽게
+
+# 컬러 출력 강제(파이프로 넘길 때 색이 사라지는 문제)
+java -Dspring.output.ansi.enabled=ALWAYS -jar app.jar</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">설정</th><th>뜻</th></tr>
+        <tr><td><code>logging.level.*</code></td><td>로거별 레벨</td></tr>
+        <tr><td><code>logging.group.*</code></td><td>로거 묶음 이름</td></tr>
+        <tr><td><code>logging.file.name</code></td><td>파일 경로+이름</td></tr>
+        <tr><td><code>logging.pattern.*</code></td><td>콘솔·파일 패턴</td></tr>
+        <tr><td><code>logging.charset.file</code></td><td>파일 인코딩</td></tr>
+        <tr><td><code>logging.threshold.*</code></td><td>appender 하한</td></tr>
+        <tr><td><b><code>logging.structured.format.*</code></b></td><td><b>JSON 출력 (3.4+)</b></td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">기동 로그를 조용히</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">시끄러운 로거 길들이기</h4>
+      <pre class="code" data-lang="yaml"><code>logging:
+  level:
+    root: INFO
+    # 기동할 때만 시끄러운 것들
+    org.springframework.boot.autoconfigure: WARN
+    org.apache.catalina: WARN
+    org.hibernate.orm.deprecation: ERROR
+    # 운영에서 절대 DEBUG 로 두면 안 되는 것들 ★
+    org.apache.http.wire: WARN        # HTTP 본문을 통째로 찍습니다
+    org.springframework.web.client.RestTemplate: WARN
+    io.netty: WARN
+    org.hibernate.type.descriptor.jdbc.BasicBinder: WARN   # 바인딩 값 전부</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>운영에서 DEBUG 로 켜면 안 되는 것</b> —
+        <code>org.apache.http.wire</code> 는 <b>요청·응답 본문 전체</b>를 찍습니다.
+        여기에 <b>카드번호·주민번호·토큰</b>이 그대로 남습니다.
+        “잠깐만 켜자”가 <b>개인정보 유출 사고</b>가 되는 대표 경로입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기동 실패 로그를 놓치지 않기</h4>
+      <pre class="code" data-lang="text"><code>문제 — 로깅 설정이 적용되기 '전'에 난 오류는 파일에 안 남습니다.
+
+  1. JVM 시작
+  2. Spring 이 application.yml 을 읽음
+  3. LoggingSystem 초기화 ← 여기부터 파일 appender 가 삽니다
+  4. 빈 생성 ...
+
+  2~3 사이에서 죽으면 표준출력에만 남습니다.
+
+대책
+  · 컨테이너면 stdout 을 수집하므로 자동으로 해결됩니다 ★
+  · 아니라면 기동 스크립트에서 리다이렉트를 겁니다
+      java -jar app.jar &gt; logs/stdout.log 2&gt;&amp;1
+  · 셧다운 로그도 마찬가지 — 종료 훅이 돌기 전에 죽으면 큐가 날아갑니다
+      &lt;configuration&gt; 에 &lt;shutdownHook class="ch.qos.logback.core.hook.DefaultShutdownHook"/&gt;</code></pre>
+      <pre class="code" data-lang="bash"><code># 컨테이너에서 권장하는 모양 — 파일을 아예 만들지 않습니다
+#   logging.file.name 을 지정하지 않고
+#   logging.structured.format.console=ecs 로 JSON 을 stdout 에
+#   → 롤링·디스크 관리·권한 문제가 전부 사라집니다
+
+kubectl logs -f deploy/order-api | jq -r '.message'</code></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== lg10 ==================== -->
+<section class="sec" id="lg10">
+  <div class="sec-head rv">
+    <span class="no">LOG 10</span>
+    <h2>성능과 비용 — <span class="t">얼마나 찍을지</span>를 설계합니다</h2>
+    <p class="lead">
+      로그를 많이 찍으면 <b>진단은 쉬워지고 지연·비용은 나빠집니다.</b> 반대도 마찬가지입니다.
+      정답이 하나가 아니라 <b>상충</b>이므로, "어디에 놓을지"를 <b>의식적으로</b> 정해야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 270" role="img" aria-label="로그 양 선택에 따른 상충을 나타낸 발산 램프 매트릭스. 행은 전부 DEBUG, INFO 와 요청 요약, WARN 이상만, DEBUG 1퍼센트 샘플링, 동기 파일에 매번 fsync 다섯 가지이고 열은 진단 능력, p99 지연, 저장 비용, 노이즈다. 초록은 좋음 붉은색은 나쁨 회색은 중립을 뜻한다. 전부 DEBUG 는 진단은 최고지만 나머지가 모두 매우 나쁘고, INFO 와 요청 요약은 네 항목이 모두 좋음으로 균형이 잡혀 있으며, DEBUG 1퍼센트 샘플링은 진단을 어느 정도 살리면서 지연과 비용을 매우 좋게 만든다">
+      <text x="16" y="18" class="lbl">로그 양의 상충 — 초록이 좋음, 붉은색이 나쁨, 회색이 중립입니다</text>
+
+      <text x="253" y="44" class="tk" text-anchor="middle">진단 능력</text>
+      <text x="367" y="44" class="tk" text-anchor="middle">p99 지연</text>
+      <text x="481" y="44" class="tk" text-anchor="middle">저장 비용</text>
+      <text x="595" y="44" class="tk" text-anchor="middle">노이즈</text>
+
+      <text x="16" y="70" class="ann">전부 DEBUG (운영)</text>
+      <rect class="cel d-p2" x="200" y="52" width="106" height="28"/><text x="253" y="70" class="tk" text-anchor="middle">매우 좋음</text>
+      <rect class="cel d-n2" x="314" y="52" width="106" height="28"/><text x="367" y="70" class="tk" text-anchor="middle">매우 나쁨</text>
+      <rect class="cel d-n2" x="428" y="52" width="106" height="28"/><text x="481" y="70" class="tk" text-anchor="middle">매우 나쁨</text>
+      <rect class="cel d-n2" x="542" y="52" width="106" height="28"/><text x="595" y="70" class="tk" text-anchor="middle">매우 나쁨</text>
+
+      <text x="16" y="102" class="ann ok-t">INFO + 요청 1건 요약</text>
+      <rect class="cel d-p1" x="200" y="84" width="106" height="28"/><text x="253" y="102" class="tk" text-anchor="middle">좋음</text>
+      <rect class="cel d-p1" x="314" y="84" width="106" height="28"/><text x="367" y="102" class="tk" text-anchor="middle">좋음</text>
+      <rect class="cel d-p1" x="428" y="84" width="106" height="28"/><text x="481" y="102" class="tk" text-anchor="middle">좋음</text>
+      <rect class="cel d-p1" x="542" y="84" width="106" height="28"/><text x="595" y="102" class="tk" text-anchor="middle">좋음</text>
+
+      <text x="16" y="134" class="ann">WARN 이상만</text>
+      <rect class="cel d-n2" x="200" y="116" width="106" height="28"/><text x="253" y="134" class="tk" text-anchor="middle">매우 나쁨</text>
+      <rect class="cel d-p2" x="314" y="116" width="106" height="28"/><text x="367" y="134" class="tk" text-anchor="middle">매우 좋음</text>
+      <rect class="cel d-p2" x="428" y="116" width="106" height="28"/><text x="481" y="134" class="tk" text-anchor="middle">매우 좋음</text>
+      <rect class="cel d-p2" x="542" y="116" width="106" height="28"/><text x="595" y="134" class="tk" text-anchor="middle">매우 좋음</text>
+
+      <text x="16" y="166" class="ann">DEBUG 1% 샘플링</text>
+      <rect class="cel d-p1" x="200" y="148" width="106" height="28"/><text x="253" y="166" class="tk" text-anchor="middle">좋음</text>
+      <rect class="cel d-p2" x="314" y="148" width="106" height="28"/><text x="367" y="166" class="tk" text-anchor="middle">매우 좋음</text>
+      <rect class="cel d-p2" x="428" y="148" width="106" height="28"/><text x="481" y="166" class="tk" text-anchor="middle">매우 좋음</text>
+      <rect class="cel d-0" x="542" y="148" width="106" height="28"/><text x="595" y="166" class="tk" text-anchor="middle">보통</text>
+
+      <text x="16" y="198" class="ann">동기 파일 + fsync 매번</text>
+      <rect class="cel d-0" x="200" y="180" width="106" height="28"/><text x="253" y="198" class="tk" text-anchor="middle">보통</text>
+      <rect class="cel d-n2" x="314" y="180" width="106" height="28"/><text x="367" y="198" class="tk" text-anchor="middle">매우 나쁨</text>
+      <rect class="cel d-n1" x="428" y="180" width="106" height="28"/><text x="481" y="198" class="tk" text-anchor="middle">나쁨</text>
+      <rect class="cel d-0" x="542" y="180" width="106" height="28"/><text x="595" y="198" class="tk" text-anchor="middle">보통</text>
+
+      <rect class="cel d-n2" x="200" y="214" width="16" height="12"/>
+      <rect class="cel d-n1" x="220" y="214" width="16" height="12"/>
+      <rect class="cel d-0" x="240" y="214" width="16" height="12"/>
+      <rect class="cel d-p1" x="260" y="214" width="16" height="12"/>
+      <rect class="cel d-p2" x="280" y="214" width="16" height="12"/>
+      <text x="190" y="224" class="ann" text-anchor="end">나쁨</text>
+      <text x="304" y="224" class="ann">좋음</text>
+
+      <text x="16" y="246" class="lbl">가운데는 반드시 무채색입니다 — "좋지도 나쁘지도 않다"가 눈에 보여야 합니다</text>
+      <text x="16" y="262" class="lbl">둘째 줄이 대부분의 서비스가 있어야 할 자리입니다 — 나머지는 상황이 만드는 예외</text>
+    </svg>
+    <div class="cap">발산 램프 — <b>한쪽만 진한 행</b>은 어딘가를 크게 희생하고 있다는 뜻입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">먼저 재세요 — 볼륨 계산</h4>
+      <pre class="code" data-lang="bash"><code># ① 지금 초당 몇 줄을 찍고 있나
+wc -l logs/app.log
+# 한 시간 치라면 / 3600
+
+# ② 한 줄 평균 바이트
+ls -l logs/app.log            # 크기 ÷ 줄 수
+
+# ③ 하루 용량 = 초당 줄 수 × 평균 바이트 × 86400
+#    예) 2,000줄/s × 300B × 86400 ≈ 51.8 GB/일 (압축 전)
+#    30일 보관이면 압축해도 수백 GB — 여기서 비용이 결정됩니다
+
+# ④ 어떤 로거가 대부분을 차지하는지
+awk '{print $4}' logs/app.log | sort | uniq -c | sort -rn | head -20
+#   대개 상위 3개 로거가 전체의 80% 를 차지합니다 ★
+
+# ⑤ 같은 문구가 반복되는지 (묶어서 줄일 후보)
+sed -E 's/[0-9]+/N/g' logs/app.log | sort | uniq -c | sort -rn | head</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>줄이는 순서</b> — ① 상위 3개 로거의 레벨을 올린다 →
+        ② 루프 안 로그를 <b>요약 한 줄</b>로 바꾼다 →
+        ③ 정상 흐름의 DEBUG 를 <b>샘플링</b>한다 →
+        ④ 그래도 남으면 비동기.
+        <b>①·② 만으로 절반 이하로 떨어지는 경우가 흔합니다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">샘플링 — 다 찍지 않고 살리기</h4>
+      <pre class="code" data-lang="java"><code>// ① 요청 단위 샘플링 — 뽑힌 요청만 통째로 DEBUG (가장 유용) ★
+public class SamplingFilter extends OncePerRequestFilter {
+    private static final double RATE = 0.01;   // 1%
+    protected void doFilterInternal(...) {
+        boolean sampled = ThreadLocalRandom.current().nextDouble() &lt; RATE;
+        MDC.put("sampled", String.valueOf(sampled));
+        try { chain.doFilter(req, res); } finally { MDC.clear(); }
+    }
+}</code></pre>
+      <pre class="code" data-lang="xml"><code>&lt;!-- MDC 값으로 appender 를 통과시키기 --&gt;
+&lt;appender name="DEBUG_FILE" class="...RollingFileAppender"&gt;
+  &lt;filter class="ch.qos.logback.core.filter.EvaluatorFilter"&gt;
+    &lt;evaluator class="ch.qos.logback.classic.boolex.OnMarkerEvaluator"&gt;
+      &lt;marker&gt;SAMPLED&lt;/marker&gt;
+    &lt;/evaluator&gt;
+    &lt;OnMismatch&gt;DENY&lt;/OnMismatch&gt;
+    &lt;OnMatch&gt;ACCEPT&lt;/OnMatch&gt;
+  &lt;/filter&gt;
+  ...
+&lt;/appender&gt;
+
+&lt;!-- 같은 문구가 쏟아질 때 초당 개수를 제한 --&gt;
+&lt;turboFilter class="ch.qos.logback.classic.turbo.DuplicateMessageFilter"&gt;
+  &lt;allowedRepetitions&gt;5&lt;/allowedRepetitions&gt;
+  &lt;cacheSize&gt;200&lt;/cacheSize&gt;
+&lt;/turboFilter&gt;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>샘플링에서 절대 빼면 안 되는 것</b> —
+        <b>ERROR · WARN 은 100% 남깁니다.</b> 샘플링은 <b>정상 흐름의 상세</b>에만 겁니다.
+        그리고 <b>같은 요청은 전부 찍히거나 전부 안 찍혀야</b> 합니다 —
+        줄 단위로 무작위 추출하면 <b>이어지지 않는 조각</b>만 남아 쓸모가 없습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">레벨 설계 한 장</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">레벨 배치표</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:20%">레벨</th><th>운영</th><th>거기 넣을 것</th></tr>
+        <tr><td><b>ERROR</b></td><td>켬</td><td>사람이 개입해야 하는 실패</td></tr>
+        <tr><td><b>WARN</b></td><td>켬</td><td>재시도 성공 · 폴백 · 임계치 근접</td></tr>
+        <tr><td><b>INFO</b></td><td>켬</td><td><b>요청/작업 1건당 1~3줄 요약</b></td></tr>
+        <tr><td>DEBUG</td><td>끔</td><td>분기·중간값 (샘플링 대상)</td></tr>
+        <tr><td>TRACE</td><td>끔</td><td>루프 안 · 프로토콜 덤프</td></tr>
+      </table></div>
+      <pre class="code" data-lang="java"><code>// 요청 1건 = INFO 한 줄로 요약하는 패턴 (권장) ★
+long t0 = System.nanoTime();
+try {
+    Result r = service.handle(cmd);
+    log.info("order.create result=ok orderId={} items={} ms={}",
+             r.id(), r.itemCount(), ms(t0));
+    return r;
+} catch (BusinessException e) {
+    log.warn("order.create result=rejected reason={} ms={}", e.code(), ms(t0));
+    throw e;
+} catch (Exception e) {
+    log.error("order.create result=error ms={}", ms(t0), e);
+    throw e;
+}
+// 이 한 줄만으로 성공률 · 지연 분포 · 실패 사유 분포가 전부 나옵니다.</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>지표(metrics)와 역할을 나누세요</b> —
+        <b>"얼마나 자주·얼마나 느린가"는 메트릭</b>(Micrometer)이 훨씬 싸게 답합니다.
+        <b>로그는 "그 한 건에 무슨 일이 있었나"</b>를 위해 남기세요.
+        로그로 집계하려 들면 <b>비용이 수십 배</b>가 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로깅이 지연·GC 에 미치는 영향</h4>
+      <pre class="code" data-lang="text"><code>비용이 생기는 자리 (비싼 순서)
+
+ ① 위치 정보 (%L %M %C · includeCallerData)
+    → 호출마다 스택을 만들어 훑습니다. 10배 이상 느려집니다. ★
+ ② 동기 파일 쓰기 + 디스크 지연
+    → p99 가 디스크 지연에 그대로 물립니다.
+ ③ 문자열 조립 · 오토박싱 (GC 압력)
+    → Young GC 빈도 증가 → p99 에 멈춤이 섞임
+ ④ 예외 스택트레이스 생성
+    → 깊은 스택 한 번이 수만 줄의 일반 로그보다 비쌉니다
+ ⑤ 콘솔 출력 (터미널·컨테이너 파이프)
+    → 의외로 느립니다. 운영에서 콘솔은 최소한으로.
+
+거의 안 비싼 것
+ · 꺼진 레벨의 log.debug("...{}", x)   → 레벨 검사 한 번
+ · MDC.put / get                        → ThreadLocal 맵 접근</code></pre>
+      <pre class="code" data-lang="bash"><code># 로깅이 원인인지 30분 안에 판별하는 절차
+# 1) 레벨을 WARN 으로 내린다 → p99 를 비교
+# 2) 비동기로 바꾼다        → p99 를 비교
+# 3) 둘 다 안 변하면 로깅이 아닙니다 (다른 데를 보세요)
+
+# GC 압력 확인
+java -Xlog:gc*:file=gc.log:time,uptime -jar app.jar
+# alloc rate 가 레벨을 내렸을 때 눈에 띄게 떨어지면 로깅이 원인입니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>①번은 정말 자주 봅니다</b> — 패턴에 <code>%L</code>(줄 번호)을 넣어 두면
+        <b>로그 한 줄마다 스택 트레이스를 만듭니다</b>.
+        “줄 번호가 있으면 편하니까”로 넣었다가 <b>TPS 가 절반</b>이 된 사례가 흔합니다.
+        <b>로거 이름(<code>%logger</code>)과 이벤트 이름</b>이면 위치는 충분히 좁혀집니다.
+      </div>
+    </div>
+  </div>
+</section>

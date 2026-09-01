@@ -1,0 +1,529 @@
+<!-- ============================================================
+     로그 · 감사 PANE
+     ============================================================ -->
+<div class="pane" id="pane-log">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> WAL · redo · binlog · 슬로우 쿼리 · pgaudit · Debezium · PITR · 2026년 기준</div>
+  <h1>로그는 기록이<br>아니라<br>데이터베이스입니다</h1>
+  <p class="tx">
+    DB 에서 "로그"라는 말은 <b>완전히 다른 두 가지</b>를 가리킵니다 —
+    하나는 <b>사람이 읽는 진단 로그</b>(에러 · 느린 쿼리 · 누가 무엇을 조회했나),
+    다른 하나는 <b>DB 자신이 읽는 트랜잭션 로그</b>(WAL · redo · binlog)입니다.
+    앞의 것은 지워도 DB 가 돕니다. 뒤의 것은 <b>지우는 순간 DB 가 열리지 않습니다</b>.
+    이 탭은 그 둘을 갈라 놓고 시작해서, <b>커밋이 왜 로그 flush 인지</b>,
+    <b>크래시에서 어떻게 돌아오는지</b>, 그리고 그 로그를 읽어
+    <b>느린 쿼리를 잡고 · 감사에 대응하고 · 데이터 파이프라인(CDC)을 만드는</b> 데까지 갑니다.
+    <b>이 탭을 마치면 "로그 파일이 디스크를 다 먹었어요" 라는 연락에 무엇을 지워도 되는지 답할 수 있습니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>6</b><span>DB 제품</span></div>
+    <div><b>2</b><span>로그의 얼굴</span></div>
+    <div><b>17</b><span>그림</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== lg01 ==================== -->
+<section class="sec" id="lg01">
+  <div class="sec-head rv">
+    <span class="no">LOG 01</span>
+    <h2>DB 로그의 <span class="t">두 얼굴</span> — 사람이 읽는 것과 DB 가 읽는 것</h2>
+    <p class="lead">
+      운영 중에 가장 위험한 오해가 여기서 나옵니다. <b>"로그 파일이 디스크를 다 먹었으니 지웁시다"</b> —
+      무엇을 지우느냐에 따라 아무 일도 안 일어나거나, <b>DB 가 두 번 다시 안 열립니다</b>.
+      먼저 이 둘을 갈라 놓겠습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 252" role="img" aria-label="데이터베이스에서 로그라는 말이 가리키는 두 가지를 좌우로 나란히 놓고 비교한 그림. 왼쪽은 사람이 읽는 진단 로그로 에러 로그, 느린 쿼리 로그, 감사 로그가 여기에 속하며 꺼도 되고 지워도 데이터베이스는 정상 동작한다. 오른쪽은 데이터베이스 자신이 읽는 트랜잭션 로그로 WAL, redo, binlog 가 여기에 속하며 끌 수 없고 지우면 데이터베이스가 열리지 않는다. 아래에는 파일 이름만 보고 지우면 안 된다는 경고가 있다.">
+      <text x="16" y="18" class="lbl">같은 "로그"라는 말이 완전히 다른 두 가지를 가리킵니다</text>
+
+      <rect class="bx" x="16" y="30" width="316" height="26"/>
+      <text x="174" y="48" class="val" text-anchor="middle">① 진단 로그 — 사람이 읽습니다</text>
+
+      <rect class="bx bx-fw" x="348" y="30" width="316" height="26"/>
+      <text x="506" y="48" class="val" text-anchor="middle">② 트랜잭션 로그 — DB 가 읽습니다</text>
+
+      <rect class="bx" x="16" y="60" width="316" height="102"/>
+      <text x="32" y="80" class="ann">무엇을: 에러 · 느린 쿼리 · 접속 · 누가 무엇을 봤나</text>
+      <text x="32" y="98" class="ann">누가 읽나: 개발자 · DBA · 감사 담당 · 수집기</text>
+      <text x="32" y="116" class="ann">끌 수 있나: 됩니다. 꺼도 DB 는 정상입니다</text>
+      <text x="32" y="134" class="ann">지우면: 원인 분석을 못 할 뿐입니다</text>
+      <text x="32" y="152" class="ann">파일: postgresql-2026-09-01.log · slow.log</text>
+
+      <rect class="bx bx-fw" x="348" y="60" width="316" height="102"/>
+      <text x="364" y="80" class="ann">무엇을: 이 트랜잭션이 어느 페이지를 어떻게 바꿨나</text>
+      <text x="364" y="98" class="ann">누가 읽나: DB 엔진 자신 · 복제 · CDC 도구</text>
+      <text x="364" y="116" class="ann rs-t">끌 수 있나: 못 끕니다. 끄면 커밋의 뜻이 없어집니다</text>
+      <text x="364" y="134" class="ann rs-t">지우면: DB 가 안 열립니다 · 복구 불가</text>
+      <text x="364" y="152" class="ann">파일: pg_wal/ · ib_logfile0 · binlog.000123</text>
+
+      <rect class="bx bx-hi" x="16" y="172" width="648" height="50"/>
+      <text x="32" y="192" class="val am-t">헷갈리는 자리 — "로그를 지워도 되나요?"</text>
+      <text x="32" y="212" class="ann">①은 지워도 됩니다. ②는 지우는 순간 DB 가 죽습니다. 이름에 log 가 들어갔다고 같은 것이 아닙니다</text>
+
+      <text x="16" y="242" class="lbl">이 탭의 절반은 ①(진단·감사), 나머지 절반은 ②(WAL·binlog)입니다</text>
+    </svg>
+    <div class="cap">DB 로그의 두 얼굴 — <b>사람이 읽는 것</b>과 <b>DB 가 읽는 것</b>은 이름만 같습니다.</div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 282" role="img" aria-label="여섯 개 데이터베이스가 다섯 가지 로그 기능을 각각 어떤 이름으로 얼마나 잘 지원하는지 보여 주는 히트맵. 행은 PostgreSQL, MySQL, Oracle, SQLite, Redis, MongoDB 이고 열은 슬로우 로그, 감사, WAL과 redo, CDC 소스, 프로파일러다. 색이 진할수록 기본으로 들어 있고 옅을수록 없거나 별도 도구가 필요하다. SQLite 행은 대부분 비어 있고 PostgreSQL 과 MySQL 행이 가장 진하다.">
+      <text x="16" y="18" class="lbl">DB × 로그 기능 — 색이 진할수록 "기본으로 들어 있다"</text>
+
+      <text x="252" y="38" class="tk" font-size="9" text-anchor="middle">슬로우 로그</text>
+      <text x="344" y="38" class="tk" font-size="9" text-anchor="middle">감사</text>
+      <text x="436" y="38" class="tk" font-size="9" text-anchor="middle">WAL · redo</text>
+      <text x="528" y="38" class="tk" font-size="9" text-anchor="middle">CDC 소스</text>
+      <text x="620" y="38" class="tk" font-size="9" text-anchor="middle">프로파일러</text>
+
+      <text x="16" y="63" class="ann">PostgreSQL</text>
+      <rect class="cel h5" x="208" y="46" width="88" height="26"/><text x="252" y="63" class="tk" font-size="9" text-anchor="middle">설정 한 줄</text>
+      <rect class="cel h3" x="300" y="46" width="88" height="26"/><text x="344" y="63" class="tk" font-size="9" text-anchor="middle">pgaudit</text>
+      <rect class="cel h5" x="392" y="46" width="88" height="26"/><text x="436" y="63" class="tk" font-size="9" text-anchor="middle">WAL</text>
+      <rect class="cel h5" x="484" y="46" width="88" height="26"/><text x="528" y="63" class="tk" font-size="9" text-anchor="middle">논리 복제</text>
+      <rect class="cel h4" x="576" y="46" width="88" height="26"/><text x="620" y="63" class="tk" font-size="9" text-anchor="middle">pg_stat_st.</text>
+
+      <text x="16" y="93" class="ann">MySQL</text>
+      <rect class="cel h5" x="208" y="76" width="88" height="26"/><text x="252" y="93" class="tk" font-size="9" text-anchor="middle">slow log</text>
+      <rect class="cel h3" x="300" y="76" width="88" height="26"/><text x="344" y="93" class="tk" font-size="9" text-anchor="middle">플러그인</text>
+      <rect class="cel h5" x="392" y="76" width="88" height="26"/><text x="436" y="93" class="tk" font-size="9" text-anchor="middle">redo · binlog</text>
+      <rect class="cel h5" x="484" y="76" width="88" height="26"/><text x="528" y="93" class="tk" font-size="9" text-anchor="middle">binlog</text>
+      <rect class="cel h3" x="576" y="76" width="88" height="26"/><text x="620" y="93" class="tk" font-size="9" text-anchor="middle">P_S</text>
+
+      <text x="16" y="123" class="ann">Oracle</text>
+      <rect class="cel h4" x="208" y="106" width="88" height="26"/><text x="252" y="123" class="tk" font-size="9" text-anchor="middle">AWR · ASH</text>
+      <rect class="cel h4" x="300" y="106" width="88" height="26"/><text x="344" y="123" class="tk" font-size="9" text-anchor="middle">Unified</text>
+      <rect class="cel h5" x="392" y="106" width="88" height="26"/><text x="436" y="123" class="tk" font-size="9" text-anchor="middle">redo</text>
+      <rect class="cel h3" x="484" y="106" width="88" height="26"/><text x="528" y="123" class="tk" font-size="9" text-anchor="middle">LogMiner</text>
+      <rect class="cel h4" x="576" y="106" width="88" height="26"/><text x="620" y="123" class="tk" font-size="9" text-anchor="middle">SQL Trace</text>
+
+      <text x="16" y="153" class="ann">SQLite</text>
+      <rect class="cel h0" x="208" y="136" width="88" height="26"/><text x="252" y="153" class="tk" font-size="9" text-anchor="middle">없음</text>
+      <rect class="cel h0" x="300" y="136" width="88" height="26"/><text x="344" y="153" class="tk" font-size="9" text-anchor="middle">없음</text>
+      <rect class="cel h3" x="392" y="136" width="88" height="26"/><text x="436" y="153" class="tk" font-size="9" text-anchor="middle">WAL 모드</text>
+      <rect class="cel h0" x="484" y="136" width="88" height="26"/><text x="528" y="153" class="tk" font-size="9" text-anchor="middle">없음</text>
+      <rect class="cel h1" x="576" y="136" width="88" height="26"/><text x="620" y="153" class="tk" font-size="9" text-anchor="middle">.timer</text>
+
+      <text x="16" y="183" class="ann">Redis</text>
+      <rect class="cel h4" x="208" y="166" width="88" height="26"/><text x="252" y="183" class="tk" font-size="9" text-anchor="middle">SLOWLOG</text>
+      <rect class="cel h1" x="300" y="166" width="88" height="26"/><text x="344" y="183" class="tk" font-size="9" text-anchor="middle">ACL LOG</text>
+      <rect class="cel h3" x="392" y="166" width="88" height="26"/><text x="436" y="183" class="tk" font-size="9" text-anchor="middle">AOF</text>
+      <rect class="cel h2" x="484" y="166" width="88" height="26"/><text x="528" y="183" class="tk" font-size="9" text-anchor="middle">keyspace</text>
+      <rect class="cel h2" x="576" y="166" width="88" height="26"/><text x="620" y="183" class="tk" font-size="9" text-anchor="middle">MONITOR</text>
+
+      <text x="16" y="213" class="ann">MongoDB</text>
+      <rect class="cel h4" x="208" y="196" width="88" height="26"/><text x="252" y="213" class="tk" font-size="9" text-anchor="middle">slowms</text>
+      <rect class="cel h2" x="300" y="196" width="88" height="26"/><text x="344" y="213" class="tk" font-size="9" text-anchor="middle">유료판</text>
+      <rect class="cel h4" x="392" y="196" width="88" height="26"/><text x="436" y="213" class="tk" font-size="9" text-anchor="middle">journal</text>
+      <rect class="cel h5" x="484" y="196" width="88" height="26"/><text x="528" y="213" class="tk" font-size="9" text-anchor="middle">oplog</text>
+      <rect class="cel h5" x="576" y="196" width="88" height="26"/><text x="620" y="213" class="tk" font-size="9" text-anchor="middle">level 0~2</text>
+
+      <rect class="cel h0" x="208" y="230" width="18" height="11"/>
+      <rect class="cel h2" x="228" y="230" width="18" height="11"/>
+      <rect class="cel h3" x="248" y="230" width="18" height="11"/>
+      <rect class="cel h5" x="268" y="230" width="18" height="11"/>
+      <text x="296" y="240" class="ann">왼쪽 = 없거나 별도 도구 · 오른쪽 = 기본 제공</text>
+
+      <text x="16" y="262" class="lbl">색은 훑어보기용이고 칸 안의 이름이 확인용입니다 — 색만으로 읽지 마세요</text>
+      <text x="16" y="278" class="lbl">SQLite 행이 비어 있는 것은 결함이 아니라 "그런 용도가 아니다"라는 뜻입니다</text>
+    </svg>
+    <div class="cap">DB × 로그 기능 지도 — <b>이 탭에서 갈 곳</b>을 한 장에 담았습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 진단 로그 — 켜고 끄는 스위치입니다</h4>
+      <pre class="code" data-lang="sql"><code>-- PostgreSQL : 200ms 넘는 쿼리만 로그로
+ALTER SYSTEM SET log_min_duration_statement = '200ms';
+SELECT pg_reload_conf();          -- 재시작 없이 적용
+
+-- MySQL : 슬로우 쿼리 로그 켜기
+SET GLOBAL slow_query_log = ON;
+SET GLOBAL long_query_time = 0.2;  -- 초 단위 (소수 가능)
+
+-- 끄는 것도 한 줄. 꺼도 DB 는 아무 일 없이 계속 돕니다
+SET GLOBAL slow_query_log = OFF;</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 스위치의 성격</b> — 켜면 <b>디스크와 CPU 를 조금 더 씁니다</b>.
+        그래서 "전부 다 켜 두기"가 정답이 아니고, <b>무엇을 볼지 정하고 그것만 켜는 것</b>이
+        운영의 기본입니다. 뒤의 lg03 · lg05 에서 제품별로 다룹니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 트랜잭션 로그 — 스위치가 없습니다</h4>
+      <pre class="code" data-lang="bash"><code># PostgreSQL 의 WAL — 여기를 지우면 DB 가 안 열립니다
+$PGDATA/pg_wal/000000010000000000000023
+$PGDATA/pg_wal/000000010000000000000024   # 16MB 씩
+
+# MySQL(InnoDB) 의 redo 로그와 binlog
+/var/lib/mysql/#innodb_redo/#ib_redo1234
+/var/lib/mysql/binlog.000123
+
+# Oracle 의 온라인 redo 로그
+/u01/oradata/ORCL/redo01.log
+
+# "log" 로 끝나지만 이건 데이터입니다.
+# 지우려면 DB 가 시킨 방법으로만 지웁니다 (아카이브 · PURGE · 체크포인트)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>실제로 자주 나는 사고</b> — 디스크가 차서 <code>rm</code> 으로
+        <code>pg_wal</code> 안의 파일을 지웠다가 <b>DB 를 못 살린 사례</b>가 계속 나옵니다.
+        WAL 은 "이미 커밋했다고 응답한 데이터"가 아직 데이터 파일에 없을 수 있는 상태를 메우는 유일한 근거입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="b">왜 둘로 갈리나 — <span class="t">한쪽은 관찰, 한쪽은 계약</span> <span class="lvl e">🟢 기초</span></h3>
+  <div class="tw rv d1">
+    <table class="cheat">
+      <tr><th style="width:20%"></th><th style="width:40%">① 진단 로그</th><th>② 트랜잭션 로그</th></tr>
+      <tr><td>목적</td><td>무슨 일이 있었는지 <b>사람이</b> 알기 위해</td><td><b>DB 가</b> 약속(커밋)을 지키기 위해</td></tr>
+      <tr><td>형식</td><td>사람이 읽는 텍스트</td><td>엔진 전용 이진 포맷</td></tr>
+      <tr><td>쓰는 시점</td><td>일이 끝난 뒤(사후)</td><td class="ok"><b>데이터를 고치기 전(사전)</b></td></tr>
+      <tr><td>없으면</td><td>원인을 못 찾습니다</td><td class="no">커밋이 사라집니다 · DB 가 안 열립니다</td></tr>
+      <tr><td>끄기</td><td class="ok">설정 한 줄</td><td class="no">불가 (Redis·SQLite 만 예외적으로 약화 가능)</td></tr>
+      <tr><td>보존</td><td>규정에 따라 (며칠~수년)</td><td>체크포인트·백업 이후 자동 회수</td></tr>
+      <tr><td>커지는 속도</td><td>쿼리 수에 비례</td><td><b>쓰기 양</b>에 비례</td></tr>
+      <tr><td>대표 이름</td><td>error log · slow log · audit log</td><td>WAL · redo · binlog · oplog · AOF</td></tr>
+    </table>
+  </div>
+
+  <div class="note info rv d1">
+    <b>용어가 겹쳐서 헷갈리는 지점 셋</b>
+    <br>· <b>MySQL 의 "로그"는 다섯 개</b>입니다 — 에러 · 제너럴 · 슬로우는 ①, redo · binlog 는 ②.
+    한 서버 안에 두 얼굴이 같이 있습니다(lg05).
+    <br>· <b>MongoDB 의 oplog</b> 는 이름이 "operation log" 지만 ②입니다 — 복제의 근거입니다.
+    <br>· <b>SQLite 의 WAL</b> 은 PostgreSQL 의 WAL 과 <b>같은 아이디어</b>지만 규모가 완전히 다릅니다(lg07).
+  </div>
+
+  <h3 class="sub" data-lv="i">이 탭에서 실제로 쓸 명령 — <span class="t">지금 확인해 보기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="quad rv">
+    <div class="q-pg">
+      <h5>PostgreSQL — 로그가 어디 있나</h5>
+      <pre class="code" data-lang="sql"><code>SHOW log_directory;      -- 기본 'log'
+SHOW log_filename;
+SHOW data_directory;     -- pg_wal 은 이 아래
+SELECT pg_current_wal_lsn();   -- 지금 WAL 위치</code></pre>
+    </div>
+    <div class="q-my">
+      <h5>MySQL — 다섯 로그의 현재 상태</h5>
+      <pre class="code" data-lang="sql"><code>SHOW VARIABLES LIKE 'log_error';
+SHOW VARIABLES LIKE 'slow_query_log%';
+SHOW VARIABLES LIKE 'log_bin%';
+SHOW BINARY LOGS;        -- binlog 목록과 크기</code></pre>
+    </div>
+    <div class="q-ora">
+      <h5>Oracle — alert log 위치</h5>
+      <pre class="code" data-lang="sql"><code>SELECT value FROM v$diag_info
+ WHERE name = 'Diag Trace';
+SELECT * FROM v$log;        -- 온라인 redo 그룹
+SELECT log_mode FROM v$database;  -- ARCHIVELOG?</code></pre>
+    </div>
+    <div class="q-lt">
+      <h5>SQLite — 지금 어떤 모드인가</h5>
+      <pre class="code" data-lang="sql"><code>PRAGMA journal_mode;   -- delete | wal | memory ...
+PRAGMA synchronous;    -- 0 OFF · 1 NORMAL · 2 FULL
+-- wal 이면 파일 옆에 -wal, -shm 이 생깁니다</code></pre>
+    </div>
+  </div>
+
+  <div class="note tip rv d2">
+    <b>채택 정도를 어떻게 말해야 하나</b> — 이 탭에서는 정확한 점유율 숫자를 쓰지 않습니다.
+    <b>WAL(선행 기록)은 사실상 모든 관계형 DB 의 표준</b>이고,
+    <b>binlog 기반 CDC(Debezium)는 스트리밍 파이프라인에서 널리 쓰이며</b>,
+    <b>감사 플러그인은 규제 산업에서만 켜는 편</b>입니다.
+    숫자가 필요하면 <b>DB-Engines 순위</b>(제품 인기)와
+    <b>GitHub star 추이</b>(도구 채택)를 직접 확인하는 것이 정확합니다 —
+    이 두 곳이 시점이 찍힌 공개 자료입니다.
+  </div>
+</section>
+
+
+<!-- ==================== lg02 ==================== -->
+<section class="sec" id="lg02">
+  <div class="sec-head rv">
+    <span class="no">LOG 02</span>
+    <h2><span class="t">WAL</span> — 데이터보다 로그를 먼저 쓰는 이유</h2>
+    <p class="lead">
+      Write-Ahead Logging 은 이름이 곧 규칙입니다. <b>데이터 페이지를 고치기 전에, 그 변경을 로그에 먼저 적는다.</b>
+      이 한 줄에서 <b>커밋의 의미 · 크래시 복구 · 복제 · PITR · CDC</b> 가 전부 나옵니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 280" role="img" aria-label="애플리케이션이 커밋을 요청한 뒤 응답을 받기까지의 시퀀스 다이어그램. 데이터베이스 프로세스는 먼저 메모리 버퍼 풀의 페이지를 고치고, 변경 내용을 WAL 파일에 순차로 덧붙인 다음 fsync 로 디스크 도달을 확인한다. 그 확인이 끝난 시점에 커밋 완료 응답이 애플리케이션에 돌아가며, 데이터 파일에 실제로 반영하는 일은 나중에 체크포인트가 처리한다.">
+      <text x="16" y="18" class="lbl">COMMIT 이 돌아오기까지 — 데이터 파일은 아직 손도 대지 않았습니다</text>
+
+      <rect class="actr" x="26" y="30" width="118" height="28"/>
+      <text x="85" y="49" class="ann" text-anchor="middle">앱</text>
+      <rect class="actr" x="182" y="30" width="140" height="28"/>
+      <text x="252" y="49" class="ann" text-anchor="middle">DB 프로세스</text>
+      <rect class="actr" x="360" y="30" width="140" height="28"/>
+      <text x="430" y="49" class="ann" text-anchor="middle">WAL 파일(디스크)</text>
+      <rect class="actr" x="538" y="30" width="126" height="28"/>
+      <text x="601" y="49" class="ann" text-anchor="middle">데이터 파일</text>
+
+      <path class="life" d="M85 62 L85 258"/>
+      <path class="life" d="M252 62 L252 258"/>
+      <path class="life" d="M430 62 L430 258"/>
+      <path class="life" d="M601 62 L601 258"/>
+
+      <rect class="actv" x="247" y="74" width="10" height="152"/>
+      <rect class="actv" x="425" y="120" width="10" height="54"/>
+
+      <path class="msg" d="M85 80 L244 80"/>
+      <text x="93" y="75" class="ann">1. UPDATE … COMMIT</text>
+
+      <path class="lead-ln" d="M259 98 L272 98"/>
+      <text x="278" y="101" class="ann">2. 버퍼 풀에서 고칩니다</text>
+      <text x="278" y="113" class="ann">(메모리만 — 아직 안전하지 않음)</text>
+
+      <path class="msg" d="M262 128 L422 128"/>
+      <text x="270" y="123" class="ann">3. WAL 레코드 append (순차 쓰기)</text>
+
+      <text x="440" y="148" class="ann rs-t">4. fsync() — 디스크 도달 확인</text>
+
+      <path class="msg-a" d="M422 172 L262 172"/>
+      <text x="270" y="167" class="ann">5. 기록 완료</text>
+
+      <path class="msg-a" d="M244 196 L93 196"/>
+      <text x="99" y="191" class="ann ok-t">6. COMMIT OK — 여기서 커밋이 끝납니다</text>
+
+      <path class="msg-a" d="M262 226 L593 226"/>
+      <text x="270" y="221" class="ann">7. 데이터 파일 반영은 나중에 — 체크포인트가 합니다</text>
+
+      <text x="16" y="252" class="lbl">내구성을 만드는 것은 ③④ 두 줄뿐입니다 — 데이터 파일은 이 순간과 무관합니다</text>
+      <text x="16" y="270" class="lbl">그래서 커밋 성능 = WAL 디스크의 fsync 성능. WAL 을 느린 디스크에 두면 전체가 느려집니다</text>
+    </svg>
+    <div class="cap">커밋의 정체 — <b>"로그가 디스크에 닿았다"</b>는 확인 한 번입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 로그가 먼저인가 — 두 가지 이유</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%"></th><th>데이터 파일에 바로 쓰면</th><th>로그에 먼저 쓰면</th></tr>
+        <tr><td>디스크 접근</td><td class="no">여기저기 흩어진 <b>임의 쓰기</b></td><td class="ok"><b>파일 끝에 순차 쓰기</b></td></tr>
+        <tr><td>쓰기 횟수</td><td class="no">페이지마다 한 번씩</td><td class="ok">여러 변경을 한 번에 모아서</td></tr>
+        <tr><td>중간에 죽으면</td><td class="no">반쯤 고쳐진 페이지 — 복구 불가</td><td class="ok">로그를 다시 읽어 재현</td></tr>
+        <tr><td>커밋 지연</td><td class="no">모든 페이지를 기다림</td><td class="ok">로그 한 번의 fsync</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>핵심은 "순차"</b> — HDD 에서는 임의 쓰기와 순차 쓰기가 <b>수십 배</b> 차이였습니다.
+        NVMe SSD 에서 그 격차는 크게 줄었지만, <b>fsync 한 번의 지연</b>과
+        <b>여러 트랜잭션을 묶어 한 번에 flush</b>(group commit)하는 이득은 그대로 남아 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WAL 레코드에 실제로 들어가는 것</h4>
+      <pre class="code" data-lang="text"><code>[ LSN 0/1A2B3C48 ]                 ← 로그 안의 주소(순서)
+  xid      : 51823                 ← 어느 트랜잭션인가
+  rmgr     : Heap                  ← 어느 자원 관리자(테이블/인덱스)
+  page     : rel 16384, blk 921    ← 어느 파일의 몇 번째 페이지
+  action   : UPDATE                ← 무엇을 했나
+  old/new  : (tuple 이미지 또는 차이)
+  prev LSN : 0/1A2B3C10            ← 앞 레코드로 되감기용
+
+[ LSN 0/1A2B3D02 ]
+  xid      : 51823
+  action   : COMMIT                ← 이 레코드가 디스크에 닿으면 커밋 확정</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>LSN(Log Sequence Number)</b> — WAL 안의 <b>바이트 오프셋</b>입니다.
+        "복제가 얼마나 밀렸나", "PITR 을 어디까지 복원했나"가 전부 이 숫자의 차이로 표현됩니다.
+        MySQL 도 같은 개념을 LSN 이라 부르고, Oracle 은 <b>SCN</b> 이라고 부릅니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="b">크래시가 나면 무슨 일이 벌어지나 — <span class="t">REDO 와 UNDO</span> <span class="lvl e">🟢 기초</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 232" role="img" aria-label="정전으로 데이터베이스가 죽었다가 다시 살아나는 과정을 시간 순으로 그린 타임라인. 커밋 시점에는 WAL 에 커밋 레코드가 남아 있고 데이터 파일은 아직 옛 값이다. 크래시가 나면 메모리 버퍼는 전부 사라지지만 디스크의 WAL 은 남는다. 재시작하면 엔진이 마지막 체크포인트부터 로그를 읽어 커밋된 트랜잭션을 다시 적용하는 REDO 를 하고, 끝나지 않은 트랜잭션을 되돌리는 UNDO 를 한 뒤 일관된 상태로 열린다.">
+      <text x="16" y="18" class="lbl">정전이 나도 커밋이 살아남는 이유 — 로그만 있으면 다시 만들 수 있습니다</text>
+
+      <path class="ax ar" d="M40 118 L648 118"/>
+
+      <path class="ln" d="M100 112 L100 124"/>
+      <path class="ln" d="M218 112 L218 124"/>
+      <path class="ln" d="M336 112 L336 124"/>
+      <path class="ln" d="M454 112 L454 124"/>
+      <path class="ln" d="M572 112 L572 124"/>
+
+      <text x="100" y="138" class="tk" font-size="9" text-anchor="middle">커밋 A</text>
+      <text x="218" y="138" class="tk" font-size="9" text-anchor="middle">크래시</text>
+      <text x="336" y="138" class="tk" font-size="9" text-anchor="middle">재시작</text>
+      <text x="454" y="138" class="tk" font-size="9" text-anchor="middle">REDO</text>
+      <text x="572" y="138" class="tk" font-size="9" text-anchor="middle">UNDO · 오픈</text>
+
+      <circle class="dot" cx="100" cy="118" r="5"/>
+      <circle class="dot" cx="218" cy="118" r="5" style="fill:#fb7185"/>
+      <circle class="dot" cx="336" cy="118" r="5"/>
+      <circle class="dot" cx="454" cy="118" r="5"/>
+      <circle class="dot" cx="572" cy="118" r="5" style="fill:#34d399"/>
+
+      <path class="lead-ln" d="M100 112 L100 94"/>
+      <text x="100" y="88" class="ann" text-anchor="middle">WAL 에 커밋 레코드</text>
+      <text x="100" y="76" class="ann" text-anchor="middle">데이터 파일은 옛 값</text>
+
+      <path class="lead-ln" d="M218 112 L218 94"/>
+      <text x="218" y="88" class="ann rs-t" text-anchor="middle">메모리 전부 소실</text>
+
+      <path class="lead-ln" d="M454 112 L454 94"/>
+      <text x="454" y="88" class="ann" text-anchor="middle">커밋된 것 다시 적용</text>
+
+      <path class="lead-ln" d="M572 112 L572 94"/>
+      <text x="572" y="88" class="ann ok-t" text-anchor="middle">일관된 상태로 오픈</text>
+
+      <path class="lead-ln" d="M336 124 L336 146"/>
+      <text x="336" y="158" class="ann" text-anchor="middle">체크포인트부터 로그를 읽습니다</text>
+
+      <path class="lead-ln" d="M572 124 L572 162"/>
+      <text x="572" y="176" class="ann" text-anchor="middle">안 끝난 것 되돌림</text>
+
+      <path class="dim-ln" d="M340 200 L568 200"/>
+      <text x="454" y="194" class="ann" text-anchor="middle">복구 시간 = 체크포인트 간격에 비례합니다</text>
+
+      <text x="16" y="224" class="lbl">체크포인트를 자주 하면 복구가 빠르지만 평소 쓰기가 늘어납니다 — 이것도 트레이드오프입니다</text>
+    </svg>
+    <div class="cap">크래시 복구 — <b>REDO 로 살리고 UNDO 로 되돌립니다</b>. 근거는 로그 하나뿐입니다.</div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">REDO / UNDO / 체크포인트 — 세 단어</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">단어</th><th>하는 일</th></tr>
+        <tr><td><b>REDO</b></td><td>커밋됐는데 데이터 파일에 아직 없는 변경을 <b>다시 적용</b></td></tr>
+        <tr><td><b>UNDO</b></td><td>커밋 안 됐는데 데이터 파일에 이미 반영된 변경을 <b>되돌림</b></td></tr>
+        <tr><td><b>체크포인트</b></td><td>지금까지의 더티 페이지를 데이터 파일에 밀어 넣고 <b>"여기까지는 안전"</b> 표시</td></tr>
+        <tr><td><b>LSN</b></td><td>로그 안의 위치. 복제 지연·복원 지점이 전부 이 값</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>"커밋 안 된 변경이 왜 데이터 파일에 있나?"</b> —
+        메모리가 부족하면 엔진은 <b>커밋 여부와 무관하게</b> 더티 페이지를 디스크로 내보냅니다(steal).
+        그래서 UNDO 가 필요합니다. 반대로 커밋했다고 곧바로 데이터 파일에 쓰지도 않습니다(no-force) —
+        그래서 REDO 가 필요합니다. <b>steal · no-force</b> 조합이 WAL 이 존재하는 이유입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복구가 도는 것을 눈으로 보기</h4>
+      <pre class="code" data-lang="text"><code># PostgreSQL 서버 로그 — 죽였다가 다시 켜면 이렇게 나옵니다
+LOG:  database system was interrupted; last known up at 2026-08-31 03:11:07
+LOG:  database system was not properly shut down; automatic recovery in progress
+LOG:  redo starts at 0/1A2B3C48          ← 여기서부터 다시 적용
+LOG:  invalid record length at 0/1A5F0180: wanted 24, got 0
+LOG:  redo done at 0/1A5F0158            ← 로그 끝에 도달
+LOG:  database system is ready to accept connections</code></pre>
+      <pre class="code" data-lang="bash"><code># 직접 해 보기 (개발 환경에서만!)
+pg_ctl -D $PGDATA -m immediate stop   # 전원 뽑기와 같은 종료
+pg_ctl -D $PGDATA start               # 위 로그가 그대로 나옵니다
+
+# MySQL 이면 에러 로그에 이렇게 남습니다
+# [InnoDB] Starting crash recovery.
+# [InnoDB] Log scan progressed past the checkpoint lsn 5238942</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>"복구 중"이 오래 걸린다면</b> — 체크포인트 간격이 너무 길거나
+        (<code>max_wal_size</code> · <code>innodb_log_file_size</code> 가 큼),
+        마지막 체크포인트 이후 쓰기가 폭증했다는 뜻입니다.
+        <b>복구 시간과 평소 성능은 같은 다이얼의 양 끝</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">내구성 다이얼 — <span class="t">fsync 를 얼마나 자주 할 것인가</span> <span class="lvl h">🔴 실무</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="네 개 데이터베이스의 내구성 설정을 다섯 단계 발산 램프 위에 배치한 표. 왼쪽 끝은 커밋을 잃을 수 있지만 가장 빠른 설정이고 오른쪽 끝은 복제까지 확인하는 가장 안전한 설정이며 가운데는 절충이다. PostgreSQL 의 synchronous_commit, MySQL 의 innodb_flush_log_at_trx_commit, Redis 의 appendfsync, SQLite 의 synchronous 가 각각 어느 값이 어느 단계에 해당하는지 보여 준다. 붉은 쪽은 장애 때 잃는 데이터가 생기고 초록 쪽은 안전하지만 느리다.">
+      <text x="16" y="18" class="lbl">같은 다이얼입니다 — 이름만 제품마다 다릅니다</text>
+
+      <text x="252" y="40" class="tk" font-size="9" text-anchor="middle">커밋 유실 가능</text>
+      <text x="344" y="40" class="tk" font-size="9" text-anchor="middle">OS 에 맡김</text>
+      <text x="436" y="40" class="tk" font-size="9" text-anchor="middle">절충</text>
+      <text x="528" y="40" class="tk" font-size="9" text-anchor="middle">매 커밋 flush</text>
+      <text x="620" y="40" class="tk" font-size="9" text-anchor="middle">복제까지 확인</text>
+
+      <text x="16" y="63" class="ann">PostgreSQL</text>
+      <text x="16" y="75" class="ann">synchronous_commit</text>
+      <rect class="cel d-n2" x="208" y="48" width="88" height="32"/><text x="252" y="68" class="tk" font-size="9" text-anchor="middle">off</text>
+      <rect class="cel d-n1" x="300" y="48" width="88" height="32"/><text x="344" y="68" class="tk" font-size="9" text-anchor="middle">local</text>
+      <rect class="cel d-0" x="392" y="48" width="88" height="32"/><text x="436" y="68" class="tk" font-size="9" text-anchor="middle">—</text>
+      <rect class="cel d-p1" x="484" y="48" width="88" height="32"/><text x="528" y="68" class="tk" font-size="9" text-anchor="middle">on (기본)</text>
+      <rect class="cel d-p2" x="576" y="48" width="88" height="32"/><text x="620" y="68" class="tk" font-size="9" text-anchor="middle">remote_apply</text>
+
+      <text x="16" y="99" class="ann">MySQL · InnoDB</text>
+      <text x="16" y="111" class="ann">innodb_flush_log_at_trx_commit</text>
+      <rect class="cel d-n2" x="208" y="84" width="88" height="32"/><text x="252" y="104" class="tk" font-size="9" text-anchor="middle">0</text>
+      <rect class="cel d-n1" x="300" y="84" width="88" height="32"/><text x="344" y="104" class="tk" font-size="9" text-anchor="middle">2</text>
+      <rect class="cel d-0" x="392" y="84" width="88" height="32"/><text x="436" y="104" class="tk" font-size="9" text-anchor="middle">—</text>
+      <rect class="cel d-p1" x="484" y="84" width="88" height="32"/><text x="528" y="104" class="tk" font-size="9" text-anchor="middle">1 (기본)</text>
+      <rect class="cel d-p2" x="576" y="84" width="88" height="32"/><text x="620" y="104" class="tk" font-size="9" text-anchor="middle">1 + 반동기</text>
+
+      <text x="16" y="135" class="ann">Redis</text>
+      <text x="16" y="147" class="ann">appendfsync</text>
+      <rect class="cel d-n2" x="208" y="120" width="88" height="32"/><text x="252" y="140" class="tk" font-size="9" text-anchor="middle">no</text>
+      <rect class="cel d-n1" x="300" y="120" width="88" height="32"/><text x="344" y="140" class="tk" font-size="9" text-anchor="middle">—</text>
+      <rect class="cel d-0" x="392" y="120" width="88" height="32"/><text x="436" y="140" class="tk" font-size="9" text-anchor="middle">everysec</text>
+      <rect class="cel d-p1" x="484" y="120" width="88" height="32"/><text x="528" y="140" class="tk" font-size="9" text-anchor="middle">always</text>
+      <rect class="cel d-0" x="576" y="120" width="88" height="32"/><text x="620" y="140" class="tk" font-size="9" text-anchor="middle">WAIT 명령</text>
+
+      <text x="16" y="171" class="ann">SQLite</text>
+      <text x="16" y="183" class="ann">synchronous</text>
+      <rect class="cel d-n2" x="208" y="156" width="88" height="32"/><text x="252" y="176" class="tk" font-size="9" text-anchor="middle">OFF</text>
+      <rect class="cel d-n1" x="300" y="156" width="88" height="32"/><text x="344" y="176" class="tk" font-size="9" text-anchor="middle">NORMAL</text>
+      <rect class="cel d-0" x="392" y="156" width="88" height="32"/><text x="436" y="176" class="tk" font-size="9" text-anchor="middle">—</text>
+      <rect class="cel d-p1" x="484" y="156" width="88" height="32"/><text x="528" y="176" class="tk" font-size="9" text-anchor="middle">FULL (기본)</text>
+      <rect class="cel d-p2" x="576" y="156" width="88" height="32"/><text x="620" y="176" class="tk" font-size="9" text-anchor="middle">EXTRA</text>
+
+      <text x="208" y="206" class="ann rs-t">← 빠릅니다 · 장애 때 최근 커밋을 잃습니다</text>
+      <text x="664" y="206" class="ann ok-t" text-anchor="end">안전합니다 · 커밋마다 기다립니다 →</text>
+
+      <text x="16" y="230" class="lbl">가운데 칸이 무채색인 이유 — 어느 쪽도 "더 좋은" 것이 아니라 무엇을 포기할지의 선택이기 때문입니다</text>
+      <text x="16" y="248" class="lbl">돈 · 주문 · 재고는 오른쪽. 조회수 · 세션 · 캐시는 왼쪽으로 내려도 됩니다</text>
+    </svg>
+    <div class="cap">내구성 ↔ 성능 — <b>한 다이얼의 양 끝</b>입니다. 테이블마다 답이 다릅니다.</div>
+  </div>
+
+  <div class="vs rv d1">
+    <div class="bad">
+      <h5>✗ 전부 최고 내구성으로 두기</h5>
+      <pre class="code" data-lang="sql"><code>-- 모든 트랜잭션이 커밋마다 fsync 를 기다립니다
+SET synchronous_commit = on;   -- 기본값 (맞습니다)
+
+-- 그런데 이런 것까지:
+INSERT INTO page_view_log (path, at) VALUES ('/home', now());
+-- 초당 수천 건 · 잃어도 되는 데이터인데
+-- 커밋마다 디스크를 기다리며 WAL 을 밀어 냅니다</code></pre>
+      <p class="tx" style="margin-bottom:0">결과 — <b>중요한 주문 트랜잭션이 로그 뒤에서 줄을 섭니다.</b>
+      전부 안전하게 만들면 <b>정작 안전해야 할 것이 느려집니다.</b></p>
+    </div>
+    <div class="good">
+      <h5>✓ 트랜잭션마다 다이얼을 돌리기</h5>
+      <pre class="code" data-lang="sql"><code>-- PostgreSQL : 세션·트랜잭션 단위로 바꿀 수 있습니다
+BEGIN;
+SET LOCAL synchronous_commit = off;   -- 이 트랜잭션만
+INSERT INTO page_view_log (path, at) VALUES ('/home', now());
+COMMIT;   -- 즉시 반환. 장애 때 최근 몇백 ms 를 잃을 수 있음
+
+-- 주문은 그대로 기본값(on)을 씁니다
+BEGIN;
+INSERT INTO orders (...) VALUES (...);
+COMMIT;   -- fsync 를 기다립니다</code></pre>
+      <p class="tx" style="margin-bottom:0"><b>같은 DB 안에서도 테이블마다 요구가 다릅니다.</b>
+      "잃으면 곤란한가?"를 먼저 묻고 다이얼을 돌립니다.</p>
+    </div>
+  </div>
+
+  <div class="note warn rv d2">
+    <b>fsync 는 생각보다 자주 거짓말을 합니다</b>
+    <br>· <b>디스크 쓰기 캐시</b> — 소비자용 SSD 는 캐시에만 넣고 "썼다"고 답하기도 합니다.
+    전원이 나가면 그 구간이 사라집니다. 서버용 디스크는 <b>PLP(전원 손실 보호)</b> 로 이 구간을 지킵니다.
+    <br>· <b>가상화 · 네트워크 스토리지</b> — 계층이 하나 늘 때마다 fsync 의 의미가 흐려집니다.
+    클라우드 관리형 DB 를 쓰는 이유의 절반이 여기에 있습니다.
+    <br>· <b><code>fsync = off</code> 는 벤치마크 전용</b>입니다. PostgreSQL 문서도 그렇게 씁니다.
+    운영에서 켜 두면 <b>크래시 한 번에 DB 전체가 복구 불능</b>이 될 수 있습니다.
+    (<code>synchronous_commit = off</code> 는 다릅니다 — 이쪽은 <b>최근 커밋만</b> 잃고 DB 는 일관됩니다.)
+  </div>
+</section>

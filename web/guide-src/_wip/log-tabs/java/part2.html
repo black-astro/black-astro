@@ -1,0 +1,840 @@
+
+
+<!-- ==================== lg04 ==================== -->
+<section class="sec" id="lg04">
+  <div class="sec-head rv">
+    <span class="no">LOG 04</span>
+    <h2>의존성 지옥 풀기 — <span class="t">바인딩 하나 · 브리지 여럿</span></h2>
+    <p class="lead">
+      로깅에서 가장 자주 나는 사고는 코드 문제가 아니라 <b>클래스패스 문제</b>입니다.
+      "로그가 안 나온다" · "두 번 찍힌다" · "라이브러리 로그만 안 보인다" — 전부 이 절의 이야기입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 272" role="img" aria-label="SLF4J 를 중심에 둔 의존 그래프. 내 코드는 SLF4J API 를 직접 부르고, 아직 commons-logging 을 쓰는 라이브러리 A 는 jcl-over-slf4j 브리지를 거쳐, Log4j2 API 를 쓰는 라이브러리 B 는 log4j-to-slf4j 브리지를 거쳐 SLF4J 로 들어온다. SLF4J 아래에는 바인딩이 하나만 있어야 하며 logback-classic 을 채택하면 log4j-slf4j2-impl 은 함께 넣으면 안 된다">
+      <text x="16" y="18" class="lbl">바인딩은 하나, 브리지는 여럿 — 로그가 사라지거나 겹치는 자리</text>
+
+      <circle class="nd" cx="64" cy="64" r="30"/>
+      <text x="64" y="68" class="ann" text-anchor="middle">내 코드</text>
+
+      <circle class="nd" cx="64" cy="140" r="30"/>
+      <text x="64" y="137" class="ann" text-anchor="middle">라이브러리</text>
+      <text x="64" y="149" class="ann" text-anchor="middle">A (JCL)</text>
+
+      <circle class="nd" cx="64" cy="216" r="30"/>
+      <text x="64" y="213" class="ann" text-anchor="middle">라이브러리</text>
+      <text x="64" y="225" class="ann" text-anchor="middle">B (L4J2)</text>
+
+      <rect class="bx" x="150" y="118" width="124" height="32"/>
+      <text x="212" y="138" class="ann" text-anchor="middle">jcl-over-slf4j</text>
+
+      <rect class="bx" x="150" y="194" width="124" height="32"/>
+      <text x="212" y="214" class="ann" text-anchor="middle">log4j-to-slf4j</text>
+
+      <circle class="nd nd-fw" cx="364" cy="140" r="46"/>
+      <text x="364" y="137" class="val" text-anchor="middle">SLF4J API</text>
+      <text x="364" y="152" class="ann" text-anchor="middle">인터페이스만</text>
+
+      <rect class="bx bx-ok" x="486" y="60" width="178" height="48"/>
+      <text x="575" y="82" class="val ok-t" text-anchor="middle">logback-classic</text>
+      <text x="575" y="97" class="ann" text-anchor="middle">바인딩 — 이것 하나만</text>
+
+      <rect class="bx bx-warn" x="486" y="176" width="178" height="48"/>
+      <text x="575" y="198" class="val rs-t" text-anchor="middle">log4j-slf4j2-impl</text>
+      <text x="575" y="213" class="ann" text-anchor="middle">같이 넣으면 충돌</text>
+
+      <path class="ln ar" d="M92 78 Q 210 100 318 128"/>
+      <path class="ln ar" d="M94 136 L146 134"/>
+      <path class="ln ar" d="M278 134 L316 137"/>
+      <path class="ln ar" d="M94 212 L146 210"/>
+      <path class="ln ar" d="M278 206 L322 162"/>
+      <path class="fl ar" d="M400 118 L482 96"/>
+      <path class="ar-rs" d="M400 162 L482 190" style="stroke:#fb7185;stroke-width:1.4;fill:none;stroke-dasharray:5 4"/>
+
+      <text x="16" y="248" class="lbl">바인딩이 0개면 로그가 통째로 사라지고, 2개면 어느 쪽이 이겼는지 알 수 없습니다</text>
+      <text x="16" y="264" class="lbl">브리지(over/to)는 여러 개 넣어도 됩니다 — 남의 로그를 SLF4J 로 끌어오는 어댑터입니다</text>
+    </svg>
+    <div class="cap">의존 그래프 — <b>들어오는 화살표는 여럿, 나가는 화살표는 하나</b>. 이 모양이 깨지면 로그가 이상해집니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">증상으로 원인 찾기</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">증상</th><th>원인</th></tr>
+        <tr><td><b>로그가 하나도 안 나옴</b></td><td>바인딩 0개 → NOP</td></tr>
+        <tr><td>같은 줄이 두 번</td><td>appender 중복 · <code>additivity</code></td></tr>
+        <tr><td>내 로그만 나옴</td><td>브리지 없음 (JCL·JUL 유실)</td></tr>
+        <tr><td>설정 파일이 안 먹음</td><td>다른 구현체가 이김</td></tr>
+        <tr><td><code>StackOverflowError</code></td><td><b>브리지 순환</b> ★</td></tr>
+        <tr><td>기동 로그만 안 나옴</td><td>JUL 브리지 초기화 시점</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>SLF4J(W): Class path contains multiple SLF4J providers.
+SLF4J(W): Found provider [ch.qos.logback.classic.spi.LogbackServiceProvider]
+SLF4J(W): Found provider [org.apache.logging.slf4j.SLF4JServiceProvider]
+SLF4J(W): Actual provider is of type [...LogbackServiceProvider]
+
+  → 경고일 뿐 실행은 됩니다. 그래서 더 위험합니다.
+    개발 PC 와 운영 서버의 클래스패스 순서가 다르면
+    '어느 쪽이 이기는지'가 환경마다 달라집니다. ★</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>NOP 이 가장 무섭습니다</b> —
+        <code>Defaulting to no-operation (NOP) logger implementation</code> 은
+        <b>예외가 아니라 경고</b>입니다. 애플리케이션은 멀쩡히 뜨고,
+        <b>로그만 조용히 사라집니다</b>. 장애 나서야 알게 됩니다.
+        기동 로그의 <code>SLF4J</code> 줄을 <b>CI 에서 검사</b>하는 팀도 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">브리지 네 개 — 이름 규칙만 알면 됩니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">아티팩트</th><th>하는 일</th></tr>
+        <tr><td><code>jul-to-slf4j</code></td><td>java.util.logging → SLF4J</td></tr>
+        <tr><td><code>jcl-over-slf4j</code></td><td>commons-logging → SLF4J</td></tr>
+        <tr><td><code>log4j-over-slf4j</code></td><td><b>Log4j 1.x</b> → SLF4J</td></tr>
+        <tr><td><code>log4j-to-slf4j</code></td><td><b>Log4j2 API</b> → SLF4J</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>이름 읽는 법
+  · "A-over-B"  = A 의 API 를 흉내 내는 가짜 jar (원본은 반드시 제거)
+  · "A-to-B"    = A 의 정식 어댑터 (원본 API 는 그대로 둠)
+  · "B-A-impl"  = B(파사드)를 A(구현)로 잇는 바인딩
+
+절대 같이 넣으면 안 되는 짝 ★
+  log4j-over-slf4j  +  slf4j-log4j12    → 무한 재귀 (StackOverflowError)
+  jcl-over-slf4j    +  slf4j-jcl        → 무한 재귀
+  log4j-to-slf4j    +  log4j-slf4j2-impl → 무한 재귀
+
+  이유: A→B 로 보내는 다리와 B→A 로 보내는 다리를
+        동시에 놓으면 로그 한 줄이 영원히 왕복합니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Spring Boot 는 이걸 이미 해 뒀습니다</b> —
+        <code>spring-boot-starter-logging</code> 안에
+        <b><code>logback-classic</code> + <code>log4j-to-slf4j</code> + <code>jul-to-slf4j</code></b>
+        가 들어 있습니다. 그래서 부트 프로젝트는
+        <b>아무것도 안 해도 브리지가 다 깔려 있습니다.</b>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">exclude 를 실제로 쓰는 법</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Gradle — 무엇이 어디서 들어왔는지부터</h4>
+      <pre class="code" data-lang="bash"><code># ① 로깅 관련 의존성만 추려 보기
+./gradlew dependencies --configuration runtimeClasspath | grep -i -E "slf4j|logback|log4j|commons-logging|tinylog"
+
+# ② '왜 들어왔는지' 경로 추적 — 이게 진짜 무기입니다 ★
+./gradlew dependencyInsight --dependency log4j-core --configuration runtimeClasspath
+
+# 출력 예
+#  org.apache.logging.log4j:log4j-core:2.20.0
+#  \--- com.example:legacy-client:3.1
+#       \--- runtimeClasspath
+
+# ③ 실제 실행 시점의 클래스패스에서 중복 확인
+jar tf build/libs/app.jar | grep -i "SLF4JServiceProvider"</code></pre>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts
+
+// ── A. 프로젝트 전체에서 특정 모듈을 빼기 (가장 확실)
+configurations.all {
+    exclude(group = "commons-logging", module = "commons-logging")
+    exclude(group = "log4j",           module = "log4j")           // 1.x
+    exclude(group = "org.slf4j",       module = "slf4j-log4j12")
+}
+
+// ── B. 특정 의존성에서만 빼기
+implementation("com.example:legacy-client:3.1") {
+    exclude(group = "org.apache.logging.log4j", module = "log4j-core")
+}
+
+// ── C. 빠진 자리를 브리지로 메우기
+implementation("org.slf4j:jcl-over-slf4j")
+implementation("org.slf4j:log4j-over-slf4j")
+
+// ── D. 중복이 다시 들어오면 빌드를 깨뜨리기 ★
+configurations.all {
+    resolutionStrategy {
+        componentSelection {
+            all {
+                if (candidate.module == "slf4j-log4j12") reject("바인딩 중복 금지")
+            }
+        }
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Maven · Log4j2 로 갈아타기</h4>
+      <pre class="code" data-lang="xml"><code>&lt;!-- Maven — 왜 들어왔는지 보기 --&gt;
+&lt;!-- mvn dependency:tree -Dincludes=:::*  --&gt;
+&lt;!-- mvn dependency:tree -Dincludes=org.slf4j,ch.qos.logback,org.apache.logging.log4j --&gt;
+
+&lt;dependency&gt;
+  &lt;groupId&gt;com.example&lt;/groupId&gt;
+  &lt;artifactId&gt;legacy-client&lt;/artifactId&gt;
+  &lt;version&gt;3.1&lt;/version&gt;
+  &lt;exclusions&gt;
+    &lt;exclusion&gt;
+      &lt;groupId&gt;commons-logging&lt;/groupId&gt;
+      &lt;artifactId&gt;commons-logging&lt;/artifactId&gt;
+    &lt;/exclusion&gt;
+  &lt;/exclusions&gt;
+&lt;/dependency&gt;
+
+&lt;!-- Spring Boot 에서 Logback → Log4j2 로 교체 --&gt;
+&lt;dependency&gt;
+  &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+  &lt;artifactId&gt;spring-boot-starter-web&lt;/artifactId&gt;
+  &lt;exclusions&gt;
+    &lt;exclusion&gt;
+      &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+      &lt;artifactId&gt;spring-boot-starter-logging&lt;/artifactId&gt;
+    &lt;/exclusion&gt;
+  &lt;/exclusions&gt;
+&lt;/dependency&gt;
+&lt;dependency&gt;
+  &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+  &lt;artifactId&gt;spring-boot-starter-log4j2&lt;/artifactId&gt;
+&lt;/dependency&gt;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Gradle 에서 흔한 실수</b> — <code>spring-boot-starter-logging</code> 을
+        <b>한 군데서만</b> exclude 하는 것. 다른 starter 가 또 끌고 옵니다.
+        <b><code>configurations.all { exclude(...) }</code></b> 로
+        <b>전체에서</b> 빼야 합니다. 그리고 exclude 한 뒤에는
+        <b>기동 로그에 SLF4J 경고가 없는지 반드시 확인</b>하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="note info rv">
+    <b>순서대로 하면 대부분 풀립니다</b> —
+    ① <code>dependencyInsight</code> / <code>dependency:tree</code> 로 <b>지금 뭐가 들어와 있는지</b> 본다 →
+    ② <b>바인딩(provider)이 정확히 하나</b>인지 확인한다 →
+    ③ 남은 옛 API(<code>commons-logging</code> · <code>log4j</code> 1.x · JUL)는
+    <b><code>-over-</code> jar 로 갈아 끼운다</b> →
+    ④ 기동 로그의 <code>SLF4J</code> 경고가 <b>0줄</b>인지 본다 →
+    ⑤ 라이브러리 로그(예: <code>org.hibernate</code>)가 실제로 찍히는지 <b>눈으로</b> 확인한다.
+  </div>
+</section>
+
+
+<!-- ==================== lg05 ==================== -->
+<section class="sec" id="lg05">
+  <div class="sec-head rv">
+    <span class="no">LOG 05</span>
+    <h2>Logback 설정 — <span class="t">appender · 롤링 · 프로파일</span></h2>
+    <p class="lead">
+      Spring Boot 는 <code>application.yml</code> 만으로도 꽤 갑니다. 그러다 어느 순간
+      <b>패턴을 바꾸고 싶고 · 파일을 나누고 싶고 · 프로파일마다 다르게 하고 싶어집니다.</b>
+      그때 필요한 것이 <code>logback-spring.xml</code> 한 장입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 242" role="img" aria-label="Logback 에서 로그 한 줄이 파일이 되기까지의 흐름과 롤링. 로거가 레벨 필터를 지나 Appender 로 가고 Encoder 가 패턴을 적용해 지금 쓰는 파일인 app.log 에 기록한다. 크기나 날짜 조건이 되면 롤오버가 일어나 app-2026-09-01.0.log.gz 같은 이름으로 넘어가고, maxHistory 와 totalSizeCap 조건에 걸리면 오래된 파일이 삭제된다. 저장소는 원통으로 그려져 있다">
+      <text x="16" y="18" class="lbl">Logback 한 줄이 파일이 되기까지 — 그리고 롤링이 일어나는 자리</text>
+
+      <rect class="bx" x="16" y="40" width="132" height="48"/>
+      <text x="82" y="62" class="val" text-anchor="middle">Logger</text>
+      <text x="82" y="77" class="ann" text-anchor="middle">com.myapp · DEBUG</text>
+
+      <path class="fl ar" d="M152 64 L168 64"/>
+      <rect class="bx" x="172" y="40" width="132" height="48"/>
+      <text x="238" y="62" class="val" text-anchor="middle">레벨 필터</text>
+      <text x="238" y="77" class="ann" text-anchor="middle">INFO 이상만 통과</text>
+
+      <path class="fl ar" d="M308 64 L324 64"/>
+      <rect class="bx" x="328" y="40" width="150" height="48"/>
+      <text x="403" y="62" class="val" text-anchor="middle">Appender</text>
+      <text x="403" y="77" class="ann" text-anchor="middle">Console · RollingFile</text>
+
+      <path class="fl ar" d="M482 64 L498 64"/>
+      <rect class="bx" x="502" y="40" width="162" height="48"/>
+      <text x="583" y="62" class="val" text-anchor="middle">Encoder</text>
+      <text x="583" y="77" class="ann" text-anchor="middle">%d [%thread] %-5level</text>
+
+      <path class="fl ar" d="M583 92 L583 116 L180 116 L180 136"/>
+
+      <path class="cyl" d="M116 150 L116 192 A 64 10 0 0 0 244 192 L244 150"/>
+      <ellipse class="cyl" cx="180" cy="150" rx="64" ry="10"/>
+      <text x="180" y="172" class="val" text-anchor="middle">app.log</text>
+      <text x="180" y="187" class="ann" text-anchor="middle">지금 쓰는 파일</text>
+
+      <path class="fl ar" d="M248 168 L316 168"/>
+      <text x="282" y="160" class="ann" text-anchor="middle">롤오버</text>
+
+      <path class="cyl" d="M320 150 L320 192 A 76 10 0 0 0 472 192 L472 150"/>
+      <ellipse class="cyl" cx="396" cy="150" rx="76" ry="10"/>
+      <text x="396" y="170" class="val" text-anchor="middle">롤링된 파일</text>
+      <text x="396" y="185" class="ann" text-anchor="middle">app-2026-09-01.0.log.gz</text>
+
+      <path class="fl ar" d="M476 168 L506 168"/>
+      <text x="491" y="160" class="ann" text-anchor="middle">보관</text>
+
+      <path class="cyl" d="M508 150 L508 192 A 70 10 0 0 0 648 192 L648 150"/>
+      <ellipse class="cyl" cx="578" cy="150" rx="70" ry="10"/>
+      <text x="578" y="170" class="val" text-anchor="middle">삭제</text>
+      <text x="578" y="185" class="ann" text-anchor="middle">maxHistory · totalSizeCap</text>
+
+      <text x="16" y="218" class="lbl">롤오버 조건과 보관 정책은 다른 설정입니다 — 언제 자르나 / 얼마나 남기나</text>
+      <text x="16" y="234" class="lbl">디스크가 꽉 차면 애플리케이션이 멈춥니다 — totalSizeCap 은 선택이 아닙니다</text>
+    </svg>
+    <div class="cap">원통이 저장소 — <b>파일은 계속 늘어납니다.</b> 자르는 규칙과 지우는 규칙을 둘 다 정해야 끝납니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">logback-spring.xml 한 장 (복붙용)</h4>
+      <pre class="code" data-lang="xml"><code>&lt;!-- src/main/resources/logback-spring.xml --&gt;
+&lt;configuration scan="true" scanPeriod="30 seconds"&gt;
+
+  &lt;!-- 부트가 만들어 둔 기본값을 그대로 가져다 씁니다 --&gt;
+  &lt;include resource="org/springframework/boot/logging/logback/defaults.xml"/&gt;
+
+  &lt;!-- application.yml 의 값을 XML 로 끌어오기 --&gt;
+  &lt;springProperty scope="context" name="APP" source="spring.application.name"/&gt;
+
+  &lt;property name="PATTERN"
+      value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{traceId:-}] - %msg%n"/&gt;
+
+  &lt;appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender"&gt;
+    &lt;encoder&gt;&lt;pattern&gt;${PATTERN}&lt;/pattern&gt;&lt;/encoder&gt;
+  &lt;/appender&gt;
+
+  &lt;appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender"&gt;
+    &lt;file&gt;logs/${APP}.log&lt;/file&gt;
+    &lt;rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy"&gt;
+      &lt;fileNamePattern&gt;logs/${APP}-%d{yyyy-MM-dd}.%i.log.gz&lt;/fileNamePattern&gt;
+      &lt;maxFileSize&gt;100MB&lt;/maxFileSize&gt;      &lt;!-- 이 크기를 넘으면 자름 --&gt;
+      &lt;maxHistory&gt;30&lt;/maxHistory&gt;            &lt;!-- 30일치만 --&gt;
+      &lt;totalSizeCap&gt;10GB&lt;/totalSizeCap&gt;      &lt;!-- 전체 상한 ★ --&gt;
+      &lt;cleanHistoryOnStart&gt;true&lt;/cleanHistoryOnStart&gt;
+    &lt;/rollingPolicy&gt;
+    &lt;encoder&gt;&lt;pattern&gt;${PATTERN}&lt;/pattern&gt;&lt;/encoder&gt;
+  &lt;/appender&gt;
+
+  &lt;!-- 프로파일마다 다르게 --&gt;
+  &lt;springProfile name="local"&gt;
+    &lt;root level="DEBUG"&gt;&lt;appender-ref ref="CONSOLE"/&gt;&lt;/root&gt;
+  &lt;/springProfile&gt;
+  &lt;springProfile name="prod"&gt;
+    &lt;logger name="com.myapp" level="INFO"/&gt;
+    &lt;root level="WARN"&gt;
+      &lt;appender-ref ref="CONSOLE"/&gt;
+      &lt;appender-ref ref="FILE"/&gt;
+    &lt;/root&gt;
+  &lt;/springProfile&gt;
+&lt;/configuration&gt;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>파일 이름이 <code>logback.xml</code> 이면 안 됩니다</b> —
+        <code>&lt;springProfile&gt;</code> · <code>&lt;springProperty&gt;</code> 는
+        <b>Spring 이 로깅을 초기화할 때</b> 처리하므로,
+        Logback 이 먼저 읽어 버리는 <code>logback.xml</code> 에서는 <b>동작하지 않습니다</b>.
+        Spring Boot 에서는 항상 <b><code>logback-spring.xml</code></b>.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">XML 없이 application.yml 로만</h4>
+      <pre class="code" data-lang="yaml"><code>logging:
+  level:
+    root: INFO
+    com.myapp: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.springframework.web: WARN
+
+  file:
+    name: logs/app.log          # 경로+이름 (path 와 동시에 쓰지 않습니다)
+
+  logback:
+    rollingpolicy:
+      file-name-pattern: logs/app-%d{yyyy-MM-dd}.%i.log.gz
+      max-file-size: 100MB
+      max-history: 30
+      total-size-cap: 10GB
+      clean-history-on-start: true
+
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level %logger{20} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{traceId:-}] - %msg%n"
+
+  charset:
+    file: UTF-8                 # 윈도우에서 한글 깨짐 방지 ★</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">패턴 조각</th><th>뜻</th></tr>
+        <tr><td><code>%d{...}</code></td><td>시각</td></tr>
+        <tr><td><code>%thread</code></td><td>스레드 이름</td></tr>
+        <tr><td><code>%-5level</code></td><td>레벨 (5칸 왼쪽 정렬)</td></tr>
+        <tr><td><code>%logger{36}</code></td><td>클래스명 (36자로 축약)</td></tr>
+        <tr><td><b><code>%X{traceId:-}</code></b></td><td><b>MDC 값</b> (없으면 빈칸)</td></tr>
+        <tr><td><code>%msg%n</code></td><td>메시지 + 줄바꿈</td></tr>
+        <tr><td><code>%ex{short}</code></td><td>스택트레이스 (짧게)</td></tr>
+        <tr><td class="rs-t"><code>%L</code> <code>%M</code> <code>%C</code></td><td><b>줄번호·메서드·클래스 — 매우 느림</b></td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>어디까지 yml 로 되나</b> — <b>레벨 · 파일 이름 · 롤링 · 패턴 · 인코딩</b>까지는 yml 로 끝납니다.
+        <b>appender 를 여러 개 만들고 로거마다 다르게 붙이는 순간</b> XML 이 필요합니다.
+        그 전까지는 XML 을 만들지 마세요 — 관리 대상만 늘어납니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">설정이 안 먹을 때</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Logback 이 설정을 찾는 순서</h4>
+      <pre class="code" data-lang="text"><code>① logback-test.xml   (테스트 클래스패스 — 있으면 이게 이깁니다) ★
+② logback.xml
+③ (Spring Boot) logback-spring.xml
+④ 아무것도 없으면 → 콘솔에 DEBUG 로 전부 출력
+
+흔한 함정
+  · src/test/resources/logback-test.xml 을 넣어 두고 잊어버림
+    → 테스트에서만 로그가 이상하게 나옴
+  · 라이브러리 jar 안에 logback.xml 이 들어 있음
+    → jar tf lib.jar | grep logback  로 확인
+  · -Dlogback.configurationFile=/path/logback.xml 로 강제 지정 가능
+
+설정이 안 먹으면 우선 이걸 켭니다
+  &lt;configuration debug="true"&gt;
+    → 어떤 파일을 읽었고 appender 를 어떻게 만들었는지 전부 출력</code></pre>
+      <pre class="code" data-lang="bash"><code># 실행 중에 어떤 설정 파일을 읽었는지 확인
+java -Dlogback.debug=true -jar app.jar 2&gt;&amp;1 | head -40
+
+# 지금 유효한 레벨을 코드로 확인
+# (Actuator 가 있으면 LOG 09 의 엔드포인트가 더 편합니다)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">appender 를 나누고 중복을 막기</h4>
+      <pre class="code" data-lang="xml"><code>&lt;!-- 에러만 따로 파일로 빼기 --&gt;
+&lt;appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender"&gt;
+  &lt;filter class="ch.qos.logback.classic.filter.LevelFilter"&gt;
+    &lt;level&gt;ERROR&lt;/level&gt;
+    &lt;onMatch&gt;ACCEPT&lt;/onMatch&gt;
+    &lt;onMismatch&gt;DENY&lt;/onMismatch&gt;
+  &lt;/filter&gt;
+  &lt;file&gt;logs/error.log&lt;/file&gt;
+  &lt;rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy"&gt;
+    &lt;fileNamePattern&gt;logs/error-%d{yyyy-MM-dd}.log.gz&lt;/fileNamePattern&gt;
+    &lt;maxHistory&gt;90&lt;/maxHistory&gt;
+  &lt;/rollingPolicy&gt;
+  &lt;encoder&gt;&lt;pattern&gt;${PATTERN}&lt;/pattern&gt;&lt;/encoder&gt;
+&lt;/appender&gt;
+
+&lt;!-- 감사 로그처럼 '한 로거를 통째로 다른 파일로' --&gt;
+&lt;logger name="AUDIT" level="INFO" additivity="false"&gt;
+  &lt;!--       additivity="false" 가 없으면 root 로도 또 나갑니다 ★ --&gt;
+  &lt;appender-ref ref="AUDIT_FILE"/&gt;
+&lt;/logger&gt;
+
+&lt;!-- 시끄러운 라이브러리 조용히 시키기 --&gt;
+&lt;logger name="org.apache.http" level="WARN"/&gt;
+&lt;logger name="org.hibernate.type.descriptor.sql" level="WARN"/&gt;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“로그가 두 번 찍혀요”의 99%가 <code>additivity</code></b> 입니다.
+        Logback 의 로거는 <b>부모에게도 전달</b>합니다 —
+        <code>com.myapp.Order</code> 로거에 appender 를 붙이면
+        <b>그 appender + root 의 appender</b> 양쪽으로 나갑니다.
+        따로 빼려면 <b><code>additivity="false"</code></b> 를 반드시 붙이세요.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== lg06 ==================== -->
+<section class="sec" id="lg06">
+  <div class="sec-head rv">
+    <span class="no">LOG 06</span>
+    <h2>Log4j2 와 <span class="t">비동기 로깅</span> — Disruptor 가 뭘 바꿨나</h2>
+    <p class="lead">
+      Logback 에도 <code>AsyncAppender</code> 가 있습니다. 그런데 Log4j2 의 <code>AsyncLogger</code> 는
+      <b>다른 층에서, 다른 자료구조로</b> 비동기를 합니다. 그 차이가 처리량 차이의 정체입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 256" role="img" aria-label="로깅 방식별 상대 처리량 막대 차트. 동기 Console 과 동기 RollingFile 이 기준 1배로 가장 낮고, Logback 의 AsyncAppender 가 약 3배, Log4j2 의 AsyncLogger 가 약 8배, Log4j2 전면 비동기가 약 10배 이상이다. 배수는 자릿수 수준의 근사이며 환경에 따라 달라진다">
+      <text x="16" y="18" class="lbl">로깅 방식별 상대 처리량 — 배수는 자릿수 수준의 근사입니다</text>
+
+      <path class="ax" d="M190 34 L190 196"/>
+      <path class="gr" d="M302 34 L302 196"/>
+      <path class="gr" d="M415 34 L415 196"/>
+      <path class="gr" d="M527 34 L527 196"/>
+      <path class="ax" d="M190 196 L648 196"/>
+
+      <text x="16" y="56" class="ann">동기 Console</text>
+      <rect class="bar-mut" x="190" y="42" width="37" height="20"/>
+      <text x="235" y="56" class="tk">기준 1배</text>
+
+      <text x="16" y="88" class="ann">동기 RollingFile</text>
+      <rect class="bar-mut" x="190" y="74" width="37" height="20"/>
+      <text x="235" y="88" class="tk">거의 같음 — 디스크가 결정</text>
+
+      <text x="16" y="120" class="ann">Logback Async</text>
+      <rect class="bar" x="190" y="106" width="112" height="20"/>
+      <text x="310" y="120" class="tk">약 3배 — 큐 + 별도 스레드</text>
+
+      <text x="16" y="152" class="ann ok-t">Log4j2 AsyncLogger</text>
+      <rect class="bar" x="190" y="138" width="300" height="20" style="fill:rgba(52,211,153,.22);stroke:rgba(52,211,153,.55)"/>
+      <text x="498" y="152" class="tk ok-t">약 8배 — 링버퍼</text>
+
+      <text x="16" y="184" class="ann ok-t">Log4j2 전면 비동기</text>
+      <rect class="bar" x="190" y="170" width="375" height="20" style="fill:rgba(52,211,153,.22);stroke:rgba(52,211,153,.55)"/>
+      <text x="573" y="184" class="tk ok-t">약 10배 이상</text>
+
+      <text x="190" y="212" class="tk" text-anchor="middle">0</text>
+      <text x="302" y="212" class="tk" text-anchor="middle">3</text>
+      <text x="415" y="212" class="tk" text-anchor="middle">6</text>
+      <text x="527" y="212" class="tk" text-anchor="middle">9</text>
+      <text x="640" y="212" class="tk" text-anchor="middle">12 배</text>
+
+      <text x="16" y="232" class="lbl">막대는 0에서 시작합니다 — 축을 자르면 차이가 과장됩니다</text>
+      <text x="16" y="248" class="lbl">내 환경 숫자는 JMH 나 Log4j2 성능 테스트로 직접 재세요</text>
+    </svg>
+    <div class="cap">막대 — <b>동기끼리는 차이가 없습니다.</b> 갈라지는 지점은 "누가 디스크를 기다리나"입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">AsyncAppender 와 AsyncLogger 는 다른 층입니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%"></th><th>Logback AsyncAppender</th><th>Log4j2 AsyncLogger</th></tr>
+        <tr><td>비동기 지점</td><td><b>appender 앞</b></td><td><b>logger 호출 직후</b></td></tr>
+        <tr><td>자료구조</td><td><code>ArrayBlockingQueue</code></td><td><b>LMAX Disruptor</b> 링버퍼</td></tr>
+        <tr><td>락</td><td>있음</td><td><b>락 없음</b> (CAS)</td></tr>
+        <tr><td>포맷 시점</td><td>큐에 넣기 전</td><td>소비 스레드에서</td></tr>
+        <tr><td>가득 찼을 때</td><td>버리거나 블록</td><td>정책 선택 가능</td></tr>
+        <tr><td>설정</td><td>XML 몇 줄</td><td>의존성 + 설정</td></tr>
+      </table></div>
+      <pre class="code" data-lang="xml"><code>&lt;!-- Logback — 이 정도로도 대부분 충분합니다 --&gt;
+&lt;appender name="ASYNC" class="ch.qos.logback.classic.AsyncAppender"&gt;
+  &lt;queueSize&gt;8192&lt;/queueSize&gt;            &lt;!-- 기본 256 은 너무 작습니다 --&gt;
+  &lt;discardingThreshold&gt;0&lt;/discardingThreshold&gt;
+  &lt;!-- 기본값 20 이면 큐가 80% 차는 순간 INFO 이하를 버립니다 ★ --&gt;
+  &lt;neverBlock&gt;false&lt;/neverBlock&gt;
+  &lt;!-- true 면 큐가 꽉 찼을 때 로그를 버리고 애플리케이션은 안 멈춥니다 --&gt;
+  &lt;includeCallerData&gt;false&lt;/includeCallerData&gt;
+  &lt;!-- true 로 하면 스택을 뒤져 줄번호를 붙입니다 — 10배 이상 느려집니다 --&gt;
+  &lt;appender-ref ref="FILE"/&gt;
+&lt;/appender&gt;</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>기본값이 조용히 로그를 버립니다</b> — Logback <code>AsyncAppender</code> 의
+        <code>discardingThreshold</code> 기본값은 <b>20</b>입니다.
+        큐가 80% 차면 <b>TRACE·DEBUG·INFO 를 말없이 버립니다</b>.
+        “부하가 몰릴 때만 로그가 사라진다”는 신고의 원인이 대개 이것입니다.
+        <b>버리기 싫으면 <code>0</code></b>, 대신 큐가 꽉 차면 애플리케이션이 기다립니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Log4j2 전면 비동기 켜기</h4>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts
+configurations.all {
+    exclude(group = "org.springframework.boot", module = "spring-boot-starter-logging")
+}
+dependencies {
+    implementation("org.springframework.boot:spring-boot-starter-log4j2")
+    implementation("com.lmax:disruptor")   // 버전은 Log4j2 문서의 호환 표를 따르세요
+}</code></pre>
+      <pre class="code" data-lang="bash"><code># 방법 ① 전면 비동기 — 모든 로거가 비동기가 됩니다 (가장 빠름)
+java -Dlog4j2.contextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector \
+     -jar app.jar
+
+# 또는 src/main/resources/log4j2.component.properties 에
+#   log4j2.contextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector
+#   log4j2.asyncLoggerRingBufferSize=262144
+#   log4j2.asyncQueueFullPolicy=Discard        # 기본은 Default(블록)
+#   log4j2.discardThreshold=INFO</code></pre>
+      <pre class="code" data-lang="xml"><code>&lt;!-- 방법 ② 혼합 — 일부 로거만 비동기 --&gt;
+&lt;Configuration status="WARN"&gt;
+  &lt;Appenders&gt;
+    &lt;RollingFile name="FILE" fileName="logs/app.log"
+                 filePattern="logs/app-%d{yyyy-MM-dd}-%i.log.gz"&gt;
+      &lt;PatternLayout pattern="%d %-5level %logger{36} [%X{traceId}] - %msg%n"/&gt;
+      &lt;Policies&gt;
+        &lt;TimeBasedTriggeringPolicy/&gt;
+        &lt;SizeBasedTriggeringPolicy size="100MB"/&gt;
+      &lt;/Policies&gt;
+      &lt;DefaultRolloverStrategy max="30"/&gt;
+    &lt;/RollingFile&gt;
+  &lt;/Appenders&gt;
+  &lt;Loggers&gt;
+    &lt;!-- includeLocation 은 기본 false 로 두세요 (켜면 스택을 뒤집니다) --&gt;
+    &lt;AsyncLogger name="com.myapp" level="INFO" includeLocation="false"
+                 additivity="false"&gt;
+      &lt;AppenderRef ref="FILE"/&gt;
+    &lt;/AsyncLogger&gt;
+    &lt;Root level="WARN"&gt;&lt;AppenderRef ref="FILE"/&gt;&lt;/Root&gt;
+  &lt;/Loggers&gt;
+&lt;/Configuration&gt;</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>비동기의 대가</b> — ① <b>순서가 살짝 흔들릴 수 있고</b>,
+        ② <b>프로세스가 죽으면 큐에 남은 로그가 사라지며</b>(그래서 종료 훅이 중요),
+        ③ 예외 스택을 나중에 포맷하므로 <b>가변 객체를 로그 인자로 넘기면 값이 달라집니다</b>.
+        마지막 항목은 실제로 디버깅을 어렵게 만드니, <b>불변 값이나 문자열을 넘기세요</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="x">한 단계 더 — <span class="t">가비지 프리 모드</span> <span class="lvl x">🧬 전문가</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로그 한 줄이 만드는 쓰레기</h4>
+      <pre class="code" data-lang="text"><code>log.info("order={} amount={}", id, amount) 한 번에 만들어지는 객체(대략)
+
+  · Object[] 가변인자 배열              1개
+  · Long / BigDecimal 오토박싱          2개
+  · 포맷된 String                       1개
+  · byte[] (인코딩 결과)                1개
+  · LogEvent · 타임스탬프 객체 등        수 개
+
+초당 10만 줄 = 초당 수십만 개의 단명 객체
+  → Young GC 빈도가 올라가고, p99 지연에 GC 멈춤이 섞입니다.
+
+Log4j2 의 대응 (가비지 프리 모드)
+  · ThreadLocal 로 버퍼를 재사용   log4j2.enableThreadlocals=true
+  · 직접 인코딩(중간 String 생략)  log4j2.enableDirectEncoders=true
+  · 대부분의 Layout·Appender 가 이 모드를 지원합니다
+
+  주의: 웹 애플리케이션(WAR)에서는 ThreadLocal 이 누수 위험이라
+        기본으로 꺼집니다. 실행형 jar 에서만 켜세요.</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>여기까지 필요한 경우는 드뭅니다</b> —
+        <b>초당 수십만 줄, p99 를 밀리초 단위로 관리하는 시스템</b>에서만 의미가 있습니다.
+        그 전에는 <b>로그를 덜 찍는 것</b>이 훨씬 큰 효과를 냅니다(LOG 10).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 재는 법</h4>
+      <pre class="code" data-lang="java"><code>// JMH 로 로깅 비용만 떼어 재기
+@BenchmarkMode(Mode.Throughput)
+@OutputTimeUnit(TimeUnit.SECONDS)
+@State(Scope.Benchmark)
+public class LogBench {
+    static final Logger log = LoggerFactory.getLogger(LogBench.class);
+    long id = 1042L;
+
+    @Benchmark public void bound()  { log.info("order={}", id); }
+    @Benchmark public void concat() { log.info("order=" + id); }
+    @Benchmark public void off()    { log.debug("order={}", id); }  // 꺼진 레벨
+}
+
+// 실행
+//   ./gradlew jmh
+// 보는 것
+//   · ops/s 그 자체보다 '방식 사이의 배수'
+//   · GC 통계: -prof gc  →  alloc rate 가 확 줄어드는지</code></pre>
+      <pre class="code" data-lang="bash"><code># 운영에서 로깅이 지연에 잡히는지 보는 가장 싼 방법
+# ① 로그 레벨을 WARN 으로 내리고 p99 를 비교
+# ② 비동기로 바꾸고 다시 비교
+# ③ 두 번 다 안 변하면 병목은 로깅이 아닙니다 ★
+
+# 스레드 덤프에서 로깅 락 대기 찾기
+jcmd &lt;pid&gt; Thread.print | grep -A 5 -i "logback\|log4j" | head -40</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>순서를 지키세요</b> — “느릴 것 같아서” 비동기부터 켜면
+        <b>로그 유실이라는 새 문제</b>만 얻습니다.
+        <b>재고 → 레벨을 조정하고 → 그래도 남으면 비동기</b>.
+        대부분의 팀은 두 번째 단계에서 끝납니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ==================== lg07 ==================== -->
+<section class="sec" id="lg07">
+  <div class="sec-head rv">
+    <span class="no">LOG 07</span>
+    <h2>구조적 로깅 — <span class="t">문장 대신 필드</span>로 찍기</h2>
+    <p class="lead">
+      로그를 사람이 <code>grep</code> 하던 시대에는 문장이 좋았습니다.
+      <b>수집기에 넣고 검색·집계하는 시대</b>에는 <b>필드</b>가 좋습니다.
+      바꾸는 데 필요한 것은 인코더 하나와 <b>필드 이름 규약</b>입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 256" role="img" aria-label="구조적 로깅의 흐름. 애플리케이션이 JSON 인코더를 거쳐 한 줄에 한 이벤트씩 파일에 쓰고, Fluent Bit 같은 수집기가 그 파일을 읽어 Elasticsearch 나 Loki, Datadog 같은 외부 로그 백엔드로 보낸다. 백엔드에 쌓인 로그는 Kibana 나 Grafana 에서 필드로 검색하고 집계한다. 저장소는 원통, 외부 서비스는 구름으로 그려져 있다">
+      <text x="16" y="18" class="lbl">구조적 로깅 — 한 줄이 문장이 아니라 필드 묶음이 됩니다</text>
+
+      <rect class="bx" x="16" y="40" width="126" height="48"/>
+      <text x="79" y="62" class="val" text-anchor="middle">앱</text>
+      <text x="79" y="77" class="ann" text-anchor="middle">log.info(...)</text>
+
+      <path class="fl ar" d="M146 64 L162 64"/>
+      <rect class="bx bx-fw" x="166" y="40" width="140" height="48"/>
+      <text x="236" y="62" class="val" text-anchor="middle">JSON 인코더</text>
+      <text x="236" y="77" class="ann" text-anchor="middle">@timestamp · level</text>
+
+      <path class="fl ar" d="M310 64 L326 64"/>
+      <path class="cyl" d="M330 46 L330 82 A 62 9 0 0 0 454 82 L454 46"/>
+      <ellipse class="cyl" cx="392" cy="46" rx="62" ry="9"/>
+      <text x="392" y="68" class="val" text-anchor="middle">app.json.log</text>
+      <text x="392" y="102" class="ann" text-anchor="middle">한 줄 = 한 이벤트</text>
+
+      <path class="fl ar" d="M458 64 L474 64"/>
+      <rect class="bx" x="478" y="40" width="142" height="48"/>
+      <text x="549" y="62" class="val" text-anchor="middle">수집기</text>
+      <text x="549" y="77" class="ann" text-anchor="middle">Fluent Bit · Filebeat</text>
+
+      <path class="fl ar" d="M549 92 L549 174 L524 174"/>
+
+      <path class="cld" d="M246 200 A 30 30 0 0 1 306 200 A 44 44 0 0 1 394 200 A 36 36 0 0 1 466 200 A 26 26 0 0 1 518 200 Z"/>
+      <text x="382" y="168" class="val" text-anchor="middle">로그 수집 백엔드</text>
+      <text x="382" y="184" class="ann" text-anchor="middle">Elasticsearch · Loki · Datadog</text>
+
+      <path class="fl ar" d="M242 192 L220 192"/>
+      <rect class="bx bx-ok" x="40" y="170" width="176" height="48"/>
+      <text x="128" y="192" class="val" text-anchor="middle">Kibana · Grafana</text>
+      <text x="128" y="207" class="ann" text-anchor="middle">필드로 검색 · 집계</text>
+
+      <text x="16" y="232" class="lbl">문장을 파싱해서 필드를 만들지 말고, 처음부터 필드로 찍습니다</text>
+      <text x="16" y="248" class="lbl">필드 이름은 팀 전체가 같아야 검색이 됩니다 — ECS 같은 규약을 빌리세요</text>
+    </svg>
+    <div class="cap">구름이 우리 손 밖의 경계 — <b>거기서부터는 필드 이름이 계약</b>입니다. 이름을 바꾸면 대시보드가 깨집니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Logback + JSON 인코더</h4>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts — 둘 중 하나를 고릅니다
+implementation("net.logstash.logback:logstash-logback-encoder:8.1")  // 자유로운 필드
+implementation("co.elastic.logging:logback-ecs-encoder:1.6.0")       // ECS 규약 고정
+// 버전은 mvnrepository 에서 최신 안정을 확인하세요</code></pre>
+      <pre class="code" data-lang="xml"><code>&lt;!-- ① logstash-logback-encoder --&gt;
+&lt;appender name="JSON" class="ch.qos.logback.core.rolling.RollingFileAppender"&gt;
+  &lt;file&gt;logs/app.json.log&lt;/file&gt;
+  &lt;rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy"&gt;
+    &lt;fileNamePattern&gt;logs/app-%d{yyyy-MM-dd}.%i.json.log.gz&lt;/fileNamePattern&gt;
+    &lt;maxFileSize&gt;100MB&lt;/maxFileSize&gt;
+    &lt;totalSizeCap&gt;10GB&lt;/totalSizeCap&gt;
+  &lt;/rollingPolicy&gt;
+  &lt;encoder class="net.logstash.logback.encoder.LogstashEncoder"&gt;
+    &lt;includeMdcKeyName&gt;traceId&lt;/includeMdcKeyName&gt;
+    &lt;includeMdcKeyName&gt;userId&lt;/includeMdcKeyName&gt;
+    &lt;customFields&gt;{"service":"order-api","env":"prod"}&lt;/customFields&gt;
+    &lt;fieldNames&gt;
+      &lt;timestamp&gt;@timestamp&lt;/timestamp&gt;
+      &lt;level&gt;log.level&lt;/level&gt;
+      &lt;logger&gt;log.logger&lt;/logger&gt;
+    &lt;/fieldNames&gt;
+    &lt;throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter"&gt;
+      &lt;maxDepthPerThrowable&gt;30&lt;/maxDepthPerThrowable&gt;
+      &lt;maxLength&gt;4096&lt;/maxLength&gt;
+      &lt;shortenedClassNameLength&gt;40&lt;/shortenedClassNameLength&gt;
+    &lt;/throwableConverter&gt;
+  &lt;/encoder&gt;
+&lt;/appender&gt;
+
+&lt;!-- ② ECS 규약을 그대로 쓰고 싶으면 --&gt;
+&lt;encoder class="co.elastic.logging.logback.EcsEncoder"&gt;
+  &lt;serviceName&gt;order-api&lt;/serviceName&gt;
+  &lt;serviceVersion&gt;1.4.2&lt;/serviceVersion&gt;
+  &lt;serviceEnvironment&gt;prod&lt;/serviceEnvironment&gt;
+&lt;/encoder&gt;</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Spring Boot 3.4 부터는 의존성 없이도 됩니다</b> —
+        <code>logging.structured.format.console=ecs</code> (또는 <code>logstash</code>·<code>gelf</code>)
+        한 줄로 <b>부트가 직접 JSON 을 찍습니다</b>.
+        간단한 서비스라면 인코더 라이브러리를 넣지 않아도 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">코드에서 필드를 붙이는 세 가지 방법</h4>
+      <pre class="code" data-lang="java"><code>import static net.logstash.logback.argument.StructuredArguments.*;
+
+// ① kv — 메시지에도 보이고 JSON 필드도 됩니다 (가장 무난)
+log.info("order.completed {} {}", kv("orderId", id), kv("amount", amount));
+// 텍스트:  order.completed orderId=1042 amount=32000
+// JSON:    {"message":"order.completed ...","orderId":1042,"amount":32000}
+
+// ② value — 메시지에는 값만, JSON 에는 필드로
+log.info("order.completed {}", value("orderId", id));
+
+// ③ SLF4J 2.0 표준 fluent API — 라이브러리 의존이 없습니다 ★
+log.atInfo()
+   .setMessage("order.completed")
+   .addKeyValue("orderId", id)
+   .addKeyValue("amount", amount)
+   .addKeyValue("elapsedMs", elapsed)
+   .log();
+
+// MDC 에 넣은 값은 자동으로 전부 필드가 됩니다 (LOG 08)
+MDC.put("traceId", traceId);
+log.info("order.completed");   // JSON 에 traceId 가 자동 포함</code></pre>
+      <pre class="code" data-lang="json"><code>{
+  "@timestamp": "2026-09-01T10:22:41.108+09:00",
+  "log.level": "INFO",
+  "log.logger": "com.myapp.order.OrderService",
+  "service": "order-api",
+  "env": "prod",
+  "trace.id": "3f9a1c0b7e2d4a55",
+  "user.id": "u-88213",
+  "message": "order.completed",
+  "orderId": 1042,
+  "amount": 32000,
+  "elapsedMs": 87,
+  "process.thread.name": "http-nio-8080-exec-3"
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">필드 설계 규칙</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">필드 다섯 묶음이면 충분합니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">묶음</th><th>필드</th><th>누가 넣나</th></tr>
+        <tr><td>시각·레벨</td><td><code>@timestamp</code> <code>log.level</code></td><td>인코더</td></tr>
+        <tr><td>어디</td><td><code>service.name</code> <code>host</code> <code>log.logger</code></td><td>설정</td></tr>
+        <tr><td><b>누가·어떤 요청</b></td><td><code>trace.id</code> <code>user.id</code></td><td><b>MDC</b></td></tr>
+        <tr><td>무슨 일</td><td><code>event.action</code> + 도메인 값</td><td>코드</td></tr>
+        <tr><td>실패</td><td><code>error.type</code> <code>error.stack_trace</code></td><td>인코더</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>이름 규칙 세 개
+  ① 소문자 + 점(.) 계층      user.id, http.response.status_code
+  ② 같은 뜻은 같은 이름       userId / user_id / uid 를 섞지 않기
+  ③ 값의 타입을 고정          orderId 는 항상 숫자, 항상 문자열 중 하나
+
+바꿀 때는 '한동안 둘 다' 를 찍습니다
+  · 새 필드를 추가 → 대시보드를 옮김 → 옛 필드를 제거
+  · 이름을 바로 바꾸면 그날의 대시보드가 통째로 빕니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>필드 폭발(mapping explosion)</b> — Elasticsearch 는 새 필드마다 매핑을 만듭니다.
+        <b>동적으로 만들어지는 키</b>(예: <code>kv(orderId, ...)</code> 를 키 이름에 넣기)를 찍으면
+        <b>인덱스가 수천 개 필드로 부풀어 클러스터가 죽습니다.</b>
+        <b>키 이름은 코드에 상수로 고정</b>하세요 — 값만 변해야 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">텍스트와 JSON 을 함께 쓰기</h4>
+      <pre class="code" data-lang="xml"><code>&lt;!-- 개발자는 콘솔에서 사람이 읽는 형태로,
+     수집기는 파일에서 JSON 으로 — 둘 다 켜 둡니다 --&gt;
+&lt;springProfile name="local"&gt;
+  &lt;root level="DEBUG"&gt;&lt;appender-ref ref="CONSOLE"/&gt;&lt;/root&gt;
+&lt;/springProfile&gt;
+
+&lt;springProfile name="prod"&gt;
+  &lt;root level="INFO"&gt;
+    &lt;appender-ref ref="JSON"/&gt;      &lt;!-- 파일: 기계용 --&gt;
+    &lt;appender-ref ref="CONSOLE"/&gt;   &lt;!-- 표준출력: 컨테이너 로그 --&gt;
+  &lt;/root&gt;
+&lt;/springProfile&gt;</code></pre>
+      <pre class="code" data-lang="bash"><code># 컨테이너라면 파일 대신 표준출력이 정답입니다
+#   앱 → stdout(JSON) → 컨테이너 런타임 → 수집기
+#   파일 롤링·디스크 관리를 앱이 안 해도 됩니다 ★
+
+# 로컬에서 JSON 로그를 사람이 읽기
+tail -f logs/app.json.log | jq -r \
+  '"\(.["@timestamp"]) \(.["log.level"]) \(.message) trace=\(.["trace.id"] // "-")"'
+
+# 특정 요청만 따라가기
+grep '"trace.id":"3f9a1c0b7e2d4a55"' logs/app.json.log | jq .</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>둘 다 켜면 비용이 두 배 아닌가</b> — 맞습니다. 그래서 보통은
+        <b>운영에서 콘솔은 WARN 이상, 파일 JSON 은 INFO 이상</b>처럼 레벨을 다르게 둡니다.
+        컨테이너 환경이면 <b>JSON 을 표준출력 하나로만</b> 내보내는 쪽이 더 단순합니다.
+      </div>
+    </div>
+  </div>
+</section>

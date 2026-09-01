@@ -1,0 +1,454 @@
+
+
+<!-- ==================== lg03 ==================== -->
+<section class="sec" id="lg03">
+  <div class="sec-head rv">
+    <span class="no">LOG 03</span>
+    <h2><span class="t">pino</span> 실전 — 왜 빠르고, 무엇을 워커에게 넘기나</h2>
+    <p class="lead">
+      pino 가 빠른 이유는 마법이 아니라 <b>안 하는 일이 많아서</b>입니다.
+      메인 스레드에서는 <b>문자열을 만들어 버퍼에 넣는 것</b>까지만 하고, 나머지는 전부 워커 스레드로 넘깁니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 250" role="img" aria-label="pino 가 로그 한 줄을 처리하는 과정을 스레드별 스윔레인으로 나눈 그림. 메인 스레드 레인에서는 logger.info 호출, 레벨 확인, JSON 한 줄 조립, 버퍼에 덧붙이기까지만 한다. 그 다음 thread-stream 을 통해 워커 스레드 레인으로 넘어가고, 워커가 포매팅과 전송을 대신한다. 마지막 바깥 레인에는 표준 출력, 파일, 원격 수집기가 있다">
+      <text x="16" y="18" class="lbl">pino 의 한 줄 — 메인 스레드는 거의 아무 일도 하지 않습니다</text>
+
+      <rect class="lane" x="106" y="30" width="558" height="56"/>
+      <rect class="lane-alt" x="106" y="90" width="558" height="56"/>
+      <rect class="lane" x="106" y="150" width="558" height="56"/>
+
+      <rect class="lane-hd" x="16" y="30" width="84" height="56"/>
+      <text x="58" y="63" class="val" text-anchor="middle">메인 스레드</text>
+      <rect class="lane-hd" x="16" y="90" width="84" height="56"/>
+      <text x="58" y="123" class="val" text-anchor="middle">워커 스레드</text>
+      <rect class="lane-hd" x="16" y="150" width="84" height="56"/>
+      <text x="58" y="183" class="val" text-anchor="middle">바깥</text>
+
+      <rect class="bx" x="120" y="42" width="118" height="32"/>
+      <text x="179" y="62" class="ann" text-anchor="middle">logger.info(obj)</text>
+      <path class="fl ar" d="M242 58 L250 58"/>
+      <rect class="bx" x="254" y="42" width="118" height="32"/>
+      <text x="313" y="62" class="ann" text-anchor="middle">레벨 확인</text>
+      <path class="fl ar" d="M376 58 L384 58"/>
+      <rect class="bx bx-fw" x="388" y="42" width="118" height="32"/>
+      <text x="447" y="62" class="ann" text-anchor="middle">JSON 한 줄 조립</text>
+      <path class="fl ar" d="M510 58 L518 58"/>
+      <rect class="bx" x="522" y="42" width="118" height="32"/>
+      <text x="581" y="62" class="ann" text-anchor="middle">버퍼에 append</text>
+
+      <path class="fl ar" d="M581 78 L581 98"/>
+
+      <rect class="bx bx-ok" x="120" y="102" width="544" height="32"/>
+      <text x="392" y="122" class="ann" text-anchor="middle">thread-stream — 워커 스레드가 포매팅과 전송을 대신합니다</text>
+
+      <path class="fl ar" d="M200 138 L200 158"/>
+      <path class="fl ar" d="M380 138 L380 158"/>
+      <path class="fl ar" d="M572 138 L572 158"/>
+
+      <rect class="bx" x="120" y="162" width="160" height="32"/>
+      <text x="200" y="182" class="ann" text-anchor="middle">stdout (컨테이너)</text>
+      <rect class="bx" x="300" y="162" width="160" height="32"/>
+      <text x="380" y="182" class="ann" text-anchor="middle">app.log 파일</text>
+      <rect class="bx" x="490" y="162" width="164" height="32"/>
+      <text x="572" y="182" class="ann" text-anchor="middle">수집기 · 원격</text>
+
+      <circle class="pk" r="3.5"><animateMotion dur="2.6s" repeatCount="indefinite" path="M140 58 L620 58"/></circle>
+
+      <text x="16" y="226" class="lbl">메인 스레드가 하는 일은 문자열을 만들어 버퍼에 넣는 것뿐입니다 — 그래서 빠릅니다</text>
+      <text x="16" y="242" class="lbl">pino-pretty 를 앱 안에서 돌리면 이 그림이 무너집니다 — 개발용 파이프로만 쓰세요</text>
+    </svg>
+    <div class="cap">스윔레인 — <b>줄을 넘어가는 화살표</b>가 곧 스레드가 바뀌는 지점입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">5분 시작 — 이 설정이 대부분의 정답입니다</h4>
+      <pre class="code" data-lang="bash"><code>npm i pino
+npm i -D pino-pretty          # ★ 개발 의존성입니다. 운영 번들에 넣지 마세요</code></pre>
+      <pre class="code" data-lang="ts"><code>// src/logger.ts
+import pino from 'pino';
+
+export const logger = pino({
+  level: process.env.LOG_LEVEL ?? 'info',
+
+  // ① 레벨을 숫자(30) 대신 문자열("info")로 — 수집기 쿼리가 훨씬 편합니다
+  formatters: {
+    level: (label) =&gt; ({ level: label }),
+  },
+
+  // ② 시각을 ISO 문자열로. 기본은 epoch 밀리초(빠르지만 사람이 못 읽습니다)
+  timestamp: pino.stdTimeFunctions.isoTime,
+
+  // ③ 모든 줄에 붙는 고정 필드 — 어느 서비스의 어느 배포인지
+  base: {
+    service: 'checkout-api',
+    env: process.env.NODE_ENV,
+    version: process.env.GIT_SHA?.slice(0, 7),
+  },
+
+  // ④ 지울 것은 처음부터 지웁니다 (lg10 에서 자세히)
+  redact: ['req.headers.authorization', 'req.headers.cookie', '*.password'],
+});
+
+logger.info({ orderId: 8821, ms: 37 }, 'order paid');
+// {"level":"info","time":"2026-08-14T09:12:03.421Z","service":"checkout-api",
+//  "env":"production","orderId":8821,"ms":37,"msg":"order paid"}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>인자 순서를 외우세요</b> — <code>logger.info(객체, 메시지)</code> 입니다.
+        <b>객체가 먼저</b>입니다. <code>logger.info('주문 ' + id)</code> 처럼 문자열을 조립하면
+        <b>검색할 수 있는 필드가 사라집니다</b>. 메시지는 고정 문구로 두고 값은 객체에 넣으세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 빠른가 — 안 하는 일 다섯 가지</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">보통의 로거</th><th>pino</th></tr>
+        <tr><td><code>util.inspect</code> 로 예쁘게</td><td><b>안 함</b> — JSON 문자열을 바로 만듭니다</td></tr>
+        <tr><td>중간 객체를 여러 번 변환</td><td><b>안 함</b> — 한 번에 문자열로 이어 붙입니다</td></tr>
+        <tr><td>매 호출마다 레벨 비교</td><td>레벨별 함수를 <b>미리 만들어</b> 둡니다. 꺼진 레벨은 <b>빈 함수</b></td></tr>
+        <tr><td>고정 필드를 매번 직렬화</td><td>자식 로거의 <b>고정 필드는 한 번만</b> 문자열로 굳혀 둡니다</td></tr>
+        <tr><td>포맷·전송을 그 자리에서</td><td><b>워커 스레드</b>로 넘깁니다(<code>pino.transport</code>)</td></tr>
+      </table></div>
+      <div class="note info">
+        <b>핵심은 “문자열 조립”입니다</b> — pino 가 만드는 건 처음부터 끝까지
+        <b>한 줄짜리 문자열</b>입니다. 중간에 자바스크립트 객체를 만들지 않으니
+        <b>GC 가 할 일도 없습니다</b>. 이게 벤치마크에서 자릿수 차이를 만드는 부분입니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>단, 인자는 여전히 평가됩니다</b> —
+        <code>logger.debug(`무거운 ${expensive()}`)</code> 는
+        <b>debug 가 꺼져 있어도 <code>expensive()</code> 가 실행됩니다.</b>
+        템플릿 문자열 대신 <code>logger.debug({ data }, '...')</code> 로 넘기거나
+        <code>if (logger.isLevelEnabled('debug'))</code> 로 감싸세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">자식 로거 — <span class="t">문맥을 한 번만 붙이는 법</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>logger.child()</code> — pino 를 쓰는 진짜 이유</h4>
+      <pre class="code" data-lang="ts"><code>// 요청마다 자식 로거를 하나 만들어 두면
+// 그 아래 모든 줄에 reqId 가 자동으로 붙습니다.
+const reqLog = logger.child({ reqId: 'req_01J8Q', userId: 'u_8821' });
+
+reqLog.info('handler start');
+reqLog.debug({ sql: 'select ...' }, 'db query');
+reqLog.info({ ms: 37 }, 'handler done');
+// 세 줄 모두 reqId · userId 를 갖습니다
+
+// 자식의 자식도 됩니다 — 계층이 쌓입니다
+const dbLog = reqLog.child({ component: 'db', pool: 'primary' });
+
+// ★ 자식 로거는 "만드는 순간" 고정 필드를 문자열로 굳혀 둡니다.
+//    그래서 줄마다 다시 직렬화하지 않습니다 — 거의 공짜입니다.
+//    반대로 값이 매 줄 달라지는 것은 child 가 아니라 인자로 넘기세요.
+reqLog.info({ ms: Date.now() - t0 }, 'done');   // ○ 인자
+logger.child({ ms: ... });                       // ✗ 매번 child 를 만들면 낭비</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>자식 로거를 어떻게 함수 안까지 전달하나</b> — 인자로 계속 넘기는 건 금방 지칩니다.
+        <b><code>AsyncLocalStorage</code></b> 로 “지금 처리 중인 요청”을 들고 다니는 방법을
+        <b>lg07</b> 에서 통째로 다룹니다. 실무에서 가장 많이 쓰는 패턴입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">에러를 제대로 남기기 — <code>err</code> 라는 이름</h4>
+      <pre class="code" data-lang="ts"><code>try {
+  await pay(order);
+} catch (err) {
+  // ★ 키 이름을 err 로 두면 pino 의 표준 직렬화기가 붙습니다
+  //   → type · message · stack · code 를 펼쳐 줍니다
+  reqLog.error({ err, orderId: order.id }, 'payment failed');
+}
+
+// ✗ 이렇게 하면 대부분 "{}" 만 남습니다
+//   Error 는 열거 가능한 속성이 없어서 JSON.stringify 가 비웁니다
+reqLog.error({ error: err });          // 키 이름이 err 가 아님
+reqLog.error(JSON.stringify(err));     // → "{}"
+reqLog.error(err.message);             // 스택이 사라짐
+
+// 원인 사슬(cause)까지 남기려면
+throw new Error('checkout failed', { cause: err });   // Node 16.9+
+// pino 는 err.cause 도 따라 내려가며 직렬화합니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>실무에서 가장 많이 보는 로그 사고</b>가 <b>“에러를 찍었는데 스택이 없다”</b>입니다.
+        원인은 거의 항상 위 세 가지 중 하나입니다.
+        <b><code>{ err }</code> 라는 키 이름 하나</b>만 지켜도 절반은 해결됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">트랜스포트 — <span class="t">개발과 운영을 갈라 놓기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">개발: 파이프로 예쁘게, 운영: 그냥 stdout</h4>
+      <pre class="code" data-lang="bash"><code># ★ 권장 — 별도 프로세스로 파이프. 앱은 JSON 만 뱉습니다
+node dist/app.js | npx pino-pretty
+
+# package.json
+# "scripts": {
+#   "dev":   "tsx watch src/main.ts | pino-pretty --colorize --translateTime SYS:HH:MM:ss",
+#   "start": "node dist/main.js"          ← 운영은 아무것도 붙이지 않습니다
+# }
+
+# 운영에서 굳이 파일이 필요하면 (컨테이너가 아닐 때만)
+node dist/app.js &gt;&gt; /var/log/app/app.log 2&gt;&amp;1</code></pre>
+      <pre class="code" data-lang="ts"><code>// 앱 안에서 붙여야 한다면 transport 로 — 워커 스레드에서 돕니다
+const logger = pino({
+  transport: process.env.NODE_ENV === 'production'
+    ? undefined                                  // 운영: stdout 그대로가 가장 빠릅니다
+    : { target: 'pino-pretty', options: { colorize: true } },
+});
+
+// 여러 목적지로 동시에 (각각 별도 워커)
+const multi = pino({
+  transport: {
+    targets: [
+      { target: 'pino/file',   level: 'info',  options: { destination: 1 } },  // 1 = stdout
+      { target: 'pino/file',   level: 'error', options: { destination: './error.log' } },
+    ],
+  },
+});</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>pino-pretty</code> 를 운영에 절대 넣지 마세요</b> — 색 코드와 정렬을 만드느라
+        <b>pino 의 장점을 전부 되돌립니다</b>. 게다가 결과물이 <b>JSON 이 아니어서</b>
+        수집기가 필드를 못 읽습니다. 예쁜 출력은 <b>사람이 보는 개발 화면</b>에서만.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비동기 버퍼와 “죽을 때 마지막 줄”</h4>
+      <pre class="code" data-lang="ts"><code>// pino 는 기본적으로 버퍼에 모았다가 씁니다(sonic-boom).
+// 빠른 대신, 프로세스가 갑자기 죽으면 버퍼가 날아갑니다.
+
+import pino from 'pino';
+const dest = pino.destination({ sync: false });   // 기본값
+const logger = pino(dest);
+
+// ★ 종료 직전에 반드시 비웁니다
+const flushAndExit = (code: number) =&gt; {
+  logger.flush();                 // 버퍼를 밀어냄
+  dest.on('drain', () =&gt; process.exit(code));
+};
+
+process.on('SIGTERM', () =&gt; flushAndExit(0));     // k8s 가 보내는 신호
+process.on('SIGINT',  () =&gt; flushAndExit(0));
+
+// 잡히지 않은 예외 — pino.final 이 안전하게 마지막 줄을 씁니다
+process.on('uncaughtException', pino.final(logger, (err, finalLogger) =&gt; {
+  finalLogger.fatal({ err }, 'uncaught exception');
+  process.exit(1);
+}));</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>sync: true</code> 는 언제 쓰나</b> — <b>짧은 CLI·배치·람다</b>처럼
+        “끝나면 바로 죽는” 프로그램입니다. 이때는 버퍼가 날아가는 위험이 손해보다 큽니다.
+        <b>장시간 도는 서버라면 절대 켜지 마세요</b> — 매 줄이 동기 <code>write</code> 가 됩니다(<b>lg09</b>).
+      </div>
+    </div>
+  </div>
+
+  <div class="note tip">
+    <b>운영 pino 체크리스트 여섯 줄</b> —
+    ① <code>level</code> 을 환경변수로 ② <code>base</code> 에 service·env·version
+    ③ <code>redact</code> 로 헤더·비밀번호 ④ <code>err</code> 키로 에러
+    ⑤ 요청마다 <code>child({ reqId })</code> ⑥ SIGTERM 에서 <code>flush</code>.
+    <b>여기까지가 “설정 끝”입니다.</b> 나머지는 수집기가 합니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> pino 는 <b>메인 스레드에서 문자열만 만들고</b> 나머지를 워커에 넘겨 빠릅니다.
+  <b>자식 로거</b>로 문맥을 한 번만 붙이고, <b>에러는 <code>err</code> 키</b>로 넘기고,
+  <b><code>pino-pretty</code> 는 개발 파이프</b>로만 씁니다.</div>
+</section>
+
+
+<!-- ==================== lg04 ==================== -->
+<section class="sec" id="lg04">
+  <div class="sec-head rv">
+    <span class="no">LOG 04</span>
+    <h2><span class="t">winston</span> 실전 — 조립식의 값과 값어치</h2>
+    <p class="lead">
+      winston 은 <b>포맷과 목적지를 레고처럼 조립</b>하는 로거입니다. 그 유연함이 장점이자 비용입니다.
+      <b>pino 로 안 되는 것이 있을 때만</b> 꺼내는 편이 좋습니다 — 그 “있을 때”가 언제인지 봅시다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 172" role="img" aria-label="winston 의 포맷 파이프라인을 셰브론으로 나타낸 그림. 로거 호출에서 시작해 타임스탬프 추가, 에러 스택 펼치기, JSON 문자열 만들기 순서로 지나가며 각 단계마다 객체를 새로 만든다. 마지막에 콘솔, 회전 파일, HTTP 같은 여러 트랜스포트로 갈라진다">
+      <text x="16" y="18" class="lbl">winston 은 포맷을 이어 붙인 뒤 여러 목적지로 나눕니다</text>
+
+      <polygon class="chev" points="16,40 116,40 132,64 116,88 16,88 32,64"/>
+      <text x="76" y="61" class="ann" text-anchor="middle">logger.info</text>
+      <text x="76" y="76" class="ann" text-anchor="middle">info 객체</text>
+
+      <polygon class="chev" points="142,40 242,40 258,64 242,88 142,88 158,64"/>
+      <text x="202" y="61" class="ann" text-anchor="middle">timestamp()</text>
+      <text x="202" y="76" class="ann" text-anchor="middle">시각 추가</text>
+
+      <polygon class="chev" points="268,40 368,40 384,64 368,88 268,88 284,64"/>
+      <text x="328" y="61" class="ann" text-anchor="middle">errors()</text>
+      <text x="328" y="76" class="ann" text-anchor="middle">스택 펼치기</text>
+
+      <polygon class="chev s4" points="394,40 494,40 510,64 494,88 394,88 410,64"/>
+      <text x="454" y="61" class="ann" text-anchor="middle">json()</text>
+      <text x="454" y="76" class="ann" text-anchor="middle">문자열로</text>
+
+      <path class="ln ar" d="M514 60 L524 44"/>
+      <path class="ln ar" d="M514 64 L524 78"/>
+      <path class="ln ar" d="M514 68 L524 112"/>
+
+      <rect class="bx" x="528" y="30" width="136" height="28"/>
+      <text x="596" y="48" class="ann" text-anchor="middle">Console</text>
+      <rect class="bx" x="528" y="64" width="136" height="28"/>
+      <text x="596" y="82" class="ann" text-anchor="middle">File · 회전</text>
+      <rect class="bx" x="528" y="98" width="136" height="28"/>
+      <text x="596" y="116" class="ann" text-anchor="middle">Http · Slack</text>
+
+      <path class="brk" d="M16 100 L16 106 L510 106 L510 100"/>
+      <text x="263" y="122" class="ann" text-anchor="middle">여기까지가 format 파이프라인 — 단계마다 객체를 새로 만듭니다</text>
+
+      <text x="16" y="148" class="lbl">유연함의 값은 객체 할당입니다 — pino 는 이 구간이 통째로 없습니다</text>
+      <text x="16" y="164" class="lbl">셰브론은 되돌아가지 않는다는 뜻을 도형이 대신 말해 줍니다</text>
+    </svg>
+    <div class="cap">파이프라인 — <b>단계 수가 곧 비용</b>. 대신 <b>목적지를 마음대로 붙일 수 있습니다.</b></div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 설정 — 운영에서 쓸 만한 모양</h4>
+      <pre class="code" data-lang="bash"><code>npm i winston winston-daily-rotate-file</code></pre>
+      <pre class="code" data-lang="ts"><code>import winston from 'winston';
+import 'winston-daily-rotate-file';
+
+const { combine, timestamp, errors, json, colorize, printf } = winston.format;
+
+export const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL ?? 'info',
+  defaultMeta: { service: 'checkout-api', env: process.env.NODE_ENV },
+
+  format: combine(
+    errors({ stack: true }),          // ★ 반드시 json() 앞에. 없으면 스택이 사라집니다
+    timestamp(),
+    json(),
+  ),
+
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.DailyRotateFile({
+      filename: 'logs/app-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxSize: '50m',
+      maxFiles: '14d',                // 14일치만 남기고 지웁니다
+      zippedArchive: true,
+    }),
+  ],
+
+  // 죽을 때의 마지막 줄
+  exceptionHandlers: [new winston.transports.File({ filename: 'logs/exceptions.log' })],
+  rejectionHandlers: [new winston.transports.File({ filename: 'logs/rejections.log' })],
+});
+
+// 개발에서는 사람이 읽는 포맷으로 갈아 끼웁니다
+if (process.env.NODE_ENV !== 'production') {
+  logger.clear();
+  logger.add(new winston.transports.Console({
+    format: combine(colorize(), timestamp({ format: 'HH:mm:ss' }),
+      printf(({ level, message, timestamp, ...rest }) =&gt;
+        `${timestamp} ${level} ${message} ${Object.keys(rest).length ? JSON.stringify(rest) : ''}`)),
+  }));
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>순서가 결과를 바꿉니다</b> — <code>errors({ stack: true })</code> 를
+        <code>json()</code> <b>뒤</b>에 두면 이미 문자열이 된 뒤라 아무 일도 안 합니다.
+        <b><code>combine</code> 은 위에서 아래로 순서대로</b> 적용됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">winston 의 레벨은 <b>숫자가 반대</b>입니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">winston (npm 레벨)</th><th>pino</th></tr>
+        <tr><td><code>error</code> = 0</td><td><code>fatal</code> = 60</td></tr>
+        <tr><td><code>warn</code> = 1</td><td><code>error</code> = 50</td></tr>
+        <tr><td><code>info</code> = 2</td><td><code>warn</code> = 40</td></tr>
+        <tr><td><code>http</code> = 3</td><td><code>info</code> = 30</td></tr>
+        <tr><td><code>verbose</code> = 4</td><td><code>debug</code> = 20</td></tr>
+        <tr><td><code>debug</code> = 5</td><td><code>trace</code> = 10</td></tr>
+        <tr><td><code>silly</code> = 6</td><td>—</td></tr>
+      </table></div>
+      <div class="note info">
+        <b>winston 은 작을수록 심각</b>하고 <b>pino 는 클수록 심각</b>합니다.
+        둘 다 “<code>level</code> 로 지정한 것과 <b>그보다 심각한 것</b>을 남긴다”는 뜻은 같습니다.
+        <b>대시보드에서 <code>level &gt;= 50</code> 같은 조건을 쓸 때 반대로 걸리기 쉬우니</b>
+        레벨은 <b>문자열로 출력</b>해 두는 편이 안전합니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>winston 에도 자식 로거가 있습니다</b> —
+        <code>const reqLog = logger.child({ reqId })</code>.
+        다만 pino 처럼 고정 필드를 미리 굳혀 두지는 않아서
+        <b>비용 절감 효과는 없고 편의 기능</b>에 가깝습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">그래서 언제 winston 인가 <span class="lvl m">🟡 중급</span></h3>
+  <div class="vs rv d1">
+    <div class="good">
+      <h5>winston 이 맞는 상황</h5>
+      <ul class="tx" style="margin:0">
+        <li><b>수집기가 없는 환경</b> — 온프레미스 VM 에 직접 파일을 쓰고 회전시켜야 할 때</li>
+        <li><b>목적지가 여럿이고 규칙이 다를 때</b> — error 는 Slack, 나머지는 파일, 감사 로그는 DB</li>
+        <li><b>이미 winston 으로 돌고 있고</b> 지금 병목이 로깅이 아닐 때 (바꾸는 게 손해)</li>
+        <li><b>레벨을 커스텀</b>해야 할 때 — <code>audit</code> · <code>security</code> 같은 자체 레벨 정의가 쉽습니다</li>
+      </ul>
+    </div>
+    <div class="bad">
+      <h5>winston 이면 후회하는 상황</h5>
+      <ul class="tx" style="margin:0">
+        <li><b>초당 수천 줄</b> 이상 — 포맷 체인의 객체 할당이 그대로 지연이 됩니다</li>
+        <li><b>컨테이너 · 쿠버네티스</b> — 파일 트랜스포트가 오히려 짐이 됩니다(<b>lg12</b>)</li>
+        <li><b>Fastify</b> — 내장 pino 를 떼어 내고 winston 을 넣는 건 손해입니다</li>
+        <li><b>원격 트랜스포트로 직접 전송</b> — 네트워크가 느려지면 <b>앱이 같이 느려집니다</b></li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">winston 에서 pino 로 옮기기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">인터페이스를 먼저 좁히면 교체가 하루 일이 됩니다</h4>
+    <pre class="code" data-lang="ts"><code>// src/log.ts — 앱 코드는 이 타입만 압니다
+export interface AppLogger {
+  debug(fields: Record&lt;string, unknown&gt;, msg: string): void;
+  info (fields: Record&lt;string, unknown&gt;, msg: string): void;
+  warn (fields: Record&lt;string, unknown&gt;, msg: string): void;
+  error(fields: Record&lt;string, unknown&gt;, msg: string): void;
+  child(fields: Record&lt;string, unknown&gt;): AppLogger;
+}
+
+// winston 구현 — 인자 순서를 pino 쪽에 맞춰 뒤집어 줍니다
+const wrapWinston = (w: winston.Logger): AppLogger =&gt; ({
+  debug: (f, m) =&gt; w.debug(m, f),
+  info:  (f, m) =&gt; w.info(m, f),
+  warn:  (f, m) =&gt; w.warn(m, f),
+  error: (f, m) =&gt; w.error(m, f),
+  child: (f) =&gt; wrapWinston(w.child(f)),
+});
+
+// pino 는 그대로 이 모양입니다 — 나중에 한 줄만 바꾸면 됩니다
+// export const log: AppLogger = pino({ ... });</code></pre>
+    <div class="note tip">
+      <b>이전 순서</b> — ① 위처럼 <b>얇은 인터페이스</b>를 만들어 앱 전체를 거기에 붙입니다
+      ② 필드 이름을 <b>양쪽이 같게</b> 맞춥니다(<code>level</code>·<code>time</code>·<code>msg</code>)
+      ③ 스테이징에서 <b>둘 다 켜고</b> 대시보드 쿼리가 똑같이 나오는지 확인
+      ④ 운영에서 스위치. <b>“한 번에 다 바꾸기”가 실패하는 이유</b>는 대개 ②를 건너뛰기 때문입니다.
+    </div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>파일 회전을 앱이 하지 마세요</b> — <code>winston-daily-rotate-file</code> 은 편하지만
+      <b>여러 프로세스가 같은 파일을 회전시키면 로그가 섞이거나 사라집니다</b>(PM2 클러스터에서 자주 봅니다).
+      회전은 <code>logrotate</code> 나 <b>컨테이너 런타임</b>에 맡기는 것이 안전합니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> winston 은 <b>목적지를 조립</b>하려고 씁니다.
+  그 유연함의 값은 <b>단계마다 만드는 객체</b>입니다. 수집기가 있는 환경이라면
+  <b>pino + stdout</b> 이 거의 항상 더 낫고, winston 은 <b>수집기가 없을 때의 답</b>입니다.</div>
+</section>

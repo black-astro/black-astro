@@ -1,0 +1,750 @@
+
+
+<!-- ==================== lg10 ==================== -->
+<section class="sec" id="lg10">
+  <div class="sec-head rv">
+    <span class="no">LOG 10</span>
+    <h2>민감정보 — <span class="t">로그로 새는 것들</span>과 막는 법</h2>
+    <p class="lead">
+      로그는 <b>암호화되지 않고, 오래 보관되고, 많은 사람이 봅니다.</b>
+      개발자 · 운영자 · 외주 · 수집기 SaaS 까지 닿습니다.
+      비밀번호 한 줄이 로그에 남으면 그건 <b>평문 저장</b>과 같은 사고입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 248" role="img" aria-label="로그인 요청을 그대로 로그로 남겼을 때 한 줄에 어떤 민감정보가 섞여 나가는지 해부한 그림. 위쪽 붉은 줄에는 이메일, 평문 비밀번호, 인증 토큰, 카드번호가 모두 들어 있고 각각 개인정보, 비밀번호 평문, 세션 탈취 가능, 카드 정보 규정 위반이라는 지시선이 붙어 있다. 아래쪽 초록 줄은 같은 요청을 마스킹 필터로 거른 결과로, 이메일은 앞 두 글자만 남고 비밀번호와 토큰은 별표로 대체되며 카드번호는 앞뒤 네 자리만 남는다.">
+      <text x="16" y="18" class="lbl">로그인 요청 하나를 그대로 찍으면 — 이 한 줄이 사고입니다</text>
+
+      <rect class="bx bx-warn" x="16" y="38" width="648" height="30"/>
+      <text x="24" y="56" class="ann">{"event":"login",</text>
+      <text x="120" y="56" class="ann">"user":"kim@x.com",</text>
+      <text x="228" y="56" class="ann">"password":"hunter2",</text>
+      <text x="346" y="56" class="ann">"token":"eyJhbGci...",</text>
+      <text x="470" y="56" class="ann">"card":"4111-1111-1111"}</text>
+
+      <path class="lead-ln" d="M171 70 L171 84"/>
+      <text x="171" y="96" class="ann" text-anchor="middle">개인정보(이메일)</text>
+
+      <path class="lead-ln" d="M285 70 L285 98"/>
+      <text x="285" y="110" class="ann rs-t" text-anchor="middle">비밀번호 평문</text>
+
+      <path class="lead-ln" d="M405 70 L405 122"/>
+      <text x="405" y="134" class="ann rs-t" text-anchor="middle">세션 탈취 가능</text>
+
+      <path class="lead-ln" d="M532 70 L532 146"/>
+      <text x="532" y="158" class="ann rs-t" text-anchor="middle">카드 정보 · 규정 위반</text>
+
+      <rect class="bx bx-ok" x="16" y="180" width="648" height="30"/>
+      <text x="24" y="198" class="ann ok-t">{"event":"login","user":"ki***@x.com","password":"***","token":"***","card":"411111******1111"}</text>
+
+      <text x="16" y="228" class="lbl">유출은 값 하나가 아니라 객체를 통째로 찍을 때 일어납니다 — repr 한 번이면 전부 나갑니다</text>
+      <text x="16" y="244" class="lbl">마스킹 필터는 핸들러에 붙입니다 — 그래야 모든 출력 경로가 한 번에 덮입니다</text>
+    </svg>
+    <div class="cap">같은 요청, 두 가지 기록 — <b>필터 하나</b>가 사고와 정상 사이를 가릅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실제로 새는 다섯 가지 패턴</h4>
+      <pre class="code" data-lang="python"><code># ① 요청 바디를 통째로
+logger.debug("요청 %s", await request.json())      # 비밀번호 · 카드번호 포함
+
+# ② 객체를 repr 로 (가장 흔합니다)
+logger.info("사용자 %r", user)
+#   @dataclass 나 SQLAlchemy 모델은 기본 repr 이 '모든 필드'를 찍습니다
+#   → password_hash, ssn, phone 이 전부 로그로
+
+# ③ 예외 메시지에 접속 문자열
+except OperationalError as e:
+    logger.exception("DB 연결 실패")
+#   psycopg 등의 에러 메시지에 host/user/password 가 들어 있는 경우가 있습니다
+
+# ④ URL 쿼리스트링에 토큰
+logger.info("호출 %s", url)      # https://api/x?access_token=eyJ...
+
+# ⑤ 서드파티 DEBUG 로그
+logging.getLogger("httpx").setLevel(logging.DEBUG)
+#   요청·응답 '헤더'를 그대로 찍습니다 → Authorization 노출</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>②번이 압도적으로 많습니다.</b>
+        <code>logger.info("사용자 %r", user)</code> 한 줄이
+        <b>테이블의 모든 컬럼</b>을 로그로 옮깁니다.
+        모델 클래스에 <b><code>__repr__</code> 을 직접 정의</b>해 두는 것만으로 절반이 막힙니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">마스킹 필터 — 핸들러에 붙입니다</h4>
+      <pre class="code" data-lang="python"><code># app/logging_filters.py
+import logging, re
+
+SECRET_KEYS = {"password", "passwd", "pwd", "token", "access_token",
+               "refresh_token", "secret", "api_key", "authorization",
+               "cookie", "set-cookie", "ssn", "card", "card_number"}
+
+PATTERNS = [
+    (re.compile(r'(?i)("(?:%s)"\s*:\s*)"[^"]*"' % "|".join(SECRET_KEYS)),
+     r'\1"***"'),                                   # JSON 형태
+    (re.compile(r'(?i)\b(bearer)\s+[A-Za-z0-9._\-]+'), r'\1 ***'),
+    (re.compile(r'\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?(\d{4})\b'),
+     r'****-****-****-\1'),                         # 카드번호
+    (re.compile(r'(?i)(access_token|api_key)=[^&amp;\s]+'), r'\1=***'),
+]
+
+class MaskFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        for pat, repl in PATTERNS:
+            msg = pat.sub(repl, msg)
+        record.msg, record.args = msg, ()   # 이미 합쳤으므로 args 는 비웁니다
+        # extra 로 넘어온 값도 훑습니다
+        for key in list(record.__dict__):
+            if key.lower() in SECRET_KEYS:
+                record.__dict__[key] = "***"
+        return True</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>왜 핸들러에 붙이나</b> — 로거에 붙이면 <b>그 로거를 지나는 줄만</b> 걸러집니다.
+        <b>핸들러에 붙이면</b> 서드파티 로그를 포함해 <b>그 출력으로 나가는 모든 줄</b>이 걸러집니다.
+        <code>dictConfig</code> 의 <code>handlers.console.filters</code> 에 넣으세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">애초에 안 만드는 것이 제일 낫습니다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">모델 쪽에서 막기</h4>
+      <pre class="code" data-lang="python"><code>from dataclasses import dataclass, field
+
+@dataclass
+class User:
+    id: int
+    email: str
+    password_hash: str = field(repr=False)    # ★ repr 에서 제외
+    ssn: str = field(repr=False)
+
+    def __repr__(self):                        # 아예 직접 정의하는 편이 확실
+        return f"User(id={self.id})"
+
+# Pydantic v2
+from pydantic import BaseModel, SecretStr, Field
+class LoginIn(BaseModel):
+    email: str
+    password: SecretStr           # str(v) 하면 '**********' 로 나옵니다
+    card: str = Field(repr=False)
+
+# SQLAlchemy 모델도 마찬가지
+class Account(Base):
+    def __repr__(self):
+        return f"&lt;Account id={self.id}&gt;"</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>SecretStr</code> 은 실수를 구조적으로 막습니다.</b>
+        값을 꺼내려면 <code>.get_secret_value()</code> 를 <b>명시적으로</b> 불러야 하므로,
+        무심코 로그에 찍히는 경로가 <b>코드 리뷰에서 눈에 띕니다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">structlog 는 처리기 하나로</h4>
+      <pre class="code" data-lang="python"><code>SECRET_KEYS = {"password", "token", "api_key", "authorization", "card"}
+
+def mask_processor(logger, method_name, event_dict):
+    for k in list(event_dict):
+        if k.lower() in SECRET_KEYS:
+            event_dict[k] = "***"
+        elif k.lower() == "email" and isinstance(event_dict[k], str):
+            name, _, dom = event_dict[k].partition("@")
+            event_dict[k] = f"{name[:2]}***@{dom}"
+    return event_dict
+
+structlog.configure(processors=[
+    structlog.contextvars.merge_contextvars,
+    mask_processor,                      # ★ 렌더러 '앞'에 둡니다
+    structlog.processors.TimeStamper(fmt="iso", utc=True),
+    structlog.processors.JSONRenderer(ensure_ascii=False),
+])</code></pre>
+      <pre class="code" data-lang="python"><code># 시끄럽고 위험한 서드파티 로거는 아예 올려 둡니다
+for name in ("httpx", "httpcore", "urllib3", "requests",
+             "botocore", "boto3", "sqlalchemy.engine"):
+    logging.getLogger(name).setLevel(logging.WARNING)
+#   특히 sqlalchemy.engine 을 INFO 로 켜면
+#   바인딩된 파라미터(= 실제 값)가 전부 로그로 나옵니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>sqlalchemy.engine</code> = <code>INFO</code> 는 개발용입니다.</b>
+        SQL 과 함께 <b>바인드 파라미터의 실제 값</b>이 찍히므로,
+        운영에서 켜면 <b>테이블의 데이터가 그대로 로그로 복사</b>됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">사고를 전제로 설계</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">외부로 나갈 때 한 번 더 거릅니다</h4>
+      <pre class="code" data-lang="python"><code>import sentry_sdk
+
+def scrub(event, hint):
+    req = event.get("request", {})
+    if "data" in req:
+        req["data"] = "[filtered]"
+    if "headers" in req:
+        for h in ("Authorization", "Cookie", "X-Api-Key"):
+            req["headers"].pop(h, None)
+    for k in ("user",):
+        event.get(k, {}).pop("ip_address", None)
+    return event
+
+sentry_sdk.init(
+    dsn=os.environ["SENTRY_DSN"],
+    send_default_pii=False,     # ★ 기본으로 두세요 (True 면 IP·쿠키가 전송됩니다)
+    before_send=scrub,
+    traces_sample_rate=0.05,
+)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“기본값이 안전한가”를 항상 확인하세요.</b>
+        Sentry 의 <code>send_default_pii</code>, loguru 의 <code>diagnose=True</code>
+        (예외 발생 시 <b>지역 변수 값까지</b> 출력), Django 의 <code>DEBUG=True</code> 화면 —
+        전부 <b>편하려고 켜 둔 옵션이 유출 경로</b>가 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 전 점검표</h4>
+      <div class="tw"><table class="df" style="margin:0">
+        <thead><tr><th style="width:34%">항목</th><th>확인 방법</th></tr></thead>
+        <tbody>
+          <tr><td><b>마스킹 필터가 붙었나</b></td><td>모든 <code>handlers</code> 의 <code>filters</code> 목록에 있는지</td></tr>
+          <tr><td><b>필터에 테스트가 있나</b></td><td><code>caplog</code> 로 “비밀번호가 안 나오는지” 단정</td></tr>
+          <tr><td><b>모델 repr</b></td><td>민감 필드가 있는 클래스에 <code>__repr__</code> 정의</td></tr>
+          <tr><td><b>서드파티 레벨</b></td><td>httpx · sqlalchemy · boto3 가 WARNING 인지</td></tr>
+          <tr><td><b>보관 기간</b></td><td>수집기에 <b>90일</b> 등 상한이 걸려 있는지</td></tr>
+          <tr><td><b>접근 권한</b></td><td>로그 대시보드가 <b>사내 인증</b> 뒤에 있는지</td></tr>
+          <tr><td><b>유출 시 절차</b></td><td>이미 저장된 로그를 <b>지우는 방법</b>이 있는지</td></tr>
+        </tbody>
+      </table></div>
+      <pre class="code" data-lang="python"><code># pytest 로 못 박아 두기
+def test_비밀번호가_로그에_남지_않는다(caplog):
+    with caplog.at_level(logging.INFO):
+        logger.info('{"password":"hunter2"}')
+    assert "hunter2" not in caplog.text
+    assert "***" in caplog.text</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>필터는 조용히 깨집니다.</b> 정규식 하나를 고치다 실수해도 아무 에러가 안 납니다.
+        <b>테스트로 못 박아 두지 않으면</b> 몇 달 뒤에 다시 새기 시작합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 순서는 <b>① 애초에 안 만들기</b>(<code>__repr__</code> · <code>SecretStr</code>)
+    <b>② 나가기 전에 거르기</b>(핸들러에 붙인 마스킹 필터)
+    <b>③ 외부 전송 직전에 한 번 더</b>(<code>before_send</code>) 입니다.
+    그리고 <b>필터가 동작하는지 테스트로 못 박아 두세요</b> — 조용히 깨지는 종류의 코드입니다.</div>
+</section>
+
+
+<!-- ==================== lg11 ==================== -->
+<section class="sec" id="lg11">
+  <div class="sec-head rv">
+    <span class="no">LOG 11</span>
+    <h2>내보내기 — <span class="t">Sentry · OpenTelemetry · 수집기</span></h2>
+    <p class="lead">
+      서버 안의 로그는 <b>서버가 죽으면 같이 사라집니다.</b>
+      그리고 서버가 10대가 되는 순간 <b>ssh 로 grep 하는 방식</b>은 끝납니다.
+      로그를 밖으로 내보내는 길은 크게 두 갈래입니다 — <b>앱이 직접 보내기</b>와 <b>수집기가 걷어 가기</b>.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 304" role="img" aria-label="로그를 외부로 내보내는 두 갈래 길을 보여 주는 그림. 애플리케이션은 표준 출력으로 JSON 한 줄씩 내보내며, 위쪽 길에서는 Sentry SDK 가 프로세스 안에서 예외를 잡아 외부의 Sentry 서비스로 직접 보내고, 아래쪽 길에서는 Fluent Bit 이나 Vector 같은 수집기가 표준 출력을 걷어 가 Loki 나 OpenSearch 같은 저장소에 넣고 동시에 OTLP 를 받는 로그 백엔드로도 보낸다. 외부 서비스는 점선 구름으로, 저장소는 원통으로 그려져 있다.">
+      <text x="16" y="18" class="lbl">두 갈래 — 앱이 직접 보내는 길과, 수집기가 걷어 가는 길</text>
+
+      <rect class="bx bx-fw" x="16" y="76" width="150" height="54"/>
+      <text x="91" y="98" class="val" text-anchor="middle">애플리케이션</text>
+      <text x="91" y="114" class="ann" text-anchor="middle">stdout · JSON</text>
+
+      <path class="fl ar" d="M170 92 L216 62"/>
+      <rect class="bx" x="220" y="40" width="150" height="44"/>
+      <text x="295" y="60" class="val" text-anchor="middle">Sentry SDK</text>
+      <text x="295" y="76" class="ann" text-anchor="middle">logging 연동</text>
+
+      <path class="fl ar" d="M374 58 L502 56"/>
+      <path class="cld" d="M506 86 a24 24 0 0 1 2 -48 a28 28 0 0 1 52 -12 a24 24 0 0 1 42 16 a22 22 0 0 1 -6 44 Z"/>
+      <text x="552" y="54" class="val" text-anchor="middle">Sentry</text>
+      <text x="552" y="70" class="ann" text-anchor="middle">예외 집계 · 알림</text>
+
+      <path class="fl ar" d="M170 116 L216 136"/>
+      <rect class="bx" x="220" y="118" width="150" height="44"/>
+      <text x="295" y="138" class="val" text-anchor="middle">수집기</text>
+      <text x="295" y="154" class="ann" text-anchor="middle">Fluent Bit · Vector</text>
+
+      <path class="fl ar" d="M374 140 L502 140"/>
+      <path class="cld" d="M506 170 a24 24 0 0 1 2 -48 a28 28 0 0 1 52 -12 a24 24 0 0 1 42 16 a22 22 0 0 1 -6 44 Z"/>
+      <text x="552" y="138" class="val" text-anchor="middle">로그 백엔드</text>
+      <text x="552" y="154" class="ann" text-anchor="middle">OTel Collector</text>
+
+      <path class="fl ar" d="M295 166 L295 182"/>
+      <ellipse class="cyl" cx="295" cy="196" rx="70" ry="10"/>
+      <path class="cyl" d="M225 196 V232 a70 10 0 0 0 140 0 V196"/>
+      <text x="295" y="218" class="val" text-anchor="middle">Loki · OpenSearch</text>
+      <text x="295" y="256" class="ann" text-anchor="middle">검색 · 대시보드 · 보관</text>
+
+      <text x="16" y="280" class="lbl">점선 구름은 내 프로세스 밖입니다 — 느려지거나 죽어도 앱이 멈추면 안 됩니다</text>
+      <text x="16" y="296" class="lbl">그래서 직접 보내는 길에는 반드시 큐와 타임아웃을 끼웁니다 (LOG 07)</text>
+    </svg>
+    <div class="cap">앱은 <b>stdout 에 흘려보낼 뿐</b>이고, 어디로 갈지는 <b>바깥이 정합니다</b> — 예외 알림만 예외적으로 직접 보냅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Sentry — 예외를 사람에게 알리는 길</h4>
+      <div class="dep"><code>uv add "sentry-sdk[fastapi]"</code> (django · flask · celery 도 같은 방식)</div>
+      <pre class="code" data-lang="python"><code>import logging, sentry_sdk
+from sentry_sdk.integrations.logging import LoggingIntegration
+
+sentry_logging = LoggingIntegration(
+    level=logging.INFO,         # INFO 이상을 '빵부스러기(breadcrumb)' 로 모음
+    event_level=logging.ERROR,  # ERROR 이상은 '이벤트' 로 전송 ★
+)
+
+sentry_sdk.init(
+    dsn=os.environ["SENTRY_DSN"],
+    integrations=[sentry_logging],
+    environment=os.getenv("ENV", "dev"),
+    release=os.getenv("GIT_SHA", "dev"),   # ★ 어느 배포에서 났는지
+    send_default_pii=False,
+    traces_sample_rate=0.05,
+)
+
+# 이제 이 한 줄이 Sentry 이슈가 됩니다
+logger.exception("결제 실패 order=%s", order_id)
+
+# 태그·컨텍스트를 붙이면 검색이 됩니다
+with sentry_sdk.new_scope() as scope:
+    scope.set_tag("shop_id", shop_id)
+    scope.set_context("order", {"id": order_id, "amount": amount})
+    logger.exception("결제 실패")</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>event_level</code> 을 INFO 로 두지 마세요.</b>
+        INFO 로그 하나하나가 이슈가 되어 <b>요금과 알림이 폭발</b>합니다.
+        기본값(ERROR)이 맞습니다. 그리고 <b>같은 예외는 자동으로 묶이지만</b>,
+        메시지에 변수를 넣으면 <b>묶이지 않고 따로따로</b> 쌓입니다(LOG 05 의 그 규칙).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">OpenTelemetry 로그 — 트레이스와 잇기</h4>
+      <div class="dep"><code>uv add opentelemetry-sdk opentelemetry-exporter-otlp</code></div>
+      <pre class="code" data-lang="python"><code>import logging
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (
+    OTLPLogExporter)
+from opentelemetry.sdk.resources import Resource
+
+provider = LoggerProvider(resource=Resource.create({
+    "service.name": "billing",
+    "service.version": os.getenv("GIT_SHA", "dev"),
+    "deployment.environment": os.getenv("ENV", "dev"),
+}))
+provider.add_log_record_processor(
+    BatchLogRecordProcessor(OTLPLogExporter(endpoint="http://otel:4317")))
+
+# 표준 logging 핸들러로 붙습니다 — 기존 코드를 안 고쳐도 됩니다
+handler = LoggingHandler(level=logging.INFO, logger_provider=provider)
+logging.getLogger().addHandler(handler)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>OTel 로그의 값어치는 “이음”에 있습니다.</b>
+        같은 <code>trace_id</code> 로 <b>로그 · 트레이스 · 메트릭</b>이 이어지므로,
+        느린 요청 하나를 찍으면 <b>그 요청이 남긴 로그만</b> 골라 볼 수 있습니다.
+        <b>OTel 을 이미 쓰고 있다면</b> 로그도 같은 파이프로 보내는 것이 자연스럽습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">stdout → 수집기 → 저장소</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Fluent Bit — 컨테이너 로그를 걷어 갑니다</h4>
+      <pre class="code" data-lang="ini"><code># fluent-bit.conf
+[SERVICE]
+    Flush        5
+    Log_Level    info
+    Parsers_File parsers.conf
+
+[INPUT]
+    Name              tail
+    Path              /var/log/containers/*.log
+    Parser            docker
+    Tag               kube.*
+    Mem_Buf_Limit     16MB
+    Skip_Long_Lines   On
+
+[FILTER]
+    Name         parser
+    Match        kube.*
+    Key_Name     log
+    Parser       json          # ★ 앱이 JSON 으로 찍었기에 그대로 파싱됩니다
+    Reserve_Data On
+
+[OUTPUT]
+    Name   loki
+    Match  *
+    Host   loki
+    Port   3100
+    Labels job=app, env=${ENV}
+    # ★ 라벨은 값의 종류가 적은 것만! request_id 를 라벨로 두면 터집니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Loki 의 라벨은 인덱스입니다.</b> <code>request_id</code> 처럼 값이 무한한 것을 라벨로 두면
+        <b>스트림이 폭발</b>해 Loki 가 멈춥니다.
+        라벨은 <code>job</code> · <code>env</code> · <code>namespace</code> 수준으로,
+        나머지는 <b>본문 안의 JSON 필드</b>로 두고 검색하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Vector — 걷어 가면서 가공까지</h4>
+      <pre class="code" data-lang="toml"><code># vector.toml
+[sources.app]
+type = "file"
+include = ["/var/log/app/*.log"]
+
+[transforms.parse]
+type = "remap"
+inputs = ["app"]
+source = '''
+  . = parse_json!(string!(.message))
+  .service = "billing"
+  # 마지막 방어선 — 혹시 새어 나온 값을 여기서 한 번 더 지웁니다
+  if exists(.password) { .password = "***" }
+  if exists(.token)    { .token = "***" }
+'''
+
+[sinks.opensearch]
+type = "elasticsearch"
+inputs = ["parse"]
+endpoints = ["http://opensearch:9200"]
+bulk.index = "app-logs-%Y.%m.%d"
+
+[sinks.archive]
+type = "aws_s3"
+inputs = ["parse"]
+bucket = "my-log-archive"
+compression = "gzip"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“뜨거운 저장소 + 차가운 저장소” 구성</b>이 비용에서 크게 이깁니다 —
+        최근 <b>7~14일</b>은 검색 가능한 곳(Loki · OpenSearch)에,
+        그 이상은 <b>S3 에 gzip</b> 으로 던져 둡니다.
+        규정상 1년 보관이 필요해도 <b>검색 인덱스를 1년치 유지할 필요는 없습니다.</b>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">무엇을 고르나</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규모별 최소 구성</h4>
+      <div class="tw"><table class="df" style="margin:0">
+        <thead><tr><th style="width:26%">상황</th><th>이 정도면 충분합니다</th></tr></thead>
+        <tbody>
+          <tr><td><b>혼자 · 서버 1대</b></td><td>stdout + <code>journalctl</code> · <b>Sentry 무료 티어</b>.
+              그 이상은 과합니다</td></tr>
+          <tr><td><b>소규모 팀 · 서버 몇 대</b></td><td>JSON stdout + <b>Grafana Loki</b> + Sentry.
+              Loki 는 인덱스가 작아 <b>운영 부담이 가장 적습니다</b></td></tr>
+          <tr><td><b>쿠버네티스</b></td><td><b>Fluent Bit DaemonSet</b> → Loki/OpenSearch.
+              앱은 stdout 만 신경 쓰면 됩니다</td></tr>
+          <tr><td><b>이미 OTel 사용 중</b></td><td><b>OTel Collector</b> 한 갈래로 로그·트레이스·메트릭 통합</td></tr>
+          <tr><td><b>규정·감사 필요</b></td><td>+ <b>S3 장기 보관</b>(불변 버킷) + 접근 로그</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>SaaS(Datadog · New Relic 등)를 쓸 때는 비용 구조를 먼저 보세요.</b>
+        대부분 <b>수집 용량(GB)</b>과 <b>보관 기간</b>으로 과금합니다.
+        DEBUG 를 켠 채 배포하면 <b>그달 청구서가 몇 배</b>가 됩니다 —
+        레벨 관리가 곧 비용 관리입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 보내는 핸들러의 위험</h4>
+      <pre class="code" data-lang="python"><code># ❌ 로그를 HTTP 로 동기 전송
+class HttpLogHandler(logging.Handler):
+    def emit(self, record):
+        requests.post(URL, json=self.format(record))   # 요청 스레드가 멈춥니다
+#   수집기가 느려지면 → 우리 API 응답이 느려집니다
+#   수집기가 죽으면   → 우리 서비스도 같이 죽습니다
+
+# ✅ 큐를 반드시 끼웁니다 (LOG 07)
+#    QueueHandler → QueueListener → HttpLogHandler
+#    + 타임아웃 · 재시도 상한 · 큐 최대 크기
+
+q = queue.Queue(maxsize=10_000)      # ★ 무제한은 메모리 사고
+class DropOldestQueueHandler(logging.handlers.QueueHandler):
+    def enqueue(self, record):
+        try:
+            self.queue.put_nowait(record)
+        except queue.Full:
+            try: self.queue.get_nowait()   # 가장 오래된 것을 버리고
+            except queue.Empty: pass
+            self.queue.put_nowait(record)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>로깅 때문에 서비스가 죽는 사고는 생각보다 흔합니다.</b>
+        원칙은 <b>“로그는 절대 요청 처리 경로를 막지 않는다”</b> 입니다 —
+        <b>비동기 · 상한 있는 큐 · 짧은 타임아웃 · 실패 시 조용히 버리기</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 앱은 <b>stdout 에 JSON 한 줄</b>만 씁니다.
+    거기서부터는 <b>수집기(Fluent Bit · Vector)가 걷어 가</b> Loki · OpenSearch · S3 로 보냅니다.
+    <b>예외 알림만</b> Sentry SDK 로 직접 보내고,
+    OTel 을 쓴다면 <b>trace_id 로 로그와 트레이스를 잇습니다.</b>
+    직접 보내는 핸들러에는 <b>반드시 큐와 상한</b>을 두세요.</div>
+</section>
+
+
+<!-- ==================== lg12 ==================== -->
+<section class="sec" id="lg12">
+  <div class="sec-head rv">
+    <span class="no">LOG 12</span>
+    <h2>예외 로깅 — <span class="t">트레이스백을 잃지 않는 법</span></h2>
+    <p class="lead">
+      장애 조사에서 가장 아까운 순간은 <b>“에러가 났다는 건 아는데 어디서 났는지 모를 때”</b> 입니다.
+      트레이스백은 <b>가만두면 사라집니다</b> — 스레드에서, asyncio 태스크에서, 그리고
+      <code>except: logger.error(str(e))</code> 한 줄에서.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 282" role="img" aria-label="잡히지 않은 예외가 실행 맥락에 따라 어디로 가는지 네 개의 가로줄로 정리한 그림. 메인 스레드에서는 sys.excepthook 이 표준 에러로만 출력하고 로그에는 남지 않는다. 다른 스레드에서는 threading.excepthook 이, asyncio 태스크에서는 이벤트 루프의 예외 처리기가 담당한다. 자식 프로세스의 예외는 부모가 알 수 없다. 각 줄에 기본 동작과 처방이 함께 적혀 있다.">
+      <text x="16" y="18" class="lbl">잡히지 않은 예외는 맥락마다 다른 곳으로 갑니다 — 기본값은 전부 '로그에 안 남음'</text>
+
+      <rect class="lane-hd" x="16" y="40" width="88" height="46"/>
+      <text x="60" y="68" class="val" text-anchor="middle">메인 스레드</text>
+      <rect class="lane" x="110" y="40" width="554" height="46"/>
+      <text x="124" y="60" class="ann rs-t">기본 — sys.excepthook 이 stderr 로 트레이스백만 출력합니다 (로그에 안 남음)</text>
+      <text x="124" y="76" class="ann ok-t">처방 — sys.excepthook 을 교체해 logger.critical(exc_info=...) 로 남깁니다</text>
+
+      <rect class="lane-hd" x="16" y="90" width="88" height="46"/>
+      <text x="60" y="118" class="val" text-anchor="middle">다른 스레드</text>
+      <rect class="lane-alt" x="110" y="90" width="554" height="46"/>
+      <text x="124" y="110" class="ann rs-t">기본 — threading.excepthook 이 stderr 로만 출력, 프로세스는 계속 돕니다</text>
+      <text x="124" y="126" class="ann ok-t">처방 — threading.excepthook 을 교체 (3.8+) · 워커 안을 try/except 로 감싸기</text>
+
+      <rect class="lane-hd" x="16" y="140" width="88" height="46"/>
+      <text x="60" y="168" class="val" text-anchor="middle">asyncio</text>
+      <rect class="lane" x="110" y="140" width="554" height="46"/>
+      <text x="124" y="160" class="ann rs-t">기본 — 태스크가 정리될 때 "Task exception was never retrieved" 한 번</text>
+      <text x="124" y="176" class="ann ok-t">처방 — loop.set_exception_handler() · 태스크에 done 콜백으로 로깅 붙이기</text>
+
+      <rect class="lane-hd" x="16" y="190" width="88" height="46"/>
+      <text x="60" y="218" class="val" text-anchor="middle">자식 프로세스</text>
+      <rect class="lane-alt" x="110" y="190" width="554" height="46"/>
+      <text x="124" y="210" class="ann rs-t">기본 — 부모는 종료 코드만 압니다. 트레이스백은 자식의 stderr 에만</text>
+      <text x="124" y="226" class="ann ok-t">처방 — 워커 진입점을 try/except 로 감싸고 큐나 파일로 로그를 모읍니다</text>
+
+      <text x="16" y="260" class="lbl">공통 원칙 — 잡을 수 없는 곳에서 죽더라도 '한 줄은 반드시 로그에 남게' 만듭니다</text>
+      <text x="16" y="276" class="lbl">훅은 진입점에서 한 번만 설치합니다. 설치했는지 테스트로 확인해 두세요</text>
+    </svg>
+    <div class="cap">맥락마다 담당자가 다릅니다 — <b>네 곳에 훅을 걸어야</b> 트레이스백이 새지 않습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본기 — <code>exception</code> · <code>exc_info</code> · <code>stack_info</code></h4>
+      <pre class="code" data-lang="python"><code>try:
+    pay(order)
+except PgError:
+    # ✅ ① 가장 흔한 형태 — ERROR 레벨 + 트레이스백
+    logger.exception("결제 실패 order=%s", order.id)
+
+    # ② 레벨을 바꾸고 싶으면 exc_info=True
+    logger.warning("결제 실패(재시도 예정) order=%s", order.id, exc_info=True)
+    logger.critical("복구 불가", exc_info=True)
+
+    # ③ 예외 객체를 직접 줄 수도 있습니다 (3.x 공통)
+    logger.error("결제 실패", exc_info=err)
+
+    # ④ 예외가 아닌데 '여기까지 어떻게 왔는지' 가 궁금할 때
+    logger.warning("이상한 상태", stack_info=True)
+
+# ❌ 하지 말 것 — 트레이스백이 통째로 사라집니다
+except Exception as e:
+    logger.error(f"실패: {e}")      # 메시지 한 줄만 남습니다
+    logger.error(str(e))            # 어디서 났는지 영영 모릅니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>logger.exception</code> 은 <code>except</code> 블록 안에서만</b> 씁니다.
+        밖에서 부르면 트레이스백 자리에 <code>NoneType: None</code> 만 찍힙니다.
+        그리고 <code>exception</code> 은 <b>레벨이 ERROR 로 고정</b>이라,
+        다른 레벨이 필요하면 <code>exc_info=True</code> 를 쓰세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한 번만 찍기 — 계층마다 찍지 않습니다</h4>
+      <pre class="code" data-lang="python"><code># ❌ 같은 예외가 세 번 로그에 남습니다
+def repo():
+    try: db.execute(...)
+    except Exception: logger.exception("DB 실패"); raise
+
+def service():
+    try: repo()
+    except Exception: logger.exception("서비스 실패"); raise
+
+def api():
+    try: service()
+    except Exception: logger.exception("API 실패"); raise
+
+# ✅ 안쪽은 맥락만 붙여서 다시 던지고, 경계에서 한 번만 찍습니다
+def repo():
+    try: db.execute(...)
+    except Exception as e:
+        raise RepoError(f"주문 조회 실패 id={oid}") from e   # ★ from e
+
+def api():
+    try: service()
+    except Exception:
+        logger.exception("요청 처리 실패")   # 경계에서 딱 한 번
+        return JSONResponse({"error": "internal"}, status_code=500)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>raise ... from e</code> 를 쓰면</b> 트레이스백에
+        <b>“The above exception was the direct cause of…”</b> 로 원인 사슬이 그대로 남습니다.
+        <code>from</code> 없이 던져도 <code>__context__</code> 로 이어지지만,
+        <b>의도한 변환</b>임을 코드와 로그 양쪽에 남기는 편이 낫습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">네 곳에 훅 걸기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">복붙해서 진입점에 넣는 한 벌</h4>
+    <pre class="code" data-lang="python"><code># app/excepthooks.py
+import asyncio, logging, sys, threading
+
+logger = logging.getLogger("uncaught")
+
+# ── ① 메인 스레드
+def _sys_hook(exc_type, exc, tb):
+    if issubclass(exc_type, KeyboardInterrupt):     # Ctrl+C 는 그대로 두기
+        sys.__excepthook__(exc_type, exc, tb)
+        return
+    logger.critical("잡히지 않은 예외", exc_info=(exc_type, exc, tb))
+
+# ── ② 다른 스레드 (Python 3.8+)
+def _thread_hook(args):
+    if issubclass(args.exc_type, SystemExit):
+        return
+    logger.critical("스레드에서 잡히지 않은 예외 thread=%s",
+                    args.thread.name if args.thread else "-",
+                    exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+# ── ③ asyncio 이벤트 루프
+def _loop_hook(loop, context):
+    exc = context.get("exception")
+    if exc is not None:
+        logger.critical("asyncio 예외: %s", context.get("message"), exc_info=exc)
+    else:
+        logger.critical("asyncio 오류: %s", context.get("message"))
+
+# ── ④ 소멸자·GC 중에 난 예외 (드물지만 원인 찾기가 가장 어렵습니다)
+def _unraisable_hook(args):
+    logger.error("unraisable: %s", args.err_msg or args.object,
+                 exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+def install():
+    sys.excepthook = _sys_hook
+    threading.excepthook = _thread_hook
+    sys.unraisablehook = _unraisable_hook
+    try:
+        asyncio.get_running_loop().set_exception_handler(_loop_hook)
+    except RuntimeError:
+        pass          # 아직 루프가 없으면 시작 이벤트에서 다시 부릅니다</code></pre>
+    <pre class="code" data-lang="python"><code># app/main.py
+from app.logging_config import setup
+from app.excepthooks import install
+
+setup()
+install()          # ★ 진입점에서 한 번
+
+# FastAPI 라면 루프가 뜬 뒤에 한 번 더
+@app.on_event("startup")
+async def _hooks():
+    asyncio.get_running_loop().set_exception_handler(_loop_hook)</code></pre>
+    <div class="note warn">
+      <b><code>KeyboardInterrupt</code> 와 <code>SystemExit</code> 은 걸러 주세요.</b>
+      Ctrl+C 로 끌 때마다 CRITICAL 로그와 Sentry 알림이 날아가면
+      <b>사람들이 알림을 무시하기 시작합니다.</b> 그게 진짜 손실입니다.
+    </div>
+    <div class="note info" style="margin-bottom:0">
+      <b>Python 3.11+ 의 <code>ExceptionGroup</code></b> —
+      <code>asyncio.TaskGroup</code> 이나 <code>except*</code> 를 쓰면
+      <b>여러 예외가 한꺼번에</b> 올라옵니다.
+      <code>exc_info</code> 로 넘기면 트레이스백이 <b>트리 모양(<code>+---</code>)</b>으로 찍히므로
+      <b>JSON 로그에서는 줄바꿈이 포함된 한 필드</b>가 됩니다 — 수집기 설정에서 여러 줄 처리를 확인하세요.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">테스트로 못 박고, 끝을 정리하기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">pytest 의 <code>caplog</code> 로 검증</h4>
+      <pre class="code" data-lang="python"><code>import logging, pytest
+
+def test_결제_실패가_트레이스백과_함께_남는다(caplog):
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(PgError):
+            charge("A-991", 39000)
+
+    rec = caplog.records[-1]
+    assert rec.levelno == logging.ERROR
+    assert rec.exc_info is not None            # ★ 트레이스백이 붙었는지
+    assert "A-991" in rec.getMessage()
+    assert "Traceback" in caplog.text
+
+def test_요청id가_모든_줄에_붙는다(caplog):
+    request_id_var.set("r-77")
+    with caplog.at_level(logging.INFO):
+        logger.info("작업 시작")
+    assert caplog.records[-1].request_id == "r-77"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>caplog</code> 는 필터를 거치지 않을 수 있습니다.</b>
+        pytest 가 자기 핸들러를 붙이기 때문입니다.
+        필터까지 검증하려면 <code>caplog.handler.addFilter(MaskFilter())</code> 로
+        <b>명시적으로 붙여</b> 테스트하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">종료할 때 남은 로그 비우기</h4>
+      <pre class="code" data-lang="python"><code>import atexit, logging, signal, sys
+
+def shutdown(*_):
+    logging.getLogger(__name__).info("종료 신호 수신, 로그를 비웁니다")
+    logging.shutdown()        # ★ 모든 핸들러 flush + close
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, shutdown)   # 컨테이너는 SIGTERM 으로 멈춥니다
+signal.signal(signal.SIGINT, shutdown)
+atexit.register(logging.shutdown)
+
+# QueueListener 를 쓴다면 그것도 함께 (LOG 07)
+#   atexit.register(listener.stop)</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:40%">언제 로그가 사라지나</th><th>처방</th></tr>
+        <tr><td>SIGKILL · OOM Killer</td><td>막을 수 없음 — <b>버퍼를 작게</b></td></tr>
+        <tr><td>QueueListener 미정지</td><td><code>atexit</code> 로 <code>stop()</code></td></tr>
+        <tr><td>컨테이너 즉시 종료</td><td><code>terminationGracePeriod</code> 늘리기</td></tr>
+        <tr><td>버퍼링된 stdout</td><td><code>PYTHONUNBUFFERED=1</code> ★</td></tr>
+        <tr><td>fork 직후 자식 죽음</td><td>자식 진입점을 try/except 로</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>PYTHONUNBUFFERED=1</code> 은 컨테이너의 필수 환경 변수</b>입니다.
+        없으면 stdout 이 블록 단위로 버퍼링되어
+        <b>프로세스가 죽는 순간 마지막 로그가 통째로 사라집니다.</b>
+        하필 가장 필요한 그 로그입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>except</code> 안에서는 <b><code>logger.exception</code></b>,
+    다른 레벨이 필요하면 <b><code>exc_info=True</code></b> 입니다.
+    같은 예외를 <b>계층마다 찍지 말고</b> 경계에서 한 번만 찍고,
+    안쪽은 <code>raise ... from e</code> 로 맥락만 붙입니다.
+    그리고 <b>메인 · 스레드 · asyncio · 자식 프로세스 네 곳에 훅</b>을 걸어야
+    “죽었는데 왜 죽었는지 모르는” 상황이 없어집니다.
+    마지막으로 <b><code>PYTHONUNBUFFERED=1</code></b> 과 <b><code>logging.shutdown()</code></b> 을 잊지 마세요.</div>
+</section>
+
+</div><!-- /pane-log -->
