@@ -59,6 +59,7 @@ const TAB_LABEL = {
   dl:"🔥 딥러닝",
   llm:"✨ LLM · AI API",
   setup:"🧰 설치 · 환경 세팅",
+  log:"📝 로깅 · 로그",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -110,6 +111,7 @@ const SEC_LV = {
                c09:"i",c10:"a",c11:"a",c12:"i",c13:"a",c14:"a",c15:"a",c16:"b",
   /* qt */ q17:"b", q18:"b", q19:"b", q20:"b", q21:"i", q22:"i", q23:"a", q24:"a", q25:"i", q26:"a", q27:"i", q28:"a",
   /* setup */ st01:"b", st02:"b", st03:"b", st04:"b", st05:"i", st06:"b", st07:"i", st08:"b", st09:"i", st10:"i", st11:"a", st12:"b",
+  /* log */ lg01:"b", lg02:"b", lg03:"b", lg04:"b", lg05:"i", lg06:"i", lg07:"a", lg08:"i", lg09:"i", lg10:"i", lg11:"a", lg12:"i",
 };
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 기초 한 줄 번역 (항상 표시) */
 const EZ = {
@@ -402,6 +404,19 @@ const EZ = {
   st10:"데이터 라이브러리는 C 로 짜인 부분이 있어서 <b>어떤 휠을 받느냐</b>가 성능과 성패를 가릅니다.",
   st11:"내 PC 밖으로 내보내는 길은 셋 — <b>실행 파일 · 서버 venv · 도커</b>입니다.",
   st12:"에러 메시지를 <b>증상 → 원인 → 해결</b>로 정리해 두면 검색보다 빠릅니다.",
+  /* ── log ── */
+  lg01:"print 는 끌 수 없습니다. logging 은 <b>Logger → Filter → Handler → Formatter</b> 네 부품이 LogRecord 하나를 넘겨 가며 처리합니다.",
+  lg02:"레벨은 <b>이 줄을 볼 사람이 누구인가</b>로 정합니다 — DEBUG 는 나, INFO 는 운영자, ERROR 부터는 지금 봐야 하는 사람입니다.",
+  lg03:"basicConfig 는 연습용, fileConfig 는 레거시, <b>dictConfig 가 실무의 답</b>입니다 — disable_existing_loggers 는 언제나 False 로.",
+  lg04:"표준 logging 은 버리지 않습니다 — <b>서드파티가 전부 표준으로 로그를 내기 때문</b>이고, structlog 는 감싸고 loguru 는 따로 놉니다.",
+  lg05:"로그가 100만 줄이 되면 grep 은 끝입니다. <b>문장이 아니라 JSON 필드</b>로 남겨야 Loki · OpenSearch 에서 바로 질의됩니다.",
+  lg06:"로테이션은 안 하면 반드시 사고 나는 항목입니다 — <b>컨테이너면 stdout 하나</b>, 파일이면 크기 기준 + encoding=\"utf-8\" 이 기본입니다.",
+  lg07:"비싼 곳은 <b>f-string 포매팅 · 큰 repr · 입출력</b>뿐입니다 — %s 로 미루고, QueueHandler 로 요청 스레드에서 I/O 를 떼어냅니다.",
+  lg08:"프레임워크마다 자기 로거를 미리 설정해 둡니다 — 원칙은 하나, <b>핸들러는 root 한 곳에만</b>. 중복 출력은 언제나 핸들러가 두 곳에 붙은 것입니다.",
+  lg09:"같은 요청에서 나온 줄엔 같은 표식이 있어야 합니다 — <b>미들웨어가 만들고, 필터가 붙이고, 응답 헤더로 돌려줍니다</b>.",
+  lg10:"비밀번호 한 줄이 로그에 남으면 <b>평문 저장과 같은 사고</b>입니다 — 가장 많이 새는 길은 logger.info(\"%r\", user) 한 줄입니다.",
+  lg11:"서버가 10대가 되면 ssh grep 은 끝입니다 — <b>앱은 stdout 에 흘려보낼 뿐</b>이고, 예외 알림만 Sentry 로 직접 보냅니다.",
+  lg12:"except 안에서 <b>logger.exception</b> 을 쓰고 경계에서 딱 한 번만 찍습니다 — 스레드·asyncio·GC 에서 새는 예외는 훅 네 곳으로 잡습니다.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -722,6 +737,19 @@ const CAP = {
   st10:["p","NumPy·Pandas·PyTorch 를 GPU 까지 제대로 잡히게 설치하고, conda 가 정말 필요한 경우를 구분할 수 있습니다."],
   st11:["e","서버의 시스템 파이썬을 건드리지 않고 앱 전용 환경을 만들거나 도커 이미지로 배포할 수 있습니다."],
   st12:["s","설치·환경에서 막혔을 때 메시지만 보고 원인을 짚고, 진단 스크립트 하나로 상황을 남에게 정확히 전달할 수 있습니다."],
+  /* ── log ── */
+  lg01:["p","모듈마다 getLogger(__name__) 한 줄만 두고 설정은 진입점 한 곳에 모아, \"로그가 안 나온다 / 두 번 나온다\" 사고를 피할 수 있습니다"],
+  lg02:["p","운영 기본을 INFO 로 두고 시끄러운 서드파티는 WARNING 으로 올리며, 로거 레벨과 핸들러 레벨을 둘 다 열어 로그를 보이게 만들 수 있습니다"],
+  lg03:["p","복붙해서 바로 도는 dictConfig 한 벌을 갖추고, 핸들러 중복과 유령 로거 함정을 피해 환경별 YAML 로 설정을 분리할 수 있습니다"],
+  lg04:["p","라이브러리·스크립트·팀 서비스 상황별로 무엇을 고를지 네 질문으로 정하고, 채택 정도를 pypistats 와 저장소 활동으로 직접 확인할 수 있습니다"],
+  lg05:["p","python-json-logger 로 하루 만에 JSON 로그로 전환하고, structlog 의 foreign_pre_chain 으로 앱 로그와 서드파티 로그를 같은 모양으로 합칠 수 있습니다"],
+  lg06:["p","디스크 상한 = maxBytes × (backupCount+1) 을 계산해 문서에 적고, 멀티프로세스에서 파이썬 로테이션이 깨지는 상황을 logrotate 나 큐로 넘길 수 있습니다"],
+  lg07:["e","초당 수만 줄이 도는 서비스에서 로깅이 진짜 병목인지 py-spy 로 확인하고, 큐 리스너의 flush 를 빠뜨려 마지막 로그를 잃는 사고를 막을 수 있습니다"],
+  lg08:["p","settings.LOGGING · dictConfig 순서 · uvicorn 로거 handlers=[] 를 바로잡아 프레임워크 로그와 내 로그를 JSON 한 갈래로 합치고, 3분 진단 절차로 중복·누락을 끝낼 수 있습니다"],
+  lg09:["p","contextvars + Filter 로 모든 로그에 request_id·user_id 를 자동 주입하고, httpx·Celery 경계를 넘어서도 표식을 이어 붙일 수 있습니다"],
+  lg10:["p","마스킹 필터를 핸들러에 붙이고 모델 __repr__·SecretStr 로 애초에 안 만들며, caplog 테스트와 배포 전 점검표로 유출 경로 다섯 개를 막을 수 있습니다"],
+  lg11:["e","규모별 최소 구성(journalctl → Loki → Fluent Bit DaemonSet)을 고르고, 동기 HTTP 핸들러가 서비스를 같이 죽이는 사고를 큐와 타임아웃으로 막을 수 있습니다"],
+  lg12:["p","raise from 으로 원인 사슬을 남기고, excepthook 네 벌을 진입점에 걸며, caplog 로 트레이스백이 붙었는지 테스트하고 SIGTERM 에 logging.shutdown 으로 마지막 로그를 비울 수 있습니다"],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 (표시 필터는 없음 — 항상 전부 보입니다) */
@@ -762,7 +790,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (11번째부터 — 웹 기초·테스트·대규모 트래픽·전문가은 단축키 없음) */
-const TAB_ORDER = ["setup","python","uv","pandas","numpy","img","web","db","test","scale"];
+const TAB_ORDER = ["setup","python","uv","pandas","numpy","img","web","db","test","log"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;

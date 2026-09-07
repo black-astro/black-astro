@@ -1,0 +1,3048 @@
+<!-- ============================================================
+     로깅 PANE
+     ============================================================ -->
+<div class="pane" id="pane-log">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> LOGGING · Python 3.13/3.14 표준 logging · structlog · loguru · JSON 로그 · 로테이션 · 요청 추적</div>
+  <h1>장애가 났을 때<br>남아 있는 건<br>로그뿐입니다</h1>
+  <p class="tx">
+    서비스가 새벽에 죽었습니다. 디버거를 붙일 수도, 재현할 수도 없습니다.
+    그때 손에 쥐고 있는 건 <b>그 순간 남겨진 로그 몇 줄</b>이 전부입니다.
+    그런데 그 로그가 <code>print("여기 옴")</code> 이라면 아무것도 알아낼 수 없습니다.
+    이 탭은 <b>print 를 버리고 표준 <code>logging</code> 을 제대로 세우는 법</b>부터
+    <b>JSON 구조적 로깅 · 파일 로테이션 · 요청 ID 추적 · 민감정보 마스킹 · Sentry 와 수집기로 내보내기</b>까지
+    실무에서 실제로 쓰는 순서 그대로 다룹니다.
+    여기까지 하면 <b>"로그를 보고 원인을 찾는" 일이 짐작에서 검색으로 바뀝니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>표준 logging</b><span>사실상 표준</span></div>
+    <div><b>dictConfig</b><span>실무 설정법</span></div>
+    <div><b>JSON</b><span>사람 → 기계</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== lg01 ==================== -->
+<section class="sec" id="lg01">
+  <div class="sec-head rv">
+    <span class="no">LOG 01</span>
+    <h2>왜 <span class="t">print</span> 를 버리는가 — logging 의 다섯 부품</h2>
+    <p class="lead">
+      <code>print</code> 는 <b>끌 수가 없습니다.</b> 어디서 났는지, 언제 났는지, 어느 요청에서 났는지도 모릅니다.
+      표준 <code>logging</code> 은 그 네 가지를 전부 해결하려고 만들어진 물건이고,
+      부품이 다섯 개라는 것만 알면 나머지는 설정 문제입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 350" role="img" aria-label="logger.info 를 호출한 한 줄이 실제 출력으로 나가기까지 거치는 다섯 관문을 위에서 아래로 보여 준다. 먼저 LogRecord 객체가 만들어지고, 로거의 레벨 검사에서 대부분이 버려지며, 로거에 붙은 필터가 값을 고치거나 거부하고, 그다음 로거와 부모 로거들의 핸들러가 모두 선택되고, 마지막으로 핸들러 자신의 레벨 검사와 필터를 지나 포매터가 문자열로 만든다. 출력 대상은 표준 출력으로 나가는 StreamHandler 와 파일에 쌓이는 RotatingFileHandler 두 가지가 그려져 있다. 레벨 검사가 로거와 핸들러 두 곳에서 일어난다는 점과, propagate 를 끄지 않으면 같은 줄이 두 번 찍힌다는 점이 핵심이다.">
+      <text x="16" y="18" class="lbl">로그 한 줄이 목적지에 닿기까지 — 거치는 관문 다섯</text>
+
+      <path class="ln" d="M40 44 L40 212"/>
+
+      <circle class="stp" cx="40" cy="54" r="11"/>
+      <text x="40" y="58" class="stpn" text-anchor="middle">1</text>
+      <rect class="bx" x="64" y="37" width="600" height="34"/>
+      <text x="80" y="52" class="val">logger.info(...) 호출 — LogRecord 객체가 만들어집니다</text>
+      <text x="80" y="66" class="ann">메시지 · 인자 · 레벨 · 파일명 · 줄번호 · 시각 · 프로세스 · 스레드 이름이 한 객체에 담깁니다</text>
+
+      <circle class="stp" cx="40" cy="96" r="11"/>
+      <text x="40" y="100" class="stpn" text-anchor="middle">2</text>
+      <rect class="bx bx-hi" x="64" y="79" width="600" height="34"/>
+      <text x="80" y="94" class="val">Logger 레벨 검사 — 여기서 대부분이 버려집니다</text>
+      <text x="80" y="108" class="ann">logger.level 보다 낮으면 즉시 반환합니다. 운영에서 DEBUG 가 사라지는 자리가 여기입니다</text>
+
+      <circle class="stp" cx="40" cy="138" r="11"/>
+      <text x="40" y="142" class="stpn" text-anchor="middle">3</text>
+      <rect class="bx" x="64" y="121" width="600" height="34"/>
+      <text x="80" y="136" class="val">Logger 의 Filter — 통과 · 거부 · 필드 추가</text>
+      <text x="80" y="150" class="ann">request_id 를 붙이거나 비밀번호를 가리는 자리입니다. False 를 돌려주면 그대로 버려집니다</text>
+
+      <circle class="stp" cx="40" cy="180" r="11"/>
+      <text x="40" y="184" class="stpn" text-anchor="middle">4</text>
+      <rect class="bx" x="64" y="163" width="600" height="34"/>
+      <text x="80" y="178" class="val">Handler 수집 — 자기 핸들러 + 부모 로거들의 핸들러</text>
+      <text x="80" y="192" class="ann">propagate=True 면 부모까지 거슬러 올라갑니다. 중복 출력의 원인 1위가 바로 이 전파입니다</text>
+
+      <circle class="stp" cx="40" cy="222" r="11"/>
+      <text x="40" y="226" class="stpn" text-anchor="middle">5</text>
+      <rect class="bx bx-ok" x="64" y="205" width="600" height="34"/>
+      <text x="80" y="220" class="val ok-t">Handler 레벨 검사 → Handler 의 Filter → Formatter</text>
+      <text x="80" y="234" class="ann">핸들러마다 레벨과 포맷이 다릅니다. 콘솔은 INFO 사람용, 파일은 DEBUG JSON 처럼 나눕니다</text>
+
+      <path class="fl ar" d="M204 243 L204 252"/>
+      <path class="fl ar" d="M520 243 L520 254"/>
+
+      <rect class="bx bx-ok" x="64" y="256" width="280" height="40"/>
+      <text x="80" y="274" class="val">StreamHandler → stdout</text>
+      <text x="80" y="288" class="ann">컨테이너 · systemd 는 이것만 있으면 됩니다</text>
+
+      <ellipse class="cyl" cx="520" cy="266" rx="76" ry="10"/>
+      <path class="cyl" d="M444 266 V300 a76 10 0 0 0 152 0 V266"/>
+      <text x="520" y="288" class="val" text-anchor="middle">app.log</text>
+      <text x="520" y="304" class="ann" text-anchor="middle">RotatingFileHandler</text>
+
+      <text x="16" y="326" class="lbl">핵심 — 레벨 검사는 두 번, 로거와 핸들러에서 각각 걸립니다</text>
+      <text x="16" y="342" class="lbl">propagate 를 끄지 않으면 부모 로거의 핸들러로도 올라가 같은 줄이 두 번 찍힙니다</text>
+    </svg>
+    <div class="cap">로그 한 줄은 <b>레벨 검사 두 번</b>과 <b>필터 두 번</b>을 지나야 나옵니다 — 안 보이는 로그의 원인은 대부분 이 넷 중 하나입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">print 가 무너지는 지점 다섯</h4>
+      <pre class="code" data-lang="python"><code># 흔한 시작
+def charge(order_id, amount):
+    print("결제 시작", order_id)      # ① 운영에서 끌 수가 없습니다
+    try:
+        pg.pay(order_id, amount)
+    except Exception as e:
+        print("실패!", e)             # ② 스택 트레이스가 없습니다
+    print("결제 끝")                   # ③ 언제 찍혔는지 모릅니다
+                                      # ④ 어느 모듈·어느 요청인지 모릅니다
+                                      # ⑤ 파일로 못 보냅니다 (셸 리다이렉트뿐)</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">필요한 것</th><th>print</th><th>logging</th></tr>
+        <tr><td>운영에서 끄기</td><td>코드를 지워야</td><td><b>레벨 한 줄</b></td></tr>
+        <tr><td>시각 · 모듈 · 줄번호</td><td>직접 붙여야</td><td><b>포매터가 자동</b></td></tr>
+        <tr><td>스택 트레이스</td><td><code>traceback</code> 직접</td><td><code>logger.exception</code></td></tr>
+        <tr><td>파일 · 원격 전송</td><td>없음</td><td><b>핸들러 교체만</b></td></tr>
+        <tr><td>여러 스레드</td><td>줄이 섞임</td><td><b>줄 단위로 잠금</b></td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>print 가 느리다는 것도 사실입니다</b> — <code>print</code> 는 매번 <code>sys.stdout</code> 에 씁니다.
+        컨테이너에서 stdout 이 파이프로 물려 있으면 <b>버퍼가 차는 순간 프로세스가 멈춰 기다립니다.</b>
+        초당 수천 줄을 찍는 배치에서 실제로 겪는 사고입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">logging 으로 바꾸면 이렇게 됩니다</h4>
+      <pre class="code" data-lang="python"><code>import logging
+
+logger = logging.getLogger(__name__)   # ★ 모듈마다 이 한 줄
+
+def charge(order_id, amount):
+    logger.info("결제 시작 order=%s amount=%s", order_id, amount)
+    try:
+        pg.pay(order_id, amount)
+    except Exception:
+        logger.exception("결제 실패 order=%s", order_id)  # 트레이스백 포함
+        raise
+    logger.info("결제 완료 order=%s", order_id)</code></pre>
+      <pre class="code" data-lang="text"><code>2026-09-01 03:14:22,481 INFO  [app.billing:12] 결제 시작 order=A-991 amount=39000
+2026-09-01 03:14:22,996 ERROR [app.billing:16] 결제 실패 order=A-991
+Traceback (most recent call last):
+  File "app/billing.py", line 14, in charge
+    pg.pay(order_id, amount)
+  File "app/pg.py", line 88, in pay
+    raise TimeoutError("upstream 5s")
+TimeoutError: upstream 5s</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>메시지 뒤에 <code>%s</code> 로 넘기는 이유</b> —
+        <code>logger.info("x=%s", x)</code> 는 <b>그 레벨이 켜져 있을 때만</b> 문자열을 만듭니다.
+        <code>logger.info(f"x={x}")</code> 는 <b>레벨이 꺼져 있어도 f-string 이 먼저 계산됩니다.</b>
+        DEBUG 로그 수천 줄에서 이 차이가 그대로 CPU 로 나옵니다(<b>LOG 07</b>).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">부품 다섯 개의 역할</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Logger · Handler · Formatter · Filter · LogRecord</h4>
+      <div class="tw"><table class="df" style="margin:0">
+        <thead><tr><th style="width:24%">부품</th><th>하는 일</th></tr></thead>
+        <tbody>
+          <tr><td><b>Logger</b></td><td>코드가 부르는 <b>입구</b>. 이름으로 계층을 만듭니다
+              (<code>app.billing</code> 은 <code>app</code> 의 자식). 레벨을 여기서 한 번 검사합니다</td></tr>
+          <tr><td><b>Handler</b></td><td><b>어디로 보낼지</b>. 콘솔 · 파일 · 소켓 · 큐 · Sentry.
+              로거 하나에 여러 개를 달 수 있고, 각각 <b>자기 레벨</b>을 가집니다</td></tr>
+          <tr><td><b>Formatter</b></td><td><b>어떤 모양으로</b>. 사람이 읽는 한 줄이냐 JSON 이냐가 여기서 갈립니다</td></tr>
+          <tr><td><b>Filter</b></td><td><b>통과시킬지 · 값을 더할지</b>. 로거에도 핸들러에도 붙일 수 있습니다.
+              request_id 주입과 마스킹이 전부 여기서 일어납니다</td></tr>
+          <tr><td><b>LogRecord</b></td><td>한 줄에 해당하는 <b>객체</b>. 시각 · 레벨 · 모듈 · 줄번호 ·
+              스레드 · 예외 정보를 들고 다닙니다</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>파이썬 로깅은 Java 의 log4j 를 그대로 옮겨 온 설계</b>입니다.
+        그래서 <code>getLogger</code> · 레벨 · 핸들러 · 어펜더(=핸들러) 개념이 자바와 똑같습니다.
+        자바를 해 본 적이 있다면 <b>이름만 바꿔 읽으면</b> 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>getLogger(__name__)</code> 이 관례인 이유</h4>
+      <pre class="code" data-lang="python"><code># app/billing/pg.py  →  __name__ 은 "app.billing.pg"
+logger = logging.getLogger(__name__)
+
+# 이름이 점으로 이어지면 자동으로 부모-자식이 됩니다
+#   root
+#    └ app
+#       └ app.billing
+#          └ app.billing.pg      ← 여기서 찍은 로그가
+
+# 부모 쪽에서 통째로 조절됩니다
+logging.getLogger("app.billing").setLevel(logging.DEBUG)
+#   → app.billing 아래 전부 DEBUG 로 열립니다
+
+# 시끄러운 라이브러리 하나만 조용히
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("botocore").setLevel(logging.WARNING)</code></pre>
+      <pre class="code" data-lang="python"><code># ❌ 하지 말 것 — 루트 로거에 바로 찍기
+logging.info("주문 처리")     # 이름이 "root" 라 어디서 났는지 못 봅니다
+
+# ❌ 모든 모듈이 같은 이름을 쓰기
+logger = logging.getLogger("myapp")   # 모듈별로 못 끕니다
+
+# ✅ 모듈마다 __name__
+logger = logging.getLogger(__name__)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>왜 이게 실무에서 크게 다른가</b> — 장애 조사 중에
+        “<b>결제 모듈만 DEBUG 로 열어 주세요</b>” 라는 요청이 옵니다.
+        <code>__name__</code> 을 썼다면 <b>설정 한 줄</b>로 끝나고,
+        <code>"myapp"</code> 하나로 통일했다면 <b>전체가 DEBUG 로 열려</b> 로그가 폭발합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">설정은 진입점 한 곳에서만</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 라이브러리·모듈이 설정을 건드림</h5>
+      <pre class="code" data-lang="python"><code># mylib/core.py  — 남의 앱에 쓰이는 코드
+import logging
+logging.basicConfig(level=logging.DEBUG)   # ❌ 남의 설정을 덮어씁니다
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.StreamHandler()) # ❌ 핸들러를 스스로 답니다
+                                           #    → 앱 쪽 설정과 겹쳐 두 번 찍힘</code></pre>
+      <p>패키지를 import 한 것만으로 앱의 로그 포맷이 바뀌고 줄이 두 번 나옵니다.
+      실제로 유명 라이브러리들이 이 실수로 이슈를 받아 왔습니다.</p>
+    </div>
+    <div class="good">
+      <h5>✅ 라이브러리는 NullHandler 만</h5>
+      <pre class="code" data-lang="python"><code># mylib/__init__.py
+import logging
+logging.getLogger(__name__).addHandler(logging.NullHandler())
+#   "핸들러가 없습니다" 경고만 막고, 아무것도 출력하지 않습니다
+
+# mylib/core.py
+logger = logging.getLogger(__name__)
+logger.debug("내부 상태 %s", state)   # 앱이 켜 주면 보입니다
+
+# app/main.py  — 설정은 애플리케이션 진입점 딱 한 곳
+logging.config.dictConfig(LOGGING)   # LOG 03</code></pre>
+      <p><b>“누가 설정하는가”</b>를 한 곳으로 못 박는 것이
+      로깅 설계에서 가장 먼저 정할 규칙입니다.</p>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>logging</code> 은 <b>Logger → Filter → Handler → Formatter</b> 네 부품이
+    <b>LogRecord</b> 하나를 넘겨 가며 처리하는 구조입니다.
+    모듈마다 <code>logging.getLogger(__name__)</code> 한 줄만 두고,
+    <b>설정은 앱 진입점 한 곳에서만</b> 합니다.
+    이 두 가지만 지켜도 “로그가 안 나온다 / 두 번 나온다” 사고의 대부분이 사라집니다.</div>
+</section>
+
+
+<!-- ==================== lg02 ==================== -->
+<section class="sec" id="lg02">
+  <div class="sec-head rv">
+    <span class="no">LOG 02</span>
+    <h2>레벨 설계 — <span class="t">무엇을 언제</span> 남기나</h2>
+    <p class="lead">
+      레벨은 <b>“나중에 이 줄을 볼 사람이 누구인가”</b>로 정합니다.
+      DEBUG 는 나를 위한 것이고, WARNING 부터는 <b>남이 새벽에 깨어나 보는 것</b>입니다.
+      이 기준 하나로 대부분의 다툼이 끝납니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 288" role="img" aria-label="다섯 개 로그 레벨을 네 가지 관점으로 평가한 표. 가로축은 남는 줄 수, 진단 가치, 저장 비용, 읽는 사람의 피로이고 초록은 좋음 회색은 보통 붉은색은 나쁨을 뜻한다. DEBUG 는 진단 가치가 가장 높지만 줄 수와 비용과 피로가 모두 최악이고, INFO 는 균형이 잡혀 운영 기본값으로 쓰인다. WARNING 아래로 내려갈수록 줄 수와 비용은 좋아지지만 진단 가치가 떨어져 사고가 나면 아무것도 남지 않는다. 로그를 많이 남길수록 진단은 쉬워지고 비용과 소음은 나빠지는 정직한 맞바꿈이 보인다.">
+      <text x="16" y="18" class="lbl">레벨은 맞바꿈입니다 — 많이 남길수록 찾기 쉽고, 비싸고, 시끄럽습니다</text>
+
+      <text x="186" y="42" class="tk" font-size="9" text-anchor="middle">남는 줄 수</text>
+      <text x="318" y="42" class="tk" font-size="9" text-anchor="middle">진단 가치</text>
+      <text x="450" y="42" class="tk" font-size="9" text-anchor="middle">저장 · 전송 비용</text>
+      <text x="582" y="42" class="tk" font-size="9" text-anchor="middle">읽는 사람의 피로</text>
+
+      <text x="16" y="70" class="ann">DEBUG</text>
+      <rect class="cel d-n2" x="124" y="52" width="124" height="28"/><text x="186" y="70" class="tk" font-size="9" text-anchor="middle">아주 많음</text>
+      <rect class="cel d-p2" x="256" y="52" width="124" height="28"/><text x="318" y="70" class="tk" font-size="9" text-anchor="middle">가장 높음</text>
+      <rect class="cel d-n2" x="388" y="52" width="124" height="28"/><text x="450" y="70" class="tk" font-size="9" text-anchor="middle">가장 비쌈</text>
+      <rect class="cel d-n2" x="520" y="52" width="124" height="28"/><text x="582" y="70" class="tk" font-size="9" text-anchor="middle">매우 큼</text>
+
+      <text x="16" y="104" class="ann">INFO</text>
+      <rect class="cel d-n1" x="124" y="86" width="124" height="28"/><text x="186" y="104" class="tk" font-size="9" text-anchor="middle">많음</text>
+      <rect class="cel d-p1" x="256" y="86" width="124" height="28"/><text x="318" y="104" class="tk" font-size="9" text-anchor="middle">높음</text>
+      <rect class="cel d-n1" x="388" y="86" width="124" height="28"/><text x="450" y="104" class="tk" font-size="9" text-anchor="middle">중간</text>
+      <rect class="cel d-0" x="520" y="86" width="124" height="28"/><text x="582" y="104" class="tk" font-size="9" text-anchor="middle">견딜 만함</text>
+
+      <text x="16" y="138" class="ann">WARNING</text>
+      <rect class="cel d-0" x="124" y="120" width="124" height="28"/><text x="186" y="138" class="tk" font-size="9" text-anchor="middle">보통</text>
+      <rect class="cel d-0" x="256" y="120" width="124" height="28"/><text x="318" y="138" class="tk" font-size="9" text-anchor="middle">보통</text>
+      <rect class="cel d-p1" x="388" y="120" width="124" height="28"/><text x="450" y="138" class="tk" font-size="9" text-anchor="middle">적음</text>
+      <rect class="cel d-p1" x="520" y="120" width="124" height="28"/><text x="582" y="138" class="tk" font-size="9" text-anchor="middle">적음</text>
+
+      <text x="16" y="172" class="ann">ERROR</text>
+      <rect class="cel d-p1" x="124" y="154" width="124" height="28"/><text x="186" y="172" class="tk" font-size="9" text-anchor="middle">적음</text>
+      <rect class="cel d-n1" x="256" y="154" width="124" height="28"/><text x="318" y="172" class="tk" font-size="9" text-anchor="middle">사후에만</text>
+      <rect class="cel d-p2" x="388" y="154" width="124" height="28"/><text x="450" y="172" class="tk" font-size="9" text-anchor="middle">거의 없음</text>
+      <rect class="cel d-p2" x="520" y="154" width="124" height="28"/><text x="582" y="172" class="tk" font-size="9" text-anchor="middle">거의 없음</text>
+
+      <text x="16" y="206" class="ann">CRITICAL</text>
+      <rect class="cel d-p2" x="124" y="188" width="124" height="28"/><text x="186" y="206" class="tk" font-size="9" text-anchor="middle">아주 적음</text>
+      <rect class="cel d-n2" x="256" y="188" width="124" height="28"/><text x="318" y="206" class="tk" font-size="9" text-anchor="middle">거의 없음</text>
+      <rect class="cel d-p2" x="388" y="188" width="124" height="28"/><text x="450" y="206" class="tk" font-size="9" text-anchor="middle">없음</text>
+      <rect class="cel d-p2" x="520" y="188" width="124" height="28"/><text x="582" y="206" class="tk" font-size="9" text-anchor="middle">없음</text>
+
+      <rect class="cel d-n2" x="16" y="228" width="14" height="12"/>
+      <text x="36" y="238" class="ann">나쁨</text>
+      <rect class="cel d-0" x="82" y="228" width="14" height="12"/>
+      <text x="102" y="238" class="ann">보통</text>
+      <rect class="cel d-p2" x="148" y="228" width="14" height="12"/>
+      <text x="168" y="238" class="ann">좋음</text>
+      <text x="222" y="238" class="ann">색은 훑어보기용, 칸의 글자가 확인용입니다</text>
+
+      <text x="16" y="264" class="lbl">운영 기본값은 INFO — DEBUG 는 필요할 때 그 모듈만 잠깐 엽니다</text>
+      <text x="16" y="280" class="lbl">ERROR 만 남기는 설정은 싸 보이지만, 사고가 나면 볼 것이 아무것도 없습니다</text>
+    </svg>
+    <div class="cap">로그는 <b>많이 남길수록 찾기 쉽고 비쌉니다</b> — 그 사이에서 고르는 손잡이가 레벨입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다섯 레벨 — 이 기준으로 고릅니다</h4>
+      <div class="tw"><table class="df" style="margin:0">
+        <thead><tr><th style="width:20%">레벨</th><th style="width:12%">값</th><th>이 줄을 보게 될 사람</th></tr></thead>
+        <tbody>
+          <tr><td><b>DEBUG</b></td><td>10</td><td><b>나(개발자)</b>. 변수 값 · 분기 · 외부 응답 원문.
+              <b>운영에서는 꺼 둡니다</b></td></tr>
+          <tr><td><b>INFO</b> ★</td><td>20</td><td><b>운영자</b>. “무슨 업무가 일어났나” —
+              주문 접수 · 결제 승인 · 배치 시작·종료. <b>운영 기본값</b></td></tr>
+          <tr><td><b>WARNING</b></td><td>30</td><td><b>아침에 확인할 사람</b>. 지금은 돌지만 이상함 —
+              재시도 성공 · 폴백 사용 · 사용 중단 예정 API</td></tr>
+          <tr><td><b>ERROR</b></td><td>40</td><td><b>지금 봐야 하는 사람</b>. 이 요청·이 작업이 <b>실패</b>했음.
+              사용자 한 명이 피해를 봤습니다</td></tr>
+          <tr><td><b>CRITICAL</b></td><td>50</td><td><b>새벽에 깨울 사람</b>. 프로세스를 더 못 이어감 —
+              DB 접속 완전 실패 · 필수 설정 없음</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 오용</b> — <code>except</code> 안에서 무조건 <code>logger.error</code> 를 부르는 것.
+        <b>재시도로 복구됐다면 WARNING</b> 이고, 사용자에게 정상 응답을 돌려줬다면 ERROR 가 아닙니다.
+        ERROR 가 하루 5만 건 나오는 시스템은 <b>ERROR 를 아무도 안 봅니다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실제 코드에서의 선택</h4>
+      <pre class="code" data-lang="python"><code>logger = logging.getLogger(__name__)
+
+def place_order(req):
+    logger.debug("요청 원문 %s", req)                    # 개발용
+    order = Order.create(req)
+    logger.info("주문 생성 order=%s user=%s amount=%s",   # ★ 업무 사실
+                order.id, order.user_id, order.amount)
+
+    try:
+        pay(order)
+    except TransientError as e:
+        logger.warning("PG 일시 오류, 재시도합니다 order=%s err=%s",
+                       order.id, e)                       # 복구 가능
+        retry(order)
+    except PgError:
+        logger.exception("결제 실패 order=%s", order.id)   # 요청 실패
+        raise
+
+    return order
+
+# 프로세스가 못 뜨는 상황
+if not settings.DB_URL:
+    logger.critical("DB_URL 이 없습니다. 종료합니다")
+    sys.exit(1)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>INFO 한 줄에 무엇을 넣나</b> — <b>“누가 · 무엇을 · 얼마나 · 결과”</b> 네 가지입니다.
+        <code>user=1234 order=A-991 amount=39000 status=paid</code> 처럼
+        <b>키=값</b> 형태로 적어 두면, 나중에 JSON 으로 옮길 때 그대로 필드가 됩니다(<b>LOG 05</b>).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">레벨이 두 번 검사된다는 것</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로거 레벨과 핸들러 레벨</h4>
+      <pre class="code" data-lang="python"><code>import logging
+
+logger = logging.getLogger("app")
+logger.setLevel(logging.DEBUG)          # ① 로거 문턱 — 여기를 먼저 통과해야
+
+console = logging.StreamHandler()
+console.setLevel(logging.INFO)          # ② 콘솔에는 INFO 이상만
+
+filehdlr = logging.FileHandler("app.log")
+filehdlr.setLevel(logging.DEBUG)        # ② 파일에는 DEBUG 까지 전부
+
+logger.addHandler(console)
+logger.addHandler(filehdlr)
+
+logger.debug("자세한 값")   # 콘솔 ✗ / 파일 ✓
+logger.info("업무 사실")     # 콘솔 ✓ / 파일 ✓
+
+# ★ 로거 레벨이 INFO 였다면 debug 는 ①에서 죽어
+#   파일 핸들러가 DEBUG 여도 절대 안 나옵니다 — 사고 1위</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“DEBUG 로 켰는데 왜 안 나오죠?”</b> 의 90%가 이것입니다.
+        <b>로거는 DEBUG, 핸들러는 INFO</b> 로 되어 있거나 그 반대입니다.
+        <b>둘 다 열어야</b> 보입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">레벨 상속과 <code>NOTSET</code></h4>
+      <pre class="code" data-lang="python"><code># 로거의 기본 레벨은 NOTSET(0) — "부모에게 물어봄" 이라는 뜻입니다
+logging.getLogger("app.billing").level      # 0 = NOTSET
+logging.getLogger("app.billing").getEffectiveLevel()   # 부모를 거슬러 올라간 실효 레벨
+
+# root 만 INFO 로 두면 app.* 전부가 INFO 로 동작합니다
+logging.getLogger().setLevel(logging.INFO)
+
+# 특정 가지만 열기
+logging.getLogger("app.billing").setLevel(logging.DEBUG)
+
+# ── 비싼 로그는 미리 물어보고 만듭니다
+if logger.isEnabledFor(logging.DEBUG):
+    logger.debug("응답 전문 %s", json.dumps(huge, ensure_ascii=False))
+
+# ── 지금 어떤 상태인지 눈으로 확인 (디버깅에 최고)
+#   pip install logging_tree   →  logging_tree.printout()
+import logging_tree
+logging_tree.printout()</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>커스텀 레벨(TRACE 등)은 만들지 마세요.</b>
+        <code>logging.addLevelName</code> 으로 만들 수는 있지만,
+        <b>수집기 · Sentry · 대시보드가 모르는 값</b>이라 어딘가에서 반드시 깨집니다.
+        더 자세히 남기고 싶으면 <b>DEBUG 를 쓰고 로거 이름으로 나누세요.</b>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">환경별 기본 레벨</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">환경 변수 하나로 바꾸기</h4>
+      <pre class="code" data-lang="python"><code>import os, logging
+
+LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+#   로컬       LOG_LEVEL=DEBUG
+#   스테이징   LOG_LEVEL=DEBUG  (문제 조사 중이면)
+#   운영       LOG_LEVEL=INFO   ★ 기본
+#   부하 시험  LOG_LEVEL=WARNING
+
+logging.getLogger().setLevel(LEVEL)
+
+# 시끄러운 서드파티는 항상 한 단계 올려 둡니다
+for name in ("urllib3", "botocore", "asyncio", "PIL", "matplotlib"):
+    logging.getLogger(name).setLevel(logging.WARNING)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>재배포 없이 레벨을 바꾸고 싶다면</b> — 관리자 전용 엔드포인트를 하나 두고
+        <code>logging.getLogger(name).setLevel(lv)</code> 를 부르게 만듭니다.
+        장애 중에 <b>결제 모듈만 3분간 DEBUG</b> 로 열었다가 되돌리는 식으로 씁니다.
+        (권한 검사와 자동 원복 타이머를 꼭 함께 두세요.)
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로그가 많아 못 쓰겠다면 — 표본과 억제</h4>
+      <pre class="code" data-lang="python"><code>import logging, random, time
+
+class SampleFilter(logging.Filter):
+    """DEBUG 는 1%만 남깁니다. INFO 이상은 전부 통과."""
+    def __init__(self, rate=0.01):
+        super().__init__(); self.rate = rate
+    def filter(self, record):
+        if record.levelno &gt; logging.DEBUG:
+            return True
+        return random.random() &lt; self.rate
+
+class RateLimitFilter(logging.Filter):
+    """같은 메시지는 60초에 한 번만."""
+    def __init__(self, period=60):
+        super().__init__(); self.period = period; self.seen = {}
+    def filter(self, record):
+        key = (record.name, record.levelno, record.msg)
+        now = time.monotonic()
+        if now - self.seen.get(key, -1e9) &lt; self.period:
+            return False
+        self.seen[key] = now
+        return True
+
+logging.getLogger("app").addFilter(RateLimitFilter())</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>표본 추출은 마지막 수단입니다.</b> 먼저 <b>레벨을 정직하게 다시 나누세요</b> —
+        “루프 안에서 매 건마다 INFO” 같은 것이 진짜 원인인 경우가 대부분입니다.
+        <b>건별 로그는 DEBUG, 배치 단위 요약은 INFO</b> 로 바꾸면 줄 수가 수백 배 줄어듭니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 레벨은 <b>“이 줄을 볼 사람이 누구인가”</b>로 정합니다.
+    <b>운영 기본은 INFO</b>, 시끄러운 서드파티는 WARNING 으로 올려 두고,
+    <b>로거 레벨과 핸들러 레벨이 둘 다 열려 있어야</b> 로그가 보입니다.
+    ERROR 는 <b>진짜 실패에만</b> 쓰세요 — 남발하면 아무도 안 봅니다.</div>
+</section>
+
+
+<!-- ==================== lg03 ==================== -->
+<section class="sec" id="lg03">
+  <div class="sec-head rv">
+    <span class="no">LOG 03</span>
+    <h2>설정하는 세 가지 방법 — <span class="t">dictConfig</span> 만 남습니다</h2>
+    <p class="lead">
+      <code>basicConfig</code> 는 <b>연습용</b>, <code>fileConfig</code> 는 <b>레거시</b>,
+      <code>dictConfig</code> 가 <b>실무의 답</b>입니다.
+      셋의 차이와, 남들이 반드시 한 번은 밟는 함정 두 개를 짚습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 324" role="img" aria-label="로깅 설정 방법을 고르는 결정 흐름도. 먼저 지금 만드는 것이 라이브러리 코드인지 묻고, 그렇다면 아무 설정도 하지 말고 NullHandler 만 붙인다. 아니라면 파일 하나짜리 스크립트인지 묻고, 그렇다면 basicConfig 한 줄이면 충분하다. 둘 다 아니라면 dictConfig 를 쓴다. dictConfig 는 딕셔너리 하나로 로거와 핸들러와 포매터를 전부 정의하며 실무의 기본값이다.">
+      <text x="16" y="18" class="lbl">설정 방법 고르기 — 질문 두 개면 끝납니다</text>
+
+      <rect class="bx" x="250" y="34" width="180" height="30"/>
+      <text x="340" y="54" class="val" text-anchor="middle">로깅 설정을 어디에?</text>
+
+      <path class="fl ar" d="M340 66 L340 74"/>
+
+      <path class="dia" d="M340 78 L440 108 L340 138 L240 108 Z"/>
+      <text x="340" y="112" class="ann" text-anchor="middle">라이브러리 코드인가?</text>
+
+      <text x="455" y="100" class="ann" text-anchor="middle">예</text>
+      <path class="fl ar" d="M444 108 L466 108"/>
+      <rect class="bx bx-ok" x="470" y="88" width="194" height="42"/>
+      <text x="482" y="106" class="val">설정하지 않습니다</text>
+      <text x="482" y="122" class="ann">NullHandler 만 붙이세요</text>
+
+      <text x="356" y="150" class="ann">아니오</text>
+      <path class="fl ar" d="M340 140 L340 154"/>
+
+      <path class="dia" d="M340 156 L440 186 L340 216 L240 186 Z"/>
+      <text x="340" y="190" class="ann" text-anchor="middle">한 파일짜리 스크립트인가?</text>
+
+      <text x="455" y="178" class="ann" text-anchor="middle">예</text>
+      <path class="fl ar" d="M444 186 L466 186"/>
+      <rect class="bx" x="470" y="166" width="194" height="42"/>
+      <text x="482" y="184" class="val">basicConfig</text>
+      <text x="482" y="200" class="ann">한 줄. 단 한 번만 먹힙니다</text>
+
+      <text x="356" y="230" class="ann">아니오</text>
+      <path class="fl ar" d="M340 220 L340 234"/>
+
+      <rect class="bx bx-ok" x="200" y="236" width="280" height="44"/>
+      <text x="340" y="256" class="val ok-t" text-anchor="middle">dictConfig — 실무의 기본값</text>
+      <text x="340" y="272" class="ann" text-anchor="middle">dict 하나로 로거 · 핸들러 · 포매터를 전부</text>
+
+      <text x="16" y="300" class="lbl">fileConfig(.ini) 는 오래된 프로젝트에서만 만납니다 — 새로 쓰지 마세요</text>
+      <text x="16" y="316" class="lbl">dictConfig 는 YAML · JSON · 파이썬 dict 어디서든 같은 구조로 씁니다</text>
+    </svg>
+    <div class="cap">질문 두 개로 끝납니다 — <b>라이브러리면 설정하지 않고, 앱이면 dictConfig</b>.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① basicConfig — 연습과 스크립트용</h4>
+      <pre class="code" data-lang="python"><code>import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s [%(name)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logging.getLogger(__name__).info("시작")
+
+# ★ 함정 1 — 루트에 핸들러가 이미 있으면 '조용히 무시'됩니다
+logging.basicConfig(level=logging.DEBUG)   # 두 번째 호출은 아무 일도 안 함
+logging.basicConfig(level=logging.DEBUG, force=True)   # 3.8+ 강제로 재설정
+
+# ★ 함정 2 — 누군가 먼저 logging.info() 를 부르면
+#   그 순간 루트에 핸들러가 자동으로 붙어 이후 basicConfig 가 안 먹습니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Jupyter 에서 로그가 안 보이는 이유</b>도 이것입니다.
+        노트북 커널이 이미 루트 핸들러를 달아 두었기 때문에
+        <code>basicConfig</code> 가 무시됩니다. <code>force=True</code> 를 주세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ fileConfig — 레거시(참고용)</h4>
+      <pre class="code" data-lang="ini"><code># logging.ini  — 2000년대 스타일. 새 프로젝트에는 쓰지 마세요
+[loggers]
+keys=root,app
+
+[handlers]
+keys=console
+
+[formatters]
+keys=simple
+
+[logger_root]
+level=INFO
+handlers=console
+
+[logger_app]
+level=DEBUG
+handlers=console
+qualname=app
+propagate=0
+
+[handler_console]
+class=StreamHandler
+formatter=simple
+args=(sys.stdout,)
+
+[formatter_simple]
+format=%(asctime)s %(levelname)s %(name)s %(message)s</code></pre>
+      <pre class="code" data-lang="python"><code>import logging.config
+logging.config.fileConfig("logging.ini", disable_existing_loggers=False)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>왜 밀려났나</b> — 필터를 정의할 수 없고, <code>args=</code> 가
+        <b>문자열을 eval 하는 구조</b>라 위험하며, 환경 변수를 넣기도 어렵습니다.
+        <b>Alembic 등 일부 도구가 아직 이 포맷을 씁니다.</b>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">dictConfig 한 벌 통째로</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">복붙해서 바로 도는 실무 설정</h4>
+    <pre class="code" data-lang="python"><code># app/logging_config.py
+import os, logging.config
+
+LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+LOGGING = {
+    "version": 1,                     # 항상 1 (지금까지 바뀐 적 없습니다)
+    "disable_existing_loggers": False, # ★ 반드시 False — 아래 함정 설명 참고
+
+    "formatters": {
+        "plain": {
+            "format": "%(asctime)s %(levelname)-8s [%(name)s:%(lineno)d] "
+                      "%(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+        "json": {                      # LOG 05 에서 자세히
+            "()": "pythonjsonlogger.json.JsonFormatter",
+            "fmt": "%(asctime)s %(levelname)s %(name)s %(message)s",
+        },
+    },
+
+    "filters": {
+        "request_id": {"()": "app.logging_filters.RequestIdFilter"},   # LOG 09
+        "mask": {"()": "app.logging_filters.MaskFilter"},              # LOG 10
+    },
+
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",   # ★ stderr 가 기본이라 명시합니다
+            "level": LEVEL,
+            "formatter": "plain",
+            "filters": ["request_id", "mask"],
+        },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": "logs/app.log",
+            "maxBytes": 50 * 1024 * 1024,   # 50MB
+            "backupCount": 5,
+            "encoding": "utf-8",
+            "level": "INFO",
+            "formatter": "json",
+            "filters": ["request_id", "mask"],
+        },
+    },
+
+    "root": {"level": LEVEL, "handlers": ["console", "file"]},
+
+    "loggers": {
+        "app":       {"level": LEVEL, "propagate": True},
+        "urllib3":   {"level": "WARNING"},
+        "botocore":  {"level": "WARNING"},
+        "asyncio":   {"level": "WARNING"},
+    },
+}
+
+def setup():
+    os.makedirs("logs", exist_ok=True)
+    logging.config.dictConfig(LOGGING)</code></pre>
+    <pre class="code" data-lang="python"><code># app/main.py  — 진입점 맨 위에서 딱 한 번
+from app.logging_config import setup
+setup()
+
+import logging
+logging.getLogger(__name__).info("애플리케이션 시작 env=%s", os.getenv("ENV"))</code></pre>
+    <div class="note tip">
+      <b><code>"()"</code> 키가 뭔가요</b> — “이 클래스를 직접 만들어 달라”는 뜻의 특수 키입니다.
+      값은 <b>import 경로</b>이고, 같은 dict 의 나머지 키가 <b>생성자 인자</b>로 들어갑니다.
+      필터 · 커스텀 포매터는 전부 이 방식으로 붙입니다.
+    </div>
+    <div class="note info" style="margin-bottom:0">
+      <b><code>ext://</code> 접두사</b> 는 “파이썬 객체를 import 해서 넣어라”는 뜻입니다
+      (<code>ext://sys.stdout</code>). YAML 파일에 설정을 둘 때 특히 유용합니다.
+      <code>cfg://</code> 는 같은 설정 dict 안의 다른 값을 참조합니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">두 개의 함정</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ disable_existing_loggers 를 그냥 둠</h5>
+      <pre class="code" data-lang="python"><code>LOGGING = {
+    "version": 1,
+    # "disable_existing_loggers" 를 안 적으면 기본값이 True 입니다
+    "root": {"level": "INFO", "handlers": ["console"]},
+}
+logging.config.dictConfig(LOGGING)
+
+# 이 시점에 '이미 만들어져 있던' 모든 로거가 통째로 꺼집니다.
+#   → import 순서에 따라 어떤 모듈은 로그가 나오고 어떤 모듈은 안 나옴
+#   → "왜 이 파일만 로그가 없죠?" 라는 유령 버그의 정체</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 항상 False 로 못 박기</h5>
+      <pre class="code" data-lang="python"><code>LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,   # ★ 언제나 이렇게
+    "root": {"level": "INFO", "handlers": ["console"]},
+}
+
+# 설정이 제대로 먹었는지 눈으로 확인하는 방법
+import logging_tree; logging_tree.printout()
+#   또는
+root = logging.getLogger()
+print(root.level, [h for h in root.handlers])</code></pre>
+    </div>
+  </div>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">함정 ② — 핸들러가 두 번 붙습니다</h4>
+      <pre class="code" data-lang="python"><code># ❌ 모듈이 import 될 때마다 핸들러를 답니다
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.StreamHandler())   # 재로딩·재시작마다 하나씩 추가
+#   → 같은 줄이 2번, 3번, 4번 찍힙니다 (특히 Jupyter · 자동 재시작 서버)
+
+# ✅ 방법 1 — dictConfig 만 쓰고 addHandler 를 코드에서 안 씁니다
+# ✅ 방법 2 — 부득이하면 중복을 확인
+if not logger.handlers:
+    logger.addHandler(logging.StreamHandler())
+
+# ✅ 방법 3 — 다시 설정하기 전에 비웁니다
+for h in list(logger.handlers):
+    logger.removeHandler(h); h.close()</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>“로그가 두 번 나온다”의 원인은 딱 두 가지</b>입니다 —
+        <b>핸들러 중복 등록</b>이거나 <b>propagate 로 부모까지 올라간 것</b>입니다.
+        <code>logging_tree.printout()</code> 을 찍어 보면 어느 쪽인지 3초 만에 보입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">YAML 로 빼 두기 — 배포 환경별 파일</h4>
+      <pre class="code" data-lang="yaml"><code># logging.prod.yaml
+version: 1
+disable_existing_loggers: false
+formatters:
+  json:
+    (): pythonjsonlogger.json.JsonFormatter
+    fmt: "%(asctime)s %(levelname)s %(name)s %(message)s"
+handlers:
+  console:
+    class: logging.StreamHandler
+    stream: ext://sys.stdout
+    formatter: json
+    level: INFO
+root:
+  level: INFO
+  handlers: [console]
+loggers:
+  urllib3:
+    level: WARNING</code></pre>
+      <pre class="code" data-lang="python"><code>import yaml, logging.config, os
+
+path = os.getenv("LOG_CONFIG", "logging.dev.yaml")
+with open(path, encoding="utf-8") as f:
+    logging.config.dictConfig(yaml.safe_load(f))</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>파일로 뺄지 코드에 둘지</b> — 환경이 2~3개면 <b>파이썬 dict 하나</b>에
+        환경 변수로 분기하는 편이 관리하기 쉽습니다.
+        운영팀이 <b>재배포 없이 고쳐야</b> 한다면 YAML 로 빼고 ConfigMap 등으로 마운트하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 설정은 <b><code>dictConfig</code> 하나</b>로 통일합니다.
+    <code>"disable_existing_loggers": False</code> 를 <b>반드시</b> 적고,
+    <code>stream: ext://sys.stdout</code> 을 <b>명시</b>하고(기본은 stderr),
+    <b>진입점에서 딱 한 번</b> 호출합니다.
+    코드 안에서 <code>addHandler</code> 를 부르기 시작하면 중복 출력이 따라옵니다.</div>
+</section>
+
+
+<!-- ==================== lg04 ==================== -->
+<section class="sec" id="lg04">
+  <div class="sec-head rv">
+    <span class="no">LOG 04</span>
+    <h2>라이브러리 비교 — <span class="t">표준 · structlog · loguru</span> 그리고 나머지</h2>
+    <p class="lead">
+      결론부터 말하면 <b>표준 <code>logging</code> 은 버리지 않습니다.</b>
+      다른 라이브러리는 대부분 <b>표준 위에 얹거나 표준으로 되돌려 보내는</b> 물건이고,
+      그 이유는 여러분이 쓰는 <b>모든 서드파티 패키지가 표준 logging 으로 로그를 남기기 때문</b>입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 308" role="img" aria-label="파이썬 로깅 라이브러리 여섯 개를 다섯 가지 기준으로 비교한 히트맵. 행은 표준 logging, structlog, loguru, picologging, python-json-logger, logbook 이고 열은 구조적 로깅, 성능, 의존성 없음, 러닝 커브, 채택 정도이다. 칸이 진할수록 강하며 숫자는 5점 척도다. 표준 logging 은 의존성과 채택에서 만점이지만 구조적 로깅과 배우기 쉬움이 약하고, structlog 는 구조적 로깅에서 만점이며, loguru 는 배우기 가장 쉽고, picologging 은 성능이 가장 높지만 채택이 거의 없으며, python-json-logger 는 JSON 전환의 가장 짧은 길이고, logbook 은 신규 채택이 사실상 없다.">
+      <text x="16" y="18" class="lbl">라이브러리 비교 — 진할수록 강합니다 (숫자는 5점 척도의 상대 평가)</text>
+
+      <text x="189" y="42" class="tk" font-size="9" text-anchor="middle">구조적 로깅</text>
+      <text x="295" y="42" class="tk" font-size="9" text-anchor="middle">성능</text>
+      <text x="401" y="42" class="tk" font-size="9" text-anchor="middle">의존성 없음</text>
+      <text x="507" y="42" class="tk" font-size="9" text-anchor="middle">배우기 쉬움</text>
+      <text x="613" y="42" class="tk" font-size="9" text-anchor="middle">채택 정도</text>
+
+      <text x="16" y="69" class="ann">logging (표준)</text>
+      <rect class="cel h2" x="140" y="52" width="98" height="26"/><text x="189" y="69" class="tk" font-size="9" text-anchor="middle">2</text>
+      <rect class="cel h3" x="246" y="52" width="98" height="26"/><text x="295" y="69" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h5" x="352" y="52" width="98" height="26"/><text x="401" y="69" class="tk" font-size="9" text-anchor="middle">5</text>
+      <rect class="cel h2" x="458" y="52" width="98" height="26"/><text x="507" y="69" class="tk" font-size="9" text-anchor="middle">2</text>
+      <rect class="cel h5" x="564" y="52" width="98" height="26"/><text x="613" y="69" class="tk" font-size="9" text-anchor="middle">5</text>
+
+      <text x="16" y="101" class="ann">structlog</text>
+      <rect class="cel h5" x="140" y="84" width="98" height="26"/><text x="189" y="101" class="tk" font-size="9" text-anchor="middle">5</text>
+      <rect class="cel h4" x="246" y="84" width="98" height="26"/><text x="295" y="101" class="tk" font-size="9" text-anchor="middle">4</text>
+      <rect class="cel h3" x="352" y="84" width="98" height="26"/><text x="401" y="101" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h3" x="458" y="84" width="98" height="26"/><text x="507" y="101" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h4" x="564" y="84" width="98" height="26"/><text x="613" y="101" class="tk" font-size="9" text-anchor="middle">4</text>
+
+      <text x="16" y="133" class="ann">loguru</text>
+      <rect class="cel h3" x="140" y="116" width="98" height="26"/><text x="189" y="133" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h3" x="246" y="116" width="98" height="26"/><text x="295" y="133" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h3" x="352" y="116" width="98" height="26"/><text x="401" y="133" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h5" x="458" y="116" width="98" height="26"/><text x="507" y="133" class="tk" font-size="9" text-anchor="middle">5</text>
+      <rect class="cel h4" x="564" y="116" width="98" height="26"/><text x="613" y="133" class="tk" font-size="9" text-anchor="middle">4</text>
+
+      <text x="16" y="165" class="ann">picologging</text>
+      <rect class="cel h2" x="140" y="148" width="98" height="26"/><text x="189" y="165" class="tk" font-size="9" text-anchor="middle">2</text>
+      <rect class="cel h5" x="246" y="148" width="98" height="26"/><text x="295" y="165" class="tk" font-size="9" text-anchor="middle">5</text>
+      <rect class="cel h3" x="352" y="148" width="98" height="26"/><text x="401" y="165" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h4" x="458" y="148" width="98" height="26"/><text x="507" y="165" class="tk" font-size="9" text-anchor="middle">4</text>
+      <rect class="cel h1" x="564" y="148" width="98" height="26"/><text x="613" y="165" class="tk" font-size="9" text-anchor="middle">1</text>
+
+      <text x="16" y="197" class="ann">python-json-logger</text>
+      <rect class="cel h4" x="140" y="180" width="98" height="26"/><text x="189" y="197" class="tk" font-size="9" text-anchor="middle">4</text>
+      <rect class="cel h3" x="246" y="180" width="98" height="26"/><text x="295" y="197" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h4" x="352" y="180" width="98" height="26"/><text x="401" y="197" class="tk" font-size="9" text-anchor="middle">4</text>
+      <rect class="cel h5" x="458" y="180" width="98" height="26"/><text x="507" y="197" class="tk" font-size="9" text-anchor="middle">5</text>
+      <rect class="cel h3" x="564" y="180" width="98" height="26"/><text x="613" y="197" class="tk" font-size="9" text-anchor="middle">3</text>
+
+      <text x="16" y="229" class="ann">logbook</text>
+      <rect class="cel h3" x="140" y="212" width="98" height="26"/><text x="189" y="229" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h3" x="246" y="212" width="98" height="26"/><text x="295" y="229" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h3" x="352" y="212" width="98" height="26"/><text x="401" y="229" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h3" x="458" y="212" width="98" height="26"/><text x="507" y="229" class="tk" font-size="9" text-anchor="middle">3</text>
+      <rect class="cel h0" x="564" y="212" width="98" height="26"/><text x="613" y="229" class="tk" font-size="9" text-anchor="middle">0</text>
+
+      <rect class="cel h0" x="16" y="250" width="14" height="12"/>
+      <rect class="cel h1" x="34" y="250" width="14" height="12"/>
+      <rect class="cel h2" x="52" y="250" width="14" height="12"/>
+      <rect class="cel h3" x="70" y="250" width="14" height="12"/>
+      <rect class="cel h4" x="88" y="250" width="14" height="12"/>
+      <rect class="cel h5" x="106" y="250" width="14" height="12"/>
+      <text x="128" y="260" class="ann">왼쪽 0(약함) → 오른쪽 5(강함) · 색은 훑어보기용, 숫자가 확인용입니다</text>
+
+      <text x="16" y="284" class="lbl">한 줄 요약 — 표준을 뼈대로 두고, 필요하면 structlog 를 그 위에 얹습니다</text>
+      <text x="16" y="300" class="lbl">채택 정도는 상대적 위치입니다. 정확한 수치는 PyPI Stats 에서 직접 확인하세요</text>
+    </svg>
+    <div class="cap">여섯 개를 다섯 잣대로 놓고 보면 <b>고를 이유가 잣대마다 다르다</b>는 것이 보입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">여섯 개, 한 문단씩</h4>
+      <div class="tw"><table class="df" style="margin:0">
+        <thead><tr><th style="width:26%">라이브러리</th><th>어떤 물건이고 언제 고르나</th></tr></thead>
+        <tbody>
+          <tr><td><b>logging</b> (표준) ★</td><td><b>사실상 표준</b>입니다. 파이썬에 기본 포함이라 의존성이 0이고,
+              Django · Flask · FastAPI · requests · boto3 등 <b>거의 모든 패키지가 이걸로 로그를 냅니다.</b>
+              설정이 장황한 것이 유일한 단점 — 그래서 <code>dictConfig</code> 한 벌을 만들어 두고 씁니다</td></tr>
+          <tr><td><b>structlog</b> ★</td><td>구조적(키=값) 로깅의 <b>사실상 표준</b>. 표준 logging 을 <b>대체하지 않고 감쌉니다</b> —
+              앱 로그는 structlog 로 쓰고, 서드파티 로그는 표준 경로로 받아 <b>같은 JSON 으로 합칩니다.</b>
+              팀 서비스를 만든다면 <b>기본 선택</b></td></tr>
+          <tr><td><b>loguru</b></td><td><code>from loguru import logger</code> 한 줄이면 컬러 · 로테이션 · 트레이스백이 다 됩니다.
+              <b>개인 프로젝트 · CLI · 스크립트</b>에서 널리 씁니다. 다만 서드파티 로그를 받으려면
+              <b>InterceptHandler 를 직접 붙여야</b> 하고, 표준 dictConfig 생태계와 어긋납니다</td></tr>
+          <tr><td><b>picologging</b></td><td>Microsoft 가 낸 <b>C 확장 기반 고속 대체품</b>. import 만 바꾸면 되는 구조라 솔깃하지만,
+              <b>베타 표기가 오래 유지</b>되고 새 파이썬 버전 대응이 느립니다.
+              <b>신규 채택은 드묾</b> — 로깅이 진짜 병목임을 측정으로 확인한 뒤에만 검토하세요</td></tr>
+          <tr><td><b>python-json-logger</b></td><td><b>포매터 하나짜리</b> 패키지. 기존 dictConfig 에서 <code>formatter</code> 만 바꾸면
+              그날로 JSON 로그가 됩니다. <b>가장 적은 변경으로 구조적 로깅에 진입</b>하는 길이라 널리 씁니다</td></tr>
+          <tr><td><b>logbook</b></td><td>2010년대 초 표준 logging 의 대안으로 나온 물건.
+              지금은 <b>신규 채택이 사실상 없습니다.</b> 오래된 코드베이스에서 만나면 <b>표준으로 옮기는 것</b>을 권합니다</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고르는 기준 — 이 순서로 물어보세요</h4>
+      <pre class="code" data-lang="text"><code>① 내가 만드는 것이 라이브러리인가?
+     → 표준 logging + NullHandler. 끝. 다른 선택지 없음
+
+② 파일 하나짜리 스크립트 · 개인 도구인가?
+     → loguru 도 좋습니다 (설정 0줄로 시작)
+     → 표준 basicConfig 한 줄도 충분합니다
+
+③ 팀이 운영하는 서비스인가?
+     → 표준 logging(dictConfig) 이 뼈대
+     → 로그를 검색·집계해야 한다 → + structlog
+     → 지금 당장 JSON 만 되면 된다 → + python-json-logger
+
+④ 로깅이 프로파일러에서 상위에 잡히는가?
+     → 먼저 QueueHandler · 레벨 조정 · 표본 추출 (LOG 07)
+     → 그래도 안 되면 그때 picologging 을 '측정하고' 검토</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 실수</b> — loguru 를 쓰면서 <b>서드파티 로그가 사라진 줄 모르는 것</b>입니다.
+        loguru 는 자기만의 통로를 쓰므로, 표준 logging 으로 남긴
+        <b>SQLAlchemy · uvicorn · requests 로그가 어디에도 안 나옵니다.</b>
+        <code>InterceptHandler</code> 를 반드시 붙이세요(아래 코드).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">각각을 실제로 써 보면</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">loguru — 시작은 가장 짧습니다</h4>
+      <div class="dep"><code>uv add loguru</code></div>
+      <pre class="code" data-lang="python"><code>from loguru import logger
+
+logger.info("주문 생성 order={} amount={}", "A-991", 39000)
+logger.bind(request_id="r-77").info("컨텍스트가 붙습니다")
+
+# 파일 · 로테이션 · 보관 · 압축이 인자 하나씩
+logger.add("logs/app.log", rotation="50 MB", retention="14 days",
+           compression="zip", level="INFO", enqueue=True)   # enqueue=멀티프로세스 안전
+
+# JSON 으로
+logger.add("logs/app.jsonl", serialize=True)
+
+@logger.catch                      # 예외를 자동으로 잡아 트레이스백까지 기록
+def risky(): 1 / 0</code></pre>
+      <pre class="code" data-lang="python"><code># ★ 표준 logging 을 쓰는 서드파티 로그를 loguru 로 넘겨받기
+import logging, sys
+from loguru import logger
+
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+        frame, depth = logging.currentframe(), 2
+        while frame and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back; depth += 1
+        logger.opt(depth=depth, exception=record.exc_info) \
+              .log(level, record.getMessage())
+
+logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>loguru 의 진짜 장점</b>은 <code>enqueue=True</code> 와 <code>@logger.catch</code>,
+        그리고 <b>예쁜 트레이스백</b>(변수 값까지 보여 줍니다)입니다.
+        운영 서비스라면 이 편의를 <b>표준 생태계와의 어긋남</b>과 맞바꿀 값어치가 있는지 따져 보세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">structlog — 표준을 감싸는 방식</h4>
+      <div class="dep"><code>uv add structlog</code> (LOG 05 에서 전체 설정을 다룹니다)</div>
+      <pre class="code" data-lang="python"><code>import structlog
+
+log = structlog.get_logger()
+log.info("주문 생성", order="A-991", amount=39000, user_id=1234)
+#   → {"event":"주문 생성","order":"A-991","amount":39000,
+#      "user_id":1234,"level":"info","timestamp":"2026-09-01T03:14:22Z"}
+
+# 컨텍스트를 묶어 두면 이후 모든 줄에 붙습니다
+log = log.bind(request_id="r-77", user_id=1234)
+log.info("결제 시도")     # request_id · user_id 자동 포함
+log.warning("재시도", attempt=2)</code></pre>
+      <pre class="code" data-lang="python"><code># python-json-logger — 가장 짧은 JSON 전환
+# dictConfig 의 formatter 만 바꾸면 끝입니다
+"formatters": {
+    "json": {
+        "()": "pythonjsonlogger.json.JsonFormatter",
+        "fmt": "%(asctime)s %(levelname)s %(name)s %(message)s",
+        "rename_fields": {"levelname": "level", "asctime": "timestamp"},
+    }
+}
+# 주의: 2024년 이후 import 경로가 pythonjsonlogger.json 으로 정리됐습니다
+#       옛 예제의 pythonjsonlogger.jsonlogger 는 사용 중단 경고가 납니다</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>structlog 와 표준은 경쟁 관계가 아닙니다.</b>
+        structlog 의 권장 구성은 <b>최종 출력을 표준 logging 핸들러에 맡기는 것</b>입니다 —
+        그래야 <code>dictConfig</code> · 로테이션 · Sentry 연동을 <b>그대로 재사용</b>합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">채택 정도를 직접 확인하는 법</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">숫자는 남의 말이 아니라 직접 재세요</h4>
+      <pre class="code" data-lang="bash"><code># ① pypistats CLI — 최근 내려받기 수 (설치 없이 uvx 로)
+uvx pypistats recent structlog
+uvx pypistats recent loguru
+uvx pypistats overall python-json-logger --last-months 6
+
+# ② 웹에서 한눈에
+#    https://pypistats.org/packages/structlog
+#    https://pepy.tech/project/loguru
+
+# ③ 저장소가 살아 있는지 (마지막 커밋 · 미해결 이슈 · 릴리스 주기)
+#    GitHub 의 Insights → Commits / Releases 탭
+#    star-history.com 으로 star 추이 비교
+
+# ④ 내 환경에서 실제로 누가 쓰는지
+uv pip list | grep -Ei "structlog|loguru|json-logger|picologging"</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>내려받기 수는 인기가 아닙니다.</b> CI 가 하루에 수천 번 설치하면 그대로 올라갑니다.
+        <b>“새 커밋이 언제인지 · 이슈에 답이 달리는지 · 새 파이썬 버전이 나온 뒤 며칠 만에 대응했는지”</b>
+        가 훨씬 정직한 신호입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">2026년 8월 기준, 대략의 위치</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">패키지</th><th>대략의 위치</th></tr>
+        <tr><td><b>logging</b> (표준)</td><td><b>사실상 표준</b> — 설치 개념이 없습니다</td></tr>
+        <tr><td><b>structlog</b></td><td><b>널리 씀</b> · 주간 <b>수백만</b> 내려받기 수준</td></tr>
+        <tr><td><b>loguru</b></td><td><b>널리 씀</b> · 주간 <b>수백만</b> 내려받기 수준</td></tr>
+        <tr><td><b>python-json-logger</b></td><td><b>널리 씀</b> (많은 패키지의 간접 의존)</td></tr>
+        <tr><td><b>picologging</b></td><td><b>특정 상황에서만</b> · 신규 채택 드묾</td></tr>
+        <tr><td><b>logbook</b></td><td><b>신규 채택 사실상 없음</b> (레거시)</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        위 표는 <b>자릿수 수준의 근사</b>이고 <b>2026년 8월 무렵의 상대적 위치</b>입니다.
+        정확한 값이 필요하면 왼쪽 카드의 <code>pypistats</code> 명령이나
+        <b>pypistats.org</b> 에서 <b>오늘 날짜로</b> 직접 확인하세요 — 숫자는 계속 바뀝니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>뼈대는 표준 <code>logging</code></b> 입니다. 여기서 출발하지 않으면
+    서드파티 로그를 잃습니다. 검색 가능한 로그가 필요하면 <b>structlog</b>(또는 최소 변경이면
+    <b>python-json-logger</b>)를 얹고, 개인 도구라면 <b>loguru</b> 도 좋은 선택입니다.
+    <b>picologging 은 측정 뒤에</b>, <b>logbook 은 새로 쓰지 않습니다.</b></div>
+</section>
+
+
+<!-- ==================== lg05 ==================== -->
+<section class="sec" id="lg05">
+  <div class="sec-head rv">
+    <span class="no">LOG 05</span>
+    <h2>구조적 로깅 — <span class="t">사람이 읽는 글</span>에서 기계가 읽는 데이터로</h2>
+    <p class="lead">
+      로그가 100만 줄이 되는 순간 <code>grep</code> 으로는 답이 안 나옵니다.
+      <b>“어제 3시 이후 결제가 실패한 사용자들의 평균 금액”</b> 같은 질문에 답하려면
+      로그가 <b>문장이 아니라 필드</b>여야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 190" role="img" aria-label="structlog 의 처리기 사슬을 셰브론 다섯 개로 나타낸 그림. 이벤트 딕셔너리가 만들어지고, 컨텍스트 변수의 request id 가 병합되고, 레벨과 타임스탬프가 추가되고, 예외가 문자열로 렌더링된 뒤, 마지막에 JSON 으로 직렬화된다. 아래에 코드 한 줄이 어떤 JSON 한 줄로 바뀌는지 실제 예가 적혀 있다.">
+      <text x="16" y="18" class="lbl">structlog 처리기 사슬 — 앞 단계의 dict 가 다음 단계의 입력입니다</text>
+
+      <polygon class="chev" points="16,40 116,40 132,64 116,88 16,88 32,64"/>
+      <text x="76" y="61" class="val" text-anchor="middle">이벤트</text>
+      <text x="76" y="76" class="ann" text-anchor="middle">dict 하나</text>
+
+      <polygon class="chev" points="142,40 242,40 258,64 242,88 142,88 158,64"/>
+      <text x="202" y="61" class="val" text-anchor="middle">컨텍스트</text>
+      <text x="202" y="76" class="ann" text-anchor="middle">request_id</text>
+
+      <polygon class="chev" points="268,40 368,40 384,64 368,88 268,88 284,64"/>
+      <text x="328" y="61" class="val" text-anchor="middle">레벨 · 시각</text>
+      <text x="328" y="76" class="ann" text-anchor="middle">add_log_level</text>
+
+      <polygon class="chev" points="394,40 494,40 510,64 494,88 394,88 410,64"/>
+      <text x="454" y="61" class="val" text-anchor="middle">예외 렌더</text>
+      <text x="454" y="76" class="ann" text-anchor="middle">format_exc_info</text>
+
+      <polygon class="chev s4" points="520,40 620,40 636,64 620,88 520,88 536,64"/>
+      <text x="578" y="61" class="val" text-anchor="middle">직렬화</text>
+      <text x="578" y="76" class="ann" text-anchor="middle">JSONRenderer</text>
+
+      <path class="brk" d="M16 100 L16 106 L510 106 L510 100"/>
+      <text x="263" y="122" class="ann" text-anchor="middle">여기까지는 그냥 파이썬 dict 입니다 — 어떤 처리기든 끼워 넣을 수 있습니다</text>
+
+      <text x="16" y="152" class="lbl">넣을 때 — log.info("주문 생성", order="A-991", amount=39000)</text>
+      <text x="16" y="172" class="lbl">나올 때 — {"timestamp":"...","level":"info","event":"주문 생성","order":"A-991","amount":39000}</text>
+    </svg>
+    <div class="cap">처리기 사슬 — <b>도형 모양이 곧 방향</b>이고, 중간 어디든 내 함수를 하나 끼울 수 있습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 바꾸나 — 같은 사건, 두 가지 기록</h4>
+      <pre class="code" data-lang="text"><code>[사람이 읽는 줄]
+2026-09-01 03:14 ERROR 결제 실패 (주문 A-991, 사용자 1234, 39000원)
+
+  · 사람은 잘 읽습니다
+  · "실패한 주문의 총 금액" 을 구하려면 정규식을 짜야 합니다
+  · 메시지 문구를 조금만 바꿔도 그 정규식이 깨집니다
+
+[기계가 읽는 줄 — JSON Lines]
+{"timestamp":"2026-09-01T03:14:22Z","level":"error","event":"결제 실패",
+ "order":"A-991","user_id":1234,"amount":39000,"service":"billing"}
+
+  · Loki / OpenSearch / BigQuery 에서 바로 질의됩니다
+      level="error" AND event="결제 실패" | sum(amount)
+  · 필드를 추가해도 기존 질의가 안 깨집니다
+  · 대시보드·알림 규칙을 로그 위에 바로 세울 수 있습니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>둘 중 하나를 고르는 게 아닙니다.</b>
+        <b>로컬 개발은 사람이 읽는 컬러 출력, 운영은 JSON</b> — 환경 변수 하나로 렌더러만 바꾸면 됩니다.
+        structlog 는 이 전환을 위해 만들어진 물건이라고 봐도 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가장 짧은 길 — 포매터만 바꾸기</h4>
+      <div class="dep"><code>uv add python-json-logger</code></div>
+      <pre class="code" data-lang="python"><code>LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "json": {
+            "()": "pythonjsonlogger.json.JsonFormatter",
+            "fmt": "%(asctime)s %(levelname)s %(name)s %(message)s "
+                   "%(module)s %(funcName)s %(lineno)d",
+            "rename_fields": {"asctime": "timestamp", "levelname": "level"},
+            "json_ensure_ascii": False,     # 한글이 유니코드 이스케이프로 안 깨지게
+        },
+    },
+    "handlers": {"console": {"class": "logging.StreamHandler",
+                             "stream": "ext://sys.stdout",
+                             "formatter": "json"}},
+    "root": {"level": "INFO", "handlers": ["console"]},
+}</code></pre>
+      <pre class="code" data-lang="python"><code># extra 로 필드를 얹습니다 (표준 logging 방식)
+logger.info("결제 실패", extra={"order": "A-991", "user_id": 1234,
+                                "amount": 39000})
+# → {"timestamp":"...","level":"ERROR","message":"결제 실패",
+#    "order":"A-991","user_id":1234,"amount":39000}
+
+# ⚠ extra 키가 LogRecord 의 기존 속성과 겹치면 KeyError 가 납니다
+#   금지어: name, msg, args, levelname, module, exc_info, message ...
+logger.info("x", extra={"module": "billing"})   # ❌ 터집니다
+logger.info("x", extra={"app_module": "billing"})  # ✅</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>extra</code> 의 한계</b> — 매번 dict 를 손으로 넘겨야 하고,
+        <b>요청 전체에 공통으로 붙는 값</b>(request_id 등)을 다루기가 번거롭습니다.
+        그래서 실무에서는 <b>Filter 로 자동 주입</b>(LOG 09)하거나 <b>structlog 의 bind</b> 를 씁니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">structlog 실전 설정 한 벌</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">앱 로그와 서드파티 로그를 같은 JSON 으로 합치기</h4>
+    <div class="dep"><code>uv add structlog</code> · 표준 logging 과 함께 씁니다(대체가 아닙니다)</div>
+    <pre class="code" data-lang="python"><code># app/logging_config.py
+import logging.config, os, sys
+import structlog
+
+DEV = os.getenv("ENV", "dev") == "dev"
+
+# ── ① 앱 로그와 서드파티 로그가 공통으로 지나갈 처리기들
+shared_processors = [
+    structlog.contextvars.merge_contextvars,       # request_id 등 컨텍스트 병합
+    structlog.stdlib.add_logger_name,              # "logger": "app.billing"
+    structlog.stdlib.add_log_level,                # "level": "info"
+    structlog.processors.TimeStamper(fmt="iso", utc=True),
+    structlog.processors.StackInfoRenderer(),
+    structlog.processors.format_exc_info,          # 예외를 문자열로
+    structlog.processors.UnicodeDecoder(),
+]
+
+# ── ② 개발이면 컬러 콘솔, 운영이면 JSON
+renderer = (structlog.dev.ConsoleRenderer(colors=True) if DEV
+            else structlog.processors.JSONRenderer(ensure_ascii=False))
+
+logging.config.dictConfig({
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "structured": {
+            "()": structlog.stdlib.ProcessorFormatter,
+            # 표준 logging 으로 들어온 로그도 같은 처리기를 태웁니다
+            "foreign_pre_chain": shared_processors,
+            "processors": [
+                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                renderer,
+            ],
+        },
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler",
+                    "stream": "ext://sys.stdout",
+                    "formatter": "structured"},
+    },
+    "root": {"level": os.getenv("LOG_LEVEL", "INFO"), "handlers": ["console"]},
+    "loggers": {"urllib3": {"level": "WARNING"},
+                "botocore": {"level": "WARNING"}},
+})
+
+# ── ③ structlog 자신의 설정 — 최종 출력은 표준 logging 에 맡깁니다
+structlog.configure(
+    processors=shared_processors + [
+        structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+    ],
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,      # ★ 성능: 로거를 한 번만 만듭니다
+)</code></pre>
+    <pre class="code" data-lang="python"><code># 쓰는 쪽
+import structlog
+log = structlog.get_logger(__name__)
+
+log.info("주문 생성", order_id="A-991", amount=39000)
+
+# 요청 단위 컨텍스트 (LOG 09 에서 미들웨어로 자동화합니다)
+structlog.contextvars.bind_contextvars(request_id="r-77", user_id=1234)
+log.info("결제 시도")          # request_id · user_id 가 자동으로 붙습니다
+structlog.contextvars.clear_contextvars()</code></pre>
+    <div class="note tip">
+      <b><code>foreign_pre_chain</code> 이 핵심입니다.</b>
+      이 한 줄 덕분에 <b>SQLAlchemy · uvicorn · requests 처럼 표준 logging 을 쓰는 로그</b>도
+      같은 타임스탬프 · 같은 필드 이름 · 같은 JSON 모양으로 나옵니다.
+      수집기 입장에서 <b>로그 종류가 한 가지</b>가 되는 것이 구조적 로깅의 절반입니다.
+    </div>
+    <div class="note info" style="margin-bottom:0">
+      <b><code>cache_logger_on_first_use=True</code></b> 는 운영에서 반드시 켭니다.
+      로거 객체를 매번 만들지 않아 <b>체감할 만큼 빨라집니다.</b>
+      대신 설정을 <b>런타임에 다시 바꿀 수 없게</b> 되므로, 개발 중에는 꺼 두어도 됩니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">필드 이름을 미리 못 박습니다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">팀 표준 필드 — 처음에 정해 두세요</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">필드</th><th>예 · 규칙</th></tr>
+        <tr><td><code>timestamp</code></td><td>ISO 8601 · <b>UTC</b> (<code>2026-09-01T03:14:22.481Z</code>)</td></tr>
+        <tr><td><code>level</code></td><td>소문자 <code>info</code> / <code>error</code> 로 통일</td></tr>
+        <tr><td><code>event</code> · <code>message</code></td><td><b>변수를 넣지 않은 고정 문구</b> ★</td></tr>
+        <tr><td><code>service</code> · <code>env</code></td><td><code>billing</code> · <code>prod</code></td></tr>
+        <tr><td><code>request_id</code></td><td>요청 하나를 잇는 키 (LOG 09)</td></tr>
+        <tr><td><code>trace_id</code> · <code>span_id</code></td><td>OpenTelemetry 와 맞추기 (LOG 11)</td></tr>
+        <tr><td><code>duration_ms</code></td><td>숫자로 — 문자열 <code>"12ms"</code> 금지</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>event 에 변수를 넣지 마세요.</b>
+        <code>"주문 A-991 생성"</code> 이라고 쓰면 <b>event 값이 주문마다 달라져</b>
+        “주문 생성이 몇 번 일어났나”를 셀 수 없습니다.
+        <b>문구는 고정, 변하는 값은 필드로</b> — 이것이 구조적 로깅의 첫 번째 규칙입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">카디널리티 — 로그 비용이 터지는 자리</h4>
+      <pre class="code" data-lang="python"><code># ❌ 값의 종류가 무한한 필드를 인덱싱 대상으로 두면
+log.info("조회", sql="SELECT * FROM orders WHERE id = 9912")  # 매번 다름
+log.info("요청", url="/api/orders/9912?ts=1756...")            # 매번 다름
+
+# ✅ 변하는 부분을 빼서 묶습니다
+log.info("조회", sql_template="SELECT * FROM orders WHERE id = ?",
+         rows=1, duration_ms=3)
+log.info("요청", route="/api/orders/{id}", status=200, duration_ms=12)
+#   → route 는 값의 종류가 수십 개뿐이라 집계·알림에 쓸 수 있습니다
+
+# ✅ 큰 본문은 통째로 넣지 말고 요약과 해시만
+log.debug("응답 수신", body_bytes=len(body),
+          body_sha256=hashlib.sha256(body).hexdigest()[:12])</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>ECS · OTel 필드 규약</b>을 참고하면 이름 짓기로 다투지 않습니다.
+        Elastic Common Schema 는 <code>service.name</code> · <code>event.action</code> ·
+        <code>error.type</code> 같은 이름을 정해 두었고,
+        OpenTelemetry 로그 규약도 거의 같은 이름을 씁니다.
+        <b>둘 중 하나를 골라 그대로 따르는 것</b>이 가장 빠릅니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 구조적 로깅의 핵심은 <b>“문구는 고정, 값은 필드로”</b> 한 문장입니다.
+    최소 변경으로 시작하려면 <b>python-json-logger 포매터 교체</b>,
+    제대로 하려면 <b>structlog + ProcessorFormatter</b> 로
+    <b>앱 로그와 서드파티 로그를 같은 JSON</b>으로 합칩니다.
+    필드 이름은 <b>ECS 나 OTel 규약</b>을 베껴 쓰세요.</div>
+</section>
+
+
+<!-- ==================== lg06 ==================== -->
+<section class="sec" id="lg06">
+  <div class="sec-head rv">
+    <span class="no">LOG 06</span>
+    <h2>파일 로테이션 — <span class="t">디스크를 채우지 않는 법</span></h2>
+    <p class="lead">
+      로그로 디스크가 100% 차면 <b>서비스가 죽습니다.</b> DB 도 못 쓰고, 배포도 안 되고, ssh 도 힘들어집니다.
+      로테이션은 있으면 좋은 기능이 아니라 <b>안 하면 반드시 사고가 나는 항목</b>입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 250" role="img" aria-label="RotatingFileHandler 의 파일 회전 방식을 원통 다섯 개로 보여 준다. 현재 쓰는 app.log 가 지정한 크기를 넘으면 app.log.1 로 이름이 바뀌고, 기존 app.log.1 은 app.log.2 로 밀려나며, backupCount 를 넘어선 가장 오래된 파일은 삭제된다. 아래쪽에는 TimedRotatingFileHandler 를 썼을 때 날짜가 파일 이름 뒤에 붙어 하루에 하나씩 쌓이는 모습이 시간축 위에 그려져 있다.">
+      <text x="16" y="18" class="lbl">크기로 자르기 — 넘치면 번호가 하나씩 밀리고 마지막은 지워집니다</text>
+
+      <ellipse class="cyl" cx="84" cy="46" rx="56" ry="10"/>
+      <path class="cyl" d="M28 46 V88 a56 10 0 0 0 112 0 V46"/>
+      <text x="84" y="70" class="val" text-anchor="middle">app.log</text>
+      <text x="84" y="84" class="ann ok-t" text-anchor="middle">쓰는 중</text>
+
+      <path class="fl ar" d="M144 66 L156 66"/>
+
+      <ellipse class="cyl" cx="216" cy="46" rx="56" ry="10"/>
+      <path class="cyl" d="M160 46 V88 a56 10 0 0 0 112 0 V46"/>
+      <text x="216" y="70" class="val" text-anchor="middle">app.log.1</text>
+      <text x="216" y="84" class="ann" text-anchor="middle">직전 파일</text>
+
+      <path class="fl ar" d="M276 66 L288 66"/>
+
+      <ellipse class="cyl" cx="348" cy="46" rx="56" ry="10"/>
+      <path class="cyl" d="M292 46 V88 a56 10 0 0 0 112 0 V46"/>
+      <text x="348" y="70" class="val" text-anchor="middle">app.log.2</text>
+
+      <path class="fl ar" d="M408 66 L420 66"/>
+
+      <ellipse class="cyl" cx="480" cy="46" rx="56" ry="10"/>
+      <path class="cyl" d="M424 46 V88 a56 10 0 0 0 112 0 V46"/>
+      <text x="480" y="70" class="val" text-anchor="middle">app.log.5</text>
+
+      <path class="fl ar" d="M540 66 L552 66"/>
+
+      <ellipse class="cyl" cx="612" cy="46" rx="48" ry="10"/>
+      <path class="cyl" d="M564 46 V88 a48 10 0 0 0 96 0 V46"/>
+      <text x="612" y="70" class="val rs-t" text-anchor="middle">삭제</text>
+      <text x="612" y="84" class="ann rs-t" text-anchor="middle">backupCount 초과</text>
+
+      <text x="16" y="124" class="lbl">maxBytes=50MB · backupCount=5 → 디스크 사용량 상한이 300MB 로 계산됩니다</text>
+
+      <text x="16" y="152" class="lbl">시간으로 자르기 — 이름 뒤에 날짜가 붙어 하루에 하나씩 쌓입니다</text>
+
+      <text x="120" y="176" class="ann" text-anchor="middle">app.log.2026-09-01</text>
+      <text x="260" y="176" class="ann" text-anchor="middle">app.log.2026-09-02</text>
+      <text x="400" y="176" class="ann" text-anchor="middle">app.log.2026-09-03</text>
+      <text x="540" y="176" class="ann" text-anchor="middle">app.log (현재)</text>
+
+      <path class="ax ar" d="M40 194 L648 194"/>
+      <path class="ln" d="M120 188 L120 200"/>
+      <path class="ln" d="M260 188 L260 200"/>
+      <path class="ln" d="M400 188 L400 200"/>
+      <path class="ln" d="M540 188 L540 200"/>
+      <text x="120" y="214" class="tk" font-size="9" text-anchor="middle">09-01 자정</text>
+      <text x="260" y="214" class="tk" font-size="9" text-anchor="middle">09-02 자정</text>
+      <text x="400" y="214" class="tk" font-size="9" text-anchor="middle">09-03 자정</text>
+      <text x="540" y="214" class="tk" font-size="9" text-anchor="middle">지금</text>
+
+      <text x="16" y="240" class="lbl">둘 다 한 프로세스가 혼자 쓸 때만 안전합니다 — 여러 프로세스면 로그가 사라집니다</text>
+    </svg>
+    <div class="cap">크기로 자르면 <b>상한이 예측</b>되고, 날짜로 자르면 <b>“그날의 로그”</b>를 찾기 쉽습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">RotatingFileHandler — 크기 기준</h4>
+      <pre class="code" data-lang="python"><code>"handlers": {
+    "file": {
+        "class": "logging.handlers.RotatingFileHandler",
+        "filename": "logs/app.log",
+        "maxBytes": 50 * 1024 * 1024,   # 50MB 넘으면 회전
+        "backupCount": 5,               # app.log.1 ~ app.log.5 유지
+        "encoding": "utf-8",            # ★ 없으면 윈도우에서 cp949 로 깨집니다
+        "delay": True,                  # 첫 로그가 날 때 파일을 엽니다
+        "level": "INFO",
+        "formatter": "json",
+    },
+}
+# 디스크 상한 = maxBytes × (backupCount + 1) = 300MB
+#   ★ 이 계산을 문서에 적어 두세요. 용량 산정의 근거가 됩니다</code></pre>
+      <pre class="code" data-lang="python"><code># 코드로 직접 붙일 때
+from logging.handlers import RotatingFileHandler
+h = RotatingFileHandler("logs/app.log", maxBytes=50_000_000,
+                        backupCount=5, encoding="utf-8")
+
+# 회전 직후 압축하고 싶다면 rotator/namer 를 갈아 끼웁니다
+import gzip, shutil, os
+def gzip_rotator(source, dest):
+    with open(source, "rb") as fi, gzip.open(dest, "wb") as fo:
+        shutil.copyfileobj(fi, fo)
+    os.remove(source)
+h.rotator = gzip_rotator
+h.namer = lambda name: name + ".gz"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>encoding="utf-8"</code> 은 선택이 아닙니다.</b>
+        윈도우에서 이걸 빼면 시스템 기본 인코딩으로 열려
+        <b>한글 로그에서 <code>UnicodeEncodeError</code></b> 가 납니다.
+        로깅이 예외를 던지면 그 줄은 <b>표준 에러로 밀려나고 사라집니다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">TimedRotatingFileHandler — 시간 기준</h4>
+      <pre class="code" data-lang="python"><code>"handlers": {
+    "file": {
+        "class": "logging.handlers.TimedRotatingFileHandler",
+        "filename": "logs/app.log",
+        "when": "midnight",     # S M H D · midnight · W0~W6(요일)
+        "interval": 1,
+        "backupCount": 14,      # 14일치 보관
+        "encoding": "utf-8",
+        "utc": True,            # ★ 서버 시간대가 섞이면 조사 때 지옥입니다
+        "formatter": "json",
+    },
+}
+# 결과 파일 이름
+#   logs/app.log                 ← 지금 쓰는 것
+#   logs/app.log.2026-09-01
+#   logs/app.log.2026-08-31 ...</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">고르는 기준</th><th>추천</th></tr>
+        <tr><td>디스크 상한이 중요</td><td><b>Rotating</b>(크기)</td></tr>
+        <tr><td>“그날 로그” 를 자주 찾음</td><td><b>Timed</b>(날짜)</td></tr>
+        <tr><td>트래픽이 들쭉날쭉</td><td><b>Rotating</b> — 폭주해도 상한이 지켜짐</td></tr>
+        <tr><td>보관 기간 규정이 있음</td><td><b>Timed</b> + backupCount = 일수</td></tr>
+        <tr><td>컨테이너로 배포</td><td><b>둘 다 안 씀</b> — stdout 만</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Timed 는 트래픽 폭주에 무방비입니다.</b>
+        하루치 파일 하나가 40GB 가 되어도 자정까지 안 자릅니다.
+        <b>규정상 날짜별이 필요하면 Timed 를 쓰되, 디스크 사용률 알림</b>을 반드시 함께 거세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">여러 프로세스면 파이썬 로테이션이 깨집니다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무슨 일이 벌어지나</h4>
+      <pre class="code" data-lang="text"><code>gunicorn -w 4  →  워커 프로세스 4개가 같은 app.log 를 엽니다
+
+  워커 A: 50MB 도달 → app.log 를 app.log.1 로 rename → 새 app.log 생성
+  워커 B: (아직 옛 app.log 의 파일 핸들을 쥐고 있음)
+          → app.log.1 이 되어 버린 파일에 계속 씁니다
+  워커 C: 동시에 회전을 시도 → app.log.1 을 app.log.2 로 밀다가 충돌
+          → 파일이 통째로 사라지거나, 로그가 뒤섞입니다
+
+증상
+  · 로그 줄이 중간중간 사라진다
+  · app.log 가 비어 있는데 app.log.1 만 계속 커진다
+  · 윈도우에서는 PermissionError 가 나며 로그가 멈춘다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>이건 버그가 아니라 설계상 한계</b>입니다.
+        <code>RotatingFileHandler</code> 문서에도
+        <b>“여러 프로세스에서 한 파일에 쓰는 것은 지원하지 않는다”</b>고 적혀 있습니다.
+        gunicorn · uvicorn 워커 · Celery 워커가 있다면 <b>전부 해당됩니다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 가지 처방</h4>
+      <div class="tw"><table class="df" style="margin:0">
+        <thead><tr><th style="width:30%">방법</th><th>내용</th></tr></thead>
+        <tbody>
+          <tr><td><b>① stdout 만</b> ★</td><td>앱은 <b>stdout 에만</b> 쓰고, 파일 관리는 컨테이너 런타임 ·
+              systemd-journald · 수집기에 맡깁니다. <b>컨테이너 환경의 정답</b></td></tr>
+          <tr><td><b>② WatchedFileHandler<br>+ logrotate</b></td><td>파일 회전은 <b>OS 의 logrotate</b> 가 하고,
+              파이썬은 파일이 바뀐 것을 감지해 다시 엽니다. <b>리눅스 전통 방식</b>. 윈도우에서는 못 씁니다</td></tr>
+          <tr><td><b>③ 큐로 모으기</b></td><td><code>QueueHandler</code> 로 한 프로세스에 모아 거기서만 파일에 씁니다
+              (LOG 07). 또는 <code>concurrent-log-handler</code> 패키지로 파일 잠금을 씁니다</td></tr>
+        </tbody>
+      </table></div>
+      <pre class="code" data-lang="ini"><code># /etc/logrotate.d/myapp   ← ② 방식
+/var/log/myapp/*.log {
+    daily
+    rotate 14
+    size 100M
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate    # 또는 create + 앱이 WatchedFileHandler 사용
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>copytruncate</code> vs <code>create</code></b> —
+        <code>copytruncate</code> 는 파일을 복사한 뒤 0으로 자르므로 앱이 아무것도 몰라도 되지만,
+        <b>복사 중에 쓰인 로그가 유실</b>될 수 있습니다.
+        <code>create</code> + <code>WatchedFileHandler</code> 조합이 <b>유실 없는 정석</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">컨테이너면 파일을 쓰지 않습니다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 컨테이너 안에서 파일 로그</h5>
+      <pre class="code" data-lang="python"><code>"handlers": {
+    "file": {"class": "logging.handlers.RotatingFileHandler",
+             "filename": "/app/logs/app.log", ...}
+}</code></pre>
+      <p>컨테이너가 죽으면 <b>로그도 같이 사라집니다.</b>
+      볼륨을 붙여도 <b>여러 파드가 같은 경로에 쓰면 섞이고</b>,
+      파드 이름별로 나누면 <b>파일이 무한히 늘어납니다.</b>
+      게다가 디스크가 차면 <b>노드 전체</b>가 영향을 받습니다.</p>
+    </div>
+    <div class="good">
+      <h5>✅ stdout 한 곳으로만</h5>
+      <pre class="code" data-lang="python"><code>"handlers": {
+    "console": {"class": "logging.StreamHandler",
+                "stream": "ext://sys.stdout",
+                "formatter": "json"}
+},
+"root": {"level": "INFO", "handlers": ["console"]}</code></pre>
+      <pre class="code" data-lang="bash"><code># 파일 관리는 런타임이 합니다
+docker run --log-driver json-file \
+  --log-opt max-size=50m --log-opt max-file=5 myapp
+
+# 쿠버네티스면 노드의 로그 로테이션 설정 + 수집기(DaemonSet)</code></pre>
+      <p><b>12-Factor App 원칙</b> 그대로입니다 —
+      앱은 <b>이벤트 스트림을 stdout 에 흘려보낼 뿐</b>,
+      어디에 저장할지는 <b>실행 환경이 정합니다.</b></p>
+    </div>
+  </div>
+  <div class="note tip rv">
+    <b>그럼 파일 로그는 언제 쓰나</b> — <b>온프레미스 · 윈도우 서비스 · 데스크톱 앱 · 배치 스크립트</b>처럼
+    실행 환경이 로그를 걷어 가 주지 않는 곳입니다.
+    이 경우에도 <b>단일 프로세스인지</b> 먼저 확인하고, 아니라면 위의 ②·③ 처방을 쓰세요.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 컨테이너면 <b>stdout 하나</b>로 끝냅니다.
+    파일에 써야 한다면 <b>크기 기준 <code>RotatingFileHandler</code> + <code>encoding="utf-8"</code></b> 이 기본이고,
+    <b>디스크 상한 = maxBytes × (backupCount+1)</b> 을 계산해 문서에 적습니다.
+    <b>프로세스가 여러 개면 파이썬 로테이션은 깨집니다</b> — logrotate 나 큐로 넘기세요.</div>
+</section>
+
+
+<!-- ==================== lg07 ==================== -->
+<section class="sec" id="lg07">
+  <div class="sec-head rv">
+    <span class="no">LOG 07</span>
+    <h2>성능 — <span class="t">로깅이 느려지는 지점</span>은 세 군데뿐</h2>
+    <p class="lead">
+      로깅은 보통 공짜에 가깝습니다. 그런데 <b>초당 수만 줄</b>을 찍거나
+      <b>네트워크로 바로 보내는</b> 순간 갑자기 병목이 됩니다.
+      비싼 곳이 어디인지 알면 고치는 방법도 정해져 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 278" role="img" aria-label="로그 한 줄을 남길 때 드는 상대적 비용을 막대그래프로 비교한다. 레벨이 꺼져 있어 그냥 반환되는 경우가 가장 싸고, f-string 으로 메시지를 미리 만들었다가 버리는 경우가 그다음이며, 큐로 넘기는 경우도 싼 편이다. 콘솔에 실제로 출력하는 경우와 파일에 써서 flush 하는 경우가 가장 비싸다. 세로축은 상대적 비용이며 환경마다 값이 다르다는 점을 밝히고 있다.">
+      <text x="16" y="18" class="lbl">로그 한 줄의 상대적 비용 — 비싼 것은 언제나 입출력입니다</text>
+      <text x="16" y="36" class="unit">세로축 = 상대적 비용 (하드웨어 · 디스크 · 터미널에 따라 크게 달라집니다)</text>
+
+      <path class="gr" d="M60 162 L648 162"/>
+      <path class="gr" d="M60 125 L648 125"/>
+      <path class="gr" d="M60 88 L648 88"/>
+      <path class="gr" d="M60 50 L648 50"/>
+      <path class="ax" d="M60 200 L648 200"/>
+      <path class="ax" d="M60 50 L60 200"/>
+
+      <text x="52" y="166" class="tk" text-anchor="end">25</text>
+      <text x="52" y="129" class="tk" text-anchor="end">50</text>
+      <text x="52" y="92" class="tk" text-anchor="end">75</text>
+      <text x="52" y="54" class="tk" text-anchor="end">100</text>
+
+      <rect class="bar bar-mut" x="80" y="197" width="70" height="3"/>
+      <text x="115" y="191" class="ann" text-anchor="middle">1</text>
+      <text x="115" y="216" class="ann" text-anchor="middle">레벨 꺼짐</text>
+      <text x="115" y="230" class="ann" text-anchor="middle">즉시 반환</text>
+
+      <rect class="bar" x="190" y="182" width="70" height="18"/>
+      <text x="225" y="176" class="ann" text-anchor="middle">12</text>
+      <text x="225" y="216" class="ann" text-anchor="middle">f-string 낭비</text>
+      <text x="225" y="230" class="ann" text-anchor="middle">만들고 버림</text>
+
+      <rect class="bar" x="300" y="110" width="70" height="90"/>
+      <text x="335" y="104" class="ann" text-anchor="middle">60</text>
+      <text x="335" y="216" class="ann" text-anchor="middle">콘솔 출력</text>
+      <text x="335" y="230" class="ann" text-anchor="middle">터미널 · 파이프</text>
+
+      <rect class="bar" x="410" y="58" width="70" height="142"/>
+      <text x="445" y="52" class="ann" text-anchor="middle">95</text>
+      <text x="445" y="216" class="ann" text-anchor="middle">파일 쓰기</text>
+      <text x="445" y="230" class="ann" text-anchor="middle">flush 포함</text>
+
+      <rect class="bar" x="520" y="177" width="70" height="23"/>
+      <text x="555" y="171" class="ann ok-t" text-anchor="middle">15</text>
+      <text x="555" y="216" class="ann ok-t" text-anchor="middle">큐로 넘김</text>
+      <text x="555" y="230" class="ann ok-t" text-anchor="middle">QueueHandler</text>
+
+      <text x="16" y="254" class="lbl">고치는 순서 — ① 레벨을 정직하게 ② 포매팅을 미루기 ③ 입출력을 큐 뒤로</text>
+      <text x="16" y="270" class="lbl">네트워크로 바로 보내는 핸들러는 이 그래프 밖입니다 — 반드시 큐를 끼우세요</text>
+    </svg>
+    <div class="cap">비싼 것은 <b>언제나 입출력</b>입니다 — 큐 하나로 요청 스레드에서 그 비용을 떼어냅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① lazy 포매팅 — <code>%s</code> 를 쓰는 이유</h4>
+      <pre class="code" data-lang="python"><code># ❌ 레벨이 꺼져 있어도 문자열이 먼저 만들어집니다
+logger.debug(f"주문 {order!r} 사용자 {user!r} 항목 {items!r}")
+#   repr() 세 번 + 문자열 결합이 '무조건' 실행된 뒤 버려집니다
+
+# ✅ 레벨이 켜져 있을 때만 만들어집니다
+logger.debug("주문 %r 사용자 %r 항목 %r", order, user, items)
+
+# ✅ 계산 자체가 비싸면 미리 물어봅니다
+if logger.isEnabledFor(logging.DEBUG):
+    logger.debug("응답 전문 %s", json.dumps(payload, ensure_ascii=False))
+
+# ✅ structlog 는 키=값이라 이 문제가 거의 없습니다
+log.debug("주문 조회", order_id=order.id, item_count=len(items))</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>ruff 가 잡아 줍니다</b> — <code>G004</code>(logging-f-string) 규칙을 켜면
+        f-string 로깅을 전부 찾아냅니다. <code>[tool.ruff.lint] select = ["G"]</code> 한 줄이면 됩니다.
+        팀 규칙으로 <b>한 번에 정리</b>하기 좋은 항목입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 얼마나 차이 나는지 직접 재기</h4>
+      <pre class="code" data-lang="python"><code># bench_log.py
+import logging, timeit
+
+logging.basicConfig(level=logging.INFO)   # DEBUG 는 꺼진 상태
+log = logging.getLogger("bench")
+payload = {"a": list(range(100)), "b": "x" * 200}
+
+def lazy():   log.debug("payload %s", payload)
+def eager():  log.debug(f"payload {payload}")
+def guarded():
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("payload %s", payload)
+
+for f in (lazy, eager, guarded):
+    t = timeit.timeit(f, number=200_000)
+    print(f"{f.__name__:8s} {t:.3f}s")
+
+# 결과의 순서는 환경과 무관하게 항상 같습니다
+#   guarded  &lt; lazy  &lt;&lt;  eager
+#   (eager 만 payload 를 20만 번 문자열로 만듭니다)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>절대값을 외우지 마세요.</b> 파이썬 버전 · CPU · 터미널 종류에 따라 몇 배씩 달라집니다.
+        중요한 건 <b>순서</b>이고, 그 순서는 어디서 재도 같습니다.
+        “우리 서버에서 얼마인가”는 <b>위 스크립트를 그 서버에서</b> 돌려 보면 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">QueueHandler 로 입출력을 떼어내기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">구조 — 요청 스레드는 큐에 넣기만 합니다</h4>
+      <pre class="code" data-lang="text"><code>[요청 스레드]  logger.info(...)
+                 │
+                 ▼  put()  ← 아주 쌉니다 (메모리 큐)
+            ┌──────────┐
+            │  Queue   │
+            └──────────┘
+                 │
+                 ▼  get()   ← 별도 스레드 하나가 소비
+        [QueueListener 스레드]
+                 │
+                 ├─ FileHandler   (디스크 대기)
+                 ├─ Sentry        (네트워크 대기)
+                 └─ StreamHandler
+
+★ 느린 목적지가 요청 처리 시간에 영향을 주지 않습니다
+★ 프로세스가 죽을 때 큐에 남은 로그는 사라질 수 있습니다 → 종료 시 flush 필요</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>Python 3.12 부터는 dictConfig 에서 바로 구성됩니다.</b>
+        그 전에는 코드로 <code>QueueListener</code> 를 만들고 <code>start()</code> 를 직접 불러야 했습니다.
+        아래에 두 방식을 모두 적어 두었습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설정 두 가지 방식</h4>
+      <pre class="code" data-lang="python"><code># ── Python 3.12+ : dictConfig 만으로
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"json": {"()": "pythonjsonlogger.json.JsonFormatter"}},
+    "handlers": {
+        "file": {"class": "logging.handlers.RotatingFileHandler",
+                 "filename": "logs/app.log", "maxBytes": 50_000_000,
+                 "backupCount": 5, "encoding": "utf-8",
+                 "formatter": "json"},
+        "queue": {
+            "class": "logging.handlers.QueueHandler",
+            "handlers": ["file"],       # ★ 리스너가 뒤에서 처리할 핸들러들
+            "respect_handler_level": True,
+        },
+    },
+    "root": {"level": "INFO", "handlers": ["queue"]},
+}
+import logging.config, atexit
+logging.config.dictConfig(LOGGING)
+
+# 리스너를 켜고, 종료할 때 반드시 멈춥니다(남은 로그 flush)
+qh = logging.getHandlerByName("queue")      # 3.12+
+if qh and qh.listener:
+    qh.listener.start()
+    atexit.register(qh.listener.stop)</code></pre>
+      <pre class="code" data-lang="python"><code># ── 3.11 이하 : 코드로 직접
+import queue, atexit, logging
+from logging.handlers import QueueHandler, QueueListener
+
+q = queue.Queue(-1)                     # 무제한 (메모리 주의)
+file_h = logging.handlers.RotatingFileHandler("logs/app.log",
+            maxBytes=50_000_000, backupCount=5, encoding="utf-8")
+
+listener = QueueListener(q, file_h, respect_handler_level=True)
+listener.start()
+atexit.register(listener.stop)          # ★ 빠뜨리면 종료 시 로그가 날아갑니다
+
+root = logging.getLogger()
+root.handlers = [QueueHandler(q)]
+root.setLevel(logging.INFO)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>listener.stop()</code> 을 빠뜨리면</b> 프로세스가 끝날 때
+        <b>큐에 남아 있던 마지막 로그가 사라집니다.</b>
+        하필 <b>죽기 직전의 로그</b>가 가장 중요한 로그라서, 이게 빠지면 조사 자체가 불가능해집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">끄는 방법과 재는 방법</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전체를 잠깐 끄기 · 비용 줄이기</h4>
+      <pre class="code" data-lang="python"><code># ① 벤치마크 구간에서 로깅을 통째로 끄기
+logging.disable(logging.CRITICAL)   # 이 레벨 이하 전부 무시 (전역)
+...
+logging.disable(logging.NOTSET)     # 원복
+
+# ② 레코드에 담는 정보 줄이기 — 의외로 큽니다
+logging.logProcesses = False    # os.getpid() 호출 안 함
+logging.logThreads = False      # threading 정보 안 담음
+logging.logMultiprocessing = False
+logging.raiseExceptions = False # 운영에서는 로깅 자체의 예외를 조용히 (기본 True)
+
+# ③ 안 쓰는 전파 끊기 — 부모까지 올라가는 비용이 사라집니다
+logging.getLogger("app.hotpath").propagate = False
+
+# ④ 정말 뜨거운 루프라면 아예 부르지 않기
+DEBUG_ON = logger.isEnabledFor(logging.DEBUG)   # 루프 밖에서 한 번
+for row in millions:
+    if DEBUG_ON:
+        logger.debug("row %s", row)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>logging.disable</code> 은 전역입니다.</b>
+        라이브러리 코드나 요청 처리 중에 쓰면 <b>다른 스레드의 로그까지 사라집니다.</b>
+        벤치마크 스크립트나 테스트에서만 쓰세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">진짜 병목인지 확인하는 법</h4>
+      <pre class="code" data-lang="bash"><code># ① 실행 중인 프로세스를 건드리지 않고 샘플링
+uvx py-spy top --pid 12345
+uvx py-spy record --pid 12345 -o flame.svg -d 30
+#   flame.svg 에서 logging/__init__.py 나 emit/flush 가
+#   눈에 띄게 넓으면 그때 손을 대세요
+
+# ② 요청 하나를 쪼개 보기
+uvx py-spy dump --pid 12345      # 지금 어디서 멈춰 있는지
+
+# ③ 표준 프로파일러
+python -m cProfile -s cumtime app.py | head -40</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">증상</th><th>먼저 볼 곳</th></tr>
+        <tr><td>p99 만 튄다</td><td>파일 <b>flush</b> · 디스크 대기</td></tr>
+        <tr><td>전체가 느리다</td><td><b>DEBUG 가 켜져</b> 있는지</td></tr>
+        <tr><td>가끔 멈춘다</td><td><b>동기 네트워크 핸들러</b></td></tr>
+        <tr><td>CPU 가 높다</td><td><b>f-string</b> · 큰 객체 repr</td></tr>
+        <tr><td>메모리가 샌다</td><td>큐 무제한 · 리스너 미기동</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>대부분의 “로깅이 느려요” 는 로깅 문제가 아닙니다.</b>
+        운영에 DEBUG 가 켜져 있거나, <b>루프 안에서 건별로 INFO 를 찍고</b> 있거나,
+        <b>거대한 객체를 repr 로 찍고</b> 있는 경우가 압도적입니다.
+        <b>picologging 을 검토하기 전에</b> 이 셋부터 확인하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 비싼 것은 <b>입출력</b>이고, 두 번째가 <b>쓸데없이 만든 문자열</b>입니다.
+    <code>%s</code> 로 넘기고(<code>ruff G004</code> 로 강제),
+    느린 목적지는 <b><code>QueueHandler</code> 뒤로</b> 보내고,
+    <b>종료 시 <code>listener.stop()</code></b> 을 잊지 마세요.
+    그리고 손대기 전에 <b>py-spy 로 진짜 병목인지 먼저 확인</b>합니다.</div>
+</section>
+
+
+<!-- ==================== lg08 ==================== -->
+<section class="sec" id="lg08">
+  <div class="sec-head rv">
+    <span class="no">LOG 08</span>
+    <h2>프레임워크 연동 — <span class="t">Django · Flask · FastAPI</span></h2>
+    <p class="lead">
+      프레임워크마다 <b>자기 로거를 미리 설정해 둡니다.</b>
+      내 설정과 그 설정이 겹치면 <b>같은 줄이 두 번</b> 찍히거나 <b>포맷이 뒤섞입니다.</b>
+      해결의 원칙은 하나입니다 — <b>핸들러는 root 한 곳에만.</b>
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 270" role="img" aria-label="uvicorn 로그가 두 번 찍히는 문제와 그 해결을 좌우로 대조한 그림. 왼쪽은 고치기 전으로, uvicorn 이 자기 로거에 붙여 둔 StreamHandler 와 root 에 붙인 핸들러가 둘 다 동작해 같은 줄이 두 번 나온다. 오른쪽은 고친 뒤로, uvicorn 로거의 핸들러 목록을 비우고 전파만 켜 두어 root 핸들러 한 곳에서만 같은 JSON 포맷으로 한 번 출력된다.">
+      <text x="16" y="18" class="lbl">중복 출력의 정체 — 핸들러가 두 곳에 붙어 있습니다</text>
+
+      <text x="166" y="40" class="ann rs-t" text-anchor="middle">고치기 전 — 두 번 나옴</text>
+      <text x="507" y="40" class="ann ok-t" text-anchor="middle">고친 뒤 — 한 번만</text>
+
+      <rect class="bx" x="16" y="52" width="300" height="32"/>
+      <text x="28" y="72" class="val">root · StreamHandler</text>
+
+      <rect class="bx" x="350" y="52" width="314" height="32"/>
+      <text x="362" y="72" class="val">root · StreamHandler (JSON)</text>
+
+      <text x="172" y="110" class="ann">propagate=True</text>
+      <path class="fl ar" d="M166 122 L166 88"/>
+
+      <text x="513" y="110" class="ann">propagate=True</text>
+      <path class="fl ar" d="M507 122 L507 88"/>
+
+      <rect class="bx bx-warn" x="16" y="126" width="300" height="32"/>
+      <text x="28" y="146" class="val rs-t">uvicorn.access · StreamHandler</text>
+
+      <rect class="bx bx-ok" x="350" y="126" width="314" height="32"/>
+      <text x="362" y="146" class="val ok-t">uvicorn.access · handlers=[]</text>
+
+      <rect class="bx bx-warn" x="16" y="176" width="300" height="44"/>
+      <text x="28" y="196" class="val rs-t">같은 줄이 두 번</text>
+      <text x="28" y="212" class="ann">uvicorn 이 붙인 핸들러 + root 핸들러</text>
+
+      <rect class="bx bx-ok" x="350" y="176" width="314" height="44"/>
+      <text x="362" y="196" class="val ok-t">한 번만, 같은 포맷으로</text>
+      <text x="362" y="212" class="ann">핸들러는 root 한 곳에만 둡니다</text>
+
+      <text x="16" y="246" class="lbl">규칙 — 프레임워크 로거는 handlers 를 비우고 propagate 만 켜 둡니다</text>
+      <text x="16" y="262" class="lbl">로거 트리를 눈으로 보려면 logging_tree.printout() 한 줄이면 됩니다</text>
+    </svg>
+    <div class="cap">중복 출력은 언제나 <b>핸들러가 두 곳에 붙은 것</b>입니다 — 한 곳만 남기면 끝납니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Django — <code>settings.LOGGING</code> 이 dictConfig 입니다</h4>
+      <pre class="code" data-lang="python"><code># settings.py  — 그대로 dictConfig 문법입니다
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "json": {"()": "pythonjsonlogger.json.JsonFormatter",
+                 "fmt": "%(asctime)s %(levelname)s %(name)s %(message)s"},
+    },
+    "filters": {
+        "require_debug_false": {"()": "django.utils.log.RequireDebugFalse"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler",
+                    "stream": "ext://sys.stdout", "formatter": "json"},
+    },
+    "root": {"level": "INFO", "handlers": ["console"]},
+    "loggers": {
+        # 4xx/5xx 응답과 예외
+        "django.request": {"level": "WARNING", "propagate": True},
+        # ★ SQL 전문 — 개발에서만 켭니다. 운영에서 켜면 로그가 폭발합니다
+        "django.db.backends": {"level": "WARNING", "propagate": True},
+        "django.security": {"level": "WARNING", "propagate": True},
+        "myapp": {"level": "DEBUG" if DEBUG else "INFO", "propagate": True},
+    },
+}
+# LOGGING_CONFIG = None 으로 두면 Django 가 dictConfig 를 부르지 않습니다
+#   (내가 직접 부르고 싶을 때만)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Django 의 기본 설정을 덮어쓰고 있다는 걸 잊지 마세요.</b>
+        Django 는 자체 <code>DEFAULT_LOGGING</code> 을 가지고 있고,
+        내 <code>LOGGING</code> 은 그것과 <b>병합</b>됩니다.
+        <code>django.request</code> 를 지정하지 않으면 <b>500 에러가 이메일로 발송</b>되는
+        기본 핸들러(<code>mail_admins</code>)가 살아 있을 수 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Flask — <code>app.logger</code> 와 dictConfig 순서</h4>
+      <pre class="code" data-lang="python"><code>import logging.config
+from flask import Flask, request, g
+
+# ★ Flask 객체를 만들기 '전에' 설정해야 합니다
+logging.config.dictConfig({
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"json": {"()": "pythonjsonlogger.json.JsonFormatter"}},
+    "handlers": {"console": {"class": "logging.StreamHandler",
+                             "stream": "ext://sys.stdout",
+                             "formatter": "json"}},
+    "root": {"level": "INFO", "handlers": ["console"]},
+})
+
+app = Flask(__name__)
+# app.logger 는 이름이 "flask.app" 인 평범한 표준 로거입니다
+app.logger.info("앱 시작")
+
+@app.get("/orders")
+def orders():
+    app.logger.info("주문 조회", extra={"path": request.path})
+    return {"ok": True}
+
+# werkzeug 액세스 로그를 조용히
+logging.getLogger("werkzeug").setLevel(logging.WARNING)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Flask 는 앱 객체를 만들 때 로거를 초기화</b>합니다.
+        그래서 <code>dictConfig</code> 를 <b>나중에</b> 부르면
+        <code>app.logger</code> 만 옛 설정을 들고 남습니다.
+        <b>설정 → 앱 생성</b> 순서를 지키세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">uvicorn · gunicorn 로거 가로채기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">uvicorn 이 만드는 세 로거</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">로거 이름</th><th>내용</th></tr>
+        <tr><td><code>uvicorn</code></td><td>서버 시작 · 종료 메시지</td></tr>
+        <tr><td><code>uvicorn.error</code></td><td>이름과 달리 <b>일반 서버 로그</b>도 여기로 옵니다</td></tr>
+        <tr><td><code>uvicorn.access</code></td><td><b>액세스 로그</b> — <code>GET /orders 200</code></td></tr>
+        <tr><td><code>fastapi</code></td><td>FastAPI 자체는 거의 로그를 내지 않습니다</td></tr>
+      </table></div>
+      <pre class="code" data-lang="python"><code># app/logging_config.py 에 추가 — 핸들러를 비우고 전파만 켭니다
+"loggers": {
+    "uvicorn":        {"handlers": [], "level": "INFO", "propagate": True},
+    "uvicorn.error":  {"handlers": [], "level": "INFO", "propagate": True},
+    "uvicorn.access": {"handlers": [], "level": "INFO", "propagate": True},
+    "gunicorn.error": {"handlers": [], "level": "INFO", "propagate": True},
+    "gunicorn.access":{"handlers": [], "level": "INFO", "propagate": True},
+}
+# ★ "handlers": [] 가 핵심입니다.
+#   uvicorn 이 기본으로 달아 둔 StreamHandler 를 걷어내고,
+#   root 에 있는 내 JSON 핸들러 하나만 쓰게 만듭니다.</code></pre>
+      <pre class="code" data-lang="bash"><code># 실행 — uvicorn 이 자기 로그 설정을 하지 않게
+uvicorn app.main:app --log-config=None
+#   또는 파이썬에서 직접 띄우기 (아래 카드)
+
+# gunicorn + uvicorn 워커
+gunicorn app.main:app -k uvicorn.workers.UvicornWorker \
+  -w 4 --access-logfile - --error-logfile -
+#   '-' 는 stdout 을 뜻합니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">진입점에서 순서를 못 박기</h4>
+      <pre class="code" data-lang="python"><code># app/main.py
+from app.logging_config import setup
+setup()                      # ★ 무조건 맨 위. import 보다 먼저 실행되게
+
+import logging
+from fastapi import FastAPI
+
+logger = logging.getLogger(__name__)
+app = FastAPI()
+
+@app.on_event("startup")
+async def on_start():
+    logger.info("서버 시작 workers=%s", os.getenv("WEB_CONCURRENCY"))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000,
+                log_config=None)     # ★ uvicorn 설정을 통째로 끄기</code></pre>
+      <pre class="code" data-lang="python"><code># 액세스 로그를 내 미들웨어로 직접 남기는 편이 낫습니다
+#   (uvicorn 액세스 로그는 필드가 고정이라 커스터마이즈가 어렵습니다)
+import time
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class AccessLogMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        t0 = time.perf_counter()
+        response = await call_next(request)
+        logger.info("http_request",
+                    extra={"method": request.method,
+                           "route": request.scope.get("route").path
+                                    if request.scope.get("route") else "-",
+                           "status": response.status_code,
+                           "duration_ms": round((time.perf_counter()-t0)*1000, 1)})
+        return response
+
+app.add_middleware(AccessLogMiddleware)
+# 그리고 uvicorn.access 는 꺼 둡니다
+logging.getLogger("uvicorn.access").disabled = True</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>route.path</code> 를 쓰는 이유</b> — <code>request.url.path</code> 는
+        <code>/orders/9912</code> 처럼 <b>값이 무한히 다양</b>합니다.
+        라우트 템플릿(<code>/orders/{id}</code>)을 쓰면 <b>집계와 알림이 가능</b>해집니다(LOG 05 카디널리티).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">진단 3분 절차</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">“로그가 두 번 나와요 / 안 나와요” 를 3분 안에 끝내기</h4>
+    <pre class="code" data-lang="python"><code># ① 로거 트리를 통째로 찍어 봅니다  (uv add --dev logging_tree)
+import logging_tree
+logging_tree.printout()
+
+#  &lt;--""
+#     Level INFO
+#     Handler Stream &lt;stdout&gt;             ← root 핸들러 (있어야 함)
+#     |
+#     o&lt;--"uvicorn"
+#     |   Level INFO
+#     |   Handler Stream &lt;stderr&gt;          ← ❌ 여기! 중복의 원인
+#     |
+#     o&lt;--"app"
+#         Level INFO
+#         Propagate OFF                    ← ❌ 여기! 로그가 안 나오는 원인
+
+# ② 프로그램으로 확인
+for name in ("", "uvicorn", "uvicorn.access", "app", "app.billing"):
+    lg = logging.getLogger(name)
+    print(f"{name or 'root':18s} level={logging.getLevelName(lg.level):8s} "
+          f"eff={logging.getLevelName(lg.getEffectiveLevel()):8s} "
+          f"propagate={lg.propagate} handlers={lg.handlers}")</code></pre>
+    <div class="tw"><table class="df" style="margin:0">
+      <thead><tr><th style="width:30%">증상</th><th>원인과 처방</th></tr></thead>
+      <tbody>
+        <tr><td><b>두 번 나온다</b></td><td>자식 로거에 핸들러가 있고 <code>propagate=True</code> →
+            자식의 <code>handlers</code> 를 <b>비우거나</b> <code>propagate=False</code></td></tr>
+        <tr><td><b>안 나온다</b></td><td>① 로거 레벨 ② 핸들러 레벨 ③ <code>propagate=False</code> 인데 핸들러 없음
+            ④ <code>disable_existing_loggers</code> 가 True</td></tr>
+        <tr><td><b>포맷이 섞인다</b></td><td>프레임워크 핸들러가 살아 있음 → <code>handlers: []</code></td></tr>
+        <tr><td><b>액세스 로그만 다르다</b></td><td><code>uvicorn.access</code> 를 끄고 미들웨어로 직접 남기기</td></tr>
+        <tr><td><b>gunicorn 에서만 이상</b></td><td>워커 <code>fork</code> 이후 설정이 필요 →
+            <code>post_fork</code> 훅에서 다시 <code>dictConfig</code></td></tr>
+      </tbody>
+    </table></div>
+    <div class="note tip" style="margin-bottom:0">
+      <b>gunicorn 의 <code>post_fork</code> 훅</b> — 파일 핸들러나 큐 리스너처럼
+      <b>프로세스마다 따로 있어야 하는 자원</b>은 fork 이후에 만들어야 합니다.
+      <code>gunicorn.conf.py</code> 에 <code>def post_fork(server, worker): setup()</code> 를 두세요.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 원칙은 하나입니다 — <b>핸들러는 root 한 곳에만</b> 두고,
+    프레임워크 로거는 <code>{"handlers": [], "propagate": True}</code> 로 <b>비워서 넘겨받습니다.</b>
+    Django 는 <code>settings.LOGGING</code>, Flask 는 <b>앱 생성 전에 dictConfig</b>,
+    uvicorn 은 <code>log_config=None</code> 입니다.
+    이상하면 <b><code>logging_tree.printout()</code></b> 한 줄로 트리를 눈으로 보세요.</div>
+</section>
+
+
+<!-- ==================== lg09 ==================== -->
+<section class="sec" id="lg09">
+  <div class="sec-head rv">
+    <span class="no">LOG 09</span>
+    <h2>요청 추적 — <span class="t">request-id</span> 를 모든 줄에 붙이기</h2>
+    <p class="lead">
+      운영 로그에서 가장 자주 하는 일은 <b>“이 사용자의 이 요청이 무슨 일을 겪었나”</b>를 따라가는 것입니다.
+      동시에 수백 요청이 도는 서버에서 그게 가능하려면
+      <b>같은 요청에서 나온 줄에 같은 표식</b>이 있어야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 296" role="img" aria-label="요청 하나에 request id 가 붙는 과정을 시퀀스 다이어그램으로 보여 준다. 클라이언트가 POST 요청을 보내면 미들웨어가 request id 를 만들어 contextvars 에 저장하고, 라우트 핸들러로 요청을 넘긴다. 핸들러가 로그를 남기면 로깅 필터가 contextvars 에서 request id 를 읽어 레코드에 채워 넣는다. 응답이 돌아갈 때 X-Request-Id 헤더로 같은 값을 클라이언트에게 돌려주고, 미들웨어는 컨텍스트를 비운다.">
+      <text x="16" y="18" class="lbl">요청 하나에 표식 하나 — 미들웨어가 만들고 필터가 붙입니다</text>
+
+      <rect class="actr" x="32" y="30" width="100" height="26"/>
+      <text x="82" y="48" class="val" text-anchor="middle">클라이언트</text>
+      <rect class="actr" x="202" y="30" width="100" height="26"/>
+      <text x="252" y="48" class="val" text-anchor="middle">미들웨어</text>
+      <rect class="actr" x="382" y="30" width="100" height="26"/>
+      <text x="432" y="48" class="val" text-anchor="middle">핸들러</text>
+      <rect class="actr" x="552" y="30" width="100" height="26"/>
+      <text x="602" y="48" class="val" text-anchor="middle">logging</text>
+
+      <path class="life" d="M82 60 L82 252"/>
+      <path class="life" d="M252 60 L252 252"/>
+      <path class="life" d="M432 60 L432 252"/>
+      <path class="life" d="M602 60 L602 252"/>
+
+      <rect class="actv" x="247" y="70" width="10" height="172"/>
+      <rect class="actv" x="427" y="120" width="10" height="98"/>
+      <rect class="actv" x="597" y="142" width="10" height="40"/>
+
+      <text x="88" y="72" class="ann">POST /orders</text>
+      <path class="msg" d="M82 78 L244 78"/>
+
+      <path class="msg" d="M258 96 L306 96 L306 108 L262 108"/>
+      <text x="316" y="102" class="ann">request_id 생성 → contextvars 에 bind</text>
+
+      <text x="258" y="120" class="ann">요청 전달</text>
+      <path class="msg" d="M258 126 L424 126"/>
+
+      <text x="438" y="142" class="ann">log.info("주문 생성")</text>
+      <path class="msg" d="M438 148 L594 148"/>
+
+      <text x="352" y="192" class="ann">Filter 가 request_id 를 레코드에 주입</text>
+      <path class="msg" d="M608 166 L648 166 L648 178 L612 178"/>
+
+      <text x="266" y="206" class="ann">응답</text>
+      <path class="msg-a" d="M424 212 L262 212"/>
+
+      <text x="96" y="228" class="ann">200 OK · X-Request-Id: r-77</text>
+      <path class="msg-a" d="M244 234 L90 234"/>
+
+      <text x="16" y="272" class="lbl">contextvars 는 스레드와 asyncio 태스크마다 값이 따로입니다 — 섞이지 않습니다</text>
+      <text x="16" y="288" class="lbl">응답 헤더로 되돌려 주면 사용자가 문의할 때 그 값 하나로 바로 찾습니다</text>
+    </svg>
+    <div class="cap">미들웨어가 <b>만들고</b>, 필터가 <b>붙이고</b>, 응답 헤더로 <b>되돌려 줍니다</b> — 세 곳만 손대면 됩니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">표준 logging 으로 — contextvars + Filter</h4>
+      <pre class="code" data-lang="python"><code># app/logging_filters.py
+import contextvars, logging
+
+request_id_var = contextvars.ContextVar("request_id", default="-")
+user_id_var    = contextvars.ContextVar("user_id", default="-")
+
+class RequestIdFilter(logging.Filter):
+    """모든 LogRecord 에 request_id · user_id 를 채워 넣습니다."""
+    def filter(self, record):
+        record.request_id = request_id_var.get()
+        record.user_id    = user_id_var.get()
+        return True        # ★ 반드시 True — False 면 로그가 버려집니다</code></pre>
+      <pre class="code" data-lang="python"><code># dictConfig 에 등록하고 포맷에 넣습니다
+"filters": {"request_id": {"()": "app.logging_filters.RequestIdFilter"}},
+"formatters": {
+    "plain": {"format": "%(asctime)s %(levelname)-8s "
+                        "[%(request_id)s] %(name)s - %(message)s"},
+    "json": {"()": "pythonjsonlogger.json.JsonFormatter",
+             "fmt": "%(asctime)s %(levelname)s %(name)s %(message)s "
+                    "%(request_id)s %(user_id)s"},
+},
+"handlers": {"console": {"class": "logging.StreamHandler",
+                         "stream": "ext://sys.stdout",
+                         "formatter": "json",
+                         "filters": ["request_id"]}},</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>필터는 핸들러에 붙이세요.</b> 로거에 붙이면
+        <b>그 로거를 거치지 않는 서드파티 로그에는 안 붙습니다.</b>
+        핸들러에 붙이면 <b>그 핸들러로 나가는 모든 줄</b>에 적용됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">미들웨어 — 만들고, 헤더로 돌려주고, 비우기</h4>
+      <pre class="code" data-lang="python"><code># FastAPI / Starlette
+import uuid
+from starlette.middleware.base import BaseHTTPMiddleware
+from app.logging_filters import request_id_var
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        # 앞단(Nginx·게이트웨이)이 준 값이 있으면 그대로 이어받습니다
+        rid = request.headers.get("X-Request-Id") or uuid.uuid4().hex[:12]
+        token = request_id_var.set(rid)
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-Id"] = rid   # ★ 사용자에게 돌려주기
+            return response
+        finally:
+            request_id_var.reset(token)              # ★ 반드시 원복
+
+app.add_middleware(RequestIdMiddleware)</code></pre>
+      <pre class="code" data-lang="python"><code># Django 미들웨어
+class RequestIdMiddleware:
+    def __init__(self, get_response): self.get_response = get_response
+    def __call__(self, request):
+        rid = request.headers.get("X-Request-Id") or uuid.uuid4().hex[:12]
+        token = request_id_var.set(rid)
+        try:
+            response = self.get_response(request)
+            response["X-Request-Id"] = rid
+            return response
+        finally:
+            request_id_var.reset(token)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>reset(token)</code> 이 왜 필요한가</b> — 워커 스레드는 <b>재사용</b>됩니다.
+        원복하지 않으면 <b>다음 요청의 로그에 이전 요청의 id</b> 가 남을 수 있습니다.
+        <code>try / finally</code> 로 감싸는 것이 안전합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">LoggerAdapter 와 structlog</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">LoggerAdapter — 특정 구간에만 값을 붙일 때</h4>
+      <pre class="code" data-lang="python"><code>import logging
+
+class OrderAdapter(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        extra = kwargs.setdefault("extra", {})
+        extra.update(self.extra)      # 어댑터가 들고 있는 값
+        return msg, kwargs
+
+base = logging.getLogger(__name__)
+
+def process_order(order):
+    log = OrderAdapter(base, {"order_id": order.id, "shop_id": order.shop_id})
+    log.info("검증 시작")            # order_id · shop_id 자동 포함
+    log.info("결제 요청")
+    log.info("완료", extra={"amount": order.amount})</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">방법</th><th>언제</th></tr>
+        <tr><td><b>Filter</b> ★</td><td><b>모든 줄</b>에 붙는 값 (request_id · env · 버전)</td></tr>
+        <tr><td><b>LoggerAdapter</b></td><td>함수 · 클래스 <b>구간 단위</b> 값 (order_id)</td></tr>
+        <tr><td><code>extra=</code></td><td>그 <b>한 줄에만</b> 있는 값</td></tr>
+        <tr><td><b>structlog bind</b></td><td>위 셋을 <b>한 방식</b>으로 처리</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>어댑터는 중첩할 수 있습니다</b> — 어댑터를 감싼 어댑터도 동작합니다.
+        다만 이 지점에서 코드가 지저분해지기 시작하는데,
+        그 때가 <b>structlog 로 넘어갈 시점</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">structlog — 같은 일을 한 줄로</h4>
+      <pre class="code" data-lang="python"><code>import structlog
+from structlog.contextvars import (bind_contextvars, clear_contextvars,
+                                   bound_contextvars)
+
+log = structlog.get_logger()
+
+# 미들웨어에서
+async def dispatch(self, request, call_next):
+    clear_contextvars()
+    bind_contextvars(request_id=rid, path=request.url.path)
+    response = await call_next(request)
+    bind_contextvars(status=response.status_code)
+    log.info("http_request")
+    return response
+
+# 구간 단위 — with 블록을 벗어나면 자동으로 사라집니다
+with bound_contextvars(order_id=order.id):
+    log.info("검증 시작")
+    log.info("결제 요청")
+
+# 특정 객체에 묶어 두기
+olog = log.bind(order_id=order.id, shop_id=order.shop_id)
+olog.info("완료", amount=order.amount)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>asyncio 에서 특히 잘 맞습니다.</b> <code>contextvars</code> 는
+        <b>태스크를 만들 때 값이 복사</b>되므로, <code>asyncio.gather</code> 로 동시에 도는
+        여러 작업이 <b>각자의 request_id 를 유지</b>합니다.
+        스레드 로컬(<code>threading.local</code>)로는 이게 안 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">서비스 경계를 넘어가기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호출하는 쪽에서도 헤더를 실어 보냅니다</h4>
+      <pre class="code" data-lang="python"><code>import httpx
+from app.logging_filters import request_id_var
+
+def build_client():
+    async def add_request_id(request):
+        request.headers["X-Request-Id"] = request_id_var.get()
+    return httpx.AsyncClient(event_hooks={"request": [add_request_id]})
+
+# Celery 로 넘길 때도 같이 실어 보냅니다
+@app.task(bind=True)
+def send_mail(self, to, rid=None):
+    token = request_id_var.set(rid or "-")
+    try:
+        logger.info("메일 발송 to=%s", to)
+    finally:
+        request_id_var.reset(token)
+
+send_mail.delay(to="a@b.com", rid=request_id_var.get())</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>백그라운드 작업에서 가장 자주 끊깁니다.</b>
+        Celery · RQ · <code>BackgroundTasks</code> 는 <b>다른 프로세스·다른 컨텍스트</b>에서 돌기 때문에
+        <b>request_id 를 인자로 명시해 넘기지 않으면</b> 추적이 그 자리에서 끊깁니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">OpenTelemetry 를 쓴다면 trace_id 를 그대로</h4>
+      <pre class="code" data-lang="python"><code>from opentelemetry import trace
+
+class TraceFilter(logging.Filter):
+    def filter(self, record):
+        span = trace.get_current_span()
+        ctx = span.get_span_context()
+        if ctx and ctx.is_valid:
+            record.trace_id = format(ctx.trace_id, "032x")
+            record.span_id  = format(ctx.span_id, "016x")
+        else:
+            record.trace_id = record.span_id = "-"
+        return True
+
+# 이러면 로그와 분산 트레이스가 같은 키로 이어집니다
+#   Grafana 에서 로그 한 줄 → 해당 트레이스로 바로 점프</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>직접 만들 필요가 없을 수도 있습니다</b> —
+        <code>opentelemetry-instrumentation-logging</code> 을 설치하면
+        <code>trace_id</code> · <code>span_id</code> 를 자동으로 레코드에 넣어 줍니다.
+        이미 OTel 을 쓰고 있다면 <b>request_id 대신 trace_id 를 표식으로 삼는 것</b>도 좋은 선택입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>contextvars 에 담고, Filter 로 꺼내 붙이고, 응답 헤더로 돌려줍니다.</b>
+    필터는 <b>핸들러에</b> 붙이고, <code>reset(token)</code> 으로 <b>반드시 원복</b>합니다.
+    백그라운드 작업으로 넘어갈 때는 <b>인자로 명시해 전달</b>해야 끊기지 않습니다.
+    OTel 을 쓴다면 <b>trace_id 를 그대로</b> 쓰는 편이 낫습니다.</div>
+</section>
+
+
+<!-- ==================== lg10 ==================== -->
+<section class="sec" id="lg10">
+  <div class="sec-head rv">
+    <span class="no">LOG 10</span>
+    <h2>민감정보 — <span class="t">로그로 새는 것들</span>과 막는 법</h2>
+    <p class="lead">
+      로그는 <b>암호화되지 않고, 오래 보관되고, 많은 사람이 봅니다.</b>
+      개발자 · 운영자 · 외주 · 수집기 SaaS 까지 닿습니다.
+      비밀번호 한 줄이 로그에 남으면 그건 <b>평문 저장</b>과 같은 사고입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 252" role="img" aria-label="로그인 요청을 그대로 로그로 남겼을 때 한 줄에 어떤 민감정보가 섞여 나가는지 해부한 그림. 위쪽 붉은 줄에는 이메일, 평문 비밀번호, 인증 토큰, 카드번호가 모두 들어 있고 각각 개인정보, 비밀번호 평문, 세션 탈취 가능, 카드 정보 규정 위반이라는 지시선이 붙어 있다. 아래쪽 초록 줄은 같은 요청을 마스킹 필터로 거른 결과로, 이메일은 앞 두 글자만 남고 비밀번호와 토큰은 별표로 대체되며 카드번호는 앞뒤 네 자리만 남는다.">
+      <text x="16" y="18" class="lbl">로그인 요청 하나를 그대로 찍으면 — 이 한 줄이 사고입니다</text>
+
+      <rect class="bx bx-warn" x="16" y="38" width="648" height="30"/>
+      <text x="24" y="56" class="ann">{"event":"login",</text>
+      <text x="120" y="56" class="ann">"user":"kim@x.com",</text>
+      <text x="228" y="56" class="ann">"password":"hunter2",</text>
+      <text x="346" y="56" class="ann">"token":"eyJhbGci...",</text>
+      <text x="470" y="56" class="ann">"card":"4111-1111-1111"}</text>
+
+      <path class="lead-ln" d="M171 70 L171 84"/>
+      <text x="171" y="96" class="ann" text-anchor="middle">개인정보(이메일)</text>
+
+      <path class="lead-ln" d="M285 70 L285 98"/>
+      <text x="285" y="110" class="ann rs-t" text-anchor="middle">비밀번호 평문</text>
+
+      <path class="lead-ln" d="M405 70 L405 122"/>
+      <text x="405" y="134" class="ann rs-t" text-anchor="middle">세션 탈취 가능</text>
+
+      <path class="lead-ln" d="M532 70 L532 146"/>
+      <text x="532" y="158" class="ann rs-t" text-anchor="middle">카드 정보 · 규정 위반</text>
+
+      <rect class="bx bx-ok" x="16" y="180" width="648" height="30"/>
+      <text x="24" y="198" class="ann ok-t">{"event":"login","user":"ki***@x.com","password":"***","token":"***","card":"411111******1111"}</text>
+
+      <text x="16" y="228" class="lbl">유출은 값 하나가 아니라 객체를 통째로 찍을 때 일어납니다 — repr 한 번이면 전부 나갑니다</text>
+      <text x="16" y="244" class="lbl">마스킹 필터는 핸들러에 붙입니다 — 그래야 모든 출력 경로가 한 번에 덮입니다</text>
+    </svg>
+    <div class="cap">같은 요청, 두 가지 기록 — <b>필터 하나</b>가 사고와 정상 사이를 가릅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실제로 새는 다섯 가지 패턴</h4>
+      <pre class="code" data-lang="python"><code># ① 요청 바디를 통째로
+logger.debug("요청 %s", await request.json())      # 비밀번호 · 카드번호 포함
+
+# ② 객체를 repr 로 (가장 흔합니다)
+logger.info("사용자 %r", user)
+#   @dataclass 나 SQLAlchemy 모델은 기본 repr 이 '모든 필드'를 찍습니다
+#   → password_hash, ssn, phone 이 전부 로그로
+
+# ③ 예외 메시지에 접속 문자열
+except OperationalError as e:
+    logger.exception("DB 연결 실패")
+#   psycopg 등의 에러 메시지에 host/user/password 가 들어 있는 경우가 있습니다
+
+# ④ URL 쿼리스트링에 토큰
+logger.info("호출 %s", url)      # https://api/x?access_token=eyJ...
+
+# ⑤ 서드파티 DEBUG 로그
+logging.getLogger("httpx").setLevel(logging.DEBUG)
+#   요청·응답 '헤더'를 그대로 찍습니다 → Authorization 노출</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>②번이 압도적으로 많습니다.</b>
+        <code>logger.info("사용자 %r", user)</code> 한 줄이
+        <b>테이블의 모든 컬럼</b>을 로그로 옮깁니다.
+        모델 클래스에 <b><code>__repr__</code> 을 직접 정의</b>해 두는 것만으로 절반이 막힙니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">마스킹 필터 — 핸들러에 붙입니다</h4>
+      <pre class="code" data-lang="python"><code># app/logging_filters.py
+import logging, re
+
+SECRET_KEYS = {"password", "passwd", "pwd", "token", "access_token",
+               "refresh_token", "secret", "api_key", "authorization",
+               "cookie", "set-cookie", "ssn", "card", "card_number"}
+
+PATTERNS = [
+    (re.compile(r'(?i)("(?:%s)"\s*:\s*)"[^"]*"' % "|".join(SECRET_KEYS)),
+     r'\1"***"'),                                   # JSON 형태
+    (re.compile(r'(?i)\b(bearer)\s+[A-Za-z0-9._\-]+'), r'\1 ***'),
+    (re.compile(r'\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?(\d{4})\b'),
+     r'****-****-****-\1'),                         # 카드번호
+    (re.compile(r'(?i)(access_token|api_key)=[^&amp;\s]+'), r'\1=***'),
+]
+
+class MaskFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        for pat, repl in PATTERNS:
+            msg = pat.sub(repl, msg)
+        record.msg, record.args = msg, ()   # 이미 합쳤으므로 args 는 비웁니다
+        # extra 로 넘어온 값도 훑습니다
+        for key in list(record.__dict__):
+            if key.lower() in SECRET_KEYS:
+                record.__dict__[key] = "***"
+        return True</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>왜 핸들러에 붙이나</b> — 로거에 붙이면 <b>그 로거를 지나는 줄만</b> 걸러집니다.
+        <b>핸들러에 붙이면</b> 서드파티 로그를 포함해 <b>그 출력으로 나가는 모든 줄</b>이 걸러집니다.
+        <code>dictConfig</code> 의 <code>handlers.console.filters</code> 에 넣으세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">애초에 안 만드는 것이 제일 낫습니다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">모델 쪽에서 막기</h4>
+      <pre class="code" data-lang="python"><code>from dataclasses import dataclass, field
+
+@dataclass
+class User:
+    id: int
+    email: str
+    password_hash: str = field(repr=False)    # ★ repr 에서 제외
+    ssn: str = field(repr=False)
+
+    def __repr__(self):                        # 아예 직접 정의하는 편이 확실
+        return f"User(id={self.id})"
+
+# Pydantic v2
+from pydantic import BaseModel, SecretStr, Field
+class LoginIn(BaseModel):
+    email: str
+    password: SecretStr           # str(v) 하면 '**********' 로 나옵니다
+    card: str = Field(repr=False)
+
+# SQLAlchemy 모델도 마찬가지
+class Account(Base):
+    def __repr__(self):
+        return f"&lt;Account id={self.id}&gt;"</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b><code>SecretStr</code> 은 실수를 구조적으로 막습니다.</b>
+        값을 꺼내려면 <code>.get_secret_value()</code> 를 <b>명시적으로</b> 불러야 하므로,
+        무심코 로그에 찍히는 경로가 <b>코드 리뷰에서 눈에 띕니다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">structlog 는 처리기 하나로</h4>
+      <pre class="code" data-lang="python"><code>SECRET_KEYS = {"password", "token", "api_key", "authorization", "card"}
+
+def mask_processor(logger, method_name, event_dict):
+    for k in list(event_dict):
+        if k.lower() in SECRET_KEYS:
+            event_dict[k] = "***"
+        elif k.lower() == "email" and isinstance(event_dict[k], str):
+            name, _, dom = event_dict[k].partition("@")
+            event_dict[k] = f"{name[:2]}***@{dom}"
+    return event_dict
+
+structlog.configure(processors=[
+    structlog.contextvars.merge_contextvars,
+    mask_processor,                      # ★ 렌더러 '앞'에 둡니다
+    structlog.processors.TimeStamper(fmt="iso", utc=True),
+    structlog.processors.JSONRenderer(ensure_ascii=False),
+])</code></pre>
+      <pre class="code" data-lang="python"><code># 시끄럽고 위험한 서드파티 로거는 아예 올려 둡니다
+for name in ("httpx", "httpcore", "urllib3", "requests",
+             "botocore", "boto3", "sqlalchemy.engine"):
+    logging.getLogger(name).setLevel(logging.WARNING)
+#   특히 sqlalchemy.engine 을 INFO 로 켜면
+#   바인딩된 파라미터(= 실제 값)가 전부 로그로 나옵니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>sqlalchemy.engine</code> = <code>INFO</code> 는 개발용입니다.</b>
+        SQL 과 함께 <b>바인드 파라미터의 실제 값</b>이 찍히므로,
+        운영에서 켜면 <b>테이블의 데이터가 그대로 로그로 복사</b>됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">사고를 전제로 설계</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">외부로 나갈 때 한 번 더 거릅니다</h4>
+      <pre class="code" data-lang="python"><code>import sentry_sdk
+
+def scrub(event, hint):
+    req = event.get("request", {})
+    if "data" in req:
+        req["data"] = "[filtered]"
+    if "headers" in req:
+        for h in ("Authorization", "Cookie", "X-Api-Key"):
+            req["headers"].pop(h, None)
+    for k in ("user",):
+        event.get(k, {}).pop("ip_address", None)
+    return event
+
+sentry_sdk.init(
+    dsn=os.environ["SENTRY_DSN"],
+    send_default_pii=False,     # ★ 기본으로 두세요 (True 면 IP·쿠키가 전송됩니다)
+    before_send=scrub,
+    traces_sample_rate=0.05,
+)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“기본값이 안전한가”를 항상 확인하세요.</b>
+        Sentry 의 <code>send_default_pii</code>, loguru 의 <code>diagnose=True</code>
+        (예외 발생 시 <b>지역 변수 값까지</b> 출력), Django 의 <code>DEBUG=True</code> 화면 —
+        전부 <b>편하려고 켜 둔 옵션이 유출 경로</b>가 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 전 점검표</h4>
+      <div class="tw"><table class="df" style="margin:0">
+        <thead><tr><th style="width:34%">항목</th><th>확인 방법</th></tr></thead>
+        <tbody>
+          <tr><td><b>마스킹 필터가 붙었나</b></td><td>모든 <code>handlers</code> 의 <code>filters</code> 목록에 있는지</td></tr>
+          <tr><td><b>필터에 테스트가 있나</b></td><td><code>caplog</code> 로 “비밀번호가 안 나오는지” 단정</td></tr>
+          <tr><td><b>모델 repr</b></td><td>민감 필드가 있는 클래스에 <code>__repr__</code> 정의</td></tr>
+          <tr><td><b>서드파티 레벨</b></td><td>httpx · sqlalchemy · boto3 가 WARNING 인지</td></tr>
+          <tr><td><b>보관 기간</b></td><td>수집기에 <b>90일</b> 등 상한이 걸려 있는지</td></tr>
+          <tr><td><b>접근 권한</b></td><td>로그 대시보드가 <b>사내 인증</b> 뒤에 있는지</td></tr>
+          <tr><td><b>유출 시 절차</b></td><td>이미 저장된 로그를 <b>지우는 방법</b>이 있는지</td></tr>
+        </tbody>
+      </table></div>
+      <pre class="code" data-lang="python"><code># pytest 로 못 박아 두기
+def test_비밀번호가_로그에_남지_않는다(caplog):
+    with caplog.at_level(logging.INFO):
+        logger.info('{"password":"hunter2"}')
+    assert "hunter2" not in caplog.text
+    assert "***" in caplog.text</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>필터는 조용히 깨집니다.</b> 정규식 하나를 고치다 실수해도 아무 에러가 안 납니다.
+        <b>테스트로 못 박아 두지 않으면</b> 몇 달 뒤에 다시 새기 시작합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 순서는 <b>① 애초에 안 만들기</b>(<code>__repr__</code> · <code>SecretStr</code>)
+    <b>② 나가기 전에 거르기</b>(핸들러에 붙인 마스킹 필터)
+    <b>③ 외부 전송 직전에 한 번 더</b>(<code>before_send</code>) 입니다.
+    그리고 <b>필터가 동작하는지 테스트로 못 박아 두세요</b> — 조용히 깨지는 종류의 코드입니다.</div>
+</section>
+
+
+<!-- ==================== lg11 ==================== -->
+<section class="sec" id="lg11">
+  <div class="sec-head rv">
+    <span class="no">LOG 11</span>
+    <h2>내보내기 — <span class="t">Sentry · OpenTelemetry · 수집기</span></h2>
+    <p class="lead">
+      서버 안의 로그는 <b>서버가 죽으면 같이 사라집니다.</b>
+      그리고 서버가 10대가 되는 순간 <b>ssh 로 grep 하는 방식</b>은 끝납니다.
+      로그를 밖으로 내보내는 길은 크게 두 갈래입니다 — <b>앱이 직접 보내기</b>와 <b>수집기가 걷어 가기</b>.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 304" role="img" aria-label="로그를 외부로 내보내는 두 갈래 길을 보여 주는 그림. 애플리케이션은 표준 출력으로 JSON 한 줄씩 내보내며, 위쪽 길에서는 Sentry SDK 가 프로세스 안에서 예외를 잡아 외부의 Sentry 서비스로 직접 보내고, 아래쪽 길에서는 Fluent Bit 이나 Vector 같은 수집기가 표준 출력을 걷어 가 Loki 나 OpenSearch 같은 저장소에 넣고 동시에 OTLP 를 받는 로그 백엔드로도 보낸다. 외부 서비스는 점선 구름으로, 저장소는 원통으로 그려져 있다.">
+      <text x="16" y="18" class="lbl">두 갈래 — 앱이 직접 보내는 길과, 수집기가 걷어 가는 길</text>
+
+      <rect class="bx bx-fw" x="16" y="76" width="150" height="54"/>
+      <text x="91" y="98" class="val" text-anchor="middle">애플리케이션</text>
+      <text x="91" y="114" class="ann" text-anchor="middle">stdout · JSON</text>
+
+      <path class="fl ar" d="M170 92 L216 62"/>
+      <rect class="bx" x="220" y="40" width="150" height="44"/>
+      <text x="295" y="60" class="val" text-anchor="middle">Sentry SDK</text>
+      <text x="295" y="76" class="ann" text-anchor="middle">logging 연동</text>
+
+      <path class="fl ar" d="M374 58 L502 56"/>
+      <path class="cld" d="M506 86 a24 24 0 0 1 2 -48 a28 28 0 0 1 52 -12 a24 24 0 0 1 42 16 a22 22 0 0 1 -6 44 Z"/>
+      <text x="552" y="54" class="val" text-anchor="middle">Sentry</text>
+      <text x="552" y="70" class="ann" text-anchor="middle">예외 집계 · 알림</text>
+
+      <path class="fl ar" d="M170 116 L216 136"/>
+      <rect class="bx" x="220" y="118" width="150" height="44"/>
+      <text x="295" y="138" class="val" text-anchor="middle">수집기</text>
+      <text x="295" y="154" class="ann" text-anchor="middle">Fluent Bit · Vector</text>
+
+      <path class="fl ar" d="M374 140 L502 140"/>
+      <path class="cld" d="M506 170 a24 24 0 0 1 2 -48 a28 28 0 0 1 52 -12 a24 24 0 0 1 42 16 a22 22 0 0 1 -6 44 Z"/>
+      <text x="552" y="138" class="val" text-anchor="middle">로그 백엔드</text>
+      <text x="552" y="154" class="ann" text-anchor="middle">OTel Collector</text>
+
+      <path class="fl ar" d="M295 166 L295 182"/>
+      <ellipse class="cyl" cx="295" cy="196" rx="70" ry="10"/>
+      <path class="cyl" d="M225 196 V232 a70 10 0 0 0 140 0 V196"/>
+      <text x="295" y="218" class="val" text-anchor="middle">Loki · OpenSearch</text>
+      <text x="295" y="256" class="ann" text-anchor="middle">검색 · 대시보드 · 보관</text>
+
+      <text x="16" y="280" class="lbl">점선 구름은 내 프로세스 밖입니다 — 느려지거나 죽어도 앱이 멈추면 안 됩니다</text>
+      <text x="16" y="296" class="lbl">그래서 직접 보내는 길에는 반드시 큐와 타임아웃을 끼웁니다 (LOG 07)</text>
+    </svg>
+    <div class="cap">앱은 <b>stdout 에 흘려보낼 뿐</b>이고, 어디로 갈지는 <b>바깥이 정합니다</b> — 예외 알림만 예외적으로 직접 보냅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Sentry — 예외를 사람에게 알리는 길</h4>
+      <div class="dep"><code>uv add "sentry-sdk[fastapi]"</code> (django · flask · celery 도 같은 방식)</div>
+      <pre class="code" data-lang="python"><code>import logging, sentry_sdk
+from sentry_sdk.integrations.logging import LoggingIntegration
+
+sentry_logging = LoggingIntegration(
+    level=logging.INFO,         # INFO 이상을 '빵부스러기(breadcrumb)' 로 모음
+    event_level=logging.ERROR,  # ERROR 이상은 '이벤트' 로 전송 ★
+)
+
+sentry_sdk.init(
+    dsn=os.environ["SENTRY_DSN"],
+    integrations=[sentry_logging],
+    environment=os.getenv("ENV", "dev"),
+    release=os.getenv("GIT_SHA", "dev"),   # ★ 어느 배포에서 났는지
+    send_default_pii=False,
+    traces_sample_rate=0.05,
+)
+
+# 이제 이 한 줄이 Sentry 이슈가 됩니다
+logger.exception("결제 실패 order=%s", order_id)
+
+# 태그·컨텍스트를 붙이면 검색이 됩니다
+with sentry_sdk.new_scope() as scope:
+    scope.set_tag("shop_id", shop_id)
+    scope.set_context("order", {"id": order_id, "amount": amount})
+    logger.exception("결제 실패")</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>event_level</code> 을 INFO 로 두지 마세요.</b>
+        INFO 로그 하나하나가 이슈가 되어 <b>요금과 알림이 폭발</b>합니다.
+        기본값(ERROR)이 맞습니다. 그리고 <b>같은 예외는 자동으로 묶이지만</b>,
+        메시지에 변수를 넣으면 <b>묶이지 않고 따로따로</b> 쌓입니다(LOG 05 의 그 규칙).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">OpenTelemetry 로그 — 트레이스와 잇기</h4>
+      <div class="dep"><code>uv add opentelemetry-sdk opentelemetry-exporter-otlp</code></div>
+      <pre class="code" data-lang="python"><code>import logging
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (
+    OTLPLogExporter)
+from opentelemetry.sdk.resources import Resource
+
+provider = LoggerProvider(resource=Resource.create({
+    "service.name": "billing",
+    "service.version": os.getenv("GIT_SHA", "dev"),
+    "deployment.environment": os.getenv("ENV", "dev"),
+}))
+provider.add_log_record_processor(
+    BatchLogRecordProcessor(OTLPLogExporter(endpoint="http://otel:4317")))
+
+# 표준 logging 핸들러로 붙습니다 — 기존 코드를 안 고쳐도 됩니다
+handler = LoggingHandler(level=logging.INFO, logger_provider=provider)
+logging.getLogger().addHandler(handler)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>OTel 로그의 값어치는 “이음”에 있습니다.</b>
+        같은 <code>trace_id</code> 로 <b>로그 · 트레이스 · 메트릭</b>이 이어지므로,
+        느린 요청 하나를 찍으면 <b>그 요청이 남긴 로그만</b> 골라 볼 수 있습니다.
+        <b>OTel 을 이미 쓰고 있다면</b> 로그도 같은 파이프로 보내는 것이 자연스럽습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">stdout → 수집기 → 저장소</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Fluent Bit — 컨테이너 로그를 걷어 갑니다</h4>
+      <pre class="code" data-lang="ini"><code># fluent-bit.conf
+[SERVICE]
+    Flush        5
+    Log_Level    info
+    Parsers_File parsers.conf
+
+[INPUT]
+    Name              tail
+    Path              /var/log/containers/*.log
+    Parser            docker
+    Tag               kube.*
+    Mem_Buf_Limit     16MB
+    Skip_Long_Lines   On
+
+[FILTER]
+    Name         parser
+    Match        kube.*
+    Key_Name     log
+    Parser       json          # ★ 앱이 JSON 으로 찍었기에 그대로 파싱됩니다
+    Reserve_Data On
+
+[OUTPUT]
+    Name   loki
+    Match  *
+    Host   loki
+    Port   3100
+    Labels job=app, env=${ENV}
+    # ★ 라벨은 값의 종류가 적은 것만! request_id 를 라벨로 두면 터집니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Loki 의 라벨은 인덱스입니다.</b> <code>request_id</code> 처럼 값이 무한한 것을 라벨로 두면
+        <b>스트림이 폭발</b>해 Loki 가 멈춥니다.
+        라벨은 <code>job</code> · <code>env</code> · <code>namespace</code> 수준으로,
+        나머지는 <b>본문 안의 JSON 필드</b>로 두고 검색하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Vector — 걷어 가면서 가공까지</h4>
+      <pre class="code" data-lang="toml"><code># vector.toml
+[sources.app]
+type = "file"
+include = ["/var/log/app/*.log"]
+
+[transforms.parse]
+type = "remap"
+inputs = ["app"]
+source = '''
+  . = parse_json!(string!(.message))
+  .service = "billing"
+  # 마지막 방어선 — 혹시 새어 나온 값을 여기서 한 번 더 지웁니다
+  if exists(.password) { .password = "***" }
+  if exists(.token)    { .token = "***" }
+'''
+
+[sinks.opensearch]
+type = "elasticsearch"
+inputs = ["parse"]
+endpoints = ["http://opensearch:9200"]
+bulk.index = "app-logs-%Y.%m.%d"
+
+[sinks.archive]
+type = "aws_s3"
+inputs = ["parse"]
+bucket = "my-log-archive"
+compression = "gzip"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“뜨거운 저장소 + 차가운 저장소” 구성</b>이 비용에서 크게 이깁니다 —
+        최근 <b>7~14일</b>은 검색 가능한 곳(Loki · OpenSearch)에,
+        그 이상은 <b>S3 에 gzip</b> 으로 던져 둡니다.
+        규정상 1년 보관이 필요해도 <b>검색 인덱스를 1년치 유지할 필요는 없습니다.</b>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">무엇을 고르나</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규모별 최소 구성</h4>
+      <div class="tw"><table class="df" style="margin:0">
+        <thead><tr><th style="width:26%">상황</th><th>이 정도면 충분합니다</th></tr></thead>
+        <tbody>
+          <tr><td><b>혼자 · 서버 1대</b></td><td>stdout + <code>journalctl</code> · <b>Sentry 무료 티어</b>.
+              그 이상은 과합니다</td></tr>
+          <tr><td><b>소규모 팀 · 서버 몇 대</b></td><td>JSON stdout + <b>Grafana Loki</b> + Sentry.
+              Loki 는 인덱스가 작아 <b>운영 부담이 가장 적습니다</b></td></tr>
+          <tr><td><b>쿠버네티스</b></td><td><b>Fluent Bit DaemonSet</b> → Loki/OpenSearch.
+              앱은 stdout 만 신경 쓰면 됩니다</td></tr>
+          <tr><td><b>이미 OTel 사용 중</b></td><td><b>OTel Collector</b> 한 갈래로 로그·트레이스·메트릭 통합</td></tr>
+          <tr><td><b>규정·감사 필요</b></td><td>+ <b>S3 장기 보관</b>(불변 버킷) + 접근 로그</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>SaaS(Datadog · New Relic 등)를 쓸 때는 비용 구조를 먼저 보세요.</b>
+        대부분 <b>수집 용량(GB)</b>과 <b>보관 기간</b>으로 과금합니다.
+        DEBUG 를 켠 채 배포하면 <b>그달 청구서가 몇 배</b>가 됩니다 —
+        레벨 관리가 곧 비용 관리입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 보내는 핸들러의 위험</h4>
+      <pre class="code" data-lang="python"><code># ❌ 로그를 HTTP 로 동기 전송
+class HttpLogHandler(logging.Handler):
+    def emit(self, record):
+        requests.post(URL, json=self.format(record))   # 요청 스레드가 멈춥니다
+#   수집기가 느려지면 → 우리 API 응답이 느려집니다
+#   수집기가 죽으면   → 우리 서비스도 같이 죽습니다
+
+# ✅ 큐를 반드시 끼웁니다 (LOG 07)
+#    QueueHandler → QueueListener → HttpLogHandler
+#    + 타임아웃 · 재시도 상한 · 큐 최대 크기
+
+q = queue.Queue(maxsize=10_000)      # ★ 무제한은 메모리 사고
+class DropOldestQueueHandler(logging.handlers.QueueHandler):
+    def enqueue(self, record):
+        try:
+            self.queue.put_nowait(record)
+        except queue.Full:
+            try: self.queue.get_nowait()   # 가장 오래된 것을 버리고
+            except queue.Empty: pass
+            self.queue.put_nowait(record)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>로깅 때문에 서비스가 죽는 사고는 생각보다 흔합니다.</b>
+        원칙은 <b>“로그는 절대 요청 처리 경로를 막지 않는다”</b> 입니다 —
+        <b>비동기 · 상한 있는 큐 · 짧은 타임아웃 · 실패 시 조용히 버리기</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 앱은 <b>stdout 에 JSON 한 줄</b>만 씁니다.
+    거기서부터는 <b>수집기(Fluent Bit · Vector)가 걷어 가</b> Loki · OpenSearch · S3 로 보냅니다.
+    <b>예외 알림만</b> Sentry SDK 로 직접 보내고,
+    OTel 을 쓴다면 <b>trace_id 로 로그와 트레이스를 잇습니다.</b>
+    직접 보내는 핸들러에는 <b>반드시 큐와 상한</b>을 두세요.</div>
+</section>
+
+
+<!-- ==================== lg12 ==================== -->
+<section class="sec" id="lg12">
+  <div class="sec-head rv">
+    <span class="no">LOG 12</span>
+    <h2>예외 로깅 — <span class="t">트레이스백을 잃지 않는 법</span></h2>
+    <p class="lead">
+      장애 조사에서 가장 아까운 순간은 <b>“에러가 났다는 건 아는데 어디서 났는지 모를 때”</b> 입니다.
+      트레이스백은 <b>가만두면 사라집니다</b> — 스레드에서, asyncio 태스크에서, 그리고
+      <code>except: logger.error(str(e))</code> 한 줄에서.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 284" role="img" aria-label="잡히지 않은 예외가 실행 맥락에 따라 어디로 가는지 네 개의 가로줄로 정리한 그림. 메인 스레드에서는 sys.excepthook 이 표준 에러로만 출력하고 로그에는 남지 않는다. 다른 스레드에서는 threading.excepthook 이, asyncio 태스크에서는 이벤트 루프의 예외 처리기가 담당한다. 자식 프로세스의 예외는 부모가 알 수 없다. 각 줄에 기본 동작과 처방이 함께 적혀 있다.">
+      <text x="16" y="18" class="lbl">잡히지 않은 예외는 맥락마다 다른 곳으로 갑니다 — 기본값은 전부 '로그에 안 남음'</text>
+
+      <rect class="lane-hd" x="16" y="40" width="88" height="46"/>
+      <text x="60" y="68" class="val" text-anchor="middle">메인 스레드</text>
+      <rect class="lane" x="110" y="40" width="554" height="46"/>
+      <text x="124" y="60" class="ann rs-t">기본 — sys.excepthook 이 stderr 로 트레이스백만 출력합니다 (로그에 안 남음)</text>
+      <text x="124" y="76" class="ann ok-t">처방 — sys.excepthook 을 교체해 logger.critical(exc_info=...) 로 남깁니다</text>
+
+      <rect class="lane-hd" x="16" y="90" width="88" height="46"/>
+      <text x="60" y="118" class="val" text-anchor="middle">다른 스레드</text>
+      <rect class="lane-alt" x="110" y="90" width="554" height="46"/>
+      <text x="124" y="110" class="ann rs-t">기본 — threading.excepthook 이 stderr 로만 출력, 프로세스는 계속 돕니다</text>
+      <text x="124" y="126" class="ann ok-t">처방 — threading.excepthook 을 교체 (3.8+) · 워커 안을 try/except 로 감싸기</text>
+
+      <rect class="lane-hd" x="16" y="140" width="88" height="46"/>
+      <text x="60" y="168" class="val" text-anchor="middle">asyncio</text>
+      <rect class="lane" x="110" y="140" width="554" height="46"/>
+      <text x="124" y="160" class="ann rs-t">기본 — 태스크가 정리될 때 "Task exception was never retrieved" 한 번</text>
+      <text x="124" y="176" class="ann ok-t">처방 — loop.set_exception_handler() · 태스크에 done 콜백으로 로깅 붙이기</text>
+
+      <rect class="lane-hd" x="16" y="190" width="88" height="46"/>
+      <text x="60" y="218" class="val" text-anchor="middle">자식 프로세스</text>
+      <rect class="lane-alt" x="110" y="190" width="554" height="46"/>
+      <text x="124" y="210" class="ann rs-t">기본 — 부모는 종료 코드만 압니다. 트레이스백은 자식의 stderr 에만</text>
+      <text x="124" y="226" class="ann ok-t">처방 — 워커 진입점을 try/except 로 감싸고 큐나 파일로 로그를 모읍니다</text>
+
+      <text x="16" y="260" class="lbl">공통 원칙 — 잡을 수 없는 곳에서 죽더라도 '한 줄은 반드시 로그에 남게' 만듭니다</text>
+      <text x="16" y="276" class="lbl">훅은 진입점에서 한 번만 설치합니다. 설치했는지 테스트로 확인해 두세요</text>
+    </svg>
+    <div class="cap">맥락마다 담당자가 다릅니다 — <b>네 곳에 훅을 걸어야</b> 트레이스백이 새지 않습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본기 — <code>exception</code> · <code>exc_info</code> · <code>stack_info</code></h4>
+      <pre class="code" data-lang="python"><code>try:
+    pay(order)
+except PgError:
+    # ✅ ① 가장 흔한 형태 — ERROR 레벨 + 트레이스백
+    logger.exception("결제 실패 order=%s", order.id)
+
+    # ② 레벨을 바꾸고 싶으면 exc_info=True
+    logger.warning("결제 실패(재시도 예정) order=%s", order.id, exc_info=True)
+    logger.critical("복구 불가", exc_info=True)
+
+    # ③ 예외 객체를 직접 줄 수도 있습니다 (3.x 공통)
+    logger.error("결제 실패", exc_info=err)
+
+    # ④ 예외가 아닌데 '여기까지 어떻게 왔는지' 가 궁금할 때
+    logger.warning("이상한 상태", stack_info=True)
+
+# ❌ 하지 말 것 — 트레이스백이 통째로 사라집니다
+except Exception as e:
+    logger.error(f"실패: {e}")      # 메시지 한 줄만 남습니다
+    logger.error(str(e))            # 어디서 났는지 영영 모릅니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>logger.exception</code> 은 <code>except</code> 블록 안에서만</b> 씁니다.
+        밖에서 부르면 트레이스백 자리에 <code>NoneType: None</code> 만 찍힙니다.
+        그리고 <code>exception</code> 은 <b>레벨이 ERROR 로 고정</b>이라,
+        다른 레벨이 필요하면 <code>exc_info=True</code> 를 쓰세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한 번만 찍기 — 계층마다 찍지 않습니다</h4>
+      <pre class="code" data-lang="python"><code># ❌ 같은 예외가 세 번 로그에 남습니다
+def repo():
+    try: db.execute(...)
+    except Exception: logger.exception("DB 실패"); raise
+
+def service():
+    try: repo()
+    except Exception: logger.exception("서비스 실패"); raise
+
+def api():
+    try: service()
+    except Exception: logger.exception("API 실패"); raise
+
+# ✅ 안쪽은 맥락만 붙여서 다시 던지고, 경계에서 한 번만 찍습니다
+def repo():
+    try: db.execute(...)
+    except Exception as e:
+        raise RepoError(f"주문 조회 실패 id={oid}") from e   # ★ from e
+
+def api():
+    try: service()
+    except Exception:
+        logger.exception("요청 처리 실패")   # 경계에서 딱 한 번
+        return JSONResponse({"error": "internal"}, status_code=500)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>raise ... from e</code> 를 쓰면</b> 트레이스백에
+        <b>“The above exception was the direct cause of…”</b> 로 원인 사슬이 그대로 남습니다.
+        <code>from</code> 없이 던져도 <code>__context__</code> 로 이어지지만,
+        <b>의도한 변환</b>임을 코드와 로그 양쪽에 남기는 편이 낫습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">네 곳에 훅 걸기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <h4 class="mini" style="margin-top:0">복붙해서 진입점에 넣는 한 벌</h4>
+    <pre class="code" data-lang="python"><code># app/excepthooks.py
+import asyncio, logging, sys, threading
+
+logger = logging.getLogger("uncaught")
+
+# ── ① 메인 스레드
+def _sys_hook(exc_type, exc, tb):
+    if issubclass(exc_type, KeyboardInterrupt):     # Ctrl+C 는 그대로 두기
+        sys.__excepthook__(exc_type, exc, tb)
+        return
+    logger.critical("잡히지 않은 예외", exc_info=(exc_type, exc, tb))
+
+# ── ② 다른 스레드 (Python 3.8+)
+def _thread_hook(args):
+    if issubclass(args.exc_type, SystemExit):
+        return
+    logger.critical("스레드에서 잡히지 않은 예외 thread=%s",
+                    args.thread.name if args.thread else "-",
+                    exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+# ── ③ asyncio 이벤트 루프
+def _loop_hook(loop, context):
+    exc = context.get("exception")
+    if exc is not None:
+        logger.critical("asyncio 예외: %s", context.get("message"), exc_info=exc)
+    else:
+        logger.critical("asyncio 오류: %s", context.get("message"))
+
+# ── ④ 소멸자·GC 중에 난 예외 (드물지만 원인 찾기가 가장 어렵습니다)
+def _unraisable_hook(args):
+    logger.error("unraisable: %s", args.err_msg or args.object,
+                 exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+def install():
+    sys.excepthook = _sys_hook
+    threading.excepthook = _thread_hook
+    sys.unraisablehook = _unraisable_hook
+    try:
+        asyncio.get_running_loop().set_exception_handler(_loop_hook)
+    except RuntimeError:
+        pass          # 아직 루프가 없으면 시작 이벤트에서 다시 부릅니다</code></pre>
+    <pre class="code" data-lang="python"><code># app/main.py
+from app.logging_config import setup
+from app.excepthooks import install
+
+setup()
+install()          # ★ 진입점에서 한 번
+
+# FastAPI 라면 루프가 뜬 뒤에 한 번 더
+@app.on_event("startup")
+async def _hooks():
+    asyncio.get_running_loop().set_exception_handler(_loop_hook)</code></pre>
+    <div class="note warn">
+      <b><code>KeyboardInterrupt</code> 와 <code>SystemExit</code> 은 걸러 주세요.</b>
+      Ctrl+C 로 끌 때마다 CRITICAL 로그와 Sentry 알림이 날아가면
+      <b>사람들이 알림을 무시하기 시작합니다.</b> 그게 진짜 손실입니다.
+    </div>
+    <div class="note info" style="margin-bottom:0">
+      <b>Python 3.11+ 의 <code>ExceptionGroup</code></b> —
+      <code>asyncio.TaskGroup</code> 이나 <code>except*</code> 를 쓰면
+      <b>여러 예외가 한꺼번에</b> 올라옵니다.
+      <code>exc_info</code> 로 넘기면 트레이스백이 <b>트리 모양(<code>+---</code>)</b>으로 찍히므로
+      <b>JSON 로그에서는 줄바꿈이 포함된 한 필드</b>가 됩니다 — 수집기 설정에서 여러 줄 처리를 확인하세요.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">테스트로 못 박고, 끝을 정리하기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">pytest 의 <code>caplog</code> 로 검증</h4>
+      <pre class="code" data-lang="python"><code>import logging, pytest
+
+def test_결제_실패가_트레이스백과_함께_남는다(caplog):
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(PgError):
+            charge("A-991", 39000)
+
+    rec = caplog.records[-1]
+    assert rec.levelno == logging.ERROR
+    assert rec.exc_info is not None            # ★ 트레이스백이 붙었는지
+    assert "A-991" in rec.getMessage()
+    assert "Traceback" in caplog.text
+
+def test_요청id가_모든_줄에_붙는다(caplog):
+    request_id_var.set("r-77")
+    with caplog.at_level(logging.INFO):
+        logger.info("작업 시작")
+    assert caplog.records[-1].request_id == "r-77"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>caplog</code> 는 필터를 거치지 않을 수 있습니다.</b>
+        pytest 가 자기 핸들러를 붙이기 때문입니다.
+        필터까지 검증하려면 <code>caplog.handler.addFilter(MaskFilter())</code> 로
+        <b>명시적으로 붙여</b> 테스트하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">종료할 때 남은 로그 비우기</h4>
+      <pre class="code" data-lang="python"><code>import atexit, logging, signal, sys
+
+def shutdown(*_):
+    logging.getLogger(__name__).info("종료 신호 수신, 로그를 비웁니다")
+    logging.shutdown()        # ★ 모든 핸들러 flush + close
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, shutdown)   # 컨테이너는 SIGTERM 으로 멈춥니다
+signal.signal(signal.SIGINT, shutdown)
+atexit.register(logging.shutdown)
+
+# QueueListener 를 쓴다면 그것도 함께 (LOG 07)
+#   atexit.register(listener.stop)</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:40%">언제 로그가 사라지나</th><th>처방</th></tr>
+        <tr><td>SIGKILL · OOM Killer</td><td>막을 수 없음 — <b>버퍼를 작게</b></td></tr>
+        <tr><td>QueueListener 미정지</td><td><code>atexit</code> 로 <code>stop()</code></td></tr>
+        <tr><td>컨테이너 즉시 종료</td><td><code>terminationGracePeriod</code> 늘리기</td></tr>
+        <tr><td>버퍼링된 stdout</td><td><code>PYTHONUNBUFFERED=1</code> ★</td></tr>
+        <tr><td>fork 직후 자식 죽음</td><td>자식 진입점을 try/except 로</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>PYTHONUNBUFFERED=1</code> 은 컨테이너의 필수 환경 변수</b>입니다.
+        없으면 stdout 이 블록 단위로 버퍼링되어
+        <b>프로세스가 죽는 순간 마지막 로그가 통째로 사라집니다.</b>
+        하필 가장 필요한 그 로그입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>except</code> 안에서는 <b><code>logger.exception</code></b>,
+    다른 레벨이 필요하면 <b><code>exc_info=True</code></b> 입니다.
+    같은 예외를 <b>계층마다 찍지 말고</b> 경계에서 한 번만 찍고,
+    안쪽은 <code>raise ... from e</code> 로 맥락만 붙입니다.
+    그리고 <b>메인 · 스레드 · asyncio · 자식 프로세스 네 곳에 훅</b>을 걸어야
+    “죽었는데 왜 죽었는지 모르는” 상황이 없어집니다.
+    마지막으로 <b><code>PYTHONUNBUFFERED=1</code></b> 과 <b><code>logging.shutdown()</code></b> 을 잊지 마세요.</div>
+</section>
+
+</div><!-- /pane-log -->

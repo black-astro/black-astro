@@ -1,0 +1,417 @@
+
+
+
+<!-- ==================== lg07 ==================== -->
+<section class="sec" id="lg07">
+  <div class="sec-head rv">
+    <span class="no">LOG 07</span>
+    <h2>Ktor 3 — <span class="t">CallId 와 CallLogging</span> 두 플러그인으로 요청 한 줄을 남깁니다</h2>
+    <p class="lead">
+      Ktor 는 스프링처럼 “요청 로그가 그냥 나오는” 프레임워크가 아닙니다. 아무것도 안 하면
+      <b>요청이 들어와도 한 줄도 남지 않습니다</b>. 대신 두 플러그인이 있습니다 —
+      <b>요청마다 ID 를 붙이는 <code>CallId</code></b>와 <b>요청당 한 줄을 적는 <code>CallLogging</code></b>.
+      둘을 순서대로 심으면 앞 섹션의 MDC 문제까지 프레임워크가 대신 풀어 줍니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 232" role="img" aria-label="Ktor 요청이 지나가는 파이프라인을 셰브론 다섯 개로 그린 그림. 요청 도착, CallId 플러그인이 헤더에서 ID 를 읽거나 새로 만드는 단계, CallLogging 이 MDC 에 callId 를 넣고 요청 한 줄을 적는 단계, 라우팅 핸들러, 응답 순서다. CallLogging 부터 핸들러까지 구간에서 MDC 의 callId 가 살아 있고, 아래에는 실제로 찍히는 로그 한 줄의 예가 있다. 맨 아래에는 CallId 를 먼저 설치해야 MDC 에 값이 들어간다고 적혀 있다.">
+      <text x="16" y="18" class="lbl">요청 하나가 지나가는 길 — 두 플러그인은 순서가 있습니다</text>
+
+      <polygon class="chev" points="16,40 116,40 132,64 116,88 16,88 32,64"/>
+      <text x="76" y="61" class="val" text-anchor="middle">요청 도착</text>
+      <text x="76" y="76" class="ann" text-anchor="middle">GET /orders/42</text>
+
+      <polygon class="chev s1" points="142,40 242,40 258,64 242,88 142,88 158,64"/>
+      <text x="202" y="61" class="val" text-anchor="middle">CallId</text>
+      <text x="202" y="76" class="ann" text-anchor="middle">헤더 읽기 · 없으면 생성</text>
+
+      <polygon class="chev s1" points="268,40 368,40 384,64 368,88 268,88 284,64"/>
+      <text x="328" y="61" class="val" text-anchor="middle">CallLogging</text>
+      <text x="328" y="76" class="ann" text-anchor="middle">MDC 넣고 한 줄 기록</text>
+
+      <polygon class="chev" points="394,40 494,40 510,64 494,88 394,88 410,64"/>
+      <text x="454" y="61" class="val" text-anchor="middle">핸들러</text>
+      <text x="454" y="76" class="ann" text-anchor="middle">내 코드 · log.info { }</text>
+
+      <polygon class="chev s4" points="520,40 620,40 636,64 620,88 520,88 536,64"/>
+      <text x="578" y="61" class="val" text-anchor="middle">응답</text>
+      <text x="578" y="76" class="ann" text-anchor="middle">X-Request-Id 되돌림</text>
+
+      <path class="brk" d="M268 100 L268 106 L510 106 L510 100"/>
+      <text x="389" y="122" class="ann ok-t" text-anchor="middle">이 구간에서 MDC 의 callId 가 살아 있습니다 (코루틴을 넘어가도)</text>
+
+      <rect class="bx bx-mut" x="16" y="138" width="648" height="46"/>
+      <text x="32" y="156" class="val">INFO ktor.application - 200 OK: GET /orders/42 in 12ms</text>
+      <text x="32" y="174" class="ann">CallLogging 이 요청마다 적는 한 줄 — callId 는 MDC 이므로 logback 패턴의 %X{callId} 로 붙입니다</text>
+
+      <text x="16" y="208" class="lbl">CallId 를 먼저 install 하세요 — 순서가 바뀌면 MDC 의 callId 가 비어 나옵니다</text>
+      <text x="16" y="224" class="lbl">셋 다 SLF4J 로 나가므로 Logback 이 없으면 여전히 아무것도 찍히지 않습니다</text>
+    </svg>
+    <div class="cap">Ktor 의 요청 로그는 <b>CallId → CallLogging</b> 순서로 심는 두 플러그인이 만듭니다 — 셰브론은 되돌아가지 않습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">복사해서 쓰는 설치 코드 (Ktor 3.x)</h4>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts — 2026년 8월 기준 Ktor 3.x 계열
+dependencies {
+    implementation("io.ktor:ktor-server-core")
+    implementation("io.ktor:ktor-server-call-id")       // 요청 ID
+    implementation("io.ktor:ktor-server-call-logging")  // 요청 한 줄
+    implementation("io.github.oshai:kotlin-logging-jvm:7.0.7")
+    runtimeOnly("ch.qos.logback:logback-classic:1.5.18") // ★ 없으면 침묵
+}</code></pre>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>import io.ktor.server.plugins.callid.*
+import io.ktor.server.plugins.calllogging.*   // Ktor 3 에서 패키지가 바뀌었습니다
+import org.slf4j.event.Level
+
+fun Application.module() {
+    // ① 먼저 CallId
+    install(CallId) {
+        retrieveFromHeader("X-Request-Id")             // 게이트웨이가 준 값 우선
+        generate { UUID.randomUUID().toString().take(8) }
+        verify { it.isNotBlank() &amp;&amp; it.length &lt;= 64 }  // 이상한 값은 버리고 새로 생성
+        replyToHeader("X-Request-Id")                  // 응답에도 돌려줍니다
+    }
+    // ② 그 다음 CallLogging
+    install(CallLogging) {
+        level = Level.INFO
+        callIdMdc("callId")                            // MDC 키 이름 ★
+        filter { call -&gt; !call.request.path().startsWith("/health") }
+        format { call -&gt;
+            val status = call.response.status()?.value ?: "-"
+            val ms = call.processingTimeMillis()
+            "$status ${call.request.httpMethod.value} ${call.request.path()} ${ms}ms"
+        }
+    }
+    routing { get("/orders/{id}") { /* ... */ } }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">각 설정이 막아 주는 사고</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:40%">설정</th><th>없으면</th></tr>
+        <tr><td><code>retrieveFromHeader</code></td><td>게이트웨이·프런트가 준 ID 와 <b>끊김</b></td></tr>
+        <tr><td><code>verify</code></td><td>클라이언트가 보낸 <b>아무 문자열</b>이 로그에 박힘</td></tr>
+        <tr><td><code>replyToHeader</code></td><td>고객이 “이 오류 봐 주세요” 할 때 <b>찾을 키가 없음</b></td></tr>
+        <tr><td><code>callIdMdc</code></td><td>내 <code>log.info</code> 줄에 ID 가 <b>안 붙음</b></td></tr>
+        <tr><td><code>filter</code></td><td>헬스체크가 <b>초당 수십 줄</b>을 채움</td></tr>
+        <tr><td><code>format</code></td><td>기본 문구는 사람용 — 파싱하려면 직접 정함</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>MDC 문제를 Ktor 가 대신 풉니다</b> — <code>callIdMdc</code> 나 <code>mdc { }</code> 를 하나라도 쓰면
+        CallLogging 이 요청 처리를 <b><code>MDCContext</code> 로 감싸서</b> 실행합니다.
+        그래서 핸들러 안에서 <code>withContext(Dispatchers.IO)</code> 로 넘어가도
+        <code>callId</code> 가 따라옵니다. 단, <b>직접 <code>launch</code> 한 백그라운드 작업</b>은
+        여전히 LOG 06 의 규칙대로 <code>MDCContext()</code> 를 얹어야 합니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Ktor 2 → 3 에서 바뀐 것</b> — <code>CallLogging</code> 의 import 가
+        <code>io.ktor.server.plugins.callloging</code>(오타 그대로)에서
+        <code>io.ktor.server.plugins.calllogging</code> 으로 고쳐졌습니다.
+        옛 블로그 코드를 붙여 넣으면 <b>import 한 줄 때문에</b> 컴파일이 깨집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">MDC 에 요청 정보 더 얹기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">사용자 · 경로 · 테넌트를 모든 줄에</h4>
+      <pre class="code" data-lang="kotlin"><code>install(CallLogging) {
+    callIdMdc("callId")
+    // 요청에서 값을 꺼내 MDC 키로 — 검색 키만 넣습니다 (LOG 06)
+    mdc("path")   { call -&gt; call.request.path() }
+    mdc("method") { call -&gt; call.request.httpMethod.value }
+    mdc("tenant") { call -&gt; call.request.header("X-Tenant") }
+    // 인증 뒤에 정해지는 값은 여기서 못 읽습니다 — 아래 참고
+    mdc("userId") { call -&gt; call.principal&lt;UserIdPrincipal&gt;()?.name }
+}</code></pre>
+      <pre class="code" data-lang="xml" style="margin-bottom:0"><code>&lt;!-- logback.xml — 붙인 키를 패턴에서 꺼내 씁니다 --&gt;
+&lt;pattern&gt;%d{HH:mm:ss.SSS} %-5level [%X{callId}] [%X{tenant}] %logger{30} - %msg%n&lt;/pattern&gt;
+
+&lt;!-- Ktor 가 내는 소음을 줄이는 로거 이름들 --&gt;
+&lt;logger name="io.netty" level="INFO"/&gt;
+&lt;logger name="io.ktor.server.engine" level="INFO"/&gt;
+&lt;logger name="Exposed" level="WARN"/&gt;   &lt;!-- Exposed 를 쓴다면 SQL 로그 이름 --&gt;
+&lt;root level="INFO"&gt;&lt;appender-ref ref="CONSOLE"/&gt;&lt;/root&gt;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 값을 읽느냐가 함정입니다</h4>
+      <pre class="code" data-lang="text"><code>mdc { } 람다가 실행되는 시점
+
+  CallLogging 이 MDC 를 준비하는 때는 요청 처리의 앞쪽입니다.
+  그 시점에 아직 없는 값(인증 결과 · 라우트 파라미터)은 null 이 됩니다.
+
+  값이 잡히느냐는 Authentication 플러그인과의 설치 순서에 달려 있고,
+  버전마다 미묘하게 달랐습니다.
+  → 확신이 없으면 로그 한 줄을 찍어 보는 것이 가장 빠릅니다.
+
+확실한 방법 — 핸들러 안에서 직접 얹기
+  get("/me") {
+      val user = call.principal&lt;UserIdPrincipal&gt;()!!.name
+      withContext(MDCContext(MDC.getCopyOfContextMap().orEmpty() + ("userId" to user))) {
+          log.info { "프로필 조회" }     // userId 붙음
+          call.respond(service.me(user))
+      }
+  }</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>MDC 에 개인정보를 넣지 마세요</b> — MDC 값은 <b>그 요청의 모든 줄</b>에 복제됩니다.
+        이메일이나 전화번호를 넣으면 로그 한 줄이 아니라 <b>요청 하나당 수십 줄</b>에 새어 나갑니다.
+        <code>userId</code> 같은 <b>불투명한 키</b>만 넣습니다 (LOG 11).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">예외는 한 번만 · 테스트에서 확인</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">StatusPages 와 겹치면 두 번 찍힙니다</h4>
+      <pre class="code" data-lang="kotlin"><code>install(StatusPages) {
+    exception&lt;Throwable&gt; { call, cause -&gt;
+        // ✅ 여기서 '한 번만' 스택을 남깁니다
+        log.error(cause) { "처리 실패 ${call.request.path()}" }
+        call.respond(HttpStatusCode.InternalServerError, ErrorBody("internal"))
+    }
+    exception&lt;NotFoundException&gt; { call, _ -&gt;
+        // ❌ 404 마다 스택을 찍지 마세요 — 로그가 아니라 소음입니다
+        call.respond(HttpStatusCode.NotFound)
+    }
+}
+// CallLogging 은 status 코드만 한 줄 적습니다.
+// 핸들러 안에서 catch 해서 log.error 하고 다시 throw 하면
+//   → 핸들러 1번 + StatusPages 1번 = 같은 스택이 두 번.
+//   규칙: 로그는 '예외를 최종 처리하는 자리'에서만.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">testApplication 으로 헤더와 로그 확인</h4>
+      <pre class="code" data-lang="kotlin"><code>@Test
+fun `요청 ID 가 응답 헤더로 돌아온다`() = testApplication {
+    application { module() }
+    val res = client.get("/orders/42") {
+        header("X-Request-Id", "test-7f3a")
+    }
+    assertEquals("test-7f3a", res.headers["X-Request-Id"])
+}
+
+@Test
+fun `이상한 요청 ID 는 새로 만든다`() = testApplication {
+    application { module() }
+    val res = client.get("/orders/42") {
+        header("X-Request-Id", "a".repeat(500))   // verify 에서 탈락
+    }
+    val id = res.headers["X-Request-Id"]!!
+    assertEquals(8, id.length)
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>로그 내용까지 검증하려면</b> — Logback 의 <code>ListAppender</code> 를 테스트에서
+        <code>ktor.application</code> 로거에 붙이고 <code>list</code> 를 검사합니다(LOG 11 에 예제).
+        요청 로그 <b>형식</b>은 파싱 규칙과 짝이므로, 형식을 바꾸는 순간 수집기 설정도 같이 바꿔야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> Ktor 는 <b><code>CallId</code> → <code>CallLogging</code></b> 순서로 두 플러그인을 심어야 요청 로그가 생깁니다.
+    <code>callIdMdc("callId")</code> 한 줄이 <b>요청 ID 를 MDC 에 넣고 코루틴 너머까지 이어 주며</b>,
+    <code>filter</code> 로 헬스체크를 빼고, 예외 로그는 <b><code>StatusPages</code> 한 곳에서만</b> 남깁니다.</div>
+</section>
+
+
+<!-- ==================== lg08 ==================== -->
+<section class="sec" id="lg08">
+  <div class="sec-head rv">
+    <span class="no">LOG 08</span>
+    <h2>Spring Boot + Kotlin — <span class="t">application.yml 여덟 줄</span>이 로깅의 대부분입니다</h2>
+    <p class="lead">
+      스프링 부트는 <b>Logback 을 이미 올바르게 깔아 둔 상태</b>로 시작합니다. 여러분이 XML 을 열 일은 생각보다 적고,
+      대부분은 <code>application.yml</code> 의 <code>logging.*</code> 몇 줄로 끝납니다.
+      코틀린이라면 여기에 <b>kotlin-logging 한 줄</b>만 더하고, Lombok 의 <code>@Slf4j</code> 는 잊어도 됩니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="스프링 부트 application.yml 의 로깅 설정 여덟 줄을 해부한 그림. 가운데 상자 안에 logging.level 의 root 와 패키지별 레벨, structured.format.console 의 ecs 값, file.name, logback.rollingpolicy.total-size-cap, management.endpoints.web.exposure.include 의 loggers 가 적혀 있고, 왼쪽과 오른쪽 지시선으로 각 줄의 뜻이 설명되어 있다. 패키지 이름이 길수록 우선하고, structured.format 은 Boot 3.4 부터이며, total-size-cap 이 디스크 사고를 막고, loggers 엔드포인트를 노출하면 재시작 없이 레벨을 바꿀 수 있다고 적혀 있다.">
+      <text x="16" y="18" class="lbl">application.yml — 이 여덟 줄이 운영 로깅의 대부분을 정합니다</text>
+
+      <rect class="bx" x="150" y="34" width="380" height="196"/>
+
+      <text x="166" y="56" class="tk">logging:</text>
+      <text x="166" y="78" class="tk">  level:</text>
+      <text x="166" y="100" class="tk">    root: INFO</text>
+      <text x="166" y="122" class="tk">    com.example.order: DEBUG</text>
+      <text x="166" y="144" class="tk">  structured.format.console: ecs</text>
+      <text x="166" y="166" class="tk">  file.name: /var/log/app/app.log</text>
+      <text x="166" y="188" class="tk">  logback.rollingpolicy.total-size-cap: 5GB</text>
+      <text x="166" y="210" class="tk">management.endpoints.web.exposure.include: loggers</text>
+
+      <path class="lead-ln" d="M146 96 L96 96 L96 140"/>
+      <path class="lead-ln" d="M146 118 L120 118 L120 140"/>
+      <text x="16" y="156" class="ann">root 는 바닥값</text>
+      <text x="16" y="168" class="ann">긴 패키지 이름이</text>
+      <text x="16" y="180" class="ann">더 우선합니다</text>
+
+      <path class="lead-ln" d="M534 140 L588 140"/>
+      <path class="lead-ln" d="M534 184 L588 184"/>
+      <path class="lead-ln" d="M534 206 L588 206"/>
+
+      <text x="596" y="130" class="ann">Boot 3.4+</text>
+      <text x="596" y="142" class="ann">JSON 한 줄</text>
+      <text x="596" y="176" class="ann">디스크 사고</text>
+      <text x="596" y="188" class="ann">안전장치</text>
+      <text x="596" y="200" class="ann">재시작 없이</text>
+      <text x="596" y="212" class="ann">레벨 변경</text>
+
+      <rect class="hl" x="158" y="130" width="364" height="20"/>
+      <text x="16" y="252" class="ann am-t">노란 줄 하나가 logstash-logback-encoder 를 대신합니다 — 로컬에서는 이 줄을 빼면 사람용 패턴으로 돌아갑니다</text>
+    </svg>
+    <div class="cap">스프링 부트의 로깅은 <b>XML 이 아니라 yml 여덟 줄</b>로 대부분 끝납니다 — XML 은 appender 를 새로 만들 때만 엽니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">시작 — 의존성 한 줄과 로거 선언</h4>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts — Boot 3.x / 4.x 공통
+dependencies {
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    // ↑ 이 안에 spring-boot-starter-logging = Logback + SLF4J + 브리지 3종
+    implementation("io.github.oshai:kotlin-logging-jvm:7.0.7")   // ★ 이것만 추가
+    // ❌ logback-classic 을 다시 적지 마세요 — 버전만 어긋납니다
+}</code></pre>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// 코틀린에는 Lombok @Slf4j 가 없습니다 — 필요도 없습니다
+private val log = KotlinLogging.logger {}
+
+@Service
+class OrderService(private val repo: OrderRepository) {
+    @Transactional
+    fun place(cmd: PlaceOrder): Order {
+        log.info { "주문 접수 sku=${cmd.sku} qty=${cmd.qty}" }
+        return repo.save(Order.from(cmd)).also {
+            log.debug { "저장 완료 id=${it.id}" }
+        }
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">application.yml 에 두는 것 · XML 에 두는 것</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">하고 싶은 것</th><th>어디에</th></tr>
+        <tr><td>패키지별 레벨</td><td><b>yml</b> <code>logging.level.*</code></td></tr>
+        <tr><td>콘솔 패턴 바꾸기</td><td>yml <code>logging.pattern.console</code></td></tr>
+        <tr><td>파일 + 롤링 기본형</td><td>yml <code>logging.file.name</code> + <code>rollingpolicy.*</code></td></tr>
+        <tr><td>JSON 출력</td><td>yml <code>logging.structured.format.*</code> (3.4+)</td></tr>
+        <tr><td>AUDIT 전용 appender</td><td><b>XML</b> <code>logback-spring.xml</code></td></tr>
+        <tr><td>AsyncAppender · 필터</td><td>XML</td></tr>
+        <tr><td>프로파일별 분기</td><td>XML <code>&lt;springProfile&gt;</code> 또는 yml 프로파일 문서</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>XML 을 만드는 순간 yml 의 <code>logging.file.*</code> · <code>rollingpolicy.*</code> 는 무시됩니다</b> —
+        부트의 기본 설정을 통째로 대체하기 때문입니다. 레벨(<code>logging.level</code>)만 살아남습니다.
+        XML 에서 부트 기본 조각을 재사용하려면
+        <code>&lt;include resource="org/springframework/boot/logging/logback/defaults.xml"/&gt;</code>
+        를 맨 위에 넣으세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">재시작 없이 레벨 바꾸기 · 추적 ID 붙이기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Actuator loggers — 장애 중에 DEBUG 켜기</h4>
+      <pre class="code" data-lang="yaml"><code># application.yml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,loggers   # ★ loggers 노출
+  # 운영에서는 반드시 인증 뒤에 두세요 — 레벨 변경은 곧 DoS 수단입니다</code></pre>
+      <pre class="code" data-lang="bash" style="margin-bottom:0"><code># 지금 어떤 레벨인지
+curl -s localhost:8080/actuator/loggers/com.example.order
+# {"configuredLevel":null,"effectiveLevel":"INFO"}
+
+# 장애 조사 중 — 그 패키지만 DEBUG 로 (재시작 없음)
+curl -X POST localhost:8080/actuator/loggers/com.example.order \
+  -H 'Content-Type: application/json' \
+  -d '{"configuredLevel":"DEBUG"}'
+
+# 끝나면 되돌리기 — null 이면 부모 레벨을 따릅니다
+curl -X POST localhost:8080/actuator/loggers/com.example.order \
+  -H 'Content-Type: application/json' -d '{"configuredLevel":null}'
+# 인스턴스가 여러 대면 각 인스턴스에 따로 보내야 합니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">traceId — 직접 만들기 전에 이미 있는지 보세요</h4>
+      <pre class="code" data-lang="kotlin"><code>dependencies {
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.micrometer:micrometer-tracing-bridge-otel")
+    // ↑ 이 둘이 있으면 traceId · spanId 가 MDC 에 자동으로 들어갑니다
+}</code></pre>
+      <pre class="code" data-lang="yaml" style="margin-bottom:0"><code># 콘솔 패턴에 상관관계 ID 를 넣는 자리 — 기본값이 이미 이렇습니다
+logging:
+  pattern:
+    correlation: "[${spring.application.name:},%X{traceId:-},%X{spanId:-}] "
+  include-application-name: false   # 앞에 앱 이름이 두 번 붙으면 끄세요
+
+# 결과 —
+# 2026-08-31T10:22:41.113+09:00  INFO [order-api,6b1f...,9a2c...] 12345 --- [nio-8080-exec-1] c.e.o.OrderService : 주문 접수 sku=A-1
+#   ↑ traceId 는 게이트웨이 → 서비스 → 서비스로 헤더(traceparent)를 타고 이어집니다.
+#     LOG 06 의 callId 를 직접 만들 필요가 없어지는 지점입니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">SQL 로그와 테스트</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JPA SQL 은 show-sql 이 아니라 로거로</h4>
+      <pre class="code" data-lang="yaml"><code># ❌ spring.jpa.show-sql: true
+#    → System.out 으로 찍혀 레벨·패턴·파일 전부 무시됩니다
+
+# ✅ 로거로 — 로컬 프로파일에만
+spring:
+  config:
+    activate:
+      on-profile: local
+logging:
+  level:
+    org.hibernate.SQL: DEBUG                 # 실행되는 SQL
+    org.hibernate.orm.jdbc.bind: TRACE       # 바인딩 값 (Hibernate 6+)
+    org.springframework.jdbc.core: DEBUG     # JdbcTemplate 을 쓴다면
+    org.springframework.transaction: DEBUG   # 트랜잭션 경계 확인</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>jdbc.bind: TRACE</code> 는 운영에서 절대 켜지 마세요</b> —
+        바인딩 값에 <b>이메일 · 비밀번호 해시 · 카드번호</b>가 그대로 찍힙니다.
+        “운영에서 잠깐만” 켠 TRACE 가 수집기까지 흘러가 <b>개인정보 사고</b>가 됩니다(LOG 11).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">테스트에서 로그 검증 — OutputCaptureExtension</h4>
+      <pre class="code" data-lang="kotlin"><code>import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
+
+@ExtendWith(OutputCaptureExtension::class)
+@SpringBootTest
+class OrderServiceLogTest(@Autowired val service: OrderService) {
+
+    @Test
+    fun `주문 접수 로그에 sku 가 남는다`(output: CapturedOutput) {
+        service.place(PlaceOrder(sku = "A-1", qty = 2))
+        assertThat(output.out).contains("주문 접수 sku=A-1")
+    }
+
+    @Test
+    fun `로그에 카드번호가 없다`(output: CapturedOutput) {
+        service.pay(card = "4111111111111111")
+        assertThat(output.all).doesNotContainPattern("\\d{16}")
+    }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>로그 문구를 테스트로 고정할 것인가</b> — 대개는 <b>아니오</b>입니다. 문구는 자주 바뀌고 테스트가 깨지기만 합니다.
+        예외는 둘 — <b>수집기가 파싱하는 형식</b>과 <b>개인정보가 없다는 부정 검증</b>. 이 둘만 테스트로 잠급니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 스프링 부트는 <b>Logback 이 이미 들어 있으니 kotlin-logging 한 줄만</b> 더합니다.
+    레벨·파일·JSON 은 <b><code>application.yml</code> 의 <code>logging.*</code></b> 로, appender 를 새로 만들 때만 <code>logback-spring.xml</code> 을 엽니다.
+    <b>Actuator <code>loggers</code></b> 로 재시작 없이 레벨을 바꾸고, SQL 은 <code>show-sql</code> 대신 <b>로거</b>로 켜세요.</div>
+</section>

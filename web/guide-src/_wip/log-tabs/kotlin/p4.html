@@ -1,0 +1,451 @@
+
+
+
+<!-- ==================== lg09 ==================== -->
+<section class="sec" id="lg09">
+  <div class="sec-head rv">
+    <span class="no">LOG 09</span>
+    <h2>안드로이드 — <span class="t">Log · Timber · R8</span> 셋이 각각 다른 층에서 일합니다</h2>
+    <p class="lead">
+      안드로이드에는 SLF4J 가 없습니다. 바닥에 <code>android.util.Log</code> 가 있고, 그 위에 Timber 를 얹고,
+      릴리스 빌드에서는 R8 이 호출 자체를 지웁니다. 세 층이 하는 일이 다르기 때문에
+      <b>“Timber 를 썼으니 릴리스에서 로그가 안 나가겠지”</b>라는 생각이 가장 흔한 오해입니다 —
+      <b>문자열은 이미 만들어졌고, 호출은 여전히 APK 안에 있습니다.</b>
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="같은 로그 코드 한 줄이 디버그 빌드와 릴리스 빌드에서 어떻게 다르게 끝나는지 좌우로 대조한 그림. 왼쪽 디버그 빌드는 DebugTree 를 심어 Timber.d 가 Logcat 에 클래스 이름 태그로 찍히고, Log.d 직접 호출도 그대로 보이며, 4KB 를 넘는 줄은 잘린다. 오른쪽 릴리스 빌드는 CrashReportingTree 만 심어 Timber.d 는 나무가 버리지만 문자열은 이미 만들어졌고, R8 의 assumenosideeffects 규칙이 있어야 호출 자체가 사라지며, Timber.w 와 e 는 Crashlytics 로 간다. 아래에는 나무가 버리는 것과 R8 이 지우는 것은 다른 일이라고 적혀 있다.">
+      <text x="16" y="18" class="lbl">같은 코드 한 줄 — 디버그 빌드와 릴리스 빌드에서 다르게 끝납니다</text>
+
+      <text x="170" y="42" class="ttl" text-anchor="middle">디버그 빌드</text>
+      <text x="510" y="42" class="ttl ok-t" text-anchor="middle">릴리스 빌드</text>
+      <path class="ln-t" d="M340 30 L340 214"/>
+
+      <rect class="bx" x="40" y="52" width="260" height="34"/>
+      <text x="170" y="73" class="ann" text-anchor="middle">Timber.plant(DebugTree())</text>
+      <rect class="bx bx-ok" x="380" y="52" width="260" height="34"/>
+      <text x="510" y="73" class="ann ok-t" text-anchor="middle">Timber.plant(CrashReportingTree())</text>
+
+      <rect class="bx" x="40" y="92" width="260" height="34"/>
+      <text x="170" y="113" class="ann" text-anchor="middle">Timber.d → Logcat (태그 = 클래스 이름)</text>
+      <rect class="bx" x="380" y="92" width="260" height="34"/>
+      <text x="510" y="113" class="ann" text-anchor="middle">Timber.d → 나무가 버림 · 문자열은 이미 생성</text>
+
+      <rect class="bx" x="40" y="132" width="260" height="34"/>
+      <text x="170" y="153" class="ann" text-anchor="middle">Log.d 직접 호출도 그대로 보임</text>
+      <rect class="bx bx-ok" x="380" y="132" width="260" height="34"/>
+      <text x="510" y="153" class="ann ok-t" text-anchor="middle">R8 규칙이 있어야 호출 자체가 사라짐</text>
+
+      <rect class="bx" x="40" y="172" width="260" height="34"/>
+      <text x="170" y="193" class="ann" text-anchor="middle">4KB 넘는 줄은 Logcat 이 잘라 냄</text>
+      <rect class="bx" x="380" y="172" width="260" height="34"/>
+      <text x="510" y="193" class="ann" text-anchor="middle">Timber.w · e → Crashlytics 로 전송</text>
+
+      <text x="340" y="232" class="ann am-t" text-anchor="middle">나무가 버리는 것과 R8 이 지우는 것은 다른 일입니다</text>
+      <text x="340" y="246" class="ann" text-anchor="middle">— 앞은 실행 시간에 문자열을 만든 뒤 버리고, 뒤는 컴파일 때 코드에서 없앱니다</text>
+    </svg>
+    <div class="cap">릴리스 빌드에서 로그를 정말 없애는 것은 <b>Tree 가 아니라 R8 규칙</b>입니다 — Tree 는 출력만 막습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">바닥 — android.util.Log 의 제약 네 가지</h4>
+      <pre class="code" data-lang="kotlin"><code>import android.util.Log
+
+private const val TAG = "OrderScreen"
+
+// ① 태그 길이 — API 25 이하에서 24자 이상이면 예외로 죽습니다
+//    (API 26+ 는 제한이 풀렸지만 옛 기기를 지원하면 여전히 문제)
+Log.d(TAG, "주문 목록 갱신")
+
+// ② 한 줄 4KB 정도에서 잘립니다 — 긴 JSON 은 끝이 사라집니다
+Log.d(TAG, hugeJson)          // ...뒷부분이 조용히 없어짐
+
+// ③ 지연 평가가 없습니다 — 문자열은 항상 먼저 만들어집니다
+Log.d(TAG, "items=${items.joinToString()}")   // 릴리스에서도 결합됨
+
+// ④ 레벨 제어가 시스템 속성입니다 — 코드에서 켜고 끌 수 없습니다
+if (Log.isLoggable(TAG, Log.DEBUG)) { ... }
+//   adb shell setprop log.tag.OrderScreen DEBUG  ← 기기에서 이렇게 켬</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Log 는 파사드가 아니라 최종 출력입니다</b> — 서버의 Logback 자리에 해당합니다.
+        레벨을 설정 파일로 바꾸거나 파일로 보내는 기능이 <b>없습니다</b>.
+        그래서 그 위에 <b>Timber(껍데기)</b>를 얹어 “어디로 보낼지”를 코드로 정합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">껍데기 — Timber 5 와 CrashReportingTree</h4>
+      <pre class="code" data-lang="kotlin"><code>// Timber 는 람다 API 가 없습니다 — String.format 스타일입니다
+Timber.d("주문 %d 항목 %d개", order.id, order.items.size)   // ✅ 포맷은 Tree 가 있을 때만
+Timber.d("주문 ${order.id}")                               // ⚠ 템플릿은 먼저 결합됨
+Timber.tag("Payment").w(e, "결제 재시도 %d", attempt)       // 태그를 한 번만 바꿔 씀
+
+// 릴리스용 Tree — WARN 이상만 Crashlytics 로
+class CrashReportingTree : Timber.Tree() {
+    override fun isLoggable(tag: String?, priority: Int) =
+        priority &gt;= Log.WARN                     // ★ 여기서 걸러야 문자열 포맷을 안 함
+
+    override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+        val cl = FirebaseCrashlytics.getInstance()
+        cl.log("[$tag] $message")                // 크래시 직전 문맥으로 남음
+        if (t != null &amp;&amp; priority &gt;= Log.ERROR) cl.recordException(t)
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>isLoggable</code> 을 재정의하세요</b> — Timber 는 <code>isLoggable</code> 이 true 일 때만
+        <code>String.format</code> 을 돌립니다. <code>log()</code> 안에서 레벨을 검사하면
+        <b>이미 포맷이 끝난 뒤</b>라 비용을 못 줄입니다.
+        단, 코틀린 템플릿 <code>"$x"</code> 는 어느 쪽이든 먼저 결합됩니다(LOG 02).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">R8 로 릴리스에서 호출 자체를 지우기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">proguard-rules.pro</h4>
+      <pre class="code" data-lang="text"><code># 릴리스 빌드에서 VERBOSE · DEBUG · INFO 호출을 코드에서 제거합니다
+-assumenosideeffects class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int);
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+}
+# Timber 도 같은 방식으로 — d/v 만. w/e 는 Crashlytics 로 가야 하니 남깁니다
+-assumenosideeffects class timber.log.Timber {
+    public static void v(...);
+    public static void d(...);
+    public static void i(...);
+}
+# ⚠ Timber.tag("X").d(...) 처럼 Tree 인스턴스 메서드로 부른 것은
+#   위 규칙(static)에 안 걸립니다. 필요하면 timber.log.Timber$Tree 도 추가.</code></pre>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// build.gradle.kts — 규칙은 minify 가 켜져야 적용됩니다
+android {
+    buildTypes {
+        release {
+            isMinifyEnabled = true                  // ★ false 면 위 규칙은 무시
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 지워지고 무엇이 남나 ★</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:50%">코드</th><th>R8 적용 후</th></tr>
+        <tr><td><code>Log.d(TAG, "고정 문자열")</code></td><td><b>호출 · 문자열 모두 제거</b></td></tr>
+        <tr><td><code>Log.d(TAG, "id=$id")</code></td><td>호출 제거 · 결합은 <b>보통 같이 제거</b></td></tr>
+        <tr><td><code>Log.d(TAG, repo.count().toString())</code></td><td>호출 제거 · <b><code>count()</code> 는 남음</b></td></tr>
+        <tr><td><code>Timber.d(...)</code></td><td>규칙에 넣었으면 제거</td></tr>
+        <tr><td><code>Timber.w(...)</code></td><td><b>남음</b> (의도적으로)</td></tr>
+        <tr><td><code>Log.e(...)</code></td><td><b>남음</b></td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>인자의 부작용은 R8 이 보존합니다</b> — <code>-assumenosideeffects</code> 는 “이 <b>호출</b>은 부작용이 없다”는 뜻이지
+        인자를 계산하는 코드까지 없애 준다는 약속이 아닙니다. 부작용이 없다고 판단되는 문자열 결합은 보통 함께 사라지지만,
+        <b>메서드 호출이 들어간 인자는 그대로 실행</b>됩니다. LOG 02 의 규칙(로그 인자에 I/O 금지)은 안드로이드에서도 같습니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>확인하는 법</b> — 릴리스 APK 를 Android Studio 의 <b>Analyze APK</b> 로 열어 <code>classes.dex</code> 에서
+        <code>Log.d</code> 참조가 사라졌는지 봅니다. 또는 <code>app/build/outputs/mapping/release/usage.txt</code> 에
+        제거된 메서드 목록이 남습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">Logcat 을 읽는 법과 남기지 말아야 할 것</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">adb logcat · Android Studio 쿼리</h4>
+      <pre class="code" data-lang="bash"><code># 내 앱 프로세스만 · 시간 포함
+adb logcat -v time --pid=$(adb shell pidof -s com.example.app)
+
+# 태그 필터 — Order 는 DEBUG 이상, 나머지는 침묵(S)
+adb logcat OrderScreen:D Payment:W *:S
+
+# 크래시 직전 200줄만 파일로
+adb logcat -d -t 200 &gt; crash.txt
+
+# 버퍼 비우기 (재현 전에)
+adb logcat -c</code></pre>
+      <pre class="code" data-lang="text" style="margin-bottom:0"><code># Android Studio Logcat 창의 쿼리 문법 (Dolphin 이후)
+package:mine level:warn                 내 앱 · WARN 이상
+package:mine tag:Order -tag:Glide       Order 태그만, Glide 제외
+package:mine message~:"주문 \d+"        정규식으로 메시지 검색
+age:5m                                  최근 5분</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Logcat 은 “내 것”이 아닙니다</h4>
+      <pre class="code" data-lang="text"><code>로그가 어디까지 가나
+
+  · 같은 기기의 다른 앱은 (Android 4.1 이후) 내 로그를 못 읽습니다.
+    → 그래서 "괜찮다"고 생각하기 쉽습니다. 하지만
+  · 사용자가 보내는 버그 리포트(bugreport.zip) 에 logcat 이 통째로 들어갑니다.
+  · Play Console 의 ANR · 크래시 리포트에 최근 logcat 이 첨부됩니다.
+  · Crashlytics 의 cl.log() 는 서드파티 서버로 갑니다.
+  · 개발자 옵션 켠 사용자는 adb 로 전부 읽습니다.
+
+즉 릴리스 빌드의 로그 한 줄은 '외부로 나가는 데이터'입니다.
+
+남기지 말아야 할 것
+  · 토큰 · 세션 ID · Authorization 헤더 값
+  · 이메일 · 전화번호 · 주소 · 위치 좌표
+  · OkHttp HttpLoggingInterceptor 의 BODY 레벨 (릴리스 금지)</code></pre>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// OkHttp — 디버그에서만, 그리고 헤더는 가리고
+val logging = HttpLoggingInterceptor().apply {
+    level = if (BuildConfig.DEBUG) Level.BODY else Level.NONE
+    redactHeader("Authorization")
+    redactHeader("Cookie")
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 안드로이드 로깅은 <b>Log(출력) · Timber(껍데기) · R8(제거)</b> 세 층입니다.
+    <code>Timber.plant</code> 는 <b>디버그에서만 <code>DebugTree</code></b>, 릴리스는 <b>WARN 이상만 Crashlytics 로 보내는 Tree</b>,
+    그리고 <b><code>-assumenosideeffects</code> 로 d/v 호출을 APK 에서 지웁니다</b>.
+    Logcat 은 버그 리포트로 외부에 나가므로 <b>토큰·개인정보는 처음부터 넣지 않습니다</b>.</div>
+</section>
+
+
+<!-- ==================== lg10 ==================== -->
+<section class="sec" id="lg10">
+  <div class="sec-head rv">
+    <span class="no">LOG 10</span>
+    <h2>KMP — <span class="t">expect / actual</span> 로 직접 만들거나 <span class="t">Kermit</span> 을 쓰거나</h2>
+    <p class="lead">
+      공통 코드(commonMain)에는 SLF4J 도 <code>android.util.Log</code> 도 없습니다. 플랫폼마다 출력 수단이 다르니
+      <b>“공통에서 부르고 플랫폼에서 구현한다”</b>는 KMP 의 기본 문법 — <code>expect</code>/<code>actual</code> — 이 로깅에서도 그대로 쓰입니다.
+      직접 만들면 20줄이고, Kermit 은 그 20줄에 <b>태그·레벨·Writer 교체·Crashlytics 연동</b>을 얹은 것입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="KMP 로깅의 expect 와 actual 구조를 트리로 그린 그림. 맨 위 commonMain 에 expect fun platformLog 선언이 있고, 그 아래로 androidMain 은 Log.println 으로 Logcat 에, iosMain 은 NSLog 나 OSLog 로 Xcode 콘솔에, jvmMain 은 SLF4J 로 Logback 에, jsMain 은 console 로 브라우저에 출력하는 actual 구현이 달려 있다. 아래에는 Kermit 이 바로 이 트리를 Logger 와 LogWriter 라는 이름으로 미리 만들어 둔 것이라고 적혀 있다.">
+      <text x="16" y="18" class="lbl">공통에서 선언하고 플랫폼마다 구현합니다 — 로깅도 예외가 아닙니다</text>
+
+      <rect class="bx bx-fw" x="200" y="32" width="280" height="44"/>
+      <text x="340" y="50" class="val" text-anchor="middle">commonMain</text>
+      <text x="340" y="66" class="ann" text-anchor="middle">expect fun platformLog(level, tag, msg)</text>
+
+      <path class="ln" d="M340 78 L340 94"/>
+      <path class="ln" d="M100 94 L580 94"/>
+      <path class="ln" d="M100 94 L100 110"/>
+      <path class="ln" d="M260 94 L260 110"/>
+      <path class="ln" d="M420 94 L420 110"/>
+      <path class="ln" d="M580 94 L580 110"/>
+
+      <rect class="bx" x="30" y="112" width="140" height="58"/>
+      <text x="100" y="132" class="val" text-anchor="middle">androidMain</text>
+      <text x="100" y="147" class="ann" text-anchor="middle">Log.println(...)</text>
+      <text x="100" y="161" class="ann" text-anchor="middle">→ Logcat</text>
+
+      <rect class="bx" x="190" y="112" width="140" height="58"/>
+      <text x="260" y="132" class="val" text-anchor="middle">iosMain</text>
+      <text x="260" y="147" class="ann" text-anchor="middle">NSLog · OSLog</text>
+      <text x="260" y="161" class="ann" text-anchor="middle">→ Xcode 콘솔</text>
+
+      <rect class="bx" x="350" y="112" width="140" height="58"/>
+      <text x="420" y="132" class="val" text-anchor="middle">jvmMain</text>
+      <text x="420" y="147" class="ann" text-anchor="middle">SLF4J Logger</text>
+      <text x="420" y="161" class="ann" text-anchor="middle">→ Logback</text>
+
+      <rect class="bx" x="510" y="112" width="140" height="58"/>
+      <text x="580" y="132" class="val" text-anchor="middle">jsMain · wasmJs</text>
+      <text x="580" y="147" class="ann" text-anchor="middle">console.log(...)</text>
+      <text x="580" y="161" class="ann" text-anchor="middle">→ 브라우저 콘솔</text>
+
+      <text x="340" y="196" class="ann" text-anchor="middle">actual 이 하나라도 빠진 타깃은 컴파일이 실패합니다 — 잊을 수가 없는 구조입니다</text>
+
+      <text x="16" y="226" class="lbl">Kermit 은 이 트리를 미리 만들어 둔 것입니다 — Logger(공통) + LogWriter(플랫폼별)</text>
+      <text x="16" y="242" class="lbl">직접 만들면 레벨 · 태그 · Writer 교체를 다시 짜게 되므로, 앱이라면 Kermit 을 고르세요</text>
+    </svg>
+    <div class="cap">expect/actual 트리의 <b>잎 하나가 플랫폼 하나</b>입니다 — Kermit 은 이 잎들을 <b>LogWriter</b> 라는 이름으로 미리 채워 둡니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 만들기 — 20줄이면 됩니다</h4>
+      <pre class="code" data-lang="kotlin"><code>// commonMain/kotlin/Log.kt
+enum class LogLevel { DEBUG, INFO, WARN, ERROR }
+
+expect fun platformLog(level: LogLevel, tag: String, msg: String)
+
+// 공통에서 쓰는 얼굴 — 람다로 지연 평가를 직접 넣습니다
+object Log {
+    var minLevel = LogLevel.DEBUG
+    inline fun d(tag: String, msg: () -&gt; String) = log(LogLevel.DEBUG, tag, msg)
+    inline fun w(tag: String, msg: () -&gt; String) = log(LogLevel.WARN, tag, msg)
+    inline fun log(level: LogLevel, tag: String, msg: () -&gt; String) {
+        if (level &gt;= minLevel) platformLog(level, tag, msg())
+    }
+}
+
+// androidMain
+actual fun platformLog(level: LogLevel, tag: String, msg: String) {
+    val p = when (level) {
+        LogLevel.DEBUG -&gt; android.util.Log.DEBUG
+        LogLevel.INFO  -&gt; android.util.Log.INFO
+        LogLevel.WARN  -&gt; android.util.Log.WARN
+        LogLevel.ERROR -&gt; android.util.Log.ERROR
+    }
+    android.util.Log.println(p, tag, msg)
+}
+
+// iosMain — NSLog 는 Foundation 에 있습니다
+actual fun platformLog(level: LogLevel, tag: String, msg: String) {
+    platform.Foundation.NSLog("[%s] %s: %s", level.name, tag, msg)
+}
+
+// jvmMain
+actual fun platformLog(level: LogLevel, tag: String, msg: String) {
+    val l = org.slf4j.LoggerFactory.getLogger(tag)
+    when (level) {
+        LogLevel.DEBUG -&gt; l.debug(msg); LogLevel.INFO -&gt; l.info(msg)
+        LogLevel.WARN  -&gt; l.warn(msg);  LogLevel.ERROR -&gt; l.error(msg)
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Kermit — 같은 것을 라이브러리로</h4>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts (shared 모듈) — 2026년 8월 기준 2.0.x 계열
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation("co.touchlab:kermit:2.0.6")
+        }
+    }
+}</code></pre>
+      <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>import co.touchlab.kermit.Logger
+import co.touchlab.kermit.Severity
+
+// 공통 코드 — 어디서든 같은 API
+private val log = Logger.withTag("OrderRepo")
+
+class OrderRepo {
+    suspend fun sync() {
+        log.d { "동기화 시작" }                    // ★ 람다 — 지연 평가
+        runCatching { api.pull() }
+            .onFailure { log.e(it) { "동기화 실패" } }
+    }
+}
+
+// 앱 시작 지점(플랫폼별) — 레벨과 Writer 를 정합니다
+fun initLogging(isDebug: Boolean) {
+    Logger.setMinSeverity(if (isDebug) Severity.Verbose else Severity.Warn)
+    // 기본 Writer 는 platformLogWriter() — Android 는 Logcat, iOS 는 NSLog/OSLog
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Kermit 이 직접 만든 것보다 나은 지점</b> — <b>태그 상속</b>(<code>withTag</code>), <b>Severity 6단계</b>,
+        <b>Writer 교체·복수 등록</b>(Logcat + Crashlytics 동시), 그리고 <b>Swift 에서 같은 로거를 부를 수 있게</b> 해 두었다는 점입니다.
+        직접 만든 것은 마지막 항목을 흉내 내기가 특히 번거롭습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">Writer 갈아 끼우기 · Crashlytics · Swift 쪽</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">LogWriter — 플랫폼 잎을 직접 만드는 자리</h4>
+      <pre class="code" data-lang="kotlin"><code>import co.touchlab.kermit.LogWriter
+import co.touchlab.kermit.Severity
+
+// 공통 — 메모리에 최근 N 줄을 남겨 '버그 리포트 보내기'에 붙이는 Writer
+class RingBufferWriter(private val size: Int = 200) : LogWriter() {
+    private val buf = ArrayDeque&lt;String&gt;(size)
+    override fun log(severity: Severity, message: String, tag: String, throwable: Throwable?) {
+        if (buf.size == size) buf.removeFirst()
+        buf.addLast("${severity.name[0]}/$tag: $message")
+    }
+    fun dump(): String = buf.joinToString("\n")
+}
+
+// 등록 — 여러 개를 동시에
+val ring = RingBufferWriter()
+Logger.setLogWriters(platformLogWriter(), ring)
+
+// Crashlytics — 공식 모듈이 있습니다 (kermit-crashlytics)
+// implementation("co.touchlab:kermit-crashlytics:2.0.6")
+Logger.setLogWriters(platformLogWriter(), CrashlyticsLogWriter(minSeverity = Severity.Warn))</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">iOS 쪽 — Swift 에서 부르기 · 콘솔에서 읽기</h4>
+      <pre class="code" data-lang="text"><code>// Swift — 공유 프레임워크의 로거를 그대로 씁니다
+import Shared
+let log = Logger.companion.withTag(tag: "Checkout")
+log.i(message: "결제 화면 진입")     // 람다가 아니라 문자열 — Swift 엔 람다 오버로드가 없음
+
+// Xcode 콘솔에서 보이는 형태 (NSLog Writer)
+2026-08-31 10:22:41.113 App[12345:67890] [Checkout] I: 결제 화면 진입
+
+// OSLog Writer 로 바꾸면 Console.app 에서 subsystem/category 로 필터됩니다
+//   Logger.setLogWriters(OSLogWriter())   ← kermit 의 iosMain 에 있음</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">라이브러리</th><th>2026년 8월 기준 위치</th></tr>
+        <tr><td><b>Kermit</b></td><td>KMP 앱의 <b>기본 선택</b>. Touchlab 유지</td></tr>
+        <tr><td><b>Napier</b></td><td>비슷한 API. <code>DebugAntilog</code> 로 시작. 활동이 잦아짐</td></tr>
+        <tr><td><b>kotlin-logging 5+</b></td><td>KMP 지원. <b>서버 코드를 공유</b>할 때</td></tr>
+        <tr><td>직접 expect/actual</td><td>의존성 0 이 목표인 <b>라이브러리</b> 모듈</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Kermit 도 릴리스에서 R8 규칙이 필요합니다</b> — <code>Logger.d { }</code> 는 람다라 문자열은 안 만들지만
+        <b>호출은 남습니다</b>. Android 타깃에서 완전히 없애려면 LOG 09 처럼
+        <code>-assumenosideeffects class co.touchlab.kermit.Logger { public *** d(...); public *** v(...); }</code>
+        를 넣습니다. iOS 는 <code>setMinSeverity</code> 로만 막습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">공유 모듈이 서버까지 갈 때</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">kotlin-logging 을 KMP 에서 — JVM 은 SLF4J 로 이어집니다</h4>
+      <pre class="code" data-lang="kotlin"><code>// shared/build.gradle.kts
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation("io.github.oshai:kotlin-logging:7.0.7")   // ★ -jvm 이 아닌 공통 좌표
+        }
+        jvmMain.dependencies {
+            runtimeOnly("ch.qos.logback:logback-classic:1.5.18")    // JVM 에서만 실제 출력
+        }
+    }
+}
+
+// commonMain — 서버 탭에서 쓰던 코드와 글자 하나 안 다릅니다
+private val log = KotlinLogging.logger {}
+fun validate(o: Order) { log.debug { "검증 ${o.id}" } }
+
+// 어디로 나가나
+//   JVM     → SLF4J → Logback (서버와 같은 설정)
+//   Android → 기본은 표준 출력. Logcat 에 나오지만 태그가 밋밋합니다
+//   iOS/JS  → println / console — 레벨은 KotlinLoggingConfiguration.logLevel 로</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고르는 기준 한 장</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">상황</th><th>고르세요</th></tr>
+        <tr><td>안드로이드 + iOS 앱</td><td><b>Kermit</b></td></tr>
+        <tr><td>+ Crashlytics 연동</td><td>Kermit + <code>kermit-crashlytics</code></td></tr>
+        <tr><td>도메인 로직을 <b>서버와 공유</b></td><td><b>kotlin-logging</b> (JVM 은 Logback)</td></tr>
+        <tr><td>라이브러리 모듈 (의존성 0)</td><td>직접 <code>expect</code>/<code>actual</code></td></tr>
+        <tr><td>Compose Multiplatform 데스크톱</td><td>Kermit (JVM Writer 는 println)</td></tr>
+        <tr><td>Wasm 타깃 포함</td><td>Kermit · Napier 의 <b>지원 타깃 목록 확인</b></td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>한 프로젝트에 둘을 섞지 마세요</b> — 공유 모듈은 Kermit, 서버는 kotlin-logging 이면
+        <b>공유 모듈의 로그가 서버에서 Logback 설정을 안 탑니다</b>(Kermit 의 JVM Writer 는 println).
+        서버까지 공유한다면 처음부터 kotlin-logging 으로 통일하거나,
+        JVM 에서만 Kermit 에 <b>SLF4J 로 넘기는 커스텀 LogWriter</b> 를 끼웁니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> KMP 로깅은 <b><code>expect</code> 선언 하나 + 플랫폼별 <code>actual</code></b> 구조이고,
+    <b>Kermit 은 그 구조를 <code>Logger</code> + <code>LogWriter</code> 로 미리 만들어 둔 라이브러리</b>입니다.
+    앱은 Kermit, 서버와 공유하는 코드는 kotlin-logging, 의존성 0 인 라이브러리는 직접 만듭니다.
+    어느 쪽이든 <b>Android 릴리스에서는 R8 규칙</b>을, iOS 는 <code>setMinSeverity</code> 를 잊지 마세요.</div>
+</section>

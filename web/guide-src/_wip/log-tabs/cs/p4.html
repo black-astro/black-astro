@@ -1,0 +1,421 @@
+
+
+<!-- ==================== lg09 ==================== -->
+<section class="sec" id="lg09">
+  <div class="sec-head rv">
+    <span class="no">LOG 09</span>
+    <h2>구조적 로깅과 스키마 진화 — <span class="t">한 줄은 문장이 아니라 레코드입니다</span></h2>
+    <p class="lead">
+      <code>"Payment failed for order 88123 after 412ms"</code> 는 사람에게는 친절하지만 기계에게는 <b>파싱해야 할 숙제</b>입니다.
+      로그 한 줄을 <b>필드 이름과 값의 집합</b>으로 보면 로그는 곧 테이블이 되고,
+      그 순간부터 데이터베이스가 40년 동안 풀어 온 문제 — <b>스키마는 어떻게 바뀌는가</b> — 가 그대로 따라옵니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 274" role="img" aria-label="구조적 로그 한 줄을 부분별로 설명한 해부도. JSON 한 줄 안에 시각, 레벨과 서비스 이름, 배포 버전과 리전, 추적 식별자, 이벤트 코드와 사유 코드, 숫자 필드, 스키마 버전이 들어 있고 각 부분에 왜 필요한지가 지시선으로 붙어 있다. 시각은 UTC 로 통일하고 순서는 별도 시퀀스가 정하며, 이벤트는 문장이 아니라 코드로 적고, 숫자는 문자열이 아니라 숫자 타입으로 두며, 스키마 번호가 나중의 형식 변경을 견디게 한다.">
+      <text x="16" y="18" class="lbl">구조적 로그 한 줄 - 문장이 아니라 필드의 집합입니다</text>
+
+      <rect class="bx" x="170" y="34" width="380" height="192"/>
+      <text x="186" y="56" class="tk">{ "ts": "2026-09-07T03:12:44.128Z",</text>
+      <text x="186" y="82" class="tk">  "level": "ERROR", "service": "payment",</text>
+      <text x="186" y="108" class="tk">  "version": "1.42.0", "region": "ap-ne-2",</text>
+      <text x="186" y="134" class="tk">  "trace_id": "4bf92f35…", "span_id": "00f067aa…",</text>
+      <text x="186" y="160" class="tk">  "event": "charge.failed", "reason": "card_declined",</text>
+      <text x="186" y="186" class="tk">  "order_id": 88123, "duration_ms": 412.7,</text>
+      <text x="186" y="212" class="tk">  "schema": 3 }</text>
+      <rect class="hl" x="178" y="198" width="364" height="20"/>
+
+      <path class="lead-ln" d="M166 52 L142 52"/>
+      <text x="16" y="50" class="ann">시각은 UTC 로 통일</text>
+      <text x="16" y="62" class="ann">순서는 seq 가 정합니다</text>
+
+      <path class="lead-ln" d="M166 78 L142 78"/>
+      <text x="16" y="76" class="ann">레벨은 필터의 열쇠</text>
+      <text x="16" y="88" class="ann">service 는 필수 필드</text>
+
+      <path class="lead-ln" d="M166 104 L142 104"/>
+      <text x="16" y="102" class="ann">배포 버전이 없으면</text>
+      <text x="16" y="114" class="ann">언제부터를 못 찾습니다</text>
+
+      <path class="lead-ln" d="M554 130 L578 130"/>
+      <text x="584" y="128" class="ann">요청을 잇는 열쇠</text>
+      <text x="584" y="140" class="ann">LOG 04 의 인과</text>
+
+      <path class="lead-ln" d="M554 156 L578 156"/>
+      <text x="584" y="154" class="ann">문장이 아니라 코드</text>
+      <text x="584" y="166" class="ann">grep 대신 질의</text>
+
+      <path class="lead-ln" d="M554 182 L578 182"/>
+      <text x="584" y="180" class="ann">숫자는 숫자로</text>
+      <text x="584" y="192" class="ann">문자열이면 합산 불가</text>
+
+      <path class="lead-ln" d="M554 208 L578 208"/>
+      <text x="584" y="206" class="ann am-t">스키마 버전</text>
+      <text x="584" y="218" class="ann am-t">진화의 손잡이</text>
+
+      <text x="16" y="250" class="lbl">한 줄이 곧 레코드입니다 - 필드 이름이 열, 값이 셀. 문장으로 적으면 나중에 파싱이라는 세금을 냅니다</text>
+      <text x="16" y="266" class="lbl">스키마 번호 하나가 1년 뒤의 나를 구합니다 - 필드 뜻이 바뀌면 번호를 올리고 옛 줄은 옛 규칙으로 읽습니다</text>
+    </svg>
+    <div class="cap">로그 한 줄은 <b>열 이름이 붙은 레코드</b>입니다 — 문장으로 적는 순간 읽는 쪽이 파싱 비용을 냅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문장과 레코드 — 같은 사실, 다른 쓸모</h4>
+      <pre class="code" data-lang="python"><code>import json, logging, time
+
+# ✗ 문장 — 값이 문장 속에 녹아 있어 기계가 다시 꺼내야 합니다
+log.error(f"Payment failed for order {order_id} after {ms}ms")
+#   "412ms 넘게 걸린 실패는 몇 건?" → 정규식으로 숫자를 뽑아 비교
+#   메시지 문구를 한 글자라도 바꾸면 정규식이 깨집니다
+
+# ✓ 레코드 — 필드가 이미 분리돼 있습니다
+class JsonFormatter(logging.Formatter):
+    def format(self, rec):
+        base = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(rec.created)),
+                "level": rec.levelname, "logger": rec.name,
+                "event": rec.getMessage(), "schema": 3}
+        base.update(getattr(rec, "fields", {}))   # extra 로 넘긴 필드
+        return json.dumps(base, ensure_ascii=False)
+
+def emit(logger, level, event, **fields):
+    logger.log(level, event, extra={"fields": fields})
+
+emit(log, logging.ERROR, "charge.failed",
+     order_id=88123, reason="card_declined", duration_ms=412.7)
+
+# 수집기에서는 곧바로 질의가 됩니다
+#   event = 'charge.failed' AND duration_ms &gt; 400
+#   GROUP BY reason  → 사유별 건수가 한 줄에 나옵니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>event 는 문장이 아니라 코드</b>로 둡니다 — <code>charge.failed</code> 처럼 <b>점으로 나눈 고정 문자열</b>이면
+        오타가 나지 않고, 문구를 다듬어도 질의가 안 깨집니다. 사람이 읽을 문장은 <b>표시할 때</b> 만들면 됩니다.
+        Serilog 의 메시지 템플릿 <code>{OrderId}</code>, Go 의 <code>slog</code>, Java 의 <code>Logstash 인코더</code>가 전부 같은 생각입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스키마가 없다고 생각하는 순간 스키마가 생깁니다</h4>
+      <pre class="code" data-lang="text"><code>"우리 로그는 JSON 이라 스키마가 없어요"
+  → 대시보드가 duration_ms 를 읽는 순간 그것이 스키마입니다.
+    암묵적 스키마는 깨질 때까지 보이지 않을 뿐입니다.
+
+깨지는 순간들 (전부 실제로 겪는 것들)
+  · duration_ms 가 어느 날 문자열 "412.7" 로 바뀜  → 합계가 0
+  · user 필드가 문자열이었다가 객체 {id, name} 로   → 색인 충돌
+  · level 이 "WARN" 이었다가 "WARNING" 으로         → 필터 누락
+  · 필드 이름을 orderId → order_id 로 정리          → 옛 로그 조회 불가
+  · 시각을 로컬 시간에서 UTC 로 바꿈                → 9시간 어긋난 그래프
+
+그래서 로그에도 데이터베이스와 같은 규칙이 필요합니다
+  ① 스키마를 어딘가에 적어 둔다 (문서든 JSON Schema 든)
+  ② 바꿀 때 호환 규칙을 따른다 (다음 표)
+  ③ 줄마다 schema 버전을 싣는다 - 읽는 쪽이 어느 규칙으로 읽을지 알도록</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Elasticsearch 계열 수집기의 “매핑 충돌”</b>이 이 문제의 가장 흔한 얼굴입니다. 같은 필드 이름에
+        어느 날 다른 타입이 들어오면 <b>그 줄은 조용히 버려지거나 색인이 거부</b>됩니다. 에러가 나는 곳은 로거가 아니라
+        <b>몇 단계 뒤의 수집기</b>라서 원인을 찾는 데 시간이 걸립니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">호환성의 네 방향</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">누가 먼저 바뀌는가로 규칙이 갈립니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">호환</th><th>뜻</th><th>허용되는 변경</th></tr>
+        <tr><td><b>후방(backward)</b></td><td>새 코드가 <b>옛 데이터</b>를 읽음</td><td>필드 추가(기본값 있음) · 필드 삭제</td></tr>
+        <tr><td><b>전방(forward)</b></td><td>옛 코드가 <b>새 데이터</b>를 읽음</td><td>필드 추가 · 기본값 있는 필드 삭제</td></tr>
+        <tr><td><b>완전(full)</b></td><td>양쪽 다</td><td><b>기본값 있는 필드 추가·삭제만</b></td></tr>
+        <tr><td><b>없음</b></td><td>둘 다 아님</td><td>이름 변경 · 타입 변경 · 뜻 변경</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>로그에서는 거의 항상 "후방 + 전방" 둘 다 필요합니다
+  · 옛 로그를 새 대시보드가 읽는다     → 후방
+  · 새 로그를 아직 안 고친 알림 규칙이 읽는다 → 전방
+  · 배포는 서서히 굴러가므로 두 버전이 동시에 씁니다 ★
+
+안전한 변경             위험한 변경 (= 새 필드 + 옛 필드 유지로 우회)
+  필드 추가               필드 이름 바꾸기
+  필드 삭제(읽는 쪽 확인)  타입 바꾸기 (숫자 ↔ 문자열)
+  enum 값 추가            enum 값의 뜻 바꾸기
+                          단위 바꾸기 (ms → s) ★ 가장 교묘함</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">업캐스터 — 옛 줄을 새 형태로 읽어 올리기</h4>
+      <pre class="code" data-lang="python"><code># 스키마 2 → 3 에서 무엇이 바뀌었나
+#   · duration 이 초(float) 에서 duration_ms(밀리초) 로
+#   · user(문자열) 이 user_id 로 분리
+# 옛 로그는 고칠 수 없습니다(append-only). 읽을 때 올립니다.
+
+UPCASTERS = {
+    1: lambda r: {**r, "schema": 2, "level": r.get("lvl", "INFO")},
+    2: lambda r: {**{k: v for k, v in r.items() if k not in ("duration", "user")},
+                  "schema": 3,
+                  "duration_ms": r["duration"] * 1000 if "duration" in r else None,
+                  "user_id": r.get("user")},
+}
+CURRENT = 3
+
+def read(rec: dict) -&gt; dict:
+    v = rec.get("schema", 1)               # 번호가 없으면 가장 옛 버전
+    while v &lt; CURRENT:
+        rec = UPCASTERS[v](rec)            # 한 단계씩 올립니다
+        v = rec["schema"]
+    return rec
+
+# 규칙
+#  · 업캐스터는 순수 함수 - 같은 줄은 언제 읽어도 같은 결과 (LOG 02 의 apply 와 같음)
+#  · 한 번에 한 단계만 - 1→3 지름길을 만들면 조합이 폭발합니다
+#  · 원본은 그대로 - 저장소에는 여전히 schema 1 줄이 남아 있습니다</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>Avro · Protobuf 가 이 규칙을 강제해 줍니다</b> — Confluent Schema Registry 는 <code>BACKWARD / FORWARD / FULL</code>
+        모드로 호환되지 않는 스키마 등록을 <b>거부</b>하고, Protobuf 는 <b>필드 번호를 절대 재사용하지 말라</b>(<code>reserved</code>)는
+        규칙 하나로 전방 호환을 지킵니다. 이벤트 소싱의 이벤트 스키마에도 똑같이 적용됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">공통 스키마 위에 올라타기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>필드 이름을 팀마다 새로 짓지 않습니다. 이미 합의된 이름이 있습니다.
+
+OpenTelemetry 로그 데이터 모델 (필드의 뼈대)
+  Timestamp · ObservedTimestamp     사건 시각 / 수집기가 본 시각 (둘이 다릅니다 ★)
+  TraceId · SpanId · TraceFlags     LOG 04 의 인과 - 추적과 로그를 잇는 열쇠
+  SeverityText · SeverityNumber     "ERROR" 와 17 - 숫자가 있어야 비교·정렬이 됩니다
+  Body                              사람이 읽을 본문 (event 코드를 두기도 합니다)
+  Resource                          누가 - service.name · service.version · host · k8s.pod
+  InstrumentationScope              어느 라이브러리가
+  Attributes                        나머지 전부 - order_id · reason · duration_ms …
+
+의미 규약(semantic conventions) 이 이름을 정해 둡니다
+  http.request.method · http.response.status_code · db.system · error.type …
+  Elastic 의 ECS 가 2023년 OTel 규약으로 합쳐지는 쪽으로 정리됐습니다
+  → 이 이름을 쓰면 대시보드·알림 템플릿을 그대로 가져다 씁니다
+
+실무 규칙 넷
+  ① Resource 는 프로세스가 시작할 때 한 번 정하고 모든 줄에 붙입니다 (코드에서 매번 쓰지 않음)
+  ② 도메인 필드는 접두사로 묶습니다 - order.id · order.total · payment.method
+  ③ 같은 뜻은 같은 이름 - user_id 와 userId 와 uid 가 섞이면 조인이 안 됩니다
+  ④ 스키마 문서와 예제 줄을 코드 저장소에 같이 둡니다 - 리뷰 대상입니다</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>ObservedTimestamp 가 왜 따로 있나</b> — 사건이 일어난 시각과 수집기가 그 줄을 받은 시각은 다릅니다.
+      네트워크가 막혀 30분 뒤에 도착한 줄은 <b>Timestamp 로 정렬하면 과거에</b>, <b>ObservedTimestamp 로 보면 지금</b> 나타납니다.
+      “왜 그래프가 뒤늦게 바뀌지?”의 답이 대개 이 둘의 차이입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 로그 한 줄은 <b>필드가 있는 레코드</b>이고, 대시보드가 필드를 읽는 순간 <b>스키마가 존재</b>합니다.
+    변경은 데이터베이스와 같은 호환 규칙(후방·전방)을 따르고, 줄마다 <b>schema 버전</b>을 실어
+    옛 줄은 <b>업캐스터</b>로 읽어 올립니다. 필드 이름은 새로 짓지 말고 <b>OTel 규약</b>에 올라탑니다.</div>
+</section>
+
+
+<!-- ==================== lg10 ==================== -->
+<section class="sec" id="lg10">
+  <div class="sec-head rv">
+    <span class="no">LOG 10</span>
+    <h2>로그 컴팩션과 보존 — <span class="t">영원히 남기지는 못합니다</span></h2>
+    <p class="lead">
+      로그는 append-only 지만 디스크는 유한합니다. 무엇인가는 버려야 하는데,
+      <b>버리는 방법이 곧 시스템이 답할 수 있는 질문을 정합니다</b>.
+      시간으로 자를지, 키마다 마지막만 남길지, 싼 저장소로 옮길지 — 셋은 서로 다른 것을 잃습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 304" role="img" aria-label="다섯 가지 보존 전략을 다섯 가지 관심사로 평가한 발산 히트맵. 시간 기반 삭제와 크기 기반 삭제는 저장 비용에 유리하지만 과거 재생과 최신 상태 복원에 불리하다. 키 컴팩션은 최신 상태 복원과 잊힐 권리, 복구 시간에 가장 유리하지만 중간 이력을 잃는다. 계층 저장은 과거 재생에 유리하지만 삭제 요구와 복구 시간에 불리하다. 무기한 보존은 과거 재생에만 유리하고 비용, 삭제 요구, 복구 시간 모두에 가장 불리하다. 모든 칸이 유리한 행은 없다.">
+      <text x="16" y="18" class="lbl">보존 전략 x 관심사 - 붉을수록 불리, 푸를수록 유리, 회색은 중립</text>
+
+      <text x="202" y="44" class="tk" text-anchor="middle">저장 비용</text>
+      <text x="298" y="44" class="tk" text-anchor="middle">과거 재생</text>
+      <text x="394" y="44" class="tk" text-anchor="middle">최신 상태</text>
+      <text x="490" y="44" class="tk" text-anchor="middle">잊힐 권리</text>
+      <text x="586" y="44" class="tk" text-anchor="middle">복구 시간</text>
+
+      <text x="16" y="70" class="ann">시간 기반 삭제</text>
+      <rect class="cel d-p2" x="158" y="52" width="88" height="28"/><text x="202" y="70" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-n2" x="254" y="52" width="88" height="28"/><text x="298" y="70" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-n2" x="350" y="52" width="88" height="28"/><text x="394" y="70" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-p1" x="446" y="52" width="88" height="28"/><text x="490" y="70" class="tk" text-anchor="middle">+1</text>
+      <rect class="cel d-p1" x="542" y="52" width="88" height="28"/><text x="586" y="70" class="tk" text-anchor="middle">+1</text>
+
+      <text x="16" y="104" class="ann">크기 기반 삭제</text>
+      <rect class="cel d-p2" x="158" y="86" width="88" height="28"/><text x="202" y="104" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-n2" x="254" y="86" width="88" height="28"/><text x="298" y="104" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-n2" x="350" y="86" width="88" height="28"/><text x="394" y="104" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-0" x="446" y="86" width="88" height="28"/><text x="490" y="104" class="tk" text-anchor="middle">0</text>
+      <rect class="cel d-p1" x="542" y="86" width="88" height="28"/><text x="586" y="104" class="tk" text-anchor="middle">+1</text>
+
+      <text x="16" y="138" class="ann">키 컴팩션</text>
+      <rect class="cel d-p1" x="158" y="120" width="88" height="28"/><text x="202" y="138" class="tk" text-anchor="middle">+1</text>
+      <rect class="cel d-n1" x="254" y="120" width="88" height="28"/><text x="298" y="138" class="tk" text-anchor="middle">-1</text>
+      <rect class="cel d-p2" x="350" y="120" width="88" height="28"/><text x="394" y="138" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-p2" x="446" y="120" width="88" height="28"/><text x="490" y="138" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-p2" x="542" y="120" width="88" height="28"/><text x="586" y="138" class="tk" text-anchor="middle">+2</text>
+
+      <text x="16" y="172" class="ann">계층 저장(티어링)</text>
+      <rect class="cel d-p1" x="158" y="154" width="88" height="28"/><text x="202" y="172" class="tk" text-anchor="middle">+1</text>
+      <rect class="cel d-p2" x="254" y="154" width="88" height="28"/><text x="298" y="172" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-0" x="350" y="154" width="88" height="28"/><text x="394" y="172" class="tk" text-anchor="middle">0</text>
+      <rect class="cel d-n1" x="446" y="154" width="88" height="28"/><text x="490" y="172" class="tk" text-anchor="middle">-1</text>
+      <rect class="cel d-n1" x="542" y="154" width="88" height="28"/><text x="586" y="172" class="tk" text-anchor="middle">-1</text>
+
+      <text x="16" y="206" class="ann">무기한 보존</text>
+      <rect class="cel d-n2" x="158" y="188" width="88" height="28"/><text x="202" y="206" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-p2" x="254" y="188" width="88" height="28"/><text x="298" y="206" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-n1" x="350" y="188" width="88" height="28"/><text x="394" y="206" class="tk" text-anchor="middle">-1</text>
+      <rect class="cel d-n2" x="446" y="188" width="88" height="28"/><text x="490" y="206" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-n2" x="542" y="188" width="88" height="28"/><text x="586" y="206" class="tk" text-anchor="middle">-2</text>
+
+      <rect class="cel d-n2" x="158" y="224" width="14" height="12"/>
+      <rect class="cel d-n1" x="176" y="224" width="14" height="12"/>
+      <rect class="cel d-0" x="194" y="224" width="14" height="12"/>
+      <rect class="cel d-p1" x="212" y="224" width="14" height="12"/>
+      <rect class="cel d-p2" x="230" y="224" width="14" height="12"/>
+      <text x="252" y="234" class="ann">-2 불리 … +2 유리 (정성 평가 - 실제 값은 데이터 양과 요구에 따라 다릅니다)</text>
+
+      <text x="16" y="256" class="ann">키 컴팩션은 fold 를 미리 해 두는 것입니다 - 키마다 마지막 값만 남기니 최신 상태는 빠르고 중간 이력은 사라집니다</text>
+
+      <text x="16" y="280" class="lbl">어느 행도 전부 유리하지 않습니다 - 보존 정책은 무엇을 잃어도 되는지를 먼저 정하는 일입니다</text>
+      <text x="16" y="296" class="lbl">실무는 섞습니다 - 상태는 컴팩션 토픽, 이력은 시간 보존 + 콜드 저장소, 개인정보는 로그 밖 금고에</text>
+    </svg>
+    <div class="cap">보존 정책은 <b>무엇을 잃어도 되는지를 먼저 정하는 일</b>입니다 — 전부 유리한 행은 없습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">삭제와 컴팩션 — 같은 “버리기”, 다른 결과</h4>
+      <pre class="code" data-lang="text"><code>보존(retention) - 오래된 세그먼트를 통째로 버립니다
+  [seg0][seg1][seg2][seg3][seg4 활성]
+   ↑ 7일 지남 → unlink                 ★ 파일 하나 지우면 끝
+  남는 것: 최근 N일의 모든 사건
+  잃는 것: N일 전의 모든 것 - 그때 만들어진 키의 마지막 값까지
+
+컴팩션(compaction) - 키마다 마지막 값만 남깁니다
+  전:  k1=a  k2=x  k1=b  k3=p  k2=y  k1=c  k3=∅(툼스톤)
+  후:              k2=y  k1=c   (k3 는 툼스톤 뒤 삭제)
+  남는 것: 모든 키의 최신 값 - 오프셋 0 부터 읽으면 현재 상태 전체
+  잃는 것: k1 이 a→b→c 로 변한 과정
+
+★ 같은 질문에 다르게 답합니다
+  "k1 의 지금 값은?"         보존: 7일 전 키면 모름 / 컴팩션: 항상 답함
+  "k1 이 어제 뭐였나?"       보존: 답함 / 컴팩션: 모름
+  "지난주 이벤트 수는?"      보존: 답함 / 컴팩션: 모름 (사건 수가 보존 안 됨)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>컴팩션은 LOG 02 의 fold 를 저장소가 대신 해 두는 것</b>입니다. 키마다 <code>apply</code> 가 “마지막 값으로 덮기”라면
+        fold 결과는 곧 “키별 최신 값”이고, 그것만 남기면 재생 시간이 <b>이벤트 수가 아니라 키 수</b>에 비례합니다.
+        Kafka Streams 의 상태 저장소 · Debezium 의 스냅샷 토픽이 이렇게 복구됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">컴팩션을 직접 구현하면 (세그먼트 재작성)</h4>
+      <pre class="code" data-lang="python"><code>TOMBSTONE = None
+
+def compact(segments):
+    """오래된 세그먼트들을 읽어 키별 마지막 값만 남긴 새 세그먼트를 만듭니다."""
+    latest = {}                              # key -&gt; (offset, value)
+    for seg in segments:                     # 오래된 것부터 순서대로
+        for off, key, val in seg.read():
+            latest[key] = (off, val)         # 뒤에 온 것이 이깁니다
+    out = Segment.new()
+    for key, (off, val) in sorted(latest.items(), key=lambda kv: kv[1][0]):
+        if val is TOMBSTONE:
+            continue                         # 툼스톤은 유예 기간 뒤 함께 사라집니다
+        out.append(off, key, val)            # ★ 오프셋은 원래 번호를 그대로 유지
+    out.seal()
+    for seg in segments:
+        seg.unlink()                         # 옛 세그먼트는 통째로 삭제
+    return out
+
+# 지켜야 할 것
+#  · 활성(쓰는 중인) 세그먼트는 건드리지 않습니다 - 읽기·쓰기와 경쟁하지 않도록
+#  · 오프셋을 다시 매기지 않습니다 - 소비자의 커서가 깨집니다 (LOG 01)
+#    그래서 컴팩션 뒤의 로그는 오프셋에 빈 자리가 생깁니다. 정상입니다.
+#  · 툼스톤은 바로 지우지 않습니다 - 느린 소비자가 "삭제됐다"를 보고 가야 합니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">같은 발상이 나타나는 세 곳</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Kafka 설정으로 읽는 두 정책</h4>
+      <pre class="code" data-lang="text"><code># 토픽 단위 설정 (이름은 실제 설정 키입니다)
+
+cleanup.policy=delete            # 기본. 시간·크기로 세그먼트 삭제
+retention.ms=604800000           # 7일 (브로커 기본 log.retention.hours=168)
+retention.bytes=-1               # 크기 제한 없음 (-1)
+segment.bytes=1073741824         # 세그먼트 1GiB - 삭제 단위이자 컴팩션 단위
+
+cleanup.policy=compact           # 키별 마지막 값만 유지
+min.cleanable.dirty.ratio=0.5    # 아직 안 접힌 부분이 절반 넘으면 컴팩션 시작
+min.compaction.lag.ms=0          # 이 시간 안의 최신 줄은 접지 않음 (이력 잠깐 보존)
+delete.retention.ms=86400000     # 툼스톤을 24시간 유지한 뒤 제거
+
+cleanup.policy=compact,delete    # 둘 다 - 키별 최신 + 오래된 것은 삭제
+
+★ 컴팩션 토픽은 key 가 없는 메시지를 거부합니다 - 키가 없으면 "마지막"의 기준이 없으니까요
+★ 계층 저장(tiered storage)은 오래된 세그먼트를 객체 저장소로 옮기고
+  브로커에는 최근 것만 둡니다 - 보존 기간을 늘려도 로컬 디스크가 안 늘어납니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Raft 의 스냅샷 · LSM 의 컴팩션</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">곳</th><th>버리는 방법</th><th>남기는 것</th></tr>
+        <tr><td><b>Raft</b></td><td>상태 기계 스냅샷을 찍고 그 앞의 로그를 <b>잘라냄</b></td><td>스냅샷 + lastIncludedIndex/Term</td></tr>
+        <tr><td><b>LSM 트리</b></td><td>여러 SSTable 을 합치며 <b>키별 최신만</b> 남김</td><td>레벨별 정렬 파일</td></tr>
+        <tr><td><b>Git</b></td><td><code>gc</code> 가 도달 불가 객체를 지우고 팩으로 묶음</td><td>참조에서 닿는 커밋 전부</td></tr>
+        <tr><td><b>WAL(DB)</b></td><td>체크포인트 뒤 옛 WAL 파일 재활용</td><td>체크포인트 이후만</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>Raft 스냅샷 - 뒤처진 팔로워에게는 로그 대신 스냅샷을 보냅니다
+  InstallSnapshot(term, lastIncludedIndex, lastIncludedTerm, data)
+  · 팔로워는 스냅샷을 적용하고 그 이전 로그를 버립니다
+  · 그 뒤 로그는 평소처럼 AppendEntries 로
+
+LSM 컴팩션의 두 전략 (RocksDB 용어)
+  leveled    쓰기 증폭 큼 · 공간 효율 좋음 · 읽기 빠름
+  universal  쓰기 증폭 작음 · 공간 더 씀 · 읽기 느림
+  → 같은 트레이드오프의 축이 위 히트맵과 같습니다</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>공통 구조</b> — 전부 “<b>접은 결과(스냅샷·최신 값)를 남기고 접기 전 재료(로그)를 버린다</b>”입니다.
+        LOG 02 의 스냅샷이 응용 계층의 이야기였다면, 여기는 <b>저장소 계층</b>이 같은 일을 하는 것입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">잊힐 권리와 append-only 의 타협</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>"지워 달라"는 요구는 append-only 와 정면으로 부딪힙니다. 실무의 세 가지 답:
+
+① 컴팩션 토픽 + 툼스톤
+   key=user:118 value=∅ 를 붙이면 delete.retention.ms 뒤 그 키의 모든 값이 사라집니다
+   · 되는 것: "현재 상태" 토픽에서 그 사용자를 지움
+   · 안 되는 것: 시간 보존 토픽·백업·콜드 저장소에 남은 옛 줄 (거기까지 따라가야 합니다)
+
+② 암호 파쇄(crypto-shredding)
+   개인 필드는 사용자별 키로 암호화해 로그에 두고, 키는 로그 밖 금고에
+   · 지우기 = 금고에서 키 삭제. 로그는 한 줄도 안 고칩니다 ★
+   · 로그·백업·콜드가 몇 벌이든 한 번에 무력화됩니다
+   · 대가: 키 관리(회전·백업·접근 통제)가 새 책임이 됩니다 (🔐 보안 · 암호)
+
+③ 로그 밖 참조
+   로그에는 user_id 만, 이름·이메일은 별도 테이블
+   · 가장 단순. 대신 로그만으로는 "누구"를 못 봅니다 (조인 필요)
+
+보존 기간은 법이 정하는 하한과 비용이 정하는 상한 사이입니다
+   · 금융·의료는 수년 단위 보존 의무가 있고, 접속 기록도 법령이 최소 기간을 정합니다
+   · 그 위로는 "이 줄이 없으면 못 답하는 질문이 있나"(LOG 07)가 상한을 정합니다
+   · 기간은 데이터 종류마다 다르게 - 감사 로그 수년 · 요청 로그 몇 주 · DEBUG 며칠</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>“지웠다”가 가장 어려운 말입니다</b> — 로그는 복제본 · 백업 · 수집기 색인 · 콜드 저장소 · 개발자 노트북으로 <b>자동으로 퍼집니다</b>.
+      한 곳에서 지운 뒤 “완료”라고 답하면 나중에 다른 사본이 나옵니다.
+      그래서 ②가 유일하게 <b>사본 수와 무관하게</b> 통하는 답입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 로그는 영원하지 않고, <b>버리는 방법이 답할 수 있는 질문을 정합니다</b>.
+    시간·크기 삭제는 이력을 통째로, 컴팩션은 <b>중간 과정</b>을 잃는 대신 키별 최신 상태를 남깁니다.
+    Raft 스냅샷 · LSM 컴팩션 · DB 체크포인트가 전부 같은 발상이고,
+    잊힐 권리는 <b>암호 파쇄</b>로 append-only 를 지키면서 풉니다.</div>
+</section>

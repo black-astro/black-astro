@@ -1,0 +1,454 @@
+
+
+
+<!-- ==================== lg07 ==================== -->
+<section class="sec" id="lg07">
+  <div class="sec-head rv">
+    <span class="no">LOG 07</span>
+    <h2><span class="t">Oracle</span> 과 <span class="t">SQLite</span> — 규모의 양 끝, 같은 원리</h2>
+    <p class="lead">
+      한쪽은 은행 코어를 돌리는 DB, 다른 쪽은 휴대폰 안에서 도는 파일 하나짜리 DB 입니다.
+      그런데 둘 다 <b>"데이터보다 로그를 먼저 쓴다"</b>는 lg02 의 규칙을 그대로 따릅니다.
+      다른 것은 <b>규모와 이름</b>뿐이라는 것을 이 섹션에서 확인합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 294" role="img" aria-label="Oracle 의 온라인 redo 로그 그룹 세 개가 원을 그리며 순환하는 그림. 그룹 1 이 다 차면 log switch 로 그룹 2 로 넘어가고, 그룹 2 가 차면 그룹 3 으로, 그룹 3 이 차면 다시 그룹 1 을 덮어쓴다. 다 찬 그룹은 ARCn 프로세스가 오른쪽의 아카이브 로그 저장소로 복사한 뒤에야 덮어쓸 수 있으며, 세 그룹이 모두 아카이브 전이면 데이터베이스가 멈춘다.">
+      <text x="16" y="18" class="lbl">온라인 redo 로그 그룹 셋이 돌아가며 채워집니다 — 다 찬 그룹은 ARCn 이 복사합니다</text>
+
+      <circle class="nd" cx="150" cy="100" r="42"/>
+      <text x="150" y="97" class="val" text-anchor="middle">그룹 1</text>
+      <text x="150" y="112" class="ann" text-anchor="middle">redo01.log</text>
+
+      <circle class="nd nd-fw" cx="330" cy="100" r="42"/>
+      <text x="330" y="97" class="val" text-anchor="middle">그룹 2</text>
+      <text x="330" y="112" class="ann rs-t" text-anchor="middle">CURRENT</text>
+      <text x="330" y="124" class="ann" text-anchor="middle">지금 쓰는 중</text>
+
+      <circle class="nd" cx="240" cy="230" r="42"/>
+      <text x="240" y="227" class="val" text-anchor="middle">그룹 3</text>
+      <text x="240" y="242" class="ann" text-anchor="middle">복사 뒤 비활성</text>
+
+      <path class="ln ar" d="M196 92 L284 92"/>
+      <text x="240" y="84" class="ann" text-anchor="middle">log switch (다 차면)</text>
+
+      <path class="ln ar" d="M304 138 L266 192"/>
+      <text x="300" y="172" class="ann">log switch</text>
+
+      <path class="ln ar" d="M214 192 L176 138"/>
+      <text x="16" y="172" class="ann">아카이브 끝난 뒤 덮어씀</text>
+
+      <text x="540" y="180" class="ttl" text-anchor="middle">아카이브</text>
+      <path class="cyl" d="M484 200 L484 248 A 56 12 0 0 0 596 248 L596 200"/>
+      <ellipse class="cyl" cx="540" cy="200" rx="56" ry="12"/>
+      <text x="540" y="226" class="val" text-anchor="middle">archivelog/</text>
+      <text x="540" y="242" class="ann" text-anchor="middle">RMAN 이 관리</text>
+
+      <path class="fl ar" d="M286 226 L480 226"/>
+      <text x="383" y="218" class="ann" text-anchor="middle">ARCn — 다 찬 그룹을 복사</text>
+
+      <text x="16" y="270" class="lbl">세 그룹 중 하나가 다 차면 다음 그룹으로 넘어갑니다(log switch) — 셋 다 아카이브 전이면 DB 가 멈춥니다</text>
+      <text x="16" y="286" class="lbl">이 순환이 PostgreSQL 의 pg_wal 세그먼트 재사용과 같은 원리입니다 — 이름만 다릅니다</text>
+    </svg>
+    <div class="cap">Oracle redo 순환 — <b>돌아가며 채우고, 복사가 끝나야 덮어씁니다</b>. 복사가 밀리면 DB 가 기다립니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Oracle 의 진단 로그 — alert log 와 trace</h4>
+      <pre class="code" data-lang="sql"><code>-- 어디 있나 (ADR — Automatic Diagnostic Repository)
+SELECT name, value FROM v$diag_info
+ WHERE name IN ('Diag Trace', 'Diag Alert');
+-- Diag Trace : .../diag/rdbms/orcl/ORCL/trace/alert_ORCL.log
+-- Diag Alert : .../alert/log.xml  (같은 내용의 XML 판)
+
+-- 온라인 redo 그룹의 상태 — 그림의 CURRENT · ACTIVE · INACTIVE
+SELECT group#, sequence#, bytes/1024/1024 AS mb, members, status
+  FROM v$log ORDER BY group#;
+
+-- 아카이브 모드인가 (아니면 PITR 불가)
+ARCHIVE LOG LIST;
+SELECT log_mode FROM v$database;</code></pre>
+      <pre class="code" data-lang="text"><code># alert log 에서 자주 보는 두 줄 — 뜻을 알아야 합니다
+Thread 1 cannot allocate new log, sequence 4812
+Checkpoint not complete            ← ★ redo 그룹이 다 찼는데 아직
+                                      체크포인트가 안 끝남. DB 가 멈춰 기다림
+ORA-00257: archiver error           ← 아카이브 대상이 꽉 참. 즉시 조치</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>"Checkpoint not complete" 가 반복되면</b> — redo 그룹이 너무 작거나 적습니다.
+        그룹을 <b>더 크게 · 더 많이</b>(보통 3~5개) 만드는 것이 정답이고,
+        log switch 를 <b>15~20분에 한 번</b> 정도로 맞추는 것이 오래된 경험칙입니다.
+        <code>ALTER DATABASE ADD LOGFILE GROUP 4 SIZE 1G;</code>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">AWR · ASH — 로그가 아니라 "시간 단면"</h4>
+      <pre class="code" data-lang="sql"><code>-- ASH : 1초마다 활성 세션을 찍은 사진. 최근 1시간은 메모리에
+SELECT sql_id, event, count(*) AS samples
+  FROM v$active_session_history
+ WHERE sample_time &gt; sysdate - 1/24
+ GROUP BY sql_id, event
+ ORDER BY samples DESC FETCH FIRST 10 ROWS ONLY;
+-- samples 가 곧 "그 SQL 이 그 대기 상태로 보낸 초"입니다
+
+-- AWR : 1시간마다 저장하는 성능 스냅샷. 리포트는 스크립트로
+@?/rdbms/admin/awrrpt.sql        -- HTML 리포트 (구간 두 개 고름)
+
+-- 특정 세션의 SQL 을 파일로 추적 (tkprof 로 읽음)
+EXEC DBMS_MONITOR.SESSION_TRACE_ENABLE(sid =&gt; 123, serial_num =&gt; 456,
+                                       waits =&gt; TRUE, binds =&gt; TRUE);</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>라이선스 주의</b> — AWR · ASH · ADDM 은 <b>Diagnostics Pack</b>(Enterprise Edition 의 유료 옵션)입니다.
+        조회만 해도 사용으로 간주됩니다. 옵션이 없으면 <b>Statspack</b>(무료 · 기능은 AWR 의 조상)이나
+        <code>v$sql</code> · <code>v$session</code> 직접 조회를 씁니다.
+        <code>control_management_pack_access</code> 파라미터로 서버에서 막아 둘 수 있습니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0;margin-top:10px">
+        <b>다른 DB 와 대응</b> — ASH ≈ <code>pg_stat_activity</code> 를 1초마다 저장한 것,
+        AWR ≈ <code>pg_stat_statements</code> + OS 지표의 시간별 스냅샷.
+        PostgreSQL 에서 비슷한 것을 원하면 <b>pg_stat_monitor</b>·<b>pgsentinel</b> 같은 확장을 붙입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="b">SQLite — <span class="t">rollback journal 과 WAL 모드</span> <span class="lvl e">🟢 기초</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 290" role="img" aria-label="SQLite 의 두 저널 방식을 좌우로 대조한 표. 왼쪽 rollback journal 은 쓰기 전에 옛 페이지를 journal 파일에 복사하고 커밋 때 데이터베이스 파일을 직접 덮어쓰며 쓰는 동안 읽기가 막히고 커밋마다 fsync 가 두 번 이상이다. 오른쪽 WAL 모드는 새 페이지를 wal 파일에 덧붙이고 커밋은 commit 프레임 하나를 추가하는 것이며 읽기와 쓰기가 동시에 가능하고 데이터베이스 파일 반영은 체크포인트 때 일어나며 fsync 가 적다.">
+      <text x="16" y="18" class="lbl">같은 자리에 같은 역할 — 다섯 줄 중 셋이 다릅니다</text>
+
+      <text x="240" y="42" class="ttl" text-anchor="middle">rollback journal (기본 · DELETE)</text>
+      <text x="534" y="42" class="ttl" text-anchor="middle">WAL 모드</text>
+      <path class="ln-t" d="M387 30 L387 246"/>
+
+      <text x="16" y="73" class="ann">쓰기 전에</text>
+      <rect class="bx" x="110" y="52" width="260" height="34"/>
+      <text x="240" y="73" class="ann" text-anchor="middle">옛 페이지를 -journal 에 복사</text>
+      <rect class="bx" x="404" y="52" width="260" height="34"/>
+      <text x="534" y="73" class="ann" text-anchor="middle">새 페이지를 -wal 끝에 추가</text>
+
+      <text x="16" y="113" class="ann">커밋이란</text>
+      <rect class="bx" x="110" y="92" width="260" height="34"/>
+      <text x="240" y="113" class="ann" text-anchor="middle">DB 파일을 덮어쓰고 journal 삭제</text>
+      <rect class="bx bx-ok" x="404" y="92" width="260" height="34"/>
+      <text x="534" y="113" class="ann ok-t" text-anchor="middle">-wal 에 commit 프레임 하나 추가</text>
+
+      <text x="16" y="153" class="ann">동시 접근</text>
+      <rect class="bx bx-warn" x="110" y="132" width="260" height="34"/>
+      <text x="240" y="153" class="ann rs-t" text-anchor="middle">쓰는 동안 읽기가 막힘</text>
+      <rect class="bx bx-ok" x="404" y="132" width="260" height="34"/>
+      <text x="534" y="153" class="ann ok-t" text-anchor="middle">읽기와 쓰기가 동시에 됨</text>
+
+      <text x="16" y="193" class="ann">DB 파일 반영</text>
+      <rect class="bx" x="110" y="172" width="260" height="34"/>
+      <text x="240" y="193" class="ann" text-anchor="middle">커밋 즉시</text>
+      <rect class="bx" x="404" y="172" width="260" height="34"/>
+      <text x="534" y="193" class="ann" text-anchor="middle">체크포인트 때 (기본 1000 페이지마다)</text>
+
+      <text x="16" y="233" class="ann">fsync 횟수</text>
+      <rect class="bx bx-warn" x="110" y="212" width="260" height="34"/>
+      <text x="240" y="233" class="ann rs-t" text-anchor="middle">커밋마다 두 번 이상</text>
+      <rect class="bx bx-ok" x="404" y="212" width="260" height="34"/>
+      <text x="534" y="233" class="ann ok-t" text-anchor="middle">체크포인트 때만 (NORMAL)</text>
+
+      <text x="387" y="268" class="ann am-t" text-anchor="middle">오른쪽이 PostgreSQL 의 WAL 과 같은 아이디어입니다 — 파일 하나짜리 DB 가 같은 규칙을 씁니다</text>
+      <text x="387" y="282" class="ann" text-anchor="middle">단, 모든 프로세스가 같은 호스트에 있어야 하고 네트워크 파일 시스템에서는 못 씁니다</text>
+    </svg>
+    <div class="cap">SQLite 두 모드 — <b>WAL 이 읽기·쓰기 동시성과 fsync 횟수에서 이깁니다</b>. 앱 DB 라면 거의 항상 WAL.</div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WAL 모드 켜기 — 한 번 켜면 파일에 남습니다</h4>
+      <pre class="code" data-lang="sql"><code>PRAGMA journal_mode = WAL;        -- 'wal' 이 돌아오면 성공. 파일에 영구 저장
+PRAGMA synchronous = NORMAL;      -- WAL 에서는 NORMAL 이 권장 (커밋마다 fsync 안 함)
+PRAGMA wal_autocheckpoint = 1000; -- 기본값. -wal 이 1000 페이지 넘으면 자동 체크포인트
+
+-- 지금 상태 보기
+PRAGMA journal_mode;              -- wal
+PRAGMA wal_checkpoint(PASSIVE);   -- 손으로 체크포인트 (읽는 사람 방해 안 함)
+PRAGMA wal_checkpoint(TRUNCATE);  -- 체크포인트 + -wal 파일을 0 으로 잘라 냄</code></pre>
+      <pre class="code" data-lang="bash"><code># WAL 모드에서 생기는 파일 — 셋을 항상 같이 다룹니다
+app.db          # 데이터 파일
+app.db-wal      # 아직 체크포인트 안 된 변경. 지우면 최근 커밋이 사라집니다
+app.db-shm      # 공유 메모리 인덱스 (프로세스 간 조정용). 지워도 다시 만듦
+
+# 백업할 때 app.db 만 복사하면 -wal 의 내용이 빠집니다
+sqlite3 app.db ".backup backup.db"     # ★ 이 방법이 안전합니다
+sqlite3 app.db "VACUUM INTO 'backup.db'"</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>-wal 파일이 계속 커진다면</b> — 누군가 <b>읽기 트랜잭션을 열어 둔 채</b>
+        안 닫고 있는 것입니다. 체크포인트는 그 읽기가 보는 위치까지밖에 못 밀어 냅니다.
+        커서를 끝까지 소비하지 않은 ORM 코드가 흔한 원인입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SQLite 에는 슬로우 로그가 없습니다 — 대신 이렇게</h4>
+      <pre class="code" data-lang="sql"><code>-- 셸에서: 명령마다 걸린 시간 표시
+.timer on
+SELECT count(*) FROM orders WHERE status = 'PAID';
+-- Run Time: real 0.412 user 0.398 sys 0.012
+
+-- 실행계획 — SCAN 이 보이면 인덱스가 없는 것
+EXPLAIN QUERY PLAN
+SELECT * FROM orders WHERE status = 'PAID';
+-- QUERY PLAN
+-- `--SCAN orders                       ← 전체 훑기
+-- `--SEARCH orders USING INDEX ix_status (status=?)  ← 이게 목표</code></pre>
+      <pre class="code" data-lang="python"><code># 앱에서: 느린 문장을 직접 잡아 로그로 (Python 예)
+import sqlite3, time, logging
+con = sqlite3.connect("app.db")
+con.execute("PRAGMA journal_mode=WAL")
+
+def slow_trace(sql):                 # 모든 문장이 여기를 지나갑니다
+    logging.debug("SQL %s", sql)
+con.set_trace_callback(slow_trace)   # C API 의 sqlite3_trace_v2 와 같은 것
+
+# 시간까지 재려면 실행 전후를 감싸는 얇은 래퍼를 둡니다
+t = time.perf_counter()
+rows = con.execute("SELECT ... ").fetchall()
+if (time.perf_counter() - t) &gt; 0.2:
+    logging.warning("slow sqlite: %.3fs", time.perf_counter() - t)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>SQLite 가 "로그가 없다"는 것은 결함이 아닙니다</b> — 서버 프로세스가 없으니
+        로그를 쓸 주체도 없습니다. <b>앱이 곧 DB 서버</b>이므로 앱의 로거가 슬로우 로그 역할을 합니다.
+        lg01 히트맵에서 SQLite 행이 비어 있던 이유입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:20%">같은 개념</th><th>PostgreSQL</th><th>MySQL · InnoDB</th><th>Oracle</th><th>SQLite</th></tr>
+      <tr><td>선행 기록 로그</td><td>WAL (pg_wal/)</td><td>redo (#innodb_redo/)</td><td>online redo log 그룹</td><td>-wal 파일 (WAL 모드)</td></tr>
+      <tr><td>로그 안의 위치</td><td>LSN</td><td>LSN</td><td><b>SCN</b></td><td>프레임 번호</td></tr>
+      <tr><td>보관용 복사</td><td>archive_command</td><td>binlog (계층이 다름)</td><td>ARCn → archivelog</td><td class="warn">없음 (파일 백업)</td></tr>
+      <tr><td>반영 시점</td><td>체크포인트</td><td>체크포인트 · 퍼지</td><td>체크포인트 (DBWn)</td><td>체크포인트 (1000 페이지)</td></tr>
+      <tr><td>내구성 다이얼</td><td>synchronous_commit</td><td>innodb_flush_log_at_trx_commit</td><td>COMMIT WRITE NOWAIT</td><td>synchronous</td></tr>
+      <tr><td>사람이 읽는 로그</td><td>postgresql-*.log</td><td>error log · slow log</td><td>alert_SID.log · trace</td><td class="warn">앱 로거가 대신</td></tr>
+    </table>
+  </div>
+</section>
+
+
+<!-- ==================== lg08 ==================== -->
+<section class="sec" id="lg08">
+  <div class="sec-head rv">
+    <span class="no">LOG 08</span>
+    <h2>NoSQL 의 로그 — <span class="t">Redis</span> AOF 와 <span class="t">MongoDB</span> oplog</h2>
+    <p class="lead">
+      "NoSQL 은 로그가 없다"는 말은 틀렸습니다. Redis 는 <b>명령 자체를 순서대로 적은 파일</b>(AOF)로
+      복구하고, MongoDB 는 <b>oplog</b> 하나로 복제와 CDC 를 다 해냅니다.
+      관계형에서 배운 두 얼굴이 여기서도 그대로 나타납니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 230" role="img" aria-label="Redis 가 메모리 데이터셋을 디스크에 남기는 두 경로를 그린 흐름도. 클라이언트의 쓰기 명령은 메모리 데이터셋에 적용되고, 위쪽 경로에서는 fork 한 자식 프로세스가 주기적으로 dump.rdb 스냅샷 파일을 만들며, 아래쪽 경로에서는 AOF 버퍼가 appendfsync 설정에 따라 appendonly.aof 파일에 명령을 순서대로 덧붙인다. 복구할 때는 더 최근까지 남아 있는 AOF 를 먼저 읽는다.">
+      <text x="16" y="18" class="lbl">Redis 는 두 가지로 디스크에 남깁니다 — 스냅샷(RDB)과 명령 기록(AOF)</text>
+
+      <rect class="bx" x="16" y="80" width="100" height="52"/>
+      <text x="66" y="102" class="val" text-anchor="middle">클라이언트</text>
+      <text x="66" y="118" class="ann" text-anchor="middle">SET · INCR</text>
+
+      <path class="fl ar" d="M120 106 L136 106"/>
+
+      <rect class="bx bx-fw" x="140" y="80" width="150" height="52"/>
+      <text x="215" y="102" class="val" text-anchor="middle">메모리 데이터셋</text>
+      <text x="215" y="118" class="ann" text-anchor="middle">모든 읽기·쓰기는 여기</text>
+
+      <path class="fl ar" d="M294 96 L338 60"/>
+      <text x="296" y="70" class="ann">스냅샷</text>
+      <rect class="bx" x="342" y="36" width="140" height="44"/>
+      <text x="412" y="54" class="val" text-anchor="middle">fork() 자식</text>
+      <text x="412" y="70" class="ann" text-anchor="middle">BGSAVE · save 규칙마다</text>
+      <path class="fl ar" d="M486 58 L520 58"/>
+      <path class="cyl" d="M524 44 L524 84 A 56 10 0 0 0 636 84 L636 44"/>
+      <ellipse class="cyl" cx="580" cy="44" rx="56" ry="10"/>
+      <text x="580" y="66" class="val" text-anchor="middle">dump.rdb</text>
+      <text x="580" y="80" class="ann" text-anchor="middle">한 장의 사진</text>
+
+      <path class="fl ar" d="M294 116 L338 152"/>
+      <text x="296" y="150" class="ann">명령 기록</text>
+      <rect class="bx" x="342" y="130" width="140" height="44"/>
+      <text x="412" y="148" class="val" text-anchor="middle">AOF 버퍼</text>
+      <text x="412" y="164" class="ann" text-anchor="middle">appendfsync 마다 fsync</text>
+      <path class="fl ar" d="M486 152 L520 152"/>
+      <path class="cyl" d="M524 138 L524 178 A 56 10 0 0 0 636 178 L636 138"/>
+      <ellipse class="cyl" cx="580" cy="138" rx="56" ry="10"/>
+      <text x="580" y="160" class="val" text-anchor="middle">appendonly.aof</text>
+      <text x="580" y="174" class="ann" text-anchor="middle">명령을 순서대로</text>
+
+      <text x="16" y="206" class="lbl">복구할 때는 AOF 가 있으면 AOF 를 먼저 읽습니다 — 더 최근까지 남아 있기 때문입니다</text>
+      <text x="16" y="222" class="lbl">Redis 7 부터 AOF 는 폴더(appendonlydir)에 base(.rdb) + 증분(.aof)으로 나뉘어 저장됩니다</text>
+    </svg>
+    <div class="cap">Redis 영속성 — <b>RDB 는 사진, AOF 는 일기</b>입니다. 둘 다 켜는 것이 운영 기본값입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SLOWLOG — Redis 의 슬로우 쿼리 로그 (메모리 안에만)</h4>
+      <pre class="code" data-lang="bash"><code># redis.conf 또는 CONFIG SET — 단위가 마이크로초입니다
+CONFIG SET slowlog-log-slower-than 10000   # 10ms 넘는 명령만 (기본값)
+CONFIG SET slowlog-max-len 256             # 최근 256건만 보관 (기본 128)
+
+SLOWLOG GET 5          # 최근 5건
+# 1) 1) (integer) 4812            ← 일련번호
+#    2) (integer) 1788282667      ← 유닉스 시각
+#    3) (integer) 31245           ← 걸린 시간 (µs) = 31ms ★
+#    4) 1) "KEYS"                 ← 명령과 인자
+#       2) "cache:*"
+#    5) "10.0.3.14:52210"         ← 누가
+#    6) "orders-api"              ← CLIENT SETNAME 으로 붙인 이름
+SLOWLOG LEN
+SLOWLOG RESET</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Redis 에서 10ms 는 "매우 느림"입니다</b> — 싱글 스레드로 명령을 처리하므로
+        그 31ms 동안 <b>다른 모든 클라이언트가 줄을 섭니다.</b>
+        SLOWLOG 에 <code>KEYS</code> · <code>SMEMBERS</code>(큰 집합) · <code>HGETALL</code> · <code>FLUSHALL</code> 이 보이면
+        그 명령 자체를 없애는 것이 튜닝입니다. <b>재시작하면 지워지므로</b> 주기적으로 수집기에 보냅니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">AOF — 켜기 · 되감기 · 고치기</h4>
+      <pre class="code" data-lang="ini"><code># redis.conf — 운영 기본 조합
+appendonly yes
+appendfsync everysec          # lg02 다이얼의 가운데. 최대 1초 유실
+# appendfsync always          # 커밋마다 fsync. 관계형 DB 수준 · 가장 느림
+# appendfsync no              # OS 에 맡김. 캐시 전용이면 이것도 됨
+
+auto-aof-rewrite-percentage 100   # 마지막 rewrite 때보다 2배 커지면
+auto-aof-rewrite-min-size 64mb    # 단, 64MB 넘을 때만 다시 씀
+save 3600 1 300 100 60 10000      # RDB 스냅샷 규칙 (초 · 변경 수)</code></pre>
+      <pre class="code" data-lang="bash"><code># AOF 는 계속 자랍니다 — INCR 를 100만 번 하면 100만 줄.
+# rewrite 는 "지금 상태를 만드는 최소 명령"으로 다시 씁니다
+redis-cli BGREWRITEAOF
+
+# 정전으로 AOF 끝이 잘렸을 때 (시작이 안 됨)
+redis-check-aof --fix appendonlydir/appendonly.aof.1.incr.aof
+# "잘린 마지막 명령 하나"를 버리고 살립니다</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>AOF 는 사람이 읽을 수 있습니다</b> — RESP 프로토콜 그대로라
+        <code>less</code> 로 열면 <code>*3 $3 SET $8 user:100 …</code> 처럼 보입니다.
+        "누가 언제 이 키를 지웠나"를 AOF 에서 찾는 것이 Redis 판 binlog 조사입니다.
+        단 시각은 안 남으니 <b>타임스탬프 주석</b>(<code>aof-timestamp-enabled yes</code> <span class="ver new">7.0+</span>)을 켜 두면
+        시점 되감기(<code>redis-check-aof --truncate-to-timestamp</code>)까지 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">MongoDB — <span class="t">프로파일러</span>와 <span class="t">oplog</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 276" role="img" aria-label="MongoDB 의 oplog 를 중심에 둔 허브 구조. 프라이머리가 쓰기를 oplog 에 기록하면 세컨더리 두 대가 그것을 가져가 적용하고, 같은 oplog 를 앱의 변경 스트림, Debezium 커넥터, 시점 복구용 백업도 읽는다. oplog 는 크기가 고정된 capped 컬렉션이라 오래된 항목부터 덮어쓰인다.">
+      <text x="16" y="18" class="lbl">oplog 하나를 여섯이 읽습니다 — 복제 · 앱 · CDC · 백업이 전부 같은 곳을 봅니다</text>
+
+      <circle class="nd nd-fw" cx="340" cy="140" r="52"/>
+      <text x="340" y="136" class="val" text-anchor="middle">oplog</text>
+      <text x="340" y="152" class="ann" text-anchor="middle">local.oplog.rs</text>
+      <text x="340" y="164" class="ann" text-anchor="middle">capped · 순환</text>
+
+      <circle class="nd nd-ok" cx="340" cy="44" r="30"/>
+      <text x="340" y="48" class="ann ok-t" text-anchor="middle">프라이머리</text>
+      <circle class="nd" cx="500" cy="72" r="30"/>
+      <text x="500" y="76" class="ann" text-anchor="middle">세컨더리 A</text>
+      <circle class="nd" cx="556" cy="180" r="30"/>
+      <text x="556" y="184" class="ann" text-anchor="middle">세컨더리 B</text>
+      <circle class="nd" cx="340" cy="236" r="30"/>
+      <text x="340" y="240" class="ann" text-anchor="middle">변경 스트림</text>
+      <circle class="nd" cx="124" cy="180" r="30"/>
+      <text x="124" y="184" class="ann" text-anchor="middle">Debezium</text>
+      <circle class="nd" cx="180" cy="72" r="30"/>
+      <text x="180" y="76" class="ann" text-anchor="middle">PITR 백업</text>
+
+      <path class="ln ar" d="M340 78 L340 84"/>
+      <path class="ln ar" d="M382 112 L477 90"/>
+      <path class="ln ar" d="M392 150 L528 168"/>
+      <path class="ln ar" d="M340 196 L340 202"/>
+      <path class="ln ar" d="M288 150 L152 172"/>
+      <path class="ln ar" d="M298 112 L203 90"/>
+
+      <text x="352" y="82" class="ann">쓰기 → 기록</text>
+      <text x="442" y="118" class="ann">가져가 적용</text>
+
+      <text x="16" y="256" class="lbl">oplog 는 복제용이지만 앱(Change Streams)과 CDC 도구가 같은 것을 읽습니다 — MySQL binlog 와 같은 구도</text>
+      <text x="16" y="272" class="lbl">capped 컬렉션이라 오래된 것부터 덮입니다 — 세컨더리가 너무 밀리면 처음부터 다시 동기화합니다</text>
+    </svg>
+    <div class="cap">MongoDB oplog — <b>복제 로그가 곧 이벤트 스트림</b>입니다. 중심 하나, 읽는 쪽 여섯.</div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로파일러 — 느린 작업을 컬렉션에 남깁니다</h4>
+      <pre class="code" data-lang="js"><code>// 레벨 0 끔 · 1 느린 것만 · 2 전부 (운영 금지)
+db.setProfilingLevel(1, { slowms: 100, sampleRate: 0.5 })
+//   slowms     : 이보다 느리면 기록 (기본 100ms)
+//   sampleRate : 느린 것 중 절반만 (부하 큰 서버)
+
+// 결과는 DB 마다 system.profile (1MB capped) 에 쌓입니다
+db.system.profile.find({ millis: { $gt: 100 } })
+  .sort({ ts: -1 }).limit(5).pretty()
+// { op: "query", ns: "shop.orders",
+//   command: { find: "orders", filter: { status: "PAID" } },
+//   planSummary: "COLLSCAN",        ← ★ 인덱스 없음
+//   docsExamined: 1998412, nreturned: 3,   ← Rows_examined 와 같은 뜻
+//   millis: 812 }
+
+db.getProfilingStatus()
+db.setProfilingLevel(0)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>프로파일러를 안 켜도 mongod.log 에 남습니다</b> — <code>slowms</code> 를 넘는 작업은
+        레벨 0 이어도 로그 파일에 <code>"Slow query"</code> 로 기록됩니다(JSON 한 줄 · 4.4+).
+        <code>jq 'select(.msg=="Slow query") | .attr.durationMillis'</code> 로 바로 뽑을 수 있습니다.
+        <code>docsExamined / nreturned</code> 비율은 lg05 의 <code>Rows_examined / Rows_sent</code> 와 같은 판정법입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">oplog 와 journal — 둘 다 "DB 가 읽는 로그"</h4>
+      <pre class="code" data-lang="js"><code>// oplog 창(window) — 이만큼 밀려도 세컨더리가 따라올 수 있습니다
+rs.printReplicationInfo()
+// configured oplog size:   2048 MB
+// log length start to end: 71h  ← 이 시간 안에 복구 못 하면 재동기화
+// oplog first event time / last event time
+
+// oplog 크기 바꾸기 (재시작 없이 · 4.0+)
+db.adminCommand({ replSetResizeOplog: 1, size: 16384 })   // MB
+
+// 앱에서 oplog 를 구독 — Change Streams
+const cs = db.orders.watch([{ $match: { operationType: "delete" } }])
+while (await cs.hasNext()) {
+  const ev = await cs.next()
+  console.log(ev.documentKey, ev.clusterTime)
+  // ev._id 가 resumeToken — 끊겨도 여기부터 이어받습니다
+}</code></pre>
+      <pre class="code" data-lang="yaml"><code># mongod.conf — journal 은 WiredTiger 의 WAL 입니다 (끌 수 없음 · 6.1+)
+storage:
+  journal:
+    commitIntervalMs: 100    # 최대 100ms 마다 fsync (기본)
+# 쓰기마다 확인하려면 앱에서: { w: "majority", j: true }</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>oplog 가 덮이면 복제가 끊깁니다</b> — 세컨더리가 점검으로 oplog 창보다 오래 꺼져 있으면
+        <code>RECOVERING</code> 에 갇히고 <b>초기 동기화를 처음부터</b> 해야 합니다.
+        Debezium MongoDB 커넥터도 같은 이유로 스냅샷부터 다시 뜹니다.
+        oplog 창은 <b>가장 긴 점검 시간의 몇 배</b>로 잡아 두세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="tw rv d2">
+    <table class="cheat">
+      <tr><th style="width:18%"></th><th>① 사람이 읽는 것</th><th>② DB 가 읽는 것</th><th>내구성 다이얼</th><th>지우면</th></tr>
+      <tr><td><b>Redis</b></td><td>SLOWLOG (메모리) · ACL LOG · 서버 로그</td><td>AOF · RDB</td><td><code>appendfsync</code> no / everysec / always</td><td class="no">AOF 지우면 마지막 RDB 이후 전부 유실</td></tr>
+      <tr><td><b>MongoDB</b></td><td>mongod.log (JSON) · system.profile</td><td>journal · oplog</td><td><code>j: true</code> · <code>w: majority</code></td><td class="no">journal 은 못 지움 · oplog 는 자동 순환</td></tr>
+      <tr><td><b>비교 · MySQL</b></td><td>slow log · error log</td><td>redo · binlog</td><td><code>innodb_flush_log_at_trx_commit</code></td><td class="no">binlog 는 PURGE 로만</td></tr>
+    </table>
+  </div>
+
+  <div class="note info rv d2">
+    <b>이름은 달라도 자리는 같습니다</b> — Redis 의 <code>appendfsync everysec</code> 은 PostgreSQL 의
+    <code>synchronous_commit = off</code> 와 같은 칸이고, MongoDB 의 <code>j: true</code> 는
+    <code>synchronous_commit = on</code> 과 같은 칸입니다(lg02 다이얼).
+    <b>제품을 바꿀 때 "이 설정이 다이얼의 어느 칸인가"만 물으면</b> 문서를 처음부터 읽지 않아도 됩니다.
+  </div>
+</section>

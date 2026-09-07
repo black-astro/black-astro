@@ -1,0 +1,527 @@
+
+
+<!-- ==================== lg10 ==================== -->
+<section class="sec" id="lg10">
+  <div class="sec-head rv">
+    <span class="no">LOG 10</span>
+    <h2>분산 추적 — <span class="t"><code>tracing-opentelemetry</code></span> 로 span 을 서비스 밖으로 내보냅니다</h2>
+    <p class="lead">
+      서비스가 둘 이상이면 “이 요청이 어디서 느려졌나”는 <b>한 프로세스의 로그로는 답이 안 나옵니다.</b>
+      OpenTelemetry(OTel) 는 그 답을 위해 <b>trace_id 하나로 여러 서비스의 span 을 한 트리로 묶는</b> 규격이고,
+      <code>tracing</code> 의 span 은 이미 그 모양이라 <b>레이어 하나</b>만 끼우면 그대로 나갑니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 270" role="img" aria-label="두 서비스와 수집기 사이의 분산 추적 시퀀스. 주문 API 가 재고 서비스에 요청하면서 traceparent 헤더를 붙이고, 재고 서비스는 그 헤더를 읽어 부모 span 으로 삼는다. 두 서비스는 각자 OTLP 로 OTel Collector 에 span 을 내보내고, Collector 는 배치로 Jaeger 나 Tempo 같은 저장소에 보낸다. Collector 와 저장소는 점선 구름으로 그려 내 프로세스 밖임을 나타낸다.">
+      <text x="16" y="18" class="lbl">traceparent 헤더 한 줄이 서비스를 잇고 — span 은 각자 Collector 로 보냅니다</text>
+
+      <rect class="actr" x="26" y="30" width="112" height="28"/>
+      <text x="82" y="49" class="ann" text-anchor="middle">주문 API</text>
+      <rect class="actr" x="196" y="30" width="112" height="28"/>
+      <text x="252" y="49" class="ann" text-anchor="middle">재고 서비스</text>
+
+      <path class="cld" transform="translate(372,24)" d="M22 40 C4 40 2 22 18 20 C12 6 34 2 44 12 C52 -2 80 0 84 14 C100 6 116 18 108 28 C122 32 116 44 100 40 Z"/>
+      <text x="432" y="49" class="ann" text-anchor="middle">OTel Collector</text>
+      <path class="cld" transform="translate(542,24)" d="M22 40 C4 40 2 22 18 20 C12 6 34 2 44 12 C52 -2 80 0 84 14 C100 6 116 18 108 28 C122 32 116 44 100 40 Z"/>
+      <text x="602" y="49" class="ann" text-anchor="middle">Jaeger · Tempo</text>
+
+      <path class="life" d="M82 60 L82 232"/>
+      <path class="life" d="M252 60 L252 232"/>
+      <path class="life" d="M432 66 L432 232"/>
+      <path class="life" d="M602 66 L602 232"/>
+
+      <rect class="actv" x="77" y="74" width="10" height="96"/>
+      <rect class="actv" x="247" y="78" width="10" height="70"/>
+
+      <path class="msg" d="M90 78 L244 78"/>
+      <text x="90" y="73" class="ann">1. GET /stock · traceparent</text>
+
+      <text x="260" y="100" class="ann">2. 헤더 → 부모 span (set_parent)</text>
+
+      <path class="msg-a" d="M260 122 L424 122"/>
+      <text x="266" y="117" class="ann">3. OTLP export (배치 · 비동기)</text>
+
+      <path class="msg-a" d="M244 144 L90 144"/>
+      <text x="96" y="139" class="ann">4. 200 OK — 재고 있음</text>
+
+      <path class="msg-a" d="M90 166 L424 166"/>
+      <text x="96" y="161" class="ann">5. OTLP export — 루트 span 닫힘</text>
+
+      <path class="msg" d="M440 188 L594 188"/>
+      <text x="446" y="183" class="ann">6. 배치로 저장소에 보냅니다</text>
+
+      <path class="msg-a" d="M594 214 L90 214"/>
+      <text x="96" y="209" class="ann ok-t">7. 조회 — trace_id 하나로 두 서비스의 span 이 한 트리로 보입니다</text>
+
+      <text x="16" y="246" class="lbl">로그에도 같은 trace_id 를 필드로 남기면 — 로그 한 줄에서 트레이스로 바로 건너뜁니다</text>
+      <text x="16" y="262" class="lbl">점선 구름은 내 프로세스 밖 — Collector 는 자체 호스팅, 저장소는 SaaS 여도 됩니다</text>
+    </svg>
+    <div class="cap">서비스는 <b>헤더로 문맥을 넘기고</b> span 은 <b>각자 내보냅니다</b> — 트리는 저장소에서 다시 맞춰집니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">크레이트 네 개 — 버전은 “한 세트”입니다</h4>
+      <pre class="code" data-lang="toml"><code>[dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.31"      # ★ opentelemetry 0.30 과 짝입니다
+opentelemetry = "0.30"
+opentelemetry_sdk = "0.30"
+opentelemetry-otlp = { version = "0.30", features = ["grpc-tonic"] }
+opentelemetry-http = "0.30"         # 헤더 주입 · 추출 도우미
+
+# 네 크레이트의 minor 는 함께 움직입니다 — 하나만 올리면
+# "trait bound not satisfied" 로 컴파일이 깨집니다.
+# 2026년 8월 기준 최신 짝은 crates.io 의 tracing-opentelemetry
+# 페이지(README 의 호환표)에서 확인하세요.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 많이 막히는 곳이 버전입니다</b> — OpenTelemetry 러스트 SDK 는 아직 <b>1.0 이전</b>이라
+        minor 마다 API 가 바뀝니다. <code>tracing-opentelemetry</code> 는 <b>OTel 보다 minor 가 하나 앞선 번호</b>를 쓰는 관례가 있고,
+        <b>Cargo.lock 에 두 버전이 섞이는 순간</b> <code>global::set_tracer_provider</code> 가 서로 다른 타입을 보게 됩니다.
+        <code>cargo tree -d</code> 로 중복을 먼저 지우세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>init_telemetry()</code> — 프로바이더 + 레이어</h4>
+      <pre class="code" data-lang="rust"><code>use opentelemetry::{global, trace::TracerProvider as _, KeyValue};
+use opentelemetry_sdk::{trace::SdkTracerProvider, Resource,
+                        propagation::TraceContextPropagator};
+use opentelemetry_otlp::{SpanExporter, WithExportConfig};
+use tracing_subscriber::{fmt, EnvFilter, prelude::*};
+
+pub fn init_telemetry() -&gt; anyhow::Result&lt;SdkTracerProvider&gt; {
+    // ① W3C traceparent 를 읽고 쓰는 전파기 — 이게 없으면 헤더가 안 붙습니다
+    global::set_text_map_propagator(TraceContextPropagator::new());
+
+    // ② OTLP/gRPC exporter — Collector 의 4317 포트로
+    let exporter = SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint("http://otel-collector:4317")
+        .build()?;
+
+    // ③ 프로바이더 — 배치 전송 + 리소스(service.name 은 사실상 필수)
+    let provider = SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)          // 전용 스레드가 모아서 보냅니다
+        .with_resource(Resource::builder()
+            .with_service_name("order-api")
+            .with_attribute(KeyValue::new("deployment.environment", "prod"))
+            .build())
+        .build();
+    global::set_tracer_provider(provider.clone());
+
+    // ④ tracing 레이어 — 내 span 이 OTel span 으로 복제됩니다 ★
+    let otel = tracing_opentelemetry::layer()
+        .with_tracer(provider.tracer("order-api"));
+
+    tracing_subscriber::registry()
+        .with(EnvFilter::from_default_env())
+        .with(fmt::layer().json())
+        .with(otel)
+        .init();
+    Ok(provider)          // main 이 끝날 때 shutdown() 을 불러야 합니다
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>코드에서 바뀌는 것은 없습니다</b> — <code>#[instrument]</code> 로 만든 span 과 <code>info!</code> 이벤트가
+        그대로 OTel span 과 span event 가 됩니다. LOG 03·07 에서 붙인 문맥이 <b>그대로 분산 추적의 재료</b>입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">문맥을 서비스 밖으로 — <span class="t">헤더 주입과 추출</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호출하는 쪽 — 현재 span 을 헤더에 씁니다</h4>
+      <pre class="code" data-lang="rust"><code>use opentelemetry::global;
+use opentelemetry_http::HeaderInjector;
+use tracing_opentelemetry::OpenTelemetrySpanExt;   // .context() 를 줍니다
+
+#[tracing::instrument(skip_all, fields(sku))]
+async fn check_stock(client: &amp;reqwest::Client, sku: &amp;str)
+    -&gt; anyhow::Result&lt;Stock&gt;
+{
+    let mut req = client.get(format!("http://stock/v1/{sku}")).build()?;
+
+    // 현재 tracing span → OTel 문맥 → traceparent 헤더 ★
+    let cx = tracing::Span::current().context();
+    global::get_text_map_propagator(|p| {
+        p.inject_context(&amp;cx, &amp;mut HeaderInjector(req.headers_mut()))
+    });
+    // 나가는 헤더: traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+    //                              ↑ trace_id(16바이트)            ↑ 내 span_id   ↑ 샘플링 플래그
+
+    Ok(client.execute(req).await?.json().await?)
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>헤더 규격은 W3C Trace Context</b> — <code>traceparent</code> 와 <code>tracestate</code> 두 개입니다.
+        자바(Spring) · Go · .NET 서비스도 같은 헤더를 읽으므로 <b>언어가 섞여도 한 트리</b>가 됩니다.
+        직접 헤더를 만들지 말고 <b>전파기에 맡기세요</b> — 플래그 비트와 버전 바이트를 손으로 쓰면 틀립니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">받는 쪽 — 헤더를 부모로 삼습니다 (Axum)</h4>
+      <pre class="code" data-lang="rust"><code>use opentelemetry::global;
+use opentelemetry_http::HeaderExtractor;
+use tower_http::trace::TraceLayer;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+let app = Router::new()
+    .route("/v1/{sku}", get(get_stock))
+    .layer(TraceLayer::new_for_http()
+        .make_span_with(|req: &amp;http::Request&lt;_&gt;| {
+            // ① 들어온 헤더에서 부모 문맥을 꺼냅니다 (없으면 빈 문맥)
+            let parent = global::get_text_map_propagator(|p| {
+                p.extract(&amp;HeaderExtractor(req.headers()))
+            });
+            // ② 요청 span 을 만들고 부모를 이어 붙입니다 ★
+            let span = tracing::info_span!("http",
+                method = %req.method(), path = %req.uri().path(),
+                trace_id = tracing::field::Empty);
+            span.set_parent(parent);
+            // ③ 로그 상관용 — trace_id 를 span 필드로 남깁니다
+            use opentelemetry::trace::TraceContextExt;
+            let id = span.context().span().span_context().trace_id();
+            span.record("trace_id", id.to_string());
+            span
+        }));</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>③ 이 로그와 트레이스를 잇는 전부입니다</b> — span 필드는 안쪽 이벤트에 상속되므로
+        (LOG 05 의 <code>with_span_list</code>) <b>요청 안의 모든 JSON 로그 줄에 <code>trace_id</code> 가 붙습니다</b>.
+        Grafana 는 그 값을 클릭하면 Tempo 의 트레이스로 건너뛰게 해 줍니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">Collector · 샘플링 · 종료 — <span class="t">운영에서 정하는 세 가지</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">용어 대응표와 특수 필드</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">OpenTelemetry</th><th><code>tracing</code> 쪽</th></tr>
+        <tr><td>Trace</td><td>루트 span 부터의 트리 (이름 없음)</td></tr>
+        <tr><td>Span</td><td><code>span</code> — 이름 · 시작 · 끝</td></tr>
+        <tr><td>Span Event</td><td><code>info!</code> 등 이벤트</td></tr>
+        <tr><td>Attribute</td><td>필드 (<code>key = value</code>)</td></tr>
+        <tr><td>Status</td><td><code>error</code> 필드가 있으면 ERROR</td></tr>
+        <tr><td>Span Kind</td><td>필드 <code>otel.kind = "server"</code></td></tr>
+        <tr><td>Span Name</td><td>필드 <code>otel.name</code> 로 덮어쓰기</td></tr>
+        <tr><td>Resource</td><td>없음 — 프로바이더 설정</td></tr>
+        <tr><td>Baggage</td><td>없음 — 필드로 직접 나릅니다</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// 이름을 동적으로 — 경로 템플릿을 span 이름으로 쓰고 싶을 때
+tracing::info_span!("http", otel.name = %format!("GET {route}"),
+                    otel.kind = "server");
+// 실패를 OTel 상태로 — error 라는 이름의 필드가 있으면 STATUS_ERROR
+tracing::error!(error = %e, "재고 조회 실패");</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>span 이름에 값을 넣지 마세요</b> — <code>GET /orders/7781</code> 처럼 ID 가 이름에 들어가면
+        저장소가 이름별로 색인을 만들어 <b>카디널리티가 폭발</b>합니다.
+        이름은 <b>경로 템플릿</b>(<code>GET /orders/{id}</code>), 값은 <b>속성</b>으로.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Collector 설정 · 샘플링 · 반드시 <code>shutdown()</code></h4>
+      <pre class="code" data-lang="yaml"><code># otel-collector.yaml — 앱은 Collector 만 알고, 저장소는 여기서 바꿉니다 ★
+receivers:
+  otlp: { protocols: { grpc: { endpoint: 0.0.0.0:4317 } } }
+processors:
+  batch: {}
+  tail_sampling:                       # 느리거나 실패한 트레이스는 전부 남기기
+    policies:
+      - { name: errors, type: status_code, status_code: { status_codes: [ERROR] } }
+      - { name: slow,   type: latency,     latency: { threshold_ms: 500 } }
+      - { name: rest,   type: probabilistic, probabilistic: { sampling_percentage: 5 } }
+exporters:
+  otlp/tempo: { endpoint: tempo:4317, tls: { insecure: true } }
+service:
+  pipelines:
+    traces: { receivers: [otlp], processors: [tail_sampling, batch], exporters: [otlp/tempo] }</code></pre>
+      <pre class="code" data-lang="rust"><code>// 앱 쪽 샘플링 — 부모 결정을 따르고, 루트만 10% 로
+use opentelemetry_sdk::trace::Sampler;
+SdkTracerProvider::builder()
+    .with_sampler(Sampler::ParentBased(Box::new(Sampler::TraceIdRatioBased(0.1))))
+    // …
+
+// 종료 — WorkerGuard 와 같은 이유입니다 (LOG 08)
+#[tokio::main]
+async fn main() -&gt; anyhow::Result&lt;()&gt; {
+    let provider = init_telemetry()?;
+    run().await?;
+    provider.shutdown()?;      // ★ 배치 큐를 비우고 나서 끝냅니다
+    Ok(())
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>저장소 고르기</b> — 시작은 <b>Jaeger</b>(컨테이너 하나로 UI 까지), 로그를 Loki 에 두고 있다면 <b>Grafana Tempo</b>
+        (trace_id 클릭 연동), 운영 인력이 없으면 <b>Datadog · Honeycomb · Grafana Cloud</b> 같은 SaaS.
+        어느 쪽이든 <b>앱은 Collector 만 보게</b> 두면 저장소 교체가 YAML 한 줄입니다.
+        로그 자체도 OTLP 로 보내려면 <code>opentelemetry-appender-tracing</code> 레이어를 하나 더 끼웁니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 분산 추적은 <b>새 계측이 아니라 기존 span 을 내보내는 것</b>입니다.
+    필요한 것은 셋 — <b>전파기</b>(헤더를 읽고 씀) · <b>exporter + 프로바이더</b>(OTLP 로 Collector 에) · <b><code>tracing_opentelemetry::layer()</code></b>.
+    <code>trace_id</code> 를 span 필드로 한 번 남기면 <b>로그와 트레이스가 이어지고</b>,
+    <code>shutdown()</code> 을 잊으면 마지막 트레이스가 사라집니다. 버전은 <b>네 크레이트를 한 세트</b>로 올리세요.</div>
+</section>
+
+
+<!-- ==================== lg11 ==================== -->
+<section class="sec" id="lg11">
+  <div class="sec-head rv">
+    <span class="no">LOG 11</span>
+    <h2>에러와 패닉 — <span class="t">경계에서 한 번</span>, 그리고 로거를 거치지 않는 패닉 잡기</h2>
+    <p class="lead">
+      로그가 가장 지저분해지는 곳이 에러 처리입니다. <b>같은 에러를 세 층에서 세 번 찍고</b>, 정작 원인은 <code>{e}</code> 로
+      바깥 한 겹만 남습니다. 반대로 <b>패닉은 로거를 아예 거치지 않아</b> 파일에는 흔적이 없습니다.
+      이 섹션은 그 둘을 <code>anyhow</code> 체인과 <code>panic::set_hook</code> 으로 정리합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 372" role="img" aria-label="에러가 났을 때 어디에서 로그를 남길지 정하는 결정 흐름도. 먼저 여기서 복구할 수 있는지 묻고, 그렇다면 warn 으로 남기고 복구한다. 아니면 호출자에게 문맥을 더할 수 있는지 묻고, 그렇다면 로그 없이 context 를 붙여 물음표 연산자로 올린다. 아니면 여기가 핸들러나 main 같은 경계인지 묻고, 경계라면 error 로 한 번만 체인 전체를 남기고 응답이나 종료 코드로 바꾼다. 경계가 아니면 그냥 물음표로 올린다. 패닉은 이 그림 밖이며 별도의 훅으로 잡는다.">
+      <text x="16" y="18" class="lbl">에러가 났다 — 어디에서 로그를 남길 것인가 (답은 '경계에서 한 번')</text>
+
+      <polygon class="dia" points="120,34 216,62 120,90 24,62"/>
+      <text x="120" y="59" class="ann" text-anchor="middle">여기서 복구할</text>
+      <text x="120" y="71" class="ann" text-anchor="middle">수 있는가?</text>
+
+      <path class="ln ar" d="M220 62 L282 62"/>
+      <text x="234" y="56" class="ann">예</text>
+      <rect class="bx bx-ok" x="286" y="42" width="190" height="40"/>
+      <text x="381" y="60" class="ann ok-t" text-anchor="middle">warn! 하고 복구합니다</text>
+      <text x="381" y="74" class="ann" text-anchor="middle">재시도 · 기본값 · 대체 경로</text>
+
+      <text x="496" y="56" class="ann">'로그하고 다시 던지기'는</text>
+      <text x="496" y="70" class="ann">같은 에러를 세 번 찍습니다</text>
+      <text x="496" y="84" class="ann">— 가장 흔한 중복 로그</text>
+
+      <path class="ln ar" d="M120 94 L120 118"/>
+      <text x="128" y="110" class="ann">아니오</text>
+
+      <polygon class="dia" points="120,122 224,152 120,182 16,152"/>
+      <text x="120" y="148" class="ann" text-anchor="middle">호출자에게 문맥을</text>
+      <text x="120" y="160" class="ann" text-anchor="middle">더할 수 있는가?</text>
+
+      <path class="ln ar" d="M228 152 L282 152"/>
+      <text x="238" y="146" class="ann">예</text>
+      <rect class="bx" x="286" y="132" width="190" height="40"/>
+      <text x="381" y="150" class="ann" text-anchor="middle">.context("주문 조회")? 로 올립니다</text>
+      <text x="381" y="164" class="ann" text-anchor="middle">로그 없음 — 문맥만 붙여서 ?</text>
+
+      <text x="496" y="146" class="ann">문맥은 위로 갈수록</text>
+      <text x="496" y="160" class="ann">'왜 했나'가 붙습니다</text>
+
+      <path class="ln ar" d="M120 186 L120 210"/>
+      <text x="128" y="202" class="ann">아니오</text>
+
+      <polygon class="dia" points="120,214 216,242 120,270 24,242"/>
+      <text x="120" y="239" class="ann" text-anchor="middle">여기가 경계인가?</text>
+      <text x="120" y="251" class="ann" text-anchor="middle">(핸들러 · main · 태스크)</text>
+
+      <path class="ln ar" d="M220 242 L282 242"/>
+      <text x="234" y="236" class="ann">예</text>
+      <rect class="bx bx-ok" x="286" y="222" width="190" height="40"/>
+      <text x="381" y="240" class="ann ok-t" text-anchor="middle">error! 한 번 — 체인 전부 {e:#}</text>
+      <text x="381" y="254" class="ann" text-anchor="middle">응답 · 종료 코드로 바꿉니다</text>
+
+      <text x="496" y="236" class="ann">여기서만 error! 를 씁니다</text>
+      <text x="496" y="250" class="ann">— 그 위엔 아무도 없으니까요</text>
+
+      <path class="ln ar" d="M120 274 L120 298"/>
+      <text x="128" y="290" class="ann">아니오</text>
+      <rect class="bx bx-mut" x="24" y="302" width="192" height="40"/>
+      <text x="120" y="320" class="ann" text-anchor="middle">그냥 ? 로 올립니다</text>
+      <text x="120" y="334" class="ann" text-anchor="middle">로그도 문맥도 안 붙입니다</text>
+
+      <text x="16" y="364" class="lbl">패닉은 이 그림 밖입니다 — 로거를 거치지 않으니 panic::set_hook 으로 따로 잡습니다</text>
+    </svg>
+    <div class="cap">에러 로그는 <b>경계에서 한 번</b>, 안쪽은 <b>문맥만 붙여 올립니다</b> — 그래야 한 줄에 원인 체인이 다 들어갑니다.</div>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>층마다 찍고 다시 던집니다</h5>
+      <pre class="code" data-lang="rust"><code>fn load(path: &amp;str) -&gt; anyhow::Result&lt;Config&gt; {
+    let s = std::fs::read_to_string(path).map_err(|e| {
+        tracing::error!("파일 읽기 실패: {e}");     // ① 여기서 한 번
+        e
+    })?;
+    Ok(toml::from_str(&amp;s)?)
+}
+fn boot() -&gt; anyhow::Result&lt;App&gt; {
+    let cfg = load("app.toml").map_err(|e| {
+        tracing::error!("설정 로드 실패: {e}");     // ② 또 한 번
+        e
+    })?;
+    Ok(App::new(cfg))
+}
+fn main() {
+    if let Err(e) = boot() {
+        tracing::error!("시작 실패: {e}");           // ③ 세 번째 — 그런데 원인은 없음
+    }
+}
+// 출력 세 줄 · 마지막 줄에는 "설정 로드 실패" 만 남고 "파일 없음"은 사라집니다</code></pre>
+    </div>
+    <div class="good">
+      <h5>안쪽은 문맥만, 경계에서 체인 전체를</h5>
+      <pre class="code" data-lang="rust"><code>use anyhow::Context;
+
+fn load(path: &amp;str) -&gt; anyhow::Result&lt;Config&gt; {
+    let s = std::fs::read_to_string(path)
+        .with_context(|| format!("설정 파일 읽기: {path}"))?;   // 로그 없음
+    toml::from_str(&amp;s).context("설정 파싱")                     // 로그 없음
+}
+fn boot() -&gt; anyhow::Result&lt;App&gt; {
+    let cfg = load("app.toml").context("앱 부팅")?;             // 로그 없음
+    Ok(App::new(cfg))
+}
+fn main() -&gt; std::process::ExitCode {
+    let _guard = init_log();
+    match boot() {
+        Ok(app) =&gt; app.run(),
+        Err(e) =&gt; {
+            // ★ 경계에서 한 번 — {:#} 이 체인을 한 줄로 이어 줍니다
+            tracing::error!(error = %format!("{e:#}"), "시작 실패");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+// error="앱 부팅: 설정 파일 읽기: app.toml: No such file or directory (os error 2)"</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>anyhow</code> 에러를 로그에 담는 네 가지 모양</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">포맷</th><th>나오는 것</th><th>쓰는 곳</th></tr>
+        <tr><td><code>{e}</code></td><td><b>바깥 한 겹만</b> — "앱 부팅"</td><td>사용자에게 보일 문구</td></tr>
+        <tr><td><code>{e:#}</code></td><td>체인을 <b>한 줄</b>로 <code>a: b: c</code></td><td><b>로그 필드 ★</b></td></tr>
+        <tr><td><code>{e:?}</code></td><td>여러 줄 + <code>Caused by:</code></td><td>터미널 · 개발 중</td></tr>
+        <tr><td><code>{e:#?}</code></td><td>구조체 덤프</td><td>거의 안 씀</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// 함수 단위라면 어트리뷰트가 더 짧습니다 — Err 일 때만 error! 가 나갑니다
+#[tracing::instrument(skip_all, err(Debug))]   // Debug 라 체인이 여러 줄로
+async fn place_order(req: OrderReq) -&gt; anyhow::Result&lt;Order&gt; { ... }
+
+// 한 줄이 좋으면 Display 로 — 단, anyhow 의 Display 는 바깥 한 겹뿐 ★
+#[tracing::instrument(skip_all, err)]           // = err(Display) → "앱 부팅" 만
+// 그래서 anyhow 를 쓰면 err(Debug) 나 수동 {e:#} 이 정답입니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>error = %e</code> 가 가장 흔한 실수입니다</b> — <code>anyhow::Error</code> 의 <code>Display</code> 는
+        <b>맨 바깥 문맥만</b> 보여 줍니다. “설정 로드 실패”만 남고 <b>파일 이름도 OS 에러 코드도 사라집니다</b>.
+        로그 필드에는 <code>%format!("{e:#}")</code> 또는 <code>?e</code> 를 쓰세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어떤 에러를 어느 레벨로 — 팀 규칙</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">상황</th><th>레벨</th><th>왜</th></tr>
+        <tr><td>잘못된 입력 (4xx)</td><td><code>info</code>/<code>debug</code></td><td>내 잘못이 아님 · 알람 대상 아님</td></tr>
+        <tr><td>인증 실패 반복</td><td><code>warn</code></td><td>세어 두어야 함 (공격 징후)</td></tr>
+        <tr><td>외부 의존성 실패 + 재시도</td><td><code>warn</code></td><td>성공하면 사건 종료</td></tr>
+        <tr><td>재시도 끝에 실패 (5xx)</td><td><code>error</code></td><td>사람이 봐야 함</td></tr>
+        <tr><td>불변식 위반 · 있을 수 없는 상태</td><td><code>error</code> 또는 패닉</td><td>버그 — 즉시 조사</td></tr>
+        <tr><td>설정 오류로 시작 불가</td><td><code>error</code> + 종료</td><td>돌면 안 되는 상태</td></tr>
+      </table></div>
+      <pre class="code" data-lang="rust"><code>// Axum 경계 — 에러 타입 하나가 로그와 응답을 함께 정합니다 ★
+enum AppError { NotFound(String), Invalid(String), Internal(anyhow::Error) }
+
+impl IntoResponse for AppError {
+    fn into_response(self) -&gt; Response {
+        let (status, body) = match self {
+            AppError::NotFound(m) =&gt; {
+                tracing::info!(error = %m, "요청 거절");            // 4xx 는 info
+                (StatusCode::NOT_FOUND, m)
+            }
+            AppError::Invalid(m) =&gt; {
+                tracing::info!(error = %m, "요청 거절");
+                (StatusCode::BAD_REQUEST, m)
+            }
+            AppError::Internal(e) =&gt; {
+                tracing::error!(error = %format!("{e:#}"), "요청 실패");   // 5xx 만 error
+                // 클라이언트에는 내부 사정을 보내지 않습니다 — 문구 고정
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal error".to_string())
+            }
+        };
+        (status, Json(json!({ "error": body }))).into_response()
+    }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>4xx 를 <code>error!</code> 로 찍는 순간 알람이 무의미해집니다</b> — 봇이 잘못된 URL 을 긁기만 해도
+        에러 대시보드가 빨개집니다. <b>“내가 고칠 수 있는 것만 error”</b>가 기준입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">패닉 — <span class="t">로거를 거치지 않는 유일한 출력</span>을 붙잡기 <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0"><code>panic::set_hook</code> — 기본 훅을 감쌉니다</h4>
+      <pre class="code" data-lang="rust"><code>pub fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();      // 기본 훅(stderr 출력)을 보관
+
+    std::panic::set_hook(Box::new(move |info| {
+        // 페이로드는 &amp;str 또는 String — 둘 다 시도합니다
+        //   (Rust 1.89 부터는 info.payload_as_str() 한 줄로 됩니다)
+        let msg = info.payload().downcast_ref::&lt;&amp;str&gt;().copied()
+            .or_else(|| info.payload().downcast_ref::&lt;String&gt;().map(String::as_str))
+            .unwrap_or("(문자열이 아닌 페이로드)");
+        let location = info.location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()));
+
+        // ★ 로거로 — 현재 span 의 문맥(요청 ID 등)이 그대로 붙습니다
+        tracing::error!(
+            panic.message  = msg,
+            panic.location = location.as_deref(),
+            backtrace      = %std::backtrace::Backtrace::force_capture(),
+            "패닉"
+        );
+        default_hook(info);          // 기본 훅도 불러 stderr 에는 여전히 남깁니다
+    }));
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>훅은 unwinding 전에 불립니다</b> — 그래서 <b>현재 span 이 아직 살아 있고</b> 요청 ID 가 붙습니다.
+        <code>force_capture()</code> 는 <code>RUST_BACKTRACE</code> 와 무관하게 백트레이스를 만듭니다(비용이 있으니 패닉에서만).
+        <code>init_log()</code> 바로 다음 줄에서 설치하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비동기 태스크 · <code>panic = "abort"</code> · span 백트레이스</h4>
+      <pre class="code" data-lang="rust"><code>// ① Tokio 태스크의 패닉은 JoinError 로 돌아옵니다 — 훅은 그래도 불립니다
+let h = tokio::spawn(async { work().await });
+if let Err(e) = h.await {
+    if e.is_panic() { tracing::error!("워커 태스크가 패닉으로 죽었습니다"); }
+}
+
+// ② Axum 핸들러의 패닉은 그 연결만 끊습니다 — 500 으로 바꾸려면
+use tower_http::catch_panic::CatchPanicLayer;
+let app = Router::new().route("/", get(h)).layer(CatchPanicLayer::new());
+
+// ③ span 스택을 에러에 담기 — tracing-error
+use tracing_error::{ErrorLayer, SpanTrace};
+tracing_subscriber::registry().with(ErrorLayer::default()).with(fmt::layer()).init();
+let trace = SpanTrace::capture();        // 지금 열려 있는 span 들: http{..} → db{..}
+tracing::error!(spans = %trace, "어느 요청 안에서 났는지");
+// color-eyre 를 쓰면 에러 리포트에 이 span 스택이 자동으로 붙습니다</code></pre>
+      <pre class="code" data-lang="toml"><code># Cargo.toml — 컨테이너에서 흔히 켜는 설정
+[profile.release]
+panic = "abort"      # unwinding 코드가 빠져 바이너리가 작아집니다
+# 대신 소멸자가 안 돕니다 → WorkerGuard 도 flush 못 함 ★
+# 훅 안에서 파일에 직접 쓰거나 stderr 에 남기세요 (default_hook 이 그 역할)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>panic = "abort"</code> + <code>non_blocking</code> 조합의 함정</b> — 훅에서 <code>tracing::error!</code> 를
+        불러도 그 줄은 <b>워커 큐에 들어갈 뿐</b>이고, 곧바로 abort 되면 큐가 비워지지 않습니다.
+        파일에는 패닉 줄이 없고 stderr 에만 있습니다. 컨테이너라면 stderr 가 수집되니 괜찮지만,
+        <b>파일 로깅 환경이라면 훅에서 동기 쓰기를 한 번 더</b> 하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 에러는 <b>안쪽에서 <code>.context()</code> 만 붙여 올리고, 경계에서 <code>{e:#}</code> 로 한 번</b> 찍습니다.
+    <code>anyhow</code> 의 <code>Display</code> 는 바깥 한 겹뿐이니 <b><code>%e</code> 대신 <code>{e:#}</code> 또는 <code>?e</code></b>.
+    4xx 는 <code>info</code>, 내가 고칠 것만 <code>error</code>. 패닉은 로거를 거치지 않으므로
+    <b><code>set_hook</code> 으로 잡아 span 문맥과 함께 남기고</b>, <code>panic = "abort"</code> 면 훅에서 동기로도 씁니다.</div>
+</section>

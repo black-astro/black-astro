@@ -55,8 +55,8 @@ export const guides: Guide[] = [
       'CPython 내부',
     ],
     stats: [
-      { value: '18', label: '주제 탭' },
-      { value: '280', label: '섹션' },
+      { value: '19', label: '주제 탭' },
+      { value: '292', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -168,8 +168,8 @@ export const guides: Guide[] = [
       'CLR · GC 내부',
     ],
     stats: [
-      { value: '15', label: '주제 탭' },
-      { value: '206', label: '섹션' },
+      { value: '16', label: '주제 탭' },
+      { value: '218', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
