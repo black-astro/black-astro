@@ -1,9 +1,10 @@
-# 핸드오프 — 언어 가이드 확장 (2026-09-01 21차 갱신)
+# 핸드오프 — 언어 가이드 확장 (2026-09-07 22차 갱신)
 
 > **새 세션이라면 여기부터** — §1~§5 가 **전부 끝났습니다.** §6 도 4개 중 3개가 끝났습니다.
-> **지금 바로 이어서 할 일은 §8 하나입니다 — 로깅 탭 10개 집필(중단된 상태로 초안이 저장소에 있습니다).**
-> 초안은 `web/guide-src/_wip/log-tabs/<가이드>/` 에 조각 HTML 로 보존돼 있고,
-> **csharp · python 두 개는 pane 파일이 이미 완성**돼 `parts/panes/` 에 들어 있습니다(등록만 남음).
+> **지금 바로 이어서 할 일은 §8 하나입니다 — 로깅 탭 10개 중 8개가 남았습니다.**
+> **csharp · python 두 개는 등록까지 끝나 실제 가이드에 들어갔습니다** (커밋 `e986902`).
+> 나머지 8개 초안은 `web/guide-src/_wip/log-tabs/<가이드>/` 에 보존돼 있고,
+> **java · server 는 pane + meta.json 이 완성돼 등록만 하면 됩니다.**
 > 집필 지침서와 등록 스크립트는 저장소에 있습니다: `web/guide-src/AUTHORING.md` · `web/guide-src/tools/reg.mjs`
 > 시각화 모델 30종 카탈로그: `web/guide-src/DIAGRAM-MODELS.md` · 본보기 `web/guide-src/shared/models/*.html`
 > 갤러리 `npm run diag:lab` → `public/diag-lab/index.html`
@@ -12,24 +13,42 @@
 
 열 가이드 전부 **설치 → 기초 → 실전** 축을 갖췄고, 2026 기준 기술 스택 공백도 메웠습니다.
 
-| 가이드 | 탭 | 섹션 | 다이어그램 |
-|---|---|---|---|
-| python | 18 | 280 | 144 |
-| **js-ts** | **18** | **271** | **146** |
-| **server** | **17** | **225** | **150** |
-| java | 16 | 246 | 123 |
-| cpp | 16 | 201 | 169 |
-| rust | 15 | 174 | 142 |
-| **db** | **14** | **204** | **114** |
-| kotlin | 14 | 219 | 118 |
-| **cs** | **13** | **186** | **133** |
-| **csharp** | **15** | **206** | **149** |
+| 가이드 | 탭 | 섹션 | 다이어그램 | 로깅 탭 |
+|---|---|---|---|---|
+| **python** | **19** | **292** | **156** | ✅ 등록됨 |
+| js-ts | 18 | 271 | 146 | 조각 12/12 |
+| server | 17 | 225 | 150 | pane+meta 완성 |
+| java | 16 | 246 | 123 | pane+meta 완성 |
+| cpp | 16 | 201 | 169 | 조각 10/12 |
+| **csharp** | **16** | **218** | **163** | ✅ 등록됨 |
+| rust | 15 | 174 | 142 | 조각 12/12 |
+| db | 14 | 204 | 114 | 조각 8/12 |
+| kotlin | 14 | 219 | 118 | 조각 10/12 |
+| cs | 13 | 186 | 133 | 조각 12/12 |
 
-**총 시각화 1,388개 · 총 섹션 2,212개.**
-(시각화는 `class="diag"` 카드 수로 셉니다 — 이전 표의 1,439 는 집계 기준이 섞인 값이었습니다.
- 지금은 `class="diag"` 와 `<svg viewBox` 개수가 열 가이드 전부에서 일치합니다.)
+**총 시각화 1,414개 · 총 섹션 2,236개** (`class="diag"` 카드 수 기준).
+로깅 탭 8개가 다 들어가면 시각화가 100개 가까이 더 늘어납니다.
 
-### 이번 회차 — §5 소진 · §6 절반 처리 · 로깅 탭 착수 (2026-09-01)
+### 이번 회차 — 로깅 탭 2개 등록 · 나머지 8개 진척 (2026-09-07)
+
+**csharp · python 을 실제 가이드에 등록했고**, 나머지 8개를 에이전트로 동시에 돌렸습니다.
+**세션 한도(rate limit)로 8개 전부 중단**됐지만 **작업물은 전부 저장소에 남았습니다** — 그중 셋은
+사실상 완성 상태입니다. 자세한 것은 §8.
+
+| 무엇 | 결과 |
+|---|---|
+| csharp 로깅 탭 | ✅ 등록 — 12섹션 · 다이어그램 14 · 탭 16 · 섹션 218 |
+| python 로깅 탭 | ✅ 등록 — 12섹션 · 다이어그램 12 · 탭 19 · 섹션 292 (meta.json 을 이번에 작성) |
+| 검증 | `verify:guide` 열 가이드 ✓ · smoke ✓ · svgcheck 0건 ✓ · integrity ✓ · `vue-tsc` ✓ |
+| 사이드바 | 두 가이드의 `data-g` 버튼 `title`·`ics` 에 로깅 반영 (나머지 8개는 **일부러 되돌림** — §8-6) |
+| router stats | python 19/292 · csharp 16/218 로 갱신 |
+| java · server | pane 12/12 + meta.json 완성 — **등록만 남음** |
+| cs · js-ts · rust | 조각 12/12 완성 — **이어붙이기 + meta.json 남음** |
+| cpp · kotlin | 10/12 (lg11~lg12 남음) |
+| db | 8/12 (lg09~lg12 남음) |
+| js-ts p5.html | 코드 블록 앞의 U+FEFF 한 개 제거 ✅ |
+
+### 그 앞 회차 ⓐ — §5 소진 · §6 절반 처리 · 로깅 탭 착수 (2026-09-01)
 
 **§5(자잘한 것 3건)를 전부 끝냈고, §6 의 넷 중 셋을 처리했습니다.** 그리고 사용자 요청으로
 **로깅 탭 10개 집필에 착수했다가 토큰 사정으로 중단**했습니다 — 초안은 전부 저장소에 보존했습니다(§8).
@@ -212,8 +231,9 @@ cd web && npm run verify:guide      # 현재 상태가 깨끗한지
 ```
 그다음은 `(A) 에이전트에 과제 주기 → (B) reg.mjs 로 등록 → (C) 검증 → (D) 커밋` 반복입니다.
 
-**§1~§5 는 전부 ✅ 이고, §6 은 넷 중 셋이 끝났습니다. 지금 손댈 것은 §8(로깅 탭 10개)입니다.**
+**§1~§5 는 전부 ✅ 이고, §6 은 넷 중 셋이 끝났습니다. 지금 손댈 것은 §8(로깅 탭 8개)입니다.**
 §8 에 어디까지 돼 있는지 · 제원 · 다시 시작하는 순서가 전부 적혀 있습니다.
+**java · server 는 등록만 하면 되고, cs · js-ts · rust 는 이어붙이기 + meta.json 만 남았습니다.**
 
 ### 1. ✅ 브라우저 실측 — 열 가이드 전부 완료 (2026-08-28)
 
@@ -439,7 +459,7 @@ node guide-src/tools/chartcand.mjs --all       # 조건을 넓혀서
 
 | 항목 | 상태 |
 |---|---|
-| 6-1 모델 다양성 | 🔵 **남음** — 다만 §8 로깅 탭이 미사용 4계열을 쓰도록 지시돼 있어 같이 해결됩니다 |
+| 6-1 모델 다양성 | 🔵 **남음** — §8 로깅 탭이 미사용 4계열을 쓰도록 지시돼 있어 같이 해결됩니다. 10개 중 2개 등록됨 |
 | 6-2-1 애니메이션 속도 통일 | ✅ `dur` 11종 → 3종 (1.8s · 2.6s · 3.4s) |
 | 6-2-2 모델별 모션 · 6-2-3 성능 | 🔵 **남음** |
 | 6-3-1 좁은 화면 **브라우저 실측** | 🔵 **남음 — CSS 는 고쳤지만 눈으로 확인은 안 했습니다** |
@@ -529,55 +549,70 @@ npx vue-tsc -b                                   # ⑥ router 고쳤으면
       (원격에 GitHub Action 커밋이 수시로 들어와 그냥 push 하면 거부됩니다.
        `App.vue` stash 항목은 2026-09-01 에 되돌려서 없앴습니다 — 또 뜨면 에디터 포맷 설정을 저장소에 맞추세요)
 
-### 8. 🔴 **지금 바로 이어서 할 일** — 로깅 탭 10개 (2026-09-01 착수 · 중단)
+### 8. 🔴 **지금 바로 이어서 할 일** — 로깅 탭 8개 (2026-09-07 갱신)
 
 > 사용자 요청: "로그 관련해서도 추가해주는 게 좋을 것 같아. 각 언어별로 로그 정말 중요하잖아.
 > 다양한 라이브러리와 사용율과 좋은점 장단점 사용 예시코드 적용방법 등등."
 
-에이전트 **10개를 동시에** 돌렸고, 토큰 사정으로 **중단**했습니다. **작업물은 전부 저장소에 보존했습니다.**
+**10개 중 2개(csharp · python)는 등록까지 끝났습니다.** 남은 8개는 아래 표대로 진행 단계가 다릅니다.
 
-#### 8-1. 지금 어디까지 돼 있나
+#### 8-1. 지금 어디까지 돼 있나 (2026-09-07 실측)
 
-| 가이드 | 섹션 진행 | diag | 어디에 |
-|---|---|---|---|
-| **csharp** | **12/12 완성** | 14 | `_wip/log-tabs/csharp/15-log.html` + **`meta.json` 있음** |
-| **python** | **12/12 완성** | 12 | `_wip/log-tabs/python/19-log.html` · **meta.json 없음** |
-| server | 10/12 | 12 | `_wip/log-tabs/server/p1~p4.html` |
-| java | 10/12 | 11 | `_wip/log-tabs/java/part1~3.html` |
-| rust | 9/12 | 9 | `_wip/log-tabs/rust/p1~p3.html` |
-| cpp | 8/12 | 9 | `_wip/log-tabs/cpp/p1~p4.html` |
-| js-ts | 8/12 | 9 | `_wip/log-tabs/js-ts/p1~p4.html` |
-| cs | 8/12 | 8 | `_wip/log-tabs/cs/p1~p3.html` |
-| db | 6/12 | 9 | `_wip/log-tabs/db/p1~p3.html` |
-| kotlin | 6/12 | 6 | `_wip/log-tabs/kotlin/p1~p2.html` |
+| 가이드 | 상태 | 섹션 | diag | 남은 일 |
+|---|---|---|---|---|
+| ~~csharp~~ | ✅ **등록 완료** | 12 | 14 | — |
+| ~~python~~ | ✅ **등록 완료** | 12 | 12 | — |
+| **java** | 🟢 pane + meta 완성 | 12/12 | 14 | **등록만** (`13-log.html`) |
+| **server** | 🟢 pane + meta 완성 | 12/12 | 16 | **등록만** (`18-log.html`) |
+| **cs** | 🟡 조각 완성 | 12/12 | 12 | `cat p1..p5 > 14-log.html` + meta.json |
+| **js-ts** | 🟡 조각 완성 | 12/12 | 13 | `cat p1..p6 > 18-log.html` + meta.json |
+| **rust** | 🟡 조각 완성 | 12/12 | 12 | `cat p1..p5 > 16-log.html` + meta.json |
+| **cpp** | 🟠 10/12 | lg01~lg10 | 11 | **lg11~lg12 집필** + 결합 + meta.json |
+| **kotlin** | 🟠 10/12 | lg01~lg10 | 10 | **lg11~lg12 집필** + 결합 + meta.json |
+| **db** | 🔴 8/12 | lg01~lg08 | 13 | **lg09~lg12 집필** + 결합 + meta.json |
 
-- 조각은 **파일 이름 순서대로 이어 붙이면 됩니다**(`cat p1.html p2.html ... >> pane.html`).
-- 완성된 두 개는 `fixcut` · `svgcheck` · `integrity` **전부 통과**했습니다(OVER/BOX/LAP/CUT 0건).
+조각 파일 이름과 담고 있는 섹션:
+
+| 가이드 | 조각 | 결합 후 이름 |
+|---|---|---|
+| java | `part1`(lg01~03) `part2`(lg04~07) `part3`(lg08~10) `part4`(lg11~12) | `13-log.html` **이미 있음** |
+| server | `p1`(lg01~02) `p2`(lg03~04) `p3`(lg05~07) `p4`(lg08~10) `p5`(lg11~12) | `18-log.html` **이미 있음** |
+| cs | `p1`(lg01~02) `p2`(lg03~05) `p3`(lg06~08) `p4`(lg09~10) `p5`(lg11~12) | `14-log.html` |
+| js-ts | `p1`~`p4`(lg01~08) `p5`(lg09~10) `p6`(lg11~12) | `18-log.html` |
+| rust | `p1`(lg01~03) `p2`(lg04~06) `p3`(lg07~09) `p4`(lg10~11) `p5`(lg12) | `16-log.html` |
+| cpp | `p1`~`p4`(lg01~08) `p5`(lg09~10) — **p6 없음** | `17-log.html` |
+| kotlin | `p1`(lg01~03) `p2`(lg04~06) `p3`(lg07~08) `p4`(lg09~10) — **p5 없음** | `14-log.html` |
+| db | `p1`~`p3`(lg01~06) `p4`(lg07~08) — **p5·p6 없음** | `14-log.html` |
+
+- 조각은 **파일 이름 순서대로 이어 붙이면 됩니다.** 마지막 조각에만 `</div><!-- /pane-log -->` 가 있습니다
+  (전부 확인함 — 결합 후 closer 가 딱 1개여야 합니다).
+- 결합 후 **hero 의 `<div class="stats">` 안 `SECTIONS` 숫자를 12 로** 맞추세요. p1 에 있습니다.
 - **⚠️ 완성된 pane 을 `<가이드>/parts/panes/` 에 두면 `verify:guide` 가 깨집니다** —
-  `"파일은 있는데 parts.json 에 없음"` 으로 ✗ 가 뜹니다. 그래서 완성본도 `_wip` 에 두었습니다.
+  `"파일은 있는데 parts.json 에 없음"` 으로 ✗ 가 뜹니다.
   **pane 을 `panes/` 로 옮기는 것과 `reg.mjs` 등록은 한 번에 하세요.**
-- 지금 상태에서 `verify:guide` 는 열 가이드 전부 ✓ 입니다(2026-09-01 확인).
+- 지금 상태에서 `verify:guide` 는 열 가이드 전부 ✓ 입니다(2026-09-07 확인).
 - `web/guide-src/_wip/` 는 **집필 중 초안 보관용**입니다. 다 끝나면 폴더째 지우세요.
 
-#### 8-2. 각 탭의 확정된 제원 (에이전트에게 그대로 주면 됩니다)
+#### 8-2. 각 탭의 확정된 제원
 
 공통 — tab `log` · pane div `pane-log` · 섹션 id `lg01`~`lg12` · `<span class="no">` 는 `LOG 01` 형식 ·
 label `📝 로깅 · 로그` (server 는 `📝 로그 운영`, db 는 `📝 로그 · 감사`, cs 는 `📝 로그와 관측`) ·
 icon `📝` · cls **`lgx`** (`lg` 는 server 의 `lang` 탭이 이미 씁니다) · grad `["#a78bfa","#4c1d95"]` ·
-섹션 10~12개 · 다이어그램 최소 8개.
+섹션 12개 · 다이어그램 최소 8개.
 
-| 가이드 | pane 파일 | group | after |
-|---|---|---|---|
-| python | `panes/19-log.html` | 2 | `test` |
-| js-ts | `panes/18-log.html` | 3 | `tool` |
-| server | `panes/18-log.html` | 3 | `obs` |
-| java | `panes/13-log.html` | 4 | `tool` |
-| cpp | `panes/17-log.html` | 2 | `perf` |
-| rust | `panes/16-log.html` | 4 | `tool` |
-| db | `panes/14-log.html` | 3 | `app` |
-| kotlin | `panes/14-log.html` | 4 | `tool` |
-| cs | `panes/14-log.html` | 3 | `se` |
-| csharp | `panes/15-log.html` | 3 | `tool` |
+| 가이드 | pane 파일 | group | groupLabel | groupIcs | sheetLabel | after |
+|---|---|---|---|---|---|---|
+| js-ts | `panes/18-log.html` | 3 | 심화 · 도구 | `⚡🧬🧰📝` | 도구 | `tool` |
+| server | `panes/18-log.html` | 3 | 심화 · ADVANCED | `⚡🛡️🧬🔭📝` | 심화 | `obs` |
+| java | `panes/13-log.html` | 4 | 도구 · GUI | `🧰🖥️📝` | 도구 | `tool` |
+| cpp | `panes/17-log.html` | 2 | 빌드 · 성능 | `🛠️⚡📝` | 빌드 | `perf` |
+| rust | `panes/16-log.html` | 4 | 실전 · 생태계 | `🧰📝` | 실전 | `tool` |
+| db | `panes/14-log.html` | 3 | 심화 · 연동 | `⚙️🧬🔌📊📝` | 심화 | `app` |
+| kotlin | `panes/14-log.html` | 4 | 도구 · BUILD | `🧰📝` | 도구 | `tool` |
+| cs | `panes/14-log.html` | 3 | 심화 · 설계 | `🔧🔐🕸️🏛️📝` | 심화 | `se` |
+
+**java · server 의 meta.json 은 이미 이 값으로 채워져 있습니다.** 나머지는 새로 쓸 때 위 표를 그대로 쓰세요.
+본보기로 `web/guide-src/_wip/log-tabs/csharp/meta.json` 을 복사해 값만 바꾸는 것이 가장 빠릅니다.
 
 #### 8-3. 내용에서 지켰던 원칙 두 가지 (그대로 이어 가세요)
 
@@ -589,96 +624,87 @@ icon `📝` · cls **`lgx`** (`lg` 는 server 의 `lang` 탭이 이미 씁니다
    `d-n2~d-p2` 발산 램프(트레이드오프) · `cyl` 원통(로그 저장소) · `cld` 구름(수집기·SaaS).
    `dur` 은 `1.8s`/`2.6s`/`3.4s` 셋만. viewBox 폭 680 고정.
 
-#### 8-4. 다시 시작하는 순서
+#### 8-4. 다시 시작하는 순서 (가장 빠른 길)
 
+**① java · server 를 먼저 등록하세요 — 한 방에 끝납니다.**
 ```bash
 cd D:/gibis/workTool/astro/black-astro/web
-ls guide-src/_wip/log-tabs/*                 # 어디까지 돼 있는지 확인
+cp guide-src/_wip/log-tabs/java/13-log.html   guide-src/java/parts/panes/13-log.html
+node guide-src/tools/reg.mjs guide-src/_wip/log-tabs/java/meta.json
+npm run build:guide -- java
+node guide-src/tools/fixcut.mjs   guide-src/java/parts/panes/13-log.html
+node guide-src/tools/svgcheck.mjs guide-src/java/parts/panes/13-log.html
+node guide-src/tools/integrity.mjs java
+node guide-src/tools/smoke.mjs public/java-web/index.html
+# server 도 같은 순서 (18-log.html · after=obs)
 ```
-1. **csharp 부터 등록해 보세요** — pane 과 meta.json 이 둘 다 있어 한 방에 끝나고,
-   등록 흐름 전체를 한 번 검증할 수 있습니다.
-   ```bash
-   cp guide-src/_wip/log-tabs/csharp/15-log.html guide-src/csharp/parts/panes/15-log.html
-   node guide-src/tools/reg.mjs guide-src/_wip/log-tabs/csharp/meta.json   # pane 이 panes/15-log.html 인지 먼저 확인
-   npm run verify:guide && node guide-src/tools/smoke.mjs public/csharp-web/index.html
-   ```
-2. **python 은 meta.json 만 쓰면 됩니다** — pane 은 이미 완성돼 있습니다
-   (`_wip/log-tabs/python/19-log.html` → `python/parts/panes/19-log.html` 로 복사).
-   섹션 12개의 `title`/`star`/`lv`/`ez`/`cap`/`kw` 를 pane 을 읽어 채우세요(`AUTHORING.md` §4).
-   csharp 의 `meta.json` 을 본보기로 쓰면 빠릅니다.
-3. 나머지 8개는 조각을 이어 붙여 마무리하거나, **가이드별로 에이전트를 나눠 병렬로** 돌립니다
-   (가이드가 서로 달라 파일 충돌이 없습니다 — 이번에 10개 동시에 문제없었습니다).
-   에이전트에게는 **8-2 표의 제원 + 8-3 원칙 + `AUTHORING.md`** 를 그대로 주세요.
-   **`parts.json`·`11-sidebar.html`·`12-tabbar.html`·`js/*` 는 에이전트가 건드리지 못하게 하고,
-   `reg.mjs` 등록은 메인 세션이 순서대로** 돌립니다(공유 파일이라 동시에 쓰면 깨집니다).
-4. 등록 뒤 §7 체크리스트 — 특히 **`11-sidebar.html` 의 `data-g="N"` 버튼 `title`·`ics` 에 로깅을 더하고**
-   (아래 표), `src/router/index.ts` 의 stats 를 `verify:guide` 출력값으로 맞추세요.
 
-**사이드바 그룹 버튼 — 로깅 탭을 넣을 그룹** (`title` 뒤에 ` · 로깅` 을, `ics` 에 `📝` 를 더하세요)
+**② cs · js-ts · rust 는 이어붙이기 + meta.json 만 남았습니다.**
+```bash
+cd guide-src/_wip/log-tabs/cs   && cat p1.html p2.html p3.html p4.html p5.html > 14-log.html && cd -
+# hero 의 SECTIONS 를 12 로 고친 뒤 meta.json 작성 → ① 과 같은 등록 절차
+```
+meta.json 은 pane 을 읽어 섹션 12개의 `title`/`star`/`lv`/`ez`/`cap`/`kw` 를 채웁니다(`AUTHORING.md` §4).
+**에이전트 하나에 맡기면 10분이면 끝납니다** — python meta.json 이 그렇게 나왔습니다.
 
-| 가이드 | 줄 | 지금 title | 지금 ics |
-|---|---|---|---|
-| python | 10 | 웹·API · DB 연동 · 테스트 | 🌐🗄️🧪 |
-| js-ts | 12 | 대규모 · 전문가 · 도구 | ⚡🧬🧰 |
-| java | 12 | 도구 · JavaFX | 🧰🖥️ |
-| csharp | 11 | 데스크탑 · 실전 도구 | 🖥️🧰 |
-| rust | 12 | serde · clap · tokio · axum · sqlx · tracing | 🧰 |
-| cpp | 10 | 빌드 · 배포 · 성능 최적화 | 🛠️⚡ |
-| kotlin | 12 | 실전 도구 | 🧰 |
-| server | 11 | 성능·튜닝 · 보안·운영 · 전문가 · 관측 | ⚡🛡️🧬🔭 |
-| db | 11 | 설계·튜닝 · 전문가 · 앱 연동 · 분석/벡터 DB | ⚙️🧬🔌📊 |
-| cs | 11 | 컴파일러 · 보안 · 분산 · 소프트웨어 공학 | 🔧🔐🕸️🏛️ |
+**③ cpp · kotlin · db 는 남은 섹션 집필이 필요합니다.**
+아직 안 쓴 주제는 §8-5 목차에서 이미 쓴 섹션(위 8-1 표의 lg 번호)을 빼면 나옵니다.
+에이전트에게는 **8-2 표의 제원 + 8-3 원칙 + `AUTHORING.md`** 를 그대로 주고,
+**`parts.json`·`11-sidebar.html`·`12-tabbar.html`·`js/*` 는 건드리지 못하게** 하세요
+(공유 파일이라 동시에 쓰면 깨집니다). `reg.mjs` 등록은 메인 세션이 순서대로 돌립니다.
 
-#### 8-5. 각 가이드에서 다루기로 했던 것 (에이전트에 준 목차)
+**⚠️ 에이전트 동시 실행은 5개까지.** 2026-09-07 에 9개를 동시에 돌렸다가 **세션 한도(HTTP 429)로
+8개가 한꺼번에 중단**됐습니다. 다행히 파일은 남았지만 결합·meta 단계에서 끊긴 것들이 있었습니다.
+탭 하나가 대략 20만 토큰 · 30분입니다.
 
-- **python** — `logging` 구조(Logger·Handler·Formatter·Filter·전파) · 레벨 설계 · `dictConfig` ·
-  **비교**(표준 `logging` · `structlog` · `loguru` · `picologging` · `python-json-logger`) · 구조적 로깅 ·
-  로테이션(`RotatingFileHandler`/`TimedRotating`/`logrotate`) · `QueueHandler` 비동기 · lazy 포매팅 ·
-  Django/Flask/FastAPI 연동(uvicorn 중복 출력) · `contextvars` 로 request-id · 마스킹 · Sentry/OTel · `logger.exception`
-- **js-ts** — `console.*` 의 한계 · **비교**(`pino` · `winston` · `bunyan` · `roarr` · `debug` · `tslog` · `consola`) ·
-  `pino` 가 빠른 이유 · 구조적 로깅 필드(ECS/OTel) · Express/Nest/Fastify/Next(엣지 런타임 제약) ·
-  `AsyncLocalStorage` 로 request-id · TS 타입 안전 · 이벤트 루프를 막는 동기 쓰기 · 브라우저 로깅/Sentry ·
-  `redact` 마스킹 · stdout → 수집기
-- **java** — 파사드+구현 두 겹 구조 · **비교**(`Logback` · `Log4j2` · `j.u.l` · `tinylog`) · SLF4J `{}` 바인딩 ·
-  **의존성 지옥**(중복 바인딩 · 브리지 · exclude) · `logback-spring.xml` · Log4j2 **AsyncLogger**(Disruptor) ·
-  `logstash-logback-encoder` · **MDC 와 가상 스레드/@Async 누수** · Actuator 로 런타임 레벨 변경 ·
-  **Log4Shell 교훈** · 예외 로깅
-- **kotlin** — 로거 선언 관용구 · `kotlin-logging` 의 **람다 지연 평가** · **비교**(+ `Timber` · `Napier`) ·
-  SLF4J 의존성 정리(Gradle KTS) · Logback · **코루틴 `MDCContext`** · Ktor `CallLogging`/`CallId` ·
-  Spring Boot(Kotlin) · **안드로이드**(`android.util.Log` 제약 · Timber · R8 로 릴리스 로그 제거 · Logcat) ·
-  KMP(`expect`/`actual` · Kermit) · 마스킹
-- **csharp** — `Microsoft.Extensions.Logging` 구조와 DI · 레벨/카테고리 필터(가장 긴 접두사 승) ·
-  **비교**(내장 · `Serilog` · `NLog` · `log4net` · `ZLogger`) · **메시지 템플릿 구조적 로깅** ·
-  `[LoggerMessage]` 소스 제너레이터 · `Host.UseSerilog` + sink/enricher · `nlog.config` ·
-  ASP.NET Core(HTTP logging · `BeginScope`) · `ActivitySource` 와 TraceId · 할당/GC · 마스킹 · 배포 환경별
-- **cpp** — 표준에 로거가 없다 · `std::print`(C++23)가 바꾼 것 · **비교**(`spdlog` · `quill` · `glog` ·
-  `Boost.Log` · `log4cplus`) · `spdlog` 실전(싱크·패턴·`SPDLOG_ACTIVE_LEVEL`) · **매크로 vs 함수** ·
+#### 8-5. 각 가이드에서 다루기로 했던 것 (에이전트에 준 목차 — 남은 셋만)
+
+- **cpp** (lg11~lg12 남음) — 표준에 로거가 없다 · `std::print`(C++23)가 바꾼 것 · **비교**(`spdlog` · `quill` ·
+  `glog` · `Boost.Log` · `log4cplus`) · `spdlog` 실전(싱크·패턴·`SPDLOG_ACTIVE_LEVEL`) · **매크로 vs 함수** ·
   **비동기 로깅**(큐가 가득 찼을 때 블록 vs 유실) · 로깅 한 줄의 실제 비용 · 로테이션 ·
   **크래시 로그**(async-signal-safe · 미니덤프/core dump · Crashpad) · 멀티프로세스/`fork` · CMake 통합
-- **rust** — `println!` 을 버리는 이유 · **`log` 파사드 + 구현체** · **`tracing` 의 span 이 다른 점** ·
-  `tracing-subscriber`(`fmt` · `EnvFilter` · 레이어 합성) · **비교**(`env_logger` · `tracing` · `fern` ·
-  `slog` · `flexi_logger` · `defmt`) · JSON · `#[instrument]` · Tokio 에서 span 이 `.await` 를 건너는 원리 ·
-  `tracing-appender` 의 **`WorkerGuard` 함정** · 컴파일 타임 레벨 제거 · `tracing-opentelemetry` ·
-  `anyhow`/panic 훅 · `defmt`(no_std)
-- **server** (인프라 관점 · `17-obs` 와 중복 금지) — 로그의 전체 지도 · **Nginx `log_format`**
-  (`$request_time` · `$upstream_response_time` · `$request_id` · JSON · `map`+`if=` 로 헬스체크 소음 제거) ·
-  Apache/Tomcat/Caddy · **syslog/journald**(`SystemMaxUse`) · **logrotate**(`copytruncate` 가 로그를 잃는 이유 ·
-  `USR1`) · **수집기 비교**(Fluent Bit · Vector · Filebeat · Fluentd · Promtail) ·
-  **저장소 비교**(Loki · OpenSearch · ClickHouse · 클라우드) · `X-Request-Id` 잇기 · **비용과 샘플링** ·
-  마스킹·감사·보존 · 쿠버네티스 로그 · **장애 조사 절차**(시간→상태코드→경로→업스트림→요청 ID)
-- **db** (두 얼굴 — 진단 로그 vs 트랜잭션 로그) — **WAL 원리**(왜 데이터보다 로그 먼저 · `fsync` · 복구) ·
-  PostgreSQL(`log_min_duration_statement` · `auto_explain` · `pg_stat_statements` · WAL 설정) ·
+- **kotlin** (lg11~lg12 남음) — 로거 선언 관용구 · `kotlin-logging` 의 **람다 지연 평가** ·
+  **비교**(+ `Timber` · `Napier`) · SLF4J 의존성 정리(Gradle KTS) · Logback · **코루틴 `MDCContext`** ·
+  Ktor `CallLogging`/`CallId` · Spring Boot(Kotlin) · **안드로이드**(`android.util.Log` 제약 · Timber ·
+  R8 로 릴리스 로그 제거 · Logcat) · KMP(`expect`/`actual` · Kermit) · 마스킹
+- **db** (lg09~lg12 남음 · 두 얼굴 — 진단 로그 vs 트랜잭션 로그) — **WAL 원리**(왜 데이터보다 로그 먼저 ·
+  `fsync` · 복구) · PostgreSQL(`log_min_duration_statement` · `auto_explain` · `pg_stat_statements` · WAL 설정) ·
   MySQL(슬로우 쿼리 · **binlog** ROW/STATEMENT · redo/undo) · Oracle(alert/trace/redo · AWR/ASH) ·
   SQLite(rollback journal vs **WAL 모드**) · Redis(`slowlog` · AOF `appendfsync`) · MongoDB(프로파일러 · oplog) ·
   **슬로우 쿼리 잡는 절차**(`pt-query-digest`/`pgBadger`) · **감사 로그**(`pgaudit` 등) ·
   **CDC**(Debezium 이 binlog/WAL 을 읽는 원리) · 운영(디스크 가득 참 · PITR)
-- **cs** (이론 가이드 · `11-dist` 의 Raft 와 이어서) — **로그 = append-only ordered sequence** ·
-  **상태와 이벤트의 이중성**(`state = fold(apply, init, events)`) · WAL 과 원자성 ·
-  **Lamport 논리 시계 · 벡터 시계 · happens-before** · 상태 기계 복제와 로그 매칭 ·
-  **로그 기반 아키텍처**(이벤트 소싱 · CQRS · CDC · 카프카의 파티션된 로그) · 정보량과 카디널리티 ·
-  **관측 가능성의 이론**(제어이론에서 온 말) · 구조적 로깅과 스키마 진화 · 로그 컴팩션과 보존 ·
-  **무결성**(해시 체인 · 머클 트리 · Certificate Transparency) · 로그로 못 잡는 것
 
+이미 끝난 일곱(python · js-ts · java · kotlin · csharp · rust · server · cs)의 목차는 21차 핸드오프에
+있었고, 해당 pane/조각에 그대로 반영돼 있으니 조각을 읽으면 됩니다.
+
+#### 8-6. ⚠️ 등록할 때 잊기 쉬운 것 세 가지
+
+1. **사이드바 그룹 버튼은 `reg.mjs` 가 안 고칩니다.** 새 탭이 기존 그룹에 들어가면
+   `11-sidebar.html` 의 `data-g="N"` 버튼 `title` 뒤에 로깅을, `ics` 에 `📝` 를 손으로 더하세요.
+   **2026-09-07 에 10개를 한꺼번에 고쳤다가 등록 안 된 8개는 되돌렸습니다** — 탭이 없는데
+   그룹 이름만 "· 로깅"이 되면 안 되기 때문입니다. **등록과 같은 커밋에서 함께** 하세요.
+
+   | 가이드 | 지금 title | 지금 ics | 더할 것 |
+   |---|---|---|---|
+   | js-ts | 대규모 · 전문가 · 도구 | 🧰 앞에 ⚡🧬 | ` · 로깅` · `📝` |
+   | java | 도구 · JavaFX | 🧰🖥️ | ` · 로깅` · `📝` |
+   | rust | serde · clap · tokio · axum · sqlx · tracing | 🧰 | ` · 로깅` · `📝` |
+   | cpp | 빌드 · 배포 · 성능 최적화 | 🛠️⚡ | ` · 로깅` · `📝` |
+   | kotlin | 실전 도구 | 🧰 | ` · 로깅` · `📝` |
+   | server | 성능·튜닝 · 보안·운영 · 전문가 · 관측 | ⚡🛡️🧬🔭 | ` · 로그 운영` · `📝` |
+   | db | 설계·튜닝 · 전문가 · 앱 연동 · 분석/벡터 DB | ⚙️🧬🔌📊 | ` · 로그·감사` · `📝` |
+   | cs | 컴파일러 · 보안 · 분산 · 소프트웨어 공학 | 🔧🔐🕸️🏛️ | ` · 로그와 관측` · `📝` |
+
+2. **`src/router/index.ts` 의 stats**(탭 수 · 섹션 수)를 `verify:guide` 출력값으로 맞추고 `npx vue-tsc -b`.
+   가이드 순서는 python · java · kotlin · js-ts · csharp · db · server · cpp · rust · cs 입니다.
+3. **`reg.mjs` 는 `TAB_ORDER` 를 앞 10개로 자릅니다.** python 은 이번에 `scale` 이 빠지고 `log` 가
+   들어갔습니다(단축키 0번). 의도한 것인지 등록 뒤 `20-tab-switch.js` 의 diff 를 한 번 보세요.
+
+#### 8-7. 로깅 탭이 다 끝난 뒤 — §6-1 다시 세기
+
+로깅 탭 10개는 미사용 모델 넷(`cel` 히트맵 · `d-n2~d-p2` 발산 램프 · `cyl` 원통 · `cld` 구름)을
+쓰도록 지시돼 있습니다. **8개가 다 등록되면 §6-1 의 사용 횟수를 다시 세고**, 그래도 0회로 남은
+계열만 §3 방식(기존 그림 역적용)으로 처리하세요. 세는 법은 §6-1 에 있습니다.
 
 ---
 
@@ -718,8 +744,10 @@ ls guide-src/_wip/log-tabs/*                 # 어디까지 돼 있는지 확인
 - 검증(AUTHORING §5) 후 §6 형식으로 보고.
 ```
 
-**에이전트 운용 요령** — 탭 하나에 에이전트 하나. **동시에 5개까지**가 안전합니다
-(19개를 한꺼번에 돌렸다가 세션 토큰 한도로 전부 중단됐습니다). 한 탭이 대략 20만 토큰 · 30분.
+**에이전트 운용 요령** — 탭 하나에 에이전트 하나. **동시에 5개까지**가 안전합니다.
+19개를 한꺼번에 돌렸다가 세션 토큰 한도로 전부 중단됐고, **2026-09-07 에 9개를 돌렸다가도
+8개가 HTTP 429 로 한꺼번에 끊겼습니다**(파일은 남았지만 결합·meta 단계에서 멈춤).
+한 탭이 대략 20만 토큰 · 30분.
 완료되면 통합 담당(메인 세션)이 `reg.mjs` 로 등록 → 검증 → 그룹 라벨 보정 → router stats → 커밋.
 
 **통합할 때 잊기 쉬운 것 두 가지**
@@ -744,14 +772,16 @@ npx vue-tsc -b                                                       # router �
 - svgcheck 지적의 대부분은 **좌우 316폭 박스에 긴 한 줄** — 두 줄로 쪼개고 박스 높이 52→68
 - 넘침은 **x 를 옮기지 말고 문구를 줄여서** 해결 (옮기면 LAP 이 생깁니다)
 
-## 다이어그램 현황 — 총 1,388개 (`class="diag"` 카드 수)
+## 다이어그램 현황 — 총 1,414개 (`class="diag"` 카드 수 · 2026-09-07)
 | 가이드 | 개수 | | 가이드 | 개수 |
 |---|---|---|---|---|
-| cpp | 169 | | server | 150 |
-| **csharp** | **149** | | js-ts | 146 |
-| python | 144 | | rust | 142 |
+| cpp | 169 | | **csharp** | **163** |
+| **python** | **156** | | server | 150 |
+| js-ts | 146 | | rust | 142 |
 | cs | 133 | | java | 123 |
 | kotlin | 118 | | db | 114 |
+
+로깅 탭 8개가 더 들어가면 90개 남짓 늘어납니다(가이드당 10~16개).
 
 **모든 가이드의 모든 탭이 7개 이상**입니다.
 
@@ -787,14 +817,19 @@ npx vue-tsc -b                                                       # router �
 15. **코드블록 안의 `2>&1` 같은 `&`** 는 `&amp;` 로 — integrity 가 잡기 전에 미리 바꿔 두면 왕복이 줄어듭니다
 16. **Write 로 쓰는 조각 안에서 `\$` 이스케이프 금지** — 백슬래시가 그대로 화면에 나옵니다
 17. **bash 안에서 node -e 에 백틱이 든 템플릿 리터럴을 넣지 말 것** — 셸이 먼저 해석해 깨집니다
-18. **동시 에이전트는 5개까지** — 19개를 한 번에 돌리면 세션 토큰 한도에 걸려 전부 날아갑니다
+18. **동시 에이전트는 5개까지** — 19개를 한 번에 돌리면 세션 토큰 한도에 걸려 전부 날아갑니다.
+    **9개도 안 됩니다** — 2026-09-07 에 9개를 돌려 8개가 HTTP 429(세션 한도)로 동시에 끊겼습니다.
+    다만 **끊겨도 그때까지 쓴 파일은 남습니다** — 중단 뒤엔 지우지 말고 `_wip` 에서 진행 상태를
+    실측(섹션 id · 조각별 `lg` 번호)해 이어받으세요. 셋은 사실상 완성 상태로 남아 있었습니다.
 19. **여러 에이전트가 같은 스크래치패드를 쓰면 파일명이 충돌한다** — 에이전트마다 전용 하위 폴더를 지정할 것
 20. **`shared/models/` 는 가이드 조각이 아니다** — `build.mjs` 의 shared 고아 검사에서 제외돼 있다(`SHARED_NOT_PARTS`)
 21. **`svgcheck.mjs` 는 `<section class="sec" id=...>` 단위로만 읽는다** — 조각만 검사하려면 감싸야 한다(`lab.mjs` 가 그렇게 한다)
 22. **rotate 로 세운 텍스트는 svgcheck 가 가로 폭으로 잘못 잰다** — `writing-mode` 를 쓰거나 가로로 눕힐 것
-23. **한 섹션에 `<svg>` 가 둘 이상일 수 있다** — 교체 스크립트가 첫 번째만 바꾸면 엉뚱한 그림을 덮어씁니다
+23. **완성한 pane 을 `panes/` 에 두고 등록을 미루면 `verify:guide` 가 ✗ 를 냅니다** —
+    `parts.json` 에 없는 파일로 잡힙니다. **복사와 `reg.mjs` 등록은 한 번에** 하세요.
+24. **한 섹션에 `<svg>` 가 둘 이상일 수 있다** — 교체 스크립트가 첫 번째만 바꾸면 엉뚱한 그림을 덮어씁니다
     (`server/d03` 에서 실제로 났고 복원했습니다). **바꾸기 전에 섹션의 `<svg` 개수를 세고** n번째를 지정하세요.
-24. **에이전트 병렬은 "가이드가 서로 다르면" 안전하다** — 6개를 동시에 돌려 충돌 0건이었습니다.
+25. **에이전트 병렬은 "가이드가 서로 다르면" 안전하다** — 6개를 동시에 돌려 충돌 0건이었습니다.
     단 **빌드(`build:guide`/`verify:guide`)는 에이전트에게 시키지 말 것** — 동시에 돌면 서로 덮습니다.
     통합 담당이 마지막에 한 번만 돌립니다.
 
