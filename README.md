@@ -12,7 +12,7 @@
 <!-- 개인 소개 블로그 — 이 프로필의 본문입니다 -->
 <a href="https://black-astro.github.io/black-astro/">
   <img
-    src="assets/badges/cta-portfolio.svg?v=2"
+    src="assets/badges/cta-blog.svg"
     alt="개인 소개 블로그 — black-astro.github.io/black-astro"
   />
 </a>
