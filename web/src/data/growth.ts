@@ -15,22 +15,22 @@ export const learningProjects: LearningProject[] = [
   {
     name: 'realtime-shortlink',
     goal: 'Redis 기반 URL 단축기 — 캐시·rate limit·관측성 실습',
-    stack: ['Redis INCR', 'Base62', 'Micrometer', 'Testcontainers', 'k6'],
+    stack: ['Redis INCR', 'Base62', 'Micrometer'],
     points: [
       'Redis INCR + Base62 URL 단축, Micrometer 커스텀 메트릭(캐시 hit/miss) 노출.',
-      'IP별 슬라이딩 윈도우 rate limiter 직접 구현, Testcontainers 통합 테스트.',
-      'k6 부하 시나리오 작성 — 로컬 단일 인스턴스 실측 진행 중(p95/p99·RPS 기록 목표).',
+      'IP별 슬라이딩 윈도우 rate limiter 직접 구현.',
+      '다음 단계 — 부하 시나리오를 만들어 p95/p99·RPS를 실측하고 기록으로 남기기.',
     ],
     status: '진행 중',
   },
   {
     name: 'msa-demo',
     goal: 'Eureka + Gateway + 이벤트 기반 주문/재고 — MSA 회복탄력성 실습',
-    stack: ['Spring Cloud Gateway', 'Eureka', 'Kafka', 'Resilience4j'],
+    stack: ['Spring Cloud Gateway', 'Eureka', 'Kafka'],
     points: [
-      '동기 호출은 Resilience4j CircuitBreaker + fallback으로 보호.',
+      'Gateway + Eureka로 서비스 디스커버리와 라우팅 구성.',
       '상태 변경은 Kafka 이벤트로 비동기 분리, 소비 실패 시 지수 백오프 재시도 큐·DLQ 직접 구현.',
-      '다음 단계 — 인메모리 저장소를 H2/JPA로 교체, 통합 테스트 보강.',
+      '다음 단계 — 인메모리 저장소를 H2/JPA로 교체, 동기 호출 구간에 서킷브레이커 적용, 통합 테스트 보강.',
     ],
     status: '진행 중',
   },
@@ -73,7 +73,7 @@ export const roadmap: RoadmapArea[] = [
     title: 'Kafka · Redis 운영 수준',
     icon: 'layers',
     items: [
-      '학습 3종을 k6 실측·공개까지 완성',
+      '학습 3종을 부하 실측·공개까지 완성',
       '파티션 키/순서 보장, 서킷브레이커 상태 전이, 아웃박스 패턴 학습',
     ],
   },
