@@ -177,19 +177,44 @@ VALUES (..., 'Y', #{server_no}, ...)`,
   },
   {
     id: 'case-kakao',
-    title: 'KakaoApiServer — 발송 상태머신 + 운영 트러블슈팅',
-    tag: '운영 안정성',
+    title: 'KakaoApiServer — 초당 상한 페이서 + 발송 상태머신',
+    tag: '동시성 · 운영 안정성',
     summary:
-      '다중 스케줄러가 동일 행을 중복 처리하지 않도록 조건부 UPDATE(compare-and-set)로 락 없이 race를 차단하고, SRC_KEY 공백 매칭 운영 사고를 재현·복구·문서화.',
+      '카카오 API의 초당 200문서 상한을 라이브러리 없이 15줄 페이서로 해결하고, 다중 스케줄러의 중복 처리는 조건부 UPDATE로 락 없이 차단. SRC_KEY 공백 매칭 운영 사고는 재현·복구·문서화.',
     stack: ['Java 21', 'Spring Boot 3.3', 'Spring 6 RestClient', 'MyBatis 동적 SQL', 'Tibero 6'],
     metrics: [
+      { value: '200문서/초', label: '외부 API 상한 대응' },
+      { value: '2.5~3분', label: '2~3만 건 버스트 드레인' },
       { value: '재발 0건', label: '운영 사고' },
       { value: '중복 0건', label: '다중 스케줄러 발송' },
     ],
     blocks: [
       {
         type: 'code',
-        heading: '해결 1 — 락 없는 race 차단 (실 구현 기반 재구성 예시)',
+        heading: '해결 1 — 초당 상한 대응 페이서 (직접 구현)',
+        lang: 'java',
+        content: `// 카운터도 시간 윈도우도 없다 — 상태는 "다음 발송 가능 시각" 하나뿐
+public void acquire(int documents) throws InterruptedException {
+    if (documents <= 0) return;
+    long waitNanos;
+    synchronized (this) {                            // (1) 예약 계산만 잠금 안에서
+        long now     = System.nanoTime();
+        long startAt = Math.max(nextFreeNanos, now); // 과거면 현재로 — 버스트 크레딧 없음
+        waitNanos    = startAt - now;
+        nextFreeNanos = startAt + (long)(documents * nanosPerPermit);
+    }
+    if (waitNanos > 0) Thread.sleep(...);            // (2) 대기는 잠금 밖에서
+}`,
+      },
+      {
+        type: 'text',
+        heading: '왜 이렇게 했나',
+        content:
+          '(1)과 (2)의 분리가 핵심 — 잠금을 쥔 채 자면 스레드가 직렬화되지만, 예약만 원자적으로 끊어 두면 스케줄러 3개가 순차 슬롯을 나눠 갖고 각자 자기 몫만 잔다. 워커당 63건씩 나누면 노는 워커의 몫이 버려지므로 공유 페이서 단일 지점을 통과시켜 처리량 손실을 없앴다. 차감 단위는 요청이 아니라 문서(상한이 문서 수 기준). 상한값은 설정으로 빼고 200이 아닌 190을 기본값으로 둬 지터 여유를 남겼다. 속도조절을 상태 선점보다 앞에 배치해 대기 중 장애가 나도 중복 발송이 불가능하고, 건당 과금이라 실패는 자동 재시도 대신 보류 + 사유 기록으로 정책화했다. 단일 JVM 기준이라는 한계는 주석에 명시하고 무중단 배포 시 스위치 OFF → 교체 → ON 절차로 덮었다.',
+      },
+      {
+        type: 'code',
+        heading: '해결 2 — 락 없는 race 차단 (실 구현 기반 재구성 예시)',
         lang: 'sql',
         content: `-- 상태 전이를 조건부 UPDATE(compare-and-set)로: 한 워커만 성공
 UPDATE SEND_MASTER
@@ -199,7 +224,7 @@ UPDATE SEND_MASTER
       },
       {
         type: 'text',
-        heading: '해결 2 — SRC_KEY 공백 매칭 사고 (재현 → 복구 → 재발 방지)',
+        heading: '해결 3 — SRC_KEY 공백 매칭 사고 (재현 → 복구 → 재발 방지)',
         content:
           '증상: 카카오 결과 콜백이 "발송데이터 미존재"로 실패, RESULT 미처리 적재. 원인: SRC_KEY 양끝 공백이 카카오 측 trim과 자사 값 사이에서 비매칭됨을 SQL 분석으로 식별. 조치: 복구 SQL로 재처리 유도 → 조회 SQL에 TRIM(SRC_KEY) 명시 → 재현 절차·영향 범위·복구 SQL을 문서화. 이후 재발 0건.',
       },
