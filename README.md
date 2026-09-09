@@ -4,19 +4,8 @@
 
 <div align="center">
 
-<img
-  width="100%"
-  src="https://capsule-render.vercel.app/api?type=waving&color=0:000000,45:022a0e,100:00ff41&height=200&section=header&text=black_astro&fontSize=60&fontColor=00ff41&fontAlignY=36&desc=Backend%20Engineer%20/%20Java%20·%20Spring&descAlignY=57&descSize=18&animation=fadeIn"
-  alt="header"
-/>
-
-<!-- 움직이는 소개 텍스트 -->
-<a href="https://black-astro.github.io/black-astro/">
-  <img
-    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=21&pause=1600&color=00FF41&background=0D1117&center=true&vCenter=true&width=620&height=54&lines=%EC%A0%84%EC%9E%90%EA%B3%A0%EC%A7%80%20%C2%B7%20%EB%8C%80%EC%9A%A9%EB%9F%89%20%EB%B0%9C%EC%86%A1%2F%EB%B0%B0%EC%B9%98%205%EB%85%84%EC%B0%A8%20%EB%B0%B1%EC%97%94%EB%93%9C%3B%EB%8D%B8%ED%8C%8C%EC%9D%B4%20%EB%A0%88%EA%B1%B0%EC%8B%9C%EB%A5%BC%20Java%2021%EB%A1%9C%20%EC%9E%AC%EA%B5%AC%EC%B6%95%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4%3B%ED%95%84%EC%9A%94%ED%95%9C%20%EB%8F%84%EA%B5%AC%EB%8A%94%20%EC%A7%81%EC%A0%91%20%EB%A7%8C%EB%93%A4%EC%96%B4%20%EB%B0%B0%ED%8F%AC%ED%95%A9%EB%8B%88%EB%8B%A4"
-    alt="전자고지 · 대용량 발송/배치 5년차 백엔드"
-  />
-</a>
+<!-- 헤더 — 자체 SVG. 외부 렌더러는 GitHub 프록시에서 글자가 날아가 직접 그린다 -->
+<img src="assets/badges/header.svg" alt="black_astro — Backend Engineer · Java · Spring · 전자고지 · 대용량 발송/배치 5년차 백엔드"/>
 
 <br/>
 
@@ -273,10 +262,6 @@ npm install -g smart-msg   # 사용: sm
 
 <div align="center">
 
-<img
-  width="100%"
-  src="https://capsule-render.vercel.app/api?type=waving&color=0:00ff41,45:022a0e,100:000000&height=120&section=footer&text=%3E_%20thanks%20for%20visiting&fontSize=20&fontColor=00ff41&fontAlignY=70&animation=fadeIn"
-  alt="footer"
-/>
+<img src="assets/badges/footer.svg" alt="&gt;_ thanks for visiting"/>
 
 </div>
