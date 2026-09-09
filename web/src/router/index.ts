@@ -82,8 +82,8 @@ export const guides: Guide[] = [
       'JVM 내부',
     ],
     stats: [
-      { value: '16', label: '주제 탭' },
-      { value: '246', label: '섹션' },
+      { value: '17', label: '주제 탭' },
+      { value: '258', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -222,8 +222,8 @@ export const guides: Guide[] = [
       '보안 운영',
     ],
     stats: [
-      { value: '17', label: '주제 탭' },
-      { value: '225', label: '섹션' },
+      { value: '18', label: '주제 탭' },
+      { value: '237', label: '섹션' },
       { value: '3', label: 'MSA·Kafka·대규모' },
     ],
   },
