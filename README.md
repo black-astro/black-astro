@@ -9,11 +9,11 @@
 
 <br/>
 
-<!-- 포트폴리오 — 이 프로필의 본문입니다 -->
+<!-- 개인 소개 블로그 — 이 프로필의 본문입니다 -->
 <a href="https://black-astro.github.io/black-astro/">
   <img
-    src="assets/badges/cta-portfolio.svg"
-    alt="포트폴리오 사이트 열기 — black-astro.github.io/black-astro"
+    src="assets/badges/cta-portfolio.svg?v=2"
+    alt="개인 소개 블로그 — black-astro.github.io/black-astro"
   />
 </a>
 
