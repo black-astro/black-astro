@@ -1,0 +1,2286 @@
+<!-- ============================================================
+     로그와 관측 PANE
+     ============================================================ -->
+<div class="pane" id="pane-log">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> append-only · WAL · 이벤트 소싱 · 논리 시계 · 머클 트리 · 관측 가능성</div>
+  <h1>추가만 되는 줄 하나가<br>데이터베이스와 분산 시스템을<br>떠받치고 있습니다</h1>
+  <p class="tx">
+    로그는 <b>맨 끝에만 붙이고, 한 번 붙인 것은 고치지 않는 순서 있는 기록</b>입니다.
+    자료구조로 보면 어이없을 만큼 단순한데, <b>파일시스템 저널 · 데이터베이스의 WAL ·
+    Git 의 커밋 · Kafka 의 파티션 · Raft 의 복제 로그 · 감사 로그 · 인증서 투명성</b>이
+    전부 이 하나 위에 서 있습니다. 이 탭은 “로그 라이브러리 쓰는 법”이 아니라
+    <b>왜 이 단순한 것이 컴퓨터과학의 중심에 놓이는가</b>를 다룹니다.
+    상태와 이벤트의 관계, 시간과 인과, 정보량, 그리고 <b>로그로는 끝내 답할 수 없는 질문</b>까지 갑니다.
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>1</b><span>가지 자료구조</span></div>
+    <div><b>0</b><span>사전 지식</span></div>
+    <div><b>12</b><span>시각화</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== lg01 ==================== -->
+<section class="sec" id="lg01">
+  <div class="sec-head rv">
+    <span class="no">LOG 01</span>
+    <h2>로그란 무엇인가 — <span class="t">추가만 되는 순서 있는 기록</span></h2>
+    <p class="lead">
+      우리가 매일 보는 <code>app.log</code> 텍스트 파일 이야기가 아닙니다.
+      <b>append-only ordered sequence</b> 라는 자료구조 이야기입니다.
+      연산이 두 개밖에 없는데, 이 두 개로 데이터베이스와 분산 합의가 만들어집니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 234" role="img" aria-label="로그의 구조를 보여 주는 그림. 기록은 왼쪽에서 오른쪽으로 오프셋 0부터 순서대로 붙고, 새 기록은 항상 끝에만 추가된다. 중간을 지우거나 끼워 넣는 연산은 없다. 소비자는 각자 자기가 어디까지 읽었는지를 오프셋 하나로 기억하며, 로그 자신은 누가 어디까지 읽었는지 알 필요가 없다.">
+      <text x="16" y="18" class="lbl">로그 — 끝에만 붙이고, 각 줄에 번호(오프셋)가 하나씩</text>
+
+      <rect class="bx" x="40" y="60" width="68" height="42"/>
+      <text x="74" y="78" class="val" text-anchor="middle">개설</text>
+      <text x="74" y="93" class="ann" text-anchor="middle">balance 0</text>
+
+      <rect class="bx" x="116" y="60" width="68" height="42"/>
+      <text x="150" y="78" class="val" text-anchor="middle">입금</text>
+      <text x="150" y="93" class="ann" text-anchor="middle">+10,000</text>
+
+      <rect class="bx" x="192" y="60" width="68" height="42"/>
+      <text x="226" y="78" class="val" text-anchor="middle">출금</text>
+      <text x="226" y="93" class="ann" text-anchor="middle">-3,000</text>
+
+      <rect class="bx" x="268" y="60" width="68" height="42"/>
+      <text x="302" y="78" class="val" text-anchor="middle">입금</text>
+      <text x="302" y="93" class="ann" text-anchor="middle">+5,000</text>
+
+      <rect class="bx" x="344" y="60" width="68" height="42"/>
+      <text x="378" y="78" class="val" text-anchor="middle">이체</text>
+      <text x="378" y="93" class="ann" text-anchor="middle">-2,000</text>
+
+      <rect class="bx" x="420" y="60" width="68" height="42"/>
+      <text x="454" y="78" class="val" text-anchor="middle">이자</text>
+      <text x="454" y="93" class="ann" text-anchor="middle">+40</text>
+
+      <rect class="bx bx-ok" x="496" y="60" width="68" height="42"/>
+      <text x="530" y="78" class="val ok-t" text-anchor="middle">출금</text>
+      <text x="530" y="93" class="ann" text-anchor="middle">-1,000</text>
+
+      <rect class="bx bx-mut" x="572" y="60" width="68" height="42"/>
+      <text x="606" y="78" class="val" text-anchor="middle">다음</text>
+      <text x="606" y="93" class="ann" text-anchor="middle">여기에만</text>
+
+      <path class="ax ar" d="M32 128 L656 128"/>
+      <circle class="pk" r="3.5"><animateMotion dur="3.4s" repeatCount="indefinite" path="M32 128 L648 128"/></circle>
+
+      <path class="ln" d="M74 122 L74 134"/>
+      <path class="ln" d="M150 122 L150 134"/>
+      <path class="ln" d="M226 122 L226 134"/>
+      <path class="ln" d="M302 122 L302 134"/>
+      <path class="ln" d="M378 122 L378 134"/>
+      <path class="ln" d="M454 122 L454 134"/>
+      <path class="ln" d="M530 122 L530 134"/>
+      <path class="ln" d="M606 122 L606 134"/>
+
+      <text x="74" y="147" class="tk" text-anchor="middle">0</text>
+      <text x="150" y="147" class="tk" text-anchor="middle">1</text>
+      <text x="226" y="147" class="tk" text-anchor="middle">2</text>
+      <text x="302" y="147" class="tk" text-anchor="middle">3</text>
+      <text x="378" y="147" class="tk" text-anchor="middle">4</text>
+      <text x="454" y="147" class="tk" text-anchor="middle">5</text>
+      <text x="530" y="147" class="tk" text-anchor="middle">6</text>
+      <text x="606" y="147" class="tk" text-anchor="middle">7</text>
+
+      <path class="ln" d="M40 168 L648 168" style="opacity:.4"/>
+      <text x="16" y="172" class="ann">커서</text>
+      <circle class="dot" cx="302" cy="168" r="5"/>
+      <circle class="dot" cx="530" cy="168" r="5" style="fill:#34d399"/>
+      <text x="302" y="188" class="ann" text-anchor="middle">소비자 A - offset 3</text>
+      <text x="530" y="188" class="ann ok-t" text-anchor="middle">소비자 B - offset 6</text>
+
+      <text x="16" y="212" class="lbl">지우기도 끼워 넣기도 없으므로 순서가 곧 사실입니다 - 같은 로그를 읽으면 누구나 같은 결론에 닿습니다</text>
+      <text x="16" y="228" class="lbl">소비자는 자기 오프셋만 기억하면 됩니다 - 로그는 누가 어디까지 읽었는지 몰라도 됩니다</text>
+    </svg>
+    <div class="cap">로그의 연산은 <b>append 와 read(from offset) 둘뿐</b>입니다 — 이 제약이 곧 힘입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">50줄로 만드는 로그</h4>
+      <pre class="code" data-lang="python"><code>class Log:
+    """append-only ordered sequence — 연산은 두 개뿐입니다."""
+    def __init__(self):
+        self._items = []            # 실제로는 디스크의 세그먼트 파일
+
+    def append(self, record) -&gt; int:
+        self._items.append(record)  # ★ 끝에만 붙습니다
+        return len(self._items) - 1 # 붙은 자리 = 오프셋(불변 식별자)
+
+    def read(self, offset: int, limit: int = 100):
+        return self._items[offset:offset + limit]
+
+    def __len__(self):
+        return len(self._items)
+
+# 쓰기
+log = Log()
+log.append({"t": "deposit", "amt": 10_000})   # -&gt; 0
+log.append({"t": "withdraw", "amt": 3_000})   # -&gt; 1
+
+# 읽기 — 커서는 소비자가 들고 있습니다
+cursor = 0
+while cursor &lt; len(log):
+    for rec in log.read(cursor, 10):
+        handle(rec)
+        cursor += 1</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>없는 연산에 주목하세요</b> — <code>update(i, x)</code> 도 <code>delete(i)</code> 도
+        <code>insert(i, x)</code> 도 <b>없습니다</b>. 이 세 개를 포기했기 때문에
+        <b>동시에 읽는 사람이 몇 명이든 락이 필요 없고</b>, 어제 읽은 오프셋 3이 오늘도 같은 값입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배열 · 큐 · 로그는 어떻게 다른가</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:22%"></th><th>배열</th><th>큐</th><th>로그</th></tr>
+        <tr><td>추가</td><td>아무 데나</td><td>뒤에만</td><td><b>뒤에만</b></td></tr>
+        <tr><td>제거</td><td>아무 데나</td><td><b>앞에서 꺼냄</b></td><td><b>없음</b></td></tr>
+        <tr><td>수정</td><td>가능</td><td>없음</td><td><b>없음</b></td></tr>
+        <tr><td>읽은 뒤</td><td>남음</td><td><b>사라짐</b></td><td><b>남음</b></td></tr>
+        <tr><td>독자 수</td><td>제한 없음</td><td>보통 1</td><td><b>제한 없음</b></td></tr>
+        <tr><td>커서 주인</td><td>—</td><td>큐</td><td><b>각 소비자</b></td></tr>
+        <tr><td>과거 재생</td><td>—</td><td>불가</td><td><b>가능</b></td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>큐와 로그의 결정적 차이</b> — 큐는 <b>꺼내면 사라집니다</b>.
+        그래서 소비자가 새로 생기면 지난 메시지를 볼 방법이 없습니다.
+        로그는 읽어도 그대로 있으니 <b>새 소비자가 오프셋 0부터 다시 읽어</b>
+        과거 전체를 재생할 수 있습니다. “나중에 분석 시스템을 하나 더 붙인다”가
+        가능한지 아닌지가 여기서 갈립니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">왜 하필 순차 쓰기인가</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">하드웨어가 로그를 좋아합니다</h4>
+      <pre class="code" data-lang="text"><code>같은 1GB 를 쓸 때 (대략적인 감각)
+
+  HDD  랜덤 4KB 쓰기   ~100 IOPS   → 1GB 에 40분 이상
+  HDD  순차 쓰기       ~150 MB/s   → 1GB 에 7초
+       ★ 300배 이상 차이 — 디스크 헤드가 안 움직이니까
+
+  SSD  랜덤 4KB 쓰기   수만 IOPS   → 빨라졌지만
+  SSD  순차 쓰기                    → 여전히 몇 배 빠릅니다
+       이유: 쓰기 증폭(write amplification)과
+             FTL 의 블록 단위 소거
+
+로그는 "항상 파일 끝에 붙이기"라서
+순차 쓰기만 합니다 → 하드웨어의 가장 빠른 경로</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>🖥️ 컴퓨터구조</b> 의 저장장치 절과 이어집니다.
+        LSM 트리(RocksDB · Cassandra · LevelDB)가 <b>B+트리 대신 로그를 먼저 쓰는</b> 이유가
+        정확히 이것입니다 — 랜덤 쓰기를 순차 쓰기로 바꾸는 것.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이미 우리 주변에 있는 로그들</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">이름</th><th>무엇이 로그인가</th></tr>
+        <tr><td><b>ext4 / NTFS 저널</b></td><td>메타데이터 변경 기록 — 부팅 때 재실행</td></tr>
+        <tr><td><b>PostgreSQL WAL</b></td><td>모든 페이지 변경. 복제·PITR 의 근거</td></tr>
+        <tr><td><b>Redis AOF</b></td><td>실행한 명령 자체를 append</td></tr>
+        <tr><td><b>Git</b></td><td>커밋 = 부모 해시를 가진 불변 기록</td></tr>
+        <tr><td><b>Kafka</b></td><td>파티션 하나가 곧 로그 하나</td></tr>
+        <tr><td><b>etcd · Raft</b></td><td>복제 로그에 합의하고 상태는 파생</td></tr>
+        <tr><td><b>블록체인</b></td><td>합의로 확정되는 해시 체인 로그</td></tr>
+        <tr><td><b>journald</b></td><td>구조화 필드가 붙은 시스템 로그</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>공통점</b> — 전부 <b>“진짜 데이터는 로그이고, 우리가 보는 것은 그걸 접은 결과”</b>라는
+        구조입니다. 다음 절에서 이 “접는다”가 정확히 무엇인지 봅니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">세그먼트 · 인덱스 · 오프셋</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>파일 하나에 무한히 붙일 수는 없습니다 → 세그먼트로 자릅니다
+
+  /data/topic-A/partition-0/
+      00000000000000000000.log     ← 오프셋 0 부터
+      00000000000000000000.index   ← 오프셋 -&gt; 파일 위치 (희소 인덱스)
+      00000000000000524288.log     ← 오프셋 524288 부터
+      00000000000000524288.index
+      ...
+      00000000000009830400.log     ← 지금 쓰고 있는 활성 세그먼트
+
+  · 파일 이름이 곧 그 세그먼트의 시작 오프셋 → 이진 탐색으로 파일을 고릅니다
+  · 인덱스는 몇 KB 마다 하나씩만 (희소) → 인덱스도 순차로 붙습니다
+  · 보존 정책은 "세그먼트 파일 단위 삭제" → 파일 unlink 한 번으로 끝
+    (중간을 지우는 게 아니라 가장 오래된 파일을 통째로 지웁니다)
+
+읽기가 왜 빠른가
+  · 오프셋 -&gt; 세그먼트 -&gt; 인덱스 -&gt; 파일 위치 -&gt; 그 뒤로 순차 읽기
+  · 페이지 캐시가 그대로 활용됩니다 (최근 데이터는 대개 메모리에)
+  · sendfile(2) 로 커널에서 소켓까지 바로 — 사용자 공간 복사 0회
+    ★ Kafka 가 빠른 이유의 절반이 "특별한 것을 안 하기" 입니다</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>오프셋은 절대 재사용하지 않습니다</b> — 세그먼트를 지워도 오프셋 번호는 계속 증가합니다.
+      만약 번호를 재사용하면 “오프셋 42 를 읽었다”는 소비자의 기억이
+      <b>다른 데이터를 가리키게</b> 됩니다. <b>불변 식별자</b>라는 성질이 로그의 계약입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 로그는 <b>append 와 read(offset)</b> 두 연산만 가진
+    순서 있는 불변 기록입니다. 수정과 삭제를 포기한 대가로
+    <b>순차 쓰기 · 락 없는 다중 독자 · 과거 재생 · 안정된 식별자</b>를 얻습니다.
+    파일시스템 저널부터 Kafka 까지가 전부 같은 자료구조입니다.</div>
+</section>
+
+
+<!-- ==================== lg02 ==================== -->
+<section class="sec" id="lg02">
+  <div class="sec-head rv">
+    <span class="no">LOG 02</span>
+    <h2>상태와 이벤트의 <span class="t">이중성</span> — 접기와 미분</h2>
+    <p class="lead">
+      “잔액 7,000원”과 “입금 10,000 · 출금 3,000”은 같은 사실의 두 표현입니다.
+      <b>상태는 이벤트를 접은 것(fold)</b>이고,
+      <b>이벤트는 상태의 차이(미분)</b>입니다. 이 대응이 이 탭 전체의 뼈대입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 210" role="img" aria-label="상태가 이벤트를 왼쪽부터 차례로 접은 결과임을 보여 주는 그림. 초기값 0원에서 시작해 입금과 출금 이벤트를 하나씩 적용할 때마다 잔액이 바뀌고, 마지막 상태가 현재 잔액이 된다. 반대 방향으로는 두 상태의 차이가 곧 하나의 이벤트가 되며, 이것이 상태의 미분에 해당한다.">
+      <text x="16" y="18" class="lbl">상태는 이벤트를 왼쪽부터 접은 결과입니다</text>
+
+      <text x="92" y="38" class="ann" text-anchor="middle">+10,000</text>
+      <text x="180" y="38" class="ann" text-anchor="middle">-3,000</text>
+      <text x="268" y="38" class="ann" text-anchor="middle">+5,000</text>
+      <text x="356" y="38" class="ann" text-anchor="middle">-2,000</text>
+      <text x="444" y="38" class="ann" text-anchor="middle">+40</text>
+      <text x="532" y="38" class="ann" text-anchor="middle">-1,000</text>
+
+      <rect class="bx bx-mut" x="16" y="44" width="64" height="40"/>
+      <text x="48" y="62" class="val" text-anchor="middle">0</text>
+      <text x="48" y="78" class="ann" text-anchor="middle">초기값</text>
+
+      <path class="fl ar" d="M82 62 L100 62"/>
+      <rect class="bx" x="104" y="44" width="64" height="40"/>
+      <text x="136" y="66" class="val" text-anchor="middle">10,000</text>
+
+      <path class="fl ar" d="M170 62 L188 62"/>
+      <rect class="bx" x="192" y="44" width="64" height="40"/>
+      <text x="224" y="66" class="val" text-anchor="middle">7,000</text>
+
+      <path class="fl ar" d="M258 62 L276 62"/>
+      <rect class="bx" x="280" y="44" width="64" height="40"/>
+      <text x="312" y="66" class="val" text-anchor="middle">12,000</text>
+
+      <path class="fl ar" d="M346 62 L364 62"/>
+      <rect class="bx" x="368" y="44" width="64" height="40"/>
+      <text x="400" y="66" class="val" text-anchor="middle">10,000</text>
+
+      <path class="fl ar" d="M434 62 L452 62"/>
+      <rect class="bx" x="456" y="44" width="64" height="40"/>
+      <text x="488" y="66" class="val" text-anchor="middle">10,040</text>
+
+      <path class="fl ar" d="M522 62 L540 62"/>
+      <rect class="bx bx-ok" x="544" y="44" width="64" height="40"/>
+      <text x="576" y="62" class="val ok-t" text-anchor="middle">9,040</text>
+      <text x="576" y="78" class="ann" text-anchor="middle">현재 상태</text>
+
+      <text x="16" y="106" class="ttl">state = fold(apply, initial, events)</text>
+      <text x="16" y="124" class="ann">처음부터 다시 접으면 언제든 그때의 상태를 되살릴 수 있습니다 - 이것이 재생(replay)입니다</text>
+
+      <path class="ln ar" d="M612 88 L648 88 L648 144 L48 144 L48 92"/>
+      <text x="340" y="164" class="ann am-t" text-anchor="middle">거꾸로 읽으면 - 이웃한 두 상태의 차이가 곧 이벤트 하나입니다 (상태의 미분)</text>
+
+      <text x="16" y="188" class="lbl">상태만 들고 있으면 과거를 잃습니다 - 잔액 9,040 만 봐서는 왜 그 값이 됐는지 알 수 없습니다</text>
+      <text x="16" y="204" class="lbl">이벤트를 들고 있으면 상태는 언제든 다시 만들 수 있습니다 - 그래서 로그가 원본이고 상태는 캐시입니다</text>
+    </svg>
+    <div class="cap">상태는 이벤트의 <b>접기</b>, 이벤트는 상태의 <b>미분</b> — 어느 쪽이 원본인지가 설계를 가릅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">fold 를 코드로</h4>
+      <pre class="code" data-lang="python"><code>from functools import reduce
+
+def apply(state, ev):
+    """상태 하나 + 이벤트 하나 -&gt; 다음 상태. 순수 함수여야 합니다."""
+    t = ev["t"]
+    if t == "deposit":  return {**state, "bal": state["bal"] + ev["amt"]}
+    if t == "withdraw": return {**state, "bal": state["bal"] - ev["amt"]}
+    if t == "freeze":   return {**state, "frozen": True}
+    return state                       # 모르는 이벤트는 무시(전방 호환)
+
+initial = {"bal": 0, "frozen": False}
+events  = log.read(0, 10_000)
+
+state = reduce(apply, events, initial)   # ★ state = fold(apply, initial, events)
+
+# 어제 자정의 잔액이 궁금하다면? 그때까지만 접으면 됩니다
+as_of = [e for e in events if e["ts"] &lt; midnight]
+yesterday = reduce(apply, as_of, initial)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>apply 가 순수 함수여야 하는 이유</b> — 재생할 때 같은 결과가 나와야 하기 때문입니다.
+        <code>apply</code> 안에서 <b>현재 시각을 읽거나 · 난수를 뽑거나 · 외부 API 를 부르면</b>
+        재생한 결과가 원래와 달라집니다. 그런 값은 <b>이벤트에 미리 박아 두는 것</b>이 정석입니다
+        (<code>{"t":"charge","amt":100,"rate":1180.5,"at":"..."}</code>).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">두 설계의 대칭 — 무엇을 원본으로 둘 것인가</h4>
+      <div class="vs">
+        <div class="bad">
+          <h5>상태를 원본으로 (보통의 CRUD)</h5>
+          <pre class="code" data-lang="sql"><code>UPDATE account
+   SET balance = balance - 3000
+ WHERE id = 7;
+-- 이전 값은 그 자리에서 사라집니다
+-- "왜 3,000이 빠졌나"는 어디에도 없습니다</code></pre>
+        </div>
+        <div class="good">
+          <h5>이벤트를 원본으로 (이벤트 소싱)</h5>
+          <pre class="code" data-lang="sql"><code>INSERT INTO events(stream, seq, type, data)
+VALUES ('acct-7', 12, 'withdraw',
+        '{"amt":3000,"atm":"KR-118"}');
+-- 잔액은 이 로그를 접어서 만듭니다
+-- 과거 어느 시점이든 되살릴 수 있습니다</code></pre>
+        </div>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>CRUD 가 나쁘다는 이야기가 아닙니다.</b> CRUD 는 <b>“지금 값만 알면 되는”</b> 도메인에 정확히 맞습니다.
+        문제는 <b>나중에</b> “이 값이 왜 이렇게 됐지?”를 물어야 할 때인데,
+        그때는 이미 정보가 없습니다. <b>버리는 결정은 되돌릴 수 없습니다.</b>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">이 대칭이 나타나는 곳들</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:20%">분야</th><th>이벤트(로그)</th><th>상태(접은 결과)</th></tr>
+      <tr><td>은행</td><td>입출금 원장 한 줄 한 줄</td><td><b>잔액</b></td></tr>
+      <tr><td>Git</td><td>커밋(diff)</td><td><b>워킹 트리</b></td></tr>
+      <tr><td>DB 복제</td><td>WAL 레코드 스트림</td><td><b>복제본의 테이블</b></td></tr>
+      <tr><td>Redis</td><td>AOF 명령</td><td><b>메모리의 키 공간</b></td></tr>
+      <tr><td>React 계열</td><td>액션(디스패치된 것)</td><td><b>스토어 상태</b></td></tr>
+      <tr><td>협업 편집</td><td>연산(op) · CRDT 변경</td><td><b>문서 본문</b></td></tr>
+      <tr><td>회계</td><td>분개(전표)</td><td><b>재무제표</b></td></tr>
+      <tr><td>물리</td><td>속도(변화율)</td><td><b>위치</b></td></tr>
+    </table></div>
+    <div class="note info" style="margin-bottom:0">
+      <b>회계는 400년 전부터 이렇게 해 왔습니다</b> — 복식부기의 원장은 <b>추가만 되는 로그</b>이고,
+      잘못 적으면 지우는 게 아니라 <b>반대 전표(역분개)를 하나 더 씁니다</b>.
+      소프트웨어의 “취소 이벤트”가 정확히 같은 발상입니다.
+      <b>지우지 않는다</b>는 규칙이 감사(audit)를 가능하게 만듭니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">스냅샷 없이는 못 삽니다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">접는 비용은 이벤트 수에 비례합니다</h4>
+      <pre class="code" data-lang="python"><code># 이벤트가 500만 개인 스트림을 매번 처음부터 접으면?
+#   -&gt; 조회 한 번에 수 초. 서비스가 못 버팁니다.
+
+# ★ 스냅샷: "여기까지 접은 결과"를 주기적으로 저장
+def load(stream_id):
+    snap = snapshots.latest(stream_id)          # {seq: 4_900_000, state: {...}}
+    state = snap.state if snap else initial
+    start = snap.seq + 1 if snap else 0
+    for ev in log.read_stream(stream_id, start): # 나머지만 접습니다
+        state = apply(state, ev)
+    return state
+
+def save_snapshot(stream_id, state, seq):
+    snapshots.put(stream_id, seq, state, schema_version=3)
+
+# 규칙
+#  · 스냅샷은 캐시입니다 — 지워도 로그에서 다시 만들 수 있어야 합니다
+#  · apply 로직이 바뀌면 스냅샷을 전부 버리고 다시 만듭니다 ★
+#  · 그래서 스냅샷에 schema_version 을 반드시 넣습니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">재생이 진짜로 어려운 지점</h4>
+      <pre class="code" data-lang="text"><code>① 외부 부수효과
+   재생 중에 다시 메일이 나가면 안 됩니다.
+   -&gt; apply 는 상태만 바꾸고, 부수효과는 별도 단계로 분리
+      (읽기 모델 갱신 / 알림 발송은 '핸들러', apply 아님)
+
+② 코드가 바뀐다
+   1년 전 이벤트를 오늘 코드로 접으면 다른 값이 나올 수 있습니다.
+   -&gt; 이벤트에 version 을 넣고 apply 를 버전별로 분기
+   -&gt; 또는 업캐스터(upcaster)로 옛 이벤트를 새 형태로 승격
+
+③ 시간·환율·세율 같은 외부 값
+   -&gt; 계산에 쓴 값을 이벤트에 함께 기록 (재현 가능성 확보)
+
+④ 삭제 요구(GDPR 잊힐 권리)와 append-only 의 충돌
+   -&gt; 개인정보를 로그 밖 금고에 두고 로그에는 키만
+      (crypto-shredding: 키를 지우면 사실상 복원 불가)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>이벤트 소싱을 접는 팀이 가장 많이 걸리는 곳이 ②와 ④</b>입니다.
+        “로그는 영원하다”와 “법적으로 지워야 한다”가 정면으로 부딪힙니다.
+        <b>🔐 보안 · 암호</b> 탭의 키 관리가 여기서 실무 해법이 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>state = fold(apply, initial, events)</code> 한 줄이 이 절의 전부입니다.
+    상태는 이벤트를 접은 결과이므로 <b>언제든 다시 만들 수 있고</b>, 이벤트는 상태의 차이이므로
+    <b>상태만 남기면 이유가 사라집니다</b>. 무엇을 원본으로 둘지가 시스템의 성격을 정합니다.</div>
+</section>
+
+
+<!-- ==================== lg03 ==================== -->
+<section class="sec" id="lg03">
+  <div class="sec-head rv">
+    <span class="no">LOG 03</span>
+    <h2>WAL 과 원자성 — <span class="t">데이터보다 로그를 먼저 씁니다</span></h2>
+    <p class="lead">
+      “다 되거나 다 안 되거나”는 어떻게 만들까요.
+      답은 놀랄 만큼 단순합니다 — <b>진짜 데이터를 고치기 전에, 무엇을 고칠지를 로그에 먼저 적습니다</b>.
+      Write-Ahead Logging, 줄여서 WAL 입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 286" role="img" aria-label="Write-Ahead Logging 의 순서를 시퀀스로 보여 주는 그림. 트랜잭션은 변경 내용을 먼저 로그에 적고 fsync 로 디스크에 확정한 뒤에야 데이터 페이지를 고친다. 도중에 전원이 나가면 메모리의 페이지 변경은 사라지지만 디스크의 로그는 남으므로, 복구 과정이 로그를 처음부터 다시 실행해 커밋된 것만 남기고 나머지는 되돌린다.">
+      <text x="16" y="18" class="lbl">세로가 시간 - 로그가 항상 데이터보다 먼저입니다</text>
+
+      <rect class="actr" x="26" y="30" width="112" height="28"/>
+      <text x="82" y="49" class="ann" text-anchor="middle">트랜잭션</text>
+      <rect class="actr" x="196" y="30" width="112" height="28"/>
+      <text x="252" y="49" class="ann" text-anchor="middle">WAL 로그</text>
+      <rect class="actr" x="376" y="30" width="112" height="28"/>
+      <text x="432" y="49" class="ann" text-anchor="middle">데이터 페이지</text>
+      <rect class="actr" x="546" y="30" width="112" height="28"/>
+      <text x="602" y="49" class="ann" text-anchor="middle">복구 절차</text>
+
+      <path class="life" d="M82 60 L82 236"/>
+      <path class="life" d="M252 60 L252 236"/>
+      <path class="life" d="M432 60 L432 236"/>
+      <path class="life" d="M602 60 L602 236"/>
+
+      <rect class="actv" x="77" y="70" width="10" height="82"/>
+      <rect class="actv" x="247" y="74" width="10" height="86"/>
+      <rect class="actv" x="597" y="190" width="10" height="42"/>
+
+      <path class="msg" d="M82 78 L244 78"/>
+      <text x="90" y="73" class="ann">1. 무엇을 어떻게 바꿀지 로그에 먼저 적습니다</text>
+
+      <path class="msg-a" d="M244 100 L90 100"/>
+      <text x="96" y="95" class="ann">2. fsync 완료 - 여기서부터 전원이 나가도 살아남습니다</text>
+
+      <path class="msg" d="M82 122 L424 122"/>
+      <text x="90" y="117" class="ann">3. 이제야 실제 페이지를 고칩니다 (아직 메모리)</text>
+
+      <path class="msg" d="M260 144 L424 144"/>
+      <text x="266" y="139" class="ann">4. 체크포인트 - 여기까지는 디스크 반영이 끝났다고 표시</text>
+
+      <path d="M16 172 L664 172" style="stroke:#fb7185;stroke-width:1.2;stroke-dasharray:4 3;fill:none"/>
+      <text x="16" y="166" class="ann rs-t">여기서 전원이 나갑니다 - 메모리의 페이지 변경은 사라지고 디스크의 로그만 남습니다</text>
+
+      <path class="msg" d="M594 196 L266 196"/>
+      <text x="272" y="191" class="ann">5. 체크포인트 뒤부터 로그를 다시 실행 (redo)</text>
+
+      <path class="msg-a" d="M594 218 L440 218"/>
+      <text x="446" y="213" class="ann ok-t">6. 커밋 안 된 것은 되돌림 (undo)</text>
+
+      <text x="16" y="256" class="lbl">규칙 하나뿐입니다 - 페이지를 디스크에 쓰기 전에 그 페이지의 로그가 먼저 디스크에 있어야 합니다</text>
+      <text x="16" y="272" class="lbl">그래서 로그만 fsync 하면 됩니다 - 흩어진 페이지 대신 파일 하나만 순차로 강제 기록합니다</text>
+    </svg>
+    <div class="cap">WAL 의 계약은 한 줄 — <b>로그가 페이지보다 먼저 디스크에 닿는다</b>. 나머지는 이것의 결과입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 이 순서가 크래시에서 살아남게 하나</h4>
+      <pre class="code" data-lang="text"><code>크래시가 날 수 있는 지점은 세 곳입니다.
+
+  ① 로그도 못 쓰고 죽었다
+       → 아무 일도 없었던 것과 같습니다. 정상.
+
+  ② 로그는 썼는데 페이지를 못 고치고 죽었다
+       → 로그가 디스크에 있습니다.
+         복구가 로그를 다시 실행(redo)해서 페이지를 만듭니다. 정상.
+
+  ③ 페이지 일부만 고치고 죽었다 (부분 쓰기)
+       → 로그에 '고치기 전 값(undo)'과 '고친 뒤 값(redo)'이 있습니다.
+         커밋 레코드가 있으면 redo, 없으면 undo. 정상.
+
+★ 반대로 했다면 (페이지 먼저, 로그 나중)
+   ② 지점에서 페이지는 반쯤 바뀌었는데 무엇을 되돌려야 할지
+      아무 데도 안 적혀 있습니다 → 복구 불가능</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>원자성이 “동시에 일어남”이 아니라는 점</b>이 핵심입니다.
+        실제로는 절대 동시에 일어나지 않습니다. 다만 <b>커밋 레코드 한 줄이 디스크에 닿는 순간</b>을
+        경계로 삼아, 그 앞은 “전부 있었던 일”, 그 뒤는 “없었던 일”로 <b>해석</b>하는 것입니다.
+        원자성은 물리 현상이 아니라 <b>로그를 읽는 규약</b>입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">멱등 재실행 — 두 번 실행돼도 같아야 합니다</h4>
+      <pre class="code" data-lang="python"><code># 복구는 몇 번이든 중단됐다 다시 시작될 수 있습니다.
+# 복구 도중 또 전원이 나갈 수 있으니까요.
+# → redo 는 반드시 멱등이어야 합니다.
+
+# ✗ 멱등이 아님: 상대적 변경
+def redo_bad(page, rec):
+    page.balance += rec.delta        # 두 번 적용되면 두 배
+
+# ✓ 멱등: 절대값 + 페이지 LSN 비교 (실제 DB 방식)
+def redo_ok(page, rec):
+    if page.lsn &gt;= rec.lsn:          # ★ 이미 반영된 로그다
+        return                        #    건너뜁니다
+    page.apply(rec.after_image)       # 고친 뒤의 값을 그대로 씀
+    page.lsn = rec.lsn                # 어디까지 반영했는지 페이지에 기록
+
+# LSN(Log Sequence Number) = 로그 안의 오프셋.
+# 페이지마다 "나는 LSN 얼마까지 반영됐다"를 들고 있으면
+# 재실행이 몇 번 돌아도 결과가 같습니다.</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>멱등성은 이 탭 전체를 관통합니다</b> — 복구 재실행, 메시지 재전달,
+        복제 로그 재적용이 전부 “두 번 와도 한 번 온 것과 같게”를 요구합니다.
+        <b>🕸️ 분산 · 동시성 13</b> 의 멱등성 키가 응용 계층에서의 같은 이야기입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">체크포인트와 ARIES</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">체크포인트가 없으면 복구가 끝나지 않습니다</h4>
+      <pre class="code" data-lang="text"><code>체크포인트 = "이 시점까지의 변경은 모두 디스크 페이지에 반영됨"
+
+  없으면          → 복구할 때 로그를 태초부터 다시 읽어야 합니다
+  있으면          → 마지막 체크포인트 뒤부터만 읽으면 됩니다
+
+PostgreSQL 에서 보이는 값들
+  checkpoint_timeout = 5min        얼마나 자주
+  max_wal_size       = 1GB         WAL 이 이만큼 쌓이면 강제
+  ★ 자주 하면 복구는 빨라지고, 평소 I/O 는 늘어납니다 (트레이드오프)
+
+  SELECT pg_current_wal_lsn();          -- 지금 WAL 위치
+  SELECT pg_last_wal_replay_lsn();      -- 복제본이 어디까지 적용했나
+
+로그가 곧 복제이자 백업입니다
+  · 스트리밍 복제  = WAL 을 실시간으로 보내 복제본이 재생
+  · PITR           = 기본 백업 + 그 뒤 WAL 을 원하는 시각까지 재생
+    "어제 오후 3시 12분 상태로" 가 가능한 이유</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ARIES — 교과서에 나오는 세 단계</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:22%">단계</th><th>하는 일</th></tr>
+        <tr><td><b>Analysis</b></td><td>마지막 체크포인트부터 읽어 <b>죽을 때 살아 있던 트랜잭션</b>과 더러운 페이지 목록을 복원</td></tr>
+        <tr><td><b>Redo</b></td><td>로그를 <b>앞에서 뒤로</b> 재실행 — 커밋 여부와 무관하게 <b>일단 전부</b> 다시 적용(repeating history)</td></tr>
+        <tr><td><b>Undo</b></td><td>커밋 못 한 트랜잭션을 <b>뒤에서 앞으로</b> 되돌림. 이때의 되돌림도 CLR 로그로 남깁니다</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>Redo 를 “일단 전부” 하는 게 이상해 보입니다</b> — 어차피 되돌릴 것까지 왜 다시 할까요.
+        이유는 <b>Undo 를 하려면 먼저 크래시 직전의 정확한 상태로 돌아가 있어야</b> 하기 때문입니다.
+        되돌리려면 무엇을 되돌릴지가 화면에 있어야 하니까요. 그래서 <b>역사를 반복한 뒤 되감습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">응용 코드에서 쓰는 WAL</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="python"><code># DB 밖에서도 같은 패턴을 씁니다. 대표적인 것이 '아웃박스'입니다.
+# 문제: DB 에 저장하고 카프카에 발행하는 두 동작은 원자적일 수 없다
+#      (분산 트랜잭션 없이는)
+
+# ✗ 위험 — 커밋은 됐는데 발행 직전에 프로세스가 죽으면 이벤트 유실
+with db.transaction():
+    db.insert(order)
+kafka.publish(event)
+
+# ✓ 로그를 먼저: 같은 트랜잭션 안에서 '보낼 것'을 테이블에 적습니다
+with db.transaction():
+    db.insert(order)
+    db.insert_outbox(topic="orders", key=order.id,
+                     payload=event, created_at=now())   # ★ 이게 WAL 역할
+
+# 별도 워커가 아웃박스를 읽어 발행하고 표시합니다 (또는 CDC 가 대신)
+for row in db.fetch_unsent_outbox(limit=500):
+    kafka.publish(row.topic, row.key, row.payload)      # 중복 발행은 가능
+    db.mark_sent(row.id)                                # 정확히 한 번은 아님
+
+# 결과: at-least-once. 소비자가 멱등이면 실질적으로 exactly-once 처럼 동작합니다.
+# 순서가 필요하면 key 를 파티션 키로 써서 같은 키는 같은 파티션으로 보냅니다.</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>패턴의 이름은 달라도 뼈대는 같습니다</b> — 파일 저장의 “임시 파일에 쓰고 <code>rename</code>”,
+      배포의 “새 심볼릭 링크로 원자 교체”, 브라우저의 IndexedDB 트랜잭션까지
+      전부 <b>“진짜를 건드리기 전에 의도를 먼저 어딘가에 확정한다”</b>는 한 가지 발상입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> WAL 은 <b>데이터 페이지보다 로그를 먼저 디스크에 확정</b>합니다.
+    이 순서 하나로 크래시 지점이 어디든 복구가 가능해지고, 흩어진 페이지 대신
+    <b>파일 하나만 순차로 fsync</b> 하면 되니 빠르기까지 합니다.
+    재실행은 반드시 <b>멱등</b>이어야 하고, 체크포인트가 복구 시간을 정합니다.</div>
+</section>
+
+
+<!-- ==================== lg04 ==================== -->
+<section class="sec" id="lg04">
+  <div class="sec-head rv">
+    <span class="no">LOG 04</span>
+    <h2>시간과 인과관계 — <span class="t">벽시계로는 한 줄로 못 세웁니다</span></h2>
+    <p class="lead">
+      한 대에서는 “먼저 붙은 것이 먼저”라 순서가 공짜였습니다.
+      여러 대의 로그를 합치는 순간 그 공짜가 사라집니다.
+      시계는 서로 다르고, 심지어 <b>뒤로도 갑니다</b>.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="세 노드의 이벤트를 스윔레인으로 놓고 램포트 논리 시계를 매긴 그림. 메시지를 주고받을 때마다 받는 쪽의 시계가 보낸 쪽의 값보다 커지므로 화살표를 따라갈 수 있는 두 사건 사이에는 항상 순서가 정해진다. 반면 화살표 경로로 이어지지 않는 두 사건은 동시 사건이며, 어느 쪽이 먼저인지 정할 수 없다.">
+      <text x="16" y="18" class="lbl">가로줄 하나가 노드 하나 - 화살표는 메시지, 숫자는 램포트 시계</text>
+
+      <rect class="lane" x="106" y="30" width="558" height="56"/>
+      <rect class="lane-alt" x="106" y="90" width="558" height="56"/>
+      <rect class="lane" x="106" y="150" width="558" height="56"/>
+
+      <rect class="lane-hd" x="16" y="30" width="84" height="56"/>
+      <text x="58" y="63" class="val" text-anchor="middle">노드 A</text>
+      <rect class="lane-hd" x="16" y="90" width="84" height="56"/>
+      <text x="58" y="123" class="val" text-anchor="middle">노드 B</text>
+      <rect class="lane-hd" x="16" y="150" width="84" height="56"/>
+      <text x="58" y="183" class="val" text-anchor="middle">노드 C</text>
+
+      <rect class="bx" x="130" y="44" width="56" height="28"/>
+      <text x="158" y="62" class="val" text-anchor="middle">a1 L1</text>
+      <rect class="bx" x="210" y="44" width="56" height="28"/>
+      <text x="238" y="62" class="val" text-anchor="middle">a2 L2</text>
+      <rect class="bx bx-hi" x="430" y="44" width="56" height="28"/>
+      <text x="458" y="62" class="val" text-anchor="middle">a3 L5</text>
+
+      <rect class="bx" x="290" y="104" width="56" height="28"/>
+      <text x="318" y="122" class="val" text-anchor="middle">b1 L3</text>
+      <rect class="bx" x="370" y="104" width="56" height="28"/>
+      <text x="398" y="122" class="val" text-anchor="middle">b2 L4</text>
+      <rect class="bx" x="530" y="104" width="56" height="28"/>
+      <text x="558" y="122" class="val" text-anchor="middle">b3 L6</text>
+
+      <rect class="bx bx-fw" x="170" y="164" width="56" height="28"/>
+      <text x="198" y="182" class="val" text-anchor="middle">c1 L1</text>
+      <rect class="bx" x="470" y="164" width="56" height="28"/>
+      <text x="498" y="182" class="val" text-anchor="middle">c2 L2</text>
+
+      <path class="fl ar" d="M238 76 L314 100"/>
+      <text x="244" y="98" class="ann">메시지 m1</text>
+      <path class="fl ar" d="M398 100 L452 76"/>
+      <text x="404" y="98" class="ann">메시지 m2</text>
+      <path class="fl ar" d="M462 76 L526 100"/>
+      <text x="490" y="98" class="ann">메시지 m3</text>
+
+      <path class="lead-ln" d="M232 76 L204 160" style="stroke-dasharray:3 3"/>
+      <text x="120" y="224" class="ann am-t">a2 와 c1 사이에는 화살표 경로가 없습니다 - 동시(concurrent)</text>
+
+      <text x="16" y="242" class="lbl">램포트 시계는 a 가 b 보다 먼저면 L(a) 가 L(b) 보다 작음을 보장합니다. 그 역은 성립하지 않습니다</text>
+      <text x="16" y="258" class="lbl">벡터 시계는 노드마다 카운터를 배열로 들어 동시까지 구분합니다 - 대신 공간이 노드 수만큼 듭니다</text>
+    </svg>
+    <div class="cap">순서의 근거는 시각이 아니라 <b>메시지를 따라갈 수 있느냐</b>입니다 — 그것이 happens-before.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">happens-before 는 부분 순서입니다</h4>
+      <pre class="code" data-lang="text"><code>a → b (a happens-before b) 가 성립하는 경우는 셋뿐입니다
+
+  ① 같은 노드에서 a 가 b 보다 먼저 일어났다
+  ② a 가 메시지를 보냈고 b 가 그 메시지를 받았다
+  ③ a → c 이고 c → b 이다 (이행성)
+
+그 밖에는 전부 '동시(concurrent)' — a ‖ b
+  · 동시는 "같은 시각"이 아닙니다
+  · "어느 쪽이 먼저인지 정할 근거가 없다"는 뜻입니다
+  · 실제 벽시계로는 3시간 차이가 날 수도 있습니다
+
+★ 그래서 분산 이벤트는 전순서(total order)가 아니라
+  부분 순서(partial order)입니다.
+  한 줄로 세우려면 '없는 정보를 만들어 넣는' 수밖에 없고,
+  그것이 바로 합의(consensus)가 하는 일입니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>🔢 이산수학</b> 의 반순서 집합(poset)이 여기서 그대로 나옵니다.
+        happens-before 는 반사·반대칭·이행을 만족하는 <b>엄격 부분 순서</b>이고,
+        전순서로 확장하는 것이 위상 정렬입니다. 다만 확장 방법이 여럿이라
+        <b>어느 것을 고를지</b>를 시스템이 정해야 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">램포트 시계와 벡터 시계</h4>
+      <pre class="code" data-lang="python"><code># ── 램포트 논리 시계 ── 정수 하나
+class Lamport:
+    def __init__(self): self.t = 0
+    def local(self):                 # 내 안에서 사건이 하나 일어남
+        self.t += 1; return self.t
+    def send(self):
+        self.t += 1; return self.t   # 이 값을 메시지에 실어 보냄
+    def recv(self, ts):
+        self.t = max(self.t, ts) + 1 # ★ 받은 값과 비교해 앞서 감
+        return self.t
+
+# ── 벡터 시계 ── 노드마다 카운터 배열
+class Vector:
+    def __init__(self, me, n): self.me, self.v = me, [0] * n
+    def local(self):
+        self.v[self.me] += 1; return list(self.v)
+    def recv(self, other):
+        self.v = [max(a, b) for a, b in zip(self.v, other)]
+        self.v[self.me] += 1
+
+def compare(x, y):
+    le = all(a &lt;= b for a, b in zip(x, y))
+    ge = all(a &gt;= b for a, b in zip(x, y))
+    if le and not ge: return "x → y"
+    if ge and not le: return "y → x"
+    if le and ge:     return "같음"
+    return "동시(충돌)"                # ★ 서로 크고 작으면 concurrent</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">분산 로그를 한 줄로 세우는 네 가지 방법</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <div class="tw"><table class="cheat" style="margin:0">
+      <tr><th style="width:20%">방법</th><th>어떻게</th><th>대가</th></tr>
+      <tr><td><b>단일 시퀀서</b></td><td>한 곳이 번호를 발급 (Kafka 파티션 리더 · DB 시퀀스)</td><td>그 한 곳이 병목이자 단일 장애점. <b>가장 흔한 답</b></td></tr>
+      <tr><td><b>합의</b></td><td>Raft · Paxos 로 로그 순서 자체에 과반 동의</td><td>왕복 1회 + fsync. 지연이 붙습니다</td></tr>
+      <tr><td><b>논리 시계 + 타이브레이크</b></td><td>램포트 값이 같으면 노드 ID 로 순서를 강제</td><td>순서는 나오지만 <b>인과와 무관한 순서</b>가 섞입니다</td></tr>
+      <tr><td><b>HLC</b></td><td>물리 시각 상위 + 논리 카운터 하위 (CockroachDB)</td><td>사람이 읽을 수 있고 인과도 지킴. 시계 오차 상한 가정 필요</td></tr>
+      <tr><td><b>동기화 시계</b></td><td>원자시계·GPS 로 오차 상한을 보장 (Spanner TrueTime)</td><td>오차만큼 <b>일부러 기다립니다</b>(commit-wait). 하드웨어 필요</td></tr>
+    </table></div>
+    <div class="note warn" style="margin-bottom:0">
+      <b>“타임스탬프로 정렬하면 되지 않나”</b>가 실무에서 데이터를 조용히 지웁니다.
+      두 서버의 시계가 5ms 어긋나 있으면 <b>나중에 쓴 값이 먼저처럼 보여 옛 값에 덮입니다</b>.
+      에러도 안 납니다. <b>🕸️ 분산 · 동시성 12</b> 의 LWW 위험이 정확히 이 이야기입니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">여러 서비스의 로그를 한 화면에서 보기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>서비스 다섯 개의 로그를 시각으로 정렬해 놓고 원인을 찾으면 반드시 틀립니다.
+'결과가 원인보다 먼저' 나오는 줄을 보게 됩니다.
+
+실무의 답 — 인과를 명시적으로 들고 다닙니다 (W3C Trace Context)
+
+  traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+               ‾‾ ‾‾‾‾‾‾‾ trace-id (요청 전체) ‾‾‾   ‾ span-id ‾  플래그
+
+  · trace_id  : 요청 하나에 하나. 서비스를 넘어가도 그대로 전파
+  · span_id   : 이 구간의 ID
+  · parent_id : 나를 부른 구간의 ID   ← ★ 이것이 happens-before 그 자체
+
+정렬 규칙
+  · 화면 정렬은 timestamp 로 해도 됩니다 (사람이 보기 편하니까)
+  · 판단은 parent 관계로 합니다 (트리를 따라갑니다)
+  · 같은 서비스 안에서는 단조 증가 시퀀스를 함께 남기면 확실합니다
+
+로그 한 줄에 최소한 이것만은
+  trace_id · span_id · service · instance · monotonic_seq</code></pre>
+    <div class="note info" style="margin-bottom:0">
+      <b>왜 이 절이 로그 탭에 있나</b> — 분산 시스템에서 로그의 가치는
+      <b>“한 줄로 세울 수 있는가”</b>에 달려 있기 때문입니다.
+      순서를 못 세우는 로그는 사건의 목록일 뿐 <b>이야기</b>가 되지 못합니다.
+      다음 절은 이 순서 문제를 <b>정면으로 푸는</b> 방법입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 분산 로그의 순서는 시각이 아니라 <b>happens-before</b> 로 정의됩니다.
+    램포트 시계는 인과를 <b>어기지 않는</b> 번호를 주고, 벡터 시계는 <b>동시까지 구분</b>합니다.
+    한 줄로 세우려면 없는 정보를 만들어야 하고 — 단일 시퀀서, 합의, HLC, 동기화 시계가 그 방법입니다.</div>
+</section>
+
+
+<!-- ==================== lg05 ==================== -->
+<section class="sec" id="lg05">
+  <div class="sec-head rv">
+    <span class="no">LOG 05</span>
+    <h2>합의와 복제 로그 — <span class="t">로그가 같으면 상태가 같습니다</span></h2>
+    <p class="lead">
+      여러 대가 같은 값을 갖게 하는 가장 확실한 방법은
+      <b>같은 값을 복사하는 것이 아니라 같은 로그를 갖게 하는 것</b>입니다.
+      상태 기계 복제(RSM)라고 부르는, 분산 시스템의 가장 오래된 아이디어입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 246" role="img" aria-label="리더와 두 팔로워의 복제 로그를 인덱스별로 나란히 놓은 그림. 팔로워 A 는 앞의 여섯 항목이 리더와 같고 뒤의 두 항목만 아직 받지 못했다. 팔로워 B 는 인덱스 4 부터 다른 임기의 항목을 갖고 있어 어긋났으며, 리더는 어긋나기 시작한 지점을 찾아 그 뒤를 잘라내고 자기 항목으로 덮어쓴다.">
+      <text x="16" y="16" class="lbl">같은 인덱스, 같은 임기면 그 앞의 모든 항목이 같습니다 (로그 매칭)</text>
+
+      <text x="130" y="30" class="tk" text-anchor="middle">0</text>
+      <text x="196" y="30" class="tk" text-anchor="middle">1</text>
+      <text x="262" y="30" class="tk" text-anchor="middle">2</text>
+      <text x="328" y="30" class="tk" text-anchor="middle">3</text>
+      <text x="394" y="30" class="tk" text-anchor="middle">4</text>
+      <text x="460" y="30" class="tk" text-anchor="middle">5</text>
+      <text x="526" y="30" class="tk" text-anchor="middle">6</text>
+      <text x="592" y="30" class="tk" text-anchor="middle">7</text>
+
+      <text x="16" y="59" class="ann">리더</text>
+      <rect class="bx" x="100" y="38" width="60" height="34"/>
+      <text x="130" y="59" class="val" text-anchor="middle">1:a=1</text>
+      <rect class="bx" x="166" y="38" width="60" height="34"/>
+      <text x="196" y="59" class="val" text-anchor="middle">1:b=2</text>
+      <rect class="bx" x="232" y="38" width="60" height="34"/>
+      <text x="262" y="59" class="val" text-anchor="middle">2:c=3</text>
+      <rect class="bx" x="298" y="38" width="60" height="34"/>
+      <text x="328" y="59" class="val" text-anchor="middle">2:d=4</text>
+      <rect class="bx" x="364" y="38" width="60" height="34"/>
+      <text x="394" y="59" class="val" text-anchor="middle">3:e=5</text>
+      <rect class="bx" x="430" y="38" width="60" height="34"/>
+      <text x="460" y="59" class="val" text-anchor="middle">3:f=6</text>
+      <rect class="bx" x="496" y="38" width="60" height="34"/>
+      <text x="526" y="59" class="val" text-anchor="middle">3:g=7</text>
+      <rect class="bx" x="562" y="38" width="60" height="34"/>
+      <text x="592" y="59" class="val" text-anchor="middle">3:h=8</text>
+
+      <text x="16" y="103" class="ann">팔로워 A</text>
+      <rect class="bx bx-ok" x="100" y="82" width="60" height="34"/>
+      <text x="130" y="103" class="val ok-t" text-anchor="middle">1:a=1</text>
+      <rect class="bx bx-ok" x="166" y="82" width="60" height="34"/>
+      <text x="196" y="103" class="val ok-t" text-anchor="middle">1:b=2</text>
+      <rect class="bx bx-ok" x="232" y="82" width="60" height="34"/>
+      <text x="262" y="103" class="val ok-t" text-anchor="middle">2:c=3</text>
+      <rect class="bx bx-ok" x="298" y="82" width="60" height="34"/>
+      <text x="328" y="103" class="val ok-t" text-anchor="middle">2:d=4</text>
+      <rect class="bx bx-ok" x="364" y="82" width="60" height="34"/>
+      <text x="394" y="103" class="val ok-t" text-anchor="middle">3:e=5</text>
+      <rect class="bx bx-ok" x="430" y="82" width="60" height="34"/>
+      <text x="460" y="103" class="val ok-t" text-anchor="middle">3:f=6</text>
+      <rect class="bx bx-mut" x="496" y="82" width="60" height="34"/>
+      <text x="526" y="103" class="val" text-anchor="middle">-</text>
+      <rect class="bx bx-mut" x="562" y="82" width="60" height="34"/>
+      <text x="592" y="103" class="val" text-anchor="middle">-</text>
+
+      <text x="16" y="147" class="ann">팔로워 B</text>
+      <rect class="bx bx-ok" x="100" y="126" width="60" height="34"/>
+      <text x="130" y="147" class="val ok-t" text-anchor="middle">1:a=1</text>
+      <rect class="bx bx-ok" x="166" y="126" width="60" height="34"/>
+      <text x="196" y="147" class="val ok-t" text-anchor="middle">1:b=2</text>
+      <rect class="bx bx-ok" x="232" y="126" width="60" height="34"/>
+      <text x="262" y="147" class="val ok-t" text-anchor="middle">2:c=3</text>
+      <rect class="bx bx-ok" x="298" y="126" width="60" height="34"/>
+      <text x="328" y="147" class="val ok-t" text-anchor="middle">2:d=4</text>
+      <rect class="bx bx-warn" x="364" y="126" width="60" height="34"/>
+      <text x="394" y="147" class="val rs-t" text-anchor="middle">2:z=9</text>
+      <rect class="bx bx-warn" x="430" y="126" width="60" height="34"/>
+      <text x="460" y="147" class="val rs-t" text-anchor="middle">2:y=1</text>
+      <rect class="bx bx-mut" x="496" y="126" width="60" height="34"/>
+      <text x="526" y="147" class="val" text-anchor="middle">-</text>
+      <rect class="bx bx-mut" x="562" y="126" width="60" height="34"/>
+      <text x="592" y="147" class="val" text-anchor="middle">-</text>
+
+      <text x="16" y="180" class="ann">앞의 네 칸이 같으므로 그 앞은 검사할 필요조차 없습니다 - 리더는 인덱스 4 부터만 고칩니다</text>
+      <text x="16" y="198" class="ann rs-t">팔로워 B 의 어긋난 두 칸은 잘려 나가고 리더의 항목으로 덮입니다 (리더는 자기 로그를 절대 안 지웁니다)</text>
+
+      <text x="16" y="222" class="lbl">상태 기계 복제 - 같은 초기 상태에서 같은 로그를 같은 순서로 적용하면 반드시 같은 상태가 됩니다</text>
+      <text x="16" y="238" class="lbl">그래서 합의는 상태가 아니라 로그에 합의합니다. 상태는 로그에서 다시 만들면 되니까요</text>
+    </svg>
+    <div class="cap">복제의 단위는 값이 아니라 <b>로그 한 줄</b>입니다 — 순서가 같으면 결과가 같습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">상태 기계 복제(RSM) 의 세 조건</h4>
+      <pre class="code" data-lang="text"><code>복제본 N 대가 반드시 같은 상태가 되려면
+
+  ① 같은 초기 상태에서 시작한다
+  ② 같은 명령을 같은 순서로 받는다      ← 합의가 보장할 부분
+  ③ 명령 적용이 결정적(deterministic)이다 ← 우리가 지킬 부분
+
+③ 을 깨는 흔한 것들
+  · 현재 시각        now()          → 명령에 시각을 실어 보냅니다
+  · 난수             uuid4()        → 리더가 뽑아서 명령에 넣습니다
+  · 맵 순회 순서                    → 정렬된 순회를 씁니다
+  · 부동소수 연산 순서              → 같은 순서를 강제하거나 정수로
+  · 로캘·타임존 의존 정렬           → 고정 로캘
+
+★ ③ 이 깨지면 합의가 아무리 잘 돌아도 복제본이 갈라집니다.
+   그리고 이 갈라짐은 몇 시간 뒤에 엉뚱한 조회 결과로 나타납니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>“로그를 복제한다”와 “상태를 복제한다”의 차이</b> — 상태를 보내면 매번 전체(또는 diff)를 보내야 하고,
+        보내는 도중 값이 또 바뀝니다. 로그를 보내면 <b>보낼 것이 이미 불변으로 확정</b>돼 있고,
+        받는 쪽은 <b>어디까지 받았는지 오프셋 하나로</b> 관리하면 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로그 매칭 성질 — 두 줄로 끝나는 귀납</h4>
+      <pre class="code" data-lang="text"><code>Raft 가 유지하는 불변식(Log Matching Property)
+
+  두 로그가 같은 인덱스에 같은 임기(term)의 항목을 가지면
+    (1) 그 항목은 같은 명령이고
+    (2) 그 앞의 모든 항목도 서로 같다
+
+어떻게 이걸 공짜로 얻나 — 복제 요청에 '바로 앞 칸'을 같이 보냅니다
+
+  AppendEntries(term, prevLogIndex, prevLogTerm, entries[], leaderCommit)
+
+  팔로워:  내 로그의 prevLogIndex 자리의 임기가 prevLogTerm 인가?
+           아니면 → 거절. 리더가 인덱스를 하나 낮춰 다시 시도
+           맞으면 → 그 뒤를 잘라내고 entries 를 붙임
+
+  이 검사 하나가 귀납의 기저이자 단계입니다.
+  거절-후퇴를 반복하면 반드시 '갈라지기 시작한 지점'을 찾습니다.
+
+커밋의 정의
+  과반이 그 인덱스를 갖고 있고 + 그것이 현재 임기의 항목일 때
+  ★ 커밋된 항목은 어떤 미래의 리더에게도 반드시 남아 있습니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">쓰기 한 번의 진짜 비용</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">지연은 로그가 디스크에 닿는 시간이 정합니다</h4>
+      <pre class="code" data-lang="text"><code>합의 기반 쓰기 한 번의 지연
+
+  리더 로그 append + fsync            0.3 ~ 5 ms   (디스크에 따라)
+  + 과반 팔로워까지 왕복               0.2 ~ 2 ms   (같은 리전 기준)
+  + 팔로워의 fsync                     (병렬로 진행)
+  = 과반 중 '가장 느린' 쪽까지의 시간   ★ 최댓값이지 평균이 아닙니다
+
+리전을 넘기면
+  서울 ↔ 도쿄 왕복 ≈ 35ms → 쓰기 하나에 35ms 하한
+  서울 ↔ 버지니아  ≈ 180ms → 초당 5회짜리 쓰기가 됩니다
+
+그래서 실무 규칙
+  · 합의 클러스터는 같은 리전(다른 AZ)에 둡니다
+  · 노드는 3 또는 5 — 7 이상은 과반이 커져 느려지기만 합니다
+  · 쓰기를 묶습니다(배치) — fsync 한 번에 수백 항목
+  · 읽기는 리더 리스나 팔로워 읽기로 합의를 건너뜁니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어디에 쓰이나 — 그리고 어디에 안 쓰나</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">쓰는 곳</th><th>이유</th></tr>
+        <tr><td><b>etcd · ZooKeeper · Consul</b></td><td>클러스터 메타데이터 — 양이 적고 정확해야 함</td></tr>
+        <tr><td><b>Kafka KRaft</b></td><td>파티션 리더·설정 메타데이터</td></tr>
+        <tr><td><b>CockroachDB · TiKV</b></td><td>레인지(샤드)마다 Raft 그룹 하나</td></tr>
+        <tr><td><b>분산 락 · 리더 선출</b></td><td>“단 하나”가 보장돼야 함</td></tr>
+        <tr><td>사용자 데이터 대량 쓰기</td><td><b>안 씁니다</b> — 초당 수십만 쓰기에는 합의가 너무 비쌉니다</td></tr>
+        <tr><td>로그·메트릭 수집</td><td><b>안 씁니다</b> — 정확히 하나일 필요가 없고 처리량이 우선입니다</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>합의는 비싸므로 아껴 씁니다</b> — “누가 리더인가 · 이 샤드는 누구 것인가” 같은
+        <b>작지만 절대 틀리면 안 되는 사실</b>에만 씁니다.
+        대량 데이터는 그 결정을 <b>따라가는</b> 방식(단일 리더 복제)으로 처리합니다.
+        <b>🕸️ 분산 · 동시성 09 · 14</b> 에 Raft 의 리더 선출과 안전성 증명이 자세히 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 복제의 단위는 값이 아니라 <b>로그 한 줄</b>입니다.
+    같은 초기 상태 + 같은 로그 + 결정적 적용 = 같은 상태(RSM).
+    그래서 합의 알고리즘은 상태가 아니라 <b>로그의 순서</b>에 동의합니다.
+    쓰기 지연은 <b>과반 중 가장 느린 노드의 fsync</b>가 정합니다.</div>
+</section>
+
+
+<!-- ==================== lg06 ==================== -->
+<section class="sec" id="lg06">
+  <div class="sec-head rv">
+    <span class="no">LOG 06</span>
+    <h2>로그 기반 아키텍처 — <span class="t">데이터베이스를 뒤집기</span></h2>
+    <p class="lead">
+      데이터베이스 안에 숨어 있던 로그를 <b>밖으로 꺼내 시스템의 중심축</b>으로 놓으면
+      아키텍처가 통째로 바뀝니다. 이벤트 소싱 · CQRS · CDC · 카프카가 전부
+      이 하나의 이동에서 나온 이름들입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 282" role="img" aria-label="가운데에 원통으로 그린 커밋 로그를 두고 왼쪽에는 주문 서비스, 결제 서비스, 데이터베이스 변경 로그 같은 생산자가, 오른쪽에는 구름으로 그린 외부 소비자들이 붙어 있는 구조. 생산자는 로그 끝에만 쓰고 소비자는 각자 자기 오프셋으로 읽으므로 서로를 알 필요가 없다. 새 소비자는 오프셋 0부터 다시 읽어 과거 전체를 재생할 수 있다.">
+      <text x="16" y="18" class="lbl">로그 하나를 가운데 두면 생산자와 소비자가 서로를 몰라도 됩니다</text>
+      <text x="16" y="42" class="ttl">생산자</text>
+      <text x="456" y="42" class="ttl">외부 소비자</text>
+
+      <rect class="bx" x="16" y="60" width="110" height="36"/>
+      <text x="71" y="82" class="val" text-anchor="middle">주문 서비스</text>
+      <rect class="bx" x="16" y="108" width="110" height="36"/>
+      <text x="71" y="130" class="val" text-anchor="middle">결제 서비스</text>
+      <rect class="bx" x="16" y="156" width="110" height="36"/>
+      <text x="71" y="178" class="val" text-anchor="middle">DB 변경(CDC)</text>
+
+      <path class="fl ar" d="M130 78 L266 92"/>
+      <path class="fl ar" d="M130 126 L266 130"/>
+      <path class="fl ar" d="M130 174 L266 168"/>
+
+      <path class="cyl" d="M270 64 L270 196 A70 14 0 0 0 410 196 L410 64 Z"/>
+      <ellipse class="cyl" cx="340" cy="64" rx="70" ry="14"/>
+      <text x="340" y="94" class="val" text-anchor="middle">커밋 로그</text>
+      <text x="340" y="114" class="ann" text-anchor="middle">0 · 1 · 2 · 3 · 4 …</text>
+      <text x="340" y="134" class="ann" text-anchor="middle">쓰기는 끝에만</text>
+      <text x="340" y="154" class="ann" text-anchor="middle">읽기는 오프셋으로</text>
+      <text x="340" y="174" class="ann" text-anchor="middle">보존 기간까지 남습니다</text>
+
+      <path class="fl ar" d="M414 84 L452 78"/>
+      <path class="fl ar" d="M414 130 L452 138"/>
+      <path class="fl ar" d="M414 176 L452 194"/>
+      <circle class="pk" r="3.5"><animateMotion dur="2.6s" repeatCount="indefinite" path="M414 84 L452 78"/></circle>
+
+      <path class="cld" d="M470 92 a14 14 0 0 1 0 -28 a15 15 0 0 1 26 -11 a18 18 0 0 1 33 11 a14 14 0 0 1 0 28 Z"/>
+      <text x="500" y="70" class="ann" text-anchor="middle">분석 · 웨어하우스</text>
+      <text x="500" y="84" class="ann" text-anchor="middle">과거 전체 재생</text>
+
+      <path class="cld" d="M470 152 a14 14 0 0 1 0 -28 a15 15 0 0 1 26 -11 a18 18 0 0 1 33 11 a14 14 0 0 1 0 28 Z"/>
+      <text x="500" y="130" class="ann" text-anchor="middle">검색 색인</text>
+      <text x="500" y="144" class="ann" text-anchor="middle">실시간 갱신</text>
+
+      <path class="cld" d="M470 212 a14 14 0 0 1 0 -28 a15 15 0 0 1 26 -11 a18 18 0 0 1 33 11 a14 14 0 0 1 0 28 Z"/>
+      <text x="500" y="190" class="ann" text-anchor="middle">감사 · 규제</text>
+      <text x="500" y="204" class="ann" text-anchor="middle">지우지 않는 사본</text>
+
+      <text x="16" y="240" class="ann">생산자는 소비자를 모르고, 소비자는 서로를 모릅니다 - 아는 것은 로그와 자기 오프셋뿐입니다</text>
+      <text x="16" y="264" class="lbl">데이터베이스를 뒤집기 - 안에 숨어 있던 로그를 밖으로 꺼내 시스템 전체의 중심축으로 씁니다</text>
+      <text x="16" y="280" class="lbl">새 소비자는 오프셋 0부터 다시 읽어 과거를 통째로 재생합니다 - 큐였다면 불가능한 일입니다</text>
+    </svg>
+    <div class="cap">중심에 원통(로그) 하나 — 바깥의 구름들은 <b>서로의 존재를 모른 채</b> 같은 사실을 읽습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이벤트 소싱 + CQRS — 쓰기와 읽기를 갈라 놓기</h4>
+      <pre class="code" data-lang="python"><code># ── 쓰기 쪽(Command): 로그에 이벤트만 붙입니다 ──
+def place_order(cmd):
+    stream = f"order-{cmd.order_id}"
+    state  = load(stream)                     # fold 로 현재 상태 복원
+    if state.status != "new":
+        raise Conflict("이미 처리된 주문")     # 불변식 검사
+    events = [{"t": "OrderPlaced", "items": cmd.items,
+               "total": cmd.total, "at": cmd.at}]
+    log.append_stream(stream, events,
+                      expected_version=state.version)   # ★ 낙관적 동시성
+
+# ── 읽기 쪽(Query): 로그를 구독해 '읽기 모델'을 만듭니다 ──
+def projection_worker():
+    cursor = store.get_cursor("order-list-view")
+    for off, ev in log.read_from(cursor):
+        if ev["t"] == "OrderPlaced":
+            db.upsert_order_row(ev)           # 조회에 최적화된 평평한 표
+        elif ev["t"] == "OrderShipped":
+            db.set_shipped(ev)
+        store.set_cursor("order-list-view", off + 1)   # 멱등하게 전진
+
+# 읽기 모델은 언제든 지우고 오프셋 0 부터 다시 만들 수 있습니다.
+# → 인덱스 설계를 바꾸고 싶으면 새 모델을 만들어 재생하면 끝입니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>CQRS 의 진짜 이득</b>은 “읽기 모델을 버릴 수 있다”입니다.
+        보통의 DB 에서는 스키마를 바꾸려면 마이그레이션이라는 위험한 수술이 필요하지만,
+        로그가 원본이면 <b>새 모델을 옆에 만들어 재생하고, 다 만들어지면 스위치를 넘기면</b> 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CDC — 기존 DB 를 건드리지 않고 로그를 꺼내기</h4>
+      <pre class="code" data-lang="text"><code>Change Data Capture: DB 의 WAL 을 그대로 읽어 이벤트로 흘립니다.
+
+  PostgreSQL   논리 복제 슬롯(pgoutput · wal2json)
+  MySQL        binlog (ROW 포맷)
+  MongoDB      oplog · change stream
+  도구          Debezium · Maxwell · AWS DMS
+
+애플리케이션 코드를 하나도 안 고치고 이벤트 스트림이 생깁니다.
+
+  { "op": "u", "source": {"table": "orders", "lsn": 219383},
+    "before": {"id": 9, "status": "paid"},
+    "after":  {"id": 9, "status": "shipped"} }
+
+★ 주의 — CDC 는 '행이 바뀌었다'만 알려 줍니다.
+   '왜 바뀌었나'(주문 취소인지 관리자 수정인지)는 없습니다.
+   그래서 CDC 이벤트는 도메인 이벤트가 아닙니다.
+   · 통합·색인·데이터 웨어하우스에는 훌륭합니다
+   · 도메인 로직의 근거로 쓰면 나중에 반드시 후회합니다
+
+이중 쓰기 문제의 해법이기도 합니다 (LOG 03 의 아웃박스와 짝)
+  DB 커밋 = 이벤트 발행이 되므로 둘이 어긋날 수 없습니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">파티션과 순서 보장의 범위</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">순서는 파티션 안에서만 보장됩니다</h4>
+      <pre class="code" data-lang="text"><code>토픽 orders (파티션 3개)
+
+  P0: [주문A생성][주문A결제][주문A배송]      ← key = "A"
+  P1: [주문B생성][주문B취소]                 ← key = "B"
+  P2: [주문C생성][주문C결제]                 ← key = "C"
+
+  · 같은 key → 항상 같은 파티션 → 순서 보장 ★
+  · 다른 파티션 사이에는 순서가 없습니다 (전순서 아님)
+  · 파티션 = 병렬성의 단위 = 소비자 최대 개수
+
+★ 설계의 핵심은 "무엇을 key 로 둘 것인가"입니다
+  · 주문 ID   → 주문 단위 순서 보장, 고르게 분산
+  · 사용자 ID → 한 사용자의 사건 순서 보장
+  · 상수 하나 → 전체 순서 보장, 대신 병렬성 1 (거의 안 씁니다)
+
+핫 파티션 주의
+  인기 셀러 ID 를 key 로 쓰면 그 파티션만 폭주합니다
+  → key 에 접미사를 붙여 쪼개거나, 순서 보장을 포기합니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이 구조를 고를 때와 피할 때</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">상황</th><th>판단</th></tr>
+        <tr><td>“왜 이 값이 됐나”를 자주 묻는다</td><td><b>이벤트 소싱이 맞습니다</b> (금융·정산·의료)</td></tr>
+        <tr><td>같은 사실을 여러 저장소가 필요</td><td><b>로그를 중심에</b> (검색·캐시·분석)</td></tr>
+        <tr><td>서비스가 계속 늘어난다</td><td>로그 구독이 API 호출보다 <b>결합도가 낮습니다</b></td></tr>
+        <tr><td>레거시 DB 를 못 고친다</td><td><b>CDC</b> 로 밖에서 꺼냅니다</td></tr>
+        <tr><td>CRUD 화면 몇 개가 전부</td><td><b>쓰지 마세요</b> — 복잡도만 늘어납니다</td></tr>
+        <tr><td>강한 즉시 일관성이 필수</td><td>읽기 모델은 <b>결국 일관</b>입니다. 맞지 않습니다</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>가장 흔한 실패</b> — 읽기 모델이 몇 초 늦는다는 사실을 UI 가 견디지 못하는 경우입니다.
+        “저장했는데 목록에 없어요”가 바로 그것입니다.
+        해법은 <b>쓰기 응답에 필요한 값을 같이 돌려주거나</b>, 그 화면만 쓰기 모델을 직접 읽는 것입니다.
+        <b>🕸️ 분산 · 동시성 08</b> 의 일관성 모델과 이어집니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> DB 안에 있던 로그를 밖으로 꺼내 <b>모든 시스템이 같은 사실을 구독</b>하게 만드는 것이
+    로그 기반 아키텍처입니다. 이벤트 소싱은 쓰기를, CQRS 는 읽기를, CDC 는 레거시를 담당합니다.
+    순서는 <b>파티션 안에서만</b> 보장되고, 읽기 모델은 <b>언제든 지우고 다시 만들 수 있는</b> 캐시입니다.</div>
+</section>
+
+
+<!-- ==================== lg07 ==================== -->
+<section class="sec" id="lg07">
+  <div class="sec-head rv">
+    <span class="no">LOG 07</span>
+    <h2>정보량과 로그 — <span class="t">남기지 않은 것은 복원되지 않습니다</span></h2>
+    <p class="lead">
+      로그를 “얼마나 남길까”는 취향 문제가 아니라 <b>정보 이론 문제</b>입니다.
+      로그는 과거에서 미래로 가는 <b>채널</b>이고, 채널을 통과하지 못한 정보는
+      어떤 똑똑한 도구로도 되살릴 수 없습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 296" role="img" aria-label="로그와 메트릭의 레이블 조합이 늘어날수록 서로 다른 시계열의 개수가 곱으로 늘어나는 것을 로그 눈금 막대로 보여 주는 그림. 서비스와 상태코드만 있으면 서른 개지만, 엔드포인트와 인스턴스를 더하면 십이만 개가 되고, 사용자 아이디까지 레이블로 넣으면 천이백억 개가 되어 저장이 불가능해진다.">
+      <text x="16" y="18" class="lbl">레이블 하나가 늘 때마다 시계열 개수는 곱해집니다 (가로는 로그 눈금)</text>
+
+      <path class="gr" d="M272 34 L272 168"/>
+      <path class="gr" d="M395 34 L395 168"/>
+      <path class="gr" d="M517 34 L517 168"/>
+
+      <text x="16" y="57" class="ann">서비스 × 상태코드</text>
+      <rect class="bar" x="150" y="44" width="60" height="18"/>
+      <text x="218" y="57" class="tk">30개</text>
+
+      <text x="16" y="89" class="ann">+ 엔드포인트 80</text>
+      <rect class="bar" x="150" y="76" width="138" height="18"/>
+      <text x="296" y="89" class="tk">2,400개</text>
+
+      <text x="16" y="121" class="ann">+ 인스턴스 50</text>
+      <rect class="bar" x="150" y="108" width="207" height="18"/>
+      <text x="365" y="121" class="tk">12만 개</text>
+
+      <text x="16" y="153" class="ann">+ user_id 100만</text>
+      <rect x="150" y="140" width="452" height="18" style="fill:rgba(251,113,133,.22);stroke:rgba(251,113,133,.55);stroke-width:1;rx:3"/>
+      <text x="610" y="153" class="tk">1,200억</text>
+
+      <path class="ax ar" d="M150 172 L656 172"/>
+      <path class="ln" d="M150 166 L150 178"/>
+      <path class="ln" d="M272 166 L272 178"/>
+      <path class="ln" d="M395 166 L395 178"/>
+      <path class="ln" d="M517 166 L517 178"/>
+      <path class="ln" d="M640 166 L640 178"/>
+      <text x="150" y="190" class="tk" text-anchor="middle">1</text>
+      <text x="272" y="190" class="tk" text-anchor="middle">천</text>
+      <text x="395" y="190" class="tk" text-anchor="middle">백만</text>
+      <text x="517" y="190" class="tk" text-anchor="middle">10억</text>
+      <text x="640" y="190" class="tk" text-anchor="middle">1조</text>
+      <text x="150" y="208" class="ann">서로 다른 시계열의 개수 (한 칸이 1000배)</text>
+
+      <text x="16" y="232" class="ann rs-t">레이블 하나를 늘릴 때마다 곱해집니다 - user_id 를 넣는 순간 시계열이 1,200억 개가 됩니다</text>
+      <text x="16" y="250" class="ann">샘플링 1% 는 저장 비용을 100분의 1로 줄이지만, 딱 한 번 일어난 오류는 99% 확률로 사라집니다</text>
+
+      <text x="16" y="274" class="lbl">정보 이론으로 보면 로그는 채널입니다 - 남기지 않은 것은 나중에 어떤 도구로도 복원되지 않습니다</text>
+      <text x="16" y="290" class="lbl">무엇을 남길지 정하는 일은 곧 나중에 어떤 질문에 답할 수 있는지를 지금 정하는 일입니다</text>
+    </svg>
+    <div class="cap">카디널리티는 <b>더하기가 아니라 곱하기</b>로 늡니다 — 레이블 하나가 비용을 백 배로 만듭니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">엔트로피 관점 — 한 줄이 담는 정보의 양</h4>
+      <pre class="code" data-lang="python"><code>import math
+from collections import Counter
+
+def entropy(values):
+    """이 필드가 실제로 얼마나 '구별'해 주는가 (비트)"""
+    n = len(values)
+    c = Counter(values)
+    return -sum((k / n) * math.log2(k / n) for k in c.values())
+
+# 하루치 로그 100만 줄에서 필드별로 재 보면
+#   level      (INFO/WARN/ERROR)  →  0.3 비트   거의 다 INFO. 쓸모 적음
+#   service    (12종)             →  3.1 비트
+#   endpoint   (80종)             →  5.9 비트
+#   status     (14종)             →  1.2 비트
+#   trace_id   (100만종)          → 19.9 비트   ★ 거의 완전한 구별
+#   msg 자유문자열                →  높지만 질의 불가 (구조가 없어서)
+
+# 해석
+#  · 엔트로피가 0에 가까운 필드는 남겨도 답을 못 늘립니다
+#  · 엔트로피가 아주 높은 필드(trace_id)는 '연결'에는 최고지만
+#    메트릭 레이블로 쓰면 카디널리티가 폭발합니다 ★
+#  · 즉, 같은 필드라도 로그에서는 축복, 메트릭에서는 재앙입니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>왜 로그와 메트릭에서 답이 반대인가</b> — 로그는 <b>줄마다 값을 따로 저장</b>하므로
+        고유값이 많아도 비용이 선형입니다. 메트릭은 <b>레이블 조합마다 시계열 하나</b>를 만들어
+        영구히 들고 있으므로 <b>곱셈으로</b> 늡니다. 저장 구조가 다르니 규칙도 달라집니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">샘플링이 정확히 무엇을 잃는가</h4>
+      <pre class="code" data-lang="text"><code>균등 샘플링 1% (모든 요청을 1/100 확률로 남김)
+
+  잘 보존되는 것            잃는 것
+  ─────────────────         ─────────────────────────────
+  평균 · 중앙값             단 한 번 일어난 사건 (99% 사라짐)
+  p50 · p90 정도            p99.9 꼬리 (표본이 거의 안 남음)
+  전체 비율                 특정 사용자의 전체 여정
+  추세 방향                 정확한 카운트 (건수를 못 셉니다)
+
+★ 100건 중 1건짜리 희귀 오류는 하루에 3번 났어도
+  샘플에는 0.03건 → 사실상 '없던 일'이 됩니다.
+
+그래서 실무는 균등 샘플링을 안 씁니다
+  · 꼬리 우선(tail-based)  : 트레이스를 끝까지 모아 보고
+                             느리거나 에러면 100% 남깁니다
+  · 헤드 기반 + 강제 유지   : 에러·느린 요청은 sampled=1 로 고정
+  · 계층 샘플링             : 정상 1%, 에러 100%, 신규 기능 100%
+  · 카운트는 따로            : 샘플링해도 카운터는 전량 집계
+                             (샘플로 곱하기 100 하면 틀립니다)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">무엇을 남기면 나중에 답할 수 있나</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>질문을 먼저 적고, 그 질문에 필요한 최소 필드를 역산합니다.
+
+  질문                                     필요한 것
+  ───────────────────────────────────      ────────────────────────────
+  "이 결제가 왜 실패했나"                  trace_id · reason 코드 · 입력 요약
+  "어느 고객이 영향을 받았나"              tenant/user 식별자 (해시라도)
+  "언제부터 나빠졌나"                      단조 시각 + 배포 버전
+  "무엇을 바꿨더니 그랬나"                 version · commit · feature flag 상태
+  "이 요청이 어디서 느렸나"                span 계층 + 각 구간 duration
+  "재현하려면"                             입력의 결정적 요약(해시·크기·경로)
+
+남기지 않기로 정할 것도 명시적으로
+  · 원문 전체(요청 본문)   → 개인정보 · 용량. 요약이나 해시로
+  · 성공 경로의 DEBUG      → 평시에는 끄고 필요할 때만 동적으로 켭니다
+  · 예측 가능한 반복       → 첫 N건 + 이후 카운트만 (로그 스로틀링)
+
+한 줄 규칙
+  ★ "이 줄이 없으면 대답 못 하는 질문이 있는가?"
+     없으면 그 줄은 비용일 뿐입니다.</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>거꾸로 가장 비싼 실수</b> — 장애가 터진 뒤에야 “아, 그 값을 안 남겼네”를 알게 되는 것입니다.
+      로그는 <b>미래의 나에게 보내는 편지</b>인데, 편지는 사건이 일어나기 <b>전에</b> 써야 합니다.
+      그래서 새 기능을 만들 때 “이게 실패하면 무엇을 보고 싶을까”를 <b>설계 단계에서</b> 정합니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 로그는 과거에서 미래로 가는 <b>채널</b>이고, 통과하지 못한 정보는 복원되지 않습니다.
+    카디널리티는 <b>곱셈</b>으로 늘어나므로 고유값이 큰 필드는 로그에는 넣되 <b>메트릭 레이블에는 넣지 않습니다</b>.
+    균등 샘플링은 정확히 <b>희귀 사건과 꼬리</b>를 먼저 버립니다.</div>
+</section>
+
+
+<!-- ==================== lg08 ==================== -->
+<section class="sec" id="lg08">
+  <div class="sec-head rv">
+    <span class="no">LOG 08</span>
+    <h2>관측 가능성의 이론 — <span class="t">출력만 보고 내부를 알 수 있는가</span></h2>
+    <p class="lead">
+      관측 가능성(observability)은 마케팅 용어가 아니라 <b>제어이론에서 온 정의</b>가 있는 말입니다.
+      “출력의 유한한 기록만으로 내부 상태를 유일하게 결정할 수 있으면 그 시스템은 관측 가능하다.”
+      이 정의를 소프트웨어로 옮기면 <b>무엇을 남겨야 하는지</b>가 자동으로 따라 나옵니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 318" role="img" aria-label="여섯 가지 질문에 대해 로그, 메트릭, 추적, 프로파일 네 신호가 각각 얼마나 잘 답하는지를 색의 진하기와 0에서 5까지의 숫자로 나타낸 히트맵. 지금 오류율이 몇 퍼센트인지는 메트릭이 가장 잘 답하고, 특정 주문 하나가 왜 실패했는지는 로그가, 어느 구간에서 시간이 갔는지는 추적이, 어느 함수가 CPU 를 먹는지는 프로파일이 가장 잘 답한다. 어떤 신호도 모든 질문에 답하지 못한다.">
+      <text x="16" y="18" class="lbl">질문마다 답할 수 있는 신호가 다릅니다 (색이 진할수록 잘 답함)</text>
+
+      <text x="300" y="44" class="tk" text-anchor="middle">로그</text>
+      <text x="390" y="44" class="tk" text-anchor="middle">메트릭</text>
+      <text x="480" y="44" class="tk" text-anchor="middle">추적</text>
+      <text x="570" y="44" class="tk" text-anchor="middle">프로파일</text>
+
+      <text x="16" y="70" class="ann">지금 오류율이 몇 %인가</text>
+      <rect class="cel h3" x="258" y="52" width="84" height="28"/><text x="300" y="70" class="tk" text-anchor="middle">3</text>
+      <rect class="cel h5" x="348" y="52" width="84" height="28"/><text x="390" y="70" class="tk" text-anchor="middle">5</text>
+      <rect class="cel h2" x="438" y="52" width="84" height="28"/><text x="480" y="70" class="tk" text-anchor="middle">2</text>
+      <rect class="cel h0" x="528" y="52" width="84" height="28"/><text x="570" y="70" class="tk" text-anchor="middle">0</text>
+
+      <text x="16" y="104" class="ann">이 주문 하나가 왜 실패했나</text>
+      <rect class="cel h5" x="258" y="86" width="84" height="28"/><text x="300" y="104" class="tk" text-anchor="middle">5</text>
+      <rect class="cel h0" x="348" y="86" width="84" height="28"/><text x="390" y="104" class="tk" text-anchor="middle">0</text>
+      <rect class="cel h4" x="438" y="86" width="84" height="28"/><text x="480" y="104" class="tk" text-anchor="middle">4</text>
+      <rect class="cel h0" x="528" y="86" width="84" height="28"/><text x="570" y="104" class="tk" text-anchor="middle">0</text>
+
+      <text x="16" y="138" class="ann">어느 구간에서 시간이 갔나</text>
+      <rect class="cel h2" x="258" y="120" width="84" height="28"/><text x="300" y="138" class="tk" text-anchor="middle">2</text>
+      <rect class="cel h2" x="348" y="120" width="84" height="28"/><text x="390" y="138" class="tk" text-anchor="middle">2</text>
+      <rect class="cel h5" x="438" y="120" width="84" height="28"/><text x="480" y="138" class="tk" text-anchor="middle">5</text>
+      <rect class="cel h3" x="528" y="120" width="84" height="28"/><text x="570" y="138" class="tk" text-anchor="middle">3</text>
+
+      <text x="16" y="172" class="ann">CPU 를 어느 함수가 먹나</text>
+      <rect class="cel h0" x="258" y="154" width="84" height="28"/><text x="300" y="172" class="tk" text-anchor="middle">0</text>
+      <rect class="cel h1" x="348" y="154" width="84" height="28"/><text x="390" y="172" class="tk" text-anchor="middle">1</text>
+      <rect class="cel h1" x="438" y="154" width="84" height="28"/><text x="480" y="172" class="tk" text-anchor="middle">1</text>
+      <rect class="cel h5" x="528" y="154" width="84" height="28"/><text x="570" y="172" class="tk" text-anchor="middle">5</text>
+
+      <text x="16" y="206" class="ann">어제와 무엇이 달라졌나</text>
+      <rect class="cel h3" x="258" y="188" width="84" height="28"/><text x="300" y="206" class="tk" text-anchor="middle">3</text>
+      <rect class="cel h4" x="348" y="188" width="84" height="28"/><text x="390" y="206" class="tk" text-anchor="middle">4</text>
+      <rect class="cel h3" x="438" y="188" width="84" height="28"/><text x="480" y="206" class="tk" text-anchor="middle">3</text>
+      <rect class="cel h2" x="528" y="188" width="84" height="28"/><text x="570" y="206" class="tk" text-anchor="middle">2</text>
+
+      <text x="16" y="240" class="ann">처음 보는 질문에 답할 수 있나</text>
+      <rect class="cel h4" x="258" y="222" width="84" height="28"/><text x="300" y="240" class="tk" text-anchor="middle">4</text>
+      <rect class="cel h1" x="348" y="222" width="84" height="28"/><text x="390" y="240" class="tk" text-anchor="middle">1</text>
+      <rect class="cel h3" x="438" y="222" width="84" height="28"/><text x="480" y="240" class="tk" text-anchor="middle">3</text>
+      <rect class="cel h1" x="528" y="222" width="84" height="28"/><text x="570" y="240" class="tk" text-anchor="middle">1</text>
+
+      <rect class="cel h0" x="622" y="52" width="14" height="12"/>
+      <rect class="cel h2" x="622" y="66" width="14" height="12"/>
+      <rect class="cel h3" x="622" y="80" width="14" height="12"/>
+      <rect class="cel h5" x="622" y="94" width="14" height="12"/>
+      <text x="640" y="62" class="ann">못함</text>
+      <text x="640" y="104" class="ann">잘함</text>
+
+      <text x="16" y="268" class="ann">0 = 못 답함 · 5 = 바로 답함. 셋은 대체재가 아니라 서로 다른 질문에 답하는 도구입니다</text>
+
+      <text x="16" y="294" class="lbl">관측 가능성은 제어이론의 말입니다 - 출력만 보고 내부 상태를 유일하게 결정할 수 있으면 관측 가능</text>
+      <text x="16" y="310" class="lbl">그래서 질문이 먼저입니다 - 답해야 할 질문 목록이 없으면 무엇을 남겨야 할지도 정할 수 없습니다</text>
+    </svg>
+    <div class="cap">어떤 행도 <b>한 칸만으로 채워지지 않습니다</b> — 세 신호는 대체재가 아니라 서로 다른 질문의 도구입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">제어이론의 정의를 그대로 옮기면</h4>
+      <pre class="code" data-lang="text"><code>선형 시스템   x' = A x + B u ,  y = C x
+
+  관측 가능(observable) 이란?
+   → 출력 y 를 유한 시간 동안 관찰한 것만으로
+     초기 상태 x(0) 을 유일하게 결정할 수 있다는 뜻
+
+  판정: 관측 가능성 행렬 O = [C; CA; CA²; …; CAⁿ⁻¹]
+        rank(O) = n 이면 관측 가능
+
+소프트웨어로 옮기면
+  x  = 프로세스·큐·캐시·커넥션 풀의 내부 상태
+  y  = 우리가 밖으로 내보낸 것 (로그 · 메트릭 · 스팬)
+  C  = 계측(instrumentation) — 무엇을 내보내기로 정했는가
+
+★ 여기서 두 가지가 곧바로 따라 나옵니다
+  ① 관측 가능성은 도구가 아니라 C 의 성질입니다.
+     비싼 SaaS 를 붙여도 C 가 빈약하면 rank 가 안 찹니다.
+  ② '모니터링'은 이미 아는 y 를 보는 것이고,
+     '관측 가능성'은 새로운 y 조합으로 새 질문에 답하는 능력입니다.</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>➗ 선형대수</b> 의 계수(rank)와 <b>🤖 ML 이론</b> 의 식별 가능성(identifiability)이 같은 뼈대입니다.
+        관측이 모자라면 <b>여러 내부 상태가 같은 출력을 냅니다</b> — 그러면 원인을 하나로 좁힐 수 없습니다.
+        “로그를 봐도 모르겠다”의 정확한 수학적 이름이 이것입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">세 신호의 저장 구조가 능력을 정합니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:20%"></th><th>로그</th><th>메트릭</th><th>추적</th></tr>
+        <tr><td>단위</td><td>사건 하나</td><td>시각 + 수치</td><td>요청 하나</td></tr>
+        <tr><td>저장</td><td>줄 단위 원본</td><td><b>미리 집계</b></td><td>스팬 트리</td></tr>
+        <tr><td>비용</td><td>양에 <b>선형</b></td><td>카디널리티에 <b>곱</b></td><td>샘플링률에 선형</td></tr>
+        <tr><td>지연</td><td>초 단위</td><td><b>거의 즉시</b></td><td>초 단위</td></tr>
+        <tr><td>잘하는 질문</td><td>왜 · 무엇이</td><td>얼마나 · 언제부터</td><td>어디서</td></tr>
+        <tr><td>못하는 것</td><td>전체 추세</td><td><b>개별 사례</b></td><td>전수 통계</td></tr>
+        <tr><td>알림에</td><td>부적합</td><td><b>적합</b></td><td>부적합</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>결정적 차이는 “미리 집계했는가”</b>입니다. 메트릭은 저장할 때 이미 정보를 버렸으므로
+        <b>나중에 새로운 방식으로 쪼갤 수 없습니다</b>(“이 오류가 어느 고객에게 몰렸나”에 못 답합니다).
+        로그·추적은 원본을 갖고 있어 <b>질문을 나중에 정할 수</b> 있습니다 — 대신 비쌉니다.
+        최근의 <b>넓은 이벤트(wide event)</b> 흐름은 이 셋을 한 줄에 합치자는 시도입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">계측을 설계로 다루기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="python"><code># 계측(C 행렬)을 설계한다는 것 — 요청 하나에 '넓은 이벤트' 한 줄
+# (여러 줄로 흩어 놓으면 나중에 조인해야 하고, 조인은 대부분 안 됩니다)
+
+def handle_request(req):
+    ev = {"trace_id": trace_id.get(), "route": req.route,
+          "tenant": req.tenant, "version": BUILD, "region": REGION}
+    t0 = time.monotonic()                    # ★ 벽시계 아님 (LOG 04)
+    try:
+        ev["cache_hit"]  = cache.probe(req)
+        ev["db_calls"]   = 0                 # 핸들러가 늘려 갑니다
+        result = do_work(req, ev)
+        ev["status"] = 200
+        return result
+    except AppError as e:
+        ev["status"], ev["error_kind"] = e.status, type(e).__name__
+        raise
+    finally:
+        ev["duration_ms"] = round((time.monotonic() - t0) * 1000, 2)
+        ev["sampled"] = ev["status"] &gt;= 500 or ev["duration_ms"] &gt; 1000
+        emit(ev)          # 한 요청 = 한 줄. 필드가 30~100개여도 좋습니다
+
+# 이렇게 두면 나중에 이런 질문이 전부 '질의'가 됩니다
+#   · region=ap 이고 cache_hit=false 인 요청의 p99 는?
+#   · version 1.42 배포 후 error_kind 분포가 어떻게 변했나?
+#   · db_calls &gt; 20 인 요청은 어느 tenant 에 몰려 있나?   ← 미리 계획 못 한 질문 ★</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>“나중에 필요하면 그때 넣지”가 안 되는 이유</b> — 필드를 오늘 추가해도
+      <b>어제의 데이터에는 그 필드가 없습니다</b>. 그리고 장애는 늘 어제 일어납니다.
+      계측은 코드처럼 리뷰하고, <b>필드 추가는 배포처럼</b> 다루세요.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 관측 가능성은 <b>출력만 보고 내부 상태를 결정할 수 있는가</b>라는 제어이론의 성질입니다.
+    도구를 사서 얻는 게 아니라 <b>무엇을 내보내기로 했는가</b>로 정해집니다.
+    로그 · 메트릭 · 추적은 저장 구조가 달라 <b>답할 수 있는 질문의 종류</b>가 다릅니다.</div>
+</section>
+
+
+<!-- ==================== lg09 ==================== -->
+<section class="sec" id="lg09">
+  <div class="sec-head rv">
+    <span class="no">LOG 09</span>
+    <h2>구조적 로깅과 스키마 진화 — <span class="t">한 줄은 문장이 아니라 레코드입니다</span></h2>
+    <p class="lead">
+      <code>"Payment failed for order 88123 after 412ms"</code> 는 사람에게는 친절하지만 기계에게는 <b>파싱해야 할 숙제</b>입니다.
+      로그 한 줄을 <b>필드 이름과 값의 집합</b>으로 보면 로그는 곧 테이블이 되고,
+      그 순간부터 데이터베이스가 40년 동안 풀어 온 문제 — <b>스키마는 어떻게 바뀌는가</b> — 가 그대로 따라옵니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 274" role="img" aria-label="구조적 로그 한 줄을 부분별로 설명한 해부도. JSON 한 줄 안에 시각, 레벨과 서비스 이름, 배포 버전과 리전, 추적 식별자, 이벤트 코드와 사유 코드, 숫자 필드, 스키마 버전이 들어 있고 각 부분에 왜 필요한지가 지시선으로 붙어 있다. 시각은 UTC 로 통일하고 순서는 별도 시퀀스가 정하며, 이벤트는 문장이 아니라 코드로 적고, 숫자는 문자열이 아니라 숫자 타입으로 두며, 스키마 번호가 나중의 형식 변경을 견디게 한다.">
+      <text x="16" y="18" class="lbl">구조적 로그 한 줄 - 문장이 아니라 필드의 집합입니다</text>
+
+      <rect class="bx" x="170" y="34" width="380" height="192"/>
+      <text x="186" y="56" class="tk">{ "ts": "2026-09-07T03:12:44.128Z",</text>
+      <text x="186" y="82" class="tk">  "level": "ERROR", "service": "payment",</text>
+      <text x="186" y="108" class="tk">  "version": "1.42.0", "region": "ap-ne-2",</text>
+      <text x="186" y="134" class="tk">  "trace_id": "4bf92f35…", "span_id": "00f067aa…",</text>
+      <text x="186" y="160" class="tk">  "event": "charge.failed", "reason": "card_declined",</text>
+      <text x="186" y="186" class="tk">  "order_id": 88123, "duration_ms": 412.7,</text>
+      <text x="186" y="212" class="tk">  "schema": 3 }</text>
+      <rect class="hl" x="178" y="198" width="364" height="20"/>
+
+      <path class="lead-ln" d="M166 52 L142 52"/>
+      <text x="16" y="50" class="ann">시각은 UTC 로 통일</text>
+      <text x="16" y="62" class="ann">순서는 seq 가 정합니다</text>
+
+      <path class="lead-ln" d="M166 78 L142 78"/>
+      <text x="16" y="76" class="ann">레벨은 필터의 열쇠</text>
+      <text x="16" y="88" class="ann">service 는 필수 필드</text>
+
+      <path class="lead-ln" d="M166 104 L142 104"/>
+      <text x="16" y="102" class="ann">배포 버전이 없으면</text>
+      <text x="16" y="114" class="ann">언제부터를 못 찾습니다</text>
+
+      <path class="lead-ln" d="M554 130 L578 130"/>
+      <text x="584" y="128" class="ann">요청을 잇는 열쇠</text>
+      <text x="584" y="140" class="ann">LOG 04 의 인과</text>
+
+      <path class="lead-ln" d="M554 156 L578 156"/>
+      <text x="584" y="154" class="ann">문장이 아니라 코드</text>
+      <text x="584" y="166" class="ann">grep 대신 질의</text>
+
+      <path class="lead-ln" d="M554 182 L578 182"/>
+      <text x="584" y="180" class="ann">숫자는 숫자로</text>
+      <text x="584" y="192" class="ann">문자열이면 합산 불가</text>
+
+      <path class="lead-ln" d="M554 208 L578 208"/>
+      <text x="584" y="206" class="ann am-t">스키마 버전</text>
+      <text x="584" y="218" class="ann am-t">진화의 손잡이</text>
+
+      <text x="16" y="250" class="lbl">한 줄이 곧 레코드입니다 - 필드 이름이 열, 값이 셀. 문장으로 적으면 나중에 파싱이라는 세금을 냅니다</text>
+      <text x="16" y="266" class="lbl">스키마 번호 하나가 1년 뒤의 나를 구합니다 - 필드 뜻이 바뀌면 번호를 올리고 옛 줄은 옛 규칙으로 읽습니다</text>
+    </svg>
+    <div class="cap">로그 한 줄은 <b>열 이름이 붙은 레코드</b>입니다 — 문장으로 적는 순간 읽는 쪽이 파싱 비용을 냅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">문장과 레코드 — 같은 사실, 다른 쓸모</h4>
+      <pre class="code" data-lang="python"><code>import json, logging, time
+
+# ✗ 문장 — 값이 문장 속에 녹아 있어 기계가 다시 꺼내야 합니다
+log.error(f"Payment failed for order {order_id} after {ms}ms")
+#   "412ms 넘게 걸린 실패는 몇 건?" → 정규식으로 숫자를 뽑아 비교
+#   메시지 문구를 한 글자라도 바꾸면 정규식이 깨집니다
+
+# ✓ 레코드 — 필드가 이미 분리돼 있습니다
+class JsonFormatter(logging.Formatter):
+    def format(self, rec):
+        base = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(rec.created)),
+                "level": rec.levelname, "logger": rec.name,
+                "event": rec.getMessage(), "schema": 3}
+        base.update(getattr(rec, "fields", {}))   # extra 로 넘긴 필드
+        return json.dumps(base, ensure_ascii=False)
+
+def emit(logger, level, event, **fields):
+    logger.log(level, event, extra={"fields": fields})
+
+emit(log, logging.ERROR, "charge.failed",
+     order_id=88123, reason="card_declined", duration_ms=412.7)
+
+# 수집기에서는 곧바로 질의가 됩니다
+#   event = 'charge.failed' AND duration_ms &gt; 400
+#   GROUP BY reason  → 사유별 건수가 한 줄에 나옵니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>event 는 문장이 아니라 코드</b>로 둡니다 — <code>charge.failed</code> 처럼 <b>점으로 나눈 고정 문자열</b>이면
+        오타가 나지 않고, 문구를 다듬어도 질의가 안 깨집니다. 사람이 읽을 문장은 <b>표시할 때</b> 만들면 됩니다.
+        Serilog 의 메시지 템플릿 <code>{OrderId}</code>, Go 의 <code>slog</code>, Java 의 <code>Logstash 인코더</code>가 전부 같은 생각입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스키마가 없다고 생각하는 순간 스키마가 생깁니다</h4>
+      <pre class="code" data-lang="text"><code>"우리 로그는 JSON 이라 스키마가 없어요"
+  → 대시보드가 duration_ms 를 읽는 순간 그것이 스키마입니다.
+    암묵적 스키마는 깨질 때까지 보이지 않을 뿐입니다.
+
+깨지는 순간들 (전부 실제로 겪는 것들)
+  · duration_ms 가 어느 날 문자열 "412.7" 로 바뀜  → 합계가 0
+  · user 필드가 문자열이었다가 객체 {id, name} 로   → 색인 충돌
+  · level 이 "WARN" 이었다가 "WARNING" 으로         → 필터 누락
+  · 필드 이름을 orderId → order_id 로 정리          → 옛 로그 조회 불가
+  · 시각을 로컬 시간에서 UTC 로 바꿈                → 9시간 어긋난 그래프
+
+그래서 로그에도 데이터베이스와 같은 규칙이 필요합니다
+  ① 스키마를 어딘가에 적어 둔다 (문서든 JSON Schema 든)
+  ② 바꿀 때 호환 규칙을 따른다 (다음 표)
+  ③ 줄마다 schema 버전을 싣는다 - 읽는 쪽이 어느 규칙으로 읽을지 알도록</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Elasticsearch 계열 수집기의 “매핑 충돌”</b>이 이 문제의 가장 흔한 얼굴입니다. 같은 필드 이름에
+        어느 날 다른 타입이 들어오면 <b>그 줄은 조용히 버려지거나 색인이 거부</b>됩니다. 에러가 나는 곳은 로거가 아니라
+        <b>몇 단계 뒤의 수집기</b>라서 원인을 찾는 데 시간이 걸립니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">호환성의 네 방향</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">누가 먼저 바뀌는가로 규칙이 갈립니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">호환</th><th>뜻</th><th>허용되는 변경</th></tr>
+        <tr><td><b>후방(backward)</b></td><td>새 코드가 <b>옛 데이터</b>를 읽음</td><td>필드 추가(기본값 있음) · 필드 삭제</td></tr>
+        <tr><td><b>전방(forward)</b></td><td>옛 코드가 <b>새 데이터</b>를 읽음</td><td>필드 추가 · 기본값 있는 필드 삭제</td></tr>
+        <tr><td><b>완전(full)</b></td><td>양쪽 다</td><td><b>기본값 있는 필드 추가·삭제만</b></td></tr>
+        <tr><td><b>없음</b></td><td>둘 다 아님</td><td>이름 변경 · 타입 변경 · 뜻 변경</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>로그에서는 거의 항상 "후방 + 전방" 둘 다 필요합니다
+  · 옛 로그를 새 대시보드가 읽는다     → 후방
+  · 새 로그를 아직 안 고친 알림 규칙이 읽는다 → 전방
+  · 배포는 서서히 굴러가므로 두 버전이 동시에 씁니다 ★
+
+안전한 변경             위험한 변경 (= 새 필드 + 옛 필드 유지로 우회)
+  필드 추가               필드 이름 바꾸기
+  필드 삭제(읽는 쪽 확인)  타입 바꾸기 (숫자 ↔ 문자열)
+  enum 값 추가            enum 값의 뜻 바꾸기
+                          단위 바꾸기 (ms → s) ★ 가장 교묘함</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">업캐스터 — 옛 줄을 새 형태로 읽어 올리기</h4>
+      <pre class="code" data-lang="python"><code># 스키마 2 → 3 에서 무엇이 바뀌었나
+#   · duration 이 초(float) 에서 duration_ms(밀리초) 로
+#   · user(문자열) 이 user_id 로 분리
+# 옛 로그는 고칠 수 없습니다(append-only). 읽을 때 올립니다.
+
+UPCASTERS = {
+    1: lambda r: {**r, "schema": 2, "level": r.get("lvl", "INFO")},
+    2: lambda r: {**{k: v for k, v in r.items() if k not in ("duration", "user")},
+                  "schema": 3,
+                  "duration_ms": r["duration"] * 1000 if "duration" in r else None,
+                  "user_id": r.get("user")},
+}
+CURRENT = 3
+
+def read(rec: dict) -&gt; dict:
+    v = rec.get("schema", 1)               # 번호가 없으면 가장 옛 버전
+    while v &lt; CURRENT:
+        rec = UPCASTERS[v](rec)            # 한 단계씩 올립니다
+        v = rec["schema"]
+    return rec
+
+# 규칙
+#  · 업캐스터는 순수 함수 - 같은 줄은 언제 읽어도 같은 결과 (LOG 02 의 apply 와 같음)
+#  · 한 번에 한 단계만 - 1→3 지름길을 만들면 조합이 폭발합니다
+#  · 원본은 그대로 - 저장소에는 여전히 schema 1 줄이 남아 있습니다</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>Avro · Protobuf 가 이 규칙을 강제해 줍니다</b> — Confluent Schema Registry 는 <code>BACKWARD / FORWARD / FULL</code>
+        모드로 호환되지 않는 스키마 등록을 <b>거부</b>하고, Protobuf 는 <b>필드 번호를 절대 재사용하지 말라</b>(<code>reserved</code>)는
+        규칙 하나로 전방 호환을 지킵니다. 이벤트 소싱의 이벤트 스키마에도 똑같이 적용됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">공통 스키마 위에 올라타기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>필드 이름을 팀마다 새로 짓지 않습니다. 이미 합의된 이름이 있습니다.
+
+OpenTelemetry 로그 데이터 모델 (필드의 뼈대)
+  Timestamp · ObservedTimestamp     사건 시각 / 수집기가 본 시각 (둘이 다릅니다 ★)
+  TraceId · SpanId · TraceFlags     LOG 04 의 인과 - 추적과 로그를 잇는 열쇠
+  SeverityText · SeverityNumber     "ERROR" 와 17 - 숫자가 있어야 비교·정렬이 됩니다
+  Body                              사람이 읽을 본문 (event 코드를 두기도 합니다)
+  Resource                          누가 - service.name · service.version · host · k8s.pod
+  InstrumentationScope              어느 라이브러리가
+  Attributes                        나머지 전부 - order_id · reason · duration_ms …
+
+의미 규약(semantic conventions) 이 이름을 정해 둡니다
+  http.request.method · http.response.status_code · db.system · error.type …
+  Elastic 의 ECS 가 2023년 OTel 규약으로 합쳐지는 쪽으로 정리됐습니다
+  → 이 이름을 쓰면 대시보드·알림 템플릿을 그대로 가져다 씁니다
+
+실무 규칙 넷
+  ① Resource 는 프로세스가 시작할 때 한 번 정하고 모든 줄에 붙입니다 (코드에서 매번 쓰지 않음)
+  ② 도메인 필드는 접두사로 묶습니다 - order.id · order.total · payment.method
+  ③ 같은 뜻은 같은 이름 - user_id 와 userId 와 uid 가 섞이면 조인이 안 됩니다
+  ④ 스키마 문서와 예제 줄을 코드 저장소에 같이 둡니다 - 리뷰 대상입니다</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>ObservedTimestamp 가 왜 따로 있나</b> — 사건이 일어난 시각과 수집기가 그 줄을 받은 시각은 다릅니다.
+      네트워크가 막혀 30분 뒤에 도착한 줄은 <b>Timestamp 로 정렬하면 과거에</b>, <b>ObservedTimestamp 로 보면 지금</b> 나타납니다.
+      “왜 그래프가 뒤늦게 바뀌지?”의 답이 대개 이 둘의 차이입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 로그 한 줄은 <b>필드가 있는 레코드</b>이고, 대시보드가 필드를 읽는 순간 <b>스키마가 존재</b>합니다.
+    변경은 데이터베이스와 같은 호환 규칙(후방·전방)을 따르고, 줄마다 <b>schema 버전</b>을 실어
+    옛 줄은 <b>업캐스터</b>로 읽어 올립니다. 필드 이름은 새로 짓지 말고 <b>OTel 규약</b>에 올라탑니다.</div>
+</section>
+
+
+<!-- ==================== lg10 ==================== -->
+<section class="sec" id="lg10">
+  <div class="sec-head rv">
+    <span class="no">LOG 10</span>
+    <h2>로그 컴팩션과 보존 — <span class="t">영원히 남기지는 못합니다</span></h2>
+    <p class="lead">
+      로그는 append-only 지만 디스크는 유한합니다. 무엇인가는 버려야 하는데,
+      <b>버리는 방법이 곧 시스템이 답할 수 있는 질문을 정합니다</b>.
+      시간으로 자를지, 키마다 마지막만 남길지, 싼 저장소로 옮길지 — 셋은 서로 다른 것을 잃습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 304" role="img" aria-label="다섯 가지 보존 전략을 다섯 가지 관심사로 평가한 발산 히트맵. 시간 기반 삭제와 크기 기반 삭제는 저장 비용에 유리하지만 과거 재생과 최신 상태 복원에 불리하다. 키 컴팩션은 최신 상태 복원과 잊힐 권리, 복구 시간에 가장 유리하지만 중간 이력을 잃는다. 계층 저장은 과거 재생에 유리하지만 삭제 요구와 복구 시간에 불리하다. 무기한 보존은 과거 재생에만 유리하고 비용, 삭제 요구, 복구 시간 모두에 가장 불리하다. 모든 칸이 유리한 행은 없다.">
+      <text x="16" y="18" class="lbl">보존 전략 x 관심사 - 붉을수록 불리, 푸를수록 유리, 회색은 중립</text>
+
+      <text x="202" y="44" class="tk" text-anchor="middle">저장 비용</text>
+      <text x="298" y="44" class="tk" text-anchor="middle">과거 재생</text>
+      <text x="394" y="44" class="tk" text-anchor="middle">최신 상태</text>
+      <text x="490" y="44" class="tk" text-anchor="middle">잊힐 권리</text>
+      <text x="586" y="44" class="tk" text-anchor="middle">복구 시간</text>
+
+      <text x="16" y="70" class="ann">시간 기반 삭제</text>
+      <rect class="cel d-p2" x="158" y="52" width="88" height="28"/><text x="202" y="70" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-n2" x="254" y="52" width="88" height="28"/><text x="298" y="70" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-n2" x="350" y="52" width="88" height="28"/><text x="394" y="70" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-p1" x="446" y="52" width="88" height="28"/><text x="490" y="70" class="tk" text-anchor="middle">+1</text>
+      <rect class="cel d-p1" x="542" y="52" width="88" height="28"/><text x="586" y="70" class="tk" text-anchor="middle">+1</text>
+
+      <text x="16" y="104" class="ann">크기 기반 삭제</text>
+      <rect class="cel d-p2" x="158" y="86" width="88" height="28"/><text x="202" y="104" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-n2" x="254" y="86" width="88" height="28"/><text x="298" y="104" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-n2" x="350" y="86" width="88" height="28"/><text x="394" y="104" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-0" x="446" y="86" width="88" height="28"/><text x="490" y="104" class="tk" text-anchor="middle">0</text>
+      <rect class="cel d-p1" x="542" y="86" width="88" height="28"/><text x="586" y="104" class="tk" text-anchor="middle">+1</text>
+
+      <text x="16" y="138" class="ann">키 컴팩션</text>
+      <rect class="cel d-p1" x="158" y="120" width="88" height="28"/><text x="202" y="138" class="tk" text-anchor="middle">+1</text>
+      <rect class="cel d-n1" x="254" y="120" width="88" height="28"/><text x="298" y="138" class="tk" text-anchor="middle">-1</text>
+      <rect class="cel d-p2" x="350" y="120" width="88" height="28"/><text x="394" y="138" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-p2" x="446" y="120" width="88" height="28"/><text x="490" y="138" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-p2" x="542" y="120" width="88" height="28"/><text x="586" y="138" class="tk" text-anchor="middle">+2</text>
+
+      <text x="16" y="172" class="ann">계층 저장(티어링)</text>
+      <rect class="cel d-p1" x="158" y="154" width="88" height="28"/><text x="202" y="172" class="tk" text-anchor="middle">+1</text>
+      <rect class="cel d-p2" x="254" y="154" width="88" height="28"/><text x="298" y="172" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-0" x="350" y="154" width="88" height="28"/><text x="394" y="172" class="tk" text-anchor="middle">0</text>
+      <rect class="cel d-n1" x="446" y="154" width="88" height="28"/><text x="490" y="172" class="tk" text-anchor="middle">-1</text>
+      <rect class="cel d-n1" x="542" y="154" width="88" height="28"/><text x="586" y="172" class="tk" text-anchor="middle">-1</text>
+
+      <text x="16" y="206" class="ann">무기한 보존</text>
+      <rect class="cel d-n2" x="158" y="188" width="88" height="28"/><text x="202" y="206" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-p2" x="254" y="188" width="88" height="28"/><text x="298" y="206" class="tk" text-anchor="middle">+2</text>
+      <rect class="cel d-n1" x="350" y="188" width="88" height="28"/><text x="394" y="206" class="tk" text-anchor="middle">-1</text>
+      <rect class="cel d-n2" x="446" y="188" width="88" height="28"/><text x="490" y="206" class="tk" text-anchor="middle">-2</text>
+      <rect class="cel d-n2" x="542" y="188" width="88" height="28"/><text x="586" y="206" class="tk" text-anchor="middle">-2</text>
+
+      <rect class="cel d-n2" x="158" y="224" width="14" height="12"/>
+      <rect class="cel d-n1" x="176" y="224" width="14" height="12"/>
+      <rect class="cel d-0" x="194" y="224" width="14" height="12"/>
+      <rect class="cel d-p1" x="212" y="224" width="14" height="12"/>
+      <rect class="cel d-p2" x="230" y="224" width="14" height="12"/>
+      <text x="252" y="234" class="ann">-2 불리 … +2 유리 (정성 평가 - 실제 값은 데이터 양과 요구에 따라 다릅니다)</text>
+
+      <text x="16" y="256" class="ann">키 컴팩션은 fold 를 미리 해 두는 것입니다 - 키마다 마지막 값만 남기니 최신 상태는 빠르고 중간 이력은 사라집니다</text>
+
+      <text x="16" y="280" class="lbl">어느 행도 전부 유리하지 않습니다 - 보존 정책은 무엇을 잃어도 되는지를 먼저 정하는 일입니다</text>
+      <text x="16" y="296" class="lbl">실무는 섞습니다 - 상태는 컴팩션 토픽, 이력은 시간 보존 + 콜드 저장소, 개인정보는 로그 밖 금고에</text>
+    </svg>
+    <div class="cap">보존 정책은 <b>무엇을 잃어도 되는지를 먼저 정하는 일</b>입니다 — 전부 유리한 행은 없습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">삭제와 컴팩션 — 같은 “버리기”, 다른 결과</h4>
+      <pre class="code" data-lang="text"><code>보존(retention) - 오래된 세그먼트를 통째로 버립니다
+  [seg0][seg1][seg2][seg3][seg4 활성]
+   ↑ 7일 지남 → unlink                 ★ 파일 하나 지우면 끝
+  남는 것: 최근 N일의 모든 사건
+  잃는 것: N일 전의 모든 것 - 그때 만들어진 키의 마지막 값까지
+
+컴팩션(compaction) - 키마다 마지막 값만 남깁니다
+  전:  k1=a  k2=x  k1=b  k3=p  k2=y  k1=c  k3=∅(툼스톤)
+  후:              k2=y  k1=c   (k3 는 툼스톤 뒤 삭제)
+  남는 것: 모든 키의 최신 값 - 오프셋 0 부터 읽으면 현재 상태 전체
+  잃는 것: k1 이 a→b→c 로 변한 과정
+
+★ 같은 질문에 다르게 답합니다
+  "k1 의 지금 값은?"         보존: 7일 전 키면 모름 / 컴팩션: 항상 답함
+  "k1 이 어제 뭐였나?"       보존: 답함 / 컴팩션: 모름
+  "지난주 이벤트 수는?"      보존: 답함 / 컴팩션: 모름 (사건 수가 보존 안 됨)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>컴팩션은 LOG 02 의 fold 를 저장소가 대신 해 두는 것</b>입니다. 키마다 <code>apply</code> 가 “마지막 값으로 덮기”라면
+        fold 결과는 곧 “키별 최신 값”이고, 그것만 남기면 재생 시간이 <b>이벤트 수가 아니라 키 수</b>에 비례합니다.
+        Kafka Streams 의 상태 저장소 · Debezium 의 스냅샷 토픽이 이렇게 복구됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">컴팩션을 직접 구현하면 (세그먼트 재작성)</h4>
+      <pre class="code" data-lang="python"><code>TOMBSTONE = None
+
+def compact(segments):
+    """오래된 세그먼트들을 읽어 키별 마지막 값만 남긴 새 세그먼트를 만듭니다."""
+    latest = {}                              # key -&gt; (offset, value)
+    for seg in segments:                     # 오래된 것부터 순서대로
+        for off, key, val in seg.read():
+            latest[key] = (off, val)         # 뒤에 온 것이 이깁니다
+    out = Segment.new()
+    for key, (off, val) in sorted(latest.items(), key=lambda kv: kv[1][0]):
+        if val is TOMBSTONE:
+            continue                         # 툼스톤은 유예 기간 뒤 함께 사라집니다
+        out.append(off, key, val)            # ★ 오프셋은 원래 번호를 그대로 유지
+    out.seal()
+    for seg in segments:
+        seg.unlink()                         # 옛 세그먼트는 통째로 삭제
+    return out
+
+# 지켜야 할 것
+#  · 활성(쓰는 중인) 세그먼트는 건드리지 않습니다 - 읽기·쓰기와 경쟁하지 않도록
+#  · 오프셋을 다시 매기지 않습니다 - 소비자의 커서가 깨집니다 (LOG 01)
+#    그래서 컴팩션 뒤의 로그는 오프셋에 빈 자리가 생깁니다. 정상입니다.
+#  · 툼스톤은 바로 지우지 않습니다 - 느린 소비자가 "삭제됐다"를 보고 가야 합니다</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">같은 발상이 나타나는 세 곳</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Kafka 설정으로 읽는 두 정책</h4>
+      <pre class="code" data-lang="text"><code># 토픽 단위 설정 (이름은 실제 설정 키입니다)
+
+cleanup.policy=delete            # 기본. 시간·크기로 세그먼트 삭제
+retention.ms=604800000           # 7일 (브로커 기본 log.retention.hours=168)
+retention.bytes=-1               # 크기 제한 없음 (-1)
+segment.bytes=1073741824         # 세그먼트 1GiB - 삭제 단위이자 컴팩션 단위
+
+cleanup.policy=compact           # 키별 마지막 값만 유지
+min.cleanable.dirty.ratio=0.5    # 아직 안 접힌 부분이 절반 넘으면 컴팩션 시작
+min.compaction.lag.ms=0          # 이 시간 안의 최신 줄은 접지 않음 (이력 잠깐 보존)
+delete.retention.ms=86400000     # 툼스톤을 24시간 유지한 뒤 제거
+
+cleanup.policy=compact,delete    # 둘 다 - 키별 최신 + 오래된 것은 삭제
+
+★ 컴팩션 토픽은 key 가 없는 메시지를 거부합니다 - 키가 없으면 "마지막"의 기준이 없으니까요
+★ 계층 저장(tiered storage)은 오래된 세그먼트를 객체 저장소로 옮기고
+  브로커에는 최근 것만 둡니다 - 보존 기간을 늘려도 로컬 디스크가 안 늘어납니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Raft 의 스냅샷 · LSM 의 컴팩션</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">곳</th><th>버리는 방법</th><th>남기는 것</th></tr>
+        <tr><td><b>Raft</b></td><td>상태 기계 스냅샷을 찍고 그 앞의 로그를 <b>잘라냄</b></td><td>스냅샷 + lastIncludedIndex/Term</td></tr>
+        <tr><td><b>LSM 트리</b></td><td>여러 SSTable 을 합치며 <b>키별 최신만</b> 남김</td><td>레벨별 정렬 파일</td></tr>
+        <tr><td><b>Git</b></td><td><code>gc</code> 가 도달 불가 객체를 지우고 팩으로 묶음</td><td>참조에서 닿는 커밋 전부</td></tr>
+        <tr><td><b>WAL(DB)</b></td><td>체크포인트 뒤 옛 WAL 파일 재활용</td><td>체크포인트 이후만</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>Raft 스냅샷 - 뒤처진 팔로워에게는 로그 대신 스냅샷을 보냅니다
+  InstallSnapshot(term, lastIncludedIndex, lastIncludedTerm, data)
+  · 팔로워는 스냅샷을 적용하고 그 이전 로그를 버립니다
+  · 그 뒤 로그는 평소처럼 AppendEntries 로
+
+LSM 컴팩션의 두 전략 (RocksDB 용어)
+  leveled    쓰기 증폭 큼 · 공간 효율 좋음 · 읽기 빠름
+  universal  쓰기 증폭 작음 · 공간 더 씀 · 읽기 느림
+  → 같은 트레이드오프의 축이 위 히트맵과 같습니다</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>공통 구조</b> — 전부 “<b>접은 결과(스냅샷·최신 값)를 남기고 접기 전 재료(로그)를 버린다</b>”입니다.
+        LOG 02 의 스냅샷이 응용 계층의 이야기였다면, 여기는 <b>저장소 계층</b>이 같은 일을 하는 것입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">잊힐 권리와 append-only 의 타협</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>"지워 달라"는 요구는 append-only 와 정면으로 부딪힙니다. 실무의 세 가지 답:
+
+① 컴팩션 토픽 + 툼스톤
+   key=user:118 value=∅ 를 붙이면 delete.retention.ms 뒤 그 키의 모든 값이 사라집니다
+   · 되는 것: "현재 상태" 토픽에서 그 사용자를 지움
+   · 안 되는 것: 시간 보존 토픽·백업·콜드 저장소에 남은 옛 줄 (거기까지 따라가야 합니다)
+
+② 암호 파쇄(crypto-shredding)
+   개인 필드는 사용자별 키로 암호화해 로그에 두고, 키는 로그 밖 금고에
+   · 지우기 = 금고에서 키 삭제. 로그는 한 줄도 안 고칩니다 ★
+   · 로그·백업·콜드가 몇 벌이든 한 번에 무력화됩니다
+   · 대가: 키 관리(회전·백업·접근 통제)가 새 책임이 됩니다 (🔐 보안 · 암호)
+
+③ 로그 밖 참조
+   로그에는 user_id 만, 이름·이메일은 별도 테이블
+   · 가장 단순. 대신 로그만으로는 "누구"를 못 봅니다 (조인 필요)
+
+보존 기간은 법이 정하는 하한과 비용이 정하는 상한 사이입니다
+   · 금융·의료는 수년 단위 보존 의무가 있고, 접속 기록도 법령이 최소 기간을 정합니다
+   · 그 위로는 "이 줄이 없으면 못 답하는 질문이 있나"(LOG 07)가 상한을 정합니다
+   · 기간은 데이터 종류마다 다르게 - 감사 로그 수년 · 요청 로그 몇 주 · DEBUG 며칠</code></pre>
+    <div class="note warn" style="margin-bottom:0">
+      <b>“지웠다”가 가장 어려운 말입니다</b> — 로그는 복제본 · 백업 · 수집기 색인 · 콜드 저장소 · 개발자 노트북으로 <b>자동으로 퍼집니다</b>.
+      한 곳에서 지운 뒤 “완료”라고 답하면 나중에 다른 사본이 나옵니다.
+      그래서 ②가 유일하게 <b>사본 수와 무관하게</b> 통하는 답입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 로그는 영원하지 않고, <b>버리는 방법이 답할 수 있는 질문을 정합니다</b>.
+    시간·크기 삭제는 이력을 통째로, 컴팩션은 <b>중간 과정</b>을 잃는 대신 키별 최신 상태를 남깁니다.
+    Raft 스냅샷 · LSM 컴팩션 · DB 체크포인트가 전부 같은 발상이고,
+    잊힐 권리는 <b>암호 파쇄</b>로 append-only 를 지키면서 풉니다.</div>
+</section>
+
+
+<!-- ==================== lg11 ==================== -->
+<section class="sec" id="lg11">
+  <div class="sec-head rv">
+    <span class="no">LOG 11</span>
+    <h2>무결성 — <span class="t">해시 체인 · 머클 트리 · 인증서 투명성</span></h2>
+    <p class="lead">
+      “append-only” 는 지금까지 <b>약속</b>이었습니다. 관리자가 파일을 열어 한 줄을 고치면 아무도 모릅니다.
+      그 약속을 <b>수학으로 검증 가능하게</b> 만드는 것이 이 절입니다 — 고친 것을 막지는 못해도
+      <b>고쳤다는 사실은 반드시 드러나게</b> 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 298" role="img" aria-label="여덟 개의 로그 항목 위에 쌓아 올린 머클 트리. 맨 아래에는 각 항목의 해시 h0 부터 h7 이 있고, 이웃한 둘을 합쳐 해시한 h01, h23, h45, h67 이 그 위에, 다시 둘씩 합친 h0123 과 h4567 이 그 위에, 맨 위에 루트 해시가 있다. 다섯 번째 항목이 로그에 들어 있음을 증명하려면 형제인 h4, h67, h0123 세 개만 있으면 되고, 그 항목을 고치면 위로 이어진 h45, h4567, 루트가 전부 바뀌어 공개된 루트와 어긋난다.">
+      <text x="16" y="18" class="lbl">머클 트리 - 로그 전체를 해시 하나로 대표하고, 포함 여부는 log n 개로 증명합니다</text>
+
+      <rect class="bx bx-ok" x="300" y="34" width="80" height="30"/>
+      <text x="340" y="53" class="val ok-t" text-anchor="middle">루트</text>
+      <text x="392" y="53" class="ann">서명해 공개하는 값</text>
+
+      <path class="ln" d="M340 66 L340 74"/>
+      <path class="ln" d="M180 74 L500 74"/>
+      <path class="ln" d="M180 74 L180 82"/>
+      <path class="ln" d="M500 74 L500 82"/>
+
+      <rect class="bx bx-hi" x="140" y="84" width="80" height="30"/>
+      <text x="180" y="103" class="val" text-anchor="middle">h0123</text>
+      <rect class="bx bx-ok" x="460" y="84" width="80" height="30"/>
+      <text x="500" y="103" class="val ok-t" text-anchor="middle">h4567</text>
+
+      <path class="ln" d="M180 116 L180 124"/>
+      <path class="ln" d="M100 124 L260 124"/>
+      <path class="ln" d="M100 124 L100 132"/>
+      <path class="ln" d="M260 124 L260 132"/>
+      <path class="ln" d="M500 116 L500 124"/>
+      <path class="ln" d="M420 124 L580 124"/>
+      <path class="ln" d="M420 124 L420 132"/>
+      <path class="ln" d="M580 124 L580 132"/>
+
+      <rect class="bx" x="60" y="134" width="80" height="30"/>
+      <text x="100" y="153" class="val" text-anchor="middle">h01</text>
+      <rect class="bx" x="220" y="134" width="80" height="30"/>
+      <text x="260" y="153" class="val" text-anchor="middle">h23</text>
+      <rect class="bx bx-ok" x="380" y="134" width="80" height="30"/>
+      <text x="420" y="153" class="val ok-t" text-anchor="middle">h45</text>
+      <rect class="bx bx-hi" x="540" y="134" width="80" height="30"/>
+      <text x="580" y="153" class="val" text-anchor="middle">h67</text>
+
+      <path class="ln" d="M100 166 L100 174"/>
+      <path class="ln" d="M60 174 L140 174"/>
+      <path class="ln" d="M60 174 L60 182"/>
+      <path class="ln" d="M140 174 L140 182"/>
+      <path class="ln" d="M260 166 L260 174"/>
+      <path class="ln" d="M220 174 L300 174"/>
+      <path class="ln" d="M220 174 L220 182"/>
+      <path class="ln" d="M300 174 L300 182"/>
+      <path class="ln" d="M420 166 L420 174"/>
+      <path class="ln" d="M380 174 L460 174"/>
+      <path class="ln" d="M380 174 L380 182"/>
+      <path class="ln" d="M460 174 L460 182"/>
+      <path class="ln" d="M580 166 L580 174"/>
+      <path class="ln" d="M540 174 L620 174"/>
+      <path class="ln" d="M540 174 L540 182"/>
+      <path class="ln" d="M620 174 L620 182"/>
+
+      <rect class="bx" x="28" y="184" width="64" height="30"/>
+      <text x="60" y="203" class="val" text-anchor="middle">h0</text>
+      <rect class="bx" x="108" y="184" width="64" height="30"/>
+      <text x="140" y="203" class="val" text-anchor="middle">h1</text>
+      <rect class="bx" x="188" y="184" width="64" height="30"/>
+      <text x="220" y="203" class="val" text-anchor="middle">h2</text>
+      <rect class="bx" x="268" y="184" width="64" height="30"/>
+      <text x="300" y="203" class="val" text-anchor="middle">h3</text>
+      <rect class="bx bx-hi" x="348" y="184" width="64" height="30"/>
+      <text x="380" y="203" class="val" text-anchor="middle">h4</text>
+      <rect class="bx bx-fw" x="428" y="184" width="64" height="30"/>
+      <text x="460" y="203" class="val" text-anchor="middle">h5</text>
+      <rect class="bx" x="508" y="184" width="64" height="30"/>
+      <text x="540" y="203" class="val" text-anchor="middle">h6</text>
+      <rect class="bx" x="588" y="184" width="64" height="30"/>
+      <text x="620" y="203" class="val" text-anchor="middle">h7</text>
+
+      <text x="16" y="234" class="ann">포함 증명: 항목 5 가 들어 있음을 보이려면 형제 셋(h4 · h67 · h0123)만 있으면 됩니다 - 8개 중 3개, 항목 n 개면 log n 개</text>
+      <text x="16" y="252" class="ann rs-t">항목 5 를 한 글자라도 고치면 h5 - h45 - h4567 - 루트가 전부 바뀝니다. 공개된 루트와 어긋나는 순간 들킵니다</text>
+
+      <text x="16" y="274" class="lbl">머클 트리는 로그 전체를 해시 하나로 대표합니다 - 루트를 공개하면 아무도 몰래 과거를 고칠 수 없습니다</text>
+      <text x="16" y="290" class="lbl">일관성 증명은 어제의 루트가 오늘 로그의 앞부분에서 나왔음을 보입니다 - 추가만 했고 지우지 않았다는 증거</text>
+    </svg>
+    <div class="cap">루트 하나를 공개하면 <b>몰래 고치기가 불가능</b>해집니다 — 막는 게 아니라 <b>반드시 드러나게</b> 하는 것입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">1단계 — 해시 체인: 앞 줄의 해시를 다음 줄에 넣기</h4>
+      <pre class="code" data-lang="python"><code>import hashlib, json
+
+def h(data: bytes) -&gt; str:
+    return hashlib.sha256(data).hexdigest()
+
+class ChainedLog:
+    def __init__(self):
+        self.items, self.prev = [], "0" * 64          # 창세기 해시
+
+    def append(self, record: dict) -&gt; str:
+        body = json.dumps(record, sort_keys=True)     # ★ 직렬화가 결정적이어야
+        entry = {"prev": self.prev, "body": body}     #   같은 입력 → 같은 해시
+        entry["hash"] = h((entry["prev"] + body).encode())
+        self.items.append(entry)
+        self.prev = entry["hash"]                     # 다음 줄이 이 값을 품습니다
+        return self.prev
+
+    def verify(self) -&gt; bool:
+        prev = "0" * 64
+        for i, e in enumerate(self.items):
+            if e["prev"] != prev: return False       # 끊김 → 중간 삭제·삽입
+            if h((e["prev"] + e["body"]).encode()) != e["hash"]:
+                return False                          # 불일치 → 내용 변조
+            prev = e["hash"]
+        return True
+
+# Git 이 정확히 이것입니다 - 커밋 해시 = H(트리 + 부모 해시 + 메시지 + …)
+# 과거 커밋 하나를 고치면 그 뒤 모든 커밋의 해시가 바뀝니다 (rebase 가 그것)
+# 블록체인은 여기에 "누가 다음 줄을 붙일지" 합의를 얹은 것입니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>해시 체인이 못 막는 것</b> — 관리자가 <b>맨 끝을 잘라내고</b> 그 시점의 해시부터 다시 이어 붙이면
+        체인은 여전히 유효합니다. 체인은 “중간이 안 바뀌었다”만 보장하고 <b>“끝이 어디였는가”</b>는 모릅니다.
+        그래서 <b>마지막 해시를 외부에 공개</b>해야 합니다 — 다음 단계가 그 이야기입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">2단계 — 머클 트리: 포함 증명을 log n 으로</h4>
+      <pre class="code" data-lang="python"><code>def merkle_root(leaves: list[str]) -&gt; str:
+    level = [h(("\x00" + x).encode()) for x in leaves]   # 잎 접두사 0x00
+    while len(level) &gt; 1:
+        if len(level) % 2: level.append(level[-1])       # 홀수면 마지막 복제
+        level = [h(("\x01" + a + b).encode())            # 내부 노드 접두사 0x01
+                 for a, b in zip(level[::2], level[1::2])]
+    return level[0]
+# 접두사를 다르게 두는 이유: 잎과 내부 노드가 같은 해시를 내는 공격(second preimage) 방지
+
+def inclusion_proof(leaves, idx):
+    """idx 번째 잎의 형제 해시 목록 - 검증자는 이것만 받습니다"""
+    level = [h(("\x00" + x).encode()) for x in leaves]; proof = []
+    while len(level) &gt; 1:
+        if len(level) % 2: level.append(level[-1])
+        sib = idx ^ 1                                    # 이웃 인덱스
+        proof.append((level[sib], sib &lt; idx))            # (해시, 왼쪽인가)
+        level = [h(("\x01" + a + b).encode()) for a, b in zip(level[::2], level[1::2])]
+        idx //= 2
+    return proof
+
+def verify(leaf, proof, root) -&gt; bool:
+    cur = h(("\x00" + leaf).encode())
+    for sib, is_left in proof:
+        cur = h(("\x01" + (sib + cur if is_left else cur + sib)).encode())
+    return cur == root         # ★ 잎 하나 + 형제 log n 개로 루트를 다시 만듭니다
+
+# 100만 항목이면 증명 크기 ≈ 20 해시 = 640 바이트. 로그 전체를 받을 필요가 없습니다.</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">Certificate Transparency — 공개 로그로 CA 를 감시하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">누가 어떤 인증서를 발급했는지 전부 공개 로그에</h4>
+      <pre class="code" data-lang="text"><code>문제(2011년 전후) - CA 가 해킹당하거나 실수하면
+  google.com 인증서가 엉뚱한 사람에게 발급되고, 아무도 모릅니다.
+  (DigiNotar 사건이 대표적 - CA 자체가 뚫려 가짜 인증서가 발급됨)
+
+CT 의 답 (RFC 6962 · 2013 / 개정 RFC 9162 · 2021) - 발급을 숨길 수 없게
+  ① CA 가 인증서를 발급하면 공개 CT 로그에 제출합니다
+  ② 로그는 머클 트리에 추가하고 SCT(Signed Certificate Timestamp) 를 돌려줍니다
+     "이 인증서를 이 시각에 받았고 곧 트리에 넣겠다"는 서명된 약속
+  ③ 인증서(또는 TLS 핸드셰이크)에 SCT 를 실어 보냅니다
+  ④ 브라우저는 SCT 가 없거나 부족하면 인증서를 거부합니다
+     (Chrome 은 2018년 4월부터 신규 인증서에 CT 를 요구)
+  ⑤ 모니터가 로그를 계속 읽으며 "내 도메인 인증서가 누가 냈나"를 감시합니다
+  ⑥ 감사자는 일관성 증명으로 로그가 뒤에서 지워지지 않았는지 확인합니다
+
+★ 핵심은 "가짜 발급을 막는다"가 아니라 "가짜 발급이 반드시 공개된다"입니다.
+  가짜 인증서는 여전히 만들 수 있지만, 만들면 로그에 남고 도메인 주인이 봅니다.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">투명성 로그가 지키는 것 · 못 지키는 것</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">위협</th><th>막히나</th><th>어떻게</th></tr>
+        <tr><td>중간 항목 변조</td><td><b>드러남</b></td><td>루트 해시 불일치</td></tr>
+        <tr><td>중간 항목 삭제·삽입</td><td><b>드러남</b></td><td>일관성 증명 실패</td></tr>
+        <tr><td>끝을 잘라내고 다시 쓰기</td><td><b>드러남</b></td><td>이미 공개된 옛 루트와 어긋남</td></tr>
+        <tr><td>사람마다 다른 로그 보여주기</td><td>부분적</td><td>루트를 서로 교환(gossip)해야 잡힘</td></tr>
+        <tr><td>애초에 거짓을 기록</td><td><b>못 막음</b></td><td>로그는 “적힌 대로”만 증명</td></tr>
+        <tr><td>기록을 아예 안 함</td><td><b>못 막음</b></td><td>브라우저가 SCT 를 요구해야 강제됨</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>같은 구조가 소프트웨어 공급망으로 번졌습니다</b> — Sigstore 의 <b>Rekor</b> 는 “누가 어떤 빌드에 서명했나”를
+        투명성 로그에 남기고, Go 모듈 체크섬 DB 도 같은 머클 로그입니다. Google 의 <b>Trillian</b> 이 이런 로그의 공용 구현입니다.
+        <b>🔐 보안 · 암호</b> 탭의 서명·PKI 와 이어집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">우리 감사 로그를 변조 방지로 만들려면</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>내부 감사 로그(누가 무엇을 승인·삭제·조회했나)에 같은 원리를 씁니다. 순서대로:
+
+① 결정적 직렬화        같은 레코드는 항상 같은 바이트여야 합니다
+                       - 키 정렬 · 공백 고정 · 부동소수 표기 고정 (JSON 이면 canonical 형식)
+② 줄마다 prev 해시     해시 체인. 여기까지는 라이브러리 없이 30줄
+③ 주기적 루트 공개     하루치(또는 N 줄)마다 머클 루트를 만들어
+                       - 다른 시스템(별도 계정의 저장소 · 외부 타임스탬프 서비스) 에 적습니다
+                       - 로그를 고칠 수 있는 사람이 이 루트까지 고칠 수 없어야 뜻이 있습니다 ★
+④ 검증 잡              매일 처음부터 체인·루트를 다시 계산해 공개된 값과 비교
+                       - 불일치는 "버그"가 아니라 "사고"로 취급합니다
+⑤ 쓰기 경로 분리       로그를 쓰는 서비스 계정은 append 만, 삭제 권한은 아무에게도
+                       - 클라우드의 객체 잠금(WORM · Object Lock) 같은 저장소 기능을 씁니다
+
+하지 말 것
+  · 로그를 그 로그를 만드는 DB 안에 해시만 붙여 두기 - DBA 가 둘 다 고칩니다
+  · 블록체인부터 도입하기 - 참여자가 한 조직이면 해시 체인 + 외부 공개로 충분합니다
+  · 타임스탬프를 신뢰 근거로 쓰기 - 시각은 조작이 가장 쉬운 필드입니다 (LOG 04)</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>“변조 방지”와 “변조 감지”를 구분하세요</b> — 소프트웨어는 후자만 할 수 있습니다.
+      전자는 저장소의 권한과 물리 통제의 몫입니다. 감지가 확실하면 <b>고칠 동기가 사라지므로</b> 결과적으로 방지가 됩니다.
+      투명성의 힘은 막는 데 있지 않고 <b>숨길 수 없게 하는 데</b> 있습니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 해시 체인은 <b>중간이 안 바뀌었음</b>을, 머클 트리는 그 위에 <b>포함과 일관성을 log n 으로</b> 증명합니다.
+    루트를 <b>외부에 공개</b>해야 끝을 잘라내는 공격까지 드러납니다. Certificate Transparency 는 이 구조로
+    CA 의 발급을 숨길 수 없게 만들었고, 같은 설계가 소프트웨어 서명과 내부 감사 로그로 번졌습니다.</div>
+</section>
+
+
+<!-- ==================== lg12 ==================== -->
+<section class="sec" id="lg12">
+  <div class="sec-head rv">
+    <span class="no">LOG 12</span>
+    <h2>로그로 못 잡는 것 — <span class="t">증거이지 진실이 아닙니다</span></h2>
+    <p class="lead">
+      열한 절 동안 로그가 얼마나 강력한지 봤으니 마지막은 <b>한계</b>입니다.
+      로그는 “적힌 것”이지 “일어난 것”이 아닙니다. 둘 사이의 틈에서
+      <b>없는 줄을 없는 일로 읽고, 있는 줄을 원인으로 읽는</b> 실수가 나옵니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 302" role="img" aria-label="실제로 일어난 일, 기록된 것, 우리가 본 것 세 집합의 벤 다이어그램. 일어났지만 기록되지 않은 영역은 침묵, 기록됐지만 일어나지 않은 영역은 거짓 신호, 보았지만 근거가 없는 영역은 추측이다. 일어나고 기록됐지만 보지 못한 영역은 묻힌 증거, 기록되고 보았지만 일어나지 않은 영역은 오독, 일어나고 보았지만 기록되지 않은 영역은 감으로 안 것이다. 셋이 모두 겹치는 가운데만이 이해한 사건이다.">
+      <text x="16" y="18" class="lbl">일어난 일 · 기록된 것 · 본 것 - 셋이 겹치는 가운데만이 이해한 사건입니다</text>
+
+      <circle cx="272" cy="128" r="76" style="fill:rgba(34,211,238,.13);stroke:#22d3ee;stroke-width:1"/>
+      <circle cx="394" cy="128" r="76" style="fill:rgba(167,139,250,.13);stroke:#a78bfa;stroke-width:1"/>
+      <circle cx="333" cy="206" r="76" style="fill:rgba(251,191,36,.10);stroke:#fbbf24;stroke-width:1"/>
+
+      <text x="160" y="74" class="val s1-t" text-anchor="middle">일어난 일</text>
+      <text x="506" y="74" class="val s3-t" text-anchor="middle">기록된 것</text>
+      <text x="333" y="270" class="val s2-t" text-anchor="middle">우리가 본 것</text>
+
+      <text x="222" y="120" class="ann" style="fill:var(--ink-2)" text-anchor="middle">침묵</text>
+      <text x="222" y="132" class="ann" text-anchor="middle">계측 안 됨 · 유실</text>
+      <text x="444" y="120" class="ann" style="fill:var(--ink-2)" text-anchor="middle">거짓 신호</text>
+      <text x="444" y="132" class="ann" text-anchor="middle">계측 버그 · 재생분</text>
+      <text x="333" y="248" class="ann" style="fill:var(--ink-2)" text-anchor="middle">추측</text>
+
+      <text x="333" y="98" class="ann" style="fill:var(--ink)" text-anchor="middle">묻힌 증거</text>
+      <text x="270" y="182" class="ann" style="fill:var(--ink)" text-anchor="middle">감</text>
+      <text x="398" y="182" class="ann" style="fill:var(--ink)" text-anchor="middle">오독</text>
+
+      <circle cx="333" cy="152" r="22" style="fill:rgba(52,211,153,.18);stroke:rgba(52,211,153,.6);stroke-width:1"/>
+      <text x="333" y="156" class="ann ok-t" text-anchor="middle">이해</text>
+
+      <text x="16" y="292" class="lbl">로그는 증거이지 진실이 아닙니다 - 가운데만 이해한 사건이고, 나머지 여섯 칸이 이 절의 주제입니다</text>
+    </svg>
+    <div class="cap">가운데 초록만이 <b>이해한 사건</b>입니다 — 나머지 여섯 영역 각각에 <b>이름이 붙는다</b>는 것이 핵심입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">침묵 — 없는 줄은 없는 일이 아닙니다</h4>
+      <pre class="code" data-lang="text"><code>"에러 로그가 없으니 정상입니다" 가 틀리는 경우
+  · 요청이 서버에 닿지 못했다      DNS · LB · 네트워크 - 서버 로그엔 처음부터 없음
+  · 프로세스가 로그를 쓰기 전에 죽었다   OOM kill · SIGKILL 은 finally 를 안 거칩니다
+  · 로거의 버퍼가 함께 죽었다      비동기 로거는 크래시 때 마지막 몇 초를 잃습니다
+  · 레벨 필터가 그 줄을 걸렀다     운영은 WARN 이상 - 그 오류는 INFO 였습니다
+  · 샘플링에 버려졌다              LOG 07 - 1% 샘플링은 희귀 사건을 99% 지웁니다
+  · 디스크가 찼다                  로거가 실패했는데 그 실패를 적을 곳이 없습니다
+  · 수집기가 못 받았다             에이전트 재시작 · 백프레셔로 드롭 (조용히)
+
+★ 서버 로그에는 서버에 닿은 요청만 있습니다 - 생존자 편향의 교과서 사례
+   "우리 쪽 성공률 99.9%" 와 사용자의 "자꾸 안 돼요" 가 동시에 참일 수 있습니다
+
+대응 - 부재를 신호로 바꿉니다
+  · 하트비트 : "살아 있다"를 주기적으로 적고, 끊기면 알림 (dead man's switch)
+  · 양쪽 계측 : 클라이언트에서도 시도·실패를 보냅니다 (RUM · 모바일 SDK)
+  · 기대 카운트 : 매 시간 배치가 N 건이어야 한다 - 0 건은 "조용함"이 아니라 "장애"
+  · 종료 훅 + 동기 플러시 : 정상 종료 경로에서만이라도 버퍼를 비웁니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">거짓 신호 — 있는 줄이 사실이 아닐 때</h4>
+      <pre class="code" data-lang="python"><code># ✗ 가장 흔한 계측 버그 - 결과가 정해지기 전에 "성공"을 적습니다
+def transfer(src, dst, amt):
+    log.info("transfer.ok", src=src, dst=dst, amt=amt)   # 아직 아무것도 안 했음
+    with db.transaction():
+        debit(src, amt)
+        credit(dst, amt)          # 여기서 예외 → 롤백. 로그에는 성공이 남습니다
+
+# ✓ 결과가 확정된 뒤에, 확정된 값으로
+def transfer(src, dst, amt):
+    try:
+        with db.transaction():
+            debit(src, amt); credit(dst, amt)
+    except Exception as e:
+        log.error("transfer.failed", src=src, dst=dst, amt=amt,
+                  error_kind=type(e).__name__)
+        raise
+    log.info("transfer.ok", src=src, dst=dst, amt=amt)   # 커밋 뒤
+
+# 그 밖의 거짓 신호
+#  · 재시도 로그를 원인으로 읽기 - 재시도는 결과입니다. 첫 실패를 찾으세요
+#  · 재생(replay) 중 다시 찍힌 로그 - LOG 02 의 부수효과 분리가 안 된 경우
+#  · 타임스탬프가 어긋나 "결과가 원인보다 먼저" 보이는 줄 (LOG 04)
+#  · 복사한 코드가 남긴 남의 이름 - log.info("cache.hit") 인데 실제로는 miss</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>로그는 코드가 “적기로 한 것”</b>입니다. 코드가 틀리면 로그도 같은 방향으로 틀립니다.
+        그래서 로그와 <b>독립적인 두 번째 관측</b>(DB 의 실제 값, 상대 시스템의 기록, 고객의 화면)이 없으면
+        로그 하나로는 사고 조사를 <b>끝낼 수 없습니다</b>.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">관측자 효과와 로거 자체의 실패</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">보는 행위가 대상을 바꿉니다</h4>
+      <pre class="code" data-lang="text"><code>하이젠버그(Heisenbug) - 로그를 켜면 사라지는 버그
+  · 로깅이 타이밍을 바꿔 경쟁 상태가 안 일어납니다
+    (I/O 한 번이 마이크로초 단위 경합 창을 덮어 버립니다)
+  · DEBUG 를 켜니 GC 압력이 늘어 원래 문제가 다른 문제로 바뀝니다
+  · 로그 I/O 가 락 안에서 일어나 락 유지 시간이 늘어납니다 ★ 자주 봅니다
+
+로거가 병목이 되는 순간
+  · 동기 로거 + 느린 디스크 - 요청 스레드가 fsync 를 기다립니다
+  · 로그 문자열을 만드는 비용 - 호출 자체가 비싼 toString() · 직렬화
+    → 레벨을 먼저 확인하고 만듭니다 (isEnabled 가드 · 지연 평가)
+  · 락 안의 로깅 - 임계 구역이 I/O 시간만큼 길어집니다
+
+로거가 사고가 되는 순간
+  · 로그 라이브러리의 취약점 - 2021년 12월 Log4Shell(CVE-2021-44228):
+    로그에 적힌 문자열이 코드로 실행됐습니다. 로거도 입력을 받는 코드입니다
+  · 시그널 핸들러 · 인터럽트 안에서의 로깅 - 락을 다시 잡아 교착
+  · 로그로 디스크가 차서 DB 가 멈춤 - 로그가 서비스를 죽인 사례는 흔합니다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">일곱 가지 한계와 각각의 대응</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:32%">못 잡는 것</th><th>왜</th><th>대응</th></tr>
+        <tr><td><b>일어나지 않은 일</b></td><td>부재는 기록되지 않음</td><td>하트비트 · 기대 카운트</td></tr>
+        <tr><td><b>닿지 않은 요청</b></td><td>생존자 편향</td><td>클라이언트 측 계측</td></tr>
+        <tr><td><b>인과</b></td><td>로그는 상관·순서만</td><td>trace 의 parent 관계 · 실험</td></tr>
+        <tr><td><b>계측 전의 과거</b></td><td>어제 데이터엔 오늘 필드가 없음</td><td>설계 단계에서 계측(LOG 08)</td></tr>
+        <tr><td><b>모르는 질문</b></td><td>C 행렬은 사람이 정함</td><td>넓은 이벤트 · 원본 보존</td></tr>
+        <tr><td><b>로그 자체의 실패</b></td><td>실패를 적을 곳이 없음</td><td>외부 감시 · 수집 지표</td></tr>
+        <tr><td><b>의도</b></td><td>“왜 그랬나”는 코드 밖</td><td>도메인 이벤트에 이유 필드</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>인과는 특히 조심할 것</b> — “배포 직후 오류가 늘었다”는 상관입니다. 같은 시각에 트래픽 패턴이 바뀌었을 수 있습니다.
+        로그가 주는 것은 <b>순서(happens-before)</b>까지이고, 원인이라는 결론은 <b>되돌려 보거나(롤백) 나눠 보는(카나리)</b> 실험이 줍니다.
+        <b>🤖 ML 이론</b> 의 상관·인과 구분이 그대로입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">사고 조사에서 로그를 읽는 규율</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="text"><code>로그를 읽을 때 스스로에게 묻는 순서 (이 탭 전체의 요약이기도 합니다)
+
+  ① 이 줄은 언제 적혔나 - 사건 시각인가, 수집 시각인가, 어느 시계인가        (LOG 04 · 09)
+  ② 이 줄이 없는 구간은 조용한 것인가, 잃은 것인가 - 샘플링·버퍼·필터·수집 상태를 먼저 확인   (LOG 07 · 12)
+  ③ 이 줄은 결과가 확정된 뒤에 적힌 것인가 - "성공" 로그의 위치를 코드에서 확인            (LOG 12)
+  ④ 순서의 근거는 무엇인가 - 타임스탬프인가, trace 의 parent 인가, 파티션 오프셋인가        (LOG 04 · 06)
+  ⑤ 같은 사실을 말하는 두 번째 출처가 있나 - DB 의 실제 값, 상대 시스템, 고객 화면          (LOG 12)
+  ⑥ 이 로그가 그 뒤 고쳐졌을 가능성은 - 감사 로그라면 체인·루트가 맞는지                   (LOG 11)
+  ⑦ 지금 없는 필드는 무엇이고, 다음엔 어떻게 남길 것인가 - 사후 검토의 액션 아이템          (LOG 07 · 08)
+
+로그가 답하는 질문과 답하지 못하는 질문을 구분해 보고서에 적습니다
+  "로그에 따르면 03:12:44 에 결제 서비스가 card_declined 를 반환했다"        ← 로그가 답함
+  "그 원인은 카드사 응답 지연이었다"                                          ← 로그만으로는 추정. 근거 출처를 따로
+
+한 줄 규칙
+  ★ 로그는 증언입니다. 증언은 교차 검증되기 전까지 사실이 아닙니다.</code></pre>
+    <div class="note tip" style="margin-bottom:0">
+      <b>이 탭을 한 문장으로</b> — 로그는 <b>추가만 되는 순서 있는 기록</b>이고, 그 단순함 덕분에 원자성 · 복제 · 합의 · 재생 · 무결성이 전부
+      한 자료구조 위에 올라갑니다. 다만 로그는 <b>적힌 것</b>이지 일어난 것이 아니므로, 마지막 판단은 언제나 사람이
+      <b>두 번째 출처와 맞춰 보고</b> 내립니다. <b>🕸️ 분산 · 동시성</b> 과 <b>🏛️ 소프트웨어 공학</b> 의 사후 검토 절로 이어집니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 로그는 <b>적힌 것</b>이지 일어난 것이 아닙니다. 없는 줄은 없는 일이 아니고(침묵), 있는 줄이 사실이 아닐 수 있으며(거짓 신호),
+    순서는 주지만 <b>인과는 주지 않습니다</b>. 부재를 신호로 바꾸고(하트비트), 결과가 확정된 뒤에 적고,
+    <b>독립적인 두 번째 출처</b>와 맞춰 볼 때만 로그는 이해가 됩니다.</div>
+</section>
+
+</div><!-- /pane-log -->

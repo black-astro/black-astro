@@ -136,8 +136,8 @@ export const guides: Guide[] = [
       'WebRTC · OSR',
     ],
     stats: [
-      { value: '18', label: '주제 탭' },
-      { value: '271', label: '섹션' },
+      { value: '19', label: '주제 탭' },
+      { value: '283', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -280,8 +280,8 @@ export const guides: Guide[] = [
       'C ABI · unsafe',
     ],
     stats: [
-      { value: '15', label: '주제 탭' },
-      { value: '174', label: '섹션' },
+      { value: '16', label: '주제 탭' },
+      { value: '186', label: '섹션' },
       { value: '5', label: '실전 · 모듈 탭' },
     ],
   },
@@ -309,8 +309,8 @@ export const guides: Guide[] = [
       '분산 · 동시성',
     ],
     stats: [
-      { value: '13', label: '주제 탭' },
-      { value: '186', label: '섹션' },
+      { value: '14', label: '주제 탭' },
+      { value: '198', label: '섹션' },
       { value: '0', label: '언어 종속' },
     ],
   },
