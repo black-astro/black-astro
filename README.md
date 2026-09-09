@@ -5,7 +5,7 @@
 <div align="center">
 
 <!-- 헤더 — 자체 SVG. 외부 렌더러는 GitHub 프록시에서 글자가 날아가 직접 그린다 -->
-<img src="assets/badges/header.svg" alt="black_astro — Backend Engineer · Java · Spring · 전자고지 · 대용량 발송/배치 5년차 백엔드"/>
+<img src="assets/badges/header.svg?v=2" alt="black_astro — Backend Engineer · Java · Spring · 전자고지 · 대용량 발송/배치 5년차 백엔드"/>
 
 <br/>
 
