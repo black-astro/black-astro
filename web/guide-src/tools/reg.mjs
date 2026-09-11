@@ -81,15 +81,23 @@ if (!append) {
   if (!s.includes(`data-t="${T}"`)) {
     let n = 0;
     if (M.after === '^') {
-      const insFirst = (containerSel, txt) => {
-        const ci = s.indexOf(containerSel);
-        const fb = s.indexOf('<button class=', ci);
-        const ls = s.lastIndexOf('\n', fb) + 1;
-        const ind = s.slice(ls, fb);
-        s = s.slice(0, ls) + ind + mk(txt) + '\n' + s.slice(ls);
-      };
-      insFirst('<div class="tabrow"', labelTxt);
-      insFirst('<div class="tabsl"', M.short);
+      s = s.replace(/^(\s*)<button class="[^"]*" data-t="[a-z-]+"[^\n]*<\/button>\n/gm, (m, ind) => (n++ === 0 ? ind + mk(labelTxt) + '\n' + m : (n === 2 ? ind + mk(M.short) + '\n' + m : m)));
+      // 위 로직: 첫 줄(tabrow 첫 버튼) 앞, 그리고 tabsl 첫 버튼 앞. tabsl 첫 버튼은 n 이 tabrow 버튼 수+1 이므로 별도 처리
+      if (n < 2) throw new Error('tab buttons not found');
+      // tabsl 첫 버튼 앞에 삽입
+      const ti = s.indexOf('<div class="tabsl"');
+      const fb = s.indexOf('<button class=', ti);
+      const lineStart = s.lastIndexOf('\n', fb) + 1;
+      const ind = s.slice(lineStart, fb);
+      s = s.slice(0, lineStart) + ind + mk(M.short) + '\n' + s.slice(lineStart);
+      // 첫 replace 가 tabsl 에도 넣었을 수 있으므로 중복 제거 (n===2 분기)
+      const dupRe = new RegExp(`(\\s*<button class="${M.cls}" data-t="${T}"[^\\n]*\\n)(\\s*<button class="${M.cls}" data-t="${T}"[^\\n]*\\n)`);
+      s = s.replace(dupRe, '$1');
+      // tabrow 에 두 번 들어간 경우 정리
+      const rowS = s.indexOf('<div class="tabrow"'), rowE = s.indexOf('</div>', rowS);
+      let row = s.slice(rowS, rowE);
+      const cnt = (row.match(new RegExp(`data-t="${T}"`, 'g')) || []).length;
+      if (cnt > 1) { let seen = 0; row = row.replace(new RegExp(`\\s*<button class="${M.cls}" data-t="${T}"[^\\n]*`, 'g'), m => (seen++ === 0 ? m : '')); s = s.slice(0, rowS) + row + s.slice(rowE); }
     } else {
       const re = new RegExp(`^(\\s*)<button class="[^"]*" data-t="${M.after}"[^\\n]*<\\/button>\\n`, 'gm');
       s = s.replace(re, (m, ind) => m + ind + mk(n++ === 0 ? labelTxt : M.short) + '\n');

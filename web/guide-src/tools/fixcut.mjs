@@ -16,7 +16,8 @@ function fixFile(file) {
     }
     const need = Math.ceil(maxY + 8);
     if (need > h) {
-      out = out.replace(svg, svg.replace(`viewBox="0 0 ${w} ${h}"`, `viewBox="0 0 ${w} ${need}"`));
+      out = out.replace(`<svg viewBox="0 0 ${w} ${h}"` + svg.slice(svg.indexOf('"', svg.indexOf('viewBox="') + 9) + 1, svg.indexOf('>') + 1),
+                        `<svg viewBox="0 0 ${w} ${need}"` + svg.slice(svg.indexOf('"', svg.indexOf('viewBox="') + 9) + 1, svg.indexOf('>') + 1));
       n++;
     }
   }

@@ -30,6 +30,7 @@ node guide-src/tools/fixcut.mjs guide-src/<가이드>/parts/panes
 | `CUT` | 마지막 baseline 보다 viewBox 높이가 작아 잘림 (fixcut 으로 일괄 보정) |
 
 세로쓰기(writing-mode)는 건너뛰고, text-anchor 는 start·middle·end 셋 다 계산합니다.
+세로쓰기(writing-mode)는 건너뛰고, text-anchor 는 start·middle·end 셋 다 계산합니다.
 글자 폭은 **한글/CJK = font-size × 0.95 · 그 밖 = × 0.60** 으로 추정합니다.
 이 계수는 **브라우저 실측을 통과한 기존 다이어그램들을 기준선으로 역산**한 값입니다
 (db·server·java 가 0건이 되는 지점). 실측이 아니라 근사이므로 **±5px 안쪽 차이는 못 잡습니다** —
@@ -122,3 +123,16 @@ node guide-src/tools/chartcand.mjs --all      # 조건을 넓혀서
 같은 단위의 서로 다른 수치가 3개 이상인데 차트 어휘를 안 쓴 그림을 찾습니다.
 대개는 축·눈금을 붙이고 `.bx`→`.bar`, `.ln`→`.ax`/`.gr`, `.ann`→`.tk` 로 바꾸는 것으로 충분합니다.
 자세한 것은 `guide-src/DIAGRAM-MODELS.md`.
+
+## ④ CUT 자동 보정 — fixcut
+
+```bash
+node guide-src/tools/fixcut.mjs guide-src/<가이드>/parts/panes   # 폴더 또는 파일
+```
+
+`.diag` SVG 의 viewBox 높이를 **"마지막 baseline + 8"** 이상으로 올려 줍니다
+(DIAGRAM-STYLE §5). 다이어그램을 새로 넣은 뒤 svgcheck 로 CUT 을 확인하는 대신
+이것을 먼저 한 번 돌리면 높이 손보는 왕복이 사라집니다.
+
+**높이만 건드립니다** — 좌표·문구는 그대로입니다. OVER/BOX/LAP 은 여전히 svgcheck 로 잡고,
+넘침은 문구를 줄여서 해결하세요.
