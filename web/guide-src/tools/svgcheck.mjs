@@ -4,6 +4,7 @@
 //  · LAP  : 같은 줄(baseline 차 3 이하)에서 가로로 겹치는 글자
 //  · CUT  : 마지막 baseline + 8 보다 viewBox 높이가 작은 경우
 // (writing-mode 로 세로로 쓴 글자는 가로 폭 추정이 맞지 않으므로 건너뛴다)
+// (writing-mode 로 세로로 쓴 글자는 가로 폭 추정이 맞지 않으므로 건너뛴다)
 // 글자폭: 한글/CJK = fs × 1.10 · 그 밖 = fs × 0.60  (기존 232개로 보정)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,6 +41,7 @@ export function checkFile(file, onlyIds) {
       const texts = [];
       for (const t of svg.matchAll(/<text([^>]*)>([\s\S]*?)<\/text>/g)) {
         const a = t[1];
+        if (/writing-mode/.test(a)) continue;   // 세로쓰기 — 가로 폭 추정이 통하지 않음
         if (/writing-mode/.test(a)) continue;   // 세로쓰기 — 가로 폭 추정이 통하지 않음
         const raw = t[2].replace(/<[^>]+>/g, '')
           .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').trim();
