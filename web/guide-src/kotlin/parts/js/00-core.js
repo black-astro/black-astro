@@ -623,21 +623,50 @@ function goSec(id){
      ScrollToOptions 의 behavior:"auto" 는 "CSS 값을 따른다"는 뜻이라
      smooth 가 걸린 상태에선 매 프레임 애니메이션이 재시작돼 제자리에 머문다. */
   html.style.scrollBehavior = "auto";
-  let n = 0, last = -1;
+
+  /* 사용자가 직접 스크롤하면 보정을 멈춘다 — 끝까지 붙잡고 있으면 휠이 먹지 않는다 */
+  const INPUT = ["wheel", "touchstart", "keydown", "mousedown"];
+  const quit = () => { if (my === goSecRun){ goSecRun++; done(); } };
+  const unhook = () => INPUT.forEach(t => removeEventListener(t, quit, true));
+  INPUT.forEach(t => addEventListener(t, quit, {capture:true, passive:true}));
+
+  let ended = false;
   const done = () => {
+    if (ended) return;
+    ended = true;
+    unhook();
     html.style.scrollBehavior = "";     // 스타일시트의 smooth 로 복귀
+    /* 누른 목차를 직접 켠다. 스크롤 스파이는 '띠에 새로 들어온' 섹션만 켜므로
+       보정 도중 이전 섹션이 먼저 켜지면 그대로 남거나,
+       문서 끝의 짧은 섹션은 띠까지 올라오지 못해 앞 섹션이 켜진 채로 남았다. */
+    document.querySelectorAll('nav.side a[href^="#"]').forEach(a =>
+      a.classList.toggle("on", a.getAttribute("href") === "#" + id));
     revealIn();
   };
+  /* ★ 한두 프레임 제자리라고 끝내지 않는다.
+     section.sec 는 content-visibility:auto 라 처음 보는 섹션은 900px 자리만 차지하다가,
+     화면 근처로 오면 한두 프레임 '뒤에' 실제 높이로 렌더된다.
+     바로 위 섹션이 늦게 커지면 목표가 1~3천 px 아래로 밀려,
+     예전(2프레임 안정 = 끝)에는 앞 섹션 한가운데에 멈추고 목차도 앞 섹션이 켜졌다.
+     (처음 여는 탭에서 무작위로 누르면 3번 중 1번꼴로 재현됐다)
+     → 10프레임 연속 제자리일 때만 끝낸다. 문서 끝이라 더 못 내려가는 자리는 max 로 자른다. */
+  let n = 0, calm = 0;
   const fix = () => {
-    if (my !== goSecRun) return;                 // 더 최신 요청이 들어옴 → 중단
-    const y = Math.max(0, Math.round(el.getBoundingClientRect().top + window.scrollY - pad));
-    if (n++ > 14 || (Math.abs(y - Math.round(window.scrollY)) < 2 && y === last)){ done(); return; }
-    last = y;
-    window.scrollTo(0, y);
+    if (my !== goSecRun){ unhook(); return; }    // 더 최신 요청이 들어옴 → 중단
+    const max = html.scrollHeight - innerHeight;
+    const y = Math.max(0, Math.min(max,
+      Math.round(el.getBoundingClientRect().top + window.scrollY - pad)));
+    if (Math.abs(y - Math.round(window.scrollY)) < 2){
+      if (++calm >= 10){ done(); return; }
+    } else {
+      calm = 0;
+      window.scrollTo(0, y);
+    }
+    if (++n > 150){ done(); return; }            // 약 2.5초 — 계속 흔들리면 포기
     requestAnimationFrame(fix);
   };
   fix();
-  setTimeout(() => { if (my === goSecRun) done(); }, 900);   // rAF 가 멈춘 경우의 안전핀
+  setTimeout(() => { if (my === goSecRun) done(); }, 3000);   // rAF 가 멈춘 경우의 안전핀
 }
 document.addEventListener("click", e => {
   const a = e.target.closest('a[href^="#"]');
