@@ -182,7 +182,7 @@
     const more = Q("nav.side .navmore");
     if (more && !more.closest("details")){
       const GUIDES = [["java","☕","Java"],["kotlin","🟠","Kotlin"],["python","🐍","Python"],["js-ts","🟨","JS · TS"],
-        ["csharp","🟣","C# · Unity"],["cpp","🔵","C++"],["rust","🦀","Rust"],["db","🗄️","DB"],["server","🌐","서버기술"],["cs","🎓","CS 기술"]];
+        ["csharp","🟣","C# · Unity"],["cpp","🔵","C++"],["c","🔌","C · 임베디드"],["rust","🦀","Rust"],["db","🗄️","DB"],["server","🌐","서버기술"],["cs","🎓","CS 기술"]];
       const titles = {};
       QA("a", more).forEach(a => { const m = a.getAttribute("href").match(/([\w-]+)-web/); if (m) titles[m[1]] = a.title; });
       more.innerHTML = "";
@@ -491,7 +491,7 @@
     };
     // "다른 언어 → 이 가이드의 언어"일 때만 — 대안끼리(C# P/Invoke · Go cgo)나 FFI 양쪽(Rust 쪽 · C# 쪽) 비교는 바뀜이 아니다
     const HOME = { java:["java"], kotlin:["kotlin"], python:["python"], "js-ts":["javascript","typescript"],
-      csharp:["csharp"], cpp:["cpp","c"], rust:["rust"] }[GUIDE] || [];
+      csharp:["csharp"], cpp:["cpp","c"], c:["c"], rust:["rust"] }[GUIDE] || [];
     const ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>';
     QA("main .pane .vs, main .pane .grid2").forEach(box => {
       const kids = [...box.children].filter(c => !c.classList.contains("lx-arrow"));

@@ -257,6 +257,34 @@ export const guides: Guide[] = [
     ],
   },
   {
+    key: 'c',
+    label: 'C · Embedded Guide',
+    emoji: '🔌',
+    href: `${import.meta.env.BASE_URL}c-web/`,
+    title: 'C · 임베디드 가이드 — C 기초 · AVR · STM32 · FreeRTOS · 대규모 펌웨어 구조 (별도 페이지)',
+    heading: 'C · 임베디드 Visual Guide',
+    desc:
+      'C 언어를 기초부터 다지고 그대로 마이크로컨트롤러까지 내려가는 가이드입니다. ' +
+      '포인터·메모리·미정의 동작과 POSIX 시스템 프로그래밍, 전기 기초와 레지스터·인터럽트·부팅 과정, ' +
+      'ATmega328P(AVR)와 STM32(Cortex-M) 펌웨어, UART·I2C·SPI·CAN 드라이버, FreeRTOS, ' +
+      '커진 C 코드베이스의 모듈·레이어·빌드 구조, 디버깅·단위 테스트, 부트로더·OTA·양산까지 이어집니다.',
+    tags: [
+      'C17 · C23',
+      '포인터 · 메모리',
+      '레지스터 · 인터럽트',
+      'AVR · ATmega328P',
+      'STM32 · HAL · DMA',
+      'FreeRTOS',
+      '대규모 C 구조',
+      '부트로더 · OTA',
+    ],
+    stats: [
+      { value: '2', label: '주제 탭' },
+      { value: '26', label: '섹션' },
+      { value: '4', label: 'MCU · 하드웨어 탭' },
+    ],
+  },
+  {
     key: 'rust',
     label: 'Rust Guide',
     emoji: '🦀',

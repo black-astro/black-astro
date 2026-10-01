@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const ROOT = 'D:/gibis/workTool/astro/black-astro/web/guide-src';
 const targets = process.argv.slice(2);
-const guides = targets.length ? targets : ['cs', 'server', 'db', 'csharp', 'python', 'js-ts', 'java', 'kotlin', 'cpp', 'rust'];
+const guides = targets.length ? targets : ['cs', 'server', 'db', 'csharp', 'python', 'js-ts', 'java', 'kotlin', 'cpp', 'c', 'rust'];
 const OK_TAGS = new Set(['span', '/span', 'b', '/b', 'i', '/i', 'code', '/code', 'em', '/em', 'u', '/u', 'br']);
 let bad = 0;
 

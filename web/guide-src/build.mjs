@@ -37,6 +37,7 @@ const GUIDES = [
   { name: 'server', out: 'server-web', label: '🌐 서버기술' },
   { name: 'csharp', out: 'csharp-web', label: '🟣 C# · Unity' },
   { name: 'cpp', out: 'cpp-web', label: '🔵 C++' },
+  { name: 'c', out: 'c-web', label: '🔌 C · 임베디드' },
   { name: 'rust', out: 'rust-web', label: '🦀 Rust' },
   { name: 'cs', out: 'cs-web', label: '🎓 CS 기술' },
 ]

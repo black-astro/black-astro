@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const SRC = path.join(HERE, '..')
-const GUIDES = ['cpp', 'server', 'csharp', 'js-ts', 'python', 'rust', 'cs', 'java', 'kotlin', 'db']
+const GUIDES = ['cpp', 'c', 'server', 'csharp', 'js-ts', 'python', 'rust', 'cs', 'java', 'kotlin', 'db']
 
 // 이미 차트·모델 어휘를 쓴 그림은 손댈 필요가 없다
 const CHART = /class="[^"]*\b(bar|li|area|band|cel|ring|dot|ax|s1|s2|s3|s4|chev|dia|nd|life|lane|actv)\b/
