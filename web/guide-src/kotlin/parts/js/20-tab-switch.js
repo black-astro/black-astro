@@ -50,6 +50,7 @@ const TAB_LABEL = {
   tool:"🧰 실전 도구",
   setup:"🧰 설치 · 환경 세팅",
   ktor:"🚀 Ktor 서버",
+  qa:"🧪 테스트 · 로깅 · 운영",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -91,6 +92,7 @@ const SEC_LV = {
              to09:"b",to10:"i",to11:"b",to12:"a",to13:"b",to14:"i",to15:"a",to16:"b",
   /* setup */ st01:"b", st02:"b", st03:"b", st04:"b", st05:"i", st06:"b", st07:"i", st08:"i", st09:"i", st10:"a", st11:"i",
   /* ktor */ kt01:"b", kt02:"b", kt03:"b", kt04:"i", kt05:"i", kt06:"i", kt07:"i", kt08:"i", kt09:"i", kt10:"i", kt11:"a", kt12:"i", kt13:"a",
+  /* qa */ qa01:"b", qa02:"i", qa03:"i", qa04:"i", qa05:"b", qa06:"i", qa07:"i", qa08:"a", qa09:"i", qa10:"i", qa11:"i", qa12:"a", qa13:"i",
 };
 
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 한 줄 번역 (항상 표시) */
@@ -327,6 +329,20 @@ const EZ = {
   kt11:"스프링의 Actuator 같은 게 없어서 <b>필요한 것을 직접 붙입니다</b>. 대신 무엇이 켜져 있는지 전부 내 눈에 보여요.",
   kt12:"Shadow 플러그인으로 <b>jar 하나</b>를 만들면 배포 끝이에요. 도커로 감싸면 이미지가 스프링보다 <b>눈에 띄게 작습니다</b>.",
   kt13:"지금까지 배운 것을 <b>하나로 잇습니다</b> — 라우팅·플러그인·Exposed·Redis·JWT·WebSocket·테스트·도커까지 실제로 도는 서비스 한 벌이에요.",
+  /* ── qa ── */
+  qa01:"테스트는 <b>싼 것(단위)을 많이, 비싼 것(통합 · E2E)을 조금</b> 둡니다. 도구는 JUnit 5 + MockK 로 시작하면 됩니다.",
+  qa02:"MockK 는 <b>every 로 규칙을 녹화하고, returns 로 답을 정하고, verify 로 확인</b>합니다. suspend 면 앞에 co 를 붙입니다.",
+  qa03:"runTest 는 <b>가짜 시계</b>로 돌아서 delay 10분도 즉시 지나갑니다. 디스패처를 주입받게 만들면 이 시계를 코드 전체가 함께 씁니다.",
+  qa04:"필요한 층만 띄우는 <b>슬라이스</b>, 진짜 DB 를 띄우는 <b>Testcontainers</b>, 컨텍스트를 재사용하는 <b>캐시</b> — 이 셋이 통합 테스트의 속도와 신뢰를 정합니다.",
+  qa05:"로거는 <b>KotlinLogging.logger {}</b> 한 줄, 메시지는 <b>람다</b>로 씁니다. 꺼진 로그는 비용이 0 이 되고, JSON 으로 남기면 필드로 검색됩니다.",
+  qa06:"MDC 는 <b>스레드</b>에 붙고 코루틴은 <b>스레드를 옮겨 다니므로</b>, MDCContext 를 실어 보내야 traceId 가 따라옵니다.",
+  qa07:"suspend 코드에서 <b>runCatching · catch(Exception) 은 취소까지 삼킵니다</b>. 취소는 다시 던지고, 업무 실패는 sealed 로 표현합니다.",
+  qa08:"우상향은 <b>누수</b>, 안 내려오는 CPU 는 <b>취소 무시</b>, 계단 지연은 <b>IO 고갈</b>, 천장에 붙은 스레드는 <b>runBlocking</b> 입니다.",
+  qa09:"코틀린의 null 안전은 <b>자바 경계 · 리플렉션 · !! · lateinit</b> 네 곳에서 뚫립니다. 경계에서 nullable 로 받고, !! 대신 이유를 남기세요.",
+  qa10:"새 필드에는 <b>기본값</b>, kotlinx 에는 <b>ignoreUnknownKeys</b>, 이름 변경은 <b>두 번의 배포</b>로 — 그래야 옛 클라이언트가 안 깨집니다.",
+  qa11:"규칙은 사람이 아니라 <b>빌드가 기억</b>하게 합니다 — 버전은 카탈로그, 코드 규칙은 detekt · ktlint, 확인은 CI 가 맡습니다.",
+  qa12:"성능은 <b>추측하지 말고 JMH 로 잽니다</b>. 끊기는 연산이면 Sequence, 원시 값 대량이면 IntArray, value class 는 제네릭 자리에서 박싱됩니다.",
+  qa13:"리뷰어의 눈은 <b>자주 나오고 치명적인 함정</b>에 쓰고, 나머지는 도구에 맡깁니다. 체크리스트는 사고마다 한 줄씩 자랍니다.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -576,6 +592,20 @@ const CAP = {
   kt11:["e","구조화 로그·요청 ID·메트릭·헬스 체크·정상 종료를 갖춰 운영 중인 서비스를 관측 가능한 상태로 만듭니다."],
   kt12:["p","fat jar·Docker 이미지를 만들어 배포하고 시작 시간·메모리를 실측해, 컨테이너 자원 설정의 근거를 갖습니다."],
   kt13:["e","Ktor 로 실서비스 한 벌을 처음부터 끝까지 만들고, 같은 기능의 Spring Boot 버전과 시작 시간·메모리를 비교해 선택을 설명합니다."],
+  /* ── qa ── */
+  qa01:["p","기능마다 어느 층(단위 · 슬라이스 · 통합 · E2E)에 테스트를 둘지 정하고, Gradle 태그로 빠른 테스트와 느린 테스트를 나눠 돌릴 수 있습니다"],
+  qa02:["p","MockK 로 suspend · object · 확장 함수까지 목을 만들고, slot 으로 인자를 캡처하며, spyk · relaxed 를 언제 피해야 하는지 판단할 수 있습니다"],
+  qa03:["p","재시도 · 디바운스 · 타임아웃이 있는 suspend 함수와 Flow 를 가상 시간과 Turbine 으로 빠르고 결정적으로 테스트할 수 있습니다"],
+  qa04:["p","@WebMvcTest · @DataJpaTest · @SpringBootTest 를 목적에 맞게 고르고, @ServiceConnection 으로 PostgreSQL · Kafka 컨테이너를 붙이며, 컨텍스트 캐시 미스를 줄여 스위트 시간을 관리할 수 있습니다"],
+  qa05:["p","kotlin-logging + Logback 으로 지연 평가 로그와 JSON 구조 로그를 남기고, 레벨 정책과 런타임 레벨 변경, 예외 로그 한 번 원칙을 팀 규칙으로 세울 수 있습니다"],
+  qa06:["p","코루틴 · WebFlux · Ktor 서비스에서 요청 하나의 로그가 traceId 로 끝까지 이어지도록 MDCContext 와 Micrometer 컨텍스트 전파를 설정할 수 있습니다"],
+  qa07:["p","취소를 삼키지 않는 예외 처리 유틸을 만들고, 예외 · Result · sealed 중 알맞은 실패 표현을 고르며, SupervisorJob 과 CoroutineExceptionHandler 를 올바른 자리에 둘 수 있습니다"],
+  qa08:["p","GlobalScope 누수 · 취소 무시 루프 · Dispatchers.IO 고갈 · 서버 스레드 runBlocking 을 지표 모양으로 알아보고, 코루틴 덤프와 BlockHound 로 원인을 찾아 고칠 수 있습니다"],
+  qa09:["p","플랫폼 타입 · !! · lateinit · JPA 엔티티에서 생기는 NPE 를 미리 막는 팀 규칙과 엔티티 설계(id · equals · DB 제약 일치)를 적용할 수 있습니다"],
+  qa10:["p","kotlinx.serialization 과 Jackson 의 호환성 설정을 맞추고, 골든 파일 계약 테스트와 배포 순서로 필드 추가 · 삭제 · 이름 변경을 무중단으로 진행할 수 있습니다"],
+  qa11:["p","버전 카탈로그 · 빌드 캐시 · configuration cache · detekt 베이스라인 · ktlint 를 갖춘 Gradle 빌드와 10분 안에 끝나는 GitHub Actions 파이프라인을 구성할 수 있습니다"],
+  qa12:["p","kotlinx-benchmark 로 JMH 벤치마크를 올바르게 작성하고, List · Sequence · 배열 · value class 선택을 측정값에 근거해 판단할 수 있습니다"],
+  qa13:["p","이 탭의 함정을 나쁜 예 / 좋은 예로 리뷰에서 걸러 내고, PR 템플릿과 배포 전 체크리스트를 팀에 바로 도입할 수 있습니다"],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 */

@@ -55,8 +55,8 @@ export const guides: Guide[] = [
       'CPython 내부',
     ],
     stats: [
-      { value: '19', label: '주제 탭' },
-      { value: '292', label: '섹션' },
+      { value: '20', label: '주제 탭' },
+      { value: '305', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -82,8 +82,8 @@ export const guides: Guide[] = [
       'JVM 내부',
     ],
     stats: [
-      { value: '17', label: '주제 탭' },
-      { value: '258', label: '섹션' },
+      { value: '18', label: '주제 탭' },
+      { value: '271', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -109,8 +109,8 @@ export const guides: Guide[] = [
       'K2 내부',
     ],
     stats: [
-      { value: '14', label: '주제 탭' },
-      { value: '219', label: '섹션' },
+      { value: '15', label: '주제 탭' },
+      { value: '232', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },
@@ -136,8 +136,8 @@ export const guides: Guide[] = [
       'WebRTC · OSR',
     ],
     stats: [
-      { value: '19', label: '주제 탭' },
-      { value: '283', label: '섹션' },
+      { value: '20', label: '주제 탭' },
+      { value: '296', label: '섹션' },
       { value: '0', label: '설치 필요' },
     ],
   },

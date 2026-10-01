@@ -136,3 +136,24 @@ node guide-src/tools/fixcut.mjs guide-src/<가이드>/parts/panes   # 폴더 또
 
 **높이만 건드립니다** — 좌표·문구는 그대로입니다. OVER/BOX/LAP 은 여전히 svgcheck 로 잡고,
 넘침은 문구를 줄여서 해결하세요.
+
+## ⑦ 정렬·모션 검사 — diagaudit (2026-10 추가)
+
+```bash
+node guide-src/tools/diagaudit.mjs guide-src/<가이드>/parts/panes            # 결함 목록
+node guide-src/tools/diagaudit.mjs guide-src/<가이드>/parts/panes --summary  # 탭별 "박스형 %"
+```
+
+svgcheck 가 "글자가 넘치나"를 본다면 이것은 "줄이 맞나 · 움직임이 선을 따라가나"를 봅니다.
+
+| 코드 | 뜻 |
+|---|---|
+| `TIP` | 화살표(.ar*) 끝이 박스 안에 묻힘 — 화살촉이 박스 밑에 깔림 |
+| `PK` | 흐름 점(.pk) 경로의 시작/끝이 그려진 어떤 선 위에도 없음 — 점이 허공을 달림 |
+| `CTR` | 박스 안 가운데 정렬 글자가 박스 중심에서 3px 넘게 비켜 있음 |
+| `ROW` | 같은 크기 나란한 박스의 y 가 1~3px 어긋남 |
+| `GAP` | 한 줄 박스 3개 이상의 간격이 3~12px 차이로 들쭉날쭉 |
+
+`--summary` 의 **박스형 %** 는 "사각 박스 + 직선"만으로 그린 그림의 비율입니다. 한 탭에서 60% 를 넘으면
+같은 모양 반복입니다 — DIAGRAM-MODELS.md 에서 더 맞는 모델로 바꾸세요.
+위치가 곧 값인 그림(간트·막대)은 `<svg data-align="free">` 로 ROW/GAP/CTR 검사를 건너뜁니다.

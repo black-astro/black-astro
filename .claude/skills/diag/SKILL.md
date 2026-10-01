@@ -109,4 +109,5 @@ document.querySelectorAll('.pane, .sec').forEach(e=>e.style.contentVisibility='v
 - 계열 색 `.s1~.s4`(청록→호박→보라→초록, 순서 고정)는 **구분**용이고
   `.bx-ok`/`.bx-warn` 같은 **의미** 색과 섞지 않는다. 색만으로 구분하게 두지 말고 라벨·범례를 함께 둔다.
 
-검사: `npm run check:lab` (모델 30종) · `svgcheck.mjs` (pane) · 브라우저 실측(§6).
+검사: `npm run check:lab` (모델 30종) · `svgcheck.mjs` (pane, 넘침) · `diagaudit.mjs` (pane, 정렬·흐름 점·박스형 %) · 브라우저 실측(§6).
+박스형 % 가 60 을 넘는 탭은 같은 모양 반복입니다 — `diagaudit.mjs <폴더> --summary` 로 확인.

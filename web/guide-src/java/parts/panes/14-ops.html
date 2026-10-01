@@ -1,0 +1,3096 @@
+<!-- ============================================================
+     장애 대응 · 운영 PANE
+     ============================================================ -->
+<div class="pane" id="pane-ops">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> 런북 · 스레드 덤프 · 힙 덤프 · GC 로그 · HikariCP · 타임아웃 · Actuator · 무중단 배포 · JFR · 포스트모템 · Java 25 LTS · Spring Boot 3.x</div>
+  <h1>새벽 세 시에<br>알람이 울려도<br>당황하지 않기</h1>
+  <p class="tx">
+    장애 당번 첫날에 필요한 것은 JVM 내부 이론이 아닙니다.
+    <b>무엇을 먼저 보고, 어떤 명령을 치고, 언제 롤백을 누를지</b>입니다.
+    이 탭은 <b>신입부터 3년차까지가 내일 아침 운영 당번을 서도 될 만큼</b>
+    실무 절차만 모았습니다 — 첫 5분 런북, 스레드 덤프·힙 덤프·GC 로그 읽는 법,
+    커넥션 풀과 타임아웃 값을 정하는 계산, 알람 10개, 무중단 배포, 프로파일링, 그리고 포스트모템까지.
+    이론은 한 줄로 다른 탭에 넘기고, 여기서는 <b>복사해서 바로 치는 명령과 실제 설정값, 판단 기준</b>에 집중합니다.
+    <b>이 탭을 마치면 "어디부터 봐야 하지?"가 "이 순서로 보면 된다"로 바뀝니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>13</b><span>SECTIONS</span></div>
+    <div><b>Java 25</b><span>· Boot 3.x 기준</span></div>
+    <div><b>5분</b><span>첫 대응 런북</span></div>
+    <div><b>21</b><span>시각화</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== op01 ==================== -->
+<section class="sec" id="op01">
+  <div class="sec-head rv">
+    <span class="no">OPS 01</span>
+    <h2>장애 첫 5분 런북 — <span class="t">분류하고, 보고, 멈춘다</span></h2>
+    <p class="lead">
+      장애 대응에서 가장 비싼 실수는 <b>원인부터 찾으려는 것</b>입니다.
+      첫 5분의 목표는 원인이 아니라 <b>증상 분류 → 최근 변경 확인 → 출혈을 멈출지 결정</b>입니다.
+      이 순서를 몸에 익혀 두면 알람이 울렸을 때 손이 먼저 움직입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 334" role="img" aria-label="장애 첫 5분 결정 흐름도. 알림을 받으면 먼저 증상을 느림, 에러, 죽음 세 가지로 나눈다. 느림은 p99 지연이 평소의 세 배 이상, 에러는 5xx 비율 1퍼센트 이상, 죽음은 헬스체크 실패나 재시작이다. 세 경우 모두 다음 질문은 최근 30분 안에 배포나 설정 변경이 있었는가이며, 예라면 원인 분석보다 롤백을 먼저 한다. 아니오라면 증상별로 첫 확인 대상이 다르다. 느림은 스레드 덤프 세 번과 커넥션 풀 지표, 에러는 가장 많은 에러 로그 한 종류와 의존 서비스 상태, 죽음은 종료 사유인 OOMKilled 나 exit 137 을 확인한다">
+      <text x="16" y="18" class="lbl">첫 5분 결정 흐름 — 질문은 마름모 하나, 답은 상자</text>
+
+      <rect class="bx bx-fw" x="230" y="30" width="220" height="40"/>
+      <text x="340" y="48" class="val" text-anchor="middle">알림 · 증상 접수</text>
+      <text x="340" y="62" class="ann" text-anchor="middle">p99 · 5xx · 헬스체크</text>
+
+      <path class="ln ar" d="M290 74 L134 92"/>
+      <path class="ln ar" d="M340 74 L340 92"/>
+      <path class="ln ar" d="M390 74 L546 92"/>
+
+      <rect class="bx" x="30" y="96" width="180" height="40"/>
+      <text x="120" y="114" class="val" text-anchor="middle">느림</text>
+      <text x="120" y="128" class="ann" text-anchor="middle">p99 이 평소의 3배 이상</text>
+      <rect class="bx" x="250" y="96" width="180" height="40"/>
+      <text x="340" y="114" class="val" text-anchor="middle">에러</text>
+      <text x="340" y="128" class="ann" text-anchor="middle">5xx 비율 1% 이상</text>
+      <rect class="bx" x="470" y="96" width="180" height="40"/>
+      <text x="560" y="114" class="val" text-anchor="middle">죽음</text>
+      <text x="560" y="128" class="ann" text-anchor="middle">헬스체크 실패 · 재시작</text>
+
+      <path class="ln" d="M120 140 L120 148 M560 140 L560 148 M120 148 L560 148"/>
+      <path class="ln ar" d="M340 148 L340 162"/>
+
+      <polygon class="dia" points="340,166 470,196 340,226 210,196"/>
+      <text x="340" y="193" class="ann" text-anchor="middle">최근 30분 안에</text>
+      <text x="340" y="205" class="ann" text-anchor="middle">배포 · 설정 변경?</text>
+
+      <path class="ln ar" d="M474 196 L520 196"/>
+      <text x="482" y="190" class="ann">예</text>
+      <rect class="bx bx-ok" x="524" y="176" width="140" height="40"/>
+      <text x="594" y="194" class="val ok-t" text-anchor="middle">롤백 먼저</text>
+      <text x="594" y="208" class="ann" text-anchor="middle">원인 분석은 그다음</text>
+
+      <path class="ln" d="M340 230 L340 242 M120 242 L560 242"/>
+      <text x="348" y="238" class="ann">아니오</text>
+      <path class="ln ar" d="M120 242 L120 254"/>
+      <path class="ln ar" d="M340 242 L340 254"/>
+      <path class="ln ar" d="M560 242 L560 254"/>
+
+      <rect class="bx" x="30" y="258" width="180" height="46"/>
+      <text x="120" y="278" class="val" text-anchor="middle">스레드 덤프 3회</text>
+      <text x="120" y="294" class="ann" text-anchor="middle">풀 대기 · GC 시간 함께</text>
+      <rect class="bx" x="250" y="258" width="180" height="46"/>
+      <text x="340" y="278" class="val" text-anchor="middle">최다 에러 1종</text>
+      <text x="340" y="294" class="ann" text-anchor="middle">의존 서비스 상태부터</text>
+      <rect class="bx" x="470" y="258" width="180" height="46"/>
+      <text x="560" y="278" class="val" text-anchor="middle">종료 사유 확인</text>
+      <text x="560" y="294" class="ann" text-anchor="middle">OOMKilled · exit 137</text>
+
+      <text x="16" y="326" class="lbl">롤백은 원인 분석이 아니라 출혈을 멈추는 조치입니다 — 멈추고 나서 봅니다</text>
+    </svg>
+    <div class="cap">결정 흐름 — <b>"최근에 뭘 바꿨나"</b>가 증상과 상관없이 두 번째 질문입니다. 장애의 대부분은 변경에서 옵니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">증상 세 갈래 — 무엇을 먼저 보나</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:18%">증상</th><th>먼저 볼 지표</th><th>첫 명령 · 화면</th></tr>
+        <tr><td><b>느림</b></td><td>p99 지연 · 스레드 busy · <b>Hikari pending</b> · GC 시간</td><td><code>jcmd 1 Thread.print</code> 3회 (OPS 02)</td></tr>
+        <tr><td><b>에러</b></td><td>5xx 비율 · 상태코드 분포 · 의존 서비스 에러율</td><td>최근 10분 에러 로그 <b>종류별 개수</b></td></tr>
+        <tr><td><b>죽음</b></td><td>재시작 횟수 · 컨테이너 메모리 · 헬스체크</td><td><code>kubectl describe pod</code> 의 <b>Last State</b></td></tr>
+        <tr><td>일부만</td><td>인스턴스별 · 엔드포인트별 분해</td><td>한 대만 이상하면 <b>그 한 대를 빼기</b></td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>"전체냐 일부냐"를 먼저 가르세요</b> — 인스턴스 한 대만 이상하면 그 대를 로드밸런서에서 빼는 것으로 끝납니다.
+        특정 API 하나만 느리면 그 API 의 의존성(DB 쿼리 · 외부 호출)만 보면 됩니다.
+        <b>전체가 동시에 이상하면 공통 의존성</b>(DB · 캐시 · 네트워크 · 최근 배포)입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">첫 2분에 치는 명령 — 그대로 복사</h4>
+      <pre class="code" data-lang="bash"><code># ① 파드 상태 — 재시작(RESTARTS)이 늘고 있나
+kubectl -n shop get pods -l app=order-api -o wide
+
+# ② 죽었다면 왜 죽었나 — Last State 의 Reason · Exit Code
+kubectl -n shop describe pod order-api-7d9f8-x2k4p | grep -A6 "Last State"
+#   Reason: OOMKilled   Exit Code: 137   → OPS 03 · OPS 04
+
+# ③ 최근 변경 — 언제 무엇이 배포됐나
+kubectl -n shop rollout history deployment/order-api
+git log --since="2 hours ago" --oneline origin/main
+
+# ④ 최근 10분 에러를 '종류별'로 세기 (가장 많은 것 하나만 봅니다)
+kubectl -n shop logs -l app=order-api --since=10m --tail=-1 \
+  | grep -E "ERROR|Exception" \
+  | sed -E 's/[0-9]{4}-[0-9-]+T?[0-9:.]+//' \
+  | sort | uniq -c | sort -rn | head -5
+
+# ⑤ 앱이 스스로 아프다고 하나
+curl -s localhost:8081/actuator/health | jq .</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>로그를 위에서부터 읽지 마세요</b> — 10분이면 수만 줄입니다.
+        <b>종류별 개수</b>로 압축하면 "Connection is not available 4,812건" 같은 한 줄이 나옵니다.
+        그 한 줄이 다음에 볼 곳을 알려 줍니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">5분을 쪼개 쓰기</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 246" role="img" aria-label="장애 첫 5분의 타임박스 간트 차트. 0분에서 30초까지 상황을 선언하고 대응 채널을 연다. 30초부터 2분까지 대시보드 네 개를 확인하고, 같은 시간대에 최근 변경을 확인한다. 1분 30초부터 3분까지 최다 에러 로그를 본다. 3분부터 4분까지 롤백, 격리, 계속 관찰 중 하나를 결정하며 4분이 결정 마감이다. 공지와 기록은 처음부터 끝까지 계속된다">
+      <text x="16" y="18" class="lbl">첫 5분 타임박스 — 세로 붉은 선(4분)까지 결정을 내립니다</text>
+
+      <path class="gr" d="M150 30 L150 200"/>
+      <path class="gr" d="M248 30 L248 200"/>
+      <path class="gr" d="M346 30 L346 200"/>
+      <path class="gr" d="M444 30 L444 200"/>
+      <path class="gr" d="M542 30 L542 200"/>
+      <path class="gr" d="M640 30 L640 200"/>
+      <path class="ax" d="M150 200 L640 200"/>
+
+      <text x="150" y="216" class="tk" text-anchor="middle">0:00</text>
+      <text x="248" y="216" class="tk" text-anchor="middle">1:00</text>
+      <text x="346" y="216" class="tk" text-anchor="middle">2:00</text>
+      <text x="444" y="216" class="tk" text-anchor="middle">3:00</text>
+      <text x="542" y="216" class="tk" text-anchor="middle">4:00</text>
+      <text x="640" y="216" class="tk" text-anchor="middle">5:00</text>
+
+      <text x="16" y="50" class="ann">상황 선언 · 채널</text>
+      <rect class="bar" x="150" y="38" width="49" height="16"/>
+
+      <text x="16" y="76" class="ann">대시보드 4종</text>
+      <rect class="bar" x="199" y="64" width="147" height="16"/>
+
+      <text x="16" y="102" class="ann">최근 변경 확인</text>
+      <rect class="bar" x="199" y="90" width="98" height="16"/>
+
+      <text x="16" y="128" class="ann">최다 에러 1종</text>
+      <rect class="bar" x="297" y="116" width="147" height="16"/>
+
+      <text x="16" y="154" class="ann ok-t">결정 · 실행</text>
+      <rect class="bar" x="444" y="142" width="98" height="16" style="fill:rgba(52,211,153,.22);stroke:rgba(52,211,153,.55)"/>
+      <text x="493" y="135" class="ann ok-t" text-anchor="middle">롤백 · 격리 · 관찰</text>
+
+      <text x="16" y="180" class="ann">공지 · 기록</text>
+      <rect class="bar-mut" x="150" y="168" width="490" height="16"/>
+      <text x="395" y="180" class="ann" text-anchor="middle">5분마다 한 줄 — 무엇을 봤고 다음에 무엇을 할지</text>
+
+      <path d="M542 30 L542 200" style="stroke:#fb7185;stroke-width:1.4;stroke-dasharray:4 3;fill:none"/>
+      <text x="550" y="50" class="ann rs-t">결정 마감</text>
+
+      <text x="16" y="238" class="lbl">5분 안에 원인을 못 찾는 건 정상입니다 — 결정을 못 내리는 것이 문제입니다</text>
+    </svg>
+    <div class="cap">간트 — <b>보기와 결정 사이에 마감선</b>을 그어 두면 "조금만 더 보자"로 30분이 사라지지 않습니다.</div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">롤백 판단 기준 — 셋 중 하나면 누릅니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">조건</th><th>판단</th></tr>
+        <tr><td>증상 시작이 <b>배포 직후 30분 안</b></td><td><b>즉시 롤백</b> — 확인은 롤백 후</td></tr>
+        <tr><td>에러율이 <b>SLO 의 10배</b>를 5분째 유지</td><td><b>롤백 또는 기능 플래그 끄기</b></td></tr>
+        <tr><td>원인 가설이 <b>15분째 없음</b></td><td>되돌릴 수 있는 것부터 되돌림</td></tr>
+        <tr><td>DB 스키마 변경이 포함된 배포</td><td><b>롤백 전 호환성 확인</b> (OPS 09)</td></tr>
+        <tr><td>외부 서비스(PG · 통신사) 장애</td><td>롤백 무의미 — <b>서킷 · 폴백</b> 확인</td></tr>
+        <tr><td>트래픽 폭증(마케팅 · 크롤러)</td><td>스케일 아웃 · <b>레이트 리밋</b></td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>롤백을 망설이게 만드는 말</b> — "이번 배포랑은 상관없을 것 같은데요".
+        상관없으면 롤백해도 증상이 그대로일 테니 <b>그걸로 가설 하나가 지워집니다</b>.
+        롤백은 <b>손해가 거의 없는 실험</b>입니다. 단, 스키마가 바뀐 배포는 예외입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">되돌리는 명령 — 미리 손에 익혀 두기</h4>
+      <pre class="code" data-lang="bash"><code># 쿠버네티스 — 직전 리비전으로
+kubectl -n shop rollout undo deployment/order-api
+kubectl -n shop rollout status deployment/order-api --timeout=5m
+
+# 특정 리비전으로 (history 에서 번호 확인)
+kubectl -n shop rollout undo deployment/order-api --to-revision=41
+
+# Helm 으로 배포했다면
+helm -n shop history order-api
+helm -n shop rollback order-api 41 --wait
+
+# 한 대만 이상할 때 — 지우지 말고 '트래픽에서만' 빼기
+#   (레이블을 바꾸면 Service 셀렉터에서 빠지고, 파드는 남아 덤프를 뜰 수 있음)
+kubectl -n shop label pod order-api-7d9f8-x2k4p app=order-api-quarantine --overwrite
+
+# 기능 플래그로 끄기 (예: Unleash · LaunchDarkly · 사내 설정 서버)
+curl -X POST https://flags.internal/api/features/new-checkout/off</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>격리 후 덤프를 뜨세요</b> — 문제 파드를 바로 지우면 증거가 사라집니다.
+        레이블을 바꿔 <b>트래픽에서만 빼 두면</b>, Deployment 가 새 파드를 하나 더 띄우고
+        격리된 파드에서는 천천히 스레드 덤프 · 힙 덤프를 뜰 수 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">말로 상황을 공유하는 법</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">상황 선언 · 5분 업데이트 템플릿</h4>
+      <pre class="code" data-lang="text"><code>[장애 선언] 02:14  SEV2  주문 API 지연
+- 증상: /orders p99 4.8s (평소 0.3s), 5xx 2.1%
+- 영향: 주문 생성 일부 실패, 조회는 정상
+- 담당(IC): 김OO  /  기록: 이OO
+- 다음 업데이트: 02:20
+
+[업데이트] 02:20
+- 확인한 것: 01:58 배포 v2.41 (쿠폰 조회 쿼리 변경)
+- 가설: 새 쿼리가 풀을 오래 점유 → Hikari pending 40+
+- 조치: 02:21 v2.40 으로 롤백 시작
+- 다음 업데이트: 02:26
+
+[복구] 02:29
+- p99 0.31s, 5xx 0% — 10분 관찰 후 종료 선언
+- 후속: 포스트모템 담당 김OO, 목요일까지 (OPS 13)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">역할 나누기 — 혼자 다 하지 않기</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">역할</th><th>하는 일</th><th>하지 않는 일</th></tr>
+        <tr><td><b>지휘(IC)</b></td><td>결정 · 우선순위 · 사람 부르기</td><td>직접 디버깅</td></tr>
+        <tr><td><b>조사</b></td><td>덤프 · 로그 · 쿼리 확인</td><td>공지 작성</td></tr>
+        <tr><td><b>기록 · 공지</b></td><td>타임라인 · 5분 업데이트</td><td>원인 추측 공유</td></tr>
+        <tr><td>당번 혼자일 때</td><td><b>5분 안에 한 명 더 부르기</b></td><td>"조금만 더 보고" 버티기</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>SEV 기준은 팀마다 문서로</b> — 예: SEV1 = 핵심 기능 전면 불가 · 매출 직접 손실,
+        SEV2 = 일부 사용자·기능 장애, SEV3 = 우회 가능한 불편.
+        <b>SEV 를 정하는 데 1분 이상 쓰지 마세요</b> — 애매하면 높게 잡고 나중에 낮춥니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 첫 5분은 <b>분류(느림·에러·죽음) → 최근 변경 확인 → 롤백 여부 결정</b>입니다.
+    원인은 그다음입니다. 로그는 <b>종류별 개수</b>로 압축해서 보고, 이상한 인스턴스는 지우지 말고
+    <b>트래픽에서만 빼서</b> 증거를 남기세요.</div>
+</section>
+
+
+<!-- ==================== op02 ==================== -->
+<section class="sec" id="op02">
+  <div class="sec-head rv">
+    <span class="no">OPS 02</span>
+    <h2>스레드 덤프 읽기 — <span class="t">"지금 다들 뭐 하고 있나"</span>를 찍은 사진</h2>
+    <p class="lead">
+      "서버가 느리다"의 절반 이상은 스레드 덤프 세 장이면 원인이 보입니다.
+      덤프는 <b>모든 스레드가 그 순간 서 있는 코드 줄</b>을 찍은 사진입니다.
+      한 장은 우연일 수 있으니 <b>5초 간격으로 세 장</b> 떠서, 계속 같은 곳에 몰려 있는 스레드를 찾습니다.
+      스레드 상태와 락의 원리는 <b>🧬 고급 탭 ADV 04~05</b>에 있고, 여기서는 읽는 법만 다룹니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 298" role="img" aria-label="스레드 덤프 한 항목을 부분별로 설명한 해부도. 위쪽 상자는 BLOCKED 상태의 톰캣 요청 스레드 exec-17 로, 첫 줄의 이름은 소속 풀을, 두 번째 줄은 상태를, 세 번째 줄의 맨 위 프레임은 지금 멈춘 코드 줄을, 네 번째 줄의 waiting to lock 은 기다리는 락의 주소를 보여 준다. 아래쪽 상자는 같은 주소를 locked 로 쥐고 있는 exec-3 스레드로, 상태는 RUNNABLE 이지만 실제로는 소켓 읽기, 즉 외부 호출 응답을 기다리고 있다. 락을 쥔 채 외부 호출을 하는 것이 원인이다">
+      <text x="16" y="18" class="lbl">덤프 한 항목 뜯어 보기 — 두 상자의 같은 주소가 연결 고리입니다</text>
+
+      <rect class="bx bx-fw" x="16" y="34" width="400" height="130"/>
+      <text x="28" y="56" class="tk">"http-nio-8080-exec-17" #63 cpu=1532ms</text>
+      <text x="28" y="80" class="tk">java.lang.Thread.State: BLOCKED</text>
+      <text x="28" y="104" class="tk">at c.s.StockService.decrease(:42)</text>
+      <text x="28" y="128" class="tk">- waiting to lock &lt;0x6c1a2b3c8&gt;</text>
+      <text x="28" y="152" class="tk">at c.s.OrderService.place(:88)</text>
+      <rect class="hl" x="24" y="116" width="196" height="17"/>
+
+      <path class="lead-ln" d="M420 52 L446 52"/>
+      <text x="452" y="56" class="ann">① 이름 — exec 는 톰캣 요청 스레드</text>
+      <path class="lead-ln" d="M420 76 L446 76"/>
+      <text x="452" y="80" class="ann rs-t">② BLOCKED = 락 입구에서 대기</text>
+      <path class="lead-ln" d="M420 100 L446 100"/>
+      <text x="452" y="104" class="ann">③ 맨 위 프레임 = 지금 멈춘 줄</text>
+      <path class="lead-ln" d="M420 124 L446 124"/>
+      <text x="452" y="128" class="ann">④ 이 주소를 쥔 스레드를 찾기</text>
+      <path class="lead-ln" d="M420 148 L446 148"/>
+      <text x="452" y="152" class="ann">⑤ 아래로 갈수록 호출한 쪽</text>
+
+      <rect class="bx" x="16" y="180" width="400" height="88"/>
+      <text x="28" y="200" class="tk">"http-nio-8080-exec-3" #49 cpu=88ms</text>
+      <text x="28" y="220" class="tk">java.lang.Thread.State: RUNNABLE</text>
+      <text x="28" y="240" class="tk">at sun.nio.ch.NioSocketImpl.read</text>
+      <text x="28" y="260" class="tk">- locked &lt;0x6c1a2b3c8&gt;</text>
+      <rect class="hl" x="24" y="248" width="148" height="17"/>
+
+      <path class="lead-ln" d="M420 216 L446 216"/>
+      <text x="452" y="220" class="ann am-t">RUNNABLE 이지만 소켓 응답 대기</text>
+      <path class="lead-ln" d="M420 256 L446 256"/>
+      <text x="452" y="260" class="ann rs-t">⑥ 같은 주소 — 락 쥐고 외부 호출</text>
+
+      <text x="16" y="290" class="lbl">RUNNABLE 이 "일하는 중"은 아닙니다 — 네이티브 I/O 대기도 RUNNABLE 로 찍힙니다</text>
+    </svg>
+    <div class="cap">해부도 — <b>waiting to lock 의 주소로 locked 를 검색</b>하면 범인 스레드가 나옵니다. 덤프 읽기의 절반이 이 검색입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">덤프 뜨기 — 5초 간격 3장</h4>
+      <pre class="code" data-lang="bash"><code># 자바 프로세스 찾기 (JDK 의 jps 또는 ps)
+jps -l
+#   1 /app/app.jar          ← 컨테이너 안에서는 보통 PID 1
+
+# 권장: jcmd (-l 은 jstack 과 같은 락 정보 포함)
+for i in 1 2 3; do
+  jcmd 1 Thread.print -l &gt; /tmp/td-$(date +%H%M%S).txt
+  sleep 5
+done
+
+# 쿠버네티스 — 파드 안에서 떠서 로컬로 가져오기
+kubectl -n shop exec order-api-7d9f8-x2k4p -- \
+  sh -c 'for i in 1 2 3; do jcmd 1 Thread.print -l &gt; /tmp/td-$i.txt; sleep 5; done'
+kubectl -n shop cp order-api-7d9f8-x2k4p:/tmp/td-1.txt ./td-1.txt
+
+# JDK 가 없는 이미지(JRE 만)라면 — 표준 출력으로 덤프가 찍힙니다
+kill -3 1          # SIGQUIT. 프로세스는 죽지 않습니다
+kubectl -n shop logs order-api-7d9f8-x2k4p --since=1m &gt; td.txt</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>JRE 이미지에는 jcmd 가 없습니다</b> — <code>eclipse-temurin:25-jre</code> 같은 이미지라면
+        <code>kill -3</code> 이 유일한 길입니다. 운영 이미지를 만들 때 <b>jcmd 를 쓸 수 있게 할지</b>
+        미리 정해 두세요(JDK 이미지 또는 <code>jlink</code> 에 <code>jdk.jcmd</code> 모듈 포함).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">상태 여섯 개 — 덤프에서의 뜻</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">상태</th><th>덤프에서의 뜻</th><th>많으면</th></tr>
+        <tr><td><b>RUNNABLE</b></td><td>CPU 를 쓰거나 <b>소켓 · 파일 I/O 대기</b></td><td>맨 위 프레임이 read 면 외부가 느림</td></tr>
+        <tr><td><b>BLOCKED</b></td><td><code>synchronized</code> 입구 대기</td><td><b>락 경합</b> — 쥔 쪽을 찾기</td></tr>
+        <tr><td><b>WAITING</b></td><td><code>park</code> · <code>wait()</code> 무기한</td><td>풀 대기면 <b>자원 고갈</b></td></tr>
+        <tr><td>TIMED_WAITING</td><td><code>sleep</code> · 시간 제한 대기</td><td>대개 유휴 스레드 — 정상</td></tr>
+        <tr><td>NEW · TERMINATED</td><td>덤프에 거의 안 나옴</td><td>—</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># 상태별 개수 — 첫 10초 요약
+grep -o "Thread.State: [A-Z_]*" td-1.txt | sort | uniq -c | sort -rn
+#   182 Thread.State: TIMED_WAITING
+#    41 Thread.State: WAITING
+#    15 Thread.State: BLOCKED     ← 평소 0 이면 이상
+#    12 Thread.State: RUNNABLE</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">세 장을 겹쳐 보는 법</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 246" role="img" aria-label="세 번 뜬 스레드 덤프에서 맨 위 프레임별 스레드 수를 비교한 히트맵. HikariPool getConnection 에서 기다리는 스레드가 38, 41, 40 개로 세 장 모두 가장 많아 커넥션 풀 고갈로 판정된다. StockService decrease 에서 BLOCKED 된 스레드는 12, 15, 14 개로 락 경합이다. NioSocketImpl read 는 6, 5, 7 개로 외부 호출 대기이고, Jackson 직렬화는 2, 0, 1 개로 일시적이다. 유휴 풀 스레드는 140 개 안팎으로 정상이다">
+      <text x="16" y="18" class="lbl">맨 위 프레임별 스레드 수 — 세 장 모두 진한 줄이 병목입니다</text>
+
+      <text x="275" y="42" class="tk" text-anchor="middle">덤프 1</text>
+      <text x="369" y="42" class="tk" text-anchor="middle">+5초</text>
+      <text x="463" y="42" class="tk" text-anchor="middle">+10초</text>
+      <text x="520" y="42" class="tk">판정</text>
+
+      <text x="16" y="68" class="ann">HikariPool.getConnection</text>
+      <rect class="cel h5" x="230" y="50" width="90" height="28"/><text x="275" y="68" class="tk" text-anchor="middle">38</text>
+      <rect class="cel h5" x="324" y="50" width="90" height="28"/><text x="369" y="68" class="tk" text-anchor="middle">41</text>
+      <rect class="cel h5" x="418" y="50" width="90" height="28"/><text x="463" y="68" class="tk" text-anchor="middle">40</text>
+      <text x="520" y="68" class="ann rs-t">풀 고갈 → OPS 05</text>
+
+      <text x="16" y="100" class="ann">StockService.decrease</text>
+      <rect class="cel h3" x="230" y="82" width="90" height="28"/><text x="275" y="100" class="tk" text-anchor="middle">12</text>
+      <rect class="cel h3" x="324" y="82" width="90" height="28"/><text x="369" y="100" class="tk" text-anchor="middle">15</text>
+      <rect class="cel h3" x="418" y="82" width="90" height="28"/><text x="463" y="100" class="tk" text-anchor="middle">14</text>
+      <text x="520" y="100" class="ann am-t">락 경합</text>
+
+      <text x="16" y="132" class="ann">NioSocketImpl.read</text>
+      <rect class="cel h2" x="230" y="114" width="90" height="28"/><text x="275" y="132" class="tk" text-anchor="middle">6</text>
+      <rect class="cel h2" x="324" y="114" width="90" height="28"/><text x="369" y="132" class="tk" text-anchor="middle">5</text>
+      <rect class="cel h2" x="418" y="114" width="90" height="28"/><text x="463" y="132" class="tk" text-anchor="middle">7</text>
+      <text x="520" y="132" class="ann">외부 호출 대기</text>
+
+      <text x="16" y="164" class="ann">Jackson 직렬화</text>
+      <rect class="cel h1" x="230" y="146" width="90" height="28"/><text x="275" y="164" class="tk" text-anchor="middle">2</text>
+      <rect class="cel h0" x="324" y="146" width="90" height="28"/><text x="369" y="164" class="tk" text-anchor="middle">0</text>
+      <rect class="cel h1" x="418" y="146" width="90" height="28"/><text x="463" y="164" class="tk" text-anchor="middle">1</text>
+      <text x="520" y="164" class="ann">일시적 — 무시</text>
+
+      <text x="16" y="196" class="ann">유휴 (park · poll)</text>
+      <rect class="cel h0" x="230" y="178" width="90" height="28"/><text x="275" y="196" class="tk" text-anchor="middle">142</text>
+      <rect class="cel h0" x="324" y="178" width="90" height="28"/><text x="369" y="196" class="tk" text-anchor="middle">139</text>
+      <rect class="cel h0" x="418" y="178" width="90" height="28"/><text x="463" y="196" class="tk" text-anchor="middle">138</text>
+      <text x="520" y="196" class="ann ok-t">정상 — 일감 없음</text>
+
+      <text x="16" y="222" class="lbl">유휴 스레드는 숫자가 커도 칠하지 않습니다 — 색은 "기다리는 일감"에만 씁니다</text>
+      <text x="16" y="238" class="lbl">한 장에만 있는 줄은 우연, 세 장 모두 있는 줄이 병목입니다</text>
+    </svg>
+    <div class="cap">히트맵 — <b>세 장 내내 진한 줄</b>이 답입니다. 이 표는 아래 한 줄짜리 명령으로 직접 만들 수 있습니다.</div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">맨 위 프레임 집계 — 위 히트맵을 만드는 명령</h4>
+      <pre class="code" data-lang="bash"><code># 각 스레드의 '상태 다음 첫 번째 at 줄'만 뽑아 세기
+for f in td-*.txt; do
+  echo "== $f"
+  awk '/java.lang.Thread.State/{getline; print}' "$f" \
+    | sed -E 's/^\s+at //; s/\(.*//' \
+    | sort | uniq -c | sort -rn | head -8
+done
+
+# 우리 회사 코드가 걸린 프레임만 (패키지로 거르기)
+grep -h "at com.shop" td-*.txt | sort | uniq -c | sort -rn | head</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>도구도 있습니다</b> — IntelliJ 의 <b>Analyze Stack Trace or Thread Dump</b>,
+        웹 도구 <b>fastThread</b>, JDK Mission Control 이 같은 집계를 그림으로 보여 줍니다.
+        단, 운영 덤프에는 <b>URL 파라미터 · 사용자 정보</b>가 섞일 수 있으니
+        외부 웹 도구에 올리기 전에 회사 정책을 확인하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">가상 스레드를 쓴다면 (Java 21+)</h4>
+      <pre class="code" data-lang="bash"><code># Thread.print 에는 '플랫폼 스레드'만 나옵니다.
+# 가상 스레드는 이 명령으로 — JSON 이 grep · jq 에 편합니다
+jcmd 1 Thread.dump_to_file -format=json /tmp/vt.json
+
+jq '.threadDump.threadContainers[]
+    | {container, n: (.threads | length)}' /tmp/vt.json
+
+# Java 21~23: synchronized 안에서 블로킹하면 캐리어 스레드가 묶임(pinning)
+#   진단: -Djdk.tracePinnedThreads=full
+# Java 24+ : JEP 491 로 synchronized pinning 은 대부분 해소</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>가상 스레드에서는 "스레드 수"가 증상이 아닙니다</b> — 수만 개가 정상입니다.
+        대신 <b>커넥션 풀 · 세마포어 같은 유한 자원 앞의 대기</b>가 병목으로 드러납니다.
+        자세한 함정은 <b>🧵 최신 Java 탭</b>에 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">자주 만나는 패턴 세 가지</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 데드락 — JVM 이 직접 알려 줍니다</h4>
+      <pre class="code" data-lang="text"><code>Found one Java-level deadlock:
+=============================
+"pool-3-thread-2":
+  waiting to lock monitor 0x00007f1c2c004e28 (object 0x000000071a2b3c40, a com.shop.Account),
+  which is held by "pool-3-thread-1"
+"pool-3-thread-1":
+  waiting to lock monitor 0x00007f1c2c007a18 (object 0x000000071a2b3c58, a com.shop.Account),
+  which is held by "pool-3-thread-2"
+
+Java stack information for the threads listed above:
+"pool-3-thread-2":
+    at com.shop.TransferService.transfer(TransferService.java:31)
+    - waiting to lock &lt;0x000000071a2b3c40&gt; (a com.shop.Account)
+    - locked &lt;0x000000071a2b3c58&gt; (a com.shop.Account)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>찾는 법</b> — 덤프 맨 끝에서 <code>Found one Java-level deadlock</code> 을 검색합니다.
+        <b>고치는 법</b> — 두 락을 <b>항상 같은 순서</b>(예: 계좌 ID 오름차순)로 잡습니다.
+        <code>ReentrantLock</code> 은 이 탐지에 <b>안 걸릴 수 있으니</b> <code>tryLock(timeout)</code> 을 쓰세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 락 경합 · ③ 풀 고갈 — 발췌로 구분</h4>
+      <pre class="code" data-lang="text"><code>② 락 경합 — BLOCKED 가 한 줄에 몰림, 쥔 쪽은 '느린 일' 중
+"http-nio-8080-exec-17" ... BLOCKED (on object monitor)
+    at com.shop.StockService.decrease(StockService.java:42)
+    - waiting to lock &lt;0x00000006c1a2b3c8&gt; (a java.lang.Object)
+→ 쥔 쪽(locked &lt;0x...3c8&gt;)이 synchronized 안에서 DB · HTTP 호출 중
+
+③ 풀 고갈 — WAITING(parking), 맨 위가 Hikari 의 대기열
+"http-nio-8080-exec-88" ... WAITING (parking)
+    at jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for &lt;0x...&gt; (a java.util.concurrent.SynchronousQueue$TransferStack)
+    at com.zaxxer.hikari.util.ConcurrentBag.borrow(ConcurrentBag.java:...)
+    at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:...)
+→ 커넥션을 쥔 스레드들이 무엇을 하는지(트랜잭션 안 외부 호출?)가 진짜 원인</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>풀 고갈에서 흔한 오해</b> — "대기 스레드가 40개니까 풀을 40으로 늘리자".
+        진짜 질문은 <b>커넥션을 가진 10개가 왜 안 돌려주나</b>입니다.
+        덤프에서 <b>getConnection 이 아닌 스레드 중 JDBC 를 쥔 것</b>들의 맨 위 프레임을 보세요(OPS 05).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 덤프는 <b>5초 간격 세 장</b>, 읽을 때는 <b>상태별 개수 → 맨 위 프레임 집계 → 락 주소 추적</b> 순서입니다.
+    BLOCKED 가 몰리면 락 경합, Hikari 에서 WAITING 이 몰리면 풀 고갈,
+    맨 위가 socket read 인 RUNNABLE 이 몰리면 <b>외부가 느린 것</b>입니다.</div>
+</section>
+
+
+<!-- ==================== op03 ==================== -->
+<section class="sec" id="op03">
+  <div class="sec-head rv">
+    <span class="no">OPS 03</span>
+    <h2>힙 덤프와 OOM — <span class="t">메시지가 이미 칸 이름을 알려 줍니다</span></h2>
+    <p class="lead">
+      <code>OutOfMemoryError</code> 는 한 종류가 아닙니다. <b>어느 메모리 칸이 찼는지</b>가 메시지에 그대로 찍히고,
+      칸마다 원인과 처방이 완전히 다릅니다. 그리고 힙이 원인이라면 <b>죽는 순간의 힙 덤프</b>가 유일한 증거입니다 —
+      그래서 덤프 옵션은 장애 <b>전에</b> 켜 둬야 합니다. 힙 구조와 MAT 의 원리는 <b>🔬 전문가 탭 DEEP 07</b>에 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="컨테이너 메모리 2 기가바이트 안에서 자바 프로세스가 쓰는 칸들의 배치와 각 칸이 찼을 때의 OOM 메시지. 가장 큰 칸은 힙으로 Xmx 로 정하며 넘치면 Java heap space 가 난다. 메타스페이스가 넘치면 Metaspace, 스레드 스택을 더 만들 수 없으면 unable to create native thread, 다이렉트 버퍼가 넘치면 Direct buffer memory 가 난다. 이 칸들의 합이 컨테이너 한도를 넘으면 JVM 은 메시지를 남기지 못하고 운영체제가 프로세스를 죽여 OOMKilled, exit 137 이 된다">
+      <text x="16" y="18" class="lbl">컨테이너 2 GiB 안의 칸들 — 폭은 대략의 비율, 아래는 그 칸이 찼을 때의 메시지</text>
+
+      <rect class="bx bx-fw" x="16" y="34" width="358" height="44" rx="3"/>
+      <text x="195" y="54" class="val" text-anchor="middle">힙 (-Xmx)</text>
+      <text x="195" y="68" class="ann" text-anchor="middle">1.2 GiB · 객체가 사는 곳</text>
+      <rect class="bx" x="376" y="34" width="62" height="44" rx="3"/>
+      <text x="407" y="54" class="ann" text-anchor="middle">Meta</text>
+      <text x="407" y="68" class="ann" text-anchor="middle">클래스</text>
+      <rect class="bx" x="440" y="34" width="62" height="44" rx="3"/>
+      <text x="471" y="54" class="ann" text-anchor="middle">스택</text>
+      <text x="471" y="68" class="ann" text-anchor="middle">1MB×N</text>
+      <rect class="bx" x="504" y="34" width="62" height="44" rx="3"/>
+      <text x="535" y="54" class="ann" text-anchor="middle">Direct</text>
+      <text x="535" y="68" class="ann" text-anchor="middle">NIO</text>
+      <rect class="bx bx-mut" x="568" y="34" width="96" height="44" rx="3"/>
+      <text x="616" y="54" class="ann" text-anchor="middle">코드 · GC</text>
+      <text x="616" y="68" class="ann" text-anchor="middle">기타 네이티브</text>
+
+      <path class="lead-ln" d="M535 82 L535 100"/>
+      <text x="535" y="110" class="ann">Direct buffer memory</text>
+      <path class="lead-ln" d="M471 82 L471 118"/>
+      <text x="471" y="128" class="ann">unable to create native thread</text>
+      <path class="lead-ln" d="M407 82 L407 136"/>
+      <text x="407" y="146" class="ann">Metaspace</text>
+      <path class="lead-ln" d="M195 82 L195 154"/>
+      <text x="195" y="164" class="ann rs-t">Java heap space · GC overhead limit exceeded</text>
+
+      <path class="brk" d="M16 182 L16 188 L664 188 L664 182"/>
+      <text x="340" y="204" class="ann rs-t" text-anchor="middle">합이 한도를 넘으면 → OOMKilled · exit 137 — JVM 은 아무 메시지도 못 남깁니다</text>
+
+      <text x="16" y="228" class="lbl">메시지에 칸 이름이 찍힙니다 — 원인 추측보다 메시지 한 줄을 먼저 읽으세요</text>
+    </svg>
+    <div class="cap">메모리 배치 — <b>힙만 메모리가 아닙니다</b>. Xmx 를 컨테이너 한도와 같게 잡으면 나머지 칸이 들어갈 자리가 없어 OOMKilled 가 납니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">OOM 다섯 종류 — 메시지별 첫 조치</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">메시지</th><th>흔한 원인</th><th>첫 조치</th></tr>
+        <tr><td><code>Java heap space</code></td><td>누수 · 한 번에 너무 많이 로드(전체 조회 · 엑셀)</td><td><b>힙 덤프 분석</b></td></tr>
+        <tr><td><code>GC overhead limit exceeded</code></td><td>힙이 거의 꽉 찬 채 GC 만 반복</td><td>위와 같음 — 사실상 같은 병</td></tr>
+        <tr><td><code>Metaspace</code></td><td>클래스 동적 생성 누수(프록시 · 스크립트 엔진 · 핫 리로드)</td><td><code>jcmd 1 VM.metaspace</code></td></tr>
+        <tr><td><code>unable to create native thread</code></td><td>스레드 무한 생성 · <code>ulimit -u</code> · pids 제한</td><td>스레드 덤프로 <b>풀 이름별 개수</b></td></tr>
+        <tr><td><code>Direct buffer memory</code></td><td>Netty · NIO 버퍼 해제 누락</td><td><code>-XX:NativeMemoryTracking</code></td></tr>
+        <tr><td><b>OOMKilled (137)</b></td><td>힙 외 메모리 합이 컨테이너 한도 초과</td><td><b>Xmx 비율 낮추기</b> (OPS 04)</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>OOMKilled 에는 힙 덤프가 없습니다</b> — 운영체제가 <code>SIGKILL</code> 로 죽였기 때문에
+        JVM 은 덤프를 쓸 기회가 없습니다. <b>"OOM 인데 덤프가 안 남았다"면 거의 이것</b>입니다.
+        <code>kubectl describe pod</code> 의 <code>Reason: OOMKilled</code> 로 확인합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">장애 전에 켜 둘 JVM 옵션 — 그대로 복사</h4>
+      <pre class="code" data-lang="bash"><code># Dockerfile 또는 Deployment 의 JAVA_TOOL_OPTIONS
+JAVA_TOOL_OPTIONS="\
+ -XX:MaxRAMPercentage=70.0 \
+ -XX:+HeapDumpOnOutOfMemoryError \
+ -XX:HeapDumpPath=/dumps \
+ -XX:+ExitOnOutOfMemoryError \
+ -XX:MaxMetaspaceSize=512m \
+ -XX:MaxDirectMemorySize=256m \
+ -XX:NativeMemoryTracking=summary \
+ -Xlog:gc*:file=/dumps/gc-%p.log:time,uptime,level,tags:filecount=5,filesize=20m"
+
+# HeapDumpPath 가 디렉터리면 java_pid&lt;PID&gt;.hprof 로 저장됩니다
+# /dumps 는 반드시 '파드가 죽어도 남는' 볼륨이어야 합니다</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">옵션</th><th>왜</th></tr>
+        <tr><td><code>HeapDumpOnOutOfMemoryError</code></td><td>죽는 순간 증거 확보</td></tr>
+        <tr><td><code>ExitOnOutOfMemoryError</code></td><td><b>반쯤 죽은 채 살아 있지 않게</b> — 재시작이 낫다</td></tr>
+        <tr><td><code>MaxMetaspaceSize</code></td><td>기본은 무제한 — 누수가 컨테이너를 죽임</td></tr>
+        <tr><td><code>NativeMemoryTracking</code></td><td>힙 밖 메모리를 칸별로 보기(약간의 비용)</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">누수인지 그냥 많이 쓰는 건지</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="12시간 동안 GC 직후 힙 사용률의 변화를 비교한 선 그래프. 정상 서비스는 GC 직후 사용률이 30퍼센트 안팎에서 평평하게 유지된다. 누수가 있는 서비스는 GC 직후 사용률이 30퍼센트에서 시작해 시간마다 계속 올라 12시간 뒤 97퍼센트에 도달하고 OOM 이 난다. 85퍼센트에 알람 기준선이 그어져 있어 누수 서비스는 약 10시간 시점에 알람이 울린다">
+      <text x="16" y="18" class="lbl">GC 직후 힙 사용률 12시간 — 톱니의 '바닥'이 오르면 누수입니다</text>
+
+      <path class="ax" d="M60 40 L60 190"/>
+      <path class="ax" d="M60 190 L648 190"/>
+      <path class="gr" d="M60 115 L648 115"/>
+      <path class="gr" d="M60 40 L648 40"/>
+      <text x="52" y="194" class="tk" text-anchor="end">0</text>
+      <text x="52" y="119" class="tk" text-anchor="end">50</text>
+      <text x="52" y="44" class="tk" text-anchor="end">100%</text>
+
+      <path class="li-t" d="M60 62 L648 62" style="stroke:#fbbf24"/>
+      <text x="64" y="57" class="ann am-t">GC 후 85% — 알람 기준</text>
+
+      <path class="li s1-l" style="stroke-width:2" d="M60 142 L109 137 L158 143 L207 139 L256 140 L305 142 L354 137 L403 140 L452 143 L501 139 L550 142 L599 140 L648 139"/>
+      <text x="470" y="164" class="ann s1-t">정상 — 바닥이 평평</text>
+
+      <path class="li s2-l" style="stroke-width:2" d="M60 145 L109 136 L158 128 L207 119 L256 112 L305 103 L354 95 L403 86 L452 79 L501 70 L550 62 L599 53 L648 45"/>
+      <circle class="dot" cx="648" cy="45" r="5" style="fill:#fb7185"/>
+      <text x="636" y="34" class="ann rs-t" text-anchor="end">OOM</text>
+      <text x="110" y="104" class="ann s2-t">누수 — GC 를 해도 바닥이 오름</text>
+
+      <text x="60" y="206" class="tk" text-anchor="middle">0h</text>
+      <text x="207" y="206" class="tk" text-anchor="middle">3h</text>
+      <text x="354" y="206" class="tk" text-anchor="middle">6h</text>
+      <text x="501" y="206" class="tk" text-anchor="middle">9h</text>
+      <text x="648" y="206" class="tk" text-anchor="middle">12h</text>
+
+      <text x="16" y="228" class="lbl">순간 사용률이 아니라 GC 직후 값을 봐야 합니다 — 순간값은 늘 톱니처럼 오르내립니다</text>
+    </svg>
+    <div class="cap">라인 — <b>GC 직후 값의 추세</b>가 누수 판별의 전부입니다. 평평하면 많이 쓰는 것이고, 오르면 새는 것입니다.</div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">살아 있는 프로세스에서 덤프 뜨기</h4>
+      <pre class="code" data-lang="bash"><code># ① 먼저 가볍게 — 클래스별 개수 · 크기 상위 (몇 초)
+jcmd 1 GC.class_histogram | head -20
+#  num   #instances    #bytes  class name
+#    1:    8123456  389925888  [B
+#    2:    8120004  194880096  java.lang.String
+#    3:    2030001   97440048  com.shop.order.OrderLine   ← 우리 클래스가 상위면 의심
+
+# ② 힙 덤프 (살아 있는 객체만 — 기본값)
+jcmd 1 GC.heap_dump /dumps/heap-$(date +%H%M).hprof
+#   -all 을 붙이면 도달 불가 객체까지 (더 큼)
+
+# ③ 가져오기 — 크기를 먼저 확인 (힙 크기와 비슷합니다)
+kubectl -n shop exec order-api-x2k4p -- ls -lh /dumps
+kubectl -n shop cp order-api-x2k4p:/dumps/heap-0214.hprof ./heap.hprof
+
+# 히스토그램을 10분 간격으로 두 번 떠서 비교하면
+# '계속 늘어나는 클래스'가 바로 보입니다</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>힙 덤프는 JVM 을 멈춥니다</b> — 힙 4 GiB 면 수 초~수십 초 동안 응답이 없습니다.
+        헬스체크가 실패해 <b>재시작되면서 덤프가 잘리는</b> 사고가 흔합니다.
+        <b>OPS 01 처럼 트래픽에서 빼고</b> 뜨거나, liveness 실패 허용치를 잠시 늘리세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Eclipse MAT — 이 순서로만 보세요</h4>
+      <pre class="code" data-lang="bash"><code># MAT 자체에 힙을 넉넉히 (덤프 크기의 1.5배 이상)
+#   MemoryAnalyzer.ini 의 -Xmx 를 8g 등으로 수정
+
+# 서버에서 GUI 없이 리포트만 뽑기 (zip 안에 HTML)
+./ParseHeapDump.sh heap.hprof org.eclipse.mat.api:suspects
+./ParseHeapDump.sh heap.hprof org.eclipse.mat.api:top_components</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:8%">#</th><th style="width:32%">화면</th><th>무엇을 보나</th></tr>
+        <tr><td>1</td><td><b>Leak Suspects</b></td><td>"한 객체가 힙의 72%를 잡고 있다" — 첫 가설</td></tr>
+        <tr><td>2</td><td><b>Dominator Tree</b></td><td><b>Retained Heap</b> 내림차순 맨 위 몇 개</td></tr>
+        <tr><td>3</td><td>Path to GC Roots</td><td>weak/soft 제외 — <b>누가 놓아주지 않나</b></td></tr>
+        <tr><td>4</td><td>Histogram</td><td>개수가 비정상인 우리 클래스</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Shallow vs Retained</b> — Shallow 는 그 객체 자체의 크기,
+        Retained 는 <b>그 객체가 사라지면 같이 풀리는 전체 크기</b>입니다.
+        <code>HashMap</code> 하나의 Shallow 는 48바이트지만 Retained 는 2 GiB 일 수 있습니다. <b>Retained 로 정렬하세요.</b>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">Dominator Tree 를 읽고 코드로 가기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실제로 이렇게 보입니다</h4>
+      <pre class="code" data-lang="text"><code>Class Name                                         Retained Heap   %
+-------------------------------------------------------------------------
+java.util.concurrent.ConcurrentHashMap @ 0x7a1..     1,512,330,112  71.8%
+'- table  java.util.concurrent.ConcurrentHashMap$Node[262144]
+   '- val  com.shop.coupon.CouponView                       5,912
+      '- items  java.util.ArrayList                            ...
+org.apache.tomcat.util.threads.TaskThread                 41,220,880   1.9%
+...
+Path to GC Roots (exclude weak/soft):
+  com.shop.coupon.CouponCache.CACHE   ← static 필드
+    '- class com.shop.coupon.CouponCache  (System Class Loader)
+
+→ 해석: static Map 캐시에 키가 계속 쌓이고 지워지지 않는다</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자주 나오는 누수 다섯 — 그리고 처방</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>❌ 크기 제한 없는 static 캐시</h5>
+          <pre class="code" data-lang="java"><code>static final Map&lt;String, CouponView&gt; CACHE =
+        new ConcurrentHashMap&lt;&gt;();
+CACHE.put(userId + ":" + couponId, view);   // 영원히 쌓임</code></pre>
+        </div>
+        <div class="good">
+          <h5>✅ 상한 · 만료가 있는 캐시</h5>
+          <pre class="code" data-lang="java"><code>Cache&lt;String, CouponView&gt; cache = Caffeine.newBuilder()
+        .maximumSize(50_000)
+        .expireAfterWrite(Duration.ofMinutes(10))
+        .recordStats()        // 히트율을 지표로
+        .build();</code></pre>
+        </div>
+      </div>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">누수 유형</th><th>처방</th></tr>
+        <tr><td><code>ThreadLocal</code> 미정리</td><td><code>finally { tl.remove(); }</code></td></tr>
+        <tr><td>무한 큐(<code>LinkedBlockingQueue()</code>)</td><td>용량 지정 + 거절 정책</td></tr>
+        <tr><td>JPA 배치에서 영속성 컨텍스트</td><td>N건마다 <code>flush()</code> · <code>clear()</code></td></tr>
+        <tr><td>리스너 · 콜백 등록만 하고 해제 안 함</td><td>등록 해제 · 약한 참조</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> OOM 은 <b>메시지가 칸 이름</b>입니다. <code>HeapDumpOnOutOfMemoryError</code> 와
+    <b>살아남는 덤프 경로</b>는 미리 켜 두고, 누수 판단은 <b>GC 직후 힙의 바닥 추세</b>로,
+    분석은 MAT 의 <b>Leak Suspects → Dominator Tree(Retained) → Path to GC Roots</b> 순서로 합니다.
+    덤프가 없으면 OOMKilled — 힙이 아니라 <b>컨테이너 한도</b> 문제입니다.</div>
+</section>
+
+
+<!-- ==================== op04 ==================== -->
+<section class="sec" id="op04">
+  <div class="sec-head rv">
+    <span class="no">OPS 04</span>
+    <h2>GC 로그 해석과 튜닝 — <span class="t">플래그보다 로그 한 줄</span>이 먼저</h2>
+    <p class="lead">
+      GC 튜닝의 90%는 <b>힙 크기를 맞게 주는 것</b>이고, 나머지 10%를 판단하려면 <b>GC 로그</b>가 있어야 합니다.
+      로그 없이 플래그를 바꾸는 것은 증상 없이 약을 바꾸는 것과 같습니다.
+      G1 · ZGC 의 내부 동작은 <b>🔬 전문가 탭 DEEP 06</b>, 운영 JVM 튜닝 전반은 <b>🧬 고급 탭 ADV 13</b>을 보세요.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg data-align="free" viewBox="0 0 680 254" role="img" aria-label="한 시간 동안의 GC 멈춤 시간을 점으로 찍은 산점도. 호박색 점인 G1 은 대부분 20에서 140 밀리초 사이에 흩어져 있고 목표선 200 밀리초 아래에 있지만, 50분 무렵 Full GC 한 번이 1.8초로 그래프 위로 튀어 나간다. 속이 빈 청록 점인 ZGC 는 모든 멈춤이 1 밀리초 미만이라 바닥에 붙어 있다. 평균이 아니라 튀는 점 하나가 장애를 만든다">
+      <text x="16" y="18" class="lbl">1시간 동안의 GC 멈춤 — 점 하나가 멈춤 한 번</text>
+
+      <path class="ax" d="M60 36 L60 190"/>
+      <path class="ax" d="M60 190 L648 190"/>
+      <path class="gr" d="M60 140 L648 140"/>
+      <path class="gr" d="M60 40 L648 40"/>
+      <text x="52" y="194" class="tk" text-anchor="end">0</text>
+      <text x="52" y="144" class="tk" text-anchor="end">100</text>
+      <text x="52" y="94" class="tk" text-anchor="end">200</text>
+      <text x="52" y="44" class="tk" text-anchor="end">300</text>
+      <text x="16" y="30" class="tk">ms</text>
+
+      <path class="li-t" d="M60 90 L648 90" style="stroke:#fbbf24"/>
+      <text x="64" y="85" class="ann am-t">G1 목표 200 ms (MaxGCPauseMillis)</text>
+
+      <circle class="dot" cx="109" cy="177" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="148" cy="170" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="197" cy="179" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="236" cy="160" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="276" cy="172" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="325" cy="150" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="364" cy="167" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="403" cy="130" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="452" cy="175" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="491" cy="142" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="530" cy="162" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="579" cy="120" r="4" style="fill:#fbbf24"/>
+      <circle class="dot" cx="619" cy="171" r="4" style="fill:#fbbf24"/>
+
+      <circle class="dot" cx="550" cy="42" r="5" style="fill:#fb7185"/>
+      <text x="540" y="46" class="ann rs-t" text-anchor="end">Full GC 1.8 s — 축 밖</text>
+
+      <circle class="dot-o" cx="84" cy="188" r="3"/>
+      <circle class="dot-o" cx="128" cy="188" r="3"/>
+      <circle class="dot-o" cx="172" cy="188" r="3"/>
+      <circle class="dot-o" cx="216" cy="188" r="3"/>
+      <circle class="dot-o" cx="260" cy="188" r="3"/>
+      <circle class="dot-o" cx="420" cy="188" r="3"/>
+      <circle class="dot-o" cx="470" cy="188" r="3"/>
+      <circle class="dot-o" cx="514" cy="188" r="3"/>
+      <circle class="dot-o" cx="562" cy="188" r="3"/>
+      <circle class="dot-o" cx="604" cy="188" r="3"/>
+      <text x="300" y="182" class="ann cy-t">ZGC — 전부 1 ms 미만</text>
+
+      <text x="60" y="204" class="tk" text-anchor="middle">0분</text>
+      <text x="354" y="204" class="tk" text-anchor="middle">30분</text>
+      <text x="648" y="204" class="tk" text-anchor="middle">60분</text>
+
+      <circle class="dot" cx="66" cy="222" r="4" style="fill:#fbbf24"/>
+      <text x="76" y="226" class="lg-t">G1 멈춤</text>
+      <circle class="dot-o" cx="156" cy="222" r="3"/>
+      <text x="166" y="226" class="lg-t">ZGC 멈춤</text>
+
+      <text x="16" y="246" class="lbl">평균 멈춤은 50 ms 라도 저 점 하나가 요청 수천 건을 타임아웃시킵니다</text>
+    </svg>
+    <div class="cap">산점도 — <b>튀는 점 하나</b>가 장애입니다. GC 로그를 보는 목적은 평균이 아니라 <b>최댓값과 그 이유</b>를 찾는 것입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">GC 로그 켜기 · 한 줄 읽기</h4>
+      <pre class="code" data-lang="bash"><code># 운영 표준 — 파일 5개 × 20MB 롤링, 비용은 거의 없습니다
+-Xlog:gc*,safepoint:file=/logs/gc-%p.log:time,uptime,level,tags:filecount=5,filesize=20m
+
+# 실행 중인 JVM 에 나중에 켜기 (재시작 없이)
+jcmd 1 VM.log output=/logs/gc-live.log what=gc* decorators=time,uptime</code></pre>
+      <pre class="code" data-lang="text"><code>[2026-09-30T02:14:07.311+0900][3601.2s][info][gc] GC(812)
+  Pause Young (Normal) (G1 Evacuation Pause) 1490M-&gt;402M(2048M) 38.112ms
+  ─────┬─────           ─────────┬─────────   ──┬── ──┬── ──┬──  ───┬───
+   종류                       이유          GC 전  GC 후  힙 전체   멈춤 시간
+
+[...][gc] GC(845) Pause Young (Concurrent Start) (G1 Humongous Allocation) ...
+          ↑ 큰 배열(리전의 절반 이상) 할당 — 엑셀 · 큰 JSON 을 의심
+[...][gc] GC(851) To-space exhausted
+          ↑ 옮길 자리 없음 — 곧 Full GC 가 옵니다
+[...][gc] GC(852) Pause Full (G1 Compaction Pause) 2010M-&gt;1950M(2048M) 1812.4ms
+          ↑ 1.8초 멈춤 + 거의 못 비움(2010→1950) = 힙 부족 또는 누수</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">로그에서 볼 것 · 판단 기준</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">항목</th><th>정상</th><th>조치가 필요한 신호</th></tr>
+        <tr><td>Young 멈춤</td><td>수~수십 ms</td><td>p99 이 목표(200ms) 근처</td></tr>
+        <tr><td><b>Pause Full</b></td><td><b>0회</b></td><td>한 번이라도 나오면 조사</td></tr>
+        <tr><td>GC 후 힙(→ 뒤 숫자)</td><td>평평</td><td>계속 오름 → OPS 03 누수</td></tr>
+        <tr><td>GC 시간 비율</td><td>&lt; 5%</td><td>&gt; 10% — 처리량이 깎이는 중</td></tr>
+        <tr><td>Humongous</td><td>가끔</td><td>잦으면 리전 크기 · 코드 확인</td></tr>
+        <tr><td>ZGC <b>Allocation Stall</b></td><td>0</td><td>나오면 힙이 작다는 뜻</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># 로그를 잴 때 쓰는 한 줄 — 멈춤 시간 상위 10개
+grep -oE "Pause [A-Za-z ]+\(.*\) .* [0-9.]+ms" gc-1.log \
+  | awk '{print $NF, $0}' | sort -rn | head -10
+
+# Java 21+ 에서는 JFR 로도 — GC 멈춤 요약 표
+jfr view gc-pauses recording.jfr</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>그림으로 보고 싶으면</b> — GC 로그 파일을 <b>GCeasy</b>(웹) 나 <b>GCViewer</b>(로컬)에 넣으면
+        멈춤 분포 · 힙 추이가 바로 나옵니다. 사내 로그를 외부에 올릴 수 없으면 GCViewer 를 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">G1 이냐 ZGC 냐</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <div class="diag rv">
+    <svg data-align="free" viewBox="0 0 680 274" role="img" aria-label="GC 선택 사분면. 가로축은 힙 크기, 세로축은 지연 민감도다. 왼쪽 아래 작은 힙과 CPU 하나에는 Serial 이 있고, 오른쪽 아래 처리량 위주 배치에는 Parallel 이 있다. 가운데에는 기본값인 G1 이 있으며 대부분의 웹 서비스가 여기서 끝난다. 오른쪽 위 큰 힙에 p99 지연이 민감한 칸에는 ZGC 가 있다">
+      <text x="16" y="18" class="lbl">GC 고르기 — 가로는 힙 크기, 세로는 지연에 얼마나 민감한가</text>
+
+      <rect class="lane-alt" x="352" y="34" width="272" height="98"/>
+      <path class="ax" d="M80 34 L80 236"/>
+      <path class="ax" d="M80 236 L624 236"/>
+      <path class="gr" d="M352 34 L352 236"/>
+      <path class="gr" d="M80 135 L624 135"/>
+
+      <text x="352" y="252" class="tk" text-anchor="middle">힙 크기 →</text>
+      <text x="16" y="46" class="tk">지연 우선</text>
+      <text x="16" y="232" class="tk">처리량 우선</text>
+
+      <text x="360" y="126" class="ann ok-t">힙 8 GB 이상 · p99 이 중요하면 이 칸</text>
+
+      <circle class="dot" cx="140" cy="205" r="6"/>
+      <text x="140" y="224" class="ann" text-anchor="middle">Serial — 1 CPU</text>
+
+      <circle class="dot" cx="520" cy="200" r="6"/>
+      <text x="520" y="219" class="ann" text-anchor="middle">Parallel — 배치</text>
+
+      <circle class="dot" cx="290" cy="112" r="7" style="fill:#34d399"/>
+      <text x="290" y="98" class="ann ok-t" text-anchor="middle">G1 — 기본값</text>
+
+      <circle class="dot" cx="540" cy="70" r="7"/>
+      <text x="540" y="56" class="ann" text-anchor="middle">ZGC (세대형)</text>
+
+      <text x="16" y="266" class="lbl">대부분의 웹 서비스는 G1 에서 끝납니다 — 바꾸기 전에 로그로 이유를 대세요</text>
+    </svg>
+    <div class="cap">사분면 — <b>힙이 작고 p99 이 느슨하면 G1 그대로</b>. ZGC 는 "큰 힙 + 엄격한 p99" 칸에서만 값을 합니다.</div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">켜는 법 · 버전별 차이</h4>
+      <pre class="code" data-lang="bash"><code># G1 — Java 9+ 기본값. 따로 쓸 것 없음
+#   (단, 아래 '컨테이너 함정'에 걸리면 Serial 이 선택됩니다)
+-XX:+UseG1GC -XX:MaxGCPauseMillis=200     # 200 이 기본값
+
+# ZGC — Java 25 LTS 는 이것만으로 세대형(Generational) ZGC
+-XX:+UseZGC
+#   Java 21    : -XX:+UseZGC -XX:+ZGenerational  (세대형을 명시)
+#   Java 23    : 세대형이 기본
+#   Java 24+   : 비세대형 제거
+
+# 지금 무엇이 켜져 있나 — 추측하지 말고 확인
+jcmd 1 VM.flags | tr ' ' '\n' | grep -E "Use.*GC|MaxHeapSize|MaxRAMPercentage"
+jcmd 1 GC.heap_info</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고르는 기준</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:28%">상황</th><th>선택</th><th>이유</th></tr>
+        <tr><td>힙 &lt; 8 GB 웹 API</td><td><b>G1</b></td><td>멈춤 수십 ms 로 충분</td></tr>
+        <tr><td>힙 16 GB+ · p99 &lt; 10 ms</td><td><b>ZGC</b></td><td>멈춤이 힙 크기와 무관</td></tr>
+        <tr><td>야간 배치 · 처리량만</td><td>Parallel</td><td>멈춤 길어도 총 시간 짧음</td></tr>
+        <tr><td>CPU 1개 · 힙 수백 MB</td><td>Serial</td><td>GC 스레드 여럿이 오히려 손해</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>ZGC 의 대가</b> — 동시에 도는 GC 가 <b>CPU 를 더 쓰고</b>, 힙 여유가 부족하면
+        <b>Allocation Stall</b>(할당하던 스레드가 멈춤)이 납니다. ZGC 로 바꿀 때는
+        <b>힙을 10~20% 더</b> 주고, CPU 사용률을 같이 보세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">컨테이너 메모리 잡기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">MaxRAMPercentage — 기본값 25% 의 함정</h4>
+      <pre class="code" data-lang="yaml"><code># Deployment — 한도와 힙 비율을 '함께' 정합니다
+resources:
+  requests: { cpu: "2", memory: "2Gi" }
+  limits:   { cpu: "2", memory: "2Gi" }
+env:
+  - name: JAVA_TOOL_OPTIONS
+    value: &gt;-
+      -XX:MaxRAMPercentage=70.0
+      -XX:InitialRAMPercentage=70.0
+      -XX:+UseG1GC</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:32%">컨테이너 한도</th><th>권장 비율</th><th>남는 몫의 용도</th></tr>
+        <tr><td>512 MiB 이하</td><td>50~60%</td><td>메타스페이스 · 스택이 상대적으로 큼</td></tr>
+        <tr><td>1~4 GiB</td><td><b>65~75%</b></td><td>스레드 200개 × 1MB + Direct</td></tr>
+        <tr><td>8 GiB 이상</td><td>75~80%</td><td>네이티브 몫이 거의 고정</td></tr>
+      </table></div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">컨테이너에서 자주 당하는 것</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>❌ 아무것도 안 줌</h5>
+          <div class="sm">기본 <code>MaxRAMPercentage</code> 는 <b>25%</b>입니다. 2 GiB 컨테이너에 힙 512 MiB —
+          <b>메모리는 남는데 Java heap space</b> 로 죽습니다.</div>
+        </div>
+        <div class="bad">
+          <h5>❌ -Xmx 를 한도와 같게</h5>
+          <div class="sm"><code>-Xmx2g</code> + 한도 2Gi — 힙 밖 칸이 들어갈 자리가 없어 <b>OOMKilled</b>.</div>
+        </div>
+      </div>
+      <pre class="code" data-lang="bash"><code># JVM 이 본 CPU · 메모리 확인 — 컨테이너 안에서
+java -XX:+PrintFlagsFinal -version 2&gt;/dev/null \
+  | grep -E " MaxHeapSize | ActiveProcessorCount | Use(Serial|G1)GC "
+# CPU 2개 미만 또는 메모리 약 1.8 GB 미만이면 JVM 이 Serial GC 를 고릅니다
+#   → limits.cpu 를 2 이상으로 하거나 -XX:+UseG1GC 를 명시</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>InitialRAMPercentage 를 같게 주는 이유</b> — 힙이 작게 시작해서 커지는 동안
+        <b>잦은 GC 와 힙 확장</b>이 일어납니다. 서버는 어차피 그 메모리를 쓸 것이므로 처음부터 잡아 두는 게 낫습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> GC 로그는 <b>항상 켜 둡니다</b>(비용 거의 없음). 볼 것은 <b>Pause Full · GC 후 힙 추세 · 멈춤 최댓값</b> 세 가지.
+    대부분 <b>G1 + 맞는 힙 크기</b>로 끝나고, 컨테이너에서는 <code>MaxRAMPercentage</code> 를 <b>65~75%</b>로,
+    CPU 는 2개 이상을 주거나 GC 를 명시하세요.</div>
+</section>
+
+
+<!-- ==================== op05 ==================== -->
+<section class="sec" id="op05">
+  <div class="sec-head rv">
+    <span class="no">OPS 05</span>
+    <h2>커넥션 풀 고갈 — <span class="t">풀을 늘리기 전에 '쥔 시간'</span>을 보세요</h2>
+    <p class="lead">
+      자바 웹 서비스 장애에서 가장 자주 보는 로그 한 줄이 <code>Connection is not available, request timed out</code> 입니다.
+      DB 는 한가한데 서비스가 멈춘다면 거의 이것입니다. 원인은 대개 풀이 작아서가 아니라
+      <b>커넥션을 쥐고 다른 일을 하는 코드</b>입니다. 풀 크기 계산 · 설정값 · 안티패턴 순서로 봅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 214" role="img" aria-label="커넥션 풀 고갈 순간의 게이지 세 개. 활성 커넥션은 최대 10개 중 10개로 100퍼센트라 붉게 표시된다. 커넥션 획득 대기 시간의 p99 는 2.84초로 타임아웃 3초의 95퍼센트에 이르러 역시 붉다. 반면 데이터베이스 CPU 는 22퍼센트로 한가하다. 데이터베이스가 한가한데 풀만 꽉 찼다면 커넥션을 쥔 채 다른 일을 하는 코드가 원인이다">
+      <text x="16" y="18" class="lbl">고갈 순간의 세 게이지 — 오른쪽이 한가한 것이 단서입니다</text>
+
+      <circle class="ring-bg" cx="130" cy="106" r="46"/>
+      <circle class="ring ring-rs" cx="130" cy="106" r="46" stroke-dasharray="289 0" transform="rotate(-90 130 106)"/>
+      <text x="130" y="102" class="val" text-anchor="middle">10 / 10</text>
+      <text x="130" y="118" class="ann" text-anchor="middle">활성 커넥션</text>
+      <text x="130" y="176" class="ann rs-t" text-anchor="middle">빈 커넥션 0개</text>
+
+      <circle class="ring-bg" cx="340" cy="106" r="46"/>
+      <circle class="ring ring-rs" cx="340" cy="106" r="46" stroke-dasharray="274 15" transform="rotate(-90 340 106)"/>
+      <text x="340" y="102" class="val" text-anchor="middle">2.84 s</text>
+      <text x="340" y="118" class="ann" text-anchor="middle">획득 대기 p99</text>
+      <text x="340" y="176" class="ann rs-t" text-anchor="middle">타임아웃 3 s 의 95%</text>
+
+      <circle class="ring-bg" cx="550" cy="106" r="46"/>
+      <circle class="ring ring-ok" cx="550" cy="106" r="46" stroke-dasharray="64 225" transform="rotate(-90 550 106)"/>
+      <text x="550" y="102" class="val" text-anchor="middle">22%</text>
+      <text x="550" y="118" class="ann" text-anchor="middle">DB CPU</text>
+      <text x="550" y="176" class="ann ok-t" text-anchor="middle">DB 는 한가함</text>
+
+      <text x="16" y="206" class="lbl">풀은 꽉 찼는데 DB 가 놀고 있다 = 커넥션을 쥔 채 DB 가 아닌 일을 하는 중</text>
+    </svg>
+    <div class="cap">게이지 — <b>세 값을 나란히</b> 놓아야 진단이 됩니다. 왼쪽 둘만 보면 "풀을 늘리자"가 되고, 셋을 보면 "누가 쥐고 있나"가 됩니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">증상 — 로그와 지표</h4>
+      <pre class="code" data-lang="text"><code>HikariPool-1 - Connection is not available, request timed out after 3000ms
+  (total=10, active=10, idle=0, waiting=37)
+       ↑ 전부 사용 중   ↑ 빈 것 없음  ↑ 37개 스레드가 줄 서 있음
+
+org.springframework.transaction.CannotCreateTransactionException:
+  Could not open JPA EntityManager for transaction
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - ...</code></pre>
+      <pre class="code" data-lang="text"><code># Actuator + Micrometer 가 자동으로 내보내는 지표 (Prometheus 이름)
+hikaricp_connections_active{pool="HikariPool-1"}     # 사용 중
+hikaricp_connections_pending{pool="HikariPool-1"}    # ★ 대기 스레드 수
+hikaricp_connections_timeout_total                   # 타임아웃 누적
+hikaricp_connections_acquire_seconds                 # 획득까지 걸린 시간
+hikaricp_connections_usage_seconds                   # ★ 쥐고 있던 시간
+
+# 쥔 시간 p99 — 이게 길면 코드 문제
+histogram_quantile(0.99,
+  sum by (le) (rate(hikaricp_connections_usage_seconds_bucket[5m])))</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>usage 히스토그램을 켜야 p99 를 볼 수 있습니다</b> —
+        <code>management.metrics.distribution.percentiles-histogram.hikaricp.connections.usage: true</code>.
+        평균 사용 시간이 20ms 인데 p99 가 2초라면 <b>특정 코드 경로</b>가 범인입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">풀 크기 계산 — 리틀의 법칙</h4>
+      <pre class="code" data-lang="text"><code>필요한 커넥션 수 = 초당 트랜잭션 × 커넥션을 쥐는 평균 시간(초)
+
+예) 인스턴스 하나에 초당 200 트랜잭션, 쥐는 시간 평균 25 ms
+    200 × 0.025 = 5개   →  여유 2배  →  maximumPoolSize = 10
+
+같은 트래픽인데 쥐는 시간이 1.8 s 라면?
+    200 × 1.8   = 360개  →  풀로 해결할 수 없는 숫자
+                            (DB max_connections 를 먼저 넘습니다)
+
+DB 쪽 상한도 함께 확인
+    인스턴스 6대 × 풀 10 = 60  ≤  DB max_connections 150 의 70%
+    배포 중에는 새 파드가 겹쳐 뜨므로 (maxSurge) 순간적으로 더 많아집니다</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:42%">상황</th><th>판단</th></tr>
+        <tr><td>usage p99 짧음 · pending 계속</td><td>풀이 정말 작음 — <b>조금</b> 늘림</td></tr>
+        <tr><td><b>usage p99 김</b> · DB 한가</td><td><b>코드 문제</b> — 늘리면 악화</td></tr>
+        <tr><td>usage 김 · DB CPU 높음</td><td>슬로우 쿼리 (OPS 06)</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">설정값 정하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영용 application.yml — 값마다 이유</h4>
+      <pre class="code" data-lang="yaml"><code>spring:
+  datasource:
+    hikari:
+      pool-name: order-db
+      maximum-pool-size: 10        # 리틀의 법칙 × 2. '많을수록 좋다'가 아님
+      minimum-idle: 10             # 고정 크기 풀 권장 (HikariCP 공식 권고)
+      connection-timeout: 3000     # 기본 30초! 사용자는 30초를 안 기다립니다
+      validation-timeout: 1000
+      max-lifetime: 1740000        # 29분 — DB/방화벽의 유휴 끊김(예: 30분)보다 짧게
+      keepalive-time: 300000       # 5분마다 유휴 커넥션 살아 있는지 확인
+      leak-detection-threshold: 20000  # 20초 넘게 쥐면 스택과 함께 경고 로그
+  jpa:
+    open-in-view: false            # ★ 요청 끝까지 커넥션을 쥐는 일을 막음
+
+management:
+  metrics:
+    distribution:
+      percentiles-histogram:
+        hikaricp.connections.usage: true
+        hikaricp.connections.acquire: true</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">각 값의 판단 근거</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">설정</th><th>기본값</th><th>운영 권장</th></tr>
+        <tr><td><code>connection-timeout</code></td><td>30000</td><td><b>2000~5000</b> — 빨리 실패해 서킷 · 폴백이 일하게</td></tr>
+        <tr><td><code>maximum-pool-size</code></td><td>10</td><td>계산값. 보통 10~30</td></tr>
+        <tr><td><code>max-lifetime</code></td><td>1800000</td><td>인프라 유휴 끊김보다 30초 이상 짧게</td></tr>
+        <tr><td><code>leak-detection-threshold</code></td><td>0(끔)</td><td>정상 최장 트랜잭션의 2~3배</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>leak-detection 이 남기는 로그 — 범인 코드 줄이 그대로 찍힙니다
+WARN  com.zaxxer.hikari.pool.ProxyLeakTask - Connection leak detection
+  triggered for org.postgresql.jdbc.PgConnection@3c1f... on thread
+  http-nio-8080-exec-5, stack trace follows
+java.lang.Exception: Apparent connection leak detected
+    at com.shop.order.PaymentService.pay(PaymentService.java:47)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>leak-detection 은 '누수'만 잡지 않습니다</b> — 임계값보다 오래 쥔 <b>모든</b> 경우를 찍습니다.
+        그래서 "외부 호출을 트랜잭션 안에서 하는 코드"를 찾는 데 가장 빠른 도구입니다.
+        나중에 돌려주면 <code>Previously reported leaked connection ... was returned</code> 가 따라 찍힙니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">쥔 시간을 줄이는 코드</span> <span class="lvl h">🔴 실무</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 280" role="img" aria-label="결제 처리 한 건의 구간별 소요 시간 워터폴. 위쪽은 트랜잭션 안에서 외부 결제 API 를 부르는 경우로, 주문 조회 6 밀리초 뒤 결제 API 호출 1800 밀리초 동안 커넥션을 쥔 채 기다리고 마지막 갱신과 커밋 10 밀리초를 더해 커넥션 점유가 1818 밀리초가 된다. 아래쪽은 외부 호출을 트랜잭션 밖으로 뺀 경우로, 결제 API 1800 밀리초 동안은 커넥션 없이 기다리고 짧은 트랜잭션 16 밀리초만 커넥션을 쥔다. 전체 응답 시간은 같지만 커넥션 점유는 백 배 이상 짧아진다">
+      <text x="16" y="18" class="lbl">결제 한 건 — 응답 시간은 같고, 커넥션을 쥔 시간만 다릅니다</text>
+
+      <path class="gr" d="M182 30 L182 236"/>
+      <path class="gr" d="M298 30 L298 236"/>
+      <path class="gr" d="M414 30 L414 236"/>
+      <path class="gr" d="M530 30 L530 236"/>
+      <path class="gr" d="M646 30 L646 236"/>
+      <path class="ax" d="M182 236 L646 236"/>
+      <text x="182" y="250" class="tk" text-anchor="middle">0</text>
+      <text x="298" y="250" class="tk" text-anchor="middle">500</text>
+      <text x="414" y="250" class="tk" text-anchor="middle">1000</text>
+      <text x="530" y="250" class="tk" text-anchor="middle">1500</text>
+      <text x="636" y="250" class="tk" text-anchor="middle">2000 ms</text>
+
+      <text x="16" y="40" class="ann rs-t">❌ 트랜잭션 안에서 호출</text>
+      <text x="16" y="62" class="ann">SELECT 주문</text>
+      <rect class="bar" x="182" y="50" width="3" height="14"/>
+      <text x="192" y="62" class="tk">6 ms</text>
+      <text x="16" y="84" class="ann">결제 API 호출</text>
+      <rect x="185" y="72" width="418" height="14" style="fill:rgba(251,113,133,.22);stroke:rgba(251,113,133,.55);stroke-width:1;rx:3"/>
+      <text x="394" y="84" class="tk rs-t" text-anchor="middle">1,800 ms — 커넥션을 쥔 채 대기</text>
+      <text x="16" y="106" class="ann">UPDATE · COMMIT</text>
+      <rect class="bar" x="603" y="94" width="4" height="14"/>
+      <text x="614" y="106" class="tk">10</text>
+      <path class="dim-ln" d="M184 122 L606 122"/>
+      <text x="394" y="138" class="ann rs-t" text-anchor="middle">커넥션 점유 1,818 ms</text>
+
+      <text x="16" y="164" class="ann ok-t">✅ 호출을 트랜잭션 밖으로</text>
+      <text x="16" y="186" class="ann">결제 API 호출</text>
+      <rect class="bar-mut" x="182" y="174" width="418" height="14"/>
+      <text x="391" y="186" class="tk" text-anchor="middle">1,800 ms — 커넥션 없이 대기</text>
+      <text x="16" y="208" class="ann">짧은 트랜잭션</text>
+      <rect class="bar" x="600" y="196" width="4" height="14" style="fill:rgba(52,211,153,.22);stroke:rgba(52,211,153,.55)"/>
+      <text x="612" y="208" class="tk ok-t">16</text>
+      <text x="394" y="226" class="ann ok-t" text-anchor="middle">커넥션 점유 16 ms — 110배 이상 짧음</text>
+
+      <text x="16" y="272" class="lbl">풀 크기는 '쥔 시간'이 정합니다 — 쥔 시간을 줄이면 풀은 그대로 둬도 됩니다</text>
+    </svg>
+    <div class="cap">워터폴 — <b>막대의 길이는 같고 색만 다릅니다</b>. 붉은 막대 동안 커넥션 하나가 아무 일도 안 하고 묶여 있습니다.</div>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 트랜잭션 안에서 외부 호출</h5>
+      <pre class="code" data-lang="java"><code>@Transactional
+public void pay(Long orderId) {
+    Order order = orderRepository.findById(orderId).orElseThrow();
+    // 1.8초 동안 커넥션을 쥔 채 HTTP 응답을 기다립니다
+    PaymentResult r = paymentClient.approve(order.toPaymentRequest());
+    order.markPaid(r.txId());           // 더티 체킹으로 UPDATE
+}</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 읽기 · 외부 호출 · 쓰기를 분리</h5>
+      <pre class="code" data-lang="java"><code>private final TransactionTemplate tx;   // 같은 클래스 안에서도 확실히 동작
+
+public void pay(Long orderId) {
+    PaymentRequest req = tx.execute(s -&gt;
+            orderRepository.findById(orderId).orElseThrow().toPaymentRequest());
+
+    PaymentResult r = paymentClient.approve(req);   // 커넥션 없이 대기
+
+    tx.executeWithoutResult(s -&gt;
+            orderRepository.findById(orderId).orElseThrow().markPaid(r.txId()));
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">분리하면 생기는 질문 — "결제는 됐는데 저장이 실패하면?"</h4>
+      <pre class="code" data-lang="java"><code>// 외부 호출에 멱등 키를 붙이면 '다시 해도 한 번'이 됩니다
+PaymentResult r = paymentClient.approve(req, "order-" + orderId);
+
+// 저장 실패 시: 예외를 던지고 재시도 큐로 → 재시도 때 같은 키로 조회만 됨
+// 또는 '결제 요청됨' 상태를 먼저 커밋해 두고 결과를 나중에 반영 (상태 기계)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>정합성은 트랜잭션 하나로 묶는 게 아니라 설계로 지킵니다</b> —
+        멱등 키 · 상태 기계 · 아웃박스는 <b>⚡ 대규모 탭 SCALE 07 · 10</b>에 자세히 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">그 밖에 커넥션을 오래 쥐는 코드</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:42%">패턴</th><th>처방</th></tr>
+        <tr><td><code>open-in-view: true</code>(기본값)</td><td><b>false</b> — 뷰 렌더링 · 직렬화 동안 쥐지 않게</td></tr>
+        <tr><td>트랜잭션 안의 대용량 루프 · 파일 생성</td><td>청크로 나눠 짧은 트랜잭션 여러 개</td></tr>
+        <tr><td><b><code>REQUIRES_NEW</code></b> 중첩</td><td>스레드 하나가 커넥션 2개 → <b>풀 교착</b></td></tr>
+        <tr><td><code>@Transactional</code> 안 <code>Thread.sleep</code> · 락 대기</td><td>트랜잭션 밖에서 대기</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>REQUIRES_NEW 의 풀 교착</b> — 풀 10, 요청 10개가 동시에 바깥 트랜잭션으로 커넥션 10개를 다 쥔 뒤
+        안쪽 <code>REQUIRES_NEW</code> 가 11번째를 기다리면 <b>아무도 못 끝납니다</b>.
+        HikariCP 권장식 <b>풀 ≥ 스레드 수 × (한 스레드의 최대 동시 커넥션 − 1) + 1</b> 을 지키거나 중첩을 없애세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 풀 고갈은 <b>active · pending · usage(쥔 시간) · DB CPU</b> 네 값을 같이 봅니다.
+    DB 가 한가한데 고갈이면 <b>풀을 늘리지 말고</b> leak-detection 로그로 오래 쥐는 코드를 찾아
+    <b>외부 호출을 트랜잭션 밖으로</b> 빼세요. <code>connection-timeout</code> 은 30초 기본값을 <b>3초 안팎</b>으로 줄입니다.</div>
+</section>
+
+
+<!-- ==================== op06 ==================== -->
+<section class="sec" id="op06">
+  <div class="sec-head rv">
+    <span class="no">OPS 06</span>
+    <h2>슬로우 쿼리 실전 추적 — <span class="t">가장 느린 것 말고 '총합이 큰 것'</span></h2>
+    <p class="lead">
+      "느린 쿼리 찾아 주세요"라는 말을 들으면 보통 <b>한 번에 4초 걸리는 리포트 쿼리</b>를 찾습니다.
+      그런데 서비스를 실제로 무겁게 만드는 것은 대개 <b>3ms 짜리가 5만 번</b> 도는 쿼리입니다.
+      이 섹션은 <b>DB · 앱 · 테스트</b> 세 곳에서 쿼리를 잡는 법을 다룹니다.
+      N+1 을 고치는 JPA 기법(fetch join · batch size)은 <b>🧩 JPA 심화 탭</b>에 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 246" role="img" aria-label="한 시간 동안 쿼리별 총 실행 시간 막대 차트. 주문 상품을 주문 번호로 조회하는 쿼리가 4만 8천 번 실행되어 건당 3 밀리초지만 총 144초로 가장 크고, 이것이 N 더하기 1 이다. 건당 4.2초로 가장 느린 주간 매출 리포트는 12번만 돌아 총 50초다. 쿠폰 조회는 36초, 상품 LIKE 검색은 27초, 회원 단건 조회는 21초다">
+      <text x="16" y="18" class="lbl">1시간 동안 쿼리별 '총' 실행 시간 — 횟수 × 건당 시간</text>
+
+      <path class="ax" d="M230 30 L230 186"/>
+      <path class="gr" d="M330 30 L330 186"/>
+      <path class="gr" d="M430 30 L430 186"/>
+      <path class="gr" d="M530 30 L530 186"/>
+      <path class="gr" d="M630 30 L630 186"/>
+      <path class="ax" d="M230 186 L640 186"/>
+      <text x="230" y="202" class="tk" text-anchor="middle">0</text>
+      <text x="330" y="202" class="tk" text-anchor="middle">40</text>
+      <text x="430" y="202" class="tk" text-anchor="middle">80</text>
+      <text x="530" y="202" class="tk" text-anchor="middle">120</text>
+      <text x="630" y="202" class="tk" text-anchor="middle">160 s</text>
+
+      <text x="16" y="49" class="ann rs-t">order_item by order_id</text>
+      <rect x="230" y="36" width="360" height="18" style="fill:rgba(251,113,133,.22);stroke:rgba(251,113,133,.55);stroke-width:1;rx:3"/>
+      <text x="410" y="49" class="tk rs-t" text-anchor="middle">144 s = 48,000회 × 3 ms</text>
+
+      <text x="16" y="79" class="ann am-t">주간 매출 리포트</text>
+      <rect class="bar" x="230" y="66" width="125" height="18"/>
+      <text x="363" y="79" class="tk am-t">50 s = 12회 × 4.2 s</text>
+
+      <text x="16" y="109" class="ann">coupon by user_id</text>
+      <rect class="bar" x="230" y="96" width="90" height="18"/>
+      <text x="328" y="109" class="tk">36 s</text>
+
+      <text x="16" y="139" class="ann">product LIKE 검색</text>
+      <rect class="bar" x="230" y="126" width="67" height="18"/>
+      <text x="305" y="139" class="tk">27 s</text>
+
+      <text x="16" y="169" class="ann">member by id</text>
+      <rect class="bar" x="230" y="156" width="52" height="18"/>
+      <text x="290" y="169" class="tk">21 s</text>
+
+      <text x="16" y="222" class="lbl">"가장 느린 한 건"은 리포트지만, DB 를 가장 오래 붙잡는 것은 3 ms 짜리입니다</text>
+      <text x="16" y="238" class="lbl">정렬 기준을 평균이 아니라 총합(total)으로 바꾸는 것이 추적의 첫걸음입니다</text>
+    </svg>
+    <div class="cap">막대 — <b>총합으로 정렬</b>하면 N+1 이 맨 위로 올라옵니다. 평균으로 정렬하면 영영 안 보입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">DB 에서 잡기 — 총합 상위 10개</h4>
+      <pre class="code" data-lang="sql"><code>-- PostgreSQL (pg_stat_statements 확장, PG 13+ 컬럼명)
+SELECT calls,
+       round(total_exec_time)       AS total_ms,
+       round(mean_exec_time::numeric, 1) AS mean_ms,
+       rows,
+       left(query, 80)              AS query
+FROM   pg_stat_statements
+ORDER  BY total_exec_time DESC
+LIMIT  10;
+
+-- MySQL 8 (performance_schema — 타이머 단위는 피코초)
+SELECT LEFT(DIGEST_TEXT, 80)              AS query,
+       COUNT_STAR                         AS calls,
+       ROUND(SUM_TIMER_WAIT / 1e12, 1)    AS total_s,
+       ROUND(AVG_TIMER_WAIT / 1e9, 1)     AS avg_ms
+FROM   performance_schema.events_statements_summary_by_digest
+ORDER  BY SUM_TIMER_WAIT DESC
+LIMIT  10;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어디서 잡을까 — 도구별 자리</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">위치</th><th>도구</th><th>장점 · 한계</th></tr>
+        <tr><td>DB 통계</td><td><code>pg_stat_statements</code> · <code>performance_schema</code></td><td><b>운영 부담 없음</b> · 어느 코드인지 모름</td></tr>
+        <tr><td>DB 슬로우 로그</td><td><code>long_query_time</code> · <code>log_min_duration_statement</code></td><td>느린 한 건 · N+1 은 못 잡음</td></tr>
+        <tr><td>앱 프록시</td><td>datasource-proxy · p6spy</td><td><b>바인딩 값 · 호출 위치</b> 확인</td></tr>
+        <tr><td>ORM</td><td>Hibernate 통계 · 슬로우 로그</td><td>세션당 쿼리 수</td></tr>
+        <tr><td>APM · 트레이싱</td><td>OpenTelemetry · Pinpoint 등</td><td>요청 단위 워터폴</td></tr>
+        <tr><td>테스트</td><td>쿼리 개수 단언</td><td><b>배포 전에</b> 막음</td></tr>
+      </table></div>
+      <pre class="code" data-lang="sql"><code>-- 슬로우 로그 켜기 (재시작 없이)
+-- MySQL
+SET GLOBAL slow_query_log = ON;
+SET GLOBAL long_query_time = 0.5;
+-- PostgreSQL (postgresql.conf 또는)
+ALTER SYSTEM SET log_min_duration_statement = '500ms';
+SELECT pg_reload_conf();</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">앱에서 '어느 코드가' 보냈는지 잡기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">datasource-proxy — 운영에서도 켤 수 있는 슬로우 로그</h4>
+      <pre class="code" data-lang="kotlin"><code>implementation("net.ttddyy:datasource-proxy:1.10")</code></pre>
+      <pre class="code" data-lang="java"><code>@Component
+class SlowQueryProxy implements BeanPostProcessor {
+
+    @Override
+    public Object postProcessAfterInitialization(Object bean, String name) {
+        if (bean instanceof DataSource ds &amp;&amp; !(bean instanceof ProxyDataSource)) {
+            return ProxyDataSourceBuilder.create(ds)
+                    .name("order-db")
+                    .logSlowQueryBySlf4j(500, TimeUnit.MILLISECONDS)  // 0.5초 넘는 것만
+                    .multiline()
+                    .build();
+        }
+        return bean;
+    }
+}
+// 로그: Name:order-db, Time:1823, Success:True, Type:Prepared,
+//       Query:["select ... from coupon where user_id=?"], Params:[(1042)]</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>p6spy 는 개발 · 스테이징용</b> — <code>p6spy-spring-boot-starter</code> 는 <b>모든 쿼리를 바인딩 값과 함께</b> 찍어
+        로컬에서 N+1 을 눈으로 보기 좋습니다. 운영에서 전부 찍으면 로그 폭탄이 되니
+        운영은 <b>임계값 기반</b>(위 코드)만 켭니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Hibernate — 세션당 쿼리 수 · 슬로우 로그</h4>
+      <pre class="code" data-lang="yaml"><code>spring:
+  jpa:
+    properties:
+      hibernate:
+        generate_statistics: true     # 세션(요청)마다 요약을 남김 — 스테이징용
+        log_slow_query: 500           # Hibernate 6.2+ (Boot 3.1+), ms
+logging:
+  level:
+    org.hibernate.SQL_SLOW: info
+    org.hibernate.engine.internal.StatisticalLoggingSessionEventListener: info</code></pre>
+      <pre class="code" data-lang="text"><code>Session Metrics {
+    812300 nanoseconds spent acquiring 1 JDBC connections;
+    48211000 nanoseconds spent preparing 51 JDBC statements;   ← 51개!
+    193004000 nanoseconds spent executing 51 JDBC statements;
+    ...
+}
+→ 주문 50건 목록 화면에서 쿼리 51개 = 목록 1 + 주문마다 1 = N+1</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>"51" 같은 숫자가 보이면</b> — 목록 크기 + 1 이면 N+1 입니다.
+        고치는 법(fetch join · <code>@EntityGraph</code> · <code>default_batch_fetch_size</code>)은 JPA 심화 탭에 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">실행 계획 읽기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">EXPLAIN ANALYZE — 실제로 실행해서 잰 계획</h4>
+      <pre class="code" data-lang="sql"><code>-- PostgreSQL : 실제 시간 · 행 수 · 버퍼까지
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT * FROM coupon WHERE user_id = 1042 AND status = 'ACTIVE';
+
+Seq Scan on coupon  (cost=0.00..48120.00 rows=12 width=96)
+                    (actual time=0.03..1820.41 rows=9 loops=1)
+  Filter: ((user_id = 1042) AND (status = 'ACTIVE'))
+  Rows Removed by Filter: 2399991            ← 240만 행을 읽고 9개 남김
+Execution Time: 1820.6 ms
+
+-- 처방: 조건 컬럼에 인덱스
+CREATE INDEX CONCURRENTLY idx_coupon_user_status ON coupon (user_id, status);
+--  → Index Scan ... actual time=0.04..0.06 rows=9   Execution Time: 0.1 ms
+
+-- MySQL 8.0.18+ : 같은 기능
+EXPLAIN ANALYZE SELECT * FROM coupon WHERE user_id = 1042;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">계획에서 이 단어가 보이면</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">보이는 것</th><th>뜻 · 조치</th></tr>
+        <tr><td><b>Seq Scan</b> / <code>type=ALL</code></td><td>테이블 전체 읽기 — 큰 테이블이면 인덱스</td></tr>
+        <tr><td><b>Rows Removed by Filter</b> 큼</td><td>읽고 버리는 행이 많음 — 조건 컬럼 인덱스</td></tr>
+        <tr><td>예상 rows ≠ 실제 rows (10배+)</td><td>통계가 낡음 — <code>ANALYZE</code> 테이블</td></tr>
+        <tr><td><code>Sort Method: external merge Disk</code></td><td>정렬이 메모리를 넘침 — 인덱스 정렬 · work_mem</td></tr>
+        <tr><td><code>Using filesort</code> · <code>Using temporary</code></td><td>MySQL 정렬 · 임시 테이블 — ORDER BY 인덱스</td></tr>
+        <tr><td><code>Nested Loop</code> + 바깥 행 많음</td><td>조인 순서 · 조인 컬럼 인덱스 확인</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>운영 DB 에서 <code>EXPLAIN ANALYZE</code> 는 쿼리를 '진짜로' 실행합니다</b> —
+        UPDATE · DELETE 에 쓰면 데이터가 바뀝니다. <code>BEGIN; EXPLAIN ANALYZE ...; ROLLBACK;</code> 으로 감싸거나
+        <b>읽기 복제본</b>에서 하세요. 인덱스 추가는 PG 는 <code>CONCURRENTLY</code>, MySQL 은 온라인 DDL 로.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">N+1 을 테스트로 막기</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쿼리 개수를 단언하는 테스트</h4>
+      <pre class="code" data-lang="java"><code>@SpringBootTest
+@TestPropertySource(properties =
+        "spring.jpa.properties.hibernate.generate_statistics=true")
+class OrderListQueryCountTest {
+
+    @Autowired EntityManagerFactory emf;
+    @Autowired OrderQueryService orderQueryService;
+
+    @Test
+    void 주문_목록은_주문_수와_무관하게_쿼리_2개_이하() {
+        Statistics stats = emf.unwrap(SessionFactory.class).getStatistics();
+        stats.clear();
+
+        orderQueryService.findRecentOrders(50);   // 테스트 데이터 50건 준비 가정
+
+        assertThat(stats.getPrepareStatementCount())
+                .as("N+1 의심 — fetch join 이나 batch size 확인")
+                .isLessThanOrEqualTo(2);
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">장애 중 슬로우 쿼리 대응 순서</h4>
+      <pre class="code" data-lang="sql"><code>-- ① 지금 도는 긴 쿼리 (PostgreSQL)
+SELECT pid, now() - query_start AS dur, state, left(query, 80)
+FROM   pg_stat_activity
+WHERE  state &lt;&gt; 'idle' AND now() - query_start &gt; interval '5 seconds'
+ORDER  BY dur DESC;
+
+-- ② 정말 필요하면 그 쿼리만 취소 (커넥션은 유지)
+SELECT pg_cancel_backend(12345);
+
+-- MySQL
+SELECT id, time, state, LEFT(info, 80) FROM information_schema.processlist
+WHERE  command &lt;&gt; 'Sleep' AND time &gt; 5 ORDER BY time DESC;
+KILL QUERY 12345;</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>근본 대책은 타임아웃</b> — 쿼리마다 상한이 있으면 한 쿼리가 풀 전체를 잡아먹지 못합니다.
+        <code>spring.transaction.default-timeout</code> · JPA <code>jakarta.persistence.query.timeout</code> 힌트 ·
+        DB 쪽 <code>statement_timeout</code> 은 <b>OPS 07</b>에서 예산과 함께 정합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 쿼리는 <b>총합(횟수 × 건당)</b>으로 정렬해 찾고, <b>DB 통계 → 앱 프록시(어느 코드) → 실행 계획</b> 순서로 좁힙니다.
+    운영엔 임계값 기반 슬로우 로그만, p6spy 는 개발에서만. 그리고 <b>쿼리 개수 단언 테스트</b>로 N+1 이 다시 들어오지 못하게 막습니다.</div>
+</section>
+
+
+<!-- ==================== op07 ==================== -->
+<section class="sec" id="op07">
+  <div class="sec-head rv">
+    <span class="no">OPS 07</span>
+    <h2>타임아웃 · 재시도 · 서킷 — <span class="t">값을 '계산'해서 정하기</span></h2>
+    <p class="lead">
+      "타임아웃은 몇 초로 하죠?"에 "3초요"라고 감으로 답하면 장애 때 두 가지가 터집니다.
+      <b>하위 호출 타임아웃의 합이 상위보다 길어서</b> 사용자는 이미 떠났는데 서버만 일하거나,
+      <b>재시도가 곱해져서</b> 아픈 서비스를 더 때리는 것입니다. 서킷 브레이커의 원리는
+      <b>⚡ 대규모 탭 SCALE 11</b>에 있고, 여기서는 <b>숫자를 정하는 법</b>만 다룹니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 270" role="img" aria-label="주문 API 한 건의 타임아웃 예산 워터폴. 게이트웨이 상한은 3000 밀리초다. 자체 처리 100, DB 쿼리 상한 300, 결제 1차 호출은 연결 200 더하기 읽기 800 으로 1000, 백오프와 지터 200, 결제 재시도 1000 을 더하면 2600 이 되어 400 밀리초가 남는다. 맨 아래는 읽기 타임아웃을 설정하지 않은 경우로 막대가 끝없이 이어져, 상위가 먼저 끊어도 이 스레드는 계속 묶여 있다">
+      <text x="16" y="18" class="lbl">타임아웃 예산 — 하위의 합(재시도 포함)이 상위 안에 들어와야 합니다</text>
+
+      <path class="gr" d="M182 30 L182 210"/>
+      <path class="gr" d="M337 30 L337 210"/>
+      <path class="gr" d="M491 30 L491 210"/>
+      <path class="ax" d="M182 210 L646 210"/>
+      <path d="M646 30 L646 210" style="stroke:#fb7185;stroke-width:1.4;stroke-dasharray:4 3;fill:none"/>
+      <text x="640" y="34" class="ann rs-t" text-anchor="end">게이트웨이 3,000 ms</text>
+
+      <text x="16" y="50" class="ann">자체 처리</text>
+      <rect class="bar" x="182" y="38" width="15" height="14"/>
+      <text x="203" y="50" class="tk">100</text>
+
+      <text x="16" y="72" class="ann">DB 쿼리 (상한)</text>
+      <rect class="bar" x="197" y="60" width="46" height="14"/>
+      <text x="249" y="72" class="tk">300</text>
+
+      <text x="16" y="94" class="ann">결제 1차</text>
+      <rect class="bar" x="244" y="82" width="155" height="14"/>
+      <text x="321" y="94" class="tk" text-anchor="middle">연결 200 + 읽기 800</text>
+
+      <text x="16" y="116" class="ann">백오프 + 지터</text>
+      <rect class="bar-mut" x="399" y="104" width="31" height="14"/>
+      <text x="436" y="116" class="tk">200</text>
+
+      <text x="16" y="138" class="ann">결제 재시도</text>
+      <rect class="bar" x="430" y="126" width="155" height="14"/>
+      <text x="507" y="138" class="tk" text-anchor="middle">1,000</text>
+
+      <path class="dim-ln" d="M588 154 L642 154"/>
+      <text x="615" y="170" class="ann ok-t" text-anchor="middle">여유 400</text>
+
+      <text x="16" y="194" class="ann rs-t">❌ 읽기 타임아웃 없음</text>
+      <rect x="244" y="182" width="402" height="14" style="fill:rgba(251,113,133,.12);stroke:rgba(251,113,133,.5);stroke-width:1;stroke-dasharray:4 3;rx:3"/>
+      <text x="445" y="194" class="tk rs-t" text-anchor="middle">끝이 없음 — 상위가 끊어도 스레드는 묶임</text>
+
+      <text x="182" y="224" class="tk" text-anchor="middle">0</text>
+      <text x="337" y="224" class="tk" text-anchor="middle">1000</text>
+      <text x="491" y="224" class="tk" text-anchor="middle">2000</text>
+      <text x="636" y="224" class="tk" text-anchor="middle">3000 ms</text>
+
+      <text x="16" y="246" class="lbl">상위 타임아웃 ≥ 자체 + Σ(연결 + 읽기) × 시도 횟수 + 백오프 + 여유</text>
+      <text x="16" y="262" class="lbl">안쪽으로 갈수록 짧아야 합니다 — 바깥이 먼저 끊기면 안쪽 일은 전부 버려집니다</text>
+    </svg>
+    <div class="cap">워터폴 — <b>재시도까지 그려 넣어야</b> 예산이 보입니다. 재시도 한 번은 막대 하나를 통째로 더하는 일입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">타임아웃 여섯 종류 — 전부 따로 정합니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">종류</th><th>뜻</th><th>보통 값</th></tr>
+        <tr><td><b>연결</b></td><td>TCP 연결 맺기까지</td><td>사내 200~500 ms · 외부 1 s</td></tr>
+        <tr><td><b>읽기(응답)</b></td><td>응답 바이트를 기다리는 최대 시간</td><td>상대 p99 × 2~3</td></tr>
+        <tr><td>풀 획득</td><td>Hikari · HTTP 커넥션 풀 대기</td><td>1~3 s (OPS 05)</td></tr>
+        <tr><td>쿼리</td><td>SQL 한 문장</td><td>OLTP 1~3 s</td></tr>
+        <tr><td>트랜잭션</td><td><code>@Transactional(timeout=)</code></td><td>쿼리 상한의 합 + 여유</td></tr>
+        <tr><td><b>전체 호출</b></td><td>재시도 포함 총 시간</td><td>상위 예산에서 역산</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>기본값을 믿지 마세요</b> — JDK <code>HttpClient</code> 의 읽기 타임아웃 · 많은 JDBC 드라이버의 소켓 타임아웃은
+        기본이 <b>무한</b>입니다. "설정 안 함"은 "무한 대기"와 같은 말입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">읽기 타임아웃 정하는 법 — 상대의 p99 에서 출발</h4>
+      <pre class="code" data-lang="text"><code>결제 API 지난 7일 지연: p50 120 ms · p99 380 ms · p99.9 900 ms
+
+읽기 타임아웃 = p99.9 근처 → 800 ~ 1,000 ms
+  · p99 로 잡으면(380) 정상 요청 1% 를 스스로 끊습니다
+  · 10초로 잡으면 장애 때 스레드가 10초씩 묶입니다
+
+호출 쪽 예산 (게이트웨이 3,000 ms) 에서 역산
+  자체 100 + DB 300 + (200 + 800) × 2회 + 백오프 200 = 2,600
+  → 여유 400 ms. 재시도를 2번으로 늘리면 3,600 — 예산 초과 ✗</code></pre>
+      <pre class="code" data-lang="text"><code># 상대 서비스의 p99 를 우리 쪽 클라이언트 지표로 (Micrometer)
+histogram_quantile(0.99, sum by (le, uri) (
+  rate(http_client_requests_seconds_bucket{client_name="pay.internal"}[7d])))</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">클라이언트마다 실제로 넣는 코드</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">RestClient (Spring 6.1+ · Boot 3.2+)</h4>
+      <pre class="code" data-lang="java"><code>@Bean
+RestClient paymentClient(RestClient.Builder builder) {
+    var http = java.net.http.HttpClient.newBuilder()
+            .connectTimeout(Duration.ofMillis(200))      // 연결
+            .build();
+    var factory = new JdkClientHttpRequestFactory(http);
+    factory.setReadTimeout(Duration.ofMillis(800));       // 읽기
+
+    return builder
+            .baseUrl("https://pay.internal")
+            .requestFactory(factory)
+            .build();
+}</code></pre>
+      <h4 class="mini">WebClient (Reactor Netty)</h4>
+      <pre class="code" data-lang="java"><code>var http = reactor.netty.http.client.HttpClient.create()
+        .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 200)
+        .responseTimeout(Duration.ofMillis(800));
+WebClient client = WebClient.builder()
+        .baseUrl("https://pay.internal")
+        .clientConnector(new ReactorClientHttpConnector(http))
+        .build();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">DB 쪽 — 쿼리 · 트랜잭션 · 소켓</h4>
+      <pre class="code" data-lang="yaml"><code>spring:
+  transaction:
+    default-timeout: 5s          # @Transactional 전역 상한
+  datasource:
+    # PostgreSQL — 서버에서 쿼리 상한 + 드라이버 소켓 상한
+    url: jdbc:postgresql://db:5432/shop?options=-c%20statement_timeout=3000&amp;socketTimeout=10
+    # MySQL — 드라이버 상한 (ms)
+    # url: jdbc:mysql://db:3306/shop?connectTimeout=1000&amp;socketTimeout=5000</code></pre>
+      <pre class="code" data-lang="java"><code>// 특정 쿼리만 더 짧게 (JPA 표준 힌트, ms)
+@QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "1000"))
+List&lt;Coupon&gt; findByUserId(Long userId);
+
+// 특정 트랜잭션만 (초)
+@Transactional(timeout = 2)
+public void settle(Long orderId) { ... }</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>소켓 타임아웃은 '최후의 안전망'</b> — 쿼리 타임아웃보다 <b>길게</b> 둡니다.
+        쿼리 타임아웃은 DB 가 쿼리를 정상 취소하지만, 소켓 타임아웃은 커넥션을 끊어 버리기 때문입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">재시도가 장애를 키우지 않게</span> <span class="lvl h">🔴 실무</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="하위 서비스 장애 후 하위에 도달하는 요청 배수의 시간 변화. 2분에 장애가 시작되자 재시도를 세 계층에서 그대로 하는 경우 요청이 4배, 7배로 늘어 5분 이후 평소의 열 배 가까이에 머문다. 지터와 재시도 예산과 서킷 브레이커를 함께 쓰는 경우 잠깐 1.3배로 오른 뒤 서킷이 열리면서 평소보다 낮아지고, 8분에 회복하며 1배로 돌아온다">
+      <text x="16" y="18" class="lbl">장애 후 하위 서비스에 도달하는 요청 배수 — 평소를 1배로</text>
+
+      <path class="ax" d="M60 36 L60 190"/>
+      <path class="ax" d="M60 190 L648 190"/>
+      <path class="gr" d="M60 175 L648 175"/>
+      <path class="gr" d="M60 115 L648 115"/>
+      <path class="gr" d="M60 40 L648 40"/>
+      <text x="52" y="194" class="tk" text-anchor="end">0</text>
+      <text x="52" y="179" class="tk" text-anchor="end">1×</text>
+      <text x="52" y="119" class="tk" text-anchor="end">5×</text>
+      <text x="52" y="44" class="tk" text-anchor="end">10×</text>
+
+      <path class="li-t" d="M178 36 L178 190"/>
+      <text x="184" y="64" class="ann rs-t">장애 시작</text>
+
+      <path class="li s2-l" style="stroke-width:2" d="M60 175 L119 175 L178 175 L237 130 L296 85 L354 55 L413 46 L472 43 L531 43 L590 43 L648 43"/>
+      <text x="420" y="34" class="ann s2-t">재시도 3회 × 3계층 그대로 — 10배 가까이</text>
+
+      <path class="li s1-l" style="stroke-width:2" d="M60 175 L119 175 L178 175 L237 170 L296 174 L354 184 L413 184 L472 181 L531 175 L590 175 L648 175"/>
+      <text x="300" y="164" class="ann s1-t">지터 + 재시도 예산 + 서킷 — 오히려 줄여 줌</text>
+
+      <text x="60" y="206" class="tk" text-anchor="middle">0분</text>
+      <text x="354" y="206" class="tk" text-anchor="middle">5분</text>
+      <text x="648" y="206" class="tk" text-anchor="middle">10분</text>
+
+      <text x="16" y="228" class="lbl">계층마다 3번씩 재시도하면 3 × 3 × 3 = 27배까지 곱해질 수 있습니다</text>
+    </svg>
+    <div class="cap">라인 — 재시도는 <b>곱해집니다</b>. 회복하려는 서비스에 평소의 10배를 보내는 것은 재시도가 아니라 공격입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Resilience4j — 지터 있는 재시도 + 서킷</h4>
+      <pre class="code" data-lang="kotlin"><code>implementation("io.github.resilience4j:resilience4j-spring-boot3")
+implementation("org.springframework.boot:spring-boot-starter-aop")</code></pre>
+      <pre class="code" data-lang="java"><code>@Bean
+RetryConfigCustomizer paymentRetry() {
+    return RetryConfigCustomizer.of("payment", b -&gt; b
+            .maxAttempts(2)                               // 최초 1 + 재시도 1
+            .intervalFunction(IntervalFunction
+                    .ofExponentialRandomBackoff(Duration.ofMillis(200), 2.0, 0.5))
+            .retryExceptions(ResourceAccessException.class)   // I/O · 타임아웃만
+            .ignoreExceptions(HttpClientErrorException.class,  // 4xx 는 다시 해도 같음
+                              CallNotPermittedException.class)); // 서킷 열림
+}</code></pre>
+      <pre class="code" data-lang="yaml"><code>resilience4j:
+  circuitbreaker:
+    instances:
+      payment:
+        sliding-window-size: 50
+        minimum-number-of-calls: 20
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 800ms   # 읽기 타임아웃과 맞춤
+        slow-call-rate-threshold: 80
+        wait-duration-in-open-state: 20s
+        permitted-number-of-calls-in-half-open-state: 5</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 재시도해도 되나 — 멱등성</h4>
+      <pre class="code" data-lang="java"><code>@CircuitBreaker(name = "payment", fallbackMethod = "pending")
+@Retry(name = "payment")          // 기본 순서: Retry 가 바깥, CircuitBreaker 가 안쪽
+public PaymentResult approve(PaymentRequest req, String idemKey) {
+    return paymentClient.post().uri("/approve")
+            .header("Idempotency-Key", idemKey)   // 같은 키 = 같은 결과
+            .body(req)
+            .retrieve()
+            .body(PaymentResult.class);
+}
+
+private PaymentResult pending(PaymentRequest req, String idemKey, Throwable t) {
+    return PaymentResult.pending(idemKey);   // '확인 중' 으로 응답하고 나중에 조회
+}</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">요청</th><th>재시도</th></tr>
+        <tr><td>GET · 조회</td><td><b>가능</b></td></tr>
+        <tr><td>PUT · DELETE (전체 교체)</td><td>대개 가능</td></tr>
+        <tr><td><b>POST · 결제 · 발송</b></td><td><b>멱등 키가 있을 때만</b></td></tr>
+        <tr><td>4xx 응답</td><td>하지 않음 — 다시 해도 같음</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>재시도는 한 계층에서만</b> — 게이트웨이 · 서비스 · 클라이언트가 각자 3번씩 하면 27배입니다.
+        보통 <b>호출하는 바로 그 지점 한 곳</b>에서만, 지터를 넣어 동시에 몰리지 않게 합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 타임아웃은 <b>상대 p99.9 에서 출발</b>해 정하고, <b>상위 예산 ≥ 하위 합 × 시도 횟수</b>를 계산으로 확인합니다.
+    재시도는 <b>한 계층 · 1회 · 지터 · 멱등 요청만</b>, 그리고 서킷 브레이커 안쪽에서.
+    "기본값 그대로"는 대개 <b>무한 대기</b>라는 뜻입니다.</div>
+</section>
+
+
+<!-- ==================== op08 ==================== -->
+<section class="sec" id="op08">
+  <div class="sec-head rv">
+    <span class="no">OPS 08</span>
+    <h2>지표 대시보드 — <span class="t">RED · USE 와 꼭 걸어야 할 알람 10개</span></h2>
+    <p class="lead">
+      대시보드에 그래프 80개를 띄워 두면 장애 때 아무것도 안 보입니다.
+      필요한 것은 <b>"사용자가 아픈가"(RED)</b>와 <b>"자원이 아픈가"(USE)</b>를 한 화면에서 보는 것,
+      그리고 사람을 깨울 <b>알람 10개</b>입니다. 관측 가능성의 개념(지표 · 로그 · 트레이스)은
+      <b>⚡ 대규모 탭 SCALE 14</b>, Actuator 기초는 <b>🍃 Spring Boot 탭 BOOT 15</b>에 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 226" role="img" aria-label="장애 당일의 지표 여덟 개 스파크라인. 왼쪽은 요청 수, 5xx 비율, p99 지연, CPU 이고 오른쪽은 GC 후 힙, GC 시간 비율, Hikari 대기, 톰캣 busy 스레드다. 01시 58분 배포 표시 직후 Hikari 대기가 가장 먼저 치솟고, 이어서 톰캣 busy 와 p99 지연과 5xx 비율이 따라 오른다. 요청 수, CPU, 힙, GC 는 평평하다. 먼저 튄 것이 원인 쪽이고 뒤따라 튄 것이 증상 쪽이다">
+      <text x="16" y="18" class="lbl">장애 당일 대시보드 — 세로 점선이 배포 시각입니다</text>
+
+      <path class="li-t" d="M227 30 L227 182"/>
+      <path class="li-t" d="M553 30 L553 182"/>
+      <text x="233" y="36" class="ann am-t">배포 v2.41</text>
+      <text x="559" y="36" class="ann am-t">배포 v2.41</text>
+      <path class="gr" d="M362 30 L362 182"/>
+
+      <text x="16" y="58" class="ann">요청 수</text>
+      <path class="li" style="stroke-width:1.6" d="M100 56 L132 53 L163 55 L195 52 L227 55 L258 54 L290 53"/>
+      <text x="298" y="58" class="tk">1.2k/s</text>
+
+      <text x="16" y="96" class="ann rs-t">5xx 비율</text>
+      <path class="li" style="stroke-width:1.6;stroke:#fb7185" d="M100 98 L132 98 L163 97 L195 98 L227 97 L258 90 L290 82"/>
+      <text x="298" y="96" class="tk rs-t">2.1% ↑</text>
+
+      <text x="16" y="134" class="ann rs-t">p99 지연</text>
+      <path class="li" style="stroke-width:1.6;stroke:#fb7185" d="M100 136 L132 135 L163 136 L195 135 L227 135 L258 120 L290 114"/>
+      <text x="298" y="134" class="tk rs-t">4.8 s ↑</text>
+
+      <text x="16" y="172" class="ann">CPU</text>
+      <path class="li" style="stroke-width:1.6" d="M100 172 L132 169 L163 171 L195 168 L227 171 L258 170 L290 169"/>
+      <text x="298" y="172" class="tk">34%</text>
+
+      <text x="372" y="58" class="ann">힙 (GC 후)</text>
+      <path class="li" style="stroke-width:1.6" d="M446 56 L473 55 L499 56 L526 54 L553 56 L579 55 L606 55"/>
+      <text x="614" y="58" class="tk">41%</text>
+
+      <text x="372" y="96" class="ann">GC 시간</text>
+      <path class="li" style="stroke-width:1.6" d="M446 95 L473 94 L499 96 L526 94 L553 95 L579 94 L606 95"/>
+      <text x="614" y="96" class="tk">1.2%</text>
+
+      <text x="372" y="134" class="ann rs-t">Hikari 대기</text>
+      <path class="li" style="stroke-width:1.6;stroke:#fb7185" d="M446 136 L473 136 L499 136 L526 136 L553 128 L579 118 L606 114"/>
+      <text x="614" y="134" class="tk rs-t">37</text>
+
+      <text x="372" y="172" class="ann am-t">톰캣 busy</text>
+      <path class="li" style="stroke-width:1.6;stroke:#fbbf24" d="M446 174 L473 173 L499 174 L526 173 L553 172 L579 160 L606 154"/>
+      <text x="614" y="172" class="tk am-t">200</text>
+
+      <text x="16" y="202" class="lbl">배포 직후 가장 먼저 꺾인 줄(Hikari 대기)이 원인 쪽, 뒤따른 줄들이 증상 쪽입니다</text>
+      <text x="16" y="218" class="lbl">평평한 줄 네 개(요청 · CPU · 힙 · GC)가 "트래픽 폭증도, 메모리도 아니다"를 말해 줍니다</text>
+    </svg>
+    <div class="cap">스파크라인 — <b>누가 먼저 꺾였나</b>를 보려고 그립니다. 평평한 줄도 가설을 지워 주는 정보입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">켜기 — 의존성 두 줄 + 설정</h4>
+      <pre class="code" data-lang="kotlin"><code>implementation("org.springframework.boot:spring-boot-starter-actuator")
+runtimeOnly("io.micrometer:micrometer-registry-prometheus")</code></pre>
+      <pre class="code" data-lang="yaml"><code>management:
+  server:
+    port: 8081                    # 관리 포트 분리 — 외부 LB 에 노출하지 않기
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true             # /actuator/health/liveness · readiness (OPS 09)
+  metrics:
+    tags:
+      application: order-api      # 모든 지표에 서비스 이름 태그
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true    # p99 를 PromQL 로 계산하려면 필수
+server:
+  tomcat:
+    mbeanregistry:
+      enabled: true               # tomcat_threads_busy_threads 지표</code></pre>
+      <pre class="code" data-lang="yaml"><code># prometheus.yml
+scrape_configs:
+  - job_name: order-api
+    metrics_path: /actuator/prometheus
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['order-api:8081']</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">RED · USE — 대시보드 첫 줄과 둘째 줄</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">축</th><th>무엇</th><th>지표</th></tr>
+        <tr><td><b>R</b>ate</td><td>초당 요청</td><td><code>http_server_requests_seconds_count</code></td></tr>
+        <tr><td><b>E</b>rrors</td><td>5xx 비율</td><td>위 지표의 <code>status=~"5.."</code></td></tr>
+        <tr><td><b>D</b>uration</td><td>p99 지연</td><td><code>..._seconds_bucket</code></td></tr>
+        <tr><td><b>U</b>tilization</td><td>CPU · 힙</td><td><code>process_cpu_usage</code> · <code>jvm_gc_live_data_size_bytes</code></td></tr>
+        <tr><td><b>S</b>aturation</td><td>줄 선 것</td><td><code>hikaricp_connections_pending</code> · 톰캣 busy</td></tr>
+        <tr><td><b>E</b>rrors</td><td>자원 오류</td><td>타임아웃 수 · 재시작 수</td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code># R — 초당 요청
+sum(rate(http_server_requests_seconds_count{application="order-api"}[1m]))
+
+# E — 5xx 비율
+sum(rate(http_server_requests_seconds_count{application="order-api",status=~"5.."}[5m]))
+  / sum(rate(http_server_requests_seconds_count{application="order-api"}[5m]))
+
+# D — p99 (엔드포인트별)
+histogram_quantile(0.99, sum by (le, uri) (
+  rate(http_server_requests_seconds_bucket{application="order-api"}[5m])))
+
+# S — 톰캣 스레드 포화율
+tomcat_threads_busy_threads / tomcat_threads_config_max_threads</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>RED 는 사용자 쪽, USE 는 자원 쪽</b> — 알람은 RED 로 걸고(사용자가 아플 때 깨움),
+        원인은 USE 로 찾습니다. CPU 90% 라도 사용자가 멀쩡하면 새벽에 사람을 깨울 일은 아닙니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">꼭 걸어야 할 알람 10개</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="tw rv"><table class="cheat">
+    <tr><th style="width:4%">#</th><th style="width:20%">알람</th><th style="width:30%">조건 (예시값)</th><th>임계값 근거</th><th style="width:9%">등급</th></tr>
+    <tr><td>1</td><td><b>5xx 비율</b></td><td>&gt; 1% 가 5분 지속</td><td>SLO 99.9% 의 에러 예산을 10배 속도로 태우는 수준</td><td>호출</td></tr>
+    <tr><td>2</td><td><b>p99 지연</b></td><td>&gt; SLO × 2 가 10분</td><td>SLO 가 500 ms 면 1 s. 순간 튐은 for 로 거름</td><td>호출</td></tr>
+    <tr><td>3</td><td><b>트래픽 급감</b></td><td>지난주 같은 시각의 50% 미만</td><td><b>조용한 장애</b>(앞단 차단 · DNS) 는 에러율로 안 잡힘</td><td>호출</td></tr>
+    <tr><td>4</td><td>인스턴스 다운</td><td><code>up == 0</code> 1분</td><td>스크레이프 실패 = 프로세스 · 네트워크 이상</td><td>호출</td></tr>
+    <tr><td>5</td><td>재시작 반복</td><td>15분에 2회 초과</td><td>OOMKilled · liveness 실패의 신호</td><td>호출</td></tr>
+    <tr><td>6</td><td>GC 후 힙</td><td>&gt; 85% 가 15분</td><td>누수 조기 경보 — OOM 몇 시간 전 (OPS 03)</td><td>티켓</td></tr>
+    <tr><td>7</td><td>GC 시간 비율</td><td>&gt; 10% (5분 평균)</td><td>처리량이 깎이기 시작하는 지점</td><td>티켓</td></tr>
+    <tr><td>8</td><td><b>Hikari 대기</b></td><td>pending &gt; 0 이 3분</td><td>정상이면 0 — 지속되면 고갈 직전 (OPS 05)</td><td>호출</td></tr>
+    <tr><td>9</td><td>톰캣 포화</td><td>busy / max &gt; 90% 5분</td><td>남은 10% 가 사라지면 요청이 줄 섬</td><td>티켓</td></tr>
+    <tr><td>10</td><td>디스크 · 인증서</td><td>여유 &lt; 15% · 만료 &lt; 14일</td><td>예측 가능한 장애 — 근무 시간에 처리</td><td>티켓</td></tr>
+  </table></div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">알람 규칙 파일과 운영 원칙</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Prometheus 알람 규칙 — 1 · 3 · 6 · 8번</h4>
+      <pre class="code" data-lang="yaml"><code>groups:
+  - name: order-api
+    rules:
+      - alert: OrderApiHighErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{application="order-api",status=~"5.."}[5m]))
+            / sum(rate(http_server_requests_seconds_count{application="order-api"}[5m])) &gt; 0.01
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "주문 API 5xx {{ $value | humanizePercentage }}"
+          runbook_url: "https://wiki.internal/runbook/order-api#5xx"
+
+      - alert: OrderApiTrafficDrop
+        expr: |
+          sum(rate(http_server_requests_seconds_count{application="order-api"}[10m]))
+            &lt; 0.5 * sum(rate(http_server_requests_seconds_count{application="order-api"}[10m] offset 1w))
+        for: 10m
+        labels: { severity: page }
+
+      - alert: OrderApiHeapAfterGcHigh
+        expr: |
+          max(jvm_gc_live_data_size_bytes{application="order-api"}
+            / jvm_gc_max_data_size_bytes{application="order-api"}) &gt; 0.85
+        for: 15m
+        labels: { severity: ticket }
+
+      - alert: OrderApiDbPoolPending
+        expr: max(hikaricp_connections_pending{application="order-api"}) &gt; 0
+        for: 3m
+        labels: { severity: page }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">알람이 '양치기 소년'이 되지 않게</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">원칙</th><th>이유</th></tr>
+        <tr><td><b>모든 알람에 runbook_url</b></td><td>새벽에 받은 사람이 할 일을 바로 앎</td></tr>
+        <tr><td><b><code>for:</code> 를 꼭 둠</b></td><td>순간 튐에 깨우지 않음 (깜빡임 방지)</td></tr>
+        <tr><td>호출(page) vs 티켓</td><td>지금 사람이 필요한가로 가름</td></tr>
+        <tr><td>울렸는데 할 일이 없었다면</td><td><b>그 알람을 고치거나 지움</b></td></tr>
+        <tr><td>한 원인에 알람 하나</td><td>같은 장애에 20개가 울리면 아무것도 안 읽힘</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>"혹시 모르니까" 알람의 끝</b> — 주 50번 울리는 알람은 결국 무음 처리되고,
+        진짜 장애 때도 아무도 안 봅니다. <b>한 달 동안 울린 알람 중 실제 조치로 이어진 비율</b>을 세어 보세요.
+        절반이 안 되면 알람이 너무 많은 것입니다.
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>지표 이름 확인은 직접</b> — 버전마다 이름이 조금씩 다릅니다.
+        <code>curl -s localhost:8081/actuator/prometheus | grep -E "^(hikaricp|jvm_gc|tomcat_threads)" | cut -d'{' -f1 | sort -u</code>
+        로 지금 앱이 내보내는 이름을 먼저 보세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 대시보드 첫 줄은 <b>RED</b>(요청 · 에러 · 지연), 둘째 줄은 <b>USE</b>(CPU · 힙 · 풀 대기 · 스레드 포화).
+    알람은 <b>사용자 증상(RED)으로 깨우고, 자원(USE)은 티켓</b>으로. 모든 알람에 <code>for:</code> 와 런북 링크를 붙이고,
+    울렸는데 할 일이 없던 알람은 지웁니다.</div>
+</section>
+
+
+<!-- ==================== op09 ==================== -->
+<section class="sec" id="op09">
+  <div class="sec-head rv">
+    <span class="no">OPS 09</span>
+    <h2>무중단 배포 — <span class="t">끄는 순서와 DB 호환</span>이 전부</h2>
+    <p class="lead">
+      배포할 때마다 5xx 가 몇십 건씩 튄다면 원인은 둘 중 하나입니다.
+      <b>파드를 끄는 순서</b>가 틀렸거나, <b>새 코드와 옛 코드가 같은 DB 를 동시에 쓰는 몇 분</b>을 생각하지 않은 것입니다.
+      쿠버네티스 · Docker 배포 기초는 <b>🍃 Spring Boot 탭 BOOT 16~17</b>에 있고, 여기서는 그 두 가지만 정확히 맞춥니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 290" role="img" aria-label="쿠버네티스가 파드를 끌 때의 시퀀스. 1번으로 쿠버네티스가 서비스 엔드포인트에서 파드를 제거하는 일과 2번 preStop 훅 실행이 동시에 일어나며, preStop 은 10초 동안 잠들어 로드밸런서가 갱신될 시간을 준다. 3번 SIGTERM 을 받으면 스프링은 4번으로 readiness 를 거부 상태로 바꾸고 새 요청을 받지 않으며, 5번으로 진행 중인 요청이 끝날 때까지 최대 30초 기다린 뒤 6번으로 종료한다. terminationGracePeriodSeconds 는 preStop 10초와 종료 단계 30초에 여유를 더한 45초 이상이어야 하며, 모자라면 SIGKILL 로 강제 종료된다">
+      <text x="16" y="18" class="lbl">파드 종료 시퀀스 — 세로가 시간, 아래로 갈수록 나중입니다</text>
+
+      <rect class="actr" x="26" y="30" width="112" height="28"/>
+      <text x="82" y="49" class="ann" text-anchor="middle">쿠버네티스</text>
+      <rect class="actr" x="200" y="30" width="112" height="28"/>
+      <text x="256" y="49" class="ann" text-anchor="middle">서비스 엔드포인트</text>
+      <rect class="actr" x="374" y="30" width="112" height="28"/>
+      <text x="430" y="49" class="ann" text-anchor="middle">앱 (Spring)</text>
+      <rect class="actr" x="548" y="30" width="112" height="28"/>
+      <text x="604" y="49" class="ann" text-anchor="middle">진행 중 요청</text>
+
+      <path class="life" d="M82 60 L82 246"/>
+      <path class="life" d="M256 60 L256 246"/>
+      <path class="life" d="M430 60 L430 246"/>
+      <path class="life" d="M604 60 L604 246"/>
+
+      <rect class="actv" x="425" y="102" width="10" height="132"/>
+      <rect class="actv" x="599" y="170" width="10" height="40"/>
+
+      <path class="msg-a" d="M82 80 L248 80"/>
+      <text x="90" y="75" class="ann">1. 엔드포인트에서 제거</text>
+
+      <path class="msg" d="M82 108 L422 108"/>
+      <text x="90" y="103" class="ann">2. preStop — sleep 10초 (LB 갱신 대기)</text>
+
+      <path class="msg" d="M82 144 L422 144"/>
+      <text x="90" y="139" class="ann">3. SIGTERM</text>
+      <text x="442" y="160" class="ann am-t">4. 새 요청 거부</text>
+
+      <path class="msg" d="M438 184 L596 184"/>
+      <text x="444" y="179" class="ann">5. 진행 중 완료 대기</text>
+      <path class="msg-a" d="M596 206 L438 206"/>
+      <text x="470" y="201" class="ann ok-t">응답 완료</text>
+
+      <path class="msg-a" d="M422 230 L90 230"/>
+      <text x="96" y="225" class="ann">6. 종료 — 최대 30초 (timeout-per-shutdown-phase)</text>
+
+      <text x="16" y="266" class="lbl">terminationGracePeriodSeconds 45 ≥ preStop 10 + 종료 단계 30 + 여유</text>
+      <text x="16" y="282" class="lbl">1과 2가 동시에 일어납니다 — sleep 이 없으면 LB 가 죽어 가는 파드로 계속 보냅니다</text>
+    </svg>
+    <div class="cap">시퀀스 — <b>1번과 2번이 같은 순간</b>이라는 것이 핵심입니다. preStop 의 sleep 은 버그 회피가 아니라 이 경쟁을 흡수하는 장치입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">앱 쪽 — application.yml</h4>
+      <pre class="code" data-lang="yaml"><code>server:
+  shutdown: graceful            # Boot 3.4+ 는 기본값. 그 이전 버전은 반드시 명시
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s   # 진행 중 요청을 기다리는 최대 시간
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+        add-additional-paths: true    # 메인 포트(8080)에 /livez · /readyz 추가
+      group:
+        readiness:
+          include: readinessState    # 필요하면 핵심 의존성만 추가
+        liveness:
+          include: livenessState     # ★ 외부 의존성 절대 넣지 않기</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>프로브는 메인 포트로</b> — 관리 포트(8081)를 분리했다면 프로브가 8081 을 보는 동안
+        <b>정작 8080 이 막혀 있어도 "건강함"</b>으로 나올 수 있습니다.
+        <code>add-additional-paths</code> 로 메인 포트의 <code>/livez</code> · <code>/readyz</code> 를 보게 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">쿠버네티스 쪽 — Deployment</h4>
+      <pre class="code" data-lang="yaml"><code>spec:
+  replicas: 4
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }   # 항상 4대 이상 유지
+  template:
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: order-api
+          startupProbe:                     # 기동이 끝날 때까지 liveness 를 미룸
+            httpGet: { path: /livez, port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 36            # 최대 3분
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /livez, port: 8080 }
+            periodSeconds: 10
+            failureThreshold: 6             # 1분 — GC · 덤프 순간에 죽이지 않게
+          lifecycle:
+            preStop:
+              exec: { command: ["sh", "-c", "sleep 10"] }</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">프로브 세 개의 역할</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 넣고 무엇을 빼나</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:20%">프로브</th><th>실패하면</th><th>넣을 것</th><th>넣지 말 것</th></tr>
+        <tr><td><b>startup</b></td><td>재시작</td><td>기동 완료 여부</td><td>—</td></tr>
+        <tr><td><b>readiness</b></td><td>트래픽에서 뺌</td><td>워밍업 · 종료 중 · 핵심 의존성(신중히)</td><td>느린 외부 API</td></tr>
+        <tr><td><b>liveness</b></td><td><b>재시작</b></td><td>프로세스가 진짜 고장(데드락)</td><td><b>DB · Redis · 외부 API</b></td></tr>
+      </table></div>
+      <div class="vs" style="margin-top:12px">
+        <div class="bad">
+          <h5>❌ liveness 에 DB 체크</h5>
+          <div class="sm">DB 가 10초 흔들리면 <b>모든 파드가 동시에 재시작</b> — 작은 장애가 전면 장애로.</div>
+        </div>
+        <div class="good">
+          <h5>✅ liveness 는 자기 자신만</h5>
+          <div class="sm">DB 가 아프면 요청이 실패할 뿐 <b>재시작해도 낫지 않습니다</b>. 재시작은 고쳐질 때만.</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배포 중 5xx 가 튈 때 점검표</h4>
+      <pre class="code" data-lang="bash"><code># ① 종료 로그 — 우아한 종료가 실제로 일어났나
+kubectl -n shop logs order-api-old-xxxx --previous | grep -i "graceful"
+#   Commencing graceful shutdown. Waiting for active requests to complete
+#   Graceful shutdown complete                       ← 이 줄이 있어야 정상
+
+# ② SIGKILL 로 잘렸나 — exit 137 이면 grace period 부족
+kubectl -n shop get events --field-selector reason=Killing
+
+# ③ 새 파드가 준비되기 전에 트래픽을 받았나 — 첫 요청 지연
+kubectl -n shop get pods -w        # READY 1/1 이 되는 시각과 첫 5xx 비교</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>워밍업 전 트래픽</b> — JIT · 커넥션 풀 · 캐시가 차기 전 첫 몇 초는 느립니다.
+        <code>ApplicationRunner</code> 에서 풀을 미리 채우고, 준비가 끝난 뒤에만
+        <code>AvailabilityChangeEvent.publish(ctx, ReadinessState.ACCEPTING_TRAFFIC)</code> 하는 방식도 씁니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">DB 마이그레이션은 expand-contract</span> <span class="lvl h">🔴 실무</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 170" role="img" aria-label="컬럼 이름을 바꾸는 expand-contract 여섯 단계 파이프라인. 첫째 새 컬럼을 NULL 허용으로 추가하고, 둘째 앱이 옛 컬럼과 새 컬럼 둘 다에 쓰게 배포하며, 셋째 기존 데이터를 옛 컬럼에서 새 컬럼으로 복사하고, 넷째 앱이 새 컬럼을 읽게 배포하고, 다섯째 옛 컬럼 쓰기를 중단하고, 여섯째 옛 컬럼을 삭제한다. 셋째 단계까지는 언제 롤백해도 안전하고, 마지막 삭제는 옛 컬럼을 아무도 쓰지 않는 것이 확인된 뒤에만 한다">
+      <text x="16" y="18" class="lbl">컬럼 이름 바꾸기 — 한 번의 ALTER 가 아니라 여섯 번의 작은 배포</text>
+
+      <polygon class="chev" points="16,36 108,36 124,60 108,84 16,84 32,60"/>
+      <text x="70" y="57" class="val" text-anchor="middle">컬럼 추가</text>
+      <text x="70" y="72" class="ann" text-anchor="middle">NULL 허용</text>
+
+      <polygon class="chev" points="120,36 212,36 228,60 212,84 120,84 136,60"/>
+      <text x="174" y="57" class="val" text-anchor="middle">둘 다 쓰기</text>
+      <text x="174" y="72" class="ann" text-anchor="middle">앱 v2</text>
+
+      <polygon class="chev" points="224,36 316,36 332,60 316,84 224,84 240,60"/>
+      <text x="278" y="57" class="val" text-anchor="middle">백필</text>
+      <text x="278" y="72" class="ann" text-anchor="middle">옛 → 새 복사</text>
+
+      <polygon class="chev" points="328,36 420,36 436,60 420,84 328,84 344,60"/>
+      <text x="382" y="57" class="val" text-anchor="middle">새 것 읽기</text>
+      <text x="382" y="72" class="ann" text-anchor="middle">앱 v3</text>
+
+      <polygon class="chev" points="432,36 524,36 540,60 524,84 432,84 448,60"/>
+      <text x="486" y="57" class="val" text-anchor="middle">옛 쓰기 끝</text>
+      <text x="486" y="72" class="ann" text-anchor="middle">앱 v4</text>
+
+      <polygon class="chev" points="536,36 628,36 644,60 628,84 536,84 552,60" style="stroke:rgba(251,113,133,.5)"/>
+      <text x="590" y="57" class="val" text-anchor="middle">옛 것 삭제</text>
+      <text x="590" y="72" class="ann rs-t" text-anchor="middle">되돌릴 수 없음</text>
+
+      <path class="brk" d="M16 96 L16 102 L328 102 L328 96"/>
+      <text x="172" y="118" class="ann ok-t" text-anchor="middle">여기까지는 언제 롤백해도 안전</text>
+      <path class="brk" d="M332 96 L332 102 L644 102 L644 96"/>
+      <text x="488" y="118" class="ann am-t" text-anchor="middle">앱이 옛 컬럼을 안 쓰는 게 확인된 뒤에만</text>
+
+      <text x="16" y="146" class="lbl">어느 순간에도 '지금 배포된 앱'과 '바로 이전 앱'이 같은 스키마에서 돌아야 합니다</text>
+      <text x="16" y="162" class="lbl">이 규칙만 지키면 OPS 01 의 롤백 버튼을 언제든 누를 수 있습니다</text>
+    </svg>
+    <div class="cap">파이프라인 — <b>되돌릴 수 없는 단계는 맨 끝 하나</b>뿐이게 쪼갭니다. 그래서 롤백이 늘 가능합니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Flyway 로 나눠 쓰기 — <code>user_name</code> → <code>display_name</code></h4>
+      <pre class="code" data-lang="sql"><code>-- V41__add_display_name.sql        (① 확장 — 앱 v1 과도 호환)
+ALTER TABLE member ADD COLUMN display_name VARCHAR(100) NULL;
+
+-- 앱 v2: 저장할 때 user_name · display_name 둘 다 씀
+
+-- V42__backfill_display_name.sql    (③ 백필 — 큰 테이블은 배치로 나눠서)
+UPDATE member SET display_name = user_name
+WHERE  display_name IS NULL AND id BETWEEN 1 AND 100000;
+
+-- 앱 v3: display_name 을 읽음 · v4: user_name 쓰기 중단
+
+-- V45__drop_user_name.sql           (⑥ 수축 — 최소 한 번의 배포 주기 뒤)
+ALTER TABLE member DROP COLUMN user_name;</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호환되지 않는 변경 · 안전한 대체</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:40%">한 번에 하면 깨지는 것</th><th>안전한 대체</th></tr>
+        <tr><td>컬럼 이름 변경</td><td>위의 6단계</td></tr>
+        <tr><td><code>NOT NULL</code> 컬럼 추가</td><td>NULL 허용 + 기본값 → 백필 → 제약 추가</td></tr>
+        <tr><td>컬럼 삭제</td><td>코드에서 먼저 제거 → 다음 배포에 DROP</td></tr>
+        <tr><td>타입 변경</td><td>새 컬럼 추가 후 이전</td></tr>
+        <tr><td>큰 테이블 인덱스</td><td>PG <code>CONCURRENTLY</code> · MySQL 온라인 DDL</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>JPA 엔티티의 함정</b> — 옛 앱 v1 의 엔티티에 없는 NOT NULL 컬럼이 생기면
+        v1 의 INSERT 가 전부 실패합니다. 그리고 <code>spring.jpa.hibernate.ddl-auto</code> 는 운영에서 반드시
+        <code>validate</code> 또는 <code>none</code> 입니다 — 스키마는 Flyway 만 바꿉니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 끌 때는 <b>preStop sleep → SIGTERM → 새 요청 거부 → 진행 중 완료 → 종료</b>,
+    grace period 는 그 합보다 길게. liveness 에는 <b>외부 의존성을 넣지 않고</b>,
+    DB 변경은 <b>expand-contract</b> 로 쪼개서 "지금 앱과 이전 앱이 같은 스키마에서 돈다"를 늘 지킵니다.</div>
+</section>
+
+
+<!-- ==================== op10 ==================== -->
+<section class="sec" id="op10">
+  <div class="sec-head rv">
+    <span class="no">OPS 10</span>
+    <h2>설정 · 비밀 관리 — <span class="t">"어느 값이 이겼나"</span>와 "어디에 남았나"</h2>
+    <p class="lead">
+      설정 사고는 두 가지입니다. <b>운영에 개발 설정이 올라간 것</b>(우선순위를 몰라서),
+      그리고 <b>비밀번호가 Git 이나 로그에 남은 것</b>(경계를 몰라서). 둘 다 코드 리뷰로는 잘 안 보이고 장애나 보안 사고로 드러납니다.
+      프로파일 · <code>application.yml</code> 기초는 <b>🍃 Spring Boot 탭 BOOT 05</b>에 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="스프링 부트 설정 값의 우선순위 레이어. 위가 이긴다. 맨 위부터 커맨드라인 인자, SPRING_APPLICATION_JSON, 자바 시스템 속성, OS 환경 변수, jar 밖의 프로파일별 파일, jar 밖의 application.yml, jar 안의 프로파일별 파일, jar 안의 application.yml 순서다. 비밀 값은 환경 변수나 마운트된 파일로 넣고, jar 안의 application.yml 은 개발 기본값만 둔다">
+      <text x="16" y="18" class="lbl">같은 키가 여러 곳에 있으면 위가 이깁니다 — 8층 중 자주 쓰는 것만</text>
+
+      <path class="ln ar" d="M44 254 L44 36"/>
+      <text x="16" y="46" class="ann ok-t">높음</text>
+      <text x="16" y="250" class="ann">낮음</text>
+
+      <rect class="bx" x="72" y="32" width="250" height="24"/>
+      <text x="197" y="48" class="val" text-anchor="middle">커맨드라인 인자</text>
+      <text x="338" y="48" class="ann">--server.port=9090 · 일회성 덮어쓰기</text>
+
+      <rect class="bx" x="72" y="60" width="250" height="24"/>
+      <text x="197" y="76" class="val" text-anchor="middle">SPRING_APPLICATION_JSON</text>
+      <text x="338" y="76" class="ann">환경 변수 하나에 JSON 통째로</text>
+
+      <rect class="bx" x="72" y="88" width="250" height="24"/>
+      <text x="197" y="104" class="val" text-anchor="middle">자바 시스템 속성 (-D)</text>
+      <text x="338" y="104" class="ann">-Dspring.profiles.active=prod</text>
+
+      <rect class="bx bx-hi" x="72" y="116" width="250" height="24"/>
+      <text x="197" y="132" class="val" text-anchor="middle">OS 환경 변수</text>
+      <text x="338" y="132" class="ann am-t">SPRING_DATASOURCE_PASSWORD ← 비밀은 여기</text>
+
+      <rect class="bx" x="72" y="144" width="250" height="24"/>
+      <text x="197" y="160" class="val" text-anchor="middle">jar 밖 application-prod.yml</text>
+      <text x="338" y="160" class="ann">/config/ · 운영자가 관리</text>
+
+      <rect class="bx" x="72" y="172" width="250" height="24"/>
+      <text x="197" y="188" class="val" text-anchor="middle">jar 밖 application.yml</text>
+      <text x="338" y="188" class="ann">실행 위치의 ./config/</text>
+
+      <rect class="bx" x="72" y="200" width="250" height="24"/>
+      <text x="197" y="216" class="val" text-anchor="middle">jar 안 application-prod.yml</text>
+      <text x="338" y="216" class="ann">프로파일별 기본값 — 비밀 없이</text>
+
+      <rect class="bx bx-mut" x="72" y="228" width="250" height="24"/>
+      <text x="197" y="244" class="val" text-anchor="middle">jar 안 application.yml</text>
+      <text x="338" y="244" class="ann">개발 기본값 · 가장 약함</text>
+
+      <text x="16" y="276" class="lbl">"설정을 바꿨는데 안 먹어요"의 대부분은 위층 어딘가에 같은 키가 남아 있는 것입니다</text>
+      <text x="16" y="292" class="lbl">확인은 추측 말고 /actuator/env/키이름 — 어느 층에서 왔는지 그대로 나옵니다</text>
+    </svg>
+    <div class="cap">레이어 — <b>프로파일 파일은 같은 위치의 기본 파일을 이기고, jar 밖은 jar 안을 이깁니다</b>. 환경 변수는 그 전부를 이깁니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영에서 설정을 넣는 표준 방식</h4>
+      <pre class="code" data-lang="yaml"><code># jar 안 application.yml — 비밀 없이, 외부에서 받을 자리만
+spring:
+  config:
+    import:
+      - optional:file:/etc/order-api/          # 운영자가 두는 파일
+      - optional:configtree:/run/secrets/      # 쿠버네티스 Secret 마운트
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/shop}
+    username: ${DB_USER:shop}
+    password: ${DB_PASSWORD}                   # 기본값 없음 — 없으면 기동 실패</code></pre>
+      <pre class="code" data-lang="yaml"><code># 쿠버네티스 — Secret 을 파일로 마운트하면 파일 이름이 곧 키
+apiVersion: v1
+kind: Secret
+metadata: { name: order-api-secret }
+stringData:
+  spring.datasource.password: "s3cr3t-from-vault"
+---
+# Deployment 일부
+env:
+  - { name: SPRING_PROFILES_ACTIVE, value: "prod" }
+volumeMounts:
+  - { name: secrets, mountPath: /run/secrets, readOnly: true }
+volumes:
+  - { name: secrets, secret: { secretName: order-api-secret } }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">"이 값이 어디서 왔지?" — 확인 명령</h4>
+      <pre class="code" data-lang="bash"><code># 키 하나의 최종값과 출처 (show-values 권한 필요)
+curl -s localhost:8081/actuator/env/spring.datasource.url | jq '.property'
+#   { "source": "applicationConfig: [file:/etc/order-api/application-prod.yml]",
+#     "value": "jdbc:postgresql://db-prod:5432/shop" }
+
+# @ConfigurationProperties 빈이 실제로 받은 값
+curl -s localhost:8081/actuator/configprops | jq '.contexts[].beans
+  | with_entries(select(.key | test("payment")))'
+
+# 지금 켜진 프로파일 — 기동 로그 첫 몇 줄에도 찍힙니다
+#   The following 1 profile is active: "prod"</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Boot 3 는 /actuator/env 값을 기본으로 가립니다</b> —
+        <code>management.endpoint.env.show-values</code> 기본값이 <code>never</code> 라 전부 <code>******</code> 로 나옵니다.
+        운영에서는 <code>when-authorized</code> 로 두고 <b>관리자 역할에게만</b> 보이게 하세요. <code>always</code> 는 금지입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">잘못된 설정이면 아예 뜨지 않게</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">@ConfigurationProperties + 검증 — 기동 시점에 실패</h4>
+      <pre class="code" data-lang="java"><code>// build.gradle.kts: implementation("org.springframework.boot:spring-boot-starter-validation")
+
+@Validated
+@ConfigurationProperties(prefix = "payment")
+public record PaymentProperties(
+        @NotBlank String baseUrl,
+        @NotNull Duration connectTimeout,
+        @NotNull Duration readTimeout,
+        @Min(1) @Max(3) int maxAttempts,
+        @NotBlank String apiKey) {
+
+    @Override   // record 기본 toString 은 apiKey 를 그대로 찍습니다 ★
+    public String toString() {
+        return "PaymentProperties[baseUrl=%s, readTimeout=%s, apiKey=****]"
+                .formatted(baseUrl, readTimeout);
+    }
+}
+
+@SpringBootApplication
+@ConfigurationPropertiesScan          // 위 record 를 자동 등록
+public class OrderApiApplication { ... }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기동 실패 메시지 — 이게 나오면 성공입니다</h4>
+      <pre class="code" data-lang="text"><code>***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Binding to target com.shop.payment.PaymentProperties failed:
+
+    Property: payment.readTimeout
+    Value: "null"
+    Reason: must not be null
+
+Action:
+
+Update your application's configuration</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:44%">방식</th><th>잘못된 값이면</th></tr>
+        <tr><td><code>@Value("${payment.read-timeout}")</code></td><td>키가 없을 때만 실패 · 범위 검증 없음</td></tr>
+        <tr><td><b><code>@ConfigurationProperties</code> + <code>@Validated</code></b></td><td><b>기동 실패</b> — 배포가 멈춤</td></tr>
+        <tr><td>코드에서 읽을 때 검사</td><td>첫 요청에서야 터짐 — <b>최악</b></td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>"뜨지 않는 것"이 왜 좋은가</b> — 롤링 배포에서 새 파드가 안 뜨면 readiness 가 안 되고,
+        <b>옛 파드가 그대로 트래픽을 받습니다</b>. 잘못된 설정이 사용자에게 닿기 전에 배포가 멈춥니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">비밀이 새는 네 군데</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 흔히 새는 자리</h5>
+      <pre class="code" data-lang="java"><code>// ① Git — application-prod.yml 에 평문
+spring.datasource.password: Pr0d!2026
+
+// ② 로그 — 객체를 통째로 찍음 (record · Lombok @Data 의 toString)
+log.info("결제 설정 로드: {}", paymentProperties);
+log.debug("요청 바디: {}", requestJson);       // 카드번호 · 비밀번호 포함
+
+// ③ 예외 메시지 — URL 에 키가 붙은 채
+throw new IllegalStateException("호출 실패: " + url);  // ...?apiKey=sk_live_...
+
+// ④ 이미지 — Dockerfile 의 ENV · ARG 는 이미지 레이어에 남음
+ENV DB_PASSWORD=Pr0d!2026</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 막는 방법</h5>
+      <pre class="code" data-lang="java"><code>// ① 비밀은 환경 변수 · 마운트 파일 · Vault 에서. Git 에는 자리만
+spring.datasource.password: ${DB_PASSWORD}
+
+// ② toString 을 가리거나, 필요한 필드만 찍기
+log.info("결제 설정 로드 baseUrl={} readTimeout={}",
+        props.baseUrl(), props.readTimeout());
+
+// ③ URL 은 키를 뺀 형태로
+throw new IllegalStateException("호출 실패: " + uri.getHost() + uri.getPath());
+
+// ④ 런타임 주입 — 이미지에는 아무 비밀도 넣지 않음
+// docker run -e DB_PASSWORD="$(vault kv get -field=pw secret/order)" ...</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Git 에 올라갔다면 — 순서가 중요합니다</h4>
+      <pre class="code" data-lang="bash"><code># ① 먼저 '회전' — 키 · 비밀번호를 새로 발급하고 옛 것을 폐기
+#    커밋을 지우는 것보다 이게 먼저입니다. 이미 복제됐다고 가정하세요.
+
+# ② 그다음 기록에서 제거 (git-filter-repo)
+git filter-repo --path config/application-prod.yml --invert-paths
+
+# ③ 다시는 안 들어오게 — 커밋 전 검사
+gitleaks protect --staged      # pre-commit 훅으로
+gitleaks detect --source .     # CI 에서 저장소 전체</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설정 · 비밀 점검표</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:56%">항목</th><th>기준</th></tr>
+        <tr><td>jar 안 yml 에 운영 비밀</td><td><b>0개</b></td></tr>
+        <tr><td>운영 <code>ddl-auto</code></td><td><code>validate</code> · <code>none</code></td></tr>
+        <tr><td><code>show-values</code> · <code>show-details</code></td><td><code>when-authorized</code> 이하</td></tr>
+        <tr><td>비밀을 담은 record · DTO</td><td><code>toString</code> 재정의</td></tr>
+        <tr><td>관리 포트(8081) 외부 노출</td><td>없음</td></tr>
+        <tr><td>비밀 회전 주기 · 담당</td><td>문서로 존재</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>Jasypt 같은 '암호화된 설정'</b>은 복호화 키를 또 어딘가 둬야 하므로 문제를 한 칸 옮길 뿐입니다.
+        가능하면 <b>Vault · 클라우드 Secret Manager · 쿠버네티스 Secret(+ 저장 암호화)</b>처럼
+        플랫폼이 관리하는 저장소를 쓰세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 같은 키는 <b>환경 변수 &gt; jar 밖 파일 &gt; jar 안 파일</b> 순으로 이기고, 출처는 <code>/actuator/env/키</code> 로 확인합니다.
+    설정은 <code>@ConfigurationProperties</code> + <code>@Validated</code> 로 <b>틀리면 뜨지 않게</b>,
+    비밀은 <b>Git · 로그 · 예외 · 이미지</b> 네 곳에 남지 않게. 새면 <b>회전이 먼저</b>입니다.</div>
+</section>
+
+
+<!-- ==================== op11 ==================== -->
+<section class="sec" id="op11">
+  <div class="sec-head rv">
+    <span class="no">OPS 11</span>
+    <h2>CPU 프로파일링 — <span class="t">JFR 과 플레임 그래프</span>로 핫스팟 찾기</h2>
+    <p class="lead">
+      "CPU 가 90% 인데 왜죠?"에 스레드 덤프는 약한 답만 줍니다 — 사진 몇 장으로는 짧게 자주 도는 코드가 안 잡힙니다.
+      <b>프로파일러는 1초에 수십~수백 번 스택을 표본 추출</b>해서 "CPU 시간이 어느 메서드에 갔나"를 비율로 보여 줍니다.
+      운영에서 켜도 되는 두 도구, <b>JFR</b>과 <b>async-profiler</b>를 다룹니다.
+      JIT · 성능 최적화 이론은 <b>🧬 고급 탭 ADV 10</b> · <b>🔬 전문가 탭 DEEP 15</b>에 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg data-align="free" viewBox="0 0 680 290" role="img" aria-label="주문 목록 API 의 CPU 플레임 그래프. 아래에서 위로 호출 깊이가 쌓이고 가로 폭이 CPU 를 쓴 비율이다. 맨 아래 톰캣 워커 스레드 위에 DispatcherServlet, 그 위에 OrderController.list 가 있고, 그 위가 OrderService.findOrders, OrderMapper.toDto, Jackson 세 갈래로 나뉜다. 가장 넓은 갈래인 OrderMapper.toDto 위에서 String.format 과 Formatter.parse 가 넓은 지붕을 이루며 전체 CPU 의 34퍼센트를 차지하는 핫스팟이고, 옆의 Pattern.compile 이 14퍼센트로 매 호출마다 정규식을 컴파일하고 있다">
+      <text x="16" y="18" class="lbl">플레임 그래프 — 세로는 호출 깊이, 가로 폭이 CPU 를 쓴 비율</text>
+
+      <text x="178" y="58" class="ann am-t">넓은 지붕 — String.format 이 CPU 의 34%</text>
+      <text x="420" y="72" class="ann">Pattern.compile 14% — 호출마다 컴파일</text>
+
+      <rect class="bx bx-fw" x="178" y="80" width="222" height="22" style="rx:2"/>
+      <text x="186" y="95" class="tk">Formatter.parse</text>
+      <rect class="bx bx-fw" x="412" y="80" width="80" height="22" style="rx:2"/>
+      <text x="420" y="95" class="tk">compile</text>
+
+      <rect class="bx" x="16" y="104" width="150" height="22" style="rx:2"/>
+      <text x="24" y="119" class="tk">Hibernate · JDBC</text>
+      <rect class="bx" x="178" y="104" width="232" height="22" style="rx:2"/>
+      <text x="186" y="119" class="tk">String.format</text>
+      <rect class="bx" x="412" y="104" width="96" height="22" style="rx:2"/>
+      <text x="420" y="119" class="tk">Pattern</text>
+      <rect class="bx" x="522" y="104" width="70" height="22" style="rx:2"/>
+      <text x="530" y="119" class="tk">write</text>
+
+      <rect class="s2" x="16" y="128" width="160" height="22" style="rx:2"/>
+      <text x="24" y="143" class="tk">OrderService.find</text>
+      <rect class="s2" x="178" y="128" width="342" height="22" style="rx:2"/>
+      <text x="186" y="143" class="tk">OrderMapper.toDto — 53%</text>
+      <rect class="bx" x="522" y="128" width="78" height="22" style="rx:2"/>
+      <text x="530" y="143" class="tk">Jackson</text>
+
+      <rect class="s2" x="16" y="152" width="584" height="22" style="rx:2"/>
+      <text x="24" y="167" class="tk">OrderController.list</text>
+
+      <rect class="bx" x="16" y="176" width="600" height="22" style="rx:2"/>
+      <text x="24" y="191" class="tk">DispatcherServlet.doDispatch</text>
+      <rect class="bx" x="618" y="176" width="46" height="22" style="rx:2"/>
+      <text x="626" y="191" class="tk">GC</text>
+
+      <rect class="bx bx-mut" x="16" y="200" width="648" height="22" style="rx:2"/>
+      <text x="24" y="215" class="tk">Thread.run · Tomcat 워커 — 100%</text>
+
+      <rect class="s2" x="16" y="234" width="12" height="12"/>
+      <text x="34" y="244" class="lg-t">우리 코드</text>
+      <rect class="bx" x="110" y="234" width="12" height="12" style="rx:2"/>
+      <text x="128" y="244" class="lg-t">JDK · 라이브러리</text>
+      <rect class="bx bx-fw" x="246" y="234" width="12" height="12"/>
+      <text x="264" y="244" class="lg-t">핫스팟(넓은 지붕)</text>
+
+      <text x="16" y="266" class="lbl">높이가 아니라 폭을 봅니다 — 위가 평평하고 넓은 칸이 CPU 를 직접 쓰는 곳입니다</text>
+      <text x="16" y="282" class="lbl">가로 순서는 시간이 아니라 이름순입니다 — 좌우 위치에는 뜻이 없습니다</text>
+    </svg>
+    <div class="cap">플레임 그래프 — <b>넓은 지붕</b>을 찾고, 그 아래로 내려가 <b>우리 코드 중 가장 가까운 칸</b>을 고칩니다. 여기서는 <code>OrderMapper.toDto</code> 입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">JFR — JDK 에 들어 있는 비행 기록 장치</h4>
+      <pre class="code" data-lang="bash"><code># 지금 60초 녹화 (profile 설정 = 표본 추출 더 촘촘, 부담 약 2%)
+jcmd 1 JFR.start name=cpu settings=profile duration=60s filename=/tmp/cpu.jfr
+jcmd 1 JFR.check                     # 진행 상황
+
+# 항상 켜 두기 — 최근 6시간을 디스크에 순환 보관 (default 설정, 부담 약 1%)
+-XX:StartFlightRecording=name=bg,settings=default,disk=true,maxage=6h,maxsize=1g,dumponexit=true,filename=/dumps/
+
+# 장애가 난 '지금까지'를 꺼내기 — 재현할 필요가 없습니다 ★
+jcmd 1 JFR.dump name=bg filename=/dumps/incident-0214.jfr
+
+# 터미널에서 바로 보기 (Java 21+)
+jfr view hot-methods /tmp/cpu.jfr
+jfr view gc-pauses   /tmp/cpu.jfr
+jfr summary          /tmp/cpu.jfr</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>항상 켜 둔 JFR 이 장애 때 가장 값집니다</b> — 문제는 대개 재현이 안 됩니다.
+        순환 녹화가 켜져 있으면 <code>JFR.dump</code> 한 번으로 <b>장애 직전 몇 시간</b>이 통째로 남습니다.
+        GUI 분석은 <b>JDK Mission Control(JMC)</b> 로 엽니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">async-profiler — 플레임 그래프 한 방</h4>
+      <pre class="code" data-lang="bash"><code># 30초 CPU 프로파일 → 브라우저로 여는 HTML 플레임 그래프
+asprof -d 30 -e cpu -f /tmp/flame-cpu.html 1
+
+# 컨테이너에서 perf_events 를 못 쓰면 (권한 · 커널 설정)
+asprof -d 30 -e itimer -f /tmp/flame-cpu.html 1
+
+# 느린데 CPU 는 낮다? — 대기 시간까지 포함 (스레드별)
+asprof -d 30 -e wall -t -f /tmp/flame-wall.html 1
+
+# 할당이 많은 곳 (GC 가 잦을 때) · 락 경합
+asprof -d 30 -e alloc -f /tmp/flame-alloc.html 1
+asprof -d 30 -e lock  -f /tmp/flame-lock.html 1</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">모드</th><th>이럴 때</th></tr>
+        <tr><td><code>cpu</code></td><td>CPU 사용률이 높다</td></tr>
+        <tr><td><code>wall</code></td><td><b>느린데 CPU 는 한가</b> — I/O · 락 대기</td></tr>
+        <tr><td><code>alloc</code></td><td>GC 가 잦다 · 할당률이 높다</td></tr>
+        <tr><td><code>lock</code></td><td>BLOCKED 가 많다 (OPS 02)</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">플레임 그래프 읽는 규칙</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다섯 가지 규칙</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:8%">#</th><th>규칙</th></tr>
+        <tr><td>1</td><td><b>폭 = 비율</b>. 높이(깊이)는 중요하지 않음</td></tr>
+        <tr><td>2</td><td><b>위가 평평하고 넓은 칸</b>이 CPU 를 직접 쓰는 곳(self time)</td></tr>
+        <tr><td>3</td><td>그 아래로 내려가며 <b>우리 패키지 중 가장 위 칸</b>을 찾음 — 고칠 곳</td></tr>
+        <tr><td>4</td><td>좌우 순서는 이름순 — 시간 흐름이 아님</td></tr>
+        <tr><td>5</td><td>클릭하면 확대, 검색(Ctrl+F)으로 패키지 하이라이트</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>프로파일은 '부하가 있을 때'</b> 떠야 합니다 — 한가할 때 뜨면 GC · 타이머만 보입니다.
+        운영 피크 시간대나 부하 테스트(<b>⚡ 대규모 탭 SCALE 15</b>) 중에 뜨세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">jfr view hot-methods 출력 읽기</h4>
+      <pre class="code" data-lang="text"><code>                         Java Methods that Executes the Most
+
+Method                                                   Samples Percent
+-------------------------------------------------------- ------- -------
+java.util.Formatter.parse(String)                           4102  21.3%
+java.util.regex.Pattern.compile(String)                     1688   8.8%
+java.lang.AbstractStringBuilder.ensureCapacityInternal(int) 1210   6.3%
+com.fasterxml.jackson.core.json.UTF8JsonGenerator.writeString 955   5.0%
+...
+→ 맨 위 두 줄의 '호출한 쪽'을 찾으면 OrderMapper.toDto 가 나옵니다
+  (JMC 의 Method Profiling → Stack Trace 또는 플레임 그래프에서)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">자주 나오는 핫스팟과 처방</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 요청마다 · 원소마다 비싼 일</h5>
+      <pre class="code" data-lang="java"><code>OrderDto toDto(Order o) {
+    // ① 원소마다 String.format — 포맷 문자열을 매번 파싱
+    String label = String.format("%s-%05d", o.channel(), o.id());
+
+    // ② 호출마다 정규식 컴파일
+    boolean vip = o.memo().matches("^VIP[0-9]+$");
+
+    // ③ 요청마다 ObjectMapper 생성 (내부 캐시가 매번 초기화)
+    String json = new ObjectMapper().writeValueAsString(o.items());
+
+    // ④ 예외를 흐름 제어로 — 스택 추적 생성 비용
+    try { Integer.parseInt(o.code()); } catch (NumberFormatException e) { ... }
+    return new OrderDto(label, vip, json);
+}</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 한 번만 만들고, 싼 연산으로</h5>
+      <pre class="code" data-lang="java"><code>private static final Pattern VIP = Pattern.compile("^VIP[0-9]+$");
+private final ObjectMapper mapper;            // 스프링이 주입한 싱글턴
+
+OrderDto toDto(Order o) {
+    // ① 단순 연결 + 패딩 (format 보다 수 배 빠름)
+    String id = Long.toString(o.id());
+    String label = o.channel() + "-" + "0".repeat(Math.max(0, 5 - id.length())) + id;
+
+    // ② 미리 컴파일한 패턴 재사용 (Pattern 은 스레드 안전)
+    boolean vip = VIP.matcher(o.memo()).matches();
+
+    // ③ 공유 ObjectMapper (설정 후 스레드 안전)
+    String json = mapper.writeValueAsString(o.items());
+
+    // ④ 검사로 대체
+    boolean numeric = !o.code().isEmpty() &amp;&amp; o.code().chars().allMatch(Character::isDigit);
+    return new OrderDto(label, vip, json);
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고친 뒤에는 같은 조건으로 다시 잽니다</h4>
+      <pre class="code" data-lang="bash"><code># 같은 부하 · 같은 시간으로 전후 비교
+asprof -d 60 -e cpu -f before.html 1     # 배포 전
+asprof -d 60 -e cpu -f after.html  1     # 배포 후
+
+# JFR 두 개를 나란히 — 상위 메서드 비율이 바뀌었는지
+jfr view hot-methods before.jfr | head -15
+jfr view hot-methods after.jfr  | head -15</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영에서 켤 때 주의</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">항목</th><th>기준</th></tr>
+        <tr><td>JFR default</td><td>상시 켜도 됨 (약 1%)</td></tr>
+        <tr><td>JFR profile · asprof cpu</td><td>수십 초~수 분 단위로</td></tr>
+        <tr><td>asprof alloc · lock</td><td>짧게 — 부담이 더 큼</td></tr>
+        <tr><td>결과 파일</td><td>클래스 · 메서드 이름 포함 — 사내 보관</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>미세 최적화는 측정이 먼저</b> — 플레임 그래프에서 1% 짜리 칸을 고치면 1% 이상 빨라질 수 없습니다.
+        <b>폭이 10% 넘는 칸만</b> 고칠 가치가 있고, 고친 결과는 같은 조건의 재측정으로 확인합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> CPU 가 높으면 <code>asprof -e cpu</code> 30초로 <b>플레임 그래프</b>, 느린데 CPU 가 낮으면 <code>-e wall</code>.
+    JFR 은 <b>항상 켜 두고</b> 장애 때 <code>JFR.dump</code> 로 직전 기록을 꺼냅니다.
+    읽을 때는 <b>폭이 넓은 지붕 → 그 아래 우리 코드</b>, 고친 뒤에는 같은 조건으로 다시 잽니다.</div>
+</section>
+
+
+<!-- ==================== op12 ==================== -->
+<section class="sec" id="op12">
+  <div class="sec-head rv">
+    <span class="no">OPS 12</span>
+    <h2>코드 리뷰 체크리스트 — <span class="t">장애를 PR 에서 막기</span></h2>
+    <p class="lead">
+      이 탭 앞의 열한 섹션에 나온 장애는 거의 전부 <b>코드 몇 줄</b>에서 시작했습니다.
+      리뷰에서 "변수명이 어색해요"보다 먼저 볼 것은 <b>운영에서 터지는 여섯 갈래</b>입니다.
+      각 갈래를 <b>나쁜 예 · 좋은 예</b>로 정리했습니다 — 리뷰 코멘트에 그대로 붙여 쓸 수 있게.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 278" role="img" aria-label="코드 리뷰에서 장애를 막기 위해 볼 여섯 갈래를 가운데 PR 리뷰에서 뻗어 나가게 그린 허브 그림. 왼쪽은 동시성, 트랜잭션 경계, 예외 처리이고 오른쪽은 로깅, 쿼리, 타임아웃이다. 각 갈래 아래에는 대표 장애 사례가 적혀 있다. 동시성은 공유 HashMap 과 재고 음수, 트랜잭션 경계는 안에서 외부 호출과 자기 호출, 예외 처리는 삼키기와 원인 유실, 로깅은 비밀 노출과 맥락 없음, 쿼리는 N 더하기 1 과 무제한 조회, 타임아웃은 기본값 무한 대기다">
+      <text x="16" y="18" class="lbl">리뷰에서 먼저 볼 여섯 갈래 — 이름 짓기보다 이것이 먼저입니다</text>
+
+      <path class="ln" d="M300 116 L208 56"/>
+      <path class="ln" d="M294 140 L208 140"/>
+      <path class="ln" d="M300 164 L208 224"/>
+      <path class="ln" d="M380 116 L472 56"/>
+      <path class="ln" d="M386 140 L472 140"/>
+      <path class="ln" d="M380 164 L472 224"/>
+
+      <circle class="nd nd-fw" cx="340" cy="140" r="46"/>
+      <text x="340" y="137" class="val" text-anchor="middle">PR 리뷰</text>
+      <text x="340" y="153" class="ann" text-anchor="middle">여섯 갈래부터</text>
+
+      <rect class="bx" x="24" y="34" width="180" height="44"/>
+      <text x="114" y="53" class="val" text-anchor="middle">동시성</text>
+      <text x="114" y="69" class="ann" text-anchor="middle">공유 HashMap · 재고 음수</text>
+      <rect class="bx" x="24" y="118" width="180" height="44"/>
+      <text x="114" y="137" class="val" text-anchor="middle">트랜잭션 경계</text>
+      <text x="114" y="153" class="ann" text-anchor="middle">안에서 외부 호출 · 자기 호출</text>
+      <rect class="bx" x="24" y="202" width="180" height="44"/>
+      <text x="114" y="221" class="val" text-anchor="middle">예외 처리</text>
+      <text x="114" y="237" class="ann" text-anchor="middle">삼키기 · 원인 유실</text>
+
+      <rect class="bx" x="476" y="34" width="180" height="44"/>
+      <text x="566" y="53" class="val" text-anchor="middle">로깅</text>
+      <text x="566" y="69" class="ann" text-anchor="middle">비밀 노출 · 맥락 없음</text>
+      <rect class="bx" x="476" y="118" width="180" height="44"/>
+      <text x="566" y="137" class="val" text-anchor="middle">쿼리</text>
+      <text x="566" y="153" class="ann" text-anchor="middle">N+1 · 무제한 조회</text>
+      <rect class="bx" x="476" y="202" width="180" height="44"/>
+      <text x="566" y="221" class="val" text-anchor="middle">타임아웃</text>
+      <text x="566" y="237" class="ann" text-anchor="middle">기본값 = 무한 대기</text>
+
+      <text x="16" y="270" class="lbl">여섯 갈래 모두 테스트는 통과합니다 — 트래픽 · 동시성 · 장애 상황에서만 드러납니다</text>
+    </svg>
+    <div class="cap">허브 — 가운데는 하나, 갈래는 여섯. <b>이 여섯 가지는 단위 테스트로 안 잡히므로</b> 사람의 눈이 마지막 방어선입니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="i">갈래 ①② — <span class="t">동시성 · 트랜잭션 경계</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 싱글턴 빈의 가변 필드 · 검사 후 행동 · 자기 호출</h5>
+      <pre class="code" data-lang="java"><code>@Service
+public class StockService {
+    private final Map&lt;Long, Integer&gt; cache = new HashMap&lt;&gt;(); // 요청 스레드가 동시에 씀
+    private int calls;                                         // calls++ 는 원자적이지 않음
+
+    public void decrease(Long id, int qty) {
+        Product p = repo.findById(id).orElseThrow();
+        if (p.getStock() &gt;= qty)                  // 둘이 동시에 통과 → 재고 음수
+            p.setStock(p.getStock() - qty);
+    }
+
+    public void placeAll(List&lt;OrderReq&gt; reqs) {
+        reqs.forEach(this::place);                // this 호출 → 프록시 안 거침
+    }
+    @Transactional                                // → 이 애너테이션이 무시됨
+    public void place(OrderReq r) { ... }
+}</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 상태는 스레드 안전하게 · 조건은 DB 가 원자적으로</h5>
+      <pre class="code" data-lang="java"><code>@Service
+public class StockService {
+    private final ConcurrentHashMap&lt;Long, Integer&gt; cache = new ConcurrentHashMap&lt;&gt;();
+    private final LongAdder calls = new LongAdder();
+
+    @Transactional
+    public void decrease(Long id, int qty) {
+        // UPDATE product SET stock = stock - :qty
+        //  WHERE id = :id AND stock &gt;= :qty
+        if (repo.decreaseIfEnough(id, qty) == 0)
+            throw new OutOfStockException(id);
+    }
+}
+
+// 트랜잭션이 필요한 메서드는 '다른 빈'에서 부르게
+@Service @RequiredArgsConstructor
+public class OrderBatch {
+    private final OrderPlacer placer;             // @Transactional place() 보유
+    public void placeAll(List&lt;OrderReq&gt; reqs) { reqs.forEach(placer::place); }
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">갈래 ③④ — <span class="t">예외 처리 · 로깅</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 삼키기 · 원인 버리기 · 비밀 찍기</h5>
+      <pre class="code" data-lang="java"><code>try {
+    paymentClient.approve(req);
+} catch (Exception e) {
+    log.error(e.getMessage());                 // 스택 · 원인 · 맥락 전부 사라짐
+    return null;                               // 호출자는 성공인 줄 앎
+}
+
+catch (IOException e) {
+    throw new RuntimeException("결제 실패");   // cause 를 안 넘김 — 근본 원인 유실
+}
+
+@Transactional
+public void refund(Long id) throws IOException { ... }
+// ↑ 체크 예외(IOException)는 기본적으로 롤백되지 않습니다
+
+log.info("로그인 요청: " + loginRequest);       // record toString 에 password 포함
+items.forEach(i -&gt; log.info("처리 {}", i));     // 10만 건 = 로그 10만 줄</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 맥락과 원인을 남기고, 필요한 것만 찍기</h5>
+      <pre class="code" data-lang="java"><code>try {
+    paymentClient.approve(req);
+} catch (ResourceAccessException e) {
+    // 맥락(주문번호) + 원인(e) — 마지막 인자로 예외를 넘기면 스택이 찍힘
+    throw new PaymentFailedException("approve 실패 orderId=" + req.orderId(), e);
+}
+
+@Transactional(rollbackFor = Exception.class)  // 체크 예외도 롤백
+public void refund(Long id) throws IOException { ... }
+
+// 처리하는 '그 자리'에서 한 번만 로그 — 던지면서 또 찍지 않기
+@ExceptionHandler(PaymentFailedException.class)
+ProblemDetail onPayment(PaymentFailedException e) {
+    log.error("결제 실패", e);
+    return ProblemDetail.forStatus(HttpStatus.BAD_GATEWAY);
+}
+
+log.info("로그인 요청 userId={}", loginRequest.userId());
+log.info("일괄 처리 완료 total={} failed={}", total, failed);   // 요약 한 줄</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">갈래 ⑤⑥ — <span class="t">쿼리 · 타임아웃</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 전부 가져와서 거르기 · 기본값 클라이언트</h5>
+      <pre class="code" data-lang="java"><code>// 오늘은 1,000건, 1년 뒤엔 300만 건 → OOM (OPS 03)
+List&lt;Order&gt; all = orderRepository.findAll();
+List&lt;Order&gt; mine = all.stream()
+        .filter(o -&gt; o.getMemberId().equals(memberId)).toList();
+
+for (Order o : mine) {
+    o.getItems().size();                      // 주문마다 쿼리 1개 — N+1 (OPS 06)
+}
+
+RestTemplate rt = new RestTemplate();         // 연결 · 읽기 타임아웃 없음
+HttpClient client = HttpClient.newHttpClient();
+future.get();                                 // 상한 없는 대기</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ DB 가 거르고 · 페이지로 자르고 · 상한을 둠</h5>
+      <pre class="code" data-lang="java"><code>@Query("""
+       select distinct o from Order o
+       join fetch o.items
+       where o.memberId = :memberId
+       """)
+List&lt;Order&gt; findWithItems(Long memberId);    // 쿼리 1개
+
+Page&lt;Order&gt; page = orderRepository
+        .findByMemberId(memberId, PageRequest.of(0, 50));   // 상한 50
+
+RestClient client = builder.requestFactory(factoryWithTimeouts).build(); // OPS 07
+future.get(2, TimeUnit.SECONDS);
+cf.orTimeout(2, TimeUnit.SECONDS);            // CompletableFuture 상한</code></pre>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">PR 템플릿에 붙일 체크리스트</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:52%">질문</th><th>확인 방법</th></tr>
+        <tr><td>싱글턴 빈에 가변 필드가 생겼나?</td><td><code>private</code> 비-final 필드 검색</td></tr>
+        <tr><td>"읽고 → 검사 → 쓰기"가 동시에 와도 되나?</td><td>조건부 UPDATE · 락 · 유니크 제약</td></tr>
+        <tr><td>트랜잭션 안에 HTTP · 메시지 발행 · 파일이 있나?</td><td><code>@Transactional</code> 메서드 본문</td></tr>
+        <tr><td>자기 호출로 애너테이션이 무시되지 않나?</td><td><code>this.</code> 로 부르는 프록시 메서드</td></tr>
+        <tr><td><code>catch</code> 에서 예외를 버리지 않나?</td><td>cause 전달 · 빈 catch 금지</td></tr>
+        <tr><td>로그에 비밀 · 개인정보 · 객체 통째가 없나?</td><td><code>+ obj</code> · <code>{}</code> 에 DTO</td></tr>
+        <tr><td>목록 조회에 상한(페이지)이 있나?</td><td><code>findAll()</code> · 무제한 <code>IN</code></td></tr>
+        <tr><td>연관 컬렉션을 루프에서 건드리나?</td><td>쿼리 개수 테스트 (OPS 06)</td></tr>
+        <tr><td>새 외부 호출에 타임아웃 · 재시도 정책이 있나?</td><td>클라이언트 빈 설정</td></tr>
+        <tr><td>스키마 변경이 이전 버전 앱과 호환되나?</td><td>expand-contract (OPS 09)</td></tr>
+        <tr><td>새 설정값에 검증 · 기본값이 있나?</td><td><code>@Validated</code> (OPS 10)</td></tr>
+        <tr><td>장애 시 알아챌 지표 · 로그가 있나?</td><td>RED 지표 · 에러 로그 (OPS 08)</td></tr>
+      </table></div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">리뷰 코멘트 — 사람이 아니라 코드에</h4>
+      <pre class="code" data-lang="text"><code>❌ "이거 왜 이렇게 짰어요? 동시성 모르세요?"
+
+✅ "[필수] 이 decrease() 는 요청 두 개가 동시에 오면
+    둘 다 재고 검사를 통과할 수 있어 재고가 음수가 됩니다.
+    조건부 UPDATE(… WHERE stock &gt;= :qty)로 바꾸면 DB 가 원자적으로
+    막아 줍니다. 참고: OPS 12 동시성 예시"
+
+✅ "[제안] 로그에 loginRequest 를 통째로 넘기면 password 가
+    찍힙니다. userId 만 남기면 어떨까요?"
+
+✅ "[질문] 이 외부 호출의 읽기 타임아웃은 어디서 정해지나요?"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>[필수] · [제안] · [질문] 머리표</b>를 붙이면 작성자가 무엇을 반드시 고쳐야 하는지 바로 압니다.
+        필수는 <b>장애 · 보안 · 데이터 손상</b>에만 씁니다. 취향은 [제안] 입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 리뷰는 <b>동시성 · 트랜잭션 경계 · 예외 · 로깅 · 쿼리 · 타임아웃</b> 여섯 갈래부터.
+    전부 테스트를 통과하고 운영에서만 터지는 것들입니다. 체크리스트를 PR 템플릿에 넣고,
+    코멘트는 <b>[필수]/[제안]/[질문]</b>으로 구분해 <b>코드와 결과</b>에 대해 씁니다.</div>
+</section>
+
+
+<!-- ==================== op13 ==================== -->
+<section class="sec" id="op13">
+  <div class="sec-head rv">
+    <span class="no">OPS 13</span>
+    <h2>포스트모템 쓰기 — <span class="t">같은 장애를 두 번 겪지 않는 법</span></h2>
+    <p class="lead">
+      장애는 복구로 끝나지 않습니다. <b>왜 일어났고, 왜 늦게 알았고, 무엇을 바꿔서 다음엔 막을지</b>를 글로 남겨야
+      같은 장애가 반복되지 않습니다. 포스트모템의 목적은 <b>범인을 찾는 것이 아니라 시스템의 빈칸을 찾는 것</b>입니다.
+      이 섹션은 바로 쓸 수 있는 <b>템플릿</b>과, 쓰면서 흔히 빠지는 함정을 다룹니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 248" role="img" aria-label="장애 타임라인. 축 위쪽은 시스템에서 일어난 일, 아래쪽은 사람이 한 일이다. 01시 58분 v2.41 배포, 02시 06분 p99 상승과 풀 대기 시작, 02시 29분 지표 정상화가 위쪽에 있고, 02시 14분 알람 수신과 대응 시작, 02시 21분 롤백 결정, 02시 39분 종료 선언이 아래쪽에 있다. 증상 시작부터 감지까지 8분, 증상 시작부터 복구까지 23분이 걸렸다. 감지가 늦은 8분이 첫 번째 개선 대상이다">
+      <text x="16" y="18" class="lbl">타임라인 — 위는 시스템이 한 일, 아래는 사람이 한 일</text>
+
+      <path class="ax ar" d="M40 112 L652 112"/>
+
+      <path class="ln" d="M95 106 L95 118"/>
+      <path class="ln" d="M188 106 L188 118"/>
+      <path class="ln" d="M280 106 L280 118"/>
+      <path class="ln" d="M362 106 L362 118"/>
+      <path class="ln" d="M454 106 L454 118"/>
+      <path class="ln" d="M570 106 L570 118"/>
+
+      <text x="95" y="132" class="tk" text-anchor="middle">01:58</text>
+      <text x="188" y="132" class="tk" text-anchor="middle">02:06</text>
+      <text x="280" y="132" class="tk" text-anchor="middle">02:14</text>
+      <text x="362" y="132" class="tk" text-anchor="middle">02:21</text>
+      <text x="454" y="132" class="tk" text-anchor="middle">02:29</text>
+      <text x="570" y="132" class="tk" text-anchor="middle">02:39</text>
+
+      <circle class="dot" cx="95" cy="112" r="5" style="fill:#fbbf24"/>
+      <circle class="dot" cx="188" cy="112" r="5" style="fill:#fb7185"/>
+      <circle class="dot" cx="280" cy="112" r="5"/>
+      <circle class="dot" cx="362" cy="112" r="5"/>
+      <circle class="dot" cx="454" cy="112" r="5" style="fill:#34d399"/>
+      <circle class="dot" cx="570" cy="112" r="5"/>
+
+      <path class="lead-ln" d="M95 106 L95 84"/>
+      <text x="95" y="64" class="ann" text-anchor="middle">배포</text>
+      <text x="95" y="76" class="ann am-t" text-anchor="middle">v2.41</text>
+
+      <path class="lead-ln" d="M188 106 L188 84"/>
+      <text x="188" y="64" class="ann" text-anchor="middle">풀 대기 시작</text>
+      <text x="188" y="76" class="ann rs-t" text-anchor="middle">p99 상승</text>
+
+      <path class="lead-ln" d="M454 106 L454 84"/>
+      <text x="454" y="76" class="ann ok-t" text-anchor="middle">지표 정상</text>
+
+      <path class="lead-ln" d="M280 118 L280 148"/>
+      <text x="280" y="160" class="ann am-t" text-anchor="middle">알람 · 대응 시작</text>
+
+      <path class="lead-ln" d="M362 118 L362 148"/>
+      <text x="362" y="172" class="ann ok-t" text-anchor="middle">롤백 결정</text>
+
+      <path class="lead-ln" d="M570 118 L570 148"/>
+      <text x="570" y="160" class="ann" text-anchor="middle">종료 선언</text>
+
+      <path class="dim-ln" d="M192 196 L276 196"/>
+      <text x="234" y="190" class="ann rs-t" text-anchor="middle">감지 8분</text>
+      <path class="dim-ln" d="M192 214 L450 214"/>
+      <text x="321" y="208" class="ann" text-anchor="middle">영향 23분</text>
+
+      <text x="16" y="240" class="lbl">시각은 로그 · 알람 · 채팅 기록에서 옮겨 적습니다 — 기억으로 쓰면 반드시 틀립니다</text>
+    </svg>
+    <div class="cap">타임라인 — <b>증상 시작과 감지 사이의 빈칸</b>(8분)이 보통 가장 싸게 줄일 수 있는 구간입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">포스트모템 템플릿 — 복사해서 쓰기</h4>
+      <pre class="code" data-lang="text"><code># [SEV2] 주문 API 지연 — 2026-09-30
+
+## 요약 (3줄)
+- 01:58 배포된 쿠폰 조회 쿼리가 인덱스 없는 조건을 써서 커넥션을 오래 점유
+- 02:06~02:29 주문 생성 p99 4.8s, 5xx 2.1% (약 3,100건 실패)
+- 롤백으로 복구. 재발 방지 액션 4건
+
+## 영향
+- 사용자: 주문 생성 실패 약 3,100건 (재시도 성공 2,400건)
+- 매출: 추정 손실 약 OOO만 원 / 외부 공지: 없음
+
+## 타임라인 (KST, 출처: 알람 · 배포 로그 · 채팅)
+01:58 v2.41 배포 완료
+02:06 hikaricp pending 상승 시작 (지표)
+02:14 5xx 알람 수신, IC 김OO
+02:21 롤백 결정 → 02:29 지표 정상 → 02:39 종료 선언
+
+## 원인 (기여 요인 — 하나가 아닐 수 있음)
+1. 변경: coupon(user_id, status) 조건에 인덱스 없음
+2. 감지: 풀 대기(pending) 알람이 없어 5xx 가 쌓인 뒤에야 알람
+3. 방어: connection-timeout 30s — 빨리 실패하지 못해 스레드 고갈
+
+## 잘된 점 / 운이 좋았던 점
+- 배포 30분 규칙대로 원인 확인 전 롤백 → 복구 8분
+
+## 액션 아이템
+| # | 유형 | 내용 | 담당 | 기한 | 티켓 |
+| 1 | 감지 | Hikari pending &gt; 0 3분 알람 | 이OO | 10/04 | OPS-412 |
+| 2 | 예방 | PR 템플릿에 실행계획 항목 | 박OO | 10/07 | OPS-413 |
+| 3 | 완화 | connection-timeout 3s | 김OO | 10/04 | OPS-414 |
+| 4 | 예방 | coupon 인덱스 추가 | 김OO | 10/02 | OPS-415 |</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">숫자로 남길 것 — 장애 지표 네 개</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">지표</th><th>구간</th><th>이번</th><th>줄이는 수단</th></tr>
+        <tr><td><b>TTD</b></td><td>증상 → 감지</td><td>8분</td><td>알람 (OPS 08)</td></tr>
+        <tr><td><b>TTA</b></td><td>감지 → 대응 시작</td><td>0분</td><td>당번 · 호출 체계</td></tr>
+        <tr><td><b>TTM</b></td><td>증상 → 완화</td><td>23분</td><td>롤백 · 플래그 (OPS 01)</td></tr>
+        <tr><td>TTR</td><td>증상 → 근본 해결</td><td>2일</td><td>액션 아이템</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>분기마다 이 숫자들을 모아 보세요</b> — 장애 건수보다 <b>TTD · TTM 추세</b>가 팀의 운영 실력을 더 정직하게 보여 줍니다.
+        건수는 운에 좌우되지만, 감지와 완화 속도는 준비한 만큼 줄어듭니다.
+      </div>
+      <h4 class="mini">비난 없는 문장으로 쓰기</h4>
+      <div class="vs" style="margin-top:0">
+        <div class="bad">
+          <h5>❌ 사람을 주어로</h5>
+          <div class="sm">"김OO 이 인덱스를 확인하지 않고 배포했다."</div>
+        </div>
+        <div class="good">
+          <h5>✅ 시스템을 주어로</h5>
+          <div class="sm">"인덱스 없는 쿼리가 리뷰 · CI 어디에서도 걸리지 않고 배포될 수 있었다."</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">한 단계 더 — <span class="t">5 Whys 의 한계와 기여 요인 트리</span> <span class="lvl m">🟡 중급</span></h3>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 254" role="img" aria-label="왼쪽은 5 Whys 로 한 줄로 내려간 결과다. 왜 느려졌나에서 풀 고갈, 쿠폰 쿼리가 느림, 인덱스 없는 조건, 리뷰에서 못 봄을 거쳐 마지막에 담당자 부주의라는 사람 탓에서 멈춘다. 오른쪽은 같은 장애를 기여 요인 트리로 나눈 것이다. 주문 API 지연 23분 아래에 변경, 감지, 방어 세 갈래가 있고, 각각 쿼리 변경과 인덱스 없음, 풀 대기 알람 없음, 풀 타임아웃 30초가 원인이며, 그 아래에 실행계획 리뷰, pending 알람, 타임아웃 3초라는 액션이 하나씩 달린다">
+      <text x="16" y="18" class="lbl">한 줄로 파면 사람에서 멈추고, 갈래로 나누면 고칠 곳이 여럿 나옵니다</text>
+
+      <rect class="bx" x="16" y="36" width="220" height="24"/>
+      <text x="126" y="52" class="ann" text-anchor="middle">왜 느렸나 → 풀 고갈</text>
+      <path class="ln" d="M126 60 L126 72"/>
+      <rect class="bx" x="16" y="72" width="220" height="24"/>
+      <text x="126" y="88" class="ann" text-anchor="middle">왜 고갈 → 쿠폰 쿼리가 느림</text>
+      <path class="ln" d="M126 96 L126 108"/>
+      <rect class="bx" x="16" y="108" width="220" height="24"/>
+      <text x="126" y="124" class="ann" text-anchor="middle">왜 느림 → 인덱스 없는 조건</text>
+      <path class="ln" d="M126 132 L126 144"/>
+      <rect class="bx" x="16" y="144" width="220" height="24"/>
+      <text x="126" y="160" class="ann" text-anchor="middle">왜 없었나 → 리뷰에서 못 봄</text>
+      <path class="ln" d="M126 168 L126 180"/>
+      <rect class="bx bx-warn" x="16" y="180" width="220" height="24"/>
+      <text x="126" y="196" class="ann rs-t" text-anchor="middle">왜 못 봤나 → 담당자 부주의</text>
+      <text x="126" y="222" class="ann rs-t" text-anchor="middle">한 줄로 가면 '사람'에서 멈춥니다</text>
+
+      <path class="ln-t" d="M248 30 L248 226"/>
+
+      <rect class="bx bx-fw" x="372" y="36" width="180" height="26"/>
+      <text x="462" y="53" class="val" text-anchor="middle">주문 API 지연 23분</text>
+
+      <path class="ln" d="M462 62 L462 80 M322 80 L602 80 M322 80 L322 96 M602 80 L602 96 M462 80 L462 96"/>
+
+      <rect class="bx" x="260" y="96" width="124" height="40"/>
+      <text x="322" y="113" class="val" text-anchor="middle">변경</text>
+      <text x="322" y="128" class="ann" text-anchor="middle">쿼리 변경 · 인덱스 없음</text>
+      <rect class="bx" x="400" y="96" width="124" height="40"/>
+      <text x="462" y="113" class="val" text-anchor="middle">감지</text>
+      <text x="462" y="128" class="ann" text-anchor="middle">풀 대기 알람 없음</text>
+      <rect class="bx" x="540" y="96" width="124" height="40"/>
+      <text x="602" y="113" class="val" text-anchor="middle">방어</text>
+      <text x="602" y="128" class="ann" text-anchor="middle">풀 타임아웃 30초</text>
+
+      <path class="ln" d="M322 136 L322 160 M462 136 L462 160 M602 136 L602 160"/>
+
+      <rect class="bx bx-ok" x="260" y="160" width="124" height="40"/>
+      <text x="322" y="177" class="val ok-t" text-anchor="middle">실행계획 리뷰</text>
+      <text x="322" y="192" class="ann" text-anchor="middle">PR 템플릿 항목</text>
+      <rect class="bx bx-ok" x="400" y="160" width="124" height="40"/>
+      <text x="462" y="177" class="val ok-t" text-anchor="middle">pending 알람</text>
+      <text x="462" y="192" class="ann" text-anchor="middle">3분 지속 시 호출</text>
+      <rect class="bx bx-ok" x="540" y="160" width="124" height="40"/>
+      <text x="602" y="177" class="val ok-t" text-anchor="middle">타임아웃 3초</text>
+      <text x="602" y="192" class="ann" text-anchor="middle">빨리 실패 · 서킷</text>
+
+      <text x="462" y="222" class="ann ok-t" text-anchor="middle">갈래마다 고칠 것이 하나씩 — 어느 하나만 있었어도 짧게 끝났습니다</text>
+
+      <text x="16" y="246" class="lbl">5 Whys 는 질문 도구로 쓰고, 결론은 사람이 아니라 '시스템의 빈칸'에서 멈춥니다</text>
+    </svg>
+    <div class="cap">트리 — <b>원인은 대개 하나가 아닙니다</b>. 변경 · 감지 · 방어 중 어느 한 겹만 있었어도 장애가 짧아졌다는 것이 액션 아이템의 근거가 됩니다.</div>
+  </div>
+
+  <div class="grid2 rv d1">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">좋은 액션 아이템 · 나쁜 액션 아이템</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:46%">❌ 흔히 쓰는 것</th><th>✅ 이렇게 바꾸기</th></tr>
+        <tr><td>"앞으로 더 주의한다"</td><td>사람의 주의 대신 <b>장치</b>: CI 검사 · 알람 · 기본값</td></tr>
+        <tr><td>"모니터링 강화"</td><td>"<code>hikaricp_connections_pending &gt; 0</code> 3분 알람 추가"</td></tr>
+        <tr><td>담당 · 기한 없음</td><td><b>이름 한 명 + 날짜 + 티켓 번호</b></td></tr>
+        <tr><td>"시스템 전면 개편" 하나</td><td>2주 안에 끝나는 크기로 쪼개기</td></tr>
+        <tr><td>예방만 10개</td><td><b>예방 · 감지 · 완화</b> 유형을 골고루</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>닫히지 않는 액션 아이템이 가장 흔한 실패</b>입니다. 포스트모템 문서 안에만 있으면 잊힙니다.
+        반드시 <b>평소 쓰는 이슈 트래커에 티켓</b>으로 만들고, 주간 회의에서 남은 개수를 확인하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">5 Whys 를 쓸 때 지킬 것</h4>
+      <pre class="code" data-lang="text"><code>① "왜"마다 답이 여러 개면 전부 적고 갈래를 나눕니다
+   (한 줄만 따라가면 나머지 원인이 버려짐)
+
+② 답이 '사람'에 닿으면 질문을 바꿉니다
+   "왜 실수했나"  →  "왜 그 실수가 막히지 않았나"
+
+③ 답마다 증거(지표 · 로그 · 커밋)를 붙입니다
+   증거 없는 답은 가설 칸에 따로 둡니다
+
+④ "운이 좋았던 점"도 적습니다
+   새벽이라 트래픽이 적었다 → 낮이었다면? → 그것도 액션 후보</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">리뷰 회의 30분과 그 뒤</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">회의 진행 순서 (30분)</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:18%">시간</th><th>내용</th></tr>
+        <tr><td>5분</td><td>요약 · 영향 낭독 (문서는 회의 <b>전에</b> 공유)</td></tr>
+        <tr><td>10분</td><td>타임라인 함께 보며 <b>빈칸 · 놀란 점</b> 표시</td></tr>
+        <tr><td>10분</td><td>기여 요인 트리 · 액션 아이템 합의</td></tr>
+        <tr><td>5분</td><td>담당 · 기한 확정, 공유 범위 결정</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>언제까지 쓰나</b> — SEV1 · SEV2 는 <b>5영업일 안</b>에 초안, 같은 주에 리뷰가 보통입니다.
+        기억과 로그 보존 기간이 짧기 때문에 늦어질수록 타임라인이 부정확해집니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">포스트모템이 쌓이면 하는 일</h4>
+      <pre class="code" data-lang="text"><code>분기마다 포스트모템을 모아 '유형'으로 셉니다
+
+  유형                 건수   대표 액션
+  커넥션 풀 · 타임아웃     5    기본 타임아웃 템플릿화 (OPS 07)
+  배포 · 스키마 호환      3    expand-contract 체크 (OPS 09)
+  메모리 · OOM           2    힙 비율 표준값 (OPS 04)
+  설정 실수              2    @Validated 의무화 (OPS 10)
+
+→ 같은 유형이 3번 넘으면 개별 수정이 아니라
+  '팀 표준'(템플릿 · 린트 · 기본 설정)으로 올립니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>이 탭의 런북도 포스트모템에서 자랍니다</b> — 장애를 겪을 때마다 OPS 01 의 표와 명령어를
+        팀 위키 런북에 한 줄씩 더하세요. 다음 당번은 새벽 세 시에 그 한 줄로 10분을 법니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 포스트모템은 <b>요약 · 영향 · 타임라인(기록 기반) · 기여 요인 · 액션 아이템</b> 다섯 칸.
+    문장의 주어는 <b>사람이 아니라 시스템</b>, 원인은 한 줄이 아니라 <b>변경 · 감지 · 방어의 갈래</b>로 나누고,
+    액션 아이템은 <b>담당 · 기한 · 티켓</b>이 있어야 진짜입니다. TTD · TTM 추세가 팀의 운영 실력입니다.</div>
+</section>
+
+</div><!-- /pane-ops -->

@@ -12,7 +12,7 @@ const BO_NOTE = {
   10:      "n이 10일 땐 <b>어떤 알고리즘을 써도 똑같습니다</b>. 그래서 작은 입력으로 테스트하면 성능 문제가 안 보입니다.",
   100:     "슬슬 벌어집니다. O(n²)는 벌써 <b>1만 번</b> — 그래도 파이썬이 0.001초에 끝냅니다.",
   1000:    "O(n²)가 <b>100만 번</b>. 여기서부터 “왜 느리지?”가 시작됩니다.",
-  100000:  "O(n log n)은 <b>170만 번</b>으로 여유롭지만, O(n²)는 <b>100억 번</b> — 파이썬으로 <b>약 6시간</b>입니다. 같은 문제, 같은 컴퓨터인데요.",
+  100000:  "O(n log n)은 <b>170만 번</b>으로 여유롭지만, O(n²)는 <b>100억 번</b> — 파이썬(초당 2~5천만 번)으로 <b>약 3~8분</b>, 제한 시간 1~2초의 수백 배입니다. 같은 문제, 같은 컴퓨터인데요.",
 };
 function boGo(n, btn){
   $$("#g01 .ctrls .chip").forEach(b => b.classList.remove("on"));
@@ -468,7 +468,8 @@ function rcGen(){
     st.pop();
     if (st.length) st[st.length - 1].s = `${n + 1} × ${acc} 계산 대기`;
     S.push({ st: st.map(f => ({ ...f })), ret:{ n, v: acc },
-      note: `<code>factorial(${n})</code> 이 <b>${acc}</b> 를 반환하고 <b>사라집니다</b>. 기다리던 <code>factorial(${n + 1})</code> 이 그 값을 받아 이어서 계산합니다.` });
+      note: `<code>factorial(${n})</code> 이 <b>${acc}</b> 를 반환하고 <b>사라집니다</b>. ` +
+        (n < 5 ? `기다리던 <code>factorial(${n + 1})</code> 이 그 값을 받아 이어서 계산합니다.` : `처음 호출한 쪽이 이 값을 최종 결과로 받습니다.`) });
   }
   S.push({ st: [], ret:{ n:5, v:120 }, tone:"ok",
     note: `스택이 모두 비었습니다 → 최종 결과 <b>120</b>. <b>쌓이는 순서는 5→1, 값이 돌아오는 순서는 1→5</b> — 이 뒤집힘이 재귀의 핵심입니다.` });
@@ -504,15 +505,16 @@ function trGen(){
   snap(cls, ord, `<b>${NAMES[trMode]}</b> 순회를 시작합니다. 노드 아래 작은 숫자가 <b>방문 순서</b>입니다.`);
 
   if (trMode === "search"){
-    let i = 0, target = 43;
+    let i = 0, target = 43, cmp = 0;
     while (i >= 0){
+      cmp++;
       cls[i] = "st-cur";
       snap(cls, ord, `<b>${TR_V[i]}</b> 와 찾는 값 <b>${target}</b> 비교.`);
       if (TR_V[i] === target){ cls[i] = "st-done"; snap(cls, ord, "찾았습니다!", "ok"); return S; }
       const next = target < TR_V[i] ? L(i) : R(i);
       cls[i] = "st-hit";
       if (next < 0){
-        snap(cls, ord, `<b>${target} ${target < TR_V[i] ? "&lt;" : "&gt;"} ${TR_V[i]}</b> → ${target < TR_V[i] ? "왼쪽" : "오른쪽"}으로 가야 하는데 자식이 없습니다 → <b>${target} 은(는) 없습니다</b>. 비교는 단 <b>${Object.keys(cls).length}번</b>.`, "bad");
+        snap(cls, ord, `<b>${target} ${target < TR_V[i] ? "&lt;" : "&gt;"} ${TR_V[i]}</b> → ${target < TR_V[i] ? "왼쪽" : "오른쪽"}으로 가야 하는데 자식이 없습니다 → <b>${target} 은(는) 없습니다</b>. 비교는 단 <b>${cmp}번</b>.`, "bad");
         return S;
       }
       const edge = {}; edge[next] = true;
