@@ -157,6 +157,7 @@ const TAB_KW = {
   rtos:"FreeRTOS freertos 프리rtos 프리알토스 RTOS 알토스 실시간 운영체제 실시간OS real-time 태스크 task 스케줄러 scheduler 선점 preemption 타임슬라이스 tick 틱 큐 queue 세마포어 semaphore 세마포 뮤텍스 mutex 뮤텍 우선순위 역전 priority inversion 우선순위 상속 inheritance 인터럽트 ISR FromISR portYIELD_FROM_ISR configMAX_SYSCALL_INTERRUPT_PRIORITY NVIC 태스크 알림 notification 이벤트 그룹 event group 스트림 버퍼 stream buffer 메시지 버퍼 소프트웨어 타이머 timer heap_4 heap_5 정적 할당 스택 오버플로 stack overflow high water mark tickless 저전력 Stop 모드 워치독 IWDG 데드락 deadlock 레이스 race SystemView Tracealyzer CMSIS-RTOS osThreadNew STM32F446RE Nucleo Cortex-M4 xTaskCreate xQueueSend xSemaphoreTake 액티브 오브젝트 Zephyr ThreadX RT-Thread",
   hw:"하드웨어 기초 hardware 전기 전압 전류 저항 옴의법칙 ohm 전력 LED 저항계산 3.3V 5V 풀업 풀다운 pullup 플로팅 floating 푸시풀 오픈드레인 open-drain 바운스 디바운스 debounce 5V톨러런트 FT 레벨시프트 MCU 마이크로컨트롤러 마이컴 ATmega328P 아두이노 arduino uno STM32F446RE nucleo cortex-m4 메모리맵 레지스터 register volatile 비트조작 bitmask BSRR RMW 데이터시트 datasheet 레퍼런스매뉴얼 RM0390 에라타 errata 클럭 clock PLL HSI HSE RCC 클럭게이트 인터럽트 interrupt ISR NVIC 벡터테이블 vector table EXTI 타이머 timer PWM 프리스케일러 prescaler ADC 전압분배기 부팅 boot reset_handler 스타트업 startup 링커스크립트 linker script .data .bss map파일 베어메탈 bare metal blinky SysTick 하드웨어기쵸 레지스타 인터럽드",
   stm32:"STM32 stm32 스티엠32 에스티엠 STM32F446RE F446 Nucleo 뉴클레오 Cortex-M 코텍스 cortex m4 M4F M0+ M7 M33 CubeMX 큐브엠엑스 cubemx HAL 할 LL CMSIS 레지스터 register 클럭 clock PLL HSE HSI SYSCLK GPIO EXTI 인터럽트 NVIC SysTick HAL_Delay 콜백 callback weak UART USART DMA IDLE ReceiveToIdle 순환버퍼 타이머 timer PWM 입력캡처 엔코더 encoder ADC 샘플링 Flash 플래시 옵션바이트 RDP HardFault 하드폴트 CFSR 저전력 Stop Standby Sleep 임베디드 펌웨어 firmware 마이컴 MCU",
+  sq:"스택 큐 덱 stack queue deque 데크 스텍 큐우 LIFO FIFO 링버퍼 원형버퍼 ring buffer circular buffer 환형버퍼 head tail 마스크 mask 2의거듭제곱 power of two 무한증가인덱스 free-running index 한칸비우기 count 가득참 비어있음 full empty 넘침 overflow wraparound uint32 부호없는 unsigned 정수승격 integer promotion realloc 동적스택 void* memcpy 매크로 DEFINE_STACK _Generic 제네릭 침입형 intrusive list_head container_of offsetof sys/queue.h TAILQ STAILQ 연결큐 꼬리포인터 이진힙 binary heap 우선순위큐 priority queue sift-up sift-down 비교함수 cmp 타이머 소프트웨어타이머 timer wheel 타이머휠 tick 넘침 pthread mutex condvar 조건변수 cond_wait spurious wakeup 가짜깨어남 timedwait CLOCK_MONOTONIC close drain poison pill 독약 생산자 소비자 producer consumer 배압 backpressure stdatomic atomic SPSC lock-free 락프리 memory_order acquire release relaxed volatile ISR 인터럽트 메인루프 찢어진읽기 torn read 배리어 barrier ATOMIC_BLOCK AVR Cortex-M 정적풀 static pool 메모리풀 _Static_assert static_assert 단조스택 단조덱 monotonic 슬라이딩윈도우 BFS 0-1 BFS undo redo 괄호검사 flood fill 명시적스택 재귀 호출스택 call stack 이벤트큐 event queue 상태머신 state machine 명령큐 command parser 로그링 log ring noinit",
 };
 
 const FIND_CHIPS = ["포인터 기초","malloc 누수","구조체 패딩","함수 포인터",
@@ -255,6 +256,18 @@ const SEC_KW = {
   m11:"Flash 플래시 섹터 erase HAL_FLASH_Unlock HAL_FLASHEx_Erase HAL_FLASH_Program 옵션바이트 RDP BOR WRP EEPROM 에뮬레이션 링커 지우기시간",
   m12:"HardFault 하드폴트 예외 스택프레임 EXC_RETURN MSP PSP CFSR HFSR UFSR BFSR MMFSR BFAR MMFAR INVSTATE UNALIGNED addr2line 스택오버플로",
   m13:"저전력 low power Sleep Stop Standby WFI 웨이크업 소비전류 배터리 HAL_MAX_DELAY 타임아웃 재진입 HAL_BUSY 워치독 IWDG 체크리스트",
+  sq01:"C 표준 스택 큐 없음 선택 결정 sys/queue.h GLib GQueue stb_ds klib lwrb 규약 bool out 매개변수 nodiscard 레거시",
+  sq02:"스택 top 오버플로 언더플로 bool out realloc 2배 분할상환 shrink void* memcpy esz DEFINE_STACK 토큰붙이기 _Generic 디스패치",
+  sq03:"원형버퍼 ring buffer head tail 마스크 한칸비우기 count 무한증가인덱스 uint32 넘침 mod 2^32 정수승격 uint16 uint8 N=256 PRIu32 _Static_assert",
+  sq04:"덱 deque push_front pop_back grow 두조각 복사 size_t 0-1 연결큐 tail 포인터 use-after-free 침입형 intrusive list_head container_of offsetof list_add_tail list_del_init TAILQ FreeRTOS ListItem_t",
+  sq05:"이진힙 binary heap 우선순위큐 sift_up sift_down 비교함수 qsort 규약 다중키 순번 안정성 타이머 deadline tick 넘침 49.7일 int32 time_after 타이머휠 FreeRTOS 지연리스트",
+  sq06:"pthread mutex cond 조건변수 cond_wait timedwait spurious wakeup 가짜깨어남 CLOCK_MONOTONIC condattr_setclock close drain abort poison pill broadcast signal threads.h cnd_timedwait 배압",
+  sq07:"SPSC lock-free 락프리 stdatomic atomic_load_explicit memory_order acquire release relaxed seq_cst 캐시줄 _Alignas ISR 인터럽트 volatile 찢어진읽기 torn read 컴파일러배리어 AVR uint8 Cortex-M DMB 듀얼코어 USART_RX_vect",
+  sq08:"괄호검사 단조스택 다음큰수 next greater 슬라이딩윈도우 최댓값 단조덱 BFS 너비우선 0-1 BFS 격자 undo redo 링스택 command 패턴 코딩테스트",
+  sq09:"성능 메모리 malloc 청크 32바이트 glibc 캐시 지역성 % & 나눗셈 UDIV AVR 정적풀 static pool free list 인덱스큐 _Static_assert static_assert C23 RAM 예산 SRAM 패딩 필드순서",
+  sq10:"실수 함정 off-by-one 가득참 int 인덱스 UB realloc 누수 빈 pop 언더플로 마스크 2의거듭제곱 uint8 256 호출스택 call stack 스택오버플로 재귀 ATmega328P count 경쟁 sanitizer",
+  sq11:"언어비교 C++ std::stack std::queue priority_queue 최대힙 Java ArrayDeque PriorityQueue Python deque heapq Rust VecDeque BinaryHeap heapless Go chan container/heap 빈 pop UB",
+  sq12:"실무 이벤트큐 상태머신 dispatch 명령큐 파서 sscanf UART 로그링 덮어쓰기 noinit 워치독 이동평균 flood fill 명시적스택 재귀제거 ISR 여러개 cli disable_irq xQueueSendFromISR",
 };
 
 let FIDX = null;
