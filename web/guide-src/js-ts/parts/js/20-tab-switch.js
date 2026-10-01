@@ -57,6 +57,7 @@ const TAB_LABEL = {
   log:"📝 로깅 · 로그",
   pf:"🚑 프론트 실무 · 트러블슈팅",
   sq:"🥞 스택 · 큐 · 덱",
+  struct:"📁 프로젝트 구조",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -108,6 +109,7 @@ const SEC_LV = {
   /* log */ lg01:"b", lg02:"b", lg03:"b", lg04:"i", lg05:"b", lg06:"b", lg07:"i", lg08:"i", lg09:"i", lg10:"i", lg11:"i", lg12:"a",
   /* pf */ pf01:"b", pf02:"i", pf03:"i", pf04:"i", pf05:"i", pf06:"b", pf07:"i", pf08:"b", pf09:"a", pf10:"b", pf11:"b", pf12:"i", pf13:"b",
   /* sq */ sq01:"b", sq02:"b", sq03:"b", sq04:"i", sq05:"i", sq06:"a", sq07:"a", sq08:"i", sq09:"a", sq10:"b", sq11:"b", sq12:"i",
+  /* struct */ ps01:"b", ps02:"b", ps03:"b", ps04:"i", ps05:"i", ps06:"i", ps07:"i", ps08:"a", ps09:"b", ps10:"i",
 };
 
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 한 줄 번역 (항상 표시) */
@@ -439,6 +441,17 @@ const EZ = {
   sq10:"큐에 <b>shift</b>, 정렬에 <b>비교 함수 누락</b>, 비우기에 <b>length = 0</b>, 순회 중 <b>splice</b> — 넷만 걸러도 대부분 막힙니다.",
   sq11:"자바 · 파이썬 · C# · Rust 는 표준 타입을 <b>고르면</b> 되고, JS 는 <b>만들거나 패키지를 골라야</b> 합니다.",
   sq12:"최근 N 개는 <b>링 버퍼</b>, 리미터는 <b>시각 덱</b>, 재시도는 <b>시각 힙</b>, 배치는 <b>배열 교체</b>, 대량 호출은 <b>동시성 제한</b>.",
+  /* ── struct ── */
+  ps01:"코드는 <b>src/</b>, 설정은 루트, 모듈은 <b>ESM</b>. tsconfig <b>paths 는 타입 검사기만 아는 별칭</b>이라 node 로 돌리는 서버는 package.json <b>imports</b> 를 씁니다.",
+  ps02:"작을 땐 components/·hooks/ 종류별로 시작해도 되지만, 화면이 스무 개를 넘으면 <b>features/ 로 묶고 index.ts 로 입구를 하나</b>만 냅니다. 팀이 여럿이면 <b>FSD 의 '아래로만' 규칙</b>을 빌립니다.",
+  ps03:"Vue 는 <b>views · components · composables · stores</b> 가 사실상 표준이고, 커지면 <b>modules/기능/</b> 안에 같은 폴더를 한 벌씩 둡니다. React 와 원칙은 같고 이름만 다릅니다.",
+  ps04:"app/ 에는 <b>page · layout · route 만</b> 두고 쿼리·액션·화면 조각은 <b>src/features/</b> 로 뺍니다. 레이아웃을 나눌 땐 <b>(그룹)</b>, 라우트 옆 조각은 <b>_비공개 폴더</b>.",
+  ps05:"백엔드도 <b>기능 폴더 + routes · service · repository</b> 세 층이 기본입니다. Nest 는 모듈의 <b>exports 가 공개 API</b>이고, 기능 사이 <b>순환은 새 모듈이나 이벤트로</b> 끊습니다.",
+  ps06:"main · preload · renderer 는 <b>런타임과 권한이 다른 세 앱</b>입니다. 공유는 <b>shared/ 의 타입과 채널 이름</b>만, 나머지는 IPC 로 건넵니다.",
+  ps07:"apps/ 는 배포되는 것, packages/ 는 공유되는 것. 참조는 <b>apps → packages 한 방향</b>, 이름과 <b>workspace:*</b> 로만 하고, 늘어난 빌드 시간은 <b>Turborepo 캐시</b>로 갚습니다.",
+  ps08:"라이브러리는 <b>src/index.ts 하나가 공개 API</b>입니다. <b>exports</b> 에 적지 않은 경로는 Node 와 TS 모두 막고, 2026 신규 패키지는 <b>ESM 전용</b>이 기본입니다.",
+  ps09:"단위 테스트는 <b>코드 옆 .test.ts</b>, E2E 는 <b>e2e/</b>, 공용 setup 은 <b>test/</b>. 설정 파일은 루트에 한 벌, <b>.env.example 만 커밋</b>합니다.",
+  ps10:"시작은 대부분 <b>기능별 폴더</b>, 앱이 둘이면 <b>워크스페이스</b>. 정한 규칙은 <b>no-restricted-imports 한 줄부터</b> 린트와 CI 에 넣어 도구가 지키게 합니다.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -786,6 +799,17 @@ const CAP = {
   sq10:["p","코드 리뷰에서 shift 큐 · 사전순 정렬 · 공유 배열 비우기 · 순회 중 수정 같은 버그를 바로 짚을 수 있다"],
   sq11:["s","Java · Python · C# · C++ · Rust · Go · Kotlin 의 스택 · 큐 · 덱 · 힙 · 채널 타입을 JS 대응과 맞춰 읽을 수 있다"],
   sq12:["p","최근 N 개 버퍼 · 슬라이딩 윈도우 리미터 · 백오프 재시도 스케줄러 · 배치 전송기 · 동시성 제한 호출을 서비스 코드에 넣을 수 있다"],
+  /* ── struct ── */
+  ps01:["p","새 저장소를 공통 바탕으로 시작하고, 별칭이 실행 시 깨지는 원인을 고치며, 지금 프로젝트가 다음 구조 단계로 넘어갈 신호를 판단할 수 있다"],
+  ps02:["p","React SPA 를 기능별 폴더나 Feature-Sliced Design 으로 구성하고, 기능의 공개 API 와 import 방향 규칙을 정할 수 있다"],
+  ps03:["p","Vue 3 앱의 폴더를 create-vue 구조에서 기능별 모듈 구조로 키우고, 컴포저블·Pinia 스토어의 자리를 정할 수 있다"],
+  ps04:["p","Next.js App Router 프로젝트에서 라우트 그룹·비공개 폴더·features 분리를 적용하고 서버·클라이언트 경계 파일을 배치할 수 있다"],
+  ps05:["p","Express·Hono·NestJS 서버를 기능별 모듈로 구성하고, 계층별과 기능별 중 무엇을 쓸지와 모듈 간 순환을 끊는 방법을 정할 수 있다"],
+  ps06:["s","Electron 앱을 main·preload·renderer·shared 로 나누고, IPC 계약을 타입으로 공유하며 Tauri 구조와 대응시킬 수 있다"],
+  ps07:["e","pnpm workspace 와 Turborepo 로 apps·packages 모노레포를 구성하고 내부 패키지 참조 방식과 빌드 캐시를 설정할 수 있다"],
+  ps08:["e","npm 라이브러리의 진입점과 exports·files·sideEffects 를 설계하고, ESM 전용과 이중 배포 중 무엇을 고를지 판단할 수 있다"],
+  ps09:["p","테스트 종류별 위치와 러너 include 범위를 정하고, 설정 파일과 .env 파일을 커밋 규칙에 맞게 배치할 수 있다"],
+  ps10:["p","프로젝트 유형·규모에 맞는 구조를 고르고, ESLint·dependency-cruiser·Steiger 로 import 방향과 순환 금지를 CI 에서 강제할 수 있다"],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 */
