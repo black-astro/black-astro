@@ -52,6 +52,7 @@ const TAB_LABEL = {
   jvm:"☕ 자바 · 코틀린 모듈",
   cs:"🟣 C# · .NET 모듈",
   log:"📝 로깅 · 로그",
+  sq:"🥞 스택 · 큐 · 덱",
 };
 
 function tabDrop(force){
@@ -91,6 +92,7 @@ const SEC_LV = {
   /* jvm */ v01:"b", v02:"b", v03:"i", v04:"i", v05:"i", v06:"b", v07:"b", v08:"a", v09:"i", v10:"i", v11:"a", v12:"a",
   /* cs */ k01:"b", k02:"b", k03:"b", k04:"b", k05:"i", k06:"i", k07:"a", k08:"a", k09:"a", k10:"i", k11:"a", k12:"a",
   /* log */ lg01:"b", lg02:"b", lg03:"i", lg04:"i", lg05:"b", lg06:"b", lg07:"i", lg08:"i", lg09:"a", lg10:"a", lg11:"i", lg12:"a",
+  /* sq */ sq01:"b", sq02:"b", sq03:"b", sq04:"i", sq05:"i", sq06:"i", sq07:"i", sq08:"i", sq09:"a", sq10:"i", sq11:"b", sq12:"a",
 };
 
 
@@ -297,6 +299,19 @@ const EZ = {
   lg10:"tracing 의 span 은 이미 OTel 이 원하는 모양이라 <b>레이어 하나만 끼우면</b> trace_id 로 여러 서비스가 한 트리로 묶입니다.",
   lg11:"같은 에러를 세 층에서 세 번 찍고 원인은 <code>{e}</code> 로 바깥 한 겹만 남습니다 — 패닉은 아예 로거를 거치지 않습니다.",
   lg12:"MCU 에는 파일도 stdout 도 없습니다 — 장치는 <b>문장 번호와 원시 값</b>만 보내고 문자열은 PC 가 만듭니다.",
+  /* ── sq ── */
+  sq01:"스택은 <b>Vec</b>, 큐·덱은 <b>VecDeque</b>, 우선순위는 <b>BinaryHeap</b>, 스레드·태스크 사이는 <b>용량을 정한 채널</b>입니다. 꺼내기는 모두 Option 입니다.",
+  sq02:"Vec 의 <b>push · pop · last</b> 가 스택의 전부이고, 빈 스택의 pop 은 패닉이 아니라 <b>None</b> 입니다.",
+  sq03:"큐는 <b>VecDeque</b> 의 뒤로 넣고 앞으로 뺍니다. <b>Vec::remove(0)</b> 은 꺼낼 때마다 전부 당기는 O(n) 이라 큐가 아닙니다.",
+  sq04:"VecDeque 는 버퍼 한 장 위에서 <b>head 와 len</b> 만 움직입니다. 끝에서 감기면 메모리가 <b>두 조각</b>이라 as_slices 가 둘을 줍니다.",
+  sq05:"BinaryHeap 은 <b>가장 큰 것</b>부터 꺼냅니다. 최소는 <b>Reverse</b>, 여러 키는 <b>Ord 직접 구현</b>, f64 는 <b>total_cmp</b>.",
+  sq06:"스레드 사이의 큐는 <b>채널</b>이고, 마지막 송신자를 <b>drop</b> 하면 받는 쪽이 남은 것을 다 받고 끝납니다.",
+  sq07:"async 의 큐는 <b>tokio mpsc::channel(n)</b> 이고 <b>send().await 가 곧 배압</b>입니다. 종료는 입구만 닫고 남은 것을 비웁니다.",
+  sq08:"큐·스택에는 <b>참조 대신 인덱스</b>를 넣고 <b>while let 으로 꺼내서</b> 쓰면 빌림 검사기와 싸울 일이 거의 없습니다.",
+  sq09:"같은 O(1) 이라도 <b>원소마다 할당</b>이 붙으면 한 자릿수가 달라집니다. 원소는 <b>값으로</b>, LinkedList 는 거의 쓰지 않습니다.",
+  sq10:"O(n) 큐 · 힙 방향 · unbounded · <b>while let 에서 잡은 락</b>은 컴파일러가 모릅니다. 꺼내기는 let 문으로 먼저.",
+  sq11:"Rust 는 꺼내기가 <b>Option</b>, 힙이 <b>최대 힙</b>, 스레드 큐가 <b>채널</b>이라는 세 가지만 다른 언어와 다릅니다.",
+  sq12:"레이트 리미터·최근 N개는 <b>VecDeque 앞에서 버리고 뒤에 넣기</b>, 재시도는 <b>시각 키 최소 힙</b>, 배치는 <b>recv_many</b>, 동시 실행 제한은 <b>세마포어</b>.",
 };
 
 
@@ -504,6 +519,19 @@ const CAP = {
   lg10:["e","W3C Trace Context 로 서비스 간 문맥을 잇고 모든 JSON 로그 줄에 trace_id 를 붙여 로그와 트레이스를 한 화면에서 오갈 수 있습니다"],
   lg11:["p","anyhow 체인을 {e:#} 로 한 줄에 남기고 panic::set_hook 으로 패닉을 span 문맥과 함께 로그에 남길 수 있습니다"],
   lg12:["s","no_std 펌웨어에 defmt + RTT 로깅을 붙이고, ELF 를 잃으면 그 펌웨어 로그를 못 읽는다는 운영 제약까지 설계에 반영할 수 있습니다"],
+  /* ── sq ── */
+  sq01:["p","새 코드에서 스택·큐·덱·우선순위 큐·스레드/async 큐를 어떤 Rust 타입으로 쓸지 바로 고를 수 있다"],
+  sq02:["p","Option 을 while let · let-else · ? 로 받아 빈 스택을 안전하게 다루고, newtype 으로 API 를 좁힐 수 있다"],
+  sq03:["p","O(n) 큐 흉내를 찾아 VecDeque 로 바꾸고, drain · retain · split_off 로 일괄 처리할 수 있다"],
+  sq04:["p","덱 연산의 비용을 구조로 설명하고, 두 조각을 복사 없이 다루거나 필요할 때만 make_contiguous 로 펼 수 있다"],
+  sq05:["p","우선순위·순번 다중 키 힙, top-k, 다익스트라를 Rust 관용구로 작성할 수 있다"],
+  sq06:["p","sync_channel · crossbeam 워커 풀 · Condvar 블로킹 큐로 배압과 종료가 올바른 생산자-소비자를 만들 수 있다"],
+  sq07:["p","tokio 생산자-소비자를 유실 없이 종료하고, 가득 찼을 때의 정책(대기·포기·시간 제한)을 코드로 정할 수 있다"],
+  sq08:["s","괄호 검사·단조 스택·BFS·슬라이딩 윈도우·0-1 BFS·undo/redo 를 빌림 에러 없이 작성할 수 있다"],
+  sq09:["p","Vec · VecDeque · LinkedList · Box 의 메모리 비용을 설명하고 criterion 으로 직접 비교할 수 있다"],
+  sq10:["p","리뷰에서 큐·스택 관련 성능 버그와 동시성 실수를 찾아내고 고칠 수 있다"],
+  sq11:["p","자바·파이썬·C#·C++·JS·Go 의 스택·큐 코드를 Rust 로 정확히 옮길 수 있다"],
+  sq12:["p","레이트 리미터·최근 N개 버퍼·재시도 큐·배치 저장·동시성 제한·예약 실행을 서비스 코드로 바로 쓸 수 있다"],
 };
 
 
@@ -544,7 +572,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (0 = 10번째 탭) */
-const TAB_ORDER = ["setup","lang","own","py","node","jvm","cs","ffi","build","perf"];
+const TAB_ORDER = ["setup","lang","own","sq","py","node","jvm","cs","ffi","build"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;
