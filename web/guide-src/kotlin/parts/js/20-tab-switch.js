@@ -52,6 +52,7 @@ const TAB_LABEL = {
   ktor:"🚀 Ktor 서버",
   qa:"🧪 테스트 · 로깅 · 운영",
   sq:"🥞 스택 · 큐 · 덱",
+  struct:"📁 프로젝트 구조",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -95,6 +96,7 @@ const SEC_LV = {
   /* ktor */ kt01:"b", kt02:"b", kt03:"b", kt04:"i", kt05:"i", kt06:"i", kt07:"i", kt08:"i", kt09:"i", kt10:"i", kt11:"a", kt12:"i", kt13:"a",
   /* qa */ qa01:"b", qa02:"i", qa03:"i", qa04:"i", qa05:"b", qa06:"i", qa07:"i", qa08:"a", qa09:"i", qa10:"i", qa11:"i", qa12:"a", qa13:"i",
   /* sq */ sq01:"b", sq02:"b", sq03:"b", sq04:"i", sq05:"i", sq06:"i", sq07:"a", sq08:"i", sq09:"a", sq10:"i", sq11:"b", sq12:"i",
+  /* struct */ ps01:"b", ps02:"b", ps03:"i", ps04:"b", ps05:"i", ps06:"i", ps07:"i", ps08:"i", ps09:"a", ps10:"a",
 };
 
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 한 줄 번역 (항상 표시) */
@@ -358,6 +360,17 @@ const EZ = {
   sq10:"가장 비싼 실수는 <b><code>MutableList.removeFirst/removeLast</code></b>(구형 기기 크래시)와 <b>무제한 큐</b>(OOM). 나머지는 \"꺼낸 결과로 판단하고, 비는 게 정상이면 OrNull\" 로 막힙니다.",
   sq11:"코틀린은 <b>한 타입(<code>ArrayDeque</code>)으로 스택 · 큐 · 덱을 통일</b>하고, 빈 큐를 <code>T?</code> 로 표현하며, 우선순위 큐는 JVM 것을 빌려 씁니다.",
   sq12:"최근 N 개는 <code>ArrayDeque(limit)</code>, 레이트 리미터는 시각 덱, 안드로이드 일회성 이벤트는 <code>Channel</code>, 재시도는 시각 순 <code>PriorityQueue</code>, 작업 분배는 <code>produce</code> + 워커입니다.",
+  /* ── struct ── */
+  ps01:"어떤 코틀린 프로젝트든 <b>settings · build.gradle.kts · libs.versions.toml</b> 세 파일이 뼈대이고, 구조는 \"파일 30개 · 빌드 2분 · 모듈 10개\" 같은 신호가 올 때만 한 칸씩 키웁니다.",
+  ps02:"스프링은 <b>루트에 메인, 그 아래 기능별 패키지</b>. 작은 DTO 여럿은 <code>OrderDtos.kt</code> 한 파일에 두고, <code>internal</code> 은 패키지가 아니라 <b>모듈</b> 경계라는 점을 기억합니다.",
+  ps03:"<code>Application.module()</code> 은 <b>목차</b>만 — 설정은 <code>plugins/</code> 의 확장 함수, URL 은 기능 폴더의 <code>Route</code> 확장 함수, 객체 그래프는 <code>di/</code> 한 장에 둡니다.",
+  ps04:"공식 가이드대로 <code>ui/화면/</code> 에 Screen · ViewModel · UiState, <code>data/데이터/</code> 에 Repository · DataSource, <code>domain/</code> 은 필요할 때만 둡니다.",
+  ps05:"<b>Now in Android</b> 식으로 <code>:app</code> 이 조립하고 <code>:feature:*</code> 는 서로 모르며 <code>:core:*</code> 는 위를 모릅니다. 이동은 NavGraphBuilder 확장 함수, 의존은 <code>implementation</code> 기본.",
+  ps06:"<code>includeBuild(\"build-logic\")</code> 에 모듈 종류별 플러그인을 두면 각 모듈의 빌드 스크립트는 <b>plugins 한 줄 + 자기 의존성</b>만 남습니다.",
+  ps07:"기본은 <code>commonMain</code>, 플랫폼 API 가 필요하면 <b>선언은 공통 · 구현은 플랫폼</b>. 파일은 <code>Platform.android.kt</code> 처럼 소스셋 꼬리를 붙이고 앱 모듈에는 화면만 둡니다.",
+  ps08:"<code>composeApp/commonMain</code> 에 화면과 <b><code>composeResources/</code></b>, 플랫폼 소스셋에는 <code>main.kt</code> · <code>MainActivity</code> 같은 진입점 하나만 둡니다.",
+  ps09:"라이브러리는 <code>explicitApi()</code> 로 공개를 <b>선택</b>하게 하고, <code>apiDump</code> 로 공개 API 를 <code>.api</code> 파일에 고정해 CI 의 <code>apiCheck</code> 가 지키게 합니다.",
+  ps10:"유형 × 규모 표의 <b>왼쪽 위에서 시작</b>해 신호가 올 때만 내려가고, 모듈이 수십 개가 되기 전에 규칙을 <b>Gradle 검사 · Konsist · detekt</b> 로 옮깁니다.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -634,6 +647,17 @@ const CAP = {
   sq10:["p","코드 리뷰에서 큐 · 스택 관련 크래시 · 경쟁 조건 · 메모리 누수 패턴을 찾아 고칠 수 있습니다"],
   sq11:["s","자바 · 파이썬 · JS · C# · C++ · Rust 의 스택 · 큐 코드를 코틀린으로 옮기거나 반대로 옮길 수 있습니다"],
   sq12:["p","최근 기록 · 레이트 리미터 · UI 이벤트 · 재시도 큐 · 워커 풀을 바로 붙여 쓸 수 있는 코드로 구현할 수 있습니다"],
+  /* ── struct ── */
+  ps01:["p","새 코틀린 프로젝트의 뼈대 파일을 바로 배치하고, 지금 규모에서 패키지 · 모듈 · build-logic 중 어디까지 나눌지 판단할 수 있습니다"],
+  ps02:["p","스프링 코틀린 서버를 기능별 패키지로 배치하고, 파일 단위 묶음과 internal 의 실제 범위를 근거 있게 설명할 수 있습니다"],
+  ps03:["p","Ktor 서버를 파일이 끝없이 길어지지 않는 구조로 나누고, Koin 모듈을 규모에 맞는 자리에 둘 수 있습니다"],
+  ps04:["p","모듈 하나짜리 안드로이드 앱의 패키지 트리를 공식 아키텍처 가이드에 맞게 잡고, 클래스마다 둘 자리를 정할 수 있습니다"],
+  ps05:["e","안드로이드 앱을 feature · core 모듈로 나누고, 모듈 의존 규칙과 api/implementation 선택으로 빌드 시간을 줄일 수 있습니다"],
+  ps06:["e","모듈 수십 개의 공통 빌드 설정을 클래스형 컨벤션 플러그인으로 한곳에 모으고 버전 카탈로그와 연결할 수 있습니다"],
+  ps07:["p","KMP 프로젝트에서 코드마다 둘 소스셋을 판단하고, expect/actual 과 iOS 공개 범위를 경계 규칙에 맞게 배치할 수 있습니다"],
+  ps08:["s","Compose Multiplatform 앱의 소스셋과 리소스 폴더를 바로 배치하고, 데스크톱 패키징 · 모듈 간 Res 공유를 설정할 수 있습니다"],
+  ps09:["e","라이브러리 · 공용 모듈의 공개 API 를 explicit API 모드와 binary-compatibility-validator 로 관리하고 변경을 리뷰에서 드러낼 수 있습니다"],
+  ps10:["e","프로젝트 유형과 규모에 맞는 구조를 한 표로 고르고, 의존 규칙을 아키텍처 테스트 · 린트 · 빌드 검사로 자동 강제할 수 있습니다"],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 */
