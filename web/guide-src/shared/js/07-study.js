@@ -505,8 +505,7 @@
       if (!a || !HOME.includes(b) || HOME.includes(a)) return;
       const ar = document.createElement("div");
       ar.className = "lx-arrow";
-      ar.innerHTML = '<span class="lx-arrow-c">' + ARROW + '</span><span class="lx-arrow-t"></span>';
-      Q(".lx-arrow-t", ar).textContent = (NAME[b] || b) + "로";
+      ar.innerHTML = ARROW;  // 글자 없이 화살표 하나 — 뜻은 title 로 ("코틀린로" 같은 조사 오류도 없앤다)
       ar.title = (NAME[a] || a) + " → " + (NAME[b] || b) + " — 이렇게 바뀌어 쓰입니다";
       ar.setAttribute("aria-hidden", "true");
       kids[0].after(ar);
