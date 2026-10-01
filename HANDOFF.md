@@ -1,4 +1,101 @@
-# 핸드오프 — 언어 가이드 확장 (2026-10-01 11차 갱신 · UX 전면 개편 1차)
+# 핸드오프 — 언어 가이드 확장 (2026-10-01 12차 갱신 · C 가이드 · 스택/큐 · 프로젝트 구조)
+
+> 새 세션은 **이 12차 절만 읽고 바로 "🔜 이어서 할 일" 1번부터** 하면 됩니다. 11차 이전 기록은 아래 `---` 뒤에 있습니다.
+
+## 🆕 12차에 한 일 (전부 커밋 · 푸시 완료)
+
+| 작업 | 결과 |
+|---|---|
+| 언어 비교 화살표 단순화 (사용자 지적: "코틀린로" 조사 오류·과한 장식) | 라벨·원·그림자·애니메이션 제거, 가는 화살표 하나 (`07-study.js` ③-b · `07-study.css` 7.13) |
+| **🔌 C · 임베디드 가이드 신설** (`guide-src/c` → `c-web`) | **12탭 · 155섹션** — 아래 표 |
+| **🥞 스택 · 큐 · 덱 탭 × 8** (사용자가 "가장 중요"하다고 한 요청) | java · kotlin · python · js-ts · csharp · cpp · rust · c — 탭 id `sq`, 섹션 `sq01~sq12`, `panes/31-sq.html` |
+| **📁 프로젝트 구조 탭 × 4** | java · kotlin · python · js-ts — 탭 id `struct`, 섹션 `ps01~ps10`, `panes/30-struct.html` |
+| 핸드오프 잔여 소항목 | python 06-auto `.lbl`+font-size 12곳, java 데모 주석 t13, kotlin `_wip/log-tabs` 삭제 |
+| router stats | 실측 반영 — 앞으로는 web/ 에서 **`node guide-src/tools/stats.mjs`** 한 줄이면 verify 출력으로 자동 갱신 |
+
+### C 가이드 탭 구성 (`web/guide-src/c/parts/panes/`)
+| 그룹 | 탭 id · 접두사 | 파일 | 비고 |
+|---|---|---|---|
+| 0 언어 · C | setup `u` · base `c01~13` · sys `c14~26` · sq | 10-setup · 01-base · 02-sys · 31-sq | base/sys 는 **cpp 의 09-clang(C 언어 탭)을 둘로 나눈 복사본** — cpp 쪽 원본은 그대로 둠 |
+| 1 하드웨어 · MCU | hw `h` · avr `a` · stm32 `m` · io `p` | 03-hw · 04-avr · 05-stm32 · 06-io | 기준 칩 ATmega328P(Uno R3) · STM32F446RE(Nucleo) |
+| 2 RTOS · 구조 · 품질 | rtos `r` · arch `k` · qa `t` | 07-rtos · 08-arch · 09-qa | arch = 사용자 요청 "C 도 규모 커지면 구조 관리" |
+| 3 실전 · 양산 | prod `o` | 11-prod | 부트로더 · OTA · 서명 · 워치독 · 생산 · 보안(CRA) |
+
+- 뼈대는 cpp 에서 복제(`00-head`·`11-sidebar`·`12-tabbar`·`js/*`·`css/06-c.css`). 등록된 곳: `build.mjs` GUIDES · `verify.mjs` · `tools/chartcand.mjs` · `tools/integrity.mjs` ·
+  `shared/js/07-study.js`(가이드 목록 + 언어 화살표 HOME) · 다른 10개 가이드 `12-tabbar.html` "더 보기" 링크 · `src/router/index.ts`.
+- **C 가이드에는 아직 없는 것**: `js/85-say.js`(읽는 법 사전), 예제 코드 전수 검토(CODE-AUDIT), 라이트 테마 대비 측정.
+
+### 검증 상태 (푸시 직전)
+- `npm run verify:guide` 11개 가이드 통과 · `integrity.mjs` 전체 0 · `smoke.mjs` 11개 통과 · `vue-tsc -b` 통과
+- 브라우저(다크): c-web 12탭 전부 + 각 가이드의 sq/struct 탭 — pane 섹션 수 == navset 링크 수, 고아 섹션 0, SVG 글자 넘침(getBBox) 0, JS 오류 0
+- **라이트 테마 대비 측정·모바일 폭 확인은 이번 회차 새 탭에서 안 했습니다** → 이어서 할 일 4번
+
+## 🔜 이어서 할 일 (순서대로)
+
+### 1. 📁 프로젝트 구조 탭 — 남은 6개 (중단된 것 5 + 미착수 1)
+지침: **`web/guide-src/briefs/STRUCT-BRIEF.md`** 를 에이전트에게 그대로 읽힘. 산출물은 스크래치패드 → 통합 담당이 등록.
+에이전트 프롬프트 뼈대(실제로 쓴 것):
+```
+당신은 한국어 학습 가이드(<가이드>)의 새 탭 "📁 프로젝트 구조"를 집필합니다.
+먼저 web/guide-src/briefs/STRUCT-BRIEF.md 를 끝까지 읽고 전부 따르세요.
+## 과제
+- 가이드 `<g>` · 산출 pane `SP/struct/<g>-30-struct.html` · meta `SP/<g>-struct.meta.json`
+- meta 그룹 값: group N, groupLabel "…", groupIcs "(사이드바 data-g=N 버튼의 현재 값)", groupTitle "(그 버튼의 현재 title)",
+  sheetLabel "(12-tabbar.html 의 data-sg=N 버튼 글자)", after "<탭>"
+- 문체 본보기 · 겹치지 말 것(기존 섹션 id) · 섹션 10개 목록
+```
+| 가이드 | group / after | 겹침 주의(기존 섹션) | 섹션 10개 핵심 |
+|---|---|---|---|
+| csharp | 3 "앱 · 도구" / tool | a11 · g01 · n01 · n15 · b02 · e04 | sln/slnx · Directory.Build.props · CPM / ASP.NET Controllers vs vertical slice / Clean Architecture 프로젝트 참조 / 테스트 / WPF·MAUI MVVM / **Unity Assets/_Project + asmdef** / Blazor · Aspire / 워커 · 여러 실행 프로젝트 / NuGet 라이브러리 / 요약 + NetArchTest |
+| cpp | 2 "빌드 · 성능" / build | c25 · build 탭 · n01 · g11 · C 가이드 arch | Pitchfork / 모던 CMake 타깃 PUBLIC·PRIVATE / pimpl·컴파일 시간 / C++20 모듈 / vcpkg·Conan / 라이브러리 ABI·export / Qt 6 / 게임·서버 대형 / 테스트·도구 설정 / 요약 |
+| rust | 2 "빌드 · 성능" / build | s04 · b05 · w02 · tauri 탭 | 크레이트·모듈 파일 규칙 / pub(crate)·re-export / workspace.dependencies·lints / Axum 서비스 / CLI / Tauri / 라이브러리 feature flags·semver / 테스트 위치 / build.rs·-sys / 요약 |
+| db | 3 "심화 · 연동" / app | 마이그레이션·명명·dbt 기존 섹션 grep | DB 도 코드 / Flyway·Liquibase·Alembic 디렉터리 / 앱 저장소 vs DB 저장소 / 명명·스키마·역할 / SQL 파일 정리 / 시드 / **dbt staging·marts** / 여러 DB·expand-contract / sqlfluff·마이그레이션 CI / 요약 |
+| server | 4 "확장 · SCALE" / msa | w07 · h03 · z14 · x09 · y12 · k8s 탭 | 인프라도 코드 / nginx conf.d·snippets / compose override / **Kustomize base/overlays vs Helm** / Terraform modules·environments / **GitOps app-of-apps** / 모노 vs 폴리레포 / 환경·비밀(SOPS 등) / CI 워크플로 / 요약 + 런북·ADR |
+| cs | 3 "심화 · 설계" / se | e06 "아키텍처 — 레이어드 · 헥사고날" · e04 | **아키텍처 패턴 총론**: 계층형 · 헥사고날/클린/어니언 · MVC/MVP/MVVM · 모듈러 모놀리스 · 마이크로서비스 · 이벤트 기반 · 플러그인 · 패키지 원칙(ADP/SDP/SAP) · 유형별(웹/데스크톱/모바일/임베디드/라이브러리/파이프라인) 비교 matrix + **각 가이드 구조 탭 링크** |
+
+등록: 산출 pane 을 `guide-src/<g>/parts/panes/30-struct.html` 로 복사 → `node guide-src/tools/reg.mjs <meta>` →
+`node guide-src/tools/grpicon.mjs <g> <group> 📁 "프로젝트 구조"` → `build.mjs <g>` → verify · smoke · integrity → 커밋.
+
+### 2. C 가이드 마무리
+- `js/85-say.js` 읽는 법 사전(`volatile` · `ISR` · `NVIC` · `DMA` · `HAL_` · `UART` · `I²C` · `SPI` · `RTOS` · `xQueueSend` · `uint32_t` …) — 11차 §3-b 방식
+- 예제 코드 전수 검토(`CODE-AUDIT.md`) — C 가이드 12탭 (컴파일러가 이 PC 에 없음 → 손 추적 + node 로 로직 이식)
+- 집필 에이전트들이 "확신 없음"으로 남긴 사실 확인 목록(데이터시트·매뉴얼 대조 필요):
+  STM32CubeIDE 2.x 가 CubeMX 를 분리했는지(u08) · CMSIS 매크로 `GPIO_MODER_MODER5_0`/`GPIO_ODR_OD5`(u07·h04) · F446 PA4/PA5 TTa 핀(h02) ·
+  CubeF4 startup 의 SystemInit 순서(h11) · FreeRTOS V11 `vApplicationGetIdleTaskMemory` 셋째 인자 타입·`configKERNEL_PROVIDED_STATIC_MEMORY`(r03·r10) ·
+  CubeMX TIM6 타임베이스 NVIC 기본값(r07) · DMA2 스트림 매핑 표(m10 — RM0390 대조) · UART 수신 허용 오차 3.75/4.375%(p02) · W25Q128JV 시간값(p11) ·
+  BOR 임계 전압·`BOR_LEV`(o06) · STM32CubeProgrammer CLI 옵션(o10) · EU CRA 일정(o11) · AVR a12 전류 대략치 · F446 IRQ 개수 97(o02)
+- router 의 C 항목 세 번째 stat("4 MCU · 하드웨어 탭")은 손으로 쓴 값 — 그대로 둬도 됨
+
+### 3. 11차에서 넘어온 콘텐츠 품질 작업 (아래 11차 기록 §1~§4 그대로 유효)
+- 예제 코드 전수 검토 — **server · db · cs · csharp · cpp · rust** 6개 (가이드당 에이전트 2개, `CODE-AUDIT.md`)
+- 읽는 법(*) 사전 — csharp · cpp · rust · db · server · cs (+ c)
+- 중복 그림(`dupdiag.mjs`) · 정렬 결함(`diagaudit.mjs`) · 박스형 70%↑ 탭 다시 그리기 — server · db · cs · csharp · cpp · rust
+- 실무 탭 후보: server 🚑 장애 대응 런북 · db 🩺 운영 DBA 체크리스트 · csharp 🧪 테스트·배포 · cpp/rust 🐞 디버깅·프로파일링
+
+### 4. 이번 회차 새 탭 20개의 라이트 테마 · 모바일 점검
+11차 §검증 순서의 "라이트 대비"(전환 끄고 본문 3.2 미만 · `window.lxInkFix(svg)` 후 3 미만)와 390/768 폭 확인을
+c-web 전체 + 각 가이드 `#pane-sq` · `#pane-struct` 에 대해. 에이전트 그림에 인라인 흰 글자(`style="fill:#e8f0ff"`)가 섞였을 수 있음.
+
+## 🧰 이번 회차에 만든 것 · 알게 된 것
+
+| 파일 | 무엇 |
+|---|---|
+| `web/guide-src/briefs/C-BRIEF.md` | C 가이드 탭 집필 공통 지침(탭 지도·접두사·독자·정확성 규칙) |
+| `web/guide-src/briefs/SQ-BRIEF.md` | 스택·큐·덱 탭 12섹션 뼈대 |
+| `web/guide-src/briefs/STRUCT-BRIEF.md` | 프로젝트 구조 탭 10섹션 뼈대 (가볍게 · 디렉터리 트리 중심) |
+| `web/guide-src/tools/grpicon.mjs` | 사이드바 그룹 버튼 title·아이콘 갱신 — `reg.mjs` 가 기존 그룹 버튼을 안 고치므로 등록 뒤 실행 |
+| `web/guide-src/tools/stats.mjs` | verify 출력으로 `src/router/index.ts` stats(탭·섹션 수) 자동 반영 |
+
+- **셸 `sed` 로 이모지 치환이 조용히 실패**합니다(Git Bash). 이모지가 든 수정은 node 스크립트 · Edit 도구로. 실제 바이트는 `od -tx1` 로 확인.
+- **`reg.mjs` 의 `after` 는 "이미 등록된 탭"만** 됩니다. 탭이 순서 없이 완성되면 이미 있는 앞 탭을 after 로 두고 등록 — 나중 탭을 같은 앞 탭 뒤에 꽂으면 사이에 들어갑니다
+  (C 가이드: avr 를 sys 뒤에 먼저 → hw 를 sys 뒤에 → 순서 hw, avr). 반대로 rtos 뒤 arch 다음 qa 는 qa 의 after 를 arch 로 바꿔야 함.
+- 가이드 뼈대를 복제할 때 `90-footer.html` 끝의 `</main></div><script>` 와 `99-tail.html` 의 `</script>` 가 짝 — footer 를 새로 쓰면 스크립트 전체가 죽습니다(이번에 한 번 겪음).
+- 이 PC: **JDK 25**(`C:/Program Files/Java/jdk-25.0.1+8`, PATH 기본은 21) · IntelliJ 번들 **kotlinc 2.3** · Python 3.14 · Node 24 있음 / gcc·clang·rustc·dotnet **없음**(설치 금지).
+- 에이전트 운용: 동시에 5~6개, 탭 하나 20~35분 · 20~37만 토큰. 끝나는 대로 하나씩 등록·커밋하고 빈 자리에 다음 것을 띄우는 방식이 잘 돌았습니다.
+
+---
+
+# (11차까지) 언어 가이드 확장 기록
 
 ## 🆕 11차 — java · python · kotlin · js-ts UX 전면 개편 (완료)
 
@@ -96,90 +193,7 @@ db·cs 는 PK(흐름 점이 선을 벗어남)가 대부분입니다.
 (엔진: `shared/js/07-study.js` ③-c · 끄기: 읽기 설정 "읽는 법 표시"). 가이드마다 사전 파일 하나만 있으면 됩니다.
 - 파일: `web/guide-src/<가이드>/parts/js/85-say.js` → `window.LX_SAY = [["표기", "읽는 법", "부르는 말·한 줄 뜻"], ...]`
 - parts.json 에서 `shared/js/07-study.js` **바로 앞**에 `"js/85-say.js"` 등록 (없으면 빌드가 "파일은 있는데 parts.json 에 없음"으로 막음)
-- **매칭 규칙**: 인라인 코드 텍스트 안의 토큰을 경계 단위로(앞뒤가 영숫자·`# 핸드오프 — 언어 가이드 확장 (2026-10-01 11차 갱신 · UX 전면 개편 1차)
-
-## 🆕 11차 — java · python · kotlin · js-ts UX 전면 개편 (완료)
-
-| 가이드 | 탭 | 섹션 | 새 실무 탭 | 박스형 그림 비율 (전 → 후) |
-|---|---|---|---|---|
-| python | 19→**20** | 292→**305** | 🏭 실무 프로젝트 · 운영 (`prod`, pj01~13) | 탭 대부분 100% → **14~57%** |
-| java | 17→**18** | 258→**271** | 🚑 장애 대응 · 운영 (`ops`, op01~13) | 89~100% → **21~56%** |
-| kotlin | 14→**15** | 219→**232** | 🧪 테스트 · 로깅 · 운영 (`qa`, qa01~13) | 75~100% → **19~71%** |
-| js-ts | 19→**20** | 283→**296** | 🚑 프론트 실무 · 트러블슈팅 (`pf`, pf01~13) | 89~100% → **23~79%** |
-
-### 무엇이 바뀌었나
-1. **학습 레이어** `shared/css/07-study.css` + `shared/js/07-study.js` (네 가이드 parts.json 에만 등록)
-   - 읽기 열 1120px 로 글·그림·카드 왼쪽 선 통일 · 본문 860px · **한국어 `word-break:keep-all`**
-   - 코드 카드 + 설명 카드가 나란하면 코드 쪽 1.35배 (`:has()`)
-   - 섹션마다 **읽기 시간 · "다 읽음"** · 끝에 **다음 섹션/다음 탭** 버튼 · 사이드바 **탭 진도 막대** · 다 읽은 탭 점
-   - 탭바 **"Aa 읽기"**: 글자 크기 4단(zoom) · 집중 모드 · 진도 초기화(두 번 누르기)
-   - **이어 읽기** 알림 (#조각 없이 들어왔을 때만) · 그림 **크게 보기**(라이트박스) · `[` `]` 섹션 이동
-   - 화면 밖 `.diag` 애니메이션 정지(CSS `.zz` + SMIL `pauseAnimations`) · 등장 효과 26px→10px
-   - 클래스 접두사는 **`lx-`** — `st-` 는 파이썬 알고리즘 시각화(`st-done` 등)가 이미 씀. 바꾸지 마세요.
-   - 저장은 localStorage `st:<가이드>` 한 키.
-2. **테마** `shared/css/08-theme.css` — 강조색 하나(파랑)로 통일 + **다크/라이트 두 벌** (사용자 요청으로 언어별 색 08-id-* 는 폐기).
-   `<head>` 의 선적용 스크립트가 `lx:theme`(light|dark, 없으면 OS 설정)를 첫 그리기 전에 붙인다 — 전 가이드 공통 키.
-   탭바 버튼으로 전환. 코드 블록 · `.stage` 데모 · `.out` 은 라이트에서도 어두운 "화면 섬"(다크 토큰 재선언).
-   다이어그램 글자는 `07-study.js` 의 `inkFix` 가 라이트에서 글자-바탕 대비 3 미만이면 `lx-ink`/`lx-inv` 로 보정
-   (인라인 `style="fill:#e8f0ff"` 같은 다크 전제 값 때문 — 네 가이드 132곳 자동 보정, 측정 0건).
-3. **사이드바 3단 · PC 전폭** — 그룹(한국어 13.5px) → 지금 그룹의 탭(진도) → 목차, 다른 가이드 접기,
-   읽는 섹션 따라가기. 셸 1720px·읽기 열 가운데 정렬 제거(문단 860px 제한만).
-3. **다이어그램 개편** — 박스형 그림을 카탈로그 모델(timeline·gantt·bar·line·matrix·tree·memory·decision…)로 다시 그림.
-   **같은 섹션에 똑같은 그림이 두 번** 들어간 곳이 네 가이드에 60곳 넘게 있었음(이전 회차 삽입 도구 중복 실행 흔적).
-   대부분 두 번째를 다른 모델로 다시 그렸고, 남은 25건은 `dupdiag.mjs --fix` 로 지움.
-4. **값 오류 수정** — python 10-db B-tree 리프·블록 수(25만 배→약 2,500배), 09-algo g05 이진 탐색 단계,
-   80-algo.js factorial(6)·비교 횟수·"6시간"(→3~8분), 00-core retry 점 간격(2배씩), java t10 빌드 순서 등.
-5. **공통 CSS** `06-diag.css` 끝에 조합 우선순위 추가 — `class="tk ok-t"` 가 회색, `class="li s2-l"` 이 청록으로 나오던 버그.
-   (전 가이드 공통 · server/csharp 결과물도 CSS 11줄만 바뀜)
-6. **도구** — `tools/diagaudit.mjs`(TIP·PK·CTR·ROW·GAP + `--summary` 박스형 %) · `tools/dupdiag.mjs`(중복 그림, `--fix`).
-   seq 본보기 참가자 간격 58/68/58 → 62/62/62. 플러그인 `frontend-design`(공식) 프로젝트 범위 설치.
-
-### ⚠ 이번에 겪은 사고 — 다음 세션도 조심
-- **중복 제거를 정규식으로 하면 안 됩니다.** `.diag` 블록을 `</div>` 첫 매치에서 끊었더니 안쪽 `.cap` 의 닫힘이라
-  바깥 `</div>` 가 남아 **pane 이 일찍 닫혔습니다**(섹션이 pane 밖으로 샘). `verify:guide` 와 `smoke.mjs` 는 **통과**했습니다.
-  지금 `dupdiag.mjs` 는 `<div>` 균형으로 끝을 찾습니다. 브라우저 스모크에서 반드시
-  `#pane-<탭> section.sec` 개수 == `.navset.on a` 개수, `section.sec` 중 `.pane` 밖 0 을 확인하세요.
-- **셸에서 `node -e` 로 JS 를 고칠 때 `\b` `\s` 가 망가집니다** — `\b` 가 백스페이스(0x08)로 파일에 박혔습니다.
-  정규식이 들어가는 수정은 Write/Edit 도구나 스크립트 파일로 하세요.
-
-## ✅ 공통 틀 · 테마 — 열 가이드 전부 완료 (2026-10-01)
-
-**전체 틀·디자인·테마는 공통입니다. 가이드별로 다르게 만들지 마세요.** (사용자 결정)
-- 레이아웃: 사이드바 3단(그룹 → 탭 → 목차) · PC 전폭 · 가이드 목록 10개 **고정 순서**(Java → Kotlin → Python → JS·TS →
-  C# → C++ → Rust → DB → 서버기술 → CS) + 현재 가이드 표시 · 상단 사이드바 접기 · **헤더 접기**(접으면 오른쪽 위 "⌄ 헤더" 손잡이) · 데스크톱 탭바 한 줄(탭 줄만 가로 스크롤, 현재 탭 자동 노출)
-- 테마: 강조색 하나 · 다크/라이트 (`shared/css/08-theme.css`) — 가이드 고유 css 의 다크 전제 색은 §8.4~8.10 에서 보정
-- 읽기 설정(Aa): 글자 크기 · 줄 간격 · 사이드바 접기 · 헤더 접기 · 집중 모드 · 테마 · 진도. 다른 탭에서 바꿔도 storage 이벤트로 즉시 반영. 옵션은 `lx:prefs`, 테마는 `lx:theme`,
-  가이드 목록 열림은 `lx:guides` — 전부 전 가이드 공통이고 `<head>` 스크립트가 첫 그리기 전에 적용
-- 가이드 사이 이동: 문서 간 View Transition(사이드바·탭바 고정, 본문 교차 페이드) + 링크 호버 시 다음 가이드 미리 렌더(Speculation Rules)
-- 모바일: 1080 이하 사이드바·접기 버튼 없음, 480 이하 상단 바 한 줄(검색·목차·Aa 아이콘만), 읽기 설정은 아래 시트
-- 새 가이드를 만들면: parts.json 에 `shared/css/07-study.css` · `shared/css/08-theme.css` · `shared/js/07-study.js`,
-  `00-head.html` 에 java 와 같은 선적용 스크립트. 그 다음 라이트 대비 측정(아래 §검증).
-
-## 🔜 다음 작업 — 언어별 시각화 모델 · 설명 개선 (콘텐츠)
-
-틀은 끝났으니 남은 일은 **각 가이드 안의 그림과 설명의 질**입니다. 1차(java·python·kotlin·js-ts)와 같은 방식으로:
-가이드당 에이전트 1~2개, 지침은 1차에 쓴 "다이어그램 개편 공통 지침"(아래 요약)을 그대로.
-
-### 1. 먼저 — 중복 그림 정리 (c6a8a38 이 넣은 것)
-```bash
-node guide-src/tools/dupdiag.mjs server db cs csharp cpp      # server 18 · db 16 · cs 17 · csharp 11 · cpp 11 (rust 0)
-node guide-src/tools/dupdiag.mjs <가이드> --fix                # <div> 균형으로 지움 — 지운 뒤 브라우저에서 pane 별 섹션 수 대조
-```
-1차에서는 지우는 대신 두 번째 사본을 **다른 모델로 다시 그려** 그림 수를 지켰습니다(이게 더 좋음). 시간이 없으면 --fix.
-
-### 2. 정렬 · 모션 결함 (diagaudit) — 현재
-| server 6 | db 24 | cs 19 | csharp 16 | cpp 5 | rust 9 |
-|---|---|---|---|---|---|
-db·cs 는 PK(흐름 점이 선을 벗어남)가 대부분입니다.
-
-### 3. 박스형 70% 넘는 탭 (같은 모양 반복) — 탭마다 3~4개를 카탈로그 모델로
-- **db** 13탭 전부 88~100% — 실행계획은 tree/waterfall, 인덱스는 tree, 격리 수준은 matrix, 복제는 seq, 용량은 bar
-- **server** 15탭 78~100% — TLS 핸드셰이크 seq, LB 알고리즘 bar, Kafka 파티션 matrix, k8s 스케줄링 tree
-- **cs** 01·03·04·06·09·11 (89~100%) — 자료구조는 memory/tree/graph, 아키텍처는 layer/pipe, 분산은 seq/state
-- **csharp** 01·05·08 (100%) + 7탭 78~89%
-- **cpp** 03·05·07 (100%) + 8탭 71~92% · **rust** 01·05 (100%) + 10탭 71~86%
-
-·`@`·`.` 이 아니면). 긴 표기 우선.
+- **매칭 규칙**: 인라인 코드 텍스트 안의 토큰을 경계 단위로(앞뒤가 영숫자·`·`@`·`.` 이 아니면). 긴 표기 우선.
   그래서 `in`·`by`·`is`·`as` 처럼 짧고 흔한 영단어는 넣지 말 것(에러 메시지 "Caused by" 에도 걸림). `loc` 처럼 점 뒤에 오는 것은 `df.loc` 로.
 - 지침서: 1차에 쓴 "say-brief" 요약 — 실제 등장 빈도로 고르고, 120~250개, 한국 현업 발음, 갈리면 둘 다("바라그 / 가변 인자"), 확신 없으면 뺀다.
 - 남은 가이드 후보: **csharp**(`async`·`await`·`LINQ`·`=>`·`??=`·`[SerializeField]`·`IEnumerator`) ·
