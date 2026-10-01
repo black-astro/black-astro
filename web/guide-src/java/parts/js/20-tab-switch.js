@@ -55,6 +55,7 @@ const TAB_LABEL = {
   log:"📝 로깅 · 로그",
   ops:"🚑 장애 대응 · 운영",
   sq:"🥞 스택 · 큐 · 덱",
+  struct:"📁 프로젝트 구조",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -105,6 +106,7 @@ const SEC_LV = {
   /* log */ lg01:"b", lg02:"b", lg03:"b", lg04:"i", lg05:"i", lg06:"a", lg07:"i", lg08:"i", lg09:"i", lg10:"a", lg11:"i", lg12:"i",
   /* ops */ op01:"b", op02:"i", op03:"i", op04:"a", op05:"i", op06:"i", op07:"i", op08:"i", op09:"i", op10:"b", op11:"a", op12:"b", op13:"b",
   /* sq */ sq01:"b", sq02:"b", sq03:"b", sq04:"i", sq05:"i", sq06:"i", sq07:"a", sq08:"i", sq09:"a", sq10:"i", sq11:"b", sq12:"i",
+  /* struct */ ps01:"b", ps02:"b", ps03:"i", ps04:"i", ps05:"b", ps06:"i", ps07:"i", ps08:"i", ps09:"a", ps10:"i",
 };
 
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 한 줄 번역 (항상 표시) */
@@ -411,6 +413,17 @@ const EZ = {
   sq10:"스택·큐 버그는 <b>예외 없이 틀리는 것</b>이 대부분입니다. 확인과 꺼내기는 한 동작으로, 순회 중엔 removeIf, 덱 비교는 List 로 바꿔서.",
   sq11:"자바의 특이점은 <b>스택·큐가 한 클래스(ArrayDeque)</b>, <b>PriorityQueue 가 최소 힙</b>, <b>크기 고정 덱이 표준에 없음</b>입니다. C++·Rust 는 최대 힙이 기본입니다.",
   sq12:"최근 N개는 <b>크기 검사 덱</b>, 레이트 리미터는 <b>타임스탬프 덱</b>, 재시도는 <b>DelayQueue</b>, 깊은 트리는 <b>명시적 스택</b>입니다. 잃으면 안 되는 건 메모리 큐에 두지 않습니다.",
+  /* ── struct ── */
+  ps01:"자바는 <b>src/main/java · resources · src/test</b> 표준 레이아웃을 바꾸지 않고, 구조는 <b>패키지 → 모듈 → 서비스</b> 순서로 신호가 올 때만 한 칸씩 키웁니다.",
+  ps02:"controller/service/repository 로 나누지 말고 <b>order/ · member/ 처럼 기능으로 묶고</b>, 다른 기능이 쓸 입구만 public 으로 둡니다. <b>package-private 은 공짜 경계</b>입니다.",
+  ps03:"포트·어댑터는 <b>규칙과 외부 연동이 많은 기능에만</b> 씁니다. CRUD 기능까지 4겹으로 만들면 <b>매핑 코드만 늘어납니다</b>.",
+  ps04:"모듈은 의존 화살표가 <b>core-domain 으로만 모이게</b> 나누고, 공통 설정은 <b>build-logic 의 convention plugin</b>, 버전은 <b>libs.versions.toml</b> 한 곳에 둡니다.",
+  ps05:"<b>application.yml 은 공통 기본값, application-{profile}.yml 은 차이만</b>, 비밀번호는 환경 변수·시크릿 파일로 들어오게 하고 저장소엔 이름만 둡니다.",
+  ps06:"테스트는 운영 패키지를 거울처럼 <b>그 코드가 사는 모듈에</b> 두고, 모듈끼리 나눠 쓸 빌더·컨테이너 설정은 <b>testFixtures</b> 로 한 번만 만듭니다.",
+  ps07:"같은 규칙을 쓰는 API · 배치 · 워커는 <b>한 저장소, 실행 모듈 셋, 공유 core 하나</b>입니다. 실행 모듈 하나가 jar 하나, 배포 단위 하나입니다.",
+  ps08:"데스크톱도 <b>기능별 패키지 + View/ViewModel 분리</b>입니다. FXML 은 <b>컨트롤러와 같은 패키지 경로</b>에, 화면 패키지마다 <b>opens … to javafx.fxml</b> 한 줄.",
+  ps09:"라이브러리는 <b>api · spi · internal</b> 로 약속의 범위를 드러냅니다. exports 는 <b>모듈패스에서만</b> 지켜지므로 internal 이라는 이름 자체가 경고판입니다.",
+  ps10:"시작은 대부분 <b>기능별 패키지</b>, 실행 jar 가 둘이면 <b>멀티 모듈</b>. 정한 규칙은 <b>ArchUnit 테스트 한 파일</b>로 고정해 빌드가 지키게 합니다.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -732,6 +745,17 @@ const CAP = {
   sq10:["p","코드 리뷰에서 check-then-act, 순회 중 수정, remove(int) 혼동, equals 미재정의 같은 함정을 찾아낼 수 있다"],
   sq11:["s","자바 스택·큐 코드를 Kotlin·Python·C#·C++·Rust 로 옮길 때 방향·빈 큐 처리 차이를 놓치지 않는다"],
   sq12:["p","최근 N개 버퍼·슬라이딩 윈도우 레이트 리미터·지수 백오프 재시도·반복형 트리 순회를 운영 코드로 구현할 수 있다"],
+  /* ── struct ── */
+  ps01:["p","새 저장소를 표준 레이아웃으로 시작하고, 지금 프로젝트가 다음 구조 단계로 넘어갈 신호(파일 수·실행 파일 수·빌드 시간·팀)를 판단할 수 있다"],
+  ps02:["p","Spring Boot 프로젝트를 기능별 패키지로 구성하고 package-private 으로 기능 사이 경계를 컴파일러가 지키게 만들 수 있다"],
+  ps03:["p","핵심 기능에만 포트·어댑터 패키지 트리를 적용하고, 과해진 구조를 평평한 기능별 구조로 되돌릴 기준을 말할 수 있다"],
+  ps04:["p","settings.gradle.kts · build-logic · 버전 카탈로그로 멀티 모듈 Spring Boot 빌드를 구성하고 모듈 의존 방향 규칙을 세울 수 있다"],
+  ps05:["p","프로필별 설정 파일과 @ConfigurationProperties 위치를 정하고 비밀값을 저장소 밖으로 빼는 구성을 만들 수 있다"],
+  ps06:["p","멀티 모듈에서 단위·슬라이스·통합 테스트의 위치를 정하고 java-test-fixtures 로 테스트 도우미와 Testcontainers 설정을 공유할 수 있다"],
+  ps07:["p","API·배치·워커를 실행 모듈로 나눈 저장소를 구성하고 모노레포와 멀티 레포 중 무엇을 고를지 근거를 댈 수 있다"],
+  ps08:["s","JavaFX 앱을 MVVM 패키지와 리소스 경로 규칙으로 구성하고 module-info 의 opens·exports 를 필요한 만큼만 쓸 수 있다"],
+  ps09:["e","공개 API와 내부 구현을 패키지·module-info 로 나누고, BOM 과 호환성 검사로 멀티 모듈 라이브러리를 안전하게 배포할 수 있다"],
+  ps10:["p","프로젝트 유형·규모에 맞는 구조를 고르고, ArchUnit·Spring Modulith 로 계층 방향과 순환 금지를 테스트로 강제할 수 있다"],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 */
