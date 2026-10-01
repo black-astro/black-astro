@@ -51,6 +51,7 @@ const TAB_LABEL = {
   setup:"🧰 설치 · 환경 세팅",
   ktor:"🚀 Ktor 서버",
   qa:"🧪 테스트 · 로깅 · 운영",
+  sq:"🥞 스택 · 큐 · 덱",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -93,6 +94,7 @@ const SEC_LV = {
   /* setup */ st01:"b", st02:"b", st03:"b", st04:"b", st05:"i", st06:"b", st07:"i", st08:"i", st09:"i", st10:"a", st11:"i",
   /* ktor */ kt01:"b", kt02:"b", kt03:"b", kt04:"i", kt05:"i", kt06:"i", kt07:"i", kt08:"i", kt09:"i", kt10:"i", kt11:"a", kt12:"i", kt13:"a",
   /* qa */ qa01:"b", qa02:"i", qa03:"i", qa04:"i", qa05:"b", qa06:"i", qa07:"i", qa08:"a", qa09:"i", qa10:"i", qa11:"i", qa12:"a", qa13:"i",
+  /* sq */ sq01:"b", sq02:"b", sq03:"b", sq04:"i", sq05:"i", sq06:"i", sq07:"a", sq08:"i", sq09:"a", sq10:"i", sq11:"b", sq12:"i",
 };
 
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 한 줄 번역 (항상 표시) */
@@ -343,6 +345,19 @@ const EZ = {
   qa11:"규칙은 사람이 아니라 <b>빌드가 기억</b>하게 합니다 — 버전은 카탈로그, 코드 규칙은 detekt · ktlint, 확인은 CI 가 맡습니다.",
   qa12:"성능은 <b>추측하지 말고 JMH 로 잽니다</b>. 끊기는 연산이면 Sequence, 원시 값 대량이면 IntArray, value class 는 제네릭 자리에서 박싱됩니다.",
   qa13:"리뷰어의 눈은 <b>자주 나오고 치명적인 함정</b>에 쓰고, 나머지는 도구에 맡깁니다. 체크리스트는 사고마다 한 줄씩 자랍니다.",
+  /* ── sq ── */
+  sq01:"단일 스레드면 스택 · 큐 · 덱 전부 <b><code>ArrayDeque</code></b> 하나, 우선순위는 <code>java.util.PriorityQueue</code>, 스레드 사이는 <code>BlockingQueue</code>, 코루틴 사이는 <code>Channel</code> 입니다.",
+  sq02:"스택은 <code>addLast</code> · <code>removeLast</code> · <code>lastOrNull</code>. 일반 <code>MutableList</code> 의 <code>removeLast()</code> 는 JDK 21 · compileSdk 35 로 컴파일하면 <b>구형 기기에서 NoSuchMethodError</b> — <code>removeAt(lastIndex)</code> 로 씁니다.",
+  sq03:"큐는 <code>addLast</code> 로 넣고 <code>removeFirstOrNull() ?: …</code> 로 꺼냅니다. 자바의 offer/poll 쌍을 코틀린은 <b>OrNull + 엘비스</b>로 표현합니다.",
+  sq04:"코틀린 <code>ArrayDeque</code> 는 <b>배열 하나 + head + size</b> 입니다. 양 끝과 인덱스 접근은 O(1), 가득 차면 1.5배로 펴서 복사하고 줄어들지는 않습니다.",
+  sq05:"표준 라이브러리엔 없어 <code>java.util.PriorityQueue</code> 를 <code>compareBy</code> · <code>thenBy</code> 로 씁니다. 순회 순서는 정렬이 아니고, 같은 우선순위 순서도 보장되지 않습니다.",
+  sq06:"스레드 사이엔 <b>용량을 준 <code>ArrayBlockingQueue</code></b> — <code>put</code>/<code>take</code> 로 배압을 얻고, 끝낼 땐 <code>data object</code> 독약을 소비자 수만큼 넣습니다.",
+  sq07:"Channel 은 <b>정책이 붙은 큐</b>입니다. DROP 정책은 <code>trySend</code> 가 성공해도 값이 버려질 수 있고, <code>Flow.buffer</code> · <code>conflate</code> 는 속에 채널을 만듭니다.",
+  sq08:"괄호 검사 · 단조 스택 · BFS · 0-1 BFS · 슬라이딩 윈도우 최댓값 · undo/redo 모두 <code>ArrayDeque</code> 하나로, <b><code>?: break</code> 와 인덱스 저장</b>이 핵심 습관입니다.",
+  sq09:"실측 순서는 <b>IntArray 원형 큐 &gt; ArrayDeque &gt; LinkedList ≫ ArrayList.removeAt(0)</b>. 박싱 · 노드 객체 · 나눗셈 한 번이 차이를 만듭니다.",
+  sq10:"가장 비싼 실수는 <b><code>MutableList.removeFirst/removeLast</code></b>(구형 기기 크래시)와 <b>무제한 큐</b>(OOM). 나머지는 \"꺼낸 결과로 판단하고, 비는 게 정상이면 OrNull\" 로 막힙니다.",
+  sq11:"코틀린은 <b>한 타입(<code>ArrayDeque</code>)으로 스택 · 큐 · 덱을 통일</b>하고, 빈 큐를 <code>T?</code> 로 표현하며, 우선순위 큐는 JVM 것을 빌려 씁니다.",
+  sq12:"최근 N 개는 <code>ArrayDeque(limit)</code>, 레이트 리미터는 시각 덱, 안드로이드 일회성 이벤트는 <code>Channel</code>, 재시도는 시각 순 <code>PriorityQueue</code>, 작업 분배는 <code>produce</code> + 워커입니다.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -606,6 +621,19 @@ const CAP = {
   qa11:["p","버전 카탈로그 · 빌드 캐시 · configuration cache · detekt 베이스라인 · ktlint 를 갖춘 Gradle 빌드와 10분 안에 끝나는 GitHub Actions 파이프라인을 구성할 수 있습니다"],
   qa12:["p","kotlinx-benchmark 로 JMH 벤치마크를 올바르게 작성하고, List · Sequence · 배열 · value class 선택을 측정값에 근거해 판단할 수 있습니다"],
   qa13:["p","이 탭의 함정을 나쁜 예 / 좋은 예로 리뷰에서 걸러 내고, PR 템플릿과 배포 전 체크리스트를 팀에 바로 도입할 수 있습니다"],
+  /* ── sq ── */
+  sq01:["p","새 코드에서 스택 · 큐 · 우선순위 큐 · 동시성 큐를 상황별로 바로 고르고, Stack · LinkedList 같은 레거시를 리뷰에서 걸러낼 수 있습니다"],
+  sq02:["p","스택 코드를 코틀린 관용구로 쓰고, compileSdk 35 업그레이드 때 removeFirst/removeLast 크래시를 미리 찾아 고칠 수 있습니다"],
+  sq03:["p","빈 큐 처리를 null 안전하게 쓰고, 자바 Queue 의 플랫폼 타입 NPE 와 ArrayList.removeAt(0) 의 O(n) 을 피할 수 있습니다"],
+  sq04:["s","ArrayDeque 의 연산별 비용과 재할당 시점을 설명하고, 초기 용량 지정으로 지연 스파이크를 없앨 수 있습니다"],
+  sq05:["p","다중 키 · FIFO 보장 우선순위 큐와 top-k · 다익스트라를 코틀린으로 쓰고, KMP 공통 코드용 힙을 둘 수 있습니다"],
+  sq06:["p","유한 큐 기반 생산자-소비자를 종료 처리까지 완성하고, 무제한 큐 · 고정 스레드 풀의 OOM 위험을 막을 수 있습니다"],
+  sq07:["p","데이터 성격에 맞는 채널 용량 · 넘침 정책을 고르고, Mutex 와 요청 큐 중 공유 상태 보호 방식을 정할 수 있습니다"],
+  sq08:["s","코딩 테스트의 스택 · 큐 · 덱 문제를 코틀린 관용 코드로 짧고 안전하게 풀 수 있습니다"],
+  sq09:["e","큐 구현의 박싱 · 캐시 · 재할당 비용을 근거 있게 비교하고, 필요할 때만 원시 타입 큐로 바꿀 수 있습니다"],
+  sq10:["p","코드 리뷰에서 큐 · 스택 관련 크래시 · 경쟁 조건 · 메모리 누수 패턴을 찾아 고칠 수 있습니다"],
+  sq11:["s","자바 · 파이썬 · JS · C# · C++ · Rust 의 스택 · 큐 코드를 코틀린으로 옮기거나 반대로 옮길 수 있습니다"],
+  sq12:["p","최근 기록 · 레이트 리미터 · UI 이벤트 · 재시도 큐 · 워커 풀을 바로 붙여 쓸 수 있는 코드로 구현할 수 있습니다"],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 */
@@ -645,7 +673,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (0 = 10번째 탭) */
-const TAB_ORDER = ["setup","core","adv","co","boot","flux","data","ktor","and","andx"];
+const TAB_ORDER = ["setup","core","sq","adv","co","boot","flux","data","ktor","and"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;
