@@ -1,0 +1,3056 @@
+<!-- ============================================================
+     양산 · 펌웨어 운영 PANE
+     ============================================================ -->
+<div class="pane" id="pane-prod">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> STM32F446RE 기준 · EVT/DVT/PVT · 부트로더 · OTA · A/B 슬롯 · MCUboot · IWDG/WWDG · 리셋 원인 · 정전 안전 저장 · littlefs · 전력 예산 · 생산 지그 · RDP · CRA · 재현 가능 빌드</div>
+  <h1>책상 위 보드를<br>만 대의 제품으로<br>내보내는 법</h1>
+  <p class="tx">
+    개발 보드에서 LED 가 깜빡이면 공부는 끝나지만 <b>제품은 거기서 시작</b>합니다.
+    만 대가 고객 손에 들어가면 펌웨어는 디버거 없이 몇 년을 돌아야 하고, 멈추면 스스로 일어나야 하며,
+    버그가 나오면 <b>공장으로 회수하지 않고 원격으로 고쳐야</b> 합니다.
+    이 탭은 <b>STM32F446RE</b>(Flash 512 KB, 섹터 0~7)를 기준으로 부트로더 설계, 전원이 끊겨도 벽돌이 되지 않는 OTA,
+    이미지 서명, 워치독을 "제대로" 쓰는 법, 리셋 원인 기록, 정전 안전 저장, 배터리 수명 계산, 생산 라인 기록, 읽기 보호와 규제,
+    버전 관리까지 <b>제품으로 내보내고 현장에서 운영하는 관점</b>으로 묶었습니다.
+    <b>이 탭을 마치면 "양산 펌웨어 체크리스트"를 스스로 만들고, 부트로더 · OTA · 워치독 · 저장 구조를 설계 문서로 설명할 수 있게 됩니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>13</b><span>SECTIONS</span></div>
+    <div><b>F446RE</b><span>기준 칩 · 512 KB</span></div>
+    <div><b>A/B</b><span>롤백 되는 업데이트</span></div>
+    <div><b>0</b><span>현장 회수 목표</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== o01 ==================== -->
+<section class="sec" id="o01">
+  <div class="sec-head rv">
+    <span class="no">PROD 01</span>
+    <h2>개발 보드에서 <span class="t">제품까지</span> — EVT · DVT · PVT, 단계마다 펌웨어가 할 일</h2>
+    <p class="lead">
+      하드웨어 제품은 한 번에 만들어지지 않습니다. 업계는 보통 <b>EVT → DVT → PVT → 양산(MP)</b> 네 관문을 거치고,
+      관문마다 보드가 새로 나옵니다. 서버 개발에 빗대면 <b>dev → staging → canary → prod</b> 와 같지만 결정적인 차이가 하나 있습니다 —
+      <b>배포된 뒤에는 서버처럼 SSH 로 들어갈 수 없습니다.</b> 그래서 펌웨어는 출하 전에 "현장에서 혼자 살아남는 장치"를 다 갖춰야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="제품 개발 단계 타임라인. 축 위에는 하드웨어 상태, 아래에는 펌웨어가 할 일이 적혀 있다. 프로토타입은 개발 보드로 되는지 보는 단계이고 펌웨어는 예제로 기능을 확인한다. EVT 는 첫 자체 PCB 로 설계가 동작하는지 보며 펌웨어는 보드 브링업과 드라이버, 보드 테스트 펌웨어를 만든다. DVT 는 금형과 인증 시험 단계로 펌웨어는 기능을 완성하고 OTA 와 저전력, 생산 테스트 초안을 만든다. PVT 는 실제 생산 라인에서 수율을 보며 펌웨어는 릴리스 후보와 읽기 보호 잠금, 기록 스크립트를 확정한다. 양산 후에는 OTA 로 개선하고 현장 로그를 분석한다. 펌웨어 일이 가장 많은 구간은 DVT 다.">
+      <text x="16" y="18" class="lbl">제품 개발 관문 — 위는 하드웨어가 증명할 것, 아래는 펌웨어가 할 일</text>
+
+      <path class="ax ar" d="M30 110 L652 110"/>
+      <path class="ln" d="M84 104 L84 116"/>
+      <path class="ln" d="M212 104 L212 116"/>
+      <path class="ln" d="M340 104 L340 116"/>
+      <path class="ln" d="M468 104 L468 116"/>
+      <path class="ln" d="M596 104 L596 116"/>
+
+      <circle class="dot" cx="84" cy="110" r="5"/>
+      <circle class="dot" cx="212" cy="110" r="5"/>
+      <circle class="dot" cx="340" cy="110" r="5" style="fill:#fbbf24"/>
+      <circle class="dot" cx="468" cy="110" r="5"/>
+      <circle class="dot" cx="596" cy="110" r="5" style="fill:#34d399"/>
+
+      <text x="84" y="132" class="tk" text-anchor="middle">프로토타입</text>
+      <text x="212" y="132" class="tk" text-anchor="middle">EVT</text>
+      <text x="340" y="132" class="tk am-t" text-anchor="middle">DVT</text>
+      <text x="468" y="132" class="tk" text-anchor="middle">PVT</text>
+      <text x="596" y="132" class="tk ok-t" text-anchor="middle">양산 MP</text>
+
+      <path class="lead-ln" d="M84 104 L84 84"/>
+      <text x="84" y="76" class="ann" text-anchor="middle">개발 보드 · 점퍼선</text>
+      <text x="84" y="64" class="ann" text-anchor="middle">되는지 본다</text>
+      <path class="lead-ln" d="M212 104 L212 84"/>
+      <text x="212" y="76" class="ann" text-anchor="middle">첫 자체 PCB 수십 장</text>
+      <text x="212" y="64" class="ann" text-anchor="middle">설계가 동작하나</text>
+      <path class="lead-ln" d="M340 104 L340 84"/>
+      <text x="340" y="76" class="ann" text-anchor="middle">금형 · 인증 시험</text>
+      <text x="340" y="64" class="ann" text-anchor="middle">요구를 만족하나</text>
+      <path class="lead-ln" d="M468 104 L468 84"/>
+      <text x="468" y="76" class="ann" text-anchor="middle">실제 생산 라인</text>
+      <text x="468" y="64" class="ann" text-anchor="middle">공정이 수율을 내나</text>
+      <path class="lead-ln" d="M596 104 L596 84"/>
+      <text x="596" y="76" class="ann ok-t" text-anchor="middle">출하 · 현장 운영</text>
+      <text x="596" y="64" class="ann" text-anchor="middle">수천~수만 대</text>
+
+      <path class="lead-ln" d="M84 138 L84 148"/>
+      <text x="84" y="160" class="ann" text-anchor="middle">HAL 예제로</text>
+      <text x="84" y="173" class="ann" text-anchor="middle">기능 확인</text>
+      <path class="lead-ln" d="M212 138 L212 148"/>
+      <text x="212" y="160" class="ann" text-anchor="middle">브링업 · 드라이버</text>
+      <text x="212" y="173" class="ann" text-anchor="middle">보드 테스트 펌웨어</text>
+      <path class="lead-ln" d="M340 138 L340 148"/>
+      <text x="340" y="160" class="ann am-t" text-anchor="middle">기능 완성 · OTA</text>
+      <text x="340" y="173" class="ann am-t" text-anchor="middle">저전력 · 생산 테스트</text>
+      <path class="lead-ln" d="M468 138 L468 148"/>
+      <text x="468" y="160" class="ann" text-anchor="middle">릴리스 후보 · RDP</text>
+      <text x="468" y="173" class="ann" text-anchor="middle">기록 스크립트 확정</text>
+      <path class="lead-ln" d="M596 138 L596 148"/>
+      <text x="596" y="160" class="ann" text-anchor="middle">OTA 로 개선</text>
+      <text x="596" y="173" class="ann" text-anchor="middle">현장 로그 분석</text>
+
+      <path class="dim-ln" d="M216 196 L464 196"/>
+      <text x="340" y="190" class="ann am-t" text-anchor="middle">펌웨어 일이 몰리는 구간</text>
+      <text x="16" y="222" class="lbl">관문 하나가 보통 수 주~수 개월 — 관문마다 보드 리비전이 바뀝니다 (PROD 12)</text>
+    </svg>
+    <div class="cap">타임라인 — 하드웨어는 관문마다 <b>무엇을 증명하나</b>가 바뀌고, 펌웨어 일은 <b>DVT 에 가장 많이</b> 몰립니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">관문별 펌웨어 산출물</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:18%">관문</th><th>펌웨어가 내놓아야 하는 것</th></tr>
+        <tr><td>EVT</td><td>클럭 · 전원 · 각 주변장치를 하나씩 켜 보는 <b>브링업 펌웨어</b>, 회로 실수 목록(풀업 누락 · 핀 바뀜)</td></tr>
+        <tr><td><b>DVT</b></td><td>기능 완성, <b>부트로더 + OTA</b>, 저전력 측정, 워치독 · 리셋 원인 기록, EMC 시험용 펌웨어(무선 연속 송신 등), <b>생산 테스트 펌웨어 초안</b></td></tr>
+        <tr><td>PVT</td><td>릴리스 후보(RC), 공장 기록 스크립트, 시리얼 · 보정값 기록, <b>RDP 잠금</b>, 불량 판정 기준</td></tr>
+        <tr><td>MP</td><td>버전 태그 · 심볼(.elf) 보관, OTA 서버 운영, 현장 로그 분석 → 패치</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>EVT 는 Engineering, DVT 는 Design, PVT 는 Production Validation Test</b> 의 약자입니다.
+        회사마다 이름은 조금씩 다르지만 "설계가 되나 → 설계가 맞나 → 공장에서 되나" 순서는 같습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">펌웨어는 세 벌 — 개발 · 생산 테스트 · 출하</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:20%">항목</th><th style="width:24%">개발</th><th style="width:26%">생산 테스트</th><th>출하</th></tr>
+        <tr><td>디버그 포트</td><td>열림 (RDP 0)</td><td>열림 (공정이 씀)</td><td><b>RDP 1 이상</b> (PROD 11)</td></tr>
+        <tr><td>워치독</td><td>디버그 중 정지</td><td>긴 타임아웃</td><td><b>항상 켜짐</b>, 정지 해제</td></tr>
+        <tr><td>assert 실패</td><td>BKPT 로 멈춤</td><td>FAIL 응답</td><td>원인 기록 후 <b>리셋</b></td></tr>
+        <tr><td>로그</td><td>DEBUG · printf</td><td>결과 숫자만</td><td>WARN 이상 · Flash 링 로그</td></tr>
+        <tr><td>세미호스팅</td><td>써도 됨</td><td>금지</td><td><b>절대 금지</b></td></tr>
+        <tr><td>셸 명령</td><td>전부 열림</td><td>지그 전용 명령</td><td>인증 뒤 일부만</td></tr>
+        <tr><td>HW 시험 코드</td><td>수동</td><td><b>전 항목 자동</b></td><td>바이너리에 없음</td></tr>
+        <tr><td>버전</td><td>"dev"</td><td>태그 + factory</td><td>태그 + 빌드 ID (PROD 12)</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">세 벌을 한 소스에서 — <span class="t">빌드 스위치와 컴파일 가드</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="note info rv">
+    표의 세 벌은 <b>같은 소스에서 컴파일 스위치로</b> 뽑습니다. 생산 테스트 펌웨어는 공장에서 한 번 돌고 출하 펌웨어로 덮어써지므로,
+    공정에 "덮어쓰기" 단계가 반드시 있어야 합니다(PROD 10). 테스트 코드를 출하 이미지에 섞어 두면 <b>숨은 공장 모드</b>가 되어 보안 구멍이 됩니다.
+    출하 빌드는 개발자 PC 가 아니라 <b>CI 만</b> 만들게 합니다.
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CMake 로 세 벌 뽑기</h4>
+      <pre class="code" data-lang="cmake"><code># 같은 소스, 다른 정의 — 출하 빌드는 CI 파이프라인에서만
+set(FW_VARIANT "dev" CACHE STRING "dev | factory | prod")
+
+if(FW_VARIANT STREQUAL "dev")
+  target_compile_definitions(app PRIVATE FW_DEV=1 LOG_LEVEL=0)
+elseif(FW_VARIANT STREQUAL "factory")
+  target_compile_definitions(app PRIVATE FW_FACTORY=1 LOG_LEVEL=1)
+  target_sources(app PRIVATE src/factory/selftest.c)  # 출하 이미지엔 아예 없음
+elseif(FW_VARIANT STREQUAL "prod")
+  target_compile_definitions(app PRIVATE FW_PROD=1 LOG_LEVEL=2)
+else()
+  message(FATAL_ERROR "FW_VARIANT 는 dev | factory | prod 중 하나")
+endif()</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>"코드에는 있는데 꺼 둔 것"과 "코드에 아예 없는 것"은 다릅니다.</b> 공장 전용 명령은 <code>#if</code> 로 감추지 말고
+        파일째 빌드에서 빼세요. 바이너리에 문자열 하나라도 남으면 누군가 찾아냅니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">양산 빌드에 개발 설정이 섞이면 컴파일 실패</h4>
+      <pre class="code" data-lang="c"><code>/* prod_guard.h — 모든 .c 가 include 하는 설정 헤더 끝에 */
+#define LOG_DEBUG 0
+#define LOG_INFO  1
+#define LOG_WARN  2
+
+#if defined(FW_PROD)
+#  if defined(USE_SEMIHOSTING)
+#    error "양산 빌드에 세미호스팅이 켜져 있습니다"
+#  endif
+#  if LOG_LEVEL &lt; LOG_WARN
+#    error "양산 빌드의 로그 레벨이 DEBUG/INFO 입니다"
+#  endif
+#  if defined(FW_FACTORY) || defined(FW_DEV)
+#    error "변형 스위치가 둘 이상 켜졌습니다"
+#  endif
+#endif</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>세미호스팅이 왜 금지 1순위인가</b> — 세미호스팅 printf 는 <code>BKPT 0xAB</code> 명령으로 디버거를 부릅니다.
+        디버거가 없으면 Cortex-M 은 이 BKPT 를 <b>HardFault 로 격상</b>시킵니다. 책상에선 잘 돌던 펌웨어가
+        "USB 케이블만 빼면 바로 죽는" 전형적인 원인입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">부팅할 때 스스로 점검</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">출하 공정이 빠뜨린 것을 펌웨어가 잡기</h4>
+      <pre class="code" data-lang="c"><code>/* 출하 빌드만 — 옵션 바이트가 기대값인지 부팅마다 확인 */
+void prod_boot_checks(void)
+{
+#if defined(FW_PROD)
+    FLASH_OBProgramInitTypeDef ob = {0};
+    HAL_FLASHEx_OBGetConfig(&amp;ob);            /* RDP · BOR · WRP 읽기 */
+
+    if (ob.RDPLevel == OB_RDP_LEVEL_0)
+        event_log(EV_RDP_OPEN);               /* 공정에서 잠금을 빠뜨림 → 서버 경보 */
+    if (ob.BORLevel != OB_BOR_LEVEL3)
+        event_log(EV_BOR_LOW);
+
+    /* 개발 중 켜 둔 "디버그 정지"가 남아 있으면 끈다 */
+    DBGMCU-&gt;APB1FZ &amp;= ~(DBGMCU_APB1_FZ_DBG_IWDG_STOP |
+                       DBGMCU_APB1_FZ_DBG_WWDG_STOP);
+#endif
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>스스로 잠그지는 않습니다</b> — 펌웨어가 RDP 를 올리게 만들 수도 있지만, 공정 중 실수로 RDP 2 가 걸리면 그 보드는 영원히 다시 못 굽습니다.
+        잠금은 <b>공정의 마지막 단계(PROD 10)</b>, 펌웨어는 <b>확인과 보고</b>만 하는 분업이 안전합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">양산 출하 전 체크리스트 (요약)</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:8%">✓</th><th>항목</th><th style="width:22%">섹션</th></tr>
+        <tr><td>□</td><td>부트로더가 앱 유효성을 확인하고, 깨진 앱이면 복구 모드로</td><td>PROD 02</td></tr>
+        <tr><td>□</td><td>업데이트 도중 전원을 뽑아도 부팅됨 (실제로 100번 뽑아 봄)</td><td>PROD 03</td></tr>
+        <tr><td>□</td><td>이미지 서명 검증 · 키는 개발자 PC 가 아니라 서명 서버에</td><td>PROD 04</td></tr>
+        <tr><td>□</td><td>워치독은 모든 태스크 체크인 후에만 갱신</td><td>PROD 05</td></tr>
+        <tr><td>□</td><td>리셋 원인 · 리셋 루프 횟수 기록</td><td>PROD 06</td></tr>
+        <tr><td>□</td><td>설정 저장이 정전에 안전</td><td>PROD 07</td></tr>
+        <tr><td>□</td><td>잠자는 전류를 실측해 배터리 수명 계산과 대조</td><td>PROD 08</td></tr>
+        <tr><td>□</td><td>빌드 ID 별 .elf 보관</td><td>PROD 09 · 12</td></tr>
+        <tr><td>□</td><td>RDP · WRP · BOR 이 공정에서 설정됨</td><td>PROD 10 · 11</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 제품은 <b>EVT · DVT · PVT</b> 관문을 지나며 만들어지고, 펌웨어 일은 DVT 에 몰립니다.
+    펌웨어는 <b>개발 · 생산 테스트 · 출하</b> 세 벌로 나눠 빌드하고, 출하 빌드에 개발 설정이 섞이면 <b>컴파일이 실패</b>하게 막아 둡니다.</div>
+</section>
+
+
+<!-- ==================== o02 ==================== -->
+<section class="sec" id="o02">
+  <div class="sec-head rv">
+    <span class="no">PROD 02</span>
+    <h2>부트로더 설계 — <span class="t">Flash 를 나누고, 앱으로 깨끗하게 점프</span>하기</h2>
+    <p class="lead">
+      부트로더는 리셋 직후 가장 먼저 도는 <b>작은 두 번째 프로그램</b>입니다. 할 일은 셋뿐입니다 —
+      <b>앱이 멀쩡한지 확인하고, 필요하면 새 앱을 받고, 앱으로 넘어간다.</b> 서버로 치면 GRUB 이나 컨테이너의 init 과 같은 자리입니다.
+      리셋에서 main 까지의 기본 줄거리(벡터 테이블 [0] · [4], Reset_Handler)는 하드웨어 기초 탭 h11 · 링커 스크립트는 h12 를 참고하고,
+      여기서는 <b>두 프로그램이 한 Flash 를 나눠 쓰는 법</b>에 집중합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 252" role="img" aria-label="STM32F446RE 512 킬로바이트 Flash 를 크기에 비례해 나눈 그림. 첫째 줄은 A B 슬롯 배치로 섹터 0 과 1 의 32 킬로바이트가 부트로더, 섹터 2 와 3 이 설정 A 와 B, 섹터 4 와 5 를 합친 192 킬로바이트가 0x0801 0000 에서 시작하는 슬롯 A, 섹터 6 과 7 을 합친 256 킬로바이트가 0x0804 0000 에서 시작하는 슬롯 B 다. 둘째 줄은 단일 슬롯 배치로 부트로더와 설정 뒤에 448 킬로바이트 앱이 있고 새 이미지는 외부 SPI Flash 에 받는다. 섹터 크기가 16 16 16 16 64 128 128 128 킬로바이트로 고르지 않아 경계를 섹터에 맞춰야 한다.">
+      <text x="16" y="18" class="lbl">F446RE Flash 512 KB — 칸 폭이 크기에 비례합니다 (1 KB ≈ 1.2 px)</text>
+
+      <text x="16" y="44" class="ann">부트로더 S0~S1 · 32 KB · 0x0800 0000</text>
+      <path class="lead-ln" d="M35 48 L35 58"/>
+
+      <rect class="bx bx-fw" x="16" y="62" width="39" height="38" rx="3"/>
+      <text x="35" y="85" class="tk" text-anchor="middle">BL</text>
+      <rect class="bx bx-hi" x="55" y="62" width="39" height="38" rx="3"/>
+      <text x="74" y="85" class="tk" text-anchor="middle">CFG</text>
+      <rect class="bx bx-ok" x="94" y="62" width="234" height="38" rx="3"/>
+      <text x="211" y="78" class="ann ok-t" text-anchor="middle">슬롯 A · 실행 192 KB</text>
+      <text x="211" y="92" class="tk" text-anchor="middle">0x0801 0000 ~ 0x0803 FFFF</text>
+      <rect class="bx" x="328" y="62" width="312" height="38" rx="3"/>
+      <text x="484" y="78" class="ann" text-anchor="middle">슬롯 B · 256 KB</text>
+      <text x="484" y="92" class="tk" text-anchor="middle">0x0804 0000 ~ 0x0807 FFFF</text>
+      <path class="gr" d="M172 64 L172 98"/>
+      <path class="gr" d="M484 64 L484 70"/>
+      <path class="gr" d="M484 94 L484 98"/>
+
+      <text x="133" y="114" class="tk" text-anchor="middle">S4 64K</text>
+      <text x="250" y="114" class="tk" text-anchor="middle">S5 128K</text>
+      <text x="406" y="114" class="tk" text-anchor="middle">S6 128K</text>
+      <text x="562" y="114" class="tk" text-anchor="middle">S7 128K</text>
+
+      <path class="lead-ln" d="M74 104 L74 124"/>
+      <text x="16" y="136" class="ann am-t">설정 A/B S2~S3 · 16 KB × 2 · 0x0800 8000 (PROD 07)</text>
+
+      <text x="16" y="164" class="ann">단일 슬롯 배치</text>
+      <rect class="bx bx-fw" x="16" y="172" width="39" height="30" rx="3"/>
+      <text x="35" y="191" class="tk" text-anchor="middle">BL</text>
+      <rect class="bx bx-hi" x="55" y="172" width="39" height="30" rx="3"/>
+      <text x="74" y="191" class="tk" text-anchor="middle">CFG</text>
+      <rect class="bx bx-ok" x="94" y="172" width="546" height="30" rx="3"/>
+      <text x="367" y="191" class="ann ok-t" text-anchor="middle">앱 448 KB (S4~S7) — 새 이미지는 외부 SPI Flash 에 받음</text>
+
+      <text x="16" y="226" class="lbl">섹터가 16 · 16 · 16 · 16 · 64 · 128 · 128 · 128 KB 로 들쭉날쭉 — 경계는 반드시 섹터에</text>
+      <text x="16" y="244" class="ann">A/B 배치는 슬롯 B 가 더 크지만 앱 최대 크기는 작은 쪽(192 KB)에 묶입니다</text>
+    </svg>
+    <div class="cap">메모리 배치 — 부트로더를 넣는 순간 <b>앱이 쓸 Flash 가 줄어듭니다</b>. A/B 를 하면 절반 이하로.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">부트로더의 main — 판단은 이것뿐</h4>
+      <pre class="code" data-lang="c"><code>/* bootloader/main.c — 0x0800 0000, 32 KB 안에 들어가야 함 */
+#define APP_BASE   0x08010000u
+#define APP_MAX    (192u * 1024u)
+
+int main(void)
+{
+    HAL_Init();                    /* 클럭은 HSI 16 MHz 그대로 — 단순할수록 안전 */
+
+    if (boot_request_pending())    /* 앱이 "업데이트 받을래" 하고 리셋했나 */
+        recovery_mode();           /* UART · USB 로 새 이미지 받기 (돌아오지 않음) */
+
+    if (!app_valid(APP_BASE, APP_MAX))
+        recovery_mode();           /* 앱이 없거나 깨졌으면 앱으로 가지 않는다 */
+
+    jump_to_app(APP_BASE);         /* 돌아오지 않음 */
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>부트로더는 거의 고치지 않는 코드</b>입니다. 현장에 나간 부트로더는 업데이트하지 않는 것이 원칙이라(업데이트 도중 꺼지면 복구 수단이 없음)
+        기능을 최소로, 클럭 설정도 최소로 둡니다. 32 KB 를 넘으면 HAL 대신 LL 을 쓰거나 <code>-Os</code> 로 줄이세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">앱 유효성 검사 — 점프하기 전에 반드시</h4>
+      <pre class="code" data-lang="c"><code>static bool app_valid(uint32_t base, uint32_t max)
+{
+    const uint32_t sp = *(const volatile uint32_t *)base;          /* 벡터 [0] */
+    const uint32_t pc = *(const volatile uint32_t *)(base + 4u);   /* 벡터 [1] */
+
+    /* 지워진 Flash 는 0xFFFFFFFF — 이 검사 하나로 "앱 없음"이 걸린다 */
+    if (sp &lt; 0x20000000u || sp &gt; 0x20020000u) return false;  /* SRAM 128 KB, 끝 포함 */
+    if ((sp &amp; 0x3u) != 0u)                    return false;  /* 스택은 워드 정렬 */
+    if ((pc &amp; 0x1u) == 0u)                    return false;  /* Thumb 비트가 없으면 가짜 */
+    if (pc &lt; base || pc &gt;= base + max)        return false;  /* 앱 영역 밖을 가리킴 */
+
+    return image_digest_ok(base);   /* 내용 전체 확인 — CRC 또는 SHA-256 (PROD 04) */
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>SP · PC 검사만으로는 부족합니다</b> — 업데이트가 앞 1 KB 만 쓰고 끊기면 벡터 테이블은 멀쩡한데 나머지가 0xFF 입니다.
+        점프는 성공하고 몇 초 뒤 HardFault 가 납니다. <b>이미지 전체의 해시</b>를 함께 봐야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">앱으로 점프 — <span class="t">순서가 곧 정답</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 268" role="img" aria-label="부트로더에서 앱으로 점프하는 일곱 단계. 첫째 앱 유효성을 확인한다. 둘째 인터럽트를 전역으로 끈다. 셋째 클럭과 주변장치를 리셋 직후 상태로 돌리고 SysTick 을 멈춘다. 넷째 NVIC 의 모든 인터럽트를 끄고 펜딩을 지운다. 다섯째 VTOR 에 앱 주소를 쓰고 배리어를 둔다. 여섯째 CONTROL 을 0 으로 하고 PRIMASK 를 푼 뒤 MSP 를 앱의 초기 스택 값으로 바꾼다. 일곱째 앱의 Reset_Handler 로 분기한다. 오른쪽에는 각 단계를 빼먹으면 생기는 증상이 적혀 있다.">
+      <text x="16" y="18" class="lbl">점프 일곱 단계 — 왼쪽이 할 일, 오른쪽이 빼먹었을 때의 증상</text>
+      <path class="ln" d="M36 48 L36 240"/>
+      <path class="ln" d="M352 34 L352 252" style="opacity:.4"/>
+
+      <circle class="stp" cx="36" cy="46" r="11"/><text x="36" y="50" class="stpn" text-anchor="middle">1</text>
+      <text x="56" y="50" class="ann">앱 유효성 — SP · PC · 해시</text>
+      <text x="364" y="50" class="ann rs-t">빈 Flash 로 점프 → 즉시 HardFault</text>
+
+      <circle class="stp" cx="36" cy="78" r="11"/><text x="36" y="82" class="stpn" text-anchor="middle">2</text>
+      <text x="56" y="82" class="ann">__disable_irq() — 정리 중 끼어들기 차단</text>
+      <text x="364" y="82" class="ann rs-t">반쯤 해제된 주변장치의 ISR 이 돎</text>
+
+      <circle class="stp" cx="36" cy="110" r="11"/><text x="36" y="114" class="stpn" text-anchor="middle">3</text>
+      <text x="56" y="114" class="ann">RCC · 주변장치 원복, SysTick 정지</text>
+      <text x="364" y="114" class="ann rs-t">앱의 클럭 설정이 PLL 켜진 상태에서 실패</text>
+
+      <circle class="stp" cx="36" cy="142" r="11"/><text x="36" y="146" class="stpn" text-anchor="middle">4</text>
+      <text x="56" y="146" class="ann">NVIC ICER · ICPR 전부 지움</text>
+      <text x="364" y="146" class="ann rs-t">남은 펜딩이 앱에서 엉뚱한 핸들러로</text>
+
+      <circle class="stp" cx="36" cy="174" r="11"/><text x="36" y="178" class="stpn" text-anchor="middle">5</text>
+      <text x="56" y="178" class="ann">SCB-&gt;VTOR = 앱 주소 · DSB · ISB</text>
+      <text x="364" y="178" class="ann rs-t">인터럽트가 부트로더 핸들러로 감</text>
+
+      <circle class="stp" cx="36" cy="206" r="11"/><text x="36" y="210" class="stpn" text-anchor="middle">6</text>
+      <text x="56" y="210" class="ann">CONTROL = 0 · PRIMASK 해제 · MSP = 앱 [0]</text>
+      <text x="364" y="210" class="ann rs-t">HAL_Delay 가 영원히 안 끝남 (PRIMASK)</text>
+
+      <circle class="stp" cx="36" cy="238" r="11"/><text x="36" y="242" class="stpn" text-anchor="middle">7</text>
+      <text x="56" y="242" class="ann ok-t">앱 [4] = Reset_Handler 로 분기</text>
+      <text x="364" y="242" class="ann">앱이 .data 복사 · .bss 0 부터 다시 시작</text>
+    </svg>
+    <div class="cap">단계 — 핵심은 <b>"앱이 리셋 직후의 칩을 만나게"</b> 하는 것입니다. 하나라도 빠지면 증상이 몇 초 뒤에 엉뚱한 곳에서 납니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">jump_to_app — 위 일곱 단계 그대로</h4>
+      <pre class="code" data-lang="c"><code>/* MSP 를 바꾼 뒤엔 C 지역 변수(스택)를 믿을 수 없다 → 어셈블리 두 줄 */
+__attribute__((naked, noreturn))
+static void start_app(uint32_t sp, uint32_t pc)
+{
+    __asm volatile("msr msp, r0 \n"    /* r0 = sp (AAPCS 첫 인자) */
+                   "bx  r1      \n");  /* r1 = pc, Thumb 비트 1 그대로 */
+}
+
+void jump_to_app(uint32_t base)
+{
+    const uint32_t sp = *(const volatile uint32_t *)base;
+    const uint32_t pc = *(const volatile uint32_t *)(base + 4u);
+
+    __disable_irq();                                  /* ② */
+    HAL_DeInit();                                     /* ③ 주변장치 RCC 리셋 */
+    HAL_RCC_DeInit();                                 /*   HSI 로 복귀 (안에서 SysTick 재설정) */
+    SysTick-&gt;CTRL = 0; SysTick-&gt;LOAD = 0; SysTick-&gt;VAL = 0;  /* 그래서 맨 마지막에 정지 */
+
+    for (uint32_t i = 0; i &lt; 8u; i++) {               /* ④ F446 IRQ 97개 — 넉넉히 8워드 */
+        NVIC-&gt;ICER[i] = 0xFFFFFFFFu;
+        NVIC-&gt;ICPR[i] = 0xFFFFFFFFu;
+    }
+    SCB-&gt;ICSR = SCB_ICSR_PENDSTCLR_Msk;               /*   SysTick 펜딩도 */
+
+    SCB-&gt;VTOR = base;                                 /* ⑤ 0x200 정렬 필수 */
+    __DSB(); __ISB();
+
+    __set_CONTROL(0u);                                /* ⑥ PSP · FPU 문맥 흔적 제거 */
+    __ISB();
+    __enable_irq();                                   /*   NVIC 를 다 껐으니 안전 */
+    start_app(sp, pc);                                /* ⑥ MSP ⑦ 분기 */
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 이 순서인가</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">결정</th><th>이유</th></tr>
+        <tr><td>SysTick 정지를 맨 뒤에</td><td>F4 HAL 의 <code>HAL_RCC_DeInit()</code> 은 끝에서 <code>HAL_InitTick()</code> 으로 SysTick 을 <b>다시 켭니다</b></td></tr>
+        <tr><td><code>__enable_irq()</code></td><td>점프는 리셋이 아니라 PRIMASK=1 이 그대로 넘어갑니다. CubeMX 앱은 이걸 풀지 않으므로 SysTick 이 안 돌고 <code>HAL_Delay</code> 에서 멈춤</td></tr>
+        <tr><td>CONTROL = 0</td><td>부트로더가 RTOS 를 썼다면 PSP 사용 · 비특권 상태일 수 있음. 앱의 스타트업은 MSP 특권을 가정</td></tr>
+        <tr><td>naked 함수</td><td>C 로 <code>__set_MSP(sp)</code> 뒤 <code>((void(*)(void))pc)()</code> 를 쓰면 최적화 수준에 따라 <code>pc</code> 를 <b>바뀐 스택에서</b> 읽음</td></tr>
+        <tr><td>DSB · ISB</td><td>VTOR 쓰기가 끝나기 전에 인터럽트가 들어오지 않게</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        <b>VTOR 정렬</b> — Cortex-M4 의 벡터 테이블은 "벡터 개수 × 4 를 2 의 거듭제곱으로 올린 값"에 정렬돼야 합니다.
+        F446 은 113개 × 4 = 452 B → <b>512 B(0x200) 정렬</b>. CMSIS 의 <code>system_stm32f4xx.c</code> 주석이 "0x200 의 배수"라고 적어 둔 이유입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">앱 쪽 준비와 "리셋 거쳐 점프"</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">앱이 바꿀 두 곳</h4>
+      <pre class="code" data-lang="text"><code>/* app/STM32F446RETX_FLASH.ld */
+MEMORY
+{
+  RAM    (xrw) : ORIGIN = 0x20000000, LENGTH = 128K - 256
+  NOINIT (rw)  : ORIGIN = 0x2001FF00, LENGTH = 256     /* 부트로더와 같은 자리 */
+  FLASH  (rx)  : ORIGIN = 0x08010000, LENGTH = 192K    /* 슬롯 A = S4 + S5 */
+}</code></pre>
+      <pre class="code" data-lang="c"><code>/* app/Core/Src/system_stm32f4xx.c — 주석 해제 + 값 변경 */
+#define USER_VECT_TAB_ADDRESS
+#define VECT_TAB_OFFSET  0x00010000U   /* 0x200 의 배수 */
+/* SystemInit() 이 SCB-&gt;VTOR = FLASH_BASE | VECT_TAB_OFFSET 을 씀 */</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        부트로더가 이미 VTOR 를 썼는데 앱이 또 쓰는 이유 — <b>디버거로 앱만 올려 돌릴 때</b>도 맞게 돌게 하려는 것입니다.
+        디버깅할 때는 부트로더를 한 번 구워 두고 앱 .elf 만 내려받으면 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">앱 → 부트로더: 리셋을 거쳐 가기</h4>
+      <pre class="code" data-lang="c"><code>/* 양쪽 링커 스크립트가 같은 주소에 두는 .noinit (startup 이 0 으로 안 지움) */
+#define BOOT_REQ_MAGIC  0xB007B007u
+__attribute__((section(".noinit")))
+volatile uint32_t g_boot_req;
+
+/* 앱: OTA 명령을 받으면 */
+void enter_bootloader(void)
+{
+    g_boot_req = BOOT_REQ_MAGIC;
+    NVIC_SystemReset();            /* 칩 전체를 진짜 리셋 상태로 */
+}
+
+/* 부트로더: 맨 처음, HAL_Init 보다 먼저 */
+bool boot_request_pending(void)
+{
+    if (g_boot_req != BOOT_REQ_MAGIC) return false;
+    g_boot_req = 0u;               /* 한 번만 — 안 지우면 영원히 복구 모드 */
+    return true;
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>전원 투입(POR) 직후의 SRAM 은 쓰레기 값</b>입니다. 매직 값이 우연히 맞을 확률은 2<sup>-32</sup> 이지만,
+        더 확실히 하려면 매직과 그 비트 반전 값을 함께 써 두고 둘 다 맞을 때만 인정합니다. 반대 방향(부트로더 → 앱)도
+        이렇게 <b>리셋 후 점프</b>하면 위 일곱 단계 중 ②~④가 저절로 해결됩니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> F446 에서 부트로더는 <b>S0~S1(32 KB)</b>, 앱은 <b>0x0801 0000</b> 부터가 흔한 배치입니다.
+    점프 전에 <b>SP · PC · 해시</b>로 앱을 검사하고, 인터럽트 · 클럭 · NVIC 를 리셋 직후 상태로 돌린 뒤 <b>VTOR → MSP → Reset_Handler</b> 순서로 넘깁니다.</div>
+</section>
+
+
+<!-- ==================== o03 ==================== -->
+<section class="sec" id="o03">
+  <div class="sec-head rv">
+    <span class="no">PROD 03</span>
+    <h2>펌웨어 업데이트 — <span class="t">전원이 끊겨도 벽돌이 되지 않는</span> OTA</h2>
+    <p class="lead">
+      업데이트 경로는 두 가지입니다. 사람이 케이블을 꽂는 <b>DFU(Device Firmware Update)</b> 와 무선 · 네트워크로 받는 <b>OTA</b>.
+      어느 쪽이든 원칙은 하나입니다 — <b>어느 순간에 전원이 끊겨도, 다음 부팅에서 반드시 "돌아가는 펌웨어 하나"가 있어야 한다.</b>
+      서버의 블루-그린 배포와 같은 발상이지만, 로드 밸런서 대신 <b>부트로더</b>가 트래픽을 돌린다고 보면 됩니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">DFU — ST 내장 부트로더 vs 자체 부트로더</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%"></th><th>ST 시스템 부트로더</th><th>자체 부트로더 (PROD 02)</th></tr>
+        <tr><td>위치</td><td>시스템 메모리 0x1FFF 0000 (ROM, 지울 수 없음)</td><td>메인 Flash S0~S1</td></tr>
+        <tr><td>들어가는 법</td><td>리셋 때 <b>BOOT0 = 1</b></td><td>매직 값 · 버튼 · 앱 무효</td></tr>
+        <tr><td>인터페이스</td><td>USART · I2C · SPI · CAN · USB DFU (핀은 AN2606 표)</td><td>내가 고른 것</td></tr>
+        <tr><td>서명 검증</td><td><b>없음</b> — 아무 이미지나 받음</td><td>넣을 수 있음</td></tr>
+        <tr><td>RDP 1 에서</td><td>Flash 읽기 불가, 지우기 · 쓰기는 제한적으로</td><td>내 정책대로</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># ST 내장 부트로더 — BOOT0 를 올리고 리셋한 뒤 UART 로 (8E1, 동기 바이트 0x7F)
+STM32_Programmer_CLI -c port=COM5 br=115200 -w app.bin 0x08010000 -v
+# USB DFU (PA11/PA12) 로
+STM32_Programmer_CLI -c port=usb1 -w app.bin 0x08010000 -v</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 고르나</h4>
+      <div class="note tip">
+        <b>시스템 부트로더는 "최후의 구조 수단"</b>으로 남겨 두세요. 벽돌이 된 보드도 BOOT0 테스트 패드만 있으면 살아납니다.
+        PCB 에 <b>BOOT0 · NRST · UART1(PA9/PA10) 테스트 패드</b>를 꼭 남기라고 하드웨어 담당에게 EVT 때 요청합니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>현장 업데이트는 자체 부트로더로</b> — 시스템 부트로더는 서명을 검사하지 않아 누구든 BOOT0 만 올리면 임의 펌웨어를 올릴 수 있습니다.
+        양산품에서 이 경로를 막는 것이 RDP(PROD 11)의 역할 중 하나입니다.
+        소프트웨어에서 0x1FFF 0000 으로 점프해 시스템 부트로더를 부르는 방법도 있지만 PROD 02 의 원복 단계를 전부 거쳐야 해서 까다롭습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">OTA 한 번의 왕복 — <span class="t">받고, 검증하고, 시험하고, 확정한다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 318" role="img" aria-label="OTA 시퀀스. 서버가 앱에 새 버전과 크기와 해시를 알린다. 앱은 오프셋을 붙여 청크를 요청하고 서버가 4 킬로바이트 청크를 보내며 앱은 이를 Flash 의 슬롯 B 에 쓴다. 다 받으면 앱이 해시와 서명을 검증하고 설정에 대기 상태를 기록한 뒤 리셋한다. 부트로더는 슬롯 B 를 다시 검증하고 시험 상태로 바꿔 슬롯 B 로 부팅한다. 새 앱은 자가 진단을 하고 서버에 다시 접속한 뒤에야 설정에 확정을 기록하고 서버에 새 버전을 보고한다.">
+      <text x="16" y="18" class="lbl">세로가 시간 — 확정은 "새 펌웨어가 서버에 다시 붙은 뒤"입니다</text>
+
+      <rect class="actr" x="26" y="30" width="112" height="28"/>
+      <text x="82" y="49" class="ann" text-anchor="middle">OTA 서버</text>
+      <rect class="actr" x="200" y="30" width="112" height="28"/>
+      <text x="256" y="49" class="ann" text-anchor="middle">앱 (슬롯 A)</text>
+      <rect class="actr" x="374" y="30" width="112" height="28"/>
+      <text x="430" y="49" class="ann" text-anchor="middle">Flash 슬롯 B · 설정</text>
+      <rect class="actr" x="548" y="30" width="112" height="28"/>
+      <text x="604" y="49" class="ann" text-anchor="middle">부트로더</text>
+
+      <path class="life" d="M82 60 L82 280"/>
+      <path class="life" d="M256 60 L256 280"/>
+      <path class="life" d="M430 60 L430 280"/>
+      <path class="life" d="M604 60 L604 280"/>
+
+      <rect class="actv" x="251" y="70" width="10" height="132"/>
+      <rect class="actv" x="599" y="208" width="10" height="28"/>
+      <rect class="actv" x="251" y="240" width="10" height="34"/>
+
+      <path class="msg" d="M82 78 L248 78"/>
+      <text x="90" y="73" class="ann">1. v1.5.0 · 크기 · SHA-256</text>
+      <path class="msg" d="M248 100 L90 100"/>
+      <text x="96" y="95" class="ann">2. 청크 요청 (오프셋)</text>
+      <path class="msg-a" d="M82 122 L248 122"/>
+      <text x="90" y="117" class="ann">3. 4 KB 청크 × N</text>
+      <path class="msg" d="M264 132 L422 132"/>
+      <text x="266" y="127" class="ann">4. 섹터 지우고 쓰기</text>
+      <text x="266" y="152" class="ann am-t">5. 해시 · 서명 검증</text>
+      <path class="msg" d="M264 176 L422 176"/>
+      <text x="266" y="171" class="ann">6. 상태 = 대기(PENDING)</text>
+      <path class="msg" d="M264 198 L596 198"/>
+      <text x="266" y="193" class="ann">7. NVIC_SystemReset()</text>
+      <path class="msg" d="M596 222 L438 222"/>
+      <text x="444" y="217" class="ann">8. 재검증 · 시험(TRIAL)</text>
+      <path class="msg-a" d="M596 244 L264 244"/>
+      <text x="444" y="239" class="ann">9. 슬롯 B 로 점프</text>
+      <path class="msg" d="M264 262 L422 262"/>
+      <text x="266" y="257" class="ann ok-t">10. 확정(CONFIRMED)</text>
+      <path class="msg" d="M248 274 L90 274"/>
+      <text x="96" y="269" class="ann ok-t">11. 새 버전 보고</text>
+
+      <text x="16" y="302" class="lbl">실선은 요청 · 점선은 응답 — 5 와 8 에서 두 번 검증합니다 (받은 쪽과 실행하는 쪽이 각자)</text>
+    </svg>
+    <div class="cap">시퀀스 — 새 펌웨어는 <b>시험(TRIAL)으로 한 번 부팅</b>해 보고, 서버에 다시 붙은 뒤에야 확정합니다.</div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="A B 슬롯 업데이트 상태 기계. 정상 운용 상태에서 새 버전이 오면 다운로드 상태로 가서 슬롯 B 에 쓴다. 다운로드가 끊기거나 검증에 실패하면 받은 것을 버리고 정상 운용으로 돌아간다. 해시와 서명이 맞으면 대기 상태가 되고 리셋하면 시험 부팅 상태로 슬롯 B 를 한 번 실행한다. 새 앱이 자가 진단을 통과하면 슬롯 B 를 확정하고 정상 운용으로 돌아가며 이때 A 와 B 의 역할이 바뀐다. 확정 전에 세 번 리셋되면 롤백 상태로 가서 슬롯 A 로 부팅하고 정상 운용으로 돌아간다.">
+      <text x="16" y="18" class="lbl">A/B 슬롯 상태 기계 — 원이 상태, 화살표 글이 전이 조건</text>
+
+      <path class="ln ar" d="M540 104 Q328 -4 116 104"/>
+      <text x="328" y="44" class="ann ok-t" text-anchor="middle">자가 진단 · 서버 접속 성공 → B 확정 (A · B 역할 교대)</text>
+
+      <circle class="nd nd-ok" cx="100" cy="132" r="34"/>
+      <text x="100" y="130" class="val" text-anchor="middle">정상</text>
+      <text x="100" y="145" class="ann" text-anchor="middle">A 확정</text>
+
+      <circle class="nd" cx="250" cy="132" r="34"/>
+      <text x="250" y="130" class="val" text-anchor="middle">받는 중</text>
+      <text x="250" y="145" class="ann" text-anchor="middle">B 에 쓰기</text>
+
+      <circle class="nd" cx="400" cy="132" r="34"/>
+      <text x="400" y="130" class="val" text-anchor="middle">대기</text>
+      <text x="400" y="145" class="ann" text-anchor="middle">PENDING</text>
+
+      <circle class="nd nd-fw" cx="556" cy="132" r="34"/>
+      <text x="556" y="130" class="val" text-anchor="middle">시험</text>
+      <text x="556" y="145" class="ann" text-anchor="middle">TRIAL · B</text>
+
+      <circle class="nd nd-mut" cx="400" cy="248" r="34"/>
+      <text x="400" y="246" class="val" text-anchor="middle">롤백</text>
+      <text x="400" y="261" class="ann" text-anchor="middle">A 로 부팅</text>
+
+      <path class="ln ar" d="M138 124 L212 124"/>
+      <text x="175" y="114" class="ann" text-anchor="middle">새 버전</text>
+      <path class="ln ar" d="M288 132 L362 132"/>
+      <text x="325" y="122" class="ann" text-anchor="middle">검증 OK</text>
+      <path class="ln ar" d="M438 132 L518 132"/>
+      <text x="478" y="122" class="ann" text-anchor="middle">리셋</text>
+
+      <path class="ln ar" d="M232 162 Q175 200 120 164"/>
+      <text x="175" y="206" class="ann rs-t" text-anchor="middle">끊김 · 검증 실패</text>
+
+      <path class="ln ar" d="M538 161 L428 228"/>
+      <text x="498" y="218" class="ann rs-t">확정 전 리셋 3회</text>
+      <text x="498" y="230" class="ann">(워치독 · 폴트 포함)</text>
+
+      <path class="ln ar" d="M366 252 Q130 262 100 170"/>
+      <text x="236" y="276" class="ann" text-anchor="middle">이전 펌웨어로 복귀 · 서버에 실패 보고</text>
+    </svg>
+    <div class="cap">상태 기계 — <b>확정되지 않은 새 펌웨어는 손님</b>입니다. 정해진 횟수 안에 확정하지 못하면 부트로더가 이전 슬롯으로 되돌립니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">부트로더 쪽 — 시험 횟수를 세고 되돌리기</h4>
+      <pre class="code" data-lang="c"><code>typedef struct {
+    uint32_t active;     /* 확정된 슬롯 0=A 1=B */
+    uint32_t pending;    /* 시험할 슬롯 */
+    uint32_t state;      /* 0=IDLE 1=PENDING 2=TRIAL */
+    uint32_t tries;      /* TRIAL 부팅 횟수 */
+} boot_ctrl_t;           /* PROD 07 의 정전 안전 저장으로 보관 */
+
+#define MAX_TRIES 3u
+
+uint32_t choose_slot(void)
+{
+    boot_ctrl_t bc;
+    ctrl_load(&amp;bc);
+    if (bc.state == 1u) { bc.state = 2u; bc.tries = 0u; }    /* PENDING → TRIAL */
+    if (bc.state == 2u) {
+        if (bc.tries &gt;= MAX_TRIES || !app_valid(slot_base(bc.pending), SLOT_MAX)) {
+            bc.state = 0u;                         /* 롤백 — active 는 그대로 */
+            ctrl_save(&amp;bc);
+            evt_log(EV_ROLLBACK);
+            return bc.active;
+        }
+        bc.tries++;                                /* 점프 "전에" 먼저 기록 */
+        ctrl_save(&amp;bc);
+        return bc.pending;
+    }
+    return bc.active;
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>tries 를 점프 전에 저장</b>하는 것이 핵심입니다. 점프 뒤에 세면 새 펌웨어가 부팅하자마자 죽을 때 카운트가 영원히 오르지 않아
+        무한 리셋 루프가 됩니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">앱 쪽 — 언제 확정하나</h4>
+      <pre class="code" data-lang="c"><code>/* 새 펌웨어: 부팅 후 핵심 기능을 확인한 뒤에만 */
+void ota_confirm_if_trial(void)
+{
+    boot_ctrl_t bc;
+    ctrl_load(&amp;bc);
+    if (bc.state != 2u) return;
+
+    if (!selftest_sensors_ok())   return;   /* 센서 응답 */
+    if (!cloud_connected_once())  return;   /* ★ 다음 업데이트를 받을 수 있나 */
+
+    bc.active = bc.pending;                 /* 역할 교대 */
+    bc.state  = 0u;
+    bc.tries  = 0u;
+    ctrl_save(&amp;bc);
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>"서버에 다시 붙을 수 있나"를 확정 조건에 넣으세요.</b> 통신 코드가 망가진 펌웨어를 확정하면 그 장비는 <b>다시는 업데이트를 받지 못합니다</b>.
+        부팅만 되면 확정하는 구현이 현장 사고의 단골 원인입니다.
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>슬롯 B 에서 바로 실행(XIP)</b>하려면 이미지가 그 주소로 링크돼 있어야 합니다. 그래서 A/B 방식은
+        <b>0x0801 0000 용과 0x0804 0000 용 두 벌을 빌드</b>하고, 서버는 장비가 보고한 활성 슬롯의 반대쪽 이미지를 내려 줍니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">A/B · 스왑 · 단일 슬롯</span> 중 고르기 <span class="lvl h">🔴 실무</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 292" role="img" aria-label="업데이트 방식 다섯 가지를 F446RE 기준으로 두 축에 놓은 사분면. 가로는 앱이 쓸 수 있는 내부 Flash 크기, 세로는 실패했을 때 되돌릴 수 있는 정도다. 스왑과 스크래치 방식은 128 킬로바이트로 작지만 롤백이 되고, A B 직접 실행은 192 킬로바이트에 즉시 롤백이 된다. 덮어쓰기는 192 킬로바이트지만 롤백이 없고, 단일 슬롯과 복구 모드는 448 킬로바이트를 쓰지만 복구 모드로만 살아난다. 외부 SPI Flash 를 보조 슬롯으로 쓰면 448 킬로바이트에 롤백까지 되어 오른쪽 위 칸에 놓인다.">
+      <text x="16" y="18" class="lbl">업데이트 방식 고르기 (F446RE) — 가로는 앱 크기, 세로는 되돌리기</text>
+
+      <rect class="lane-alt" x="352" y="34" width="272" height="98"/>
+      <path class="ax" d="M80 34 L80 236"/>
+      <path class="ax" d="M80 236 L624 236"/>
+      <path class="gr" d="M352 34 L352 236"/>
+      <path class="gr" d="M80 135 L624 135"/>
+      <text x="216" y="250" class="tk" text-anchor="middle">128 KB</text>
+      <text x="352" y="250" class="tk" text-anchor="middle">256 KB</text>
+      <text x="488" y="250" class="tk" text-anchor="middle">384 KB</text>
+      <text x="624" y="250" class="tk" text-anchor="end">512 KB</text>
+      <text x="352" y="266" class="tk" text-anchor="middle">앱이 쓸 수 있는 내부 Flash →</text>
+      <text x="16" y="46" class="tk">즉시 롤백</text>
+      <text x="16" y="232" class="tk">복구 모드만</text>
+
+      <text x="360" y="126" class="ann ok-t">롤백도 되고 앱도 큼 — 이 칸</text>
+
+      <circle class="dot" cx="216" cy="80" r="6"/>
+      <text x="216" y="99" class="ann" text-anchor="middle">스왑 + 스크래치 · 128 KB</text>
+      <circle class="dot" cx="284" cy="60" r="6"/>
+      <text x="284" y="47" class="ann" text-anchor="middle">A/B 직접 실행 · 192 KB</text>
+      <circle class="dot" cx="284" cy="170" r="6"/>
+      <text x="284" y="189" class="ann" text-anchor="middle">덮어쓰기 · 롤백 없음</text>
+      <circle class="dot" cx="556" cy="206" r="6"/>
+      <text x="548" y="194" class="ann" text-anchor="end">단일 슬롯 + 복구 모드 · 448 KB</text>
+      <circle class="dot" cx="556" cy="80" r="7" style="fill:#34d399"/>
+      <text x="512" y="66" class="ann ok-t">외부 Flash 보조 슬롯</text>
+
+      <text x="16" y="284" class="lbl">스왑은 가장 큰 섹터(128 KB) 크기의 스크래치가 필요해 F446 에선 앱이 가장 작아집니다</text>
+    </svg>
+    <div class="cap">사분면 — F446 처럼 <b>섹터가 크고 하나뿐인 Flash</b>에서는 롤백과 앱 크기가 서로를 깎아 먹고, <b>외부 Flash</b> 가 둘 다 얻는 절충입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전원이 끊기는 지점별로 따져 보기</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:32%">끊긴 순간</th><th>다음 부팅</th></tr>
+        <tr><td>청크 받는 중</td><td>상태는 아직 IDLE → A 로 부팅, <b>받은 오프셋부터 이어 받기</b></td></tr>
+        <tr><td>슬롯 B 섹터 지우는 중</td><td>B 는 원래 버릴 곳 — 영향 없음</td></tr>
+        <tr><td>상태 저장 중</td><td>PROD 07 의 이중 뱅크가 <b>이전 값이나 새 값 중 하나</b>를 보장</td></tr>
+        <tr><td>TRIAL 부팅 중</td><td>tries 가 이미 올라가 있음 → 3회 뒤 롤백</td></tr>
+        <tr><td>확정 저장 중</td><td>이전 값이면 다시 TRIAL — 다시 확정하면 됨</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>"모든 단계가 다시 해도 같은 결과"(멱등)</b>가 되게 짜면 정전 분석이 쉬워집니다. 그리고 실제로 검증하세요 —
+        릴레이로 전원을 무작위 시점에 끊는 지그를 하룻밤 돌려 수천 번 업데이트해 보는 것이 업계의 표준 시험입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">받는 쪽 코드의 뼈대 — 이어 받기</h4>
+      <pre class="code" data-lang="c"><code>/* 슬롯 B 에 오프셋 순서대로만 쓴다 — 섹터 첫 청크에서 그 섹터를 지움 */
+int ota_write_chunk(uint32_t off, const uint8_t *buf, uint32_t len)
+{
+    if (off != g_ota.next_off)      return OTA_E_ORDER;  /* 서버에 next_off 재요청 */
+    if (off + len &gt; SLOT_MAX)       return OTA_E_SIZE;
+    if (len % 4u != 0u)             return OTA_E_ALIGN;  /* 워드 쓰기 */
+
+    uint32_t addr = slot_base(other_slot()) + off;
+    if (is_sector_start(addr) &amp;&amp; flash_erase_sector_at(addr) != 0)
+        return OTA_E_FLASH;
+    if (flash_write(addr, buf, len) != 0) return OTA_E_FLASH;
+
+    sha256_update(&amp;g_ota.sha, buf, len);  /* 받으면서 해시 — 다시 읽을 필요 없음 */
+    g_ota.next_off = off + len;
+    return OTA_OK;
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        재부팅 뒤 이어 받을 때는 해시 문맥이 사라졌으므로 이미 쓴 부분을 Flash 에서 다시 읽어 해시를 이어 가거나 처음부터 받습니다.
+        섹터 지우기 동안 CPU 가 멈추는 문제(STM32 탭 m11)를 잊지 말고 <b>워치독 · 통신 타임아웃</b>을 그보다 길게 잡으세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 업데이트는 <b>받기 → 검증 → 대기 → 시험 부팅 → 확정</b>의 상태 기계이고, 확정 전에 정해진 횟수만큼 죽으면 <b>롤백</b>합니다.
+    F446 에선 A/B 가 앱 크기를 절반 이하로 줄이므로 <b>외부 Flash 를 보조 슬롯</b>으로 쓰는 절충이 흔합니다.</div>
+</section>
+
+
+<!-- ==================== o04 ==================== -->
+<section class="sec" id="o04">
+  <div class="sec-head rv">
+    <span class="no">PROD 04</span>
+    <h2>이미지 무결성 · 서명 — <span class="t">"깨지지 않았나"와 "우리가 만든 것인가"</span>는 다른 질문</h2>
+    <p class="lead">
+      부트로더가 앱을 실행하기 전에 묻는 질문은 두 가지입니다. <b>전송 중에 비트가 깨지지 않았나</b>(무결성),
+      그리고 <b>우리 회사가 만든 이미지가 맞나</b>(진본성). CRC 는 앞의 질문만, 서명은 둘 다 답합니다.
+      웹 개발에 빗대면 CRC 는 TCP 체크섬, 서명은 HTTPS 인증서 검증입니다 — <b>체크섬이 맞는다고 그 서버를 믿지는 않습니다.</b>
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 248" role="img" aria-label="CRC32, SHA-256, ECDSA P-256 서명, Ed25519 서명 네 방법을 다섯 성질로 비교한 매트릭스. 우연한 손상은 넷 다 잡는다. 악의적 변조는 CRC 와 SHA-256 단독으로는 막지 못하는데 공격자가 값을 다시 계산해 붙이면 되기 때문이다. 출처 증명은 두 서명만 된다. 기기에 비밀이 필요한지는 넷 다 아니오이며 서명 검증에는 공개키만 있으면 된다. 덧붙는 크기는 CRC 4 바이트, SHA-256 32 바이트, 두 서명은 각각 64 바이트다.">
+      <text x="16" y="18" class="lbl">무결성 도구 네 가지 — 진할수록 그 일을 잘 합니다</text>
+
+      <text x="200" y="42" class="tk" text-anchor="middle">CRC32</text>
+      <text x="306" y="42" class="tk" text-anchor="middle">SHA-256</text>
+      <text x="412" y="42" class="tk" text-anchor="middle">ECDSA P-256</text>
+      <text x="518" y="42" class="tk" text-anchor="middle">Ed25519</text>
+
+      <text x="16" y="68" class="ann">우연한 손상</text>
+      <rect class="cel h4" x="150" y="52" width="100" height="26"/><text x="200" y="69" class="tk" text-anchor="middle">잡음</text>
+      <rect class="cel h5" x="256" y="52" width="100" height="26"/><text x="306" y="69" class="tk" text-anchor="middle">잡음</text>
+      <rect class="cel h5" x="362" y="52" width="100" height="26"/><text x="412" y="69" class="tk" text-anchor="middle">잡음</text>
+      <rect class="cel h5" x="468" y="52" width="100" height="26"/><text x="518" y="69" class="tk" text-anchor="middle">잡음</text>
+
+      <text x="16" y="98" class="ann">악의적 변조</text>
+      <rect class="cel h0" x="150" y="82" width="100" height="26"/><text x="200" y="99" class="tk rs-t" text-anchor="middle">못 막음</text>
+      <rect class="cel h0" x="256" y="82" width="100" height="26"/><text x="306" y="99" class="tk rs-t" text-anchor="middle">단독으론 못 막음</text>
+      <rect class="cel h5" x="362" y="82" width="100" height="26"/><text x="412" y="99" class="tk" text-anchor="middle">막음</text>
+      <rect class="cel h5" x="468" y="82" width="100" height="26"/><text x="518" y="99" class="tk" text-anchor="middle">막음</text>
+
+      <text x="16" y="128" class="ann">출처 증명</text>
+      <rect class="cel h0" x="150" y="112" width="100" height="26"/><text x="200" y="129" class="tk" text-anchor="middle">—</text>
+      <rect class="cel h0" x="256" y="112" width="100" height="26"/><text x="306" y="129" class="tk" text-anchor="middle">—</text>
+      <rect class="cel h5" x="362" y="112" width="100" height="26"/><text x="412" y="129" class="tk" text-anchor="middle">개인키 소유자</text>
+      <rect class="cel h5" x="468" y="112" width="100" height="26"/><text x="518" y="129" class="tk" text-anchor="middle">개인키 소유자</text>
+
+      <text x="16" y="158" class="ann">기기에 비밀 필요</text>
+      <rect class="cel h3" x="150" y="142" width="100" height="26"/><text x="200" y="159" class="tk" text-anchor="middle">아니오</text>
+      <rect class="cel h3" x="256" y="142" width="100" height="26"/><text x="306" y="159" class="tk" text-anchor="middle">아니오</text>
+      <rect class="cel h3" x="362" y="142" width="100" height="26"/><text x="412" y="159" class="tk" text-anchor="middle">공개키만</text>
+      <rect class="cel h3" x="468" y="142" width="100" height="26"/><text x="518" y="159" class="tk" text-anchor="middle">공개키만</text>
+
+      <text x="16" y="188" class="ann">덧붙는 크기</text>
+      <rect class="cel h1" x="150" y="172" width="100" height="26"/><text x="200" y="189" class="tk" text-anchor="middle">4 B</text>
+      <rect class="cel h1" x="256" y="172" width="100" height="26"/><text x="306" y="189" class="tk" text-anchor="middle">32 B</text>
+      <rect class="cel h1" x="362" y="172" width="100" height="26"/><text x="412" y="189" class="tk" text-anchor="middle">64 B (r‖s)</text>
+      <rect class="cel h1" x="468" y="172" width="100" height="26"/><text x="518" y="189" class="tk" text-anchor="middle">64 B</text>
+
+      <rect class="hl" x="144" y="78" width="218" height="34"/>
+      <text x="16" y="222" class="lbl">해시는 공격자도 다시 계산해 붙일 수 있습니다 — 변조를 막는 건 개인키뿐입니다</text>
+      <text x="16" y="240" class="ann">서명 검증 비용은 라이브러리 · 클럭에 따라 수십~수백 ms, 부팅마다 한 번이면 감당할 만합니다</text>
+    </svg>
+    <div class="cap">매트릭스 — CRC · SHA-256 은 <b>사고</b>를, 서명은 <b>공격</b>을 막습니다. 서명 검증에 기기 쪽 비밀은 필요 없습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CRC-32 — 스트리밍으로 계산</h4>
+      <pre class="code" data-lang="c"><code>/* IEEE 802.3 CRC-32 (zlib 과 같은 값). 표 없이 비트 단위 — 부트로더용으로 작게 */
+uint32_t crc32_update(uint32_t crc, const uint8_t *p, size_t n)
+{
+    crc = ~crc;
+    while (n--) {
+        crc ^= *p++;
+        for (int k = 0; k &lt; 8; k++)
+            crc = (crc &amp; 1u) ? (crc &gt;&gt; 1) ^ 0xEDB88320u : (crc &gt;&gt; 1);
+    }
+    return ~crc;
+}
+/* 검산: crc32_update(0, "123456789", 9) == 0xCBF43926
+   나눠 넣어도 같음: crc = crc32_update(0, a, 4); crc = crc32_update(crc, a + 4, 5); */</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        STM32 의 하드웨어 CRC 유닛은 F4 에서 <b>다항식 0x04C11DB7 고정 · 비트 반전 없음</b>이라 위 값(zlib)과 다르게 나옵니다.
+        PC 쪽 도구와 맞추려면 입력 · 출력 반전을 소프트웨어로 해 주거나, 반전 설정이 있는 F7 · L4 · G4 등의 CRC 유닛을 씁니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이미지 헤더 설계 — 0x200 바이트인 이유</h4>
+      <pre class="code" data-lang="c"><code>typedef struct {
+    uint32_t magic;        /* 0x46574844 — 덤프에선 "DHWF"(리틀엔디언) */
+    uint16_t hdr_ver;      /* 헤더 형식 버전 — 나중에 필드를 늘릴 여지 */
+    uint16_t hdr_size;     /* 0x200 */
+    uint32_t img_size;     /* 헤더 뒤 바이트 수 */
+    uint32_t fw_ver;       /* (major&lt;&lt;24) | (minor&lt;&lt;16) | patch */
+    uint32_t sec_cnt;      /* 롤백 방지 카운터 — 낮으면 거부 */
+    uint32_t hw_mask;      /* 지원 보드 리비전 비트 (PROD 12) */
+    uint32_t load_addr;    /* 링크된 슬롯 주소 — 엉뚱한 슬롯 방지 */
+    uint8_t  sha256[32];   /* 이미지 해시 */
+    uint8_t  sig[64];      /* 위 60 바이트에 대한 ECDSA P-256 서명 */
+    uint8_t  _pad[388];
+} fw_hdr_t;
+_Static_assert(sizeof(fw_hdr_t) == 0x200, "헤더는 정확히 0x200");</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>헤더를 256 B 로 잡으면 앱이 안 돕니다</b> — 헤더 바로 뒤에 앱의 벡터 테이블이 오는데, F446 의 VTOR 는 <b>0x200 정렬</b>이 필요합니다(PROD 02).
+        그래서 앱은 <code>ORIGIN = 0x08010200</code> 으로 링크하고, 부트로더는 <code>jump_to_app(base + 0x200)</code> 합니다. MCUboot 가 흔히 헤더를 0x200 으로 잡는 것도 같은 이유입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">서명 이미지의 구조 — <span class="t">MCUboot 형식</span>을 보며 <span class="lvl m">🟡 중급</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 232" role="img" aria-label="MCUboot 서명 이미지가 슬롯 안에 놓이는 배치. 맨 앞 0x200 바이트가 매직과 버전과 크기를 담은 헤더, 그 뒤 앱의 벡터 테이블과 코드가 오고, 이어서 SHA-256 과 서명과 보안 카운터를 담은 TLV 영역이 붙는다. 빈 공간은 0xFF 로 남고 슬롯 맨 끝에는 업데이트 진행 상태를 기록하는 트레일러가 있다. 서명은 헤더와 앱 본문을 덮는다.">
+      <text x="16" y="18" class="lbl">슬롯 하나 안의 서명 이미지 — 왼쪽이 낮은 주소</text>
+
+      <rect class="bx bx-hi" x="16" y="44" width="70" height="40" rx="3"/>
+      <text x="51" y="61" class="ann" text-anchor="middle">헤더</text>
+      <text x="51" y="75" class="tk" text-anchor="middle">0x200</text>
+      <rect class="bx bx-fw" x="86" y="44" width="56" height="40" rx="3"/>
+      <text x="114" y="61" class="ann" text-anchor="middle">벡터</text>
+      <text x="114" y="75" class="tk" text-anchor="middle">+0x200</text>
+      <rect class="bx" x="142" y="44" width="236" height="40" rx="3"/>
+      <text x="260" y="68" class="ann" text-anchor="middle">앱 코드 · 상수 · .data 초기값</text>
+      <rect class="bx bx-ok" x="378" y="44" width="80" height="40" rx="3"/>
+      <text x="418" y="61" class="ann ok-t" text-anchor="middle">TLV</text>
+      <text x="418" y="75" class="tk" text-anchor="middle">해시 · 서명</text>
+      <rect class="bx-mut" x="458" y="44" width="122" height="40" rx="3" style="fill:rgba(148,163,184,.06);stroke:rgba(148,163,184,.3);stroke-dasharray:3 3"/>
+      <text x="519" y="68" class="tk" text-anchor="middle">빈칸 0xFF</text>
+      <rect class="bx bx-mut" x="580" y="44" width="60" height="40" rx="3"/>
+      <text x="610" y="61" class="ann" text-anchor="middle">트레일러</text>
+      <text x="610" y="75" class="tk" text-anchor="middle">상태</text>
+
+      <path class="brk" d="M16 92 L16 98 L378 98 L378 92"/>
+      <text x="197" y="114" class="ann" text-anchor="middle">서명이 덮는 범위 (헤더 + 본문)</text>
+
+      <text x="16" y="138" class="ann">헤더: ih_magic 0x96f3b83d · ih_hdr_size · ih_img_size · ih_ver(major.minor.revision+build)</text>
+      <text x="16" y="156" class="ann">TLV: SHA-256 · 서명(ECDSA P-256 / Ed25519 / RSA) · 공개키 해시 · 보안 카운터</text>
+      <text x="16" y="174" class="ann">트레일러: 스왑 진행 상태 · image_ok(확정) · copy_done · 매직 — 슬롯 맨 끝 고정 위치</text>
+
+      <text x="16" y="204" class="lbl">트레일러는 서명 밖입니다 — 기기가 업데이트 중에 계속 고쳐 써야 하기 때문입니다</text>
+      <text x="16" y="222" class="ann">PROD 03 의 상태 기계(PENDING · TRIAL · 확정)를 MCUboot 는 이 트레일러에 기록합니다</text>
+    </svg>
+    <div class="cap">메모리 배치 — <b>서명되는 부분</b>(헤더 + 본문 + TLV 일부)과 <b>기기가 고쳐 쓰는 부분</b>(트레일러)을 나눠 둡니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">MCUboot 와 imgtool</h4>
+      <pre class="code" data-lang="bash"><code># 키 만들기 — 개인키는 서명 서버(HSM)에만, 저장소에 커밋 금지
+imgtool keygen -k root-ec-p256.pem -t ecdsa-p256
+imgtool getpub -k root-ec-p256.pem &gt; keys.c   # 부트로더에 넣을 공개키 C 배열
+
+# 서명 — 헤더 자리 0x200 을 0 으로 채워 앞에 붙이고, TLV 를 뒤에
+imgtool sign -k root-ec-p256.pem \
+  --header-size 0x200 --pad-header \
+  --align 4 --slot-size 0x20000 \
+  --version 1.5.0+42 --security-counter 7 \
+  app.bin app-signed.bin
+
+imgtool verify -k root-ec-p256.pem app-signed.bin</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>MCUboot</b> 은 Zephyr · ESP-IDF · TF-M 등이 공통으로 쓰는 오픈소스 부트로더입니다. PROD 03 의 스왑 · 덮어쓰기 · 직접 실행 방식과
+        롤백을 모두 구현해 두었고, 서명 형식도 정해져 있습니다. <b>자체 부트로더를 처음부터 쓰기 전에 먼저 검토할 후보</b>입니다.
+        Zephyr 에선 앱이 <code>boot_request_upgrade()</code> · <code>boot_write_img_confirmed()</code> 로 PROD 03 의 "대기 · 확정"을 표시합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">자체 부트로더라면 — 검증 코드의 모양</h4>
+      <pre class="code" data-lang="c"><code>/* TinyCrypt (MCUboot 도 쓰는 작은 암호 라이브러리) */
+#include "tinycrypt/sha256.h"
+#include "tinycrypt/ecc_dsa.h"
+extern const uint8_t g_pubkey[64];          /* X‖Y — 부트로더에 상수로 */
+
+bool image_signature_ok(const fw_hdr_t *h)
+{
+    uint8_t d[32];
+    struct tc_sha256_state_struct s;
+
+    /* ① 본문 해시가 헤더에 적힌 값과 같은가 */
+    tc_sha256_init(&amp;s);
+    tc_sha256_update(&amp;s, (const uint8_t *)h + h-&gt;hdr_size, h-&gt;img_size);
+    tc_sha256_final(d, &amp;s);
+    if (memcmp(d, h-&gt;sha256, 32) != 0) return false;
+
+    /* ② 헤더 앞 60 바이트(해시 포함)에 대한 서명이 맞는가 */
+    tc_sha256_init(&amp;s);
+    tc_sha256_update(&amp;s, (const uint8_t *)h, offsetof(fw_hdr_t, sig));
+    tc_sha256_final(d, &amp;s);
+    return uECC_verify(g_pubkey, d, sizeof d, h-&gt;sig, uECC_secp256r1()) == 1;
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>OpenSSL 서명은 DER 형식</b>(가변 길이 70~72 B)입니다. uECC 는 <b>r‖s 64 B 원시 형식</b>을 받으므로 서명 서버에서 변환해야 합니다
+        (예: 파이썬 cryptography 의 <code>decode_dss_signature</code>). 이걸 놓치면 "서명이 맞는데 검증이 실패"합니다.
+        <code>h-&gt;img_size</code> 를 믿기 전에 슬롯 크기 안인지부터 확인하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">신뢰 사슬</span>은 맨 아래 고리가 정합니다 <span class="lvl h">🔴 실무</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 212" role="img" aria-label="보안 부팅의 신뢰 사슬. 맨 앞은 바꿀 수 없는 시작점으로 F446 에서는 쓰기 보호와 RDP 2 로 고정한 자체 부트로더가 그 역할을 한다. 부트로더는 내장된 공개키로 앱의 서명을 검증하고, 앱은 같은 방식으로 업데이트 이미지를 검증한 뒤 저장한다. 서명 서버는 개인키를 HSM 안에 두고 CI 가 만든 이미지에 서명한다. 사슬은 가장 약한 고리만큼만 강하다.">
+      <text x="16" y="18" class="lbl">신뢰 사슬 — 각 고리는 다음 고리를 검증한 뒤에만 실행을 넘깁니다</text>
+
+      <circle class="nd nd-ok" cx="90" cy="96" r="44"/>
+      <text x="90" y="92" class="val" text-anchor="middle">불변 시작점</text>
+      <text x="90" y="108" class="ann" text-anchor="middle">BL + WRP + RDP2</text>
+      <circle class="nd" cx="250" cy="96" r="44"/>
+      <text x="250" y="92" class="val" text-anchor="middle">앱</text>
+      <text x="250" y="108" class="ann" text-anchor="middle">슬롯 A</text>
+      <circle class="nd" cx="410" cy="96" r="44"/>
+      <text x="410" y="92" class="val" text-anchor="middle">새 이미지</text>
+      <text x="410" y="108" class="ann" text-anchor="middle">슬롯 B</text>
+      <circle class="nd nd-fw" cx="580" cy="96" r="44"/>
+      <text x="580" y="92" class="val" text-anchor="middle">서명 서버</text>
+      <text x="580" y="108" class="ann" text-anchor="middle">개인키 · HSM</text>
+
+      <path class="ln ar" d="M138 96 L202 96"/>
+      <text x="170" y="86" class="ann" text-anchor="middle">검증</text>
+      <path class="ln ar" d="M298 96 L362 96"/>
+      <text x="330" y="86" class="ann" text-anchor="middle">검증</text>
+      <path class="ln ar" d="M532 96 L462 96"/>
+      <text x="497" y="86" class="ann" text-anchor="middle">서명</text>
+
+      <text x="90" y="160" class="ann" text-anchor="middle">공개키를 품고</text>
+      <text x="90" y="174" class="ann" text-anchor="middle">스스로는 안 바뀜</text>
+      <text x="410" y="160" class="ann" text-anchor="middle">버전 · 보안 카운터</text>
+      <text x="410" y="174" class="ann" text-anchor="middle">낮으면 거부</text>
+      <text x="580" y="160" class="ann rs-t" text-anchor="middle">여기가 털리면</text>
+      <text x="580" y="174" class="ann rs-t" text-anchor="middle">전 제품이 털림</text>
+
+      <text x="16" y="204" class="lbl">F446 엔 칩이 주는 불변 부트 영역이 없어 부트로더를 WRP · RDP 로 스스로 굳혀야 합니다</text>
+    </svg>
+    <div class="cap">신뢰 사슬 — <b>맨 앞 고리가 바뀔 수 있으면</b> 뒤의 서명 검증은 전부 의미가 없습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">사슬을 끊는 흔한 실수</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:38%">실수</th><th>결과</th></tr>
+        <tr><td>부트로더 섹터에 WRP 없음</td><td>앱의 버그 하나로 부트로더가 지워짐 · 공격자가 교체</td></tr>
+        <tr><td>RDP 0 출하</td><td>SWD 로 아무 이미지나 굽고 공개키도 바꿔치기</td></tr>
+        <tr><td>개인키가 개발자 PC 에</td><td>퇴사자 노트북 = 전 제품의 마스터 키</td></tr>
+        <tr><td>롤백 방지 없음</td><td>서명된 <b>옛 취약 버전</b>으로 내려가는 공격</td></tr>
+        <tr><td>검증 후 다시 읽어 실행</td><td>외부 Flash 라면 검증과 실행 사이에 바꿔치기(TOCTOU)</td></tr>
+      </table></div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">키를 어떻게 다루나</h4>
+      <div class="note tip">
+        <b>개인키는 서명 서버 하나에만</b> — CI 가 빌드한 산출물을 서명 서버(클라우드 KMS · HSM)에 보내 서명만 받아 옵니다.
+        개발 중엔 별도의 <b>개발용 키</b>를 쓰고, 개발 키로 서명된 이미지는 양산 부트로더가 거부하게 합니다.
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>키 교체 계획</b>을 처음부터 넣어 두세요 — 부트로더에 공개키 슬롯을 2~3개 두고 "폐기된 키 목록"을 업데이트로 보낼 수 있게 하면,
+        키가 유출됐을 때 현장 장비를 버리지 않아도 됩니다. 새 시리즈(STM32 H5 · U5 등)는 칩 자체의 불변 부트 영역과 TrustZone 으로
+        이 사슬의 첫 고리를 하드웨어가 맡습니다(PROD 11).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> CRC 는 사고, 서명은 공격을 막습니다. 이미지에 <b>0x200 헤더(버전 · 크기 · 해시 · 서명)</b>를 붙이고,
+    부트로더는 <b>공개키만</b> 품습니다. 사슬의 첫 고리인 부트로더를 <b>WRP · RDP</b> 로 굳히지 않으면 나머지는 장식입니다 — 처음이라면 <b>MCUboot</b> 부터 검토하세요.</div>
+</section>
+
+
+<!-- ==================== o05 ==================== -->
+<section class="sec" id="o05">
+  <div class="sec-head rv">
+    <span class="no">PROD 05</span>
+    <h2>워치독 — <span class="t">"살아 있다"가 아니라 "일하고 있다"</span>를 확인하는 타이머</h2>
+    <p class="lead">
+      워치독은 정해진 시간 안에 "갱신(킥)"하지 않으면 칩을 리셋하는 하드웨어 타이머입니다. 쿠버네티스의 <b>liveness probe</b> 와 같은 역할이지만,
+      probe 가 HTTP 200 만 확인하면 의미가 없듯이 <b>아무 데서나 킥하는 워치독도 아무것도 지키지 못합니다.</b>
+      F446 에는 성격이 다른 두 개 — <b>IWDG</b>(독립 · 끌 수 없음)와 <b>WWDG</b>(창 · 너무 일찍 킥해도 리셋)가 있습니다.
+      RTOS 에서의 감시 태스크 패턴은 FreeRTOS 탭 r13 에 있고, 여기서는 타이밍 계산과 제품 운영 관점을 봅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="IWDG 카운터의 시간 변화. 리로드 값 1000 에서 시작해 초당 500 씩 줄어들고, 0.5 초마다 킥하면 다시 1000 으로 올라가 톱니 모양이 된다. 2 초 시점에 메인 루프가 멈춰 킥이 끊기면 카운터가 계속 내려가 4 초에 0 에 닿고 리셋된다. 아래에는 LSI 클럭 오차 때문에 실제 리셋 시점이 멈춘 뒤 1.36 초에서 3.76 초 사이 어딘가라는 범위가 표시되어 있다.">
+      <text x="16" y="18" class="lbl">IWDG 카운터 — 0.5 s 마다 킥하다가 2 s 에 멈추면</text>
+
+      <path class="ax" d="M60 170 L640 170"/>
+      <path class="ax" d="M60 40 L60 170"/>
+      <path class="gr" d="M60 50 L640 50"/>
+      <text x="54" y="54" class="tk" text-anchor="end">1000</text>
+      <text x="54" y="174" class="tk" text-anchor="end">0</text>
+      <text x="60" y="186" class="tk" text-anchor="middle">0</text>
+      <text x="150" y="186" class="tk" text-anchor="middle">1 s</text>
+      <text x="240" y="186" class="tk" text-anchor="middle">2 s</text>
+      <text x="330" y="186" class="tk" text-anchor="middle">3 s</text>
+      <text x="420" y="186" class="tk" text-anchor="middle">4 s</text>
+      <text x="510" y="186" class="tk" text-anchor="middle">5 s</text>
+      <text x="600" y="186" class="tk" text-anchor="middle">6 s</text>
+
+      <path class="li" d="M60 50 L105 80 L105 50 L150 80 L150 50 L195 80 L195 50 L240 80 L240 50 L420 170"/>
+      <circle class="dot" cx="105" cy="50" r="3.5"/>
+      <circle class="dot" cx="150" cy="50" r="3.5"/>
+      <circle class="dot" cx="195" cy="50" r="3.5"/>
+      <circle class="dot" cx="240" cy="50" r="3.5" style="fill:#fbbf24"/>
+      <text x="150" y="40" class="ann ok-t" text-anchor="middle">킥 — 1000 으로 복귀</text>
+      <text x="248" y="96" class="ann am-t">메인 루프 멈춤</text>
+      <circle class="dot" cx="420" cy="170" r="5" style="fill:#fb7185"/>
+      <text x="428" y="160" class="ann rs-t">리셋 (명목 2.0 s 뒤)</text>
+
+      <rect class="hl" x="362" y="194" width="216" height="14"/>
+      <text x="470" y="205" class="tk" text-anchor="middle">LSI 오차 범위 1.36~3.76 s</text>
+      <text x="16" y="228" class="lbl">LSI 는 17~47 kHz 로 흔들립니다 — 킥 주기는 가장 짧은 경우(1.36 s)보다 넉넉히 짧게</text>
+    </svg>
+    <div class="cap">라인 — 킥이 끊긴 순간부터 <b>타임아웃만큼</b> 뒤에 리셋됩니다. 그 타임아웃은 LSI 오차 때문에 <b>3배 가까이 흔들립니다.</b></div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">IWDG 타임아웃 계산</h4>
+      <pre class="code" data-lang="text"><code>타임아웃 = (4 × 2^PR) × (RLR + 1) / f_LSI
+           └ 분주 4·8·…·256  └ 12비트 0~4095
+
+예) 분주 64 (PR=4), RLR = 999
+  f_LSI = 32 kHz (전형) → 64 × 1000 / 32000 = 2.00 s
+  f_LSI = 17 kHz (최소) → 64 000 / 17 000  = 3.76 s
+  f_LSI = 47 kHz (최대) → 64 000 / 47 000  = 1.36 s
+
+최대: 분주 256, RLR 4095 → 256 × 4096 / 32000 = 32.8 s
+최소: 분주 4,   RLR 0    → 4 / 32000       = 0.125 ms</code></pre>
+      <pre class="code" data-lang="c"><code>IWDG_HandleTypeDef hiwdg;
+
+void wdg_init(void)
+{
+    hiwdg.Instance       = IWDG;
+    hiwdg.Init.Prescaler = IWDG_PRESCALER_64;   /* 32 kHz / 64 = 2 ms 틱 */
+    hiwdg.Init.Reload    = 999;                 /* (999 + 1) × 2 ms = 2.0 s */
+    HAL_IWDG_Init(&amp;hiwdg);                     /* 이 순간 시작 — 리셋 전엔 못 끔 */
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">IWDG vs WWDG</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%"></th><th>IWDG</th><th>WWDG</th></tr>
+        <tr><td>클럭</td><td><b>LSI</b> (메인 클럭과 독립)</td><td>PCLK1 / 4096 / 분주</td></tr>
+        <tr><td>클럭이 죽으면</td><td>그래도 리셋 ✓</td><td>같이 멈춤 ✗</td></tr>
+        <tr><td>끄기</td><td>불가 (리셋까지)</td><td>불가 (리셋까지)</td></tr>
+        <tr><td>너무 일찍 킥</td><td>괜찮음 (F4 는 창 없음)</td><td><b>리셋</b></td></tr>
+        <tr><td>조기 경고</td><td>없음</td><td>EWI 인터럽트 (0x40)</td></tr>
+        <tr><td>정밀도</td><td>LSI 라 거침</td><td>PCLK 라 정확</td></tr>
+        <tr><td>용도</td><td><b>기본 안전망</b></td><td>"너무 빨리 도는" 폭주까지 잡기</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>양산품은 IWDG 를 기본</b>으로 켭니다. 옵션 바이트 <code>WDG_SW = 0</code>(하드웨어 워치독)으로 두면 <b>전원 켜자마자</b> IWDG 가 돌아
+        부트로더 단계의 멈춤까지 잡습니다. 대신 부트로더도 Flash 를 지우는 동안 킥해야 합니다(섹터 지우기 최대 2 s 안팎).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">어디서 킥하나 — <span class="t">모두가 체크인했을 때만</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 230" role="img" aria-label="체크인 후 킥 패턴의 시간 그림. 센서, 통신, 제어 세 작업이 각자 일할 때마다 체크인 점을 찍고, 감시 함수는 0.5 초마다 세 체크인이 모두 있을 때만 워치독을 킥한다. 0.9 초 시점에 통신 작업이 멈추자 체크인이 빠지고 감시 함수는 킥을 하지 않으며, 워치독 타임아웃 뒤 리셋된다. 다른 두 작업은 계속 체크인하지만 소용없다.">
+      <text x="16" y="18" class="lbl">체크인 후 킥 — 점은 체크인, 세로선은 감시 함수의 판정 (0.5 s 마다)</text>
+
+      <path class="ax" d="M110 184 L640 184"/>
+      <text x="110" y="200" class="tk" text-anchor="middle">0</text>
+      <text x="230" y="200" class="tk" text-anchor="middle">0.5 s</text>
+      <text x="350" y="200" class="tk" text-anchor="middle">1.0 s</text>
+      <text x="470" y="200" class="tk" text-anchor="middle">1.5 s</text>
+      <text x="590" y="200" class="tk" text-anchor="middle">2.0 s</text>
+
+      <text x="16" y="56" class="ann">센서 (100 ms)</text>
+      <path class="gr" d="M110 52 L640 52"/>
+      <circle class="dot" cx="134" cy="52" r="3"/><circle class="dot" cx="158" cy="52" r="3"/><circle class="dot" cx="182" cy="52" r="3"/><circle class="dot" cx="206" cy="52" r="3"/>
+      <circle class="dot" cx="254" cy="52" r="3"/><circle class="dot" cx="278" cy="52" r="3"/><circle class="dot" cx="302" cy="52" r="3"/><circle class="dot" cx="326" cy="52" r="3"/>
+      <circle class="dot" cx="374" cy="52" r="3"/><circle class="dot" cx="398" cy="52" r="3"/><circle class="dot" cx="422" cy="52" r="3"/><circle class="dot" cx="446" cy="52" r="3"/>
+      <circle class="dot" cx="494" cy="52" r="3"/><circle class="dot" cx="518" cy="52" r="3"/><circle class="dot" cx="542" cy="52" r="3"/><circle class="dot" cx="566" cy="52" r="3"/>
+
+      <text x="16" y="88" class="ann">통신 (250 ms)</text>
+      <path class="gr" d="M110 84 L640 84"/>
+      <circle class="dot" cx="170" cy="84" r="3"/><circle class="dot" cx="230" cy="84" r="3"/><circle class="dot" cx="290" cy="84" r="3"/>
+      <circle class="dot" cx="330" cy="84" r="5" style="fill:#fb7185"/>
+      <text x="360" y="80" class="ann rs-t">0.9 s 데드락 — 이후 체크인 없음</text>
+
+      <text x="16" y="120" class="ann">제어 (50 ms)</text>
+      <path class="gr" d="M110 116 L640 116"/>
+      <path class="li" d="M122 116 L630 116" style="stroke-dasharray:2 10"/>
+
+      <text x="16" y="156" class="ann">감시 → 킥</text>
+      <path class="ln" d="M230 44 L230 166"/>
+      <path class="ln" d="M350 44 L350 166"/>
+      <path class="ln" d="M470 44 L470 166" style="stroke:#fb7185"/>
+      <path class="ln" d="M590 44 L590 166" style="stroke:#fb7185"/>
+      <text x="230" y="160" class="tk ok-t" text-anchor="middle">셋 다 → 킥</text>
+      <text x="350" y="160" class="tk ok-t" text-anchor="middle">셋 다 → 킥</text>
+      <text x="470" y="160" class="tk rs-t" text-anchor="middle">통신 없음</text>
+      <text x="590" y="160" class="tk rs-t" text-anchor="middle">통신 없음</text>
+
+      <text x="16" y="222" class="lbl">센서 · 제어는 멀쩡해도 킥은 멈춥니다 — 타임아웃 뒤 리셋, 빠진 비트는 .noinit 에 기록</text>
+    </svg>
+    <div class="cap">타임라인 — 워치독을 킥하는 조건은 <b>"모든 작업이 이번 창 안에 체크인했다"</b>입니다. 창은 가장 느린 작업 주기보다 길게.</div>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 타이머 인터럽트에서 킥</h5>
+      <pre class="code" data-lang="c"><code>void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *h)
+{
+    HAL_IWDG_Refresh(&amp;hiwdg);   /* 메인 루프가 데드락이어도
+                                   인터럽트는 계속 돎 → 영원히 킥 */
+}</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 메인 루프의 감시 함수에서, 체크인을 모아서</h5>
+      <pre class="code" data-lang="c"><code>enum { CK_SENSOR = 1u &lt;&lt; 0, CK_COMM = 1u &lt;&lt; 1,
+       CK_CTRL = 1u &lt;&lt; 2, CK_ALL = 0x7u };
+static volatile uint32_t g_ck;
+__attribute__((section(".noinit"))) uint32_t g_wdg_missing;
+
+void wdg_checkin(uint32_t bit)          /* ISR 에서도 호출 가능 */
+{
+    uint32_t pm = __get_PRIMASK();
+    __disable_irq();
+    g_ck |= bit;                        /* 읽고-고치고-쓰기를 보호 */
+    __set_PRIMASK(pm);                  /* 원래 상태로 (중첩 안전) */
+}
+
+void wdg_service(void)                  /* 메인 루프에서 매번 */
+{
+    static uint32_t t0;
+    if ((uint32_t)(HAL_GetTick() - t0) &lt; 500u) return;
+    t0 = HAL_GetTick();
+
+    uint32_t pm = __get_PRIMASK();
+    __disable_irq();
+    uint32_t got = g_ck;  g_ck = 0u;    /* 꺼내고 비우기를 한 번에 */
+    __set_PRIMASK(pm);
+
+    if (got == CK_ALL) HAL_IWDG_Refresh(&amp;hiwdg);
+    else               g_wdg_missing = CK_ALL &amp; ~got;  /* 리셋 뒤 보고 */
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">WWDG 창 · 디버그 정지 · 잠자는 동안</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 164" role="img" aria-label="WWDG 갱신 창. PCLK1 45 메가헤르츠와 분주 8 에서 한 틱은 728 마이크로초다. 카운터 0x7F 에서 시작해 0x50 에 닿는 34.2 밀리초 전에 갱신하면 너무 이른 것으로 리셋되고, 34.2 에서 46.6 밀리초 사이가 갱신 가능한 창이며, 46.6 밀리초에 카운터가 0x3F 가 되면 리셋된다. 0x40 에서 조기 경고 인터럽트가 한 틱 먼저 온다.">
+      <text x="16" y="18" class="lbl">WWDG 창 — PCLK1 45 MHz · 분주 8 · Counter 0x7F · Window 0x50</text>
+      <path class="ax" d="M40 96 L640 96"/>
+      <rect class="bx bx-warn" x="40" y="54" width="440" height="34" rx="3"/>
+      <text x="260" y="76" class="ann rs-t" text-anchor="middle">갱신 금지 — 여기서 갱신하면 리셋 (0x7F → 0x50, 47틱)</text>
+      <rect class="bx bx-ok" x="480" y="54" width="160" height="34" rx="3"/>
+      <text x="560" y="76" class="ann ok-t" text-anchor="middle">갱신 창</text>
+      <text x="40" y="112" class="tk" text-anchor="middle">0</text>
+      <text x="480" y="112" class="tk" text-anchor="middle">34.2 ms</text>
+      <text x="640" y="112" class="tk" text-anchor="end">46.6 ms 리셋</text>
+      <path class="lead-ln" d="M630 50 L630 40"/>
+      <text x="624" y="38" class="ann am-t" text-anchor="end">0x40 조기 경고 (EWI) — 1틱 728 µs 남음</text>
+      <text x="16" y="140" class="lbl">한 틱 = 4096 × 8 / 45 MHz = 728 µs · 리셋까지 64틱 = 46.6 ms</text>
+      <text x="16" y="156" class="ann">너무 빨리 도는 루프(타이밍 버그 · 조건 누락으로 일을 건너뜀)까지 잡는 것이 창의 의미입니다</text>
+    </svg>
+    <div class="cap">구간 — WWDG 는 <b>늦어도, 일러도</b> 리셋합니다. 주기가 정확해야 하는 제어 루프의 감시에 씁니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">WWDG 설정과 조기 경고</h4>
+      <pre class="code" data-lang="c"><code>WWDG_HandleTypeDef hwwdg;
+
+void wwdg_init(void)                    /* SYSCLK 180 MHz, APB1 /4 = 45 MHz 가정 */
+{
+    hwwdg.Instance       = WWDG;
+    hwwdg.Init.Prescaler = WWDG_PRESCALER_8;
+    hwwdg.Init.Window    = 0x50;
+    hwwdg.Init.Counter   = 0x7F;
+    hwwdg.Init.EWIMode   = WWDG_EWI_ENABLE;
+    HAL_WWDG_Init(&amp;hwwdg);             /* MspInit 에서 클럭 · NVIC 활성 */
+}
+
+/* 40 ms 주기 제어 루프의 끝에서 — 34.2~46.6 ms 창 안 */
+HAL_WWDG_Refresh(&amp;hwwdg);
+
+/* 리셋 728 µs 전 — 할 수 있는 건 아주 짧은 기록뿐 */
+void HAL_WWDG_EarlyWakeupCallback(WWDG_HandleTypeDef *h)
+{
+    g_crash.reason = CRASH_WWDG;        /* .noinit 구조체 (PROD 09) */
+    g_crash.pc     = last_loop_marker;
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">디버깅 · 잠 · 업데이트와의 충돌</h4>
+      <pre class="code" data-lang="c"><code>#if !defined(FW_PROD)
+__HAL_DBGMCU_FREEZE_IWDG();   /* 브레이크포인트에 멈춰 있는 동안 정지 */
+__HAL_DBGMCU_FREEZE_WWDG();
+#endif</code></pre>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">상황</th><th>처방</th></tr>
+        <tr><td>디버거로 멈춤</td><td>DBGMCU freeze — <b>개발 빌드만</b> (PROD 01 의 부팅 점검이 해제)</td></tr>
+        <tr><td>Stop 모드로 60 s 잠</td><td>F4 는 Stop 중에도 IWDG 가 돕니다 (멈추는 옵션 없음 · L4 · G4 엔 있음). <b>RTC 웨이크업으로 깨어 킥</b>하거나 타임아웃을 최대(32.8 s)보다 짧은 주기로 깨우기</td></tr>
+        <tr><td>Flash 섹터 지우기</td><td>128 KB 지우기는 최대 2 s 안팎 — 타임아웃을 그보다 길게, 지우기 직전에 킥</td></tr>
+        <tr><td>긴 서명 검증</td><td>해시 계산 루프 중간에 킥 (부트로더)</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>워치독 리셋은 "고친 것"이 아닙니다.</b> 리셋 원인과 <code>g_wdg_missing</code> 을 다음 부팅에 서버로 올리지 않으면
+        버그가 매일 수천 번 일어나도 아무도 모릅니다(PROD 06 · 09).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> IWDG 타임아웃은 <b>(4 × 2<sup>PR</sup>) × (RLR + 1) / f<sub>LSI</sub></b> 이고 LSI 오차로 3배 가까이 흔들립니다.
+    킥은 <b>모든 작업이 체크인했을 때만</b>, 인터럽트가 아니라 메인 루프의 감시 함수에서 합니다. WWDG 는 <b>너무 이른 킥</b>까지 잡는 정밀 감시용입니다.</div>
+</section>
+
+
+<!-- ==================== o06 ==================== -->
+<section class="sec" id="o06">
+  <div class="sec-head rv">
+    <span class="no">PROD 06</span>
+    <h2>리셋 원인 · 브라운아웃 — <span class="t">"가끔 재부팅된다"</span>를 숫자로 바꾸기</h2>
+    <p class="lead">
+      현장에서 가장 흔한 불만은 "가끔 꺼졌다 켜진다"입니다. 원인은 워치독일 수도, 폴트일 수도, 전원이 잠깐 처진 것일 수도 있습니다.
+      다행히 STM32 는 <b>왜 리셋됐는지를 RCC_CSR 레지스터에 남깁니다.</b> 이 값을 부팅마다 읽어 기록하고 서버로 올리는 것만으로
+      서버의 <b>종료 코드(exit code) 대시보드</b> 같은 것이 생깁니다. 플래그 읽기의 기본은 하드웨어 기초 탭 h11 에 있고,
+      여기서는 <b>판정 순서 · 브라운아웃 설정 · 리셋 루프 대응</b>을 다룹니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 396" role="img" aria-label="리셋 원인 판정 흐름도. 먼저 WWDG 나 IWDG 플래그가 있으면 워치독 리셋으로 어딘가 멈춘 것이다. 아니면 소프트웨어 리셋 플래그를 보고 .noinit 의 이유 코드로 업데이트인지 폴트인지 명령인지 구분한다. 아니면 POR 플래그가 있으면 전원 투입이며 함께 켜진 BOR 과 PIN 은 무시한다. 아니면 BOR 플래그만 있으면 브라운아웃으로 전압이 처진 것이다. 아니면 PIN 플래그면 리셋 버튼이나 외부 감시 칩이나 디버거다. 모두 아니면 저전력 진입 리셋이거나 알 수 없음으로 기록한다. 내부 리셋은 NRST 핀도 함께 끌어내리므로 PIN 플래그는 맨 마지막에 본다.">
+      <text x="16" y="18" class="lbl">리셋 원인 판정 — 위에서부터 묻습니다 (순서가 틀리면 오판)</text>
+
+      <polygon class="dia" points="120,40 216,62 120,84 24,62"/>
+      <text x="120" y="59" class="ann" text-anchor="middle">WWDGRSTF 또는</text>
+      <text x="120" y="71" class="ann" text-anchor="middle">IWDGRSTF ?</text>
+      <path class="ln ar" d="M220 62 L282 62"/>
+      <text x="236" y="56" class="ann">예</text>
+      <rect class="bx bx-warn" x="286" y="44" width="370" height="36"/>
+      <text x="471" y="66" class="ann rs-t" text-anchor="middle">워치독 — 어딘가 멈춤 · 빠진 체크인 비트(PROD 05)</text>
+
+      <path class="ln ar" d="M120 88 L120 100"/>
+      <polygon class="dia" points="120,104 216,126 120,148 24,126"/>
+      <text x="120" y="129" class="ann" text-anchor="middle">SFTRSTF ?</text>
+      <path class="ln ar" d="M220 126 L282 126"/>
+      <text x="236" y="120" class="ann">예</text>
+      <rect class="bx" x="286" y="108" width="370" height="36"/>
+      <text x="471" y="130" class="ann" text-anchor="middle">소프트웨어 — .noinit 이유 코드로 OTA · 폴트 · 명령 구분</text>
+
+      <path class="ln ar" d="M120 152 L120 164"/>
+      <polygon class="dia" points="120,168 216,190 120,212 24,190"/>
+      <text x="120" y="193" class="ann" text-anchor="middle">PORRSTF ?</text>
+      <path class="ln ar" d="M220 190 L282 190"/>
+      <text x="236" y="184" class="ann">예</text>
+      <rect class="bx bx-ok" x="286" y="172" width="370" height="36"/>
+      <text x="471" y="194" class="ann ok-t" text-anchor="middle">전원 투입 — 같이 켜진 BOR · PIN 플래그는 무시</text>
+
+      <path class="ln ar" d="M120 216 L120 228"/>
+      <polygon class="dia" points="120,232 216,254 120,276 24,254"/>
+      <text x="120" y="257" class="ann" text-anchor="middle">BORRSTF ?</text>
+      <path class="ln ar" d="M220 254 L282 254"/>
+      <text x="236" y="248" class="ann">예</text>
+      <rect class="bx bx-warn" x="286" y="236" width="370" height="36"/>
+      <text x="471" y="258" class="ann rs-t" text-anchor="middle">브라운아웃 — 전압이 처짐 · 배터리 · 돌입 전류 의심</text>
+
+      <path class="ln ar" d="M120 280 L120 292"/>
+      <polygon class="dia" points="120,296 216,318 120,340 24,318"/>
+      <text x="120" y="321" class="ann" text-anchor="middle">PINRSTF ?</text>
+      <path class="ln ar" d="M220 318 L282 318"/>
+      <text x="236" y="312" class="ann">예</text>
+      <rect class="bx" x="286" y="300" width="370" height="36"/>
+      <text x="471" y="322" class="ann" text-anchor="middle">NRST 핀 — 리셋 버튼 · 외부 감시 IC · 디버거</text>
+
+      <path class="ln ar" d="M120 344 L120 356"/>
+      <rect class="bx bx-mut" x="24" y="360" width="632" height="30"/>
+      <text x="340" y="379" class="ann" text-anchor="middle">아니오 — LPWRRSTF 면 저전력 진입 리셋(nRST_STOP 옵션), 그 밖은 "알 수 없음"으로 기록</text>
+    </svg>
+    <div class="cap">결정 흐름도 — 내부 리셋도 NRST 핀을 끌어내리므로 <b>PIN 은 맨 마지막</b>, 전원 투입 때 같이 켜지는 BOR 때문에 <b>POR 을 BOR 보다 먼저</b> 봅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">플래그를 비트마스크로 남기기</h4>
+      <pre class="code" data-lang="c"><code>typedef enum {
+    RST_LPWR = 1u &lt;&lt; 0, RST_WWDG = 1u &lt;&lt; 1, RST_IWDG = 1u &lt;&lt; 2,
+    RST_SFT  = 1u &lt;&lt; 3, RST_POR  = 1u &lt;&lt; 4, RST_BOR  = 1u &lt;&lt; 5,
+    RST_PIN  = 1u &lt;&lt; 6,
+} rst_flag_t;
+
+/* 맨 처음 한 번 — 문자열 하나가 아니라 "켜진 것 전부"를 남긴다 */
+uint32_t reset_flags_take(void)
+{
+    const uint32_t csr = RCC-&gt;CSR;
+    uint32_t f = 0u;
+    if (csr &amp; RCC_CSR_LPWRRSTF) f |= RST_LPWR;
+    if (csr &amp; RCC_CSR_WWDGRSTF) f |= RST_WWDG;
+    if (csr &amp; RCC_CSR_IWDGRSTF) f |= RST_IWDG;
+    if (csr &amp; RCC_CSR_SFTRSTF)  f |= RST_SFT;
+    if (csr &amp; RCC_CSR_PORRSTF)  f |= RST_POR;
+    if (csr &amp; RCC_CSR_BORRSTF)  f |= RST_BOR;
+    if (csr &amp; RCC_CSR_PINRSTF)  f |= RST_PIN;
+    RCC-&gt;CSR |= RCC_CSR_RMVF;   /* 지우지 않으면 다음 부팅에 섞임 */
+    return f;
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>원본 비트를 다 남기고 해석은 서버에서</b> — 펌웨어에서 문자열 하나로 줄이면 판정 규칙을 고칠 때마다 업데이트가 필요합니다.
+        비트마스크 1 바이트와 부팅 번호를 올리면 대시보드에서 "IWDG 비율이 v1.5.0 부터 3배" 같은 걸 바로 봅니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">부트로더가 있으면 누가 읽나</h4>
+      <div class="note warn">
+        <b>먼저 읽는 쪽이 지우면 나중 쪽은 못 봅니다.</b> 부트로더가 <code>RMVF</code> 로 지우면 앱에는 항상 "원인 없음"이 보입니다.
+        규칙을 하나로 정하세요 — 보통 <b>부트로더가 읽고 지우되, 값을 .noinit 의 공유 구조체에 넘겨 줍니다</b>(PROD 02 와 같은 주소).
+      </div>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">플래그 조합</th><th>읽는 법</th></tr>
+        <tr><td>POR + BOR + PIN</td><td>평범한 전원 투입</td></tr>
+        <tr><td>BOR + PIN</td><td>전원이 BOR 레벨 아래로 처졌다가 회복</td></tr>
+        <tr><td>IWDG + PIN</td><td>워치독 — PIN 은 내부 리셋 펄스</td></tr>
+        <tr><td>SFT + PIN</td><td><code>NVIC_SystemReset()</code> — 의도? 폴트?</td></tr>
+        <tr><td>PIN 만</td><td>버튼 · 외부 감시 IC · 디버거의 리셋</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">브라운아웃 — <span class="t">죽지도 살지도 않은 전압</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="전원 전압이 시간에 따라 처지는 그래프. 평소 3.3 볼트이던 전압이 모터가 켜지는 순간 2.3 볼트까지 떨어졌다가 회복된다. BOR 레벨 3 인 2.7 볼트를 설정해 두면 그 아래 구간 동안 칩이 리셋 상태로 유지되어 안전하다. BOR 을 끄면 리셋 기준이 약 1.7 볼트인 POR PDR 뿐이라 2.3 볼트 구간에서 CPU 가 계속 돌며 Flash 읽기와 쓰기가 보장되지 않는 위험 구간이 된다.">
+      <text x="16" y="18" class="lbl">전압이 처지는 순간 — BOR 이 없으면 CPU 가 "반쯤 살아" 돕니다</text>
+      <path class="ax" d="M60 196 L640 196"/>
+      <path class="ax" d="M60 34 L60 196"/>
+      <text x="54" y="48" class="tk" text-anchor="end">3.3 V</text>
+      <path class="gr" d="M60 82 L640 82"/>
+      <text x="54" y="86" class="tk" text-anchor="end">2.7 V</text>
+      <text x="636" y="78" class="ann am-t" text-anchor="end">BOR 레벨 3</text>
+      <path class="gr" d="M60 145 L640 145"/>
+      <text x="54" y="149" class="tk" text-anchor="end">1.7 V</text>
+      <text x="636" y="141" class="ann" text-anchor="end">POR / PDR (BOR 꺼짐일 때 유일한 기준)</text>
+
+      <path class="li" d="M60 44 L220 44 L240 107 L300 107 L340 70 L360 44 L640 44"/>
+      <text x="270" y="121" class="ann rs-t" text-anchor="middle">2.3 V</text>
+      <path class="lead-ln" d="M230 40 L230 30"/>
+      <text x="236" y="32" class="ann">모터 기동 · 무선 송신 · 약한 배터리</text>
+
+      <rect class="hl" x="230" y="160" width="102" height="18"/>
+      <text x="281" y="173" class="tk" text-anchor="middle">BOR3: 리셋 유지</text>
+      <text x="344" y="173" class="tk rs-t">BOR 꺼짐: 180 MHz 그대로 — Flash 읽기 · 쓰기 불안정</text>
+      <text x="16" y="222" class="lbl">공장 출하 옵션 바이트는 BOR 꺼짐 — 양산에선 레벨을 정해 공정에서 써 넣습니다</text>
+    </svg>
+    <div class="cap">라인 — 2.7 V 아래로 내려간 <b>짧은 순간</b>이 가장 위험합니다. BOR 은 그 순간을 "깨끗한 리셋"으로 바꿉니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">BOR 레벨 고르기</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">BOR_LEV 비트</th><th>레벨</th><th>하강 기준(약)</th></tr>
+        <tr><td><code>00</code></td><td>레벨 3</td><td>2.7 V</td></tr>
+        <tr><td><code>01</code></td><td>레벨 2</td><td>2.4 V</td></tr>
+        <tr><td><code>10</code></td><td>레벨 1</td><td>2.1 V</td></tr>
+        <tr><td><code>11</code></td><td>꺼짐 (공장 기본)</td><td>POR/PDR 만</td></tr>
+      </table></div>
+      <pre class="code" data-lang="bash"><code># 공정에서 — 비트 값 0 이 "가장 높은 레벨"인 점에 주의
+STM32_Programmer_CLI -c port=SWD -ob BOR_LEV=0
+# 펌웨어에서 쓰는 HAL 코드는 STM32 탭 m11 참고</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        3.3 V 전원이면 <b>레벨 3</b> 이 보통의 선택입니다 — F4 의 Flash 쓰기 32비트 병렬(전압 범위 3)과 180 MHz 대기 상태 설정이 2.7 V 이상을 가정하기 때문입니다.
+        정확한 문턱값 · 히스테리시스는 데이터시트의 BOR 표를 확인하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">브라운아웃이 잦다면 — 하드웨어 쪽 질문</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">의심</th><th>확인</th></tr>
+        <tr><td>배터리 내부 저항</td><td>CR2032 는 수 mA 펄스에도 전압이 크게 처짐 — 무선 송신 순간 측정</td></tr>
+        <tr><td>돌입 전류</td><td>모터 · 릴레이 · 무선 모듈 켜는 순간 오실로스코프로 VDD</td></tr>
+        <tr><td>벌크 커패시터</td><td>송신 펄스를 버틸 만큼 큰가 (수십~수백 µF)</td></tr>
+        <tr><td>레귤레이터 여유</td><td>입력이 낮아질 때 드롭아웃 전압</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>펌웨어 쪽 완화책</b> — 무선 송신과 Flash 쓰기를 같은 순간에 하지 않기, 모터 기동을 소프트 스타트로,
+        PVD(프로그래머블 전압 감지) 인터럽트로 "곧 꺼진다"를 미리 알아 진행 중인 쓰기를 마무리하기.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">리셋 루프 감지와 안전 모드</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">연속 비정상 부팅을 세기</h4>
+      <pre class="code" data-lang="c"><code>#define BI_MAGIC 0x5AFEB007u
+typedef struct {
+    uint32_t magic, magic_inv;   /* 둘 다 맞아야 유효 — POR 직후 쓰레기 걸러 냄 */
+    uint32_t bad_boots;          /* 연속 비정상 부팅 수 */
+    uint32_t sw_reason;          /* NVIC_SystemReset 직전에 적은 이유 */
+} boot_info_t;
+__attribute__((section(".noinit"))) boot_info_t g_bi;
+
+void boot_info_update(uint32_t rst)
+{
+    if (g_bi.magic != BI_MAGIC || g_bi.magic_inv != ~BI_MAGIC || (rst &amp; RST_POR)) {
+        g_bi = (boot_info_t){ .magic = BI_MAGIC, .magic_inv = ~BI_MAGIC };
+    }
+    const bool bad = (rst &amp; (RST_IWDG | RST_WWDG)) ||
+                     ((rst &amp; RST_BOR) &amp;&amp; !(rst &amp; RST_POR)) ||   /* 전원 투입 때의 BOR 은 정상 */
+                     ((rst &amp; RST_SFT) &amp;&amp; g_bi.sw_reason == SWR_FAULT);
+    g_bi.bad_boots = bad ? g_bi.bad_boots + 1u : 0u;
+    g_bi.sw_reason = SWR_NONE;
+
+    if (g_bi.bad_boots &gt;= 5u) safe_mode();     /* 돌아오지 않음 */
+}
+
+/* 60 s 동안 문제없이 돌면 "건강함"으로 */
+void boot_info_mark_healthy(void) { g_bi.bad_boots = 0u; }</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">안전 모드가 하는 일</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">켠다</th><th>끈다</th></tr>
+        <tr><td>통신 · OTA 수신 · 로그 업로드 · LED 로 상태 표시</td><td>센서 드라이버 · 모터 · 히터 · 사용자 기능 · 실험 기능</td></tr>
+      </table></div>
+      <div class="note tip">
+        <b>안전 모드는 "고쳐 받을 수 있는 최소 상태"</b>입니다. 리셋 루프의 원인은 보통 특정 주변장치 드라이버나 깨진 설정이므로,
+        그것들을 건너뛰고 통신만 살리면 서버가 원인 로그를 받고 수정 펌웨어를 보낼 수 있습니다. 안드로이드의 복구 모드와 같은 발상입니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>.noinit 카운터는 전원을 껐다 켜면 사라집니다.</b> 전원이 반복해서 끊기는 루프(브라운아웃이 POR 까지 내려가는 경우)까지 세려면
+        PROD 07 의 Flash 저장이나 F446 의 <b>백업 레지스터 · 4 KB 백업 SRAM</b>(VBAT 로 유지)을 씁니다.
+        PROD 03 의 A/B 롤백(TRIAL 3회)과 이 카운터는 <b>서로 다른 층</b>입니다 — 롤백이 먼저, 그래도 안 되면 안전 모드.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 부팅마다 <b>RCC_CSR 을 읽고 지우고</b>, 비트 전부를 부팅 번호와 함께 기록합니다. 판정은 <b>워치독 → 소프트웨어 → POR → BOR → PIN</b> 순.
+    양산품은 <b>BOR 레벨 3</b>을 공정에서 설정하고, 연속 비정상 부팅이 쌓이면 <b>안전 모드</b>로 들어가 고쳐 받을 수 있게 합니다.</div>
+</section>
+
+
+<!-- ==================== o07 ==================== -->
+<section class="sec" id="o07">
+  <div class="sec-head rv">
+    <span class="no">PROD 07</span>
+    <h2>설정 · 데이터 저장 — <span class="t">어느 순간 꺼져도 이전 값이나 새 값</span>, 둘 중 하나</h2>
+    <p class="lead">
+      F446 내부 Flash 에 쓰는 기본(섹터 지우기 · 워드 쓰기 · 지우는 동안 CPU 정지 · A/B 두 섹터 교대)은 STM32 탭 m11 에서 다뤘습니다.
+      제품에서는 두 가지가 더 문제가 됩니다. <b>수명</b> — 섹터당 약 1만 번 지우면 끝이고, <b>전원 차단</b> — 쓰는 도중 꺼진 반쪽 기록을 믿으면 안 됩니다.
+      데이터베이스의 <b>WAL(로그 선행 기록) + 커밋 레코드</b>와 같은 원리로 둘을 함께 풉니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 270" role="img" aria-label="Flash 기록 칸 하나의 상태 기계. 지워진 칸은 모든 바이트가 0xFF 다. 본문과 CRC 를 쓰면 본문 기록 상태가 되지만 완료 표시가 없어 읽을 때 무시된다. 마지막으로 완료 표시 워드를 쓰면 확정 상태가 되어 읽기 대상이 된다. 더 큰 순번의 확정 기록이 생기면 지난 기록이 된다. 본문 기록 중 전원이 끊기면 반쯤 쓰인 칸이 되며 무시되고 다시 쓸 수도 없다. 섹터 전체를 지우면 모든 칸이 지워진 상태로 돌아간다.">
+      <text x="16" y="18" class="lbl">기록 칸 하나의 일생 — 읽는 쪽은 "확정"만 믿습니다</text>
+
+      <circle class="nd nd-mut" cx="90" cy="96" r="38"/>
+      <text x="90" y="93" class="val" text-anchor="middle">지워짐</text>
+      <text x="90" y="108" class="ann" text-anchor="middle">전부 0xFF</text>
+      <circle class="nd" cx="250" cy="96" r="38"/>
+      <text x="250" y="93" class="val" text-anchor="middle">본문 기록</text>
+      <text x="250" y="108" class="ann" text-anchor="middle">완료 표시 없음</text>
+      <circle class="nd nd-ok" cx="410" cy="96" r="38"/>
+      <text x="410" y="93" class="val" text-anchor="middle">확정</text>
+      <text x="410" y="108" class="ann" text-anchor="middle">읽기 대상</text>
+      <circle class="nd nd-mut" cx="570" cy="96" r="38"/>
+      <text x="570" y="93" class="val" text-anchor="middle">지난 기록</text>
+      <text x="570" y="108" class="ann" text-anchor="middle">더 큰 순번 있음</text>
+      <circle class="nd nd-fw" cx="250" cy="214" r="38"/>
+      <text x="250" y="211" class="val" text-anchor="middle">반쪽</text>
+      <text x="250" y="226" class="ann" text-anchor="middle">무시 · 재사용 불가</text>
+
+      <path class="ln ar" d="M132 96 L208 96"/>
+      <text x="170" y="86" class="ann" text-anchor="middle">① 본문 · CRC</text>
+      <path class="ln ar" d="M292 96 L368 96"/>
+      <text x="330" y="86" class="ann" text-anchor="middle">② 완료 워드</text>
+      <path class="ln ar" d="M452 96 L528 96"/>
+      <text x="490" y="86" class="ann" text-anchor="middle">새 기록 확정</text>
+      <path class="ln ar" d="M250 138 L250 172"/>
+      <text x="258" y="160" class="ann rs-t">① 도중 정전</text>
+      <path class="ln ar" d="M560 56 Q330 -6 100 56"/>
+      <text x="330" y="50" class="ann" text-anchor="middle">섹터 통째로 지우기 (교대할 때)</text>
+
+      <text x="330" y="208" class="ann">② 도중 정전은? 워드 하나라 "확정 전"이나</text>
+      <text x="330" y="222" class="ann">"확정" — 이전 확정 기록이 그대로 살아 있음</text>
+      <text x="16" y="262" class="lbl">순서가 전부입니다 — 완료 표시를 먼저 쓰면 반쪽 본문이 "확정"으로 읽힙니다</text>
+    </svg>
+    <div class="cap">상태 기계 — 본문을 다 쓴 뒤 <b>완료 워드를 마지막에</b> 씁니다. 0xFF 는 쓰기로만 0 이 되므로 완료 표시는 되돌아가지 않습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">덧붙여 쓰는 기록 — 지우기를 수백 분의 1 로</h4>
+      <pre class="code" data-lang="c"><code>#define REC_COMMIT 0x600DC0DEu
+typedef struct {
+    uint32_t seq;        /* 쓸 때마다 +1 — 가장 큰 확정 기록이 현재 값 */
+    uint16_t len;
+    uint16_t ver;        /* 설정 구조체 형식 버전 — 업데이트 뒤 변환용 */
+    uint8_t  data[48];
+    uint32_t crc;        /* seq ~ data 의 CRC32 (PROD 04) */
+    uint32_t commit;     /* ② 맨 마지막에 쓰는 완료 표시 */
+} rec_t;
+_Static_assert(sizeof(rec_t) == 64, "16 KB 섹터에 256 칸");
+
+int cfg_append(const void *d, uint16_t len)
+{
+    if (len &gt; sizeof(((rec_t *)0)-&gt;data)) return -1;
+    rec_t r;
+    memset(&amp;r, 0, sizeof r);
+    r.seq = g_last_seq + 1u;  r.len = len;  r.ver = CFG_VER;
+    memcpy(r.data, d, len);
+    r.crc = crc32_update(0u, (const uint8_t *)&amp;r, offsetof(rec_t, crc));
+
+    uint32_t a = next_blank_slot();         /* 64 B 전부 0xFF 인 칸 */
+    if (a == 0u) a = switch_sector();       /* 다른 섹터를 지우고 첫 칸 */
+    if (flash_write(a, &amp;r, offsetof(rec_t, commit)) != 0) return -2;   /* ① */
+    const uint32_t c = REC_COMMIT;
+    if (flash_write(a + offsetof(rec_t, commit), &amp;c, 4u) != 0) return -3;  /* ② */
+    g_last_seq = r.seq;
+    return 0;
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">읽을 때의 규칙</h4>
+      <pre class="code" data-lang="c"><code>/* 두 섹터(S2 · S3)의 모든 칸을 훑어 가장 큰 seq 의 확정 기록 */
+const rec_t *cfg_latest(void)
+{
+    const rec_t *best = NULL;
+    for (int s = 0; s &lt; 2; s++) {
+        const rec_t *p = (const rec_t *)sector_base(s);
+        for (uint32_t i = 0; i &lt; 256u; i++, p++) {
+            if (p-&gt;commit != REC_COMMIT) continue;          /* 반쪽 · 빈칸 */
+            if (crc32_update(0u, (const uint8_t *)p, offsetof(rec_t, crc)) != p-&gt;crc)
+                continue;                                    /* 비트 손상 */
+            if (best == NULL || p-&gt;seq &gt; best-&gt;seq) best = p;
+        }
+    }
+    return best;   /* NULL 이면 공장 기본값 */
+}</code></pre>
+      <div class="note warn">
+        <b>빈칸 판정은 64 B 전부</b>를 봐야 합니다. 첫 워드만 보고 0xFF 라서 "비었다"고 하면, 본문 중간까지 쓰다 꺼진 칸에 다시 쓰게 되고
+        F4 는 이미 0 인 비트를 1 로 못 되돌리므로 <b>엉뚱한 값</b>이 섞입니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>섹터 교대 순서</b> — 다른 섹터를 지우고, 최신 기록을 거기 첫 칸에 쓴 다음에야 옛 섹터를 버립니다.
+        지우는 도중 꺼져도 옛 섹터에 최신 값이 남아 있습니다. 부팅 때 <code>g_last_seq</code> 는 <code>cfg_latest()-&gt;seq</code> 로 복원합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">수명 계산 — <span class="t">1분에 한 번 저장하면 언제 닳나</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="1 분에 한 번 저장할 때 방식별 Flash 수명을 로그 눈금 막대로 비교한 그림. 128 킬로바이트 섹터 하나를 매번 지우면 1 만 번 만에 6.9 일, 두 섹터를 교대로 통째로 지우면 13.9 일, 16 킬로바이트 섹터 두 개에 64 바이트 기록을 덧붙이면 512 만 번으로 약 9.7 년, 변수 10 개를 4 바이트 단위로 쓰는 EEPROM 에뮬레이션은 약 8 천만 번으로 155 년이다.">
+      <text x="16" y="18" class="lbl">1분에 1회 저장 · 섹터당 지우기 1만 회 — 가로축은 로그 눈금입니다</text>
+
+      <path class="ax" d="M170 34 L170 166"/>
+      <path class="gr" d="M306 34 L306 166"/>
+      <path class="gr" d="M406 34 L406 166"/>
+      <path class="gr" d="M498 34 L498 166"/>
+      <path class="gr" d="M590 34 L590 166"/>
+      <path class="ax" d="M170 166 L640 166"/>
+      <text x="170" y="182" class="tk" text-anchor="middle">1일</text>
+      <text x="306" y="182" class="tk" text-anchor="middle">1달</text>
+      <text x="406" y="182" class="tk" text-anchor="middle">1년</text>
+      <text x="498" y="182" class="tk" text-anchor="middle">10년</text>
+      <text x="590" y="182" class="tk" text-anchor="middle">100년</text>
+
+      <text x="16" y="52" class="ann rs-t">128 KB 섹터 매번 지움</text>
+      <rect class="bar" x="170" y="40" width="77" height="18" style="fill:rgba(251,113,133,.22);stroke:rgba(251,113,133,.55)"/>
+      <text x="255" y="53" class="tk rs-t">6.9 일 (1만 회)</text>
+
+      <text x="16" y="82" class="ann">두 섹터 통째 교대</text>
+      <rect class="bar" x="170" y="70" width="105" height="18"/>
+      <text x="283" y="83" class="tk">13.9 일 (2만 회)</text>
+
+      <text x="16" y="112" class="ann">64 B 덧붙이기 · 16 KB × 2</text>
+      <rect class="bar" x="170" y="100" width="327" height="18"/>
+      <text x="505" y="113" class="tk">9.7 년 (512만 회)</text>
+
+      <text x="16" y="142" class="ann ok-t">EEPROM 에뮬 · 변수 10개</text>
+      <rect class="bar" x="170" y="130" width="437" height="18" style="fill:rgba(52,211,153,.22);stroke:rgba(52,211,153,.55)"/>
+      <text x="615" y="143" class="tk ok-t">155 년</text>
+
+      <text x="16" y="208" class="lbl">한 번 지울 때 몇 번 쓸 수 있나가 수명을 정합니다 — 256 칸이면 256배</text>
+      <text x="16" y="226" class="ann">계산: 수명(회) = 섹터 수 × 1만 × 섹터당 기록 수 · 1년 = 525,600 분</text>
+    </svg>
+    <div class="cap">막대(로그) — 같은 Flash 라도 <b>지우기 한 번에 몇 번 쓰느냐</b>로 수명이 일주일에서 백 년까지 갈립니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">EEPROM 에뮬레이션 — ST 응용 노트 방식</h4>
+      <pre class="code" data-lang="text"><code>페이지(섹터) 두 개, 각 페이지 맨 앞에 상태: ERASED · RECEIVE_DATA · VALID_PAGE
+
+VALID 페이지에 (가상 주소 16비트, 값 16비트) 4 B 쌍을 뒤에 덧붙임
+  [VALID][0x0001=25][0x0002=300][0x0001=26][0x0001=27] ...
+                                          └ 같은 주소면 뒤의 것이 최신
+
+페이지가 차면: 다른 페이지를 RECEIVE_DATA 로 → 각 주소의 최신 값만 복사
+              → 옛 페이지 지움 → 새 페이지를 VALID 로
+(F4 는 AN3969, 시리즈마다 응용 노트 · X-CUBE-EEPROM 이 따로 있음)
+
+수명: 16 KB 페이지 ≈ 4 095 칸 − 변수 10개 복사분 = 4 085 회 / 지우기
+      × 2 페이지 × 1만 회 ≈ 8 170만 회 → 1분에 1회면 약 155 년</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        위의 64 B 덧붙이기와 원리가 같고, 기록 단위를 <b>변수 하나(4 B)</b>로 쪼갠 것이 차이입니다. 값이 자주 바뀌는 카운터 몇 개에 강하고,
+        큰 구조체를 통째로 저장하는 데는 64 B 기록이 단순합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 어디에</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">데이터</th><th>바뀌는 빈도</th><th>저장소</th></tr>
+        <tr><td>시리얼 · 보정값</td><td>공장에서 1회</td><td>OTP · 전용 섹터 (PROD 10)</td></tr>
+        <tr><td>사용자 설정</td><td>하루 몇 번</td><td>내부 Flash 덧붙이기</td></tr>
+        <tr><td>카운터 · 누적량</td><td>분 단위</td><td>EEPROM 에뮬 · 백업 SRAM</td></tr>
+        <tr><td>측정 로그 · 파일</td><td>초 단위 · 대용량</td><td><b>외부 SPI Flash + littlefs</b></td></tr>
+        <tr><td>OTA 이미지</td><td>가끔 · 수백 KB</td><td>슬롯 B · 외부 Flash (PROD 03)</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>"자주 저장"의 함정</b> — 슬라이더를 움직일 때마다 저장하면 하루에 수천 번이 됩니다. 값이 바뀐 뒤 <b>몇 초 조용해지면 한 번</b>
+        저장하는 디바운스, 그리고 PVD(PROD 06)로 "전원이 꺼지려 할 때 한 번"이 표준 처방입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">외부 Flash 와 littlefs</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">W25Q128(16 MB · 4 KB 지우기)에 littlefs 붙이기</h4>
+      <pre class="code" data-lang="c"><code>#include "lfs.h"
+
+static int bd_read(const struct lfs_config *c, lfs_block_t b,
+                   lfs_off_t off, void *buf, lfs_size_t n)
+{ return w25q_read(b * c-&gt;block_size + off, buf, n) ? LFS_ERR_IO : 0; }
+
+static int bd_prog(const struct lfs_config *c, lfs_block_t b,
+                   lfs_off_t off, const void *buf, lfs_size_t n)
+{ return w25q_program(b * c-&gt;block_size + off, buf, n) ? LFS_ERR_IO : 0; }
+
+static int bd_erase(const struct lfs_config *c, lfs_block_t b)
+{ return w25q_erase_4k(b * c-&gt;block_size) ? LFS_ERR_IO : 0; }
+
+static int bd_sync(const struct lfs_config *c) { (void)c; return 0; }
+
+static const struct lfs_config g_lfs_cfg = {
+    .read = bd_read, .prog = bd_prog, .erase = bd_erase, .sync = bd_sync,
+    .read_size      = 16,
+    .prog_size      = 256,     /* W25Q 페이지 프로그램 단위 */
+    .block_size     = 4096,    /* 섹터 지우기 단위 */
+    .block_count    = 4096,    /* 16 MB / 4 KB */
+    .cache_size     = 256,
+    .lookahead_size = 32,
+    .block_cycles   = 500,     /* 이만큼 쓰면 블록을 옮겨 마모 분산 */
+};</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파일처럼 쓰고, 닫을 때 원자적으로</h4>
+      <pre class="code" data-lang="c"><code>lfs_t lfs;
+lfs_file_t f;
+uint32_t boots = 0;
+
+if (lfs_mount(&amp;lfs, &amp;g_lfs_cfg) != 0) {
+    fs_mount_failed();          /* ⚠ 여기서 자동 format 하지 말 것 */
+}
+lfs_file_open(&amp;lfs, &amp;f, "boot_count", LFS_O_RDWR | LFS_O_CREAT);
+lfs_file_read(&amp;lfs, &amp;f, &amp;boots, sizeof boots);
+boots++;
+lfs_file_rewind(&amp;lfs, &amp;f);
+lfs_file_write(&amp;lfs, &amp;f, &amp;boots, sizeof boots);
+lfs_file_close(&amp;lfs, &amp;f);     /* 이 순간 반영 — 그 전에 꺼지면 이전 값 */</code></pre>
+      <div class="note tip">
+        <b>littlefs</b> 는 쓰기 시 복사(copy-on-write)와 메타데이터 쌍으로 <b>정전 안전 · 마모 분산</b>을 파일 시스템 수준에서 해 줍니다.
+        RAM 은 캐시 몇 개 분량(위 설정이면 1 KB 안팎)이면 됩니다. FAT 는 정전에 약하므로 SD 카드처럼 PC 와 주고받을 때만 씁니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>"마운트 실패 → 포맷" 은 개발용 코드</b>입니다. 현장에서 SPI 배선 접촉 불량 한 번으로 마운트가 실패하면 <b>사용자 데이터가 전부 지워집니다</b>.
+        포맷은 공장 공정(PROD 10)에서만, 현장에선 오류를 기록하고 읽기 전용으로 버팁니다.
+        F446 내부 Flash(128 KB 섹터)는 블록이 너무 커서 littlefs 와 잘 맞지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 정전 안전은 <b>본문 → 완료 표시</b> 순서와 <b>순번 + CRC</b>로, 수명은 <b>지우기 한 번에 여러 번 쓰는</b> 덧붙이기로 해결합니다.
+    작은 설정은 내부 Flash 기록, 자주 바뀌는 값은 EEPROM 에뮬레이션, 대용량은 <b>외부 Flash + littlefs</b>. 현장에서 자동 포맷은 금지입니다.</div>
+</section>
+
+
+<!-- ==================== o08 ==================== -->
+<section class="sec" id="o08">
+  <div class="sec-head rv">
+    <span class="no">PROD 08</span>
+    <h2>저전력 제품 설계 — <span class="t">전력 예산표</span>로 배터리 수명을 먼저 계산한다</h2>
+    <p class="lead">
+      Sleep · Stop · Standby 모드에 들어가는 법은 STM32 탭 m13 · AVR 탭 a12 · FreeRTOS 탭 r12 에 있습니다. 제품에서 묻는 것은 다른 질문입니다 —
+      <b>"이 배터리로 몇 년 가나?"</b> 답은 <b>평균 전류</b> 하나로 정해지고, 평균 전류는 <b>모드별 전류 × 그 모드에 머무는 시간 비율</b>의 합입니다.
+      클라우드 비용을 "인스턴스 단가 × 가동 시간"으로 미리 계산하듯, 배터리도 설계 단계에서 <b>예산표</b>를 먼저 씁니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 220" role="img" aria-label="센서 노드 한 주기의 전류 파형. 대부분의 시간은 4 마이크로암페어로 잠들어 있고, 60 초마다 깨어나 3 밀리암페어로 50 밀리초 동안 측정한 뒤 8 밀리암페어로 4 밀리초 동안 무선 송신을 하고 다시 잠든다. 가로축과 세로축 모두 실제 비례가 아니며 실제로는 깨어 있는 시간이 전체의 0.1 퍼센트도 안 된다.">
+      <text x="16" y="18" class="lbl">센서 노드의 전류 — 60 s 마다 한 번 깨어납니다 (축은 비례가 아님)</text>
+      <path class="ax" d="M60 170 L640 170"/>
+      <path class="ax" d="M60 34 L60 170"/>
+      <text x="52" y="166" class="tk" text-anchor="end">4 µA</text>
+      <text x="52" y="96" class="tk" text-anchor="end">3 mA</text>
+      <text x="52" y="56" class="tk" text-anchor="end">8 mA</text>
+      <path class="gr" d="M60 92 L640 92"/>
+      <path class="gr" d="M60 52 L640 52"/>
+
+      <path class="li" d="M60 162 L180 162 L180 92 L230 92 L230 52 L244 52 L244 162 L480 162 L480 92 L530 92 L530 52 L544 52 L544 162 L640 162"/>
+      <text x="205" y="86" class="ann" text-anchor="middle">측정 50 ms</text>
+      <text x="270" y="48" class="ann">송신 4 ms</text>
+      <text x="362" y="156" class="ann" text-anchor="middle">잠 59.946 s — Stop · LDO · 센서 대기 합계</text>
+      <path class="dim-ln" d="M184 190 L476 190"/>
+      <text x="330" y="186" class="ann" text-anchor="middle">주기 60 s</text>
+      <text x="16" y="212" class="lbl">깨어 있는 시간은 0.09% — 그런데도 전하의 43% 를 씁니다 (아래 비율 막대)</text>
+    </svg>
+    <div class="cap">파형 — 짧고 높은 펄스와 길고 낮은 바닥, <b>둘의 넓이(전하)를 더한 것</b>이 배터리를 씁니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">전력 예산표 — 한 주기의 전하를 더한다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">상태</th><th>전류</th><th>시간 / 60 s</th><th>전하</th></tr>
+        <tr><td>잠</td><td>4 µA</td><td>59.946 s</td><td>239.8 µC</td></tr>
+        <tr><td>측정</td><td>3 mA</td><td>50 ms</td><td>150.0 µC</td></tr>
+        <tr><td>무선 송신</td><td>8 mA</td><td>4 ms</td><td>32.0 µC</td></tr>
+        <tr><td><b>합</b></td><td></td><td>60 s</td><td><b>421.8 µC</b></td></tr>
+      </table></div>
+      <pre class="code" data-lang="text"><code>평균 전류 = 421.8 µC / 60 s = 7.03 µA
+
+CR2032 220 mAh : 0.220 / 7.03e-6 = 31 296 h ≈ 3.6 년 (이론)
+                 실사용 80% 가정        ≈ 2.9 년
+2 × AA 2500 mAh: ≈ 40.6 년 (이론) → 실제 상한은 자가 방전 · 유효 기간(10년 안팎)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        잠 4 µA 는 <b>저전력 시리즈(L4 · U5 급) MCU + LDO 정지 전류 + 센서 대기</b>를 더한 가정값입니다.
+        F446 은 고성능 시리즈라 Stop 전류가 저전력 시리즈보다 한 자릿수 이상 큽니다 — 배터리 제품이면 MCU 선택부터 다시 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">같은 계산을 스크립트로 — 가정이 바뀔 때마다 다시</h4>
+      <pre class="code" data-lang="python"><code># power_budget.py — 1 주기(60 s) 동안의 전하를 더해 평균 전류로
+states = [  # (이름, 전류 A, 시간 s)
+    ("measure",  3e-3, 0.050),
+    ("radio_tx", 8e-3, 0.004),
+]
+PERIOD  = 60.0
+SLEEP_I = 4e-6                      # MCU Stop + LDO Iq + 센서 대기 합계
+
+awake = sum(t for _, _, t in states)
+q = sum(i * t for _, i, t in states) + SLEEP_I * (PERIOD - awake)
+avg = q / PERIOD
+print(f"평균 {avg * 1e6:.2f} uA")
+for name, mah in [("CR2032", 220), ("2xAA", 2500)]:
+    h = mah / 1000 / avg
+    print(f"{name}: 이론 {h / 8760:.1f} 년, 80% 가정 {0.8 * h / 8760:.1f} 년")
+
+# 출력
+# 평균 7.03 uA
+# CR2032: 이론 3.6 년, 80% 가정 2.9 년
+# 2xAA: 이론 40.6 년, 80% 가정 32.5 년</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        이 표를 <b>요구사항 문서에 넣고 DVT 실측값으로 갱신</b>하세요. 마케팅이 "주기를 10 s 로"라고 할 때 바로 답할 수 있습니다 —
+        10 s 주기면 평균 22.2 µA, CR2032 로 약 1.1 년입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">어디에 쓰이나 — <span class="t">주기를 줄이면 깨어 있는 비용이 지배</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 196" role="img" aria-label="한 주기 전하의 구성비를 두 주기 설정으로 비교한 비율 막대. 60 초 주기에서는 잠이 57 퍼센트, 측정이 36 퍼센트, 송신이 8 퍼센트다. 10 초 주기에서는 잠이 18 퍼센트로 줄고 측정이 68 퍼센트, 송신이 14 퍼센트로 깨어 있는 비용이 지배한다. 평균 전류는 각각 7.0 과 22.2 마이크로암페어다.">
+      <text x="16" y="18" class="lbl">한 주기 전하의 구성 — 가로 폭이 비율입니다</text>
+
+      <text x="16" y="52" class="ann">60 s 주기</text>
+      <rect class="s1" x="100" y="38" width="299" height="26"/>
+      <rect class="s2" x="401" y="38" width="187" height="26"/>
+      <rect class="s3" x="590" y="38" width="40" height="26"/>
+      <text x="250" y="55" class="tk" text-anchor="middle">잠 57%</text>
+      <text x="495" y="55" class="tk" text-anchor="middle">측정 36%</text>
+      <text x="610" y="55" class="tk" text-anchor="middle">8%</text>
+      <text x="636" y="55" class="ann">7.0 µA</text>
+
+      <text x="16" y="96" class="ann">10 s 주기</text>
+      <rect class="s1" x="100" y="82" width="93" height="26"/>
+      <rect class="s2" x="195" y="82" width="356" height="26"/>
+      <rect class="s3" x="553" y="82" width="77" height="26"/>
+      <text x="146" y="99" class="tk" text-anchor="middle">잠 18%</text>
+      <text x="373" y="99" class="tk" text-anchor="middle">측정 68%</text>
+      <text x="591" y="99" class="tk" text-anchor="middle">송신 14%</text>
+      <text x="636" y="99" class="ann">22.2 µA</text>
+
+      <rect class="s1" x="100" y="124" width="12" height="12"/>
+      <text x="118" y="134" class="lg-t">잠 (4 µA)</text>
+      <rect class="s2" x="200" y="124" width="12" height="12"/>
+      <text x="218" y="134" class="lg-t">측정 (3 mA × 50 ms)</text>
+      <rect class="s3" x="356" y="124" width="12" height="12"/>
+      <text x="374" y="134" class="lg-t">송신 (8 mA × 4 ms)</text>
+
+      <text x="16" y="168" class="lbl">60 s 에서는 잠 전류를, 10 s 에서는 측정 시간을 줄이는 것이 효과가 큽니다</text>
+      <text x="16" y="186" class="ann">측정 50 ms 를 20 ms 로 줄이면 10 s 주기의 평균이 22.2 → 13.2 µA 로 내려갑니다</text>
+    </svg>
+    <div class="cap">비율 막대 — <b>가장 큰 조각부터</b> 줄입니다. 어느 조각이 큰지는 깨우는 주기에 따라 바뀝니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">측정 도구 — 성격만</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">도구</th><th>성격</th></tr>
+        <tr><td>멀티미터</td><td>평균값만 · 펄스를 놓침 · 전류 범위를 바꾸는 순간 전압 강하로 MCU 가 리셋되기도</td></tr>
+        <tr><td><b>Nordic PPK2</b></td><td>저가 전류 프로파일러 · 전원 공급 겸 측정 · µA 바닥과 mA 펄스를 한 화면에 · 입문 표준</td></tr>
+        <tr><td><b>Joulescope</b></td><td>더 넓은 범위를 빠르게 자동 전환 · 정확도 높음 · 고가 · 제품 인증용 측정에</td></tr>
+        <tr><td>Otii Arc 등</td><td>전원 공급 + 측정 + 스크립트 자동화 · 배터리 방전 프로파일 흉내</td></tr>
+        <tr><td>µCurrent + 오실로스코프</td><td>션트 증폭기 — 파형을 직접 봄 · 손이 많이 감</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Nucleo 에서 MCU 전류만 재기</b> — 보드의 IDD 점퍼(JP6)를 빼고 그 자리에 측정기를 겁니다. ST-LINK 쪽 전류가 섞이지 않습니다.
+        디버거가 붙어 있으면 디버그 회로가 켜진 채라 잠 전류가 크게 나오므로, 측정할 땐 <b>디버거를 떼고</b> 전원부터 다시 넣습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">흔한 누설 원인 — 예산을 날리는 것들</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">원인</th><th>크기 (3.3 V)</th><th>처방</th></tr>
+        <tr><td>떠 있는 입력 핀</td><td>수~수백 µA</td><td>안 쓰는 핀은 <b>아날로그 모드</b></td></tr>
+        <tr><td>눌린 버튼의 10 kΩ 풀업</td><td>330 µA</td><td>풀업 값 키우기 · 잠들기 전 풀 끄기</td></tr>
+        <tr><td>전원 표시 LED</td><td>1~5 mA</td><td>양산 BOM 에서 빼거나 GPIO 로</td></tr>
+        <tr><td>레귤레이터 정지 전류</td><td>AMS1117 급 수 mA · 저전력 LDO 는 µA 이하</td><td>Iq 를 보고 고르기</td></tr>
+        <tr><td>배터리 측정 분압기</td><td>100 kΩ + 100 kΩ 에 3 V 면 15 µA</td><td>MOSFET 으로 측정할 때만 연결</td></tr>
+        <tr><td>꺼진 칩으로 역전류</td><td>수십 µA~</td><td>전원이 꺼진 주변 칩 쪽 핀은 Low 또는 아날로그</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>예산 7 µA 에 LED 1 mA</b> 하나가 섞이면 평균 1 007 µA — CR2032 는 <b>약 9 일</b> 만에 끝납니다. 풀업 330 µA 하나면 약 27 일.
+        누설은 "조금 더"가 아니라 <b>수명 단위가 바뀌는</b> 문제입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">잠들기 전 정리와 배터리의 현실</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">안 쓰는 핀을 아날로그로 — 단, SWD 는 빼고</h4>
+      <pre class="code" data-lang="c"><code>static void gpio_park_unused(void)
+{
+    GPIO_InitTypeDef g = {0};
+    g.Mode = GPIO_MODE_ANALOG;           /* 입력 버퍼를 끊어 떠 있는 핀의 관통 전류 제거 */
+    g.Pull = GPIO_NOPULL;
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    g.Pin = GPIO_PIN_All &amp; ~(GPIO_PIN_13 | GPIO_PIN_14 | USED_PA_PINS);
+    HAL_GPIO_Init(GPIOA, &amp;g);            /* PA13 · PA14 = SWDIO · SWCLK — 건드리면 디버거 끊김 */
+
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    g.Pin = GPIO_PIN_All &amp; ~USED_PB_PINS;
+    HAL_GPIO_Init(GPIOB, &amp;g);
+    /* … C · D · H 도 같은 방식, 끝나면 안 쓰는 포트의 클럭은 끈다 */
+    __HAL_RCC_GPIOB_CLK_DISABLE();
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        양산 빌드에서 SWD 핀까지 아날로그로 돌리면 몇 µA 를 더 아낄 수 있지만, 현장 불량품을 회수했을 때 디버거가 붙지 않습니다.
+        RDP(PROD 11)로 이미 잠겨 있다면 득실을 따져 결정합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">배터리 용량은 "조건부"입니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">현실</th><th>설계에 반영</th></tr>
+        <tr><td>CR2032 의 220 mAh 는 작은 연속 부하 기준</td><td>수 mA 펄스에선 내부 저항으로 전압이 처지고 쓸 수 있는 용량이 줄어듦 → 송신 펄스를 <b>커패시터</b>로 받쳐 줌</td></tr>
+        <tr><td>저온</td><td>영하에선 용량 · 펄스 능력이 크게 감소 — 사용 온도 범위로 계산</td></tr>
+        <tr><td>자가 방전</td><td>알칼리 AA 는 이론 40 년이어도 10 년 안팎이 상한</td></tr>
+        <tr><td>종료 전압</td><td>MCU · 무선 · BOR(PROD 06)이 요구하는 최저 전압에서 "빈 배터리"</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>현장에서 배터리 전압을 올리세요</b> — 송신 직후(가장 처졌을 때) 전압을 매번 기록해 서버에서 장비별 추세를 그리면,
+        예산표와 실제가 어긋나는 장비(누설 불량)를 출하 몇 주 만에 찾아냅니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 배터리 수명 = <b>용량 ÷ 평균 전류</b>, 평균 전류 = <b>Σ(전류 × 시간) ÷ 주기</b>. 예산표를 먼저 쓰고, PPK2 같은 프로파일러로 실측해 맞춥니다.
+    떠 있는 핀 · 풀업 · LED · 레귤레이터 Iq 같은 <b>누설 하나가 수명을 년에서 일 단위로</b> 바꿉니다.</div>
+</section>
+
+
+<!-- ==================== o09 ==================== -->
+<section class="sec" id="o09">
+  <div class="sec-head rv">
+    <span class="no">PROD 09</span>
+    <h2>현장 로그 · 크래시 리포트 운영 — <span class="t">만 대 중 한 대</span>가 왜 죽었나</h2>
+    <p class="lead">
+      서버라면 로그가 ELK 로 흘러가고 예외는 Sentry 가 묶어 줍니다. 펌웨어에는 디스크도 상시 연결도 없습니다.
+      그래서 <b>장비 안에 작은 링 로그를 두고, 다음에 연결될 때 올리고, 서버에서 빌드 ID 로 심볼을 붙여 묶는</b> 파이프라인을 직접 만듭니다.
+      HardFault 순간 레지스터를 .noinit 에 남기는 기술적 구현은 🐞 디버깅 · 테스트 탭에서 다루고, 여기서는 그것을 <b>현장에서 모아 운영하는 법</b>을 봅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 188" role="img" aria-label="현장 로그와 크래시 리포트 파이프라인 다섯 단계. 장비에서 이벤트와 크래시를 기록하고, Flash 와 .noinit 에 리셋을 넘겨 보존하고, 다음 부팅 뒤 연결되면 버전과 빌드 ID 를 붙여 업로드하고, 서버가 빌드 ID 로 보관된 elf 를 찾아 주소를 함수와 줄 번호로 바꾸고, 같은 서명끼리 묶어 버전별 추세와 알림을 만든다. 앞의 두 단계는 장비, 뒤의 두 단계는 서버에서 일어난다.">
+      <text x="16" y="18" class="lbl">현장 로그 파이프라인 — 앞의 둘은 장비, 뒤의 둘은 서버</text>
+
+      <polygon class="chev" points="16,40 116,40 132,64 116,88 16,88 32,64"/>
+      <text x="76" y="61" class="val" text-anchor="middle">기록</text>
+      <text x="76" y="76" class="ann" text-anchor="middle">이벤트 · 크래시</text>
+      <polygon class="chev" points="142,40 242,40 258,64 242,88 142,88 158,64"/>
+      <text x="202" y="61" class="val" text-anchor="middle">보존</text>
+      <text x="202" y="76" class="ann" text-anchor="middle">Flash · .noinit</text>
+      <polygon class="chev" points="268,40 368,40 384,64 368,88 268,88 284,64"/>
+      <text x="328" y="61" class="val" text-anchor="middle">업로드</text>
+      <text x="328" y="76" class="ann" text-anchor="middle">+ 빌드 ID</text>
+      <polygon class="chev" points="394,40 494,40 510,64 494,88 394,88 410,64"/>
+      <text x="454" y="61" class="val" text-anchor="middle">심볼화</text>
+      <text x="454" y="76" class="ann" text-anchor="middle">.elf 로 주소 해석</text>
+      <polygon class="chev s4" points="520,40 620,40 636,64 620,88 520,88 536,64"/>
+      <text x="578" y="61" class="val" text-anchor="middle">묶기 · 알림</text>
+      <text x="578" y="76" class="ann" text-anchor="middle">서명별 · 버전별</text>
+
+      <path class="brk" d="M16 100 L16 106 L258 106 L258 100"/>
+      <text x="137" y="122" class="ann" text-anchor="middle">장비 — 전원이 꺼져도 남아야 함</text>
+      <path class="brk" d="M394 100 L394 106 L636 106 L636 100"/>
+      <text x="515" y="122" class="ann" text-anchor="middle">서버 — .elf 가 없으면 주소만 남음</text>
+
+      <text x="16" y="156" class="lbl">빌드 ID 하나가 장비의 주소와 서버의 소스 줄 번호를 잇는 유일한 열쇠입니다</text>
+      <text x="16" y="176" class="ann">업로드가 실패해도 장비 쪽 기록은 지우지 않습니다 — 서버가 받았다고 답한 순번까지만 지웁니다</text>
+    </svg>
+    <div class="cap">파이프라인 — <b>기록 · 보존 · 업로드 · 심볼화 · 묶기</b>. 어느 한 칸이 빠지면 현장 버그는 "재현 불가"로 닫힙니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 기록하나 — 문자열 대신 토큰</h4>
+      <pre class="code" data-lang="c"><code>/* 장비엔 숫자만 — 문자열 "I2C timeout addr=%02x" 는 .elf · 사전 파일에만 */
+typedef struct __attribute__((packed)) {
+    uint16_t magic;     /* 0xA55A — 0xFFFF 이면 빈 칸 */
+    uint16_t len;       /* 뒤따르는 인자 바이트 수 */
+    uint32_t seq;       /* 전역 순번 — 업로드 확인(ack) 기준 */
+    uint32_t t_ms;      /* 부팅 후 ms (RTC 가 있으면 UTC 도) */
+    uint16_t boot_no;   /* 몇 번째 부팅인가 — 리셋 전후 구분 */
+    uint16_t event;     /* 이벤트 토큰 */
+    uint32_t crc;       /* 헤더 + 인자 */
+} log_hdr_t;            /* 20 B + 인자 몇 바이트 */
+
+#define LOG_W(ev, ...)  log_put(LV_WARN, (ev), __VA_ARGS__)
+LOG_W(EV_I2C_TIMEOUT, addr, retries);   /* 20 + 2 B 남짓 */</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>토큰 로깅</b>은 printf 문자열 대신 번호와 인자만 남기고 해석은 PC 에서 합니다. Flash · 대역폭이 10배 가까이 줄고
+        문자열이 바이너리에 남지 않아 보안에도 좋습니다. Pigweed tokenizer · Zephyr 사전 로깅 · Trice 같은 구현이 있습니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기록 수준 — 현장에선 무엇을 켜 두나</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:26%">종류</th><th>예</th><th style="width:22%">보존</th></tr>
+        <tr><td>부팅 기록</td><td>리셋 플래그 · 부팅 번호 · 버전 (PROD 06)</td><td>항상</td></tr>
+        <tr><td>크래시</td><td>폴트 레지스터 · PC · LR · 스택 일부</td><td>항상 · 최우선</td></tr>
+        <tr><td>경고</td><td>통신 재시도 · 센서 범위 밖 · 저전압</td><td>링 로그</td></tr>
+        <tr><td>지표</td><td>업타임 · 최대 스택 사용량 · 배터리 전압</td><td>주기 요약</td></tr>
+        <tr><td>디버그</td><td>상세 흐름</td><td>원격 명령으로 잠시만</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>개인정보</b> — 위치 · 사용 패턴이 담기면 개인정보가 됩니다. 수집 항목을 문서화하고, 필요 없는 것은 장비에서 아예 기록하지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">링 로그를 Flash 에 — <span class="t">가장 오래된 섹터부터 지운다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="외부 Flash 의 64 킬로바이트 링 로그를 원으로 그린 그림. 4 킬로바이트 섹터 16 개가 시계 방향으로 돌며 쓰인다. 지금 쓰는 칸은 9 번이고, 5 번부터 8 번까지는 아직 서버에 올리지 않은 기록이며, 서버가 받았다고 확인한 순번은 4 번 칸 중간까지다. 9 번이 차면 가장 오래된 기록이 든 10 번 칸을 지우고 이어 쓴다. 업로드가 오래 밀려 쓰는 위치가 확인 위치를 따라잡으면 올리지 않은 기록부터 잃는다.">
+      <text x="16" y="18" class="lbl">외부 Flash 링 로그 64 KB — 4 KB 섹터 16칸이 시계 방향으로 돕니다</text>
+<circle class="nd nd-mut" cx="250" cy="42" r="15"/><text x="250" y="45" class="tk" text-anchor="middle">0</text>
+      <circle class="nd nd-mut" cx="283" cy="49" r="15"/><text x="283" y="52" class="tk" text-anchor="middle">1</text>
+      <circle class="nd nd-mut" cx="311" cy="67" r="15"/><text x="311" y="70" class="tk" text-anchor="middle">2</text>
+      <circle class="nd nd-mut" cx="329" cy="95" r="15"/><text x="329" y="98" class="tk" text-anchor="middle">3</text>
+      <circle class="nd nd-mut" cx="336" cy="128" r="15"/><text x="336" y="131" class="tk" text-anchor="middle">4</text>
+      <circle class="nd nd-ok" cx="329" cy="161" r="15"/><text x="329" y="164" class="tk" text-anchor="middle">5</text>
+      <circle class="nd nd-ok" cx="311" cy="189" r="15"/><text x="311" y="192" class="tk" text-anchor="middle">6</text>
+      <circle class="nd nd-ok" cx="283" cy="207" r="15"/><text x="283" y="210" class="tk" text-anchor="middle">7</text>
+      <circle class="nd nd-ok" cx="250" cy="214" r="15"/><text x="250" y="217" class="tk" text-anchor="middle">8</text>
+      <circle class="nd nd-fw" cx="217" cy="207" r="15"/><text x="217" y="210" class="tk" text-anchor="middle">9</text>
+      <circle class="nd" cx="189" cy="189" r="15" style="stroke:#fbbf24;stroke-dasharray:3 2"/><text x="189" y="192" class="tk" text-anchor="middle">10</text>
+      <circle class="nd nd-mut" cx="171" cy="161" r="15"/><text x="171" y="164" class="tk" text-anchor="middle">11</text>
+      <circle class="nd nd-mut" cx="164" cy="128" r="15"/><text x="164" y="131" class="tk" text-anchor="middle">12</text>
+      <circle class="nd nd-mut" cx="171" cy="95" r="15"/><text x="171" y="98" class="tk" text-anchor="middle">13</text>
+      <circle class="nd nd-mut" cx="189" cy="67" r="15"/><text x="189" y="70" class="tk" text-anchor="middle">14</text>
+      <circle class="nd nd-mut" cx="217" cy="49" r="15"/><text x="217" y="52" class="tk" text-anchor="middle">15</text>
+      <path class="ln ar" d="M254 78 A 50 50 0 1 1 209 99"/>
+      <text x="250" y="126" class="val" text-anchor="middle">64 KB</text>
+      <text x="250" y="141" class="ann" text-anchor="middle">쓰기 방향 ↻</text>
+
+      <circle class="nd nd-mut" cx="396" cy="56" r="7"/>
+      <text x="410" y="60" class="ann">올렸거나 오래된 기록 — 지워도 됨</text>
+      <circle class="nd nd-ok" cx="396" cy="86" r="7"/>
+      <text x="410" y="90" class="ann ok-t">5~8 아직 안 올린 기록</text>
+      <circle class="nd nd-fw" cx="396" cy="116" r="7"/>
+      <text x="410" y="120" class="ann rs-t">9 지금 쓰는 칸</text>
+      <circle class="nd" cx="396" cy="146" r="7" style="stroke:#fbbf24;stroke-dasharray:3 2"/>
+      <text x="410" y="150" class="ann am-t">10 다 차면 지울 칸 — 가장 오래된 4 KB</text>
+      <text x="390" y="182" class="ann">서버 확인(ack) 순번은 4번 칸 중간</text>
+      <text x="390" y="196" class="ann">→ 그 앞은 이미 서버에 있음</text>
+
+      <text x="16" y="246" class="lbl">업로드가 밀려 쓰는 위치(9)가 한 바퀴 돌아 5 에 닿으면 안 올린 기록부터 잃습니다</text>
+    </svg>
+    <div class="cap">순환 — 링은 <b>섹터 단위로 지우며 돕니다</b>. 업로드가 얼마나 밀려도 되는지는 링 크기 ÷ 기록 속도로 정해집니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">덧붙이기 — 섹터를 넘으면 다음 섹터를 지움</h4>
+      <pre class="code" data-lang="c"><code>#define LOG_SECT   4096u
+#define LOG_NSECT  16u
+static uint32_t g_wr;          /* 다음에 쓸 오프셋 (0 ~ 64 KB) */
+
+int log_append(const log_hdr_t *h, const void *args)
+{
+    const uint32_t n = sizeof *h + h-&gt;len;
+    if (n &gt; LOG_SECT) return -1;
+
+    /* 섹터 끝을 넘으면 다음 섹터 처음으로 (기록이 섹터를 걸치지 않게) */
+    if ((g_wr % LOG_SECT) + n &gt; LOG_SECT)
+        g_wr = ((g_wr / LOG_SECT + 1u) % LOG_NSECT) * LOG_SECT;
+    if (g_wr % LOG_SECT == 0u)
+        w25q_erase_4k(LOG_BASE + g_wr);       /* 가장 오래된 4 KB 를 버림 */
+
+    /* w25q_program 은 256 B 페이지 경계에서 나눠 써야 함 (넘으면 같은 페이지 앞을 덮음) */
+    w25q_program(LOG_BASE + g_wr, h, sizeof *h);
+    w25q_program(LOG_BASE + g_wr + sizeof *h, args, h-&gt;len);
+    g_wr += n;
+    if (g_wr &gt;= LOG_NSECT * LOG_SECT) g_wr = 0u;   /* 링 끝에 딱 맞게 찼으면 처음으로 */
+    return 0;
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        부팅 때는 각 섹터의 첫 기록 <code>seq</code> 를 읽어 가장 큰 섹터를 찾고, 그 안을 끝까지 훑어 <code>g_wr</code> 를 복원합니다.
+        CRC 가 깨진 마지막 기록(쓰다 꺼짐)은 건너뜁니다 — PROD 07 의 "확정만 믿는다"와 같은 규칙입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다음 부팅 — 크래시를 리포트로 감싸 보내기</h4>
+      <pre class="code" data-lang="c"><code>typedef struct {
+    uint8_t  dev_id[12];     /* 칩 고유 ID (UID 96비트) */
+    uint32_t fw_ver;
+    uint8_t  build_id[20];   /* GNU build-id (PROD 12) */
+    uint32_t reset_flags;    /* PROD 06 */
+    uint32_t boot_no;
+    crash_rec_t crash;       /* .noinit 에서 꺼낸 것 — 형식은 디버깅 탭 */
+} crash_report_t;
+
+void report_crash_if_any(void)
+{
+    crash_rec_t c;
+    if (!crash_take(&amp;c)) return;          /* 꺼내면서 .noinit 을 지움 */
+    crash_report_t r = { .fw_ver = FW_VERSION,
+                         .reset_flags = g_rst, .boot_no = g_boot_no, .crash = c };
+    memcpy(r.dev_id, (const void *)UID_BASE, 12);
+    memcpy(r.build_id, fw_build_id(), 20);
+    outbox_put(REC_CRASH, &amp;r, sizeof r);   /* 먼저 Flash 에 — 연결되면 전송 */
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>.noinit 에서 바로 보내지 마세요.</b> 연결되기 전에 또 크래시가 나면 첫 번째 기록이 덮입니다. 먼저 Flash 의 보낼 함(outbox)에 옮기고,
+        서버가 받았다고 답한 뒤에만 지웁니다. 같은 크래시가 반복되면 <b>개수만 세는</b> 압축도 필요합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">심볼 보관과 원격 진단</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI 가 .elf 를 빌드 ID 로 보관 · 서버가 해석</h4>
+      <pre class="code" data-lang="bash"><code># CI — 릴리스 빌드마다 (바이너리와 같은 커밋에서 나온 .elf 만 의미가 있음)
+BID=$(arm-none-eabi-readelf -n build/app.elf | awk '/Build ID/ {print $3}')
+aws s3 cp build/app.elf "s3://fw-symbols/${BID}.elf"
+
+# 서버 — 리포트의 build_id 로 .elf 를 찾아 주소를 함수 · 줄로
+arm-none-eabi-addr2line -e "${BID}.elf" -f -C -i 0x08012A4C 0x08011F30
+#   sensor_read      Core/Src/sensor.c:142
+#   app_task_loop    Core/Src/app.c:88</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        스택에 쌓인 <b>LR 값은 Thumb 비트(1)가 켜진 복귀 주소</b>입니다. 호출한 줄을 찾으려면 1 을 빼서(<code>0x08011F31 → 0x08011F30</code>) 넣습니다.
+        서버는 <b>(폴트 종류 · PC 함수 · LR 함수)</b>를 서명으로 삼아 같은 버그를 한 묶음으로 세고, 버전별 발생률을 그립니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">원격 진단 명령 — 인증 · 만료 · 기록</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:34%">명령</th><th>용도</th></tr>
+        <tr><td><code>info</code></td><td>버전 · 빌드 ID · 업타임 · 리셋 통계</td></tr>
+        <tr><td><code>logs since=&lt;seq&gt;</code></td><td>링 로그 일부를 즉시 업로드</td></tr>
+        <tr><td><code>loglevel debug ttl=3600</code></td><td>한 시간만 상세 로그 — 끝나면 저절로 복귀</td></tr>
+        <tr><td><code>metrics</code></td><td>스택 최고 수위 · 힙 · 배터리 · 통신 품질</td></tr>
+        <tr><td><code>reboot</code> · <code>safe-mode</code></td><td>원격 재시작 · 안전 모드 진입 (PROD 06)</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>원격 명령은 곧 원격 공격 표면</b>입니다. 명령마다 서버 서명 + 장비 ID + 만료 시각을 붙여 검증하고(PROD 04 의 공개키 재사용),
+        같은 명령을 다시 보내는 재전송 공격을 막기 위해 순번을 둡니다. 메모리 읽기 · 쓰기 같은 범용 명령은 출하 빌드에 두지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 장비는 <b>토큰 링 로그 + 크래시 기록</b>을 Flash 에 남기고, 다음 연결 때 <b>버전 · 빌드 ID</b>와 함께 올립니다.
+    서버는 빌드 ID 로 보관한 <b>.elf</b> 로 주소를 줄 번호로 바꿔 서명별로 묶습니다. 원격 진단 명령은 <b>서명 · 만료 · 순번</b> 없이는 열지 않습니다.</div>
+</section>
+
+
+<!-- ==================== o10 ==================== -->
+<section class="sec" id="o10">
+  <div class="sec-head rv">
+    <span class="no">PROD 10</span>
+    <h2>생산 공정 — <span class="t">하루 천 대를 같은 손으로</span> 굽고, 시험하고, 기록하기</h2>
+    <p class="lead">
+      책상에선 보드 한 장을 디버거로 굽지만 공장에선 <b>사람이 아니라 스크립트가</b> 굽습니다. 펌웨어 엔지니어가 넘겨야 하는 것은
+      바이너리 하나가 아니라 <b>생산 테스트 펌웨어 · 기록 스크립트 · 합격 기준 · 기록 형식</b>입니다. 서버로 치면 배포 파이프라인과
+      헬스 체크와 감사 로그를 한꺼번에 공장에 넘기는 일입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 196" role="img" aria-label="생산 라인 여섯 단계 파이프라인. 부품 실장과 자동 광학 검사 다음에 지그에서 생산 테스트 펌웨어를 굽고, 기능 시험으로 각 주변장치를 확인하고, 기준 전압 등으로 보정값을 재서 시리얼 번호와 함께 OTP 에 기록하고, 출하 펌웨어로 덮어쓴 뒤 BOR 과 RDP 를 설정하고, 마지막으로 최종 검사와 라벨 부착과 포장을 한다. 모든 단계의 결과는 보드 시리얼 번호로 생산 기록 시스템에 남는다.">
+      <text x="16" y="18" class="lbl">생산 라인 — 각 칸의 결과가 시리얼 번호로 기록 시스템에 쌓입니다</text>
+
+      <polygon class="chev" points="16,40 112,40 126,64 112,88 16,88 30,64"/>
+      <text x="71" y="61" class="val" text-anchor="middle">실장</text>
+      <text x="71" y="76" class="ann" text-anchor="middle">SMT · AOI</text>
+      <polygon class="chev" points="120,40 216,40 230,64 216,88 120,88 134,64"/>
+      <text x="175" y="61" class="val" text-anchor="middle">굽기</text>
+      <text x="175" y="76" class="ann" text-anchor="middle">테스트 FW</text>
+      <polygon class="chev" points="224,40 320,40 334,64 320,88 224,88 238,64"/>
+      <text x="279" y="61" class="val" text-anchor="middle">기능 시험</text>
+      <text x="279" y="76" class="ann" text-anchor="middle">핀 · 통신 · 전류</text>
+      <polygon class="chev" points="328,40 424,40 438,64 424,88 328,88 342,64"/>
+      <text x="383" y="61" class="val" text-anchor="middle">보정 · ID</text>
+      <text x="383" y="76" class="ann" text-anchor="middle">OTP 기록</text>
+      <polygon class="chev" points="432,40 528,40 542,64 528,88 432,88 446,64"/>
+      <text x="487" y="61" class="val" text-anchor="middle">출하 FW</text>
+      <text x="487" y="76" class="ann" text-anchor="middle">BOR · RDP</text>
+      <polygon class="chev s4" points="536,40 632,40 646,64 632,88 536,88 550,64"/>
+      <text x="591" y="61" class="val" text-anchor="middle">최종 검사</text>
+      <text x="591" y="76" class="ann" text-anchor="middle">라벨 · 포장</text>
+
+      <path class="ln" d="M71 96 L71 112 L591 112 L591 96"/>
+      <path class="ln" d="M175 96 L175 112"/>
+      <path class="ln" d="M279 96 L279 112"/>
+      <path class="ln" d="M383 96 L383 112"/>
+      <path class="ln" d="M487 96 L487 112"/>
+      <path class="ln ar" d="M331 112 L331 130"/>
+      <rect class="bx bx-hi" x="206" y="134" width="250" height="28"/>
+      <text x="331" y="152" class="ann" text-anchor="middle">생산 기록 (MES) — 시리얼 · 측정값 · 판정</text>
+      <text x="16" y="186" class="lbl">펌웨어가 관여하는 칸은 가운데 넷 — 그중 RDP 설정이 되돌릴 수 없는 마지막 단계입니다</text>
+    </svg>
+    <div class="cap">파이프라인 — 생산 테스트 펌웨어로 <b>시험 · 보정 · ID 기록</b>을 하고, 출하 펌웨어로 덮어쓴 뒤 <b>맨 마지막에 잠급니다.</b></div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로그래밍 지그</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:30%">방식</th><th>언제</th></tr>
+        <tr><td>Tag-Connect 같은 케이블</td><td>시제품 · 수백 대 — PCB 에 패드만, 커넥터 부품 없음</td></tr>
+        <tr><td><b>포고핀 지그</b></td><td>양산 — 스프링 핀이 테스트 패드를 누름. 보드를 얹고 레버 한 번</td></tr>
+        <tr><td>갱(gang) 프로그래머</td><td>여러 장을 동시에 — 패널 단위 굽기</td></tr>
+        <tr><td>칩 사전 기록</td><td>유통사 · 제조 서비스가 실장 전 칩에 구워 줌 (부트로더만 굽는 경우 많음)</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>EVT 때 테스트 패드를 정하세요</b> — SWDIO · SWCLK · NRST · GND · VDD 에 UART TX/RX · BOOT0 까지 한쪽 면에 모아 두면 지그가 단순해집니다.
+        양산 직전에 패드를 추가하면 보드 리비전이 하나 더 생깁니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">STM32CubeProgrammer CLI 로 한 스테이션</h4>
+      <pre class="code" data-lang="bash"><code>#!/usr/bin/env bash
+set -euo pipefail
+PROBE="$1"                                  # 이 스테이션의 ST-LINK 시리얼
+CLI=STM32_Programmer_CLI
+C="-c port=SWD mode=UR reset=HWrst sn=${PROBE}"
+
+$CLI $C -e all                              # ① 전체 지우기
+$CLI $C -w factory_test-1.5.0.hex -v -rst   # ② 생산 테스트 펌웨어
+python run_tests.py --port /dev/ttyJIG0     # ③④ 시험 · 보정 · OTP 기록 (MES 기록 포함)
+
+$CLI $C -e all                              # ⑤ 출하 펌웨어 (부트로더 + 앱 합친 hex)
+$CLI $C -w release-1.5.0.hex -v
+$CLI $C -ob BOR_LEV=0                       #    BOR 레벨 3
+$CLI $C -ob RDP=0xBB                        #    RDP 1 — 맨 마지막 (이후 읽기 검증 불가)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>전체 지우기는 OTP 를 지우지 않습니다</b> — 그래서 보정값 · 시리얼을 OTP 에 두면 ⑤에서 출하 펌웨어로 갈아 끼워도 남습니다.
+        반대로 메인 Flash 의 섹터에 뒀다면 ⑤의 <code>-e all</code> 이 지웁니다. 공정 순서와 저장 위치는 함께 정해야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">시리얼 · MAC · 보정값은 어디에 — <span class="t">OTP 와 고유 ID</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 222" role="img" aria-label="F446 의 OTP 영역 배치. 0x1FFF 7800 부터 32 바이트 블록 16 개가 있고 블록 0 에 시리얼과 MAC 과 하드웨어 리비전, 블록 1 에 보정값 버전 1 이 기록되어 잠겨 있다. 블록 2 는 재보정 때 쓸 예비이고 나머지는 비어 있다. 0x1FFF 7A00 부터는 블록마다 잠금 바이트가 하나씩 있어 0x00 을 쓰면 그 블록은 영구히 쓸 수 없다. 바로 뒤 0x1FFF 7A10 에는 칩마다 다른 96 비트 고유 ID 가 공장에서 기록되어 있다.">
+      <text x="16" y="18" class="lbl">F446 OTP 512 B — 32 B 블록 16개 + 잠금 바이트 16개 (지울 수 없음)</text>
+
+      <text x="16" y="48" class="ann">0x1FFF 7800</text>
+      <rect class="bx bx-ok" x="96" y="34" width="66" height="40" rx="3"/>
+      <text x="129" y="51" class="ann ok-t" text-anchor="middle">0</text>
+      <text x="129" y="65" class="tk" text-anchor="middle">ID</text>
+      <rect class="bx bx-ok" x="164" y="34" width="66" height="40" rx="3"/>
+      <text x="197" y="51" class="ann ok-t" text-anchor="middle">1</text>
+      <text x="197" y="65" class="tk" text-anchor="middle">보정 v1</text>
+      <rect class="bx bx-hi" x="232" y="34" width="66" height="40" rx="3"/>
+      <text x="265" y="51" class="ann am-t" text-anchor="middle">2</text>
+      <text x="265" y="65" class="tk" text-anchor="middle">재보정</text>
+      <rect class="bx bx-mut" x="300" y="34" width="66" height="40" rx="3"/>
+      <text x="333" y="58" class="tk" text-anchor="middle">3</text>
+      <rect class="bx bx-mut" x="368" y="34" width="66" height="40" rx="3"/>
+      <text x="401" y="58" class="tk" text-anchor="middle">4</text>
+      <rect class="bx bx-mut" x="436" y="34" width="66" height="40" rx="3"/>
+      <text x="469" y="58" class="tk" text-anchor="middle">…</text>
+      <rect class="bx bx-mut" x="504" y="34" width="66" height="40" rx="3"/>
+      <text x="537" y="58" class="tk" text-anchor="middle">15</text>
+
+      <text x="16" y="104" class="ann">0x1FFF 7A00</text>
+      <rect class="cel h4" x="96" y="90" width="66" height="22"/><text x="129" y="105" class="tk" text-anchor="middle">00 잠금</text>
+      <rect class="cel h4" x="164" y="90" width="66" height="22"/><text x="197" y="105" class="tk" text-anchor="middle">00 잠금</text>
+      <rect class="cel h0" x="232" y="90" width="66" height="22"/><text x="265" y="105" class="tk" text-anchor="middle">FF</text>
+      <rect class="cel h0" x="300" y="90" width="66" height="22"/><text x="333" y="105" class="tk" text-anchor="middle">FF</text>
+      <rect class="cel h0" x="368" y="90" width="66" height="22"/><text x="401" y="105" class="tk" text-anchor="middle">FF</text>
+      <rect class="cel h0" x="436" y="90" width="66" height="22"/><text x="469" y="105" class="tk" text-anchor="middle">FF</text>
+      <rect class="cel h0" x="504" y="90" width="66" height="22"/><text x="537" y="105" class="tk" text-anchor="middle">FF</text>
+
+      <text x="16" y="138" class="ann">0x1FFF 7A10</text>
+      <rect class="bx bx-fw" x="96" y="124" width="474" height="24" rx="3"/>
+      <text x="333" y="140" class="tk" text-anchor="middle">UID 96비트 — ST 가 칩마다 기록 · 읽기 전용</text>
+
+      <text x="16" y="178" class="lbl">블록 0 = 매직 · 시리얼 16자 · MAC 6 B · HW 리비전 · CRC — 정확히 32 B</text>
+      <text x="16" y="196" class="ann">보정을 다시 해야 하면 새 블록에 쓰고 펌웨어는 "잠긴 블록 중 마지막 보정"을 씁니다 — 16칸이 전부입니다</text>
+      <text x="16" y="214" class="ann">RDP 레벨을 내려 Flash 를 지워도 OTP 와 UID 는 남습니다</text>
+    </svg>
+    <div class="cap">메모리 배치 — OTP 는 <b>한 번 쓰고 잠그는</b> 공장 전용 영역입니다. 잠금 바이트를 0x00 으로 쓰는 순간 그 블록은 영구히 고정됩니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">생산 테스트 펌웨어의 OTP 기록</h4>
+      <pre class="code" data-lang="c"><code>#define OTP_BASE  0x1FFF7800u
+#define OTP_LOCK  0x1FFF7A00u
+typedef struct {
+    uint32_t magic;        /* 0x1D0B10C0 */
+    char     serial[16];   /* MES 가 발급 — 라벨과 같은 값 */
+    uint8_t  mac[6];
+    uint8_t  hw_rev;
+    uint8_t  _rsv;
+    uint32_t crc;          /* 앞 28 B 의 CRC32 */
+} otp_ident_t;
+_Static_assert(sizeof(otp_ident_t) == 32, "OTP 블록 하나");
+
+HAL_StatusTypeDef otp_write_block(uint32_t blk, const void *src)
+{
+    if (blk &gt;= 16u) return HAL_ERROR;
+    const uint32_t a = OTP_BASE + 32u * blk;
+    const uint32_t *w = src;
+    for (uint32_t i = 0; i &lt; 8u; i++)            /* 이미 쓰인 블록이면 거부 */
+        if (((const volatile uint32_t *)a)[i] != 0xFFFFFFFFu) return HAL_ERROR;
+
+    HAL_StatusTypeDef st = HAL_OK;
+    HAL_FLASH_Unlock();
+    for (uint32_t i = 0; st == HAL_OK &amp;&amp; i &lt; 8u; i++)
+        st = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, a + 4u * i, w[i]);
+    if (st == HAL_OK &amp;&amp; memcmp((const void *)a, src, 32u) != 0) st = HAL_ERROR;
+    if (st == HAL_OK)                               /* 읽어서 맞을 때만 잠금 */
+        st = HAL_FLASH_Program(FLASH_TYPEPROGRAM_BYTE, OTP_LOCK + blk, 0x00u);
+    HAL_FLASH_Lock();
+    return st;
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">값마다 출처가 다릅니다</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">값</th><th>출처 · 저장</th></tr>
+        <tr><td>시리얼 번호</td><td>MES 가 발급(사람이 읽는 형식) → OTP · 라벨 · DB 셋이 같은 값. 칩 UID 는 보조 키로 함께 기록</td></tr>
+        <tr><td>MAC 주소</td><td>IEEE 에서 산 주소 블록 중 MES 가 배정 · 또는 EUI-48 내장 EEPROM 칩 · 무선 모듈에 이미 들어 있는 주소</td></tr>
+        <tr><td>보정값</td><td>지그의 기준 전압 · 온도로 측정 → ADC 오프셋 · 이득 → OTP (재보정 여유 블록)</td></tr>
+        <tr><td>장비별 비밀</td><td>클라우드 인증서 · 키 — OTP 에 평문으로 두지 말 것 (PROD 11)</td></tr>
+      </table></div>
+      <div class="note info" style="margin-bottom:0">
+        OTP 칸이 모자라거나 F446 처럼 작다면 <b>메인 Flash 의 마지막 섹터를 "공장 영역"</b>으로 두고 WRP 로 보호하는 방법도 흔합니다.
+        이때는 ⑤ 단계에서 <code>-e all</code> 대신 섹터를 골라 지워야 합니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">시험 결과는 한 줄도 버리지 않는다</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">한 대의 생산 기록</h4>
+      <pre class="code" data-lang="json"><code>{
+  "serial": "SN26A0012345",
+  "uid": "003A00253238511834383931",
+  "station": "FT-02", "fixture": "JIG-07", "operator": "kim",
+  "fw_test": "factory_test-1.5.0+42", "fw_release": "1.5.0+42",
+  "build_id": "3f2a9c1e…",
+  "measurements": [
+    {"name": "vdd_3v3",      "value": 3.312, "lo": 3.20, "hi": 3.40, "pass": true},
+    {"name": "sleep_ua",     "value": 3.8,   "lo": 0,    "hi": 6.0,  "pass": true},
+    {"name": "adc_offset_mv","value": -4.2,  "lo": -15,  "hi": 15,   "pass": true}
+  ],
+  "result": "PASS",
+  "started": "2026-09-30T08:14:02Z", "duration_s": 41.7
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>측정값을 합격 · 불합격이 아니라 숫자로</b> 남기세요. 잠 전류가 "합격이지만 6 µA 상한에 붙은" 보드가 늘기 시작하면 부품 로트 문제를
+        불량이 터지기 전에 봅니다. 현장 반품이 오면 이 기록이 첫 번째 증거입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">생산 테스트 펌웨어가 지켜야 할 것</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">규칙</th><th>이유</th></tr>
+        <tr><td>명령-응답 프로토콜 (UART)</td><td>지그 PC 의 스크립트가 순서를 정함 — 펌웨어는 시키는 것만</td></tr>
+        <tr><td>항목마다 숫자 결과</td><td>판정 기준은 PC 쪽 설정에 — 기준을 바꿔도 펌웨어는 그대로</td></tr>
+        <tr><td>시간 상한</td><td>한 대에 수십 초 — 라인 속도(택트 타임)가 비용</td></tr>
+        <tr><td>재시험 정책</td><td>몇 번까지 다시 해도 되나, 재시험 이력도 기록</td></tr>
+        <tr><td>출하 이미지에 남기지 않기</td><td>PROD 01 — 테스트 명령은 출하 빌드에 없음</td></tr>
+      </table></div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>지그도 고장 납니다.</b> 포고핀이 닳으면 접촉 불량이 "보드 불량"으로 기록됩니다. 하루 시작마다 <b>골든 보드</b>(합격이 확실한 기준 보드)로
+        지그를 먼저 시험하고, 지그별 불량률을 대시보드에 둡니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 공장은 <b>테스트 펌웨어로 시험 · 보정 · ID 기록 → 출하 펌웨어 → BOR · RDP 잠금</b> 순서로 갑니다.
+    시리얼 · 보정값은 지워지지 않는 <b>OTP</b>(또는 보호된 공장 섹터)에, 모든 측정값은 <b>숫자로 MES 에</b> 남깁니다.</div>
+</section>
+
+
+<!-- ==================== o11 ==================== -->
+<section class="sec" id="o11">
+  <div class="sec-head rv">
+    <span class="no">PROD 11</span>
+    <h2>보안 — <span class="t">읽기 보호 · 키 · 공격 · 규제</span>, 제품이 지켜야 할 최소선</h2>
+    <p class="lead">
+      서버는 데이터센터 안에 있지만 제품은 <b>공격자의 책상 위</b>에 있습니다. 납땜인두와 디버거, 전원 장치를 가진 사람이 몇 주를 들여도 되는 환경입니다.
+      그래서 펌웨어 보안은 "못 뚫게"가 아니라 <b>"한 대를 뚫어도 나머지는 안전하게, 뚫는 비용이 얻는 것보다 크게"</b>가 목표입니다.
+      그리고 2026 년 지금, 보안은 선택이 아니라 <b>판매 조건</b>이 되어 가고 있습니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 230" role="img" aria-label="STM32F4 읽기 보호 레벨 세 가지를 다섯 항목으로 비교한 매트릭스. 레벨 0 은 디버거 접속과 Flash 읽기와 RAM 이나 시스템 부트로더 부팅과 옵션 바이트 변경이 모두 가능하다. 레벨 1 은 디버거가 붙을 수는 있지만 Flash 를 읽을 수 없고 RAM 이나 시스템 부트로더로 부팅해도 Flash 를 못 읽으며 레벨 0 으로 내리면 Flash 전체가 지워진다. 레벨 2 는 디버그 포트가 영구히 닫히고 RAM 과 시스템 부트로더 부팅이 막히며 옵션 바이트도 바꿀 수 없고 되돌릴 수 없다. 레벨 2 에서도 자체 부트로더를 통한 업데이트는 가능하다.">
+      <text x="16" y="18" class="lbl">RDP 레벨 — 진할수록 잠겨 있습니다 (옵션 바이트 RDP: AA = 0 · CC = 2 · 그 밖 = 1)</text>
+
+      <text x="208" y="42" class="tk" text-anchor="middle">디버거 접속</text>
+      <text x="304" y="42" class="tk" text-anchor="middle">Flash 읽기</text>
+      <text x="400" y="42" class="tk" text-anchor="middle">RAM · ROM 부팅</text>
+      <text x="496" y="42" class="tk" text-anchor="middle">옵션 바이트</text>
+      <text x="592" y="42" class="tk" text-anchor="middle">되돌리기</text>
+
+      <text x="16" y="70" class="ann">레벨 0 (개발)</text>
+      <rect class="cel h0" x="162" y="52" width="92" height="30"/><text x="208" y="71" class="tk" text-anchor="middle">가능</text>
+      <rect class="cel h0" x="258" y="52" width="92" height="30"/><text x="304" y="71" class="tk" text-anchor="middle">가능</text>
+      <rect class="cel h0" x="354" y="52" width="92" height="30"/><text x="400" y="71" class="tk" text-anchor="middle">가능</text>
+      <rect class="cel h0" x="450" y="52" width="92" height="30"/><text x="496" y="71" class="tk" text-anchor="middle">변경 가능</text>
+      <rect class="cel h0" x="546" y="52" width="92" height="30"/><text x="592" y="71" class="tk" text-anchor="middle">—</text>
+
+      <text x="16" y="108" class="ann ok-t">레벨 1 (흔한 양산)</text>
+      <rect class="cel h2" x="162" y="90" width="92" height="30"/><text x="208" y="109" class="tk" text-anchor="middle">붙기는 함</text>
+      <rect class="cel h4" x="258" y="90" width="92" height="30"/><text x="304" y="109" class="tk" text-anchor="middle">차단</text>
+      <rect class="cel h4" x="354" y="90" width="92" height="30"/><text x="400" y="109" class="tk" text-anchor="middle">Flash 못 읽음</text>
+      <rect class="cel h2" x="450" y="90" width="92" height="30"/><text x="496" y="109" class="tk" text-anchor="middle">변경 가능</text>
+      <rect class="cel h2" x="546" y="90" width="92" height="30"/><text x="592" y="109" class="tk" text-anchor="middle">→0 전체 지움</text>
+
+      <text x="16" y="146" class="ann rs-t">레벨 2 (영구)</text>
+      <rect class="cel h5" x="162" y="128" width="92" height="30"/><text x="208" y="147" class="tk" text-anchor="middle">영구 차단</text>
+      <rect class="cel h5" x="258" y="128" width="92" height="30"/><text x="304" y="147" class="tk" text-anchor="middle">차단</text>
+      <rect class="cel h5" x="354" y="128" width="92" height="30"/><text x="400" y="147" class="tk" text-anchor="middle">막힘</text>
+      <rect class="cel h5" x="450" y="128" width="92" height="30"/><text x="496" y="147" class="tk" text-anchor="middle">고정</text>
+      <rect class="cel h5" x="546" y="128" width="92" height="30"/><text x="592" y="147" class="tk rs-t" text-anchor="middle">불가</text>
+
+      <text x="16" y="184" class="lbl">레벨 2 에서도 내 부트로더는 앱 영역을 지우고 쓸 수 있습니다 — OTA 는 계속 됩니다</text>
+      <text x="16" y="202" class="lbl">레벨 2 는 불량 분석(RMA)도 불가 — ST 도 칩을 열어 주지 못합니다</text>
+      <text x="16" y="222" class="ann">OTP · UID 는 레벨 1 → 0 의 전체 지우기에서도 남습니다 (PROD 10)</text>
+    </svg>
+    <div class="cap">매트릭스 — 대부분의 양산품은 <b>레벨 1</b>, 되돌릴 수 없는 <b>레벨 2</b> 는 위협 모델이 요구할 때만 고릅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">잠금 세 가지 — RDP · WRP · 디버그 포트</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%">장치</th><th>막는 것</th><th>주의</th></tr>
+        <tr><td><b>RDP</b></td><td>외부에서 Flash 읽기 (펌웨어 복제 · 분석)</td><td>레벨 1 → 0 은 전체 지움, 레벨 2 는 영구</td></tr>
+        <tr><td><b>WRP</b> (nWRP)</td><td>섹터별 지우기 · 쓰기 — 부트로더 S0~S1 보호</td><td>레벨 1 에선 풀 수 있음 · 레벨 2 와 함께면 영구</td></tr>
+        <tr><td>디버그 포트</td><td>SWD 로 실행 제어 · RAM 읽기</td><td>RDP 2 만이 하드웨어적으로 닫음 — SWD 핀을 GPIO 로 바꾸는 건 리셋 직후 틈이 남음</td></tr>
+      </table></div>
+      <pre class="code" data-lang="c"><code>/* 부트로더 섹터 0 · 1 쓰기 보호 — 생산 테스트 펌웨어나 공정 단계에서 한 번 */
+FLASH_OBProgramInitTypeDef ob = {0};
+ob.OptionType = OPTIONBYTE_WRP;
+ob.WRPState   = OB_WRPSTATE_ENABLE;
+ob.WRPSector  = OB_WRP_SECTOR_0 | OB_WRP_SECTOR_1;
+ob.Banks      = FLASH_BANK_1;
+HAL_FLASH_Unlock();
+HAL_FLASH_OB_Unlock();
+HAL_FLASHEx_OBProgram(&amp;ob);
+HAL_FLASH_OB_Launch();          /* 적용 — 확인은 STM32_Programmer_CLI -ob displ */
+HAL_FLASH_OB_Lock();
+HAL_FLASH_Lock();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">RDP 2 를 걸기 전에</h4>
+      <div class="note warn">
+        <b>레벨 2 는 되돌릴 수 없습니다.</b> 개발 보드에 실수로 걸면 그 보드는 다시 굽지 못하는 쇳덩이가 됩니다.
+        공정 스크립트에서 RDP 2 를 쓰는 줄은 <b>별도 확인 단계</b>를 두고, 펌웨어가 스스로 레벨 2 를 거는 코드는 두지 않는 것이 안전합니다.
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>RDP 는 금고가 아니라 자물쇠</b>입니다. 공개 연구에서 여러 STM32 계열(특히 오래된 F0 · F1 · F2 등)의 읽기 보호를 전압 글리치나
+        설계상의 틈으로 우회한 사례가 발표됐습니다. "RDP 를 걸었으니 키를 Flash 에 둬도 된다"는 결론은 위험합니다 — 아래 키 문제로 이어집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">키를 어디에 두나 · <span class="t">TrustZone</span> · 사이드채널 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">키 저장 — 위험한 순서대로</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">방식</th><th>판정</th></tr>
+        <tr><td>모든 장비가 같은 대칭키를 Flash 에</td><td>❌ 한 대 추출 = 전 제품 위조 · 복호화</td></tr>
+        <tr><td>장비마다 다른 키를 Flash 에 (RDP 1)</td><td>△ 피해가 그 한 대로 한정 — F4 의 현실적 하한</td></tr>
+        <tr><td>검증용 <b>공개키</b>만 Flash 에</td><td>✅ 서명 검증(PROD 04)엔 비밀이 필요 없음</td></tr>
+        <tr><td><b>보안 소자</b>에 개인키 (밖으로 안 나옴)</td><td>✅ ATECC608 · SE050 · STSAFE-A 같은 I2C 칩 — 키는 칩 안에서 서명만</td></tr>
+        <tr><td>TrustZone 의 보안 영역 + 키 저장소</td><td>✅ U5 · H5 · L5 같은 Armv8-M 칩</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>"모든 장비 공통 비밀"을 만들지 않는 것</b>이 설계의 첫 원칙입니다. 클라우드 접속도 장비별 인증서(공장에서 발급 · PROD 10)로 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">TrustZone-M — 한 칩 안의 두 세계</h4>
+      <pre class="code" data-lang="c"><code>/* 보안 쪽 (gcc -mcmse) — 비보안 앱이 부를 수 있는 입구 */
+__attribute__((cmse_nonsecure_entry))
+int secure_sign(const uint8_t *msg, uint32_t len, uint8_t sig[64])
+{
+    /* 개인키는 보안 메모리에만 — 비보안 쪽은 주소조차 못 읽음
+       포인터 인자는 cmse_check_address_range() 로 비보안 영역인지 확인 */
+    return do_sign_with_device_key(msg, len, sig);
+}
+/* 비보안 앱(통신 스택 · UI)은 이 함수만 부를 수 있고, 버그로 장악당해도 키는 못 꺼냄 */</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        Armv8-M(Cortex-M33 등)은 메모리를 <b>보안 / 비보안</b>으로 나누고(SAU · IDAU), 비보안 코드는 정해진 입구(NSC 영역의 SG 명령)로만 보안 함수를 부릅니다.
+        서버에 빗대면 <b>같은 머신 안의 별도 권한 프로세스</b>입니다. 보안 쪽 서비스(암호 · 보안 저장 · 증명)는 Trusted Firmware-M 이 표준 구현을 제공합니다.
+        F446(M4)에는 없습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ memcmp 로 MAC · 해시 비교 · bool 하나로 분기</h5>
+      <pre class="code" data-lang="c"><code>if (memcmp(tag, expect, 16) == 0)   /* 첫 바이트가 틀리면 바로 끝남
+                                       → 걸린 시간으로 한 바이트씩 추측 */
+    unlock();
+
+if (image_signature_ok(h))           /* 전압 글리치로 분기 한 번만
+    jump_to_app(base);                  건너뛰면 서명 검사 우회 */</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 상수 시간 비교 · 이중 확인 · 큰 해밍 거리 값</h5>
+      <pre class="code" data-lang="c"><code>int ct_memeq(const void *a, const void *b, size_t n)
+{
+    const volatile uint8_t *x = a, *y = b;
+    uint8_t d = 0;
+    for (size_t i = 0; i &lt; n; i++) d |= x[i] ^ y[i];   /* 항상 n 번 */
+    return d == 0;
+}
+
+#define SEC_OK 0x3CA5965Au              /* 1 대신 비트가 고르게 섞인 값 */
+volatile uint32_t r1 = verify_image(h); /* 성공이면 SEC_OK */
+if (r1 != SEC_OK) fail_secure();
+volatile uint32_t r2 = verify_image(h); /* 다시 — 글리치 한 번으로 둘 다 넘기 어렵게 */
+if (r2 != SEC_OK || r1 != r2) fail_secure();
+jump_to_app(base);</code></pre>
+    </div>
+  </div>
+
+  <div class="note info rv">
+    <b>사이드채널 · 글리치는 개념만 알아도 코드가 달라집니다.</b> <b>사이드채널</b>은 연산 시간 · 전력 소모 · 전자파로 비밀을 엿보는 공격(타이밍 · SPA/DPA),
+    <b>글리치(오류 주입)</b>는 전압 · 클럭 · 전자기 펄스를 순간적으로 흔들어 명령 하나를 건너뛰게 하는 공격입니다.
+    방어의 기본은 위처럼 <b>비밀에 의존하는 분기 · 조기 종료 없애기</b>와 <b>중요한 판정을 두 번, 다른 표현으로</b>입니다. 암호는 직접 짜지 말고 검증된 라이브러리를 씁니다.
+  </div>
+
+  <h3 class="sub" data-lv="a">규제 동향 — <span class="t">보안 업데이트가 법적 의무</span>가 되어 갑니다 <span class="lvl h">🔴 실무</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 214" role="img" aria-label="연결 제품 보안 규제 타임라인. 2024 년 4 월 영국 PSTI 제품 보안 제도가 시행되었고, 2024 년 12 월 EU 사이버 복원력법 CRA 가 발효되었다. 2025 년 8 월 EU 무선기기 지침의 사이버보안 요건이 적용되기 시작했고, 2026 년 9 월 CRA 의 취약점과 사고 보고 의무가 시작되었다. 지금은 2026 년 10 월이며, 2027 년 12 월 CRA 의 나머지 의무가 전면 적용된다.">
+      <text x="16" y="18" class="lbl">연결 제품 보안 규제 — 위는 시작된 것, 세로 점선이 지금(2026-10)</text>
+      <path class="ax ar" d="M40 110 L652 110"/>
+      <path class="ln" d="M60 104 L60 116"/><text x="60" y="132" class="tk" text-anchor="middle">2024</text>
+      <path class="ln" d="M205 104 L205 116"/><text x="205" y="132" class="tk" text-anchor="middle">2025</text>
+      <path class="ln" d="M350 104 L350 116"/><text x="350" y="132" class="tk" text-anchor="middle">2026</text>
+      <path class="ln" d="M495 104 L495 116"/><text x="495" y="132" class="tk" text-anchor="middle">2027</text>
+      <path class="ln" d="M640 104 L640 116"/><text x="640" y="132" class="tk" text-anchor="middle">2028</text>
+
+      <circle class="dot" cx="108" cy="110" r="5"/>
+      <path class="lead-ln" d="M108 104 L108 84"/>
+      <text x="108" y="76" class="ann" text-anchor="middle">2024-04 영국 PSTI</text>
+      <text x="108" y="64" class="ann" text-anchor="middle">공통 기본 비밀번호 금지</text>
+
+      <circle class="dot" cx="196" cy="110" r="5"/>
+      <path class="lead-ln" d="M196 116 L196 146"/>
+      <text x="196" y="158" class="ann" text-anchor="middle">2024-12 EU CRA 발효</text>
+
+      <circle class="dot" cx="289" cy="110" r="5"/>
+      <path class="lead-ln" d="M289 104 L289 84"/>
+      <text x="289" y="76" class="ann" text-anchor="middle">2025-08 EU 무선기기</text>
+      <text x="289" y="64" class="ann" text-anchor="middle">사이버보안 요건 적용</text>
+
+      <circle class="dot" cx="450" cy="110" r="5" style="fill:#fbbf24"/>
+      <path class="lead-ln" d="M450 116 L450 146"/>
+      <text x="450" y="158" class="ann am-t" text-anchor="middle">2026-09 CRA 보고 의무</text>
+      <text x="450" y="172" class="ann" text-anchor="middle">악용 취약점 · 사고 통보</text>
+
+      <path d="M459 40 L459 186" style="stroke:#fb7185;stroke-width:1.2;stroke-dasharray:4 3;fill:none"/>
+      <text x="466" y="48" class="ann rs-t">지금</text>
+
+      <circle class="dot" cx="631" cy="110" r="5" style="fill:#34d399"/>
+      <path class="lead-ln" d="M631 104 L631 84"/>
+      <text x="640" y="76" class="ann ok-t" text-anchor="end">2027-12 CRA 전면 적용</text>
+      <text x="640" y="64" class="ann" text-anchor="end">CE 표시의 조건</text>
+
+      <text x="16" y="206" class="lbl">EU 에 파는 "디지털 요소가 있는 제품"이면 펌웨어 팀의 일이 됩니다 — 원문 · 법률 검토는 별도로</text>
+    </svg>
+    <div class="cap">타임라인 — 규제는 이미 시작됐고, <b>2027 년 말</b>이면 EU 판매 제품의 보안 업데이트 체계가 CE 표시의 조건이 됩니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">펌웨어 팀에 떨어지는 일 (CRA 를 중심으로, 요지만)</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:36%">요구 (요지)</th><th>이 탭의 어디와 이어지나</th></tr>
+        <tr><td>지원 기간 동안 보안 업데이트 제공</td><td>OTA · 롤백 · 서명 (PROD 03 · 04)</td></tr>
+        <tr><td>알려진 악용 가능 취약점 없이 출시</td><td>의존 라이브러리 버전 추적 · 재현 가능 빌드 (PROD 12)</td></tr>
+        <tr><td>안전한 기본값</td><td>공통 기본 비밀번호 금지 · 디버그 잠금 (이 섹션)</td></tr>
+        <tr><td>SBOM(소프트웨어 구성 목록)</td><td>HAL · RTOS · 암호 라이브러리 · 버전 목록을 빌드마다 생성</td></tr>
+        <tr><td>취약점 처리 · 보고</td><td>현장 로그 · 버전별 집계 (PROD 09) · 신고 창구</td></tr>
+      </table></div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기억할 것</h4>
+      <div class="note tip">
+        <b>ETSI EN 303 645</b>(소비자 IoT 보안 기본 요건)가 여러 나라 제도의 공통 출발점입니다. 공통 기본 비밀번호 금지 · 취약점 신고 창구 ·
+        소프트웨어 업데이트 · 통신 보호 · 개인정보 최소화 같은 항목은 지금 설계에 넣어 두면 어느 시장이든 대부분 겹칩니다.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        이 표는 <b>엔지니어용 요약이지 법률 자문이 아닙니다.</b> 제품군 분류(일반 · 중요 제품 등), 적용 날짜, 세부 의무는 원문과 회사의 규제 담당과 확인하세요.
+        분명한 것은 하나 — <b>OTA 가 안 되는 연결 제품은 앞으로 팔기 점점 어려워진다</b>는 점입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 양산품은 <b>RDP 1 + 부트로더 WRP</b> 가 기본, 되돌릴 수 없는 RDP 2 는 위협 모델이 요구할 때만. <b>모든 장비 공통 비밀을 만들지 말고</b>,
+    키는 보안 소자 · TrustZone 에. 비밀 비교는 상수 시간, 중요한 판정은 두 번. EU CRA 로 <b>보안 업데이트는 판매 조건</b>이 되어 갑니다.</div>
+</section>
+
+
+<!-- ==================== o12 ==================== -->
+<section class="sec" id="o12">
+  <div class="sec-head rv">
+    <span class="no">PROD 12</span>
+    <h2>버전 · 릴리스 관리 — <span class="t">현장의 이 바이너리는 어느 커밋인가</span></h2>
+    <p class="lead">
+      현장에서 크래시 리포트가 오면 첫 질문은 "어느 버전?"입니다. 서버라면 이미지 태그와 배포 기록이 답해 주지만,
+      펌웨어는 <b>바이너리 안에 스스로 답을 품고</b> 있어야 합니다. 그리고 같은 커밋에서 다시 빌드하면 <b>바이트 단위로 같은 결과</b>가 나와야
+      "이 .elf 가 그 장비의 코드"라고 확신할 수 있습니다. 여기에 보드 리비전과 펌웨어의 짝까지 관리하는 것이 릴리스 관리입니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 206" role="img" aria-label="git describe 출력 v1.5.0-17-g3f2a9c1-dirty 를 부분별로 설명한 해부도. v1.5.0 은 가장 가까운 태그로 릴리스 번호, 17 은 그 태그 뒤 커밋 수, g3f2a9c1 은 g 와 커밋 해시 앞자리, dirty 는 커밋하지 않은 수정이 있다는 뜻으로 출하 빌드에서는 나오면 안 된다. 아래에는 링커가 만드는 20 바이트 빌드 ID 가 바이너리 전체의 지문이라는 설명이 있다.">
+      <text x="16" y="18" class="lbl">git describe --tags --always --dirty 의 출력 — 네 조각</text>
+
+      <rect class="bx" x="120" y="34" width="440" height="36" rx="6"/>
+      <text x="188" y="57" class="val ok-t" text-anchor="middle">v1.5.0</text>
+      <text x="252" y="57" class="val" text-anchor="middle">-17</text>
+      <text x="348" y="57" class="val" text-anchor="middle">-g3f2a9c1</text>
+      <text x="474" y="57" class="val rs-t" text-anchor="middle">-dirty</text>
+
+      <path class="lead-ln" d="M188 74 L188 92"/>
+      <text x="188" y="104" class="ann ok-t" text-anchor="middle">가장 가까운 태그</text>
+      <text x="188" y="118" class="ann" text-anchor="middle">= 릴리스 번호</text>
+      <path class="lead-ln" d="M256 74 L256 128"/>
+      <text x="268" y="140" class="ann" text-anchor="middle">태그 뒤 커밋 17개</text>
+      <path class="lead-ln" d="M352 74 L352 92"/>
+      <text x="352" y="104" class="ann" text-anchor="middle">g + 커밋 해시 앞자리</text>
+      <text x="352" y="118" class="ann" text-anchor="middle">— 정확한 커밋</text>
+      <path class="lead-ln" d="M478 74 L478 92"/>
+      <text x="478" y="104" class="ann rs-t" text-anchor="middle">커밋 안 된 수정 있음</text>
+      <text x="478" y="118" class="ann rs-t" text-anchor="middle">— 출하 빌드면 실패</text>
+
+      <rect class="hl" x="120" y="156" width="440" height="22"/>
+      <text x="340" y="171" class="tk" text-anchor="middle">build-id 3f2a9c1e… (20 B) — 링커가 바이너리 내용으로 계산한 지문</text>
+      <text x="16" y="198" class="lbl">태그는 사람이 읽는 이름, 빌드 ID 는 기계가 대조하는 지문 — 둘 다 바이너리에 넣습니다</text>
+    </svg>
+    <div class="cap">해부도 — 출하 빌드의 이름은 <b>"v1.5.0" 하나</b>여야 합니다. 꼬리가 붙어 있으면 태그 없는 커밋이거나 더러운 작업 트리입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">빌드마다 version.h 생성 (CMake)</h4>
+      <pre class="code" data-lang="cmake"><code># CMakeLists.txt — configure 때 한 번이 아니라 빌드할 때마다
+add_custom_target(gen_version ALL
+  COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR} -DOUT=${CMAKE_BINARY_DIR}/gen
+          -P ${CMAKE_SOURCE_DIR}/cmake/gen_version.cmake
+  BYPRODUCTS ${CMAKE_BINARY_DIR}/gen/version.h)
+add_dependencies(app gen_version)
+target_include_directories(app PRIVATE ${CMAKE_BINARY_DIR}/gen)
+
+# cmake/gen_version.cmake
+execute_process(COMMAND git describe --tags --always --dirty --match "v*"
+  WORKING_DIRECTORY ${SRC} OUTPUT_VARIABLE GIT_DESC
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND git log -1 --format=%ct
+  WORKING_DIRECTORY ${SRC} OUTPUT_VARIABLE GIT_TIME
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+configure_file(${SRC}/cmake/version.h.in ${OUT}/version.h @ONLY)
+# configure_file 은 내용이 같으면 파일을 안 건드림 → 불필요한 재컴파일 없음</code></pre>
+      <pre class="code" data-lang="c"><code>/* cmake/version.h.in */
+#define FW_GIT_DESC     "@GIT_DESC@"
+#define FW_COMMIT_TIME  @GIT_TIME@u   /* 빌드 시각 대신 커밋 시각 */</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">고정 위치의 빌드 정보 구조체</h4>
+      <pre class="code" data-lang="c"><code>typedef struct {
+    uint32_t magic;          /* 0xF1F0F1F0 — 덤프에서 찾기 쉬운 값 */
+    uint32_t version;        /* (1 &lt;&lt; 24) | (5 &lt;&lt; 16) | 0 */
+    char     git[32];        /* "v1.5.0" 또는 "v1.5.0-17-g3f2a9c1" */
+    uint32_t hw_mask;        /* 이 빌드가 지원하는 보드 리비전 비트 */
+    uint32_t commit_time;
+} fw_info_t;
+
+__attribute__((section(".fw_info"), used))
+const fw_info_t g_fw_info = {
+    0xF1F0F1F0u, FW_VERSION, FW_GIT_DESC, FW_HW_MASK, FW_COMMIT_TIME };</code></pre>
+      <pre class="code" data-lang="text"><code>/* 링커 스크립트 — 벡터 테이블(F446 은 0x200 미만) 바로 뒤 고정 오프셋 */
+.isr_vector : { KEEP(*(.isr_vector)) } &gt;FLASH
+.fw_info ORIGIN(FLASH) + 0x200 : { KEEP(*(.fw_info)) } &gt;FLASH
+.note.gnu.build-id : {
+    PROVIDE(g_build_id_note = .);
+    KEEP(*(.note.gnu.build-id))       /* -Wl,--build-id 필요 */
+} &gt;FLASH</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>고정 오프셋</b>이면 부트로더 · 공장 도구 · 서버가 앱을 실행하지 않고도 <code>ORIGIN + 0x200</code> 만 읽어 버전을 압니다.
+        빌드 ID 는 노트 헤더(이름 길이 · 설명 길이 · 종류 · "GNU\0" = 16 B) 뒤의 20 B 입니다 —
+        <code>fw_build_id()</code> 는 <code>g_build_id_note + 16</code> 을 돌려주면 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">재현 가능 빌드 — <span class="t">같은 커밋 = 같은 바이트</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">바이너리를 흔드는 것들과 처방</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:32%">흔드는 것</th><th>처방</th></tr>
+        <tr><td><code>__DATE__ · __TIME__</code></td><td>쓰지 않기 · 또는 <code>SOURCE_DATE_EPOCH</code> 를 커밋 시각으로 (GCC 가 따름)</td></tr>
+        <tr><td><code>__FILE__</code> · 디버그 정보의 절대 경로</td><td><code>-ffile-prefix-map=/home/ci/work=.</code></td></tr>
+        <tr><td>컴파일러 버전</td><td>Arm GNU Toolchain 을 <b>정확한 버전으로 고정</b>한 컨테이너 이미지</td></tr>
+        <tr><td>라이브러리 · HAL 버전</td><td>서브모듈 · 버전 고정 · SBOM 에 기록 (PROD 11)</td></tr>
+        <tr><td>링크 순서</td><td>소스 목록을 glob 대신 명시 · 정렬</td></tr>
+      </table></div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI 에서 확인</h4>
+      <pre class="code" data-lang="bash"><code>export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+# -ffile-prefix-map 은 툴체인 파일의 CMAKE_C_FLAGS 에 고정해 둠
+
+# 경로가 다른 두 곳에서 각각 빌드 → 해시 비교
+cmake --preset prod -B /tmp/a &amp;&amp; cmake --build /tmp/a
+cmake --preset prod -B /tmp/b &amp;&amp; cmake --build /tmp/b
+sha256sum /tmp/a/app.bin /tmp/b/app.bin     # 두 줄의 해시가 같아야 함
+arm-none-eabi-gcc --version | head -1       # 릴리스 노트에 그대로 기록</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        재현 가능하면 "현장의 바이너리 = 이 커밋"을 <b>해시로 증명</b>할 수 있고, 보관해 둔 .elf 를 잃어도 다시 빌드해 같은 심볼을 얻습니다.
+        서명(PROD 04)은 재현 가능한 빌드 결과에 걸어야 의미가 분명해집니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">보드 리비전 감지와 호환성 표</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 200" role="img" aria-label="ADC 저항 분압으로 보드 리비전을 읽는 법. 위쪽 저항 10 킬로옴은 고정이고 아래쪽 저항을 리비전마다 바꾼다. 0 옴이면 ADC 값 0 으로 Rev A, 1 킬로옴 372 로 B, 2.2 킬로옴 738 로 C, 4.7 킬로옴 1309 로 D, 10 킬로옴 2048 로 E, 22 킬로옴 2815 로 F, 47 킬로옴 3377 로 G, 저항 없음 4095 로 H 다. 이웃 값의 중간이 판정 경계이며 1 퍼센트 저항 오차로 생기는 흔들림은 경계까지의 거리보다 훨씬 작다.">
+      <text x="16" y="18" class="lbl">ADC 한 핀으로 보드 리비전 8가지 — 위 10 kΩ 고정, 아래 저항만 바꿉니다</text>
+      <path class="ax" d="M60 96 L640 96"/>
+      <path class="gr" d="M86 72 L86 120"/>
+      <path class="gr" d="M139 72 L139 120"/>
+      <path class="gr" d="M205 72 L205 120"/>
+      <path class="gr" d="M298 72 L298 120"/>
+      <path class="gr" d="M404 72 L404 120"/>
+      <path class="gr" d="M498 72 L498 120"/>
+      <path class="gr" d="M589 72 L589 120"/>
+
+      <circle class="dot" cx="60" cy="96" r="5"/>
+      <circle class="dot" cx="113" cy="96" r="5"/>
+      <circle class="dot" cx="164" cy="96" r="5"/>
+      <circle class="dot" cx="245" cy="96" r="5"/>
+      <circle class="dot" cx="350" cy="96" r="5" style="fill:#34d399"/>
+      <circle class="dot" cx="459" cy="96" r="5"/>
+      <circle class="dot" cx="538" cy="96" r="5"/>
+      <circle class="dot" cx="640" cy="96" r="5"/>
+
+      <text x="60" y="62" class="ann" text-anchor="middle">A 0Ω</text>
+      <text x="113" y="48" class="ann" text-anchor="middle">B 1k</text>
+      <text x="164" y="62" class="ann" text-anchor="middle">C 2.2k</text>
+      <text x="245" y="62" class="ann" text-anchor="middle">D 4.7k</text>
+      <text x="350" y="62" class="ann ok-t" text-anchor="middle">E 10k</text>
+      <text x="459" y="62" class="ann" text-anchor="middle">F 22k</text>
+      <text x="538" y="62" class="ann" text-anchor="middle">G 47k</text>
+      <text x="636" y="62" class="ann" text-anchor="end">H 없음</text>
+
+      <text x="60" y="138" class="tk" text-anchor="middle">0</text>
+      <text x="113" y="152" class="tk" text-anchor="middle">372</text>
+      <text x="164" y="138" class="tk" text-anchor="middle">738</text>
+      <text x="245" y="138" class="tk" text-anchor="middle">1309</text>
+      <text x="350" y="138" class="tk" text-anchor="middle">2048</text>
+      <text x="459" y="138" class="tk" text-anchor="middle">2815</text>
+      <text x="538" y="138" class="tk" text-anchor="middle">3377</text>
+      <text x="636" y="138" class="tk" text-anchor="end">4095</text>
+
+      <text x="16" y="176" class="lbl">점선이 판정 경계(이웃 값의 중간) — 1% 저항 오차는 ±20 카운트 안팎이라 여유가 큽니다</text>
+      <text x="16" y="192" class="ann">ADC 값 = 4095 × R아래 / (10 kΩ + R아래) · 분압기를 VDDA 에 물리면 전원 오차가 상쇄됩니다</text>
+    </svg>
+    <div class="cap">수직선 — 리비전마다 <b>저항 하나</b>만 바꾸면 펌웨어 하나가 보드 여덟 종류를 구분합니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">리비전 읽기 — ADC 분압 · GPIO 스트랩</h4>
+      <pre class="code" data-lang="c"><code>/* 이웃 ADC 값의 중간 — 위 그림의 점선 */
+static const uint16_t k_thr[7] = { 186, 555, 1024, 1679, 2432, 3096, 3736 };
+
+uint8_t hw_rev_from_adc(uint16_t code)       /* 여러 번 읽어 평균한 값 */
+{
+    uint8_t r = 0;
+    while (r &lt; 7u &amp;&amp; code &gt; k_thr[r]) r++;
+    return r;                                /* 0 = Rev A … 7 = Rev H */
+}
+
+/* 또는 GPIO 세 개(PB12~PB14)에 리비전마다 풀업 · 풀다운 저항 → 8가지 */
+uint8_t hw_rev_from_straps(void)
+{
+    uint8_t r = (uint8_t)(((GPIOB-&gt;IDR &gt;&gt; 12) &amp; 0x7u));  /* 입력 · 내부 풀 없음 */
+    /* 읽은 뒤 아날로그 모드로 — 저항으로 새는 전류 차단 (PROD 08) */
+    return r;
+}
+
+/* 부팅 때: 이 빌드가 이 보드를 지원하나 */
+if ((g_fw_info.hw_mask &amp; (1u &lt;&lt; hw_rev)) == 0u) safe_mode();</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">릴리스마다 남기는 호환성 표</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th>펌웨어</th><th>보드</th><th>최소 부트로더</th><th>설정 형식</th><th>비고</th></tr>
+        <tr><td>1.3.x</td><td>A · B</td><td>1.0</td><td>v1</td><td>지원 종료 예정</td></tr>
+        <tr><td>1.4.x</td><td>A · B · C</td><td>1.0</td><td>v2</td><td>v1 → v2 자동 변환</td></tr>
+        <tr><td><b>1.5.0</b></td><td>B · C · D</td><td><b>1.1</b></td><td>v2</td><td>A 보드 제외 · 서명 키 2번</td></tr>
+      </table></div>
+      <div class="note warn">
+        <b>서버는 이 표로 업데이트를 막아야 합니다.</b> 부트로더 1.0 장비에 1.5.0 을 보내면 새 서명 키를 몰라 거부되고, A 보드에 보내면 핀이 맞지 않습니다.
+        장비는 <code>(보드 리비전, 부트로더 버전, 펌웨어 버전)</code> 을 보고하고, 서버가 맞는 이미지를 고릅니다. 이미지 헤더의 <code>hw_mask</code>(PROD 04)는 마지막 방어선입니다.
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>릴리스 노트</b>엔 사용자용 변경 사항 외에 내부용으로 툴체인 버전 · 빌드 ID · 서명 키 번호 · 롤백 가능 하한(보안 카운터)을 적습니다.
+        설정 구조체의 <code>ver</code> 필드(PROD 07)가 바뀌는 릴리스는 <b>되돌아갈 때의 변환</b>까지 시험합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 바이너리에 <b>git describe · 빌드 ID</b>를 고정 위치로 넣고, <b>SOURCE_DATE_EPOCH · -ffile-prefix-map · 고정 툴체인</b>으로 같은 커밋이 같은 바이트가 되게 합니다.
+    보드 리비전은 <b>ADC 분압 · GPIO 스트랩</b>으로 읽고, 펌웨어 · 보드 · 부트로더의 짝은 <b>호환성 표</b>로 서버가 지킵니다.</div>
+</section>
+
+
+<!-- ==================== o13 ==================== -->
+<section class="sec" id="o13">
+  <div class="sec-head rv">
+    <span class="no">PROD 13</span>
+    <h2>다음 단계 — <span class="t">Zephyr · ESP-IDF · 임베디드 리눅스 · Rust</span>, 그리고 로드맵</h2>
+    <p class="lead">
+      여기까지 오면 레지스터에서 양산까지 한 바퀴를 돈 것입니다. 이제 갈림길은 "무엇을 더 깊게"입니다.
+      서버 개발자가 프레임워크 하나를 익힌 뒤 클라우드 · 데이터 · 플랫폼 중 길을 고르듯, 펌웨어도 <b>무선 IoT · 표준 RTOS 생태계 · 리눅스 · 새 언어</b> 중에서 고릅니다.
+      어느 길이든 이 탭에서 다룬 부트로더 · OTA · 워치독 · 저장 · 보안의 <b>원리는 그대로</b> 따라갑니다 — 이름만 바뀝니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="다음 단계 네 가지를 다섯 기준으로 비교한 매트릭스. Zephyr 는 C 경험을 그대로 쓰고 무선과 네트워크 스택이 들어 있으며 MCUboot 로 OTA 가 표준이고 학습 비용은 디바이스트리와 Kconfig 때문에 중간이다. ESP-IDF 는 C 그대로, 와이파이와 BLE 가 칩에 내장, OTA 와 보안 부팅이 기본 제공, 학습 비용은 낮다. 임베디드 리눅스는 C 와 리눅스 지식이 필요하고 네트워크는 전부 되며 A B 루트 파일시스템 업데이트 도구가 있고 학습 비용이 가장 높고 MMU 와 DRAM 이 있는 MPU 가 필요하다. Rust 임베디드는 새 언어를 배워야 하고 embassy 로 비동기 드라이버를 쓰며 OTA 는 아직 직접 조립하는 편이고 학습 비용이 높다.">
+      <text x="16" y="18" class="lbl">다음 단계 비교 — 진할수록 그 기준에서 유리합니다</text>
+
+      <text x="206" y="42" class="tk" text-anchor="middle">C 경험 재사용</text>
+      <text x="300" y="42" class="tk" text-anchor="middle">무선 · 네트워크</text>
+      <text x="394" y="42" class="tk" text-anchor="middle">OTA 기본 제공</text>
+      <text x="488" y="42" class="tk" text-anchor="middle">학습 비용</text>
+      <text x="582" y="42" class="tk" text-anchor="middle">하드웨어</text>
+
+      <text x="16" y="70" class="ann">Zephyr</text>
+      <rect class="cel h5" x="160" y="52" width="92" height="30"/><text x="206" y="71" class="tk" text-anchor="middle">그대로</text>
+      <rect class="cel h4" x="254" y="52" width="92" height="30"/><text x="300" y="71" class="tk" text-anchor="middle">IP · BLE 내장</text>
+      <rect class="cel h4" x="348" y="52" width="92" height="30"/><text x="394" y="71" class="tk" text-anchor="middle">MCUboot</text>
+      <rect class="cel h2" x="442" y="52" width="92" height="30"/><text x="488" y="71" class="tk" text-anchor="middle">DT · Kconfig</text>
+      <rect class="cel h4" x="536" y="52" width="92" height="30"/><text x="582" y="71" class="tk" text-anchor="middle">MCU 수백 종</text>
+
+      <text x="16" y="108" class="ann">ESP-IDF</text>
+      <rect class="cel h5" x="160" y="90" width="92" height="30"/><text x="206" y="109" class="tk" text-anchor="middle">그대로</text>
+      <rect class="cel h5" x="254" y="90" width="92" height="30"/><text x="300" y="109" class="tk" text-anchor="middle">Wi-Fi · BLE 칩</text>
+      <rect class="cel h5" x="348" y="90" width="92" height="30"/><text x="394" y="109" class="tk" text-anchor="middle">OTA · 보안 부팅</text>
+      <rect class="cel h4" x="442" y="90" width="92" height="30"/><text x="488" y="109" class="tk" text-anchor="middle">낮음</text>
+      <rect class="cel h2" x="536" y="90" width="92" height="30"/><text x="582" y="109" class="tk" text-anchor="middle">ESP32 계열만</text>
+
+      <text x="16" y="146" class="ann">임베디드 리눅스</text>
+      <rect class="cel h3" x="160" y="128" width="92" height="30"/><text x="206" y="147" class="tk" text-anchor="middle">+ 리눅스 지식</text>
+      <rect class="cel h5" x="254" y="128" width="92" height="30"/><text x="300" y="147" class="tk" text-anchor="middle">전부</text>
+      <rect class="cel h4" x="348" y="128" width="92" height="30"/><text x="394" y="147" class="tk" text-anchor="middle">A/B rootfs 도구</text>
+      <rect class="cel h0" x="442" y="128" width="92" height="30"/><text x="488" y="147" class="tk" text-anchor="middle">가장 높음</text>
+      <rect class="cel h1" x="536" y="128" width="92" height="30"/><text x="582" y="147" class="tk" text-anchor="middle">MPU + DRAM</text>
+
+      <text x="16" y="184" class="ann">Rust (embassy)</text>
+      <rect class="cel h1" x="160" y="166" width="92" height="30"/><text x="206" y="185" class="tk" text-anchor="middle">새 언어</text>
+      <rect class="cel h2" x="254" y="166" width="92" height="30"/><text x="300" y="185" class="tk" text-anchor="middle">성장 중</text>
+      <rect class="cel h1" x="348" y="166" width="92" height="30"/><text x="394" y="185" class="tk" text-anchor="middle">직접 조립</text>
+      <rect class="cel h1" x="442" y="166" width="92" height="30"/><text x="488" y="185" class="tk" text-anchor="middle">높음</text>
+      <rect class="cel h3" x="536" y="166" width="92" height="30"/><text x="582" y="185" class="tk" text-anchor="middle">STM32 · nRF 등</text>
+
+      <text x="16" y="218" class="lbl">셋은 "어디서 돌리나"의 선택, Rust 는 "무엇으로 쓰나"의 선택 — 겹쳐 고를 수도 있습니다</text>
+    </svg>
+    <div class="cap">매트릭스 — C 를 그대로 쓰며 넓히려면 <b>Zephyr · ESP-IDF</b>, 리눅스가 필요한 제품이면 <b>MPU</b>, 언어부터 바꾸려면 <b>Rust</b>.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Zephyr — 같은 Nucleo-F446RE 에서 시작</h4>
+      <pre class="code" data-lang="bash"><code>pip install west
+west init ~/zephyrproject &amp;&amp; cd ~/zephyrproject &amp;&amp; west update
+west build -b nucleo_f446re zephyr/samples/basic/blinky
+west flash</code></pre>
+      <pre class="code" data-lang="c"><code>#include &lt;zephyr/kernel.h&gt;
+#include &lt;zephyr/drivers/gpio.h&gt;
+
+/* 핀 번호가 코드에 없다 — 보드의 디바이스트리가 led0 을 PA5 로 정의 */
+static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+
+int main(void)
+{
+    if (!gpio_is_ready_dt(&amp;led)) return 0;
+    gpio_pin_configure_dt(&amp;led, GPIO_OUTPUT_ACTIVE);
+    while (1) {
+        gpio_pin_toggle_dt(&amp;led);
+        k_msleep(500);
+    }
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Zephyr</b> 는 리눅스 재단 산하의 RTOS 로, 하드웨어 기술을 <b>디바이스트리</b>에, 기능 선택을 <b>Kconfig</b> 에 둡니다(리눅스 커널과 같은 방식).
+        이 탭의 MCUboot(PROD 04) · 로그 · 셸 · 설정 저장 · 네트워크가 서브시스템으로 들어 있어 "직접 만들던 것"을 고르는 일로 바뀝니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Rust + embassy — 같은 LED 를 async 로</h4>
+      <pre class="code" data-lang="rust"><code>#![no_std]
+#![no_main]
+use embassy_executor::Spawner;
+use embassy_stm32::gpio::{Level, Output, Speed};
+use embassy_time::Timer;
+use {defmt_rtt as _, panic_probe as _};
+
+#[embassy_executor::main]
+async fn main(_spawner: Spawner) {
+    let p = embassy_stm32::init(Default::default());
+    let mut led = Output::new(p.PA5, Level::High, Speed::Low);  // Nucleo LD2
+    loop {
+        led.toggle();
+        Timer::after_millis(500).await;   // 기다리는 동안 다른 태스크가 돎
+    }
+}</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>embassy</b> 는 RTOS 태스크 대신 <b>async/await</b> 로 동시성을 표현하고, 소유권 시스템이 "주변장치 하나를 두 곳에서 잡는" 실수를 컴파일 단계에서 막습니다.
+        로그 크레이트 <code>defmt</code> 는 PROD 09 의 토큰 로깅을 언어 차원에서 한 것이고, <code>probe-rs</code> 가 굽기 · 디버깅을 맡습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="i">MCU 와 MPU — <span class="t">언제 리눅스가 필요한가</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:24%"></th><th>MCU (이 가이드)</th><th>MPU + 리눅스</th></tr>
+        <tr><td>메모리</td><td>내장 Flash · SRAM (KB~수 MB)</td><td>외부 DRAM (수백 MB~) · eMMC</td></tr>
+        <tr><td>MMU</td><td>없음 — 주소 = 물리 주소</td><td>있음 — 프로세스 격리</td></tr>
+        <tr><td>부팅</td><td>수 ms</td><td>수 초</td></tr>
+        <tr><td>실시간</td><td>µs 단위 결정적</td><td>PREEMPT_RT 로도 MCU 만큼은 어려움</td></tr>
+        <tr><td>전력</td><td>µA 대기</td><td>mA~W</td></tr>
+        <tr><td>업데이트</td><td>PROD 03 의 슬롯</td><td>SWUpdate · RAUC · Mender 의 A/B 루트 파일시스템</td></tr>
+        <tr><td>이미지 빌드</td><td>CMake 하나</td><td><b>Buildroot</b>(단순) · <b>Yocto</b>(산업 표준 · 레이어)</td></tr>
+      </table></div>
+    </div>
+    <div class="card">
+      <div class="note tip">
+        <b>리눅스가 필요한 신호</b> — 화면 UI 가 복잡하다, 카메라 · 영상 처리, 파이썬 · 컨테이너 같은 범용 소프트웨어 생태계, 수백 MB 데이터.
+        <b>MCU 가 맞는 신호</b> — 배터리, 즉시 켜짐, µs 단위 제어, 낮은 BOM 비용.
+      </div>
+      <div class="note info">
+        둘 다 필요하면 <b>둘 다 씁니다.</b> STM32MP1 · MP2 처럼 리눅스용 Cortex-A 코어 옆에 Cortex-M 코어를 둔 칩이 있고,
+        실시간 제어는 M 코어가, 네트워크 · UI 는 리눅스가 맡습니다. 이 가이드의 지식이 M 코어 쪽에 그대로 쓰입니다.
+      </div>
+      <pre class="code" data-lang="bash"><code># Buildroot — 보드 설정 하나로 부트로더 · 커널 · 루트 FS 까지 이미지 한 장
+make stm32mp157c_dk2_defconfig
+make                      # output/images/sdcard.img
+# ESP-IDF — 무선 MCU 의 표준 경로
+idf.py set-target esp32c3 &amp;&amp; idf.py build flash monitor</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="a">펌웨어 엔지니어 로드맵 — <span class="t">무엇을 어떤 순서로</span> <span class="lvl h">🔴 실무</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="펌웨어 엔지니어 로드맵 타임라인. 0 에서 3 개월은 C 와 베어메탈과 데이터시트 읽기, 3 에서 6 개월은 드라이버와 DMA 와 RTOS 와 디버거, 6 에서 12 개월은 이 탭의 부트로더와 OTA 와 워치독과 테스트와 CI 로 제품화, 1 에서 2 년은 무선 연결과 보안과 저전력과 생산, 2 년 이후는 아키텍처와 리눅스나 Zephyr 와 기능 안전 표준으로 넓어진다. 위에는 할 줄 알게 되는 것, 아래에는 만들어 볼 것이 적혀 있다.">
+      <text x="16" y="18" class="lbl">로드맵 — 위는 할 줄 알게 되는 것, 아래는 만들어 볼 것</text>
+      <path class="ax ar" d="M30 112 L652 112"/>
+      <path class="ln" d="M84 106 L84 118"/>
+      <path class="ln" d="M212 106 L212 118"/>
+      <path class="ln" d="M340 106 L340 118"/>
+      <path class="ln" d="M468 106 L468 118"/>
+      <path class="ln" d="M596 106 L596 118"/>
+      <circle class="dot" cx="84" cy="112" r="5"/>
+      <circle class="dot" cx="212" cy="112" r="5"/>
+      <circle class="dot" cx="340" cy="112" r="5" style="fill:#fbbf24"/>
+      <circle class="dot" cx="468" cy="112" r="5"/>
+      <circle class="dot" cx="596" cy="112" r="5" style="fill:#34d399"/>
+      <text x="84" y="134" class="tk" text-anchor="middle">0~3 개월</text>
+      <text x="212" y="134" class="tk" text-anchor="middle">3~6 개월</text>
+      <text x="340" y="134" class="tk am-t" text-anchor="middle">6~12 개월</text>
+      <text x="468" y="134" class="tk" text-anchor="middle">1~2 년</text>
+      <text x="596" y="134" class="tk ok-t" text-anchor="middle">2 년~</text>
+
+      <path class="lead-ln" d="M84 106 L84 86"/>
+      <text x="84" y="78" class="ann" text-anchor="middle">C · 베어메탈</text>
+      <text x="84" y="65" class="ann" text-anchor="middle">데이터시트 읽기</text>
+      <path class="lead-ln" d="M212 106 L212 86"/>
+      <text x="212" y="78" class="ann" text-anchor="middle">드라이버 · DMA</text>
+      <text x="212" y="65" class="ann" text-anchor="middle">RTOS · 디버거</text>
+      <path class="lead-ln" d="M340 106 L340 86"/>
+      <text x="340" y="78" class="ann am-t" text-anchor="middle">부트로더 · OTA</text>
+      <text x="340" y="65" class="ann am-t" text-anchor="middle">테스트 · CI (이 탭)</text>
+      <path class="lead-ln" d="M468 106 L468 86"/>
+      <text x="468" y="78" class="ann" text-anchor="middle">무선 · 보안</text>
+      <text x="468" y="65" class="ann" text-anchor="middle">저전력 · 생산</text>
+      <path class="lead-ln" d="M596 106 L596 86"/>
+      <text x="596" y="78" class="ann ok-t" text-anchor="middle">아키텍처 · 리뷰</text>
+      <text x="596" y="65" class="ann" text-anchor="middle">기능 안전 표준</text>
+
+      <path class="lead-ln" d="M84 140 L84 150"/>
+      <text x="84" y="162" class="ann" text-anchor="middle">레지스터 Blinky</text>
+      <text x="84" y="175" class="ann" text-anchor="middle">UART 에코</text>
+      <path class="lead-ln" d="M212 140 L212 150"/>
+      <text x="212" y="162" class="ann" text-anchor="middle">센서 3태스크</text>
+      <text x="212" y="175" class="ann" text-anchor="middle">DMA 로거</text>
+      <path class="lead-ln" d="M340 140 L340 150"/>
+      <text x="340" y="162" class="ann am-t" text-anchor="middle">A/B OTA 센서 노드</text>
+      <text x="340" y="175" class="ann am-t" text-anchor="middle">전원 뽑기 시험</text>
+      <path class="lead-ln" d="M468 140 L468 150"/>
+      <text x="468" y="162" class="ann" text-anchor="middle">BLE · Wi-Fi 기기</text>
+      <text x="468" y="175" class="ann" text-anchor="middle">배터리 1년 달성</text>
+      <path class="lead-ln" d="M596 140 L596 150"/>
+      <text x="596" y="162" class="ann" text-anchor="middle">Zephyr · 리눅스</text>
+      <text x="596" y="175" class="ann" text-anchor="middle">팀 플랫폼 설계</text>
+
+      <text x="16" y="206" class="lbl">기능 안전: 산업 IEC 61508 · 자동차 ISO 26262 · 의료 IEC 62304 — 분야를 정하면 따라옵니다</text>
+      <text x="16" y="224" class="ann">기간은 업무로 매일 다룰 때의 대략치 — 순서가 기간보다 중요합니다</text>
+    </svg>
+    <div class="cap">타임라인 — <b>6~12 개월 구간</b>에서 "돌아가는 코드"가 "팔 수 있는 제품"으로 바뀝니다. 이 탭이 그 구간입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">졸업 과제 — 이 탭을 한 프로젝트로</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:8%">✓</th><th>Nucleo-F446RE 센서 노드에 넣을 것</th><th style="width:18%">섹션</th></tr>
+        <tr><td>□</td><td>32 KB 부트로더 + 슬롯 A/B + 서명 검증</td><td>02 · 04</td></tr>
+        <tr><td>□</td><td>UART 로 받는 OTA, TRIAL 3회 롤백, 확정 조건</td><td>03</td></tr>
+        <tr><td>□</td><td>체크인 워치독 · 리셋 원인 · 안전 모드</td><td>05 · 06</td></tr>
+        <tr><td>□</td><td>덧붙이기 설정 저장 · 정전 시험 지그(릴레이)</td><td>07</td></tr>
+        <tr><td>□</td><td>PPK2 로 잠 전류 실측 → 예산표 갱신</td><td>08</td></tr>
+        <tr><td>□</td><td>링 로그 · 빌드 ID · addr2line 심볼화</td><td>09 · 12</td></tr>
+        <tr><td>□</td><td>CubeProgrammer CLI 공정 스크립트 · OTP 기록</td><td>10</td></tr>
+      </table></div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">계속 읽을 것</h4>
+      <div class="tw"><table class="cheat" style="margin:0">
+        <tr><th style="width:40%">자료</th><th>무엇을</th></tr>
+        <tr><td>Making Embedded Systems (Elecia White)</td><td>설계 · 아키텍처 · 현업 감각</td></tr>
+        <tr><td>The Definitive Guide to ARM Cortex-M3 and M4 (Joseph Yiu)</td><td>예외 · 폴트 · 메모리 모델의 정답지</td></tr>
+        <tr><td>Interrupt 블로그 (Memfault)</td><td>부트로더 · 크래시 리포트 · 빌드 ID 같은 이 탭 주제의 실전 글</td></tr>
+        <tr><td>Zephyr 문서 · The Embedded Rust Book</td><td>각 길의 공식 입문</td></tr>
+        <tr><td>칩 회사 응용 노트</td><td>부트로더(AN2606) · EEPROM 에뮬레이션 · 저전력 — 그 칩의 정답</td></tr>
+      </table></div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>서버 개발 경험은 무기입니다.</b> CI · 관측성 · 배포 전략 · 장애 회고 — 펌웨어 팀에 가장 부족한 경우가 많은 것들이고,
+        이 탭의 절반(OTA · 로그 · 버전 · 생산 기록)이 바로 그 감각으로 푸는 문제였습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> C 를 그대로 쓰며 넓히려면 <b>Zephyr</b>(범용) · <b>ESP-IDF</b>(Wi-Fi/BLE), 리눅스가 필요한 제품이면 <b>MPU + Buildroot/Yocto</b>,
+    언어를 바꾸려면 <b>Rust + embassy</b>. 어느 길이든 <b>부트로더 · OTA · 워치독 · 저장 · 보안</b>의 원리는 이 탭 그대로입니다.</div>
+</section>
+
+</div><!-- /pane-prod -->

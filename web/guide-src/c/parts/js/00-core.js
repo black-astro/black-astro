@@ -161,6 +161,7 @@ const TAB_KW = {
   arch:"대규모 C 구조 아키텍처 architecture 설계 구조 관리 모듈 module 모듈화 캡슐화 정보 은닉 불투명 포인터 opaque pointer opaque type 헤더 header include guard pragma once 전방 선언 forward declaration include-what-you-use IWYU 순환 의존 circular dependency 레이어 layer 계층 HAL BSP 드라이버 driver 디렉터리 구조 폴더 구조 directory layout 모노레포 monorepo boards products CMake 타깃 target PUBLIC PRIVATE INTERFACE 툴체인 toolchain arm-none-eabi CMakePresets 프리셋 링커 스크립트 linker script 설정 관리 config.h ifdef 지옥 Kconfig kconfiglib menuconfig 링크 타임 weak 심볼 static_assert _Static_assert vtable 함수 포인터 인터페이스 의존성 주입 dependency injection 의존성 역전 DIP 테스트 대역 fake mock 에러 처리 error handling goto cleanup assert 리셋 정책 메모리 정책 정적 할당 malloc 금지 메모리 풀 pool 아레나 arena 소유권 ownership 스택 사용량 stack usage 이벤트 큐 event queue 상태 머신 state machine FSM HSM 액티브 오브젝트 active object QP 코딩 표준 MISRA 미스라 CERT C BARR-C clang-tidy cppcheck clang-format 정적 분석 static analysis 코드 리뷰 리눅스 커널 Zephyr 제퍼 ESP-IDF SQLite amalgamation Redis ae 버전 semver 시맨틱 버전 changelog 변경 로그 빌드 정보 git describe 재현 가능한 빌드 대형 펌웨어 large scale firmware 펌웨어 구조 c언어 구조 씨언어",
   io:"통신 드라이버 communication driver 프로토콜 protocol UART 유아트 uart 시리얼 serial USART RS-485 rs485 RS485 RS-232 rs232 I2C i2c I²C 아이투씨 TWI SPI spi 에스피아이 CAN can 캔 CAN-FD canfd FDCAN bxCAN USB usb CDC 가상COM 1-Wire 원와이어 프레이밍 framing COBS 콥스 SLIP CRC crc16 CRC-16 CCITT 체크섬 checksum 파서 parser 상태머신 링버퍼 ringbuffer 오버런 overrun ORE DMA IDLE 풀업 pullup 버스락업 클럭스트레칭 BME280 bme280 센서드라이버 SSD1306 ssd1306 OLED 올레드 프레임버퍼 W25Q w25q128 NOR플래시 flash EEPROM littlefs 웨어레벨링 Modbus modbus 모드버스 RTU 로직분석기 logic analyzer sigrok PulseView 펄스뷰 STM32F446RE HAL",
   qa:"디버깅 debugging 디버그 debug 테스트 test 테스팅 단위테스트 unit test GDB gdb 지디비 OpenOCD openocd 오픈ocd ST-LINK stlink 스트링크 J-Link 제이링크 Cortex-Debug 코텍스디버그 SVD 브레이크포인트 breakpoint 와치포인트 watchpoint FPB DWT ITM SWO RTT SEGGER 세거 printf 로그 logging HardFault 하드폴트 하드fault CFSR HFSR addr2line 크래시덤프 crash dump noinit 스택오버플로 stack overflow 스택페인팅 MPU 힙단편화 fstack-usage Unity 유니티 CMock 씨목 FFF fake 페이크 mock 목 모킹 Ceedling 시들링 TDD 레지스터페이크 ASan UBSan Valgrind 밸그린드 libFuzzer 퍼징 fuzzing gcov lcov gcovr 커버리지 coverage CI GitHub Actions 깃허브액션 크기리포트 HIL 하드웨어인더루프 pytest pyserial uhubctl 플래키 flaky volatile 워치독 IWDG 리셋원인 RCC_CSR 정렬폴트 레이스컨디션 STM32F446RE",
+  prod:"양산 펌웨어운영 제품화 EVT DVT PVT MP 부트로더 bootloader 부트로더설계 OTA 오티에이 펌웨어업데이트 DFU 시스템부트로더 AN2606 A/B 슬롯 롤백 rollback 스왑 MCUboot 엠씨유부트 imgtool 이미지서명 서명 ECDSA Ed25519 SHA-256 CRC32 secure boot 보안부팅 신뢰사슬 워치독 watchdog 와치독 IWDG WWDG 리셋원인 RCC_CSR 브라운아웃 BOR 안전모드 리셋루프 정전안전 EEPROM에뮬레이션 littlefs 리틀fs W25Q 전력예산 배터리수명 CR2032 PPK2 Joulescope 누설전류 크래시리포트 링로그 빌드ID build-id addr2line 생산공정 지그 포고핀 CubeProgrammer OTP 시리얼번호 MAC 보정값 MES RDP 읽기보호 WRP TrustZone 사이드채널 글리치 CRA 사이버복원력법 재현가능빌드 git describe 하드웨어리비전 Zephyr ESP-IDF 임베디드리눅스 Yocto Buildroot Rust embassy 로드맵 STM32F446RE 양산펌웨어",
 };
 
 const FIND_CHIPS = ["포인터 기초","malloc 누수","구조체 패딩","함수 포인터",
@@ -310,6 +311,19 @@ const SEC_KW = {
   t11:"CI GitHub Actions workflow arm-none-eabi-gcc-action 툴체인파일 크기리포트 size_diff GITHUB_STEP_SUMMARY cppcheck clang-tidy codecov upload-artifact elf map hex 재현가능빌드 릴리스 concurrency",
   t12:"HIL hardware-in-the-loop 테스트지그 테스트벤치 pytest pyserial fixture conftest uhubctl 전원사이클 self-hosted runner JUnit 플래키 flaky rerun 워치독시험 명령셸 DUT",
   t13:"volatile 최적화 지연루프 ISR 레이스 RMW 원자연산 atomic LDREX STREX 정렬폴트 packed UNALIGNED 스택오버플로 클럭 HSE MCO printf float _printf_float newlib-nano 워치독 IWDG LSI 리셋원인 RCC_CSR 안전모드",
+  o01:"EVT DVT PVT 양산 MP 관문 개발펌웨어 출하펌웨어 생산테스트펌웨어 세미호스팅 BKPT 체크리스트 CMake 변형 빌드 prod_guard",
+  o02:"부트로더 bootloader Flash분할 섹터 S0 S1 0x08010000 VTOR MSP Reset_Handler jump_to_app 점프 NVIC ICER PRIMASK CONTROL naked 링커스크립트 VECT_TAB_OFFSET noinit 앱유효성",
+  o03:"OTA DFU 시스템부트로더 BOOT0 AN2606 A/B 슬롯 스왑 스크래치 덮어쓰기 롤백 TRIAL PENDING 확정 confirm 이어받기 정전 멱등 외부Flash STM32_Programmer_CLI",
+  o04:"무결성 CRC32 SHA-256 서명 ECDSA P-256 Ed25519 이미지헤더 MCUboot imgtool TLV 트레일러 TinyCrypt uECC 신뢰사슬 secure boot 롤백방지 보안카운터 HSM 키관리",
+  o05:"워치독 watchdog IWDG WWDG LSI 프리스케일러 리로드 타임아웃 계산 킥 refresh 체크인 감시 창 EWI DBGMCU freeze Stop모드 WDG_SW",
+  o06:"리셋원인 RCC_CSR IWDGRSTF WWDGRSTF SFTRSTF PORRSTF BORRSTF PINRSTF RMVF 브라운아웃 BOR BOR_LEV PVD 리셋루프 안전모드 noinit 백업레지스터",
+  o07:"설정저장 Flash 수명 1만회 지우기 정전안전 커밋 완료표시 순번 seq CRC 덧붙이기 EEPROM에뮬레이션 AN3969 littlefs W25Q SPI플래시 마모분산",
+  o08:"저전력 전력예산 평균전류 배터리수명 CR2032 AA mAh PPK2 Joulescope 전류측정 누설 플로팅 풀업 LED 레귤레이터 Iq 아날로그모드 자가방전",
+  o09:"현장로그 링로그 크래시리포트 토큰로깅 defmt 빌드ID build-id addr2line 심볼 elf 보관 업로드 outbox 원격진단 텔레메트리 Memfault",
+  o10:"생산공정 프로그래밍지그 포고핀 Tag-Connect 갱프로그래머 STM32CubeProgrammer CLI OTP 잠금바이트 UID 시리얼번호 MAC 보정값 MES 생산테스트 골든보드 택트타임",
+  o11:"보안 RDP 읽기보호 레벨2 WRP 쓰기보호 디버그잠금 키저장 보안소자 ATECC608 SE050 TrustZone cmse 사이드채널 글리치 상수시간 CRA 사이버복원력법 PSTI EN303645 SBOM",
+  o12:"버전관리 git describe version.h 빌드ID build-id fw_info 고정위치 재현가능빌드 SOURCE_DATE_EPOCH ffile-prefix-map 툴체인고정 하드웨어리비전 ADC분압 GPIO스트랩 호환성표 릴리스노트",
+  o13:"다음단계 Zephyr 제퍼 디바이스트리 Kconfig west ESP-IDF ESP32 임베디드리눅스 MPU Buildroot Yocto SWUpdate Rust embassy probe-rs 로드맵 기능안전 ISO26262",
 };
 
 let FIDX = null;
