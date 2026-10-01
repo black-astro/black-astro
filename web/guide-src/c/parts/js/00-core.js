@@ -152,6 +152,7 @@ $$(".stage-title").forEach(t => {
 const TAB_KW = {
   base:"c 씨 c언어 clang gcc 표준 c17 c11 c99 c23 정수 int32_t stdint size_t 오버플로 배열 포인터 decay 문자열 널종료 strcpy snprintf 버퍼오버플로 malloc free 누수 해제후사용 이중해제 구조체 패딩 정렬 union 비트필드 함수포인터 콜백 qsort 파일 fopen fgets errno 전처리기 매크로 define 인클루드가드 헤더 static extern makefile ub 미정의동작 앨리어싱 c와c++차이 externc",
   sys:"c 자료구조 동적배열 연결리스트 해시테이블 qsort bsearch 문자열처리 토큰 파싱 posix open read write stat opendir 시간 clock_gettime 소켓 socket tcp 서버 epoll poll 스레드 pthread mutex condvar atomic 프로세스 fork exec waitpid 시그널 signal 파이프 pipe c23 nullptr constexpr typeof embed 임베디드 라이브러리 정적 공유 so dll 버전 테스트 디버깅 gdb valgrind 프로젝트구조 makefile cmake 생태계 sqlite libcurl",
+  setup:"설치 툴체인 toolchain 환경설정 개발환경 세팅 msys2 ucrt64 mingw gcc 지씨씨 msvc cl.exe visual studio build tools 빌드툴 wsl wsl2 usbipd 리눅스 맥 macos homebrew vscode vs코드 비주얼스튜디오코드 clangd compile_commands tasks.json launch.json make makefile cmake 씨메이크 ninja 닌자 크로스컴파일 cross compiler avr-gcc avrdude 에이브이알 arm-none-eabi-gcc arm gnu toolchain newlib nano.specs objcopy hex bin elf stm32cubemx cubeide cubeclt cubeprogrammer st-link stlink 스티링크 j-link cmsis-dap openocd pyocd swd swdio swclk platformio 플랫폼아이오 wokwi qemu renode simulide simavr 시뮬레이터 아두이노 uno r3 r4 nucleo f446re 뉴클레오 로직분석기 멀티미터 드라이버 ch340 zadig com포트 udev dialout path 환경변수 not in sync 트러블슈팅",
 };
 
 const FIND_CHIPS = ["포인터 기초","malloc 누수","구조체 패딩","함수 포인터",
@@ -185,6 +186,19 @@ const SEC_KW = {
   c24:"디버깅 테스트 gdb lldb bt backtrace watch breakpoint 코어덤프 core dump ulimit ASan AddressSanitizer UBSan sanitize valgrind leak-check helgrind Unity cmocka Criterion greatest CTest ctest 새니타이저 -g -O0 -O2 optimized out objcopy debuglink GitHub Actions CI",
   c25:"Makefile make 의존성 -MMD -MP wildcard patsubst 탭 들여쓰기 CMake CMakeLists target_include_directories FetchContent find_package pkg-config vcpkg Ninja 디렉터리구조 include src tests third_party clang-format gitignore compile_commands.json clangd bear GitHub Actions 릴리스 static musl",
   c26:"생태계 라이브러리 SQLite libcurl cJSON yyjson jansson zlib zstd miniz libuv libevent raylib SDL3 mbedTLS OpenSSL GTK Nuklear stb_ds klib Unity log.c argtable getopt_long 의존성관리 vcpkg apt FetchContent 라이선스 Redis CPython Git Nginx FFmpeg PostgreSQL 리눅스커널 WebAssembly Emscripten",
+  u01:"툴체인 지도 호스트 컴파일러 크로스 컴파일러 플래셔 디버그 프로브 IDE elf hex bin 산출물 arm-none-eabi 펌웨어 흐름",
+  u02:"msys2 ucrt64 pacman mingw-w64 gcc msvc cl.exe build tools developer powershell std=c17 c23 경고 플래그 Wconversion utf-8 chcp PATH 환경변수",
+  u03:"build-essential apt dnf brew xcode-select wsl2 usbipd bind attach ttyACM0 ttyUSB0 dialout udev 60-openocd.rules lsusb vid pid",
+  u04:"vscode clangd cpptools compile_commands.json query-driver .clangd tasks.json launch.json cppdbg problemMatcher cmake tools extensions.json 빨간줄 자동완성",
+  u05:"makefile cmake ninja 툴체인 파일 toolchain CMAKE_SYSTEM_NAME Generic CMakePresets preset objcopy post_build 링커 스크립트 gc-sections print-memory-usage",
+  u06:"avr-gcc avr-libc avrdude mmcu atmega328p F_CPU 16MHz objcopy ihex intel hex optiboot 부트로더 stk500 퓨즈 usbasp isp m328p 115200",
+  u07:"arm-none-eabi-gcc arm gnu toolchain cortex-m4 mthumb mfloat-abi hard softfp mfpu fpv4-sp-d16 newlib nano.specs nosys.specs printf_float objcopy size map multilib",
+  u08:"stm32cubemx cubeide cubeclt cubeprogrammer STM32_Programmer_CLI vs code stm32 확장 ioc user code nucleo-f446re 코드 생성 cmake 프리셋 mode=UR",
+  u09:"st-link j-link cmsis-dap daplink swd swdio swclk nrst swo vtref cn4 cn2 openocd pyocd gdb server 3333 cortex-debug svd 10핀 커넥터",
+  u10:"platformio pio platformio.ini env atmelavr ststm32 stm32cube framework upload_protocol debug_tool native unity lib_deps device monitor compiledb",
+  u11:"wokwi simulide simavr qemu qemu-system-avr mps2-an386 semihosting rdimon renode resc diagram.json wokwi.toml 시뮬레이션 에뮬레이터 ci",
+  u12:"구매 장바구니 arduino uno r3 r4 ra4m1 atmega328p nucleo-f446re blue pill stm32f103 짝퉁 cks32 로직 분석기 pulseview sigrok 멀티미터 브레드보드 저항 led 220옴",
+  u13:"트러블슈팅 드라이버 ch340 cp2102 st-link 드라이버 zadig com 포트 장치 관리자 stk500_recv not in sync no st-link detected can not connect to target connect under reset boot0 udev dialout modemmanager brltty path where.exe setx",
 };
 
 let FIDX = null;

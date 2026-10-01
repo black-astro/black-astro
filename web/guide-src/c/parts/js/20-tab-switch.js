@@ -38,6 +38,7 @@ function switchTab(name){
 const TAB_LABEL = {
   base:"🅲 C 기초",
   sys:"⚙️ C 실전 · 시스템",
+  setup:"🧰 설치 · 툴체인",
 };
 
 function tabDrop(force){
@@ -54,6 +55,7 @@ document.addEventListener("click", e => {   // 바깥 탭하면 닫기
 const SEC_LV = {
   /* base */ c01:"b", c02:"b", c03:"i", c04:"i", c05:"i", c06:"a", c07:"a", c08:"i", c09:"i", c10:"i", c11:"a", c12:"i", c13:"b",
   /* sys */ c14:"i", c15:"i", c16:"i", c17:"i", c18:"a", c19:"a", c20:"a", c21:"i", c22:"a", c23:"a", c24:"i", c25:"i", c26:"b",
+  /* setup */ u01:"b", u02:"b", u03:"i", u04:"i", u05:"i", u06:"b", u07:"i", u08:"b", u09:"i", u10:"b", u11:"i", u12:"b", u13:"i",
 };
 
 
@@ -85,6 +87,20 @@ const EZ = {
   c24:"C 버그는 <b>증상이 원인에서 멀리</b> 나타납니다. 눈으로 찾지 말고 새니타이저·valgrind·gdb 에게 시킵니다.",
   c25:"파일이 셋을 넘으면 <code>gcc *.c</code> 로는 안 됩니다. <b>의존 그래프를 적어 두면 바뀐 것만 다시 빌드</b>됩니다.",
   c26:"C 에 패키지 매니저는 없지만 <b>세상에서 가장 많이 실행되는 라이브러리</b>들이 C 로 되어 있습니다. 무엇을 언제 쓰는지 정리합니다.",
+  /* ── setup ── */
+  u01:"펌웨어 도구는 <b>컴파일러 · 크로스 컴파일러 · 빌드 도구 · 플래셔 · 프로브 · IDE</b> 여섯 칸이고, PC 프로그램과 달리 결과물을 <b>USB 너머 칩으로 옮기는 도구</b>가 더 붙습니다.",
+  u02:"윈도우에서는 <b>MSYS2 UCRT64 GCC</b> 를 기본으로 깔고 PATH 에 <code>C:\\msys64\\ucrt64\\bin</code> 만 넣습니다. 표준은 <code>-std=c17</code> 처럼 <b>항상 직접 적습니다</b>.",
+  u03:"리눅스 · 맥은 패키지 몇 개면 끝나고, WSL2 는 <b>usbipd 로 USB 장치를 넘겨 줘야</b> 보드가 보입니다.",
+  u04:"VS Code 는 껍데기이고, 자동완성은 <b>clangd 가 compile_commands.json 을 읽어서</b> 합니다. 빌드는 tasks.json, 디버그는 launch.json.",
+  u05:"작은 프로젝트는 Makefile 도 되지만, 임베디드는 <b>CMake + 툴체인 파일 + Ninja</b> 로 PC 테스트 빌드와 칩 빌드를 한 트리에서 나눕니다.",
+  u06:"<code>avr-gcc -mmcu=atmega328p -DF_CPU=16000000UL</code> 로 빌드하고 <code>avr-objcopy</code> 로 hex 를 뽑아 <code>avrdude -c arduino</code> 로 굽습니다 — 아두이노 업로드 버튼의 정체입니다.",
+  u07:"Cortex-M 은 <b>Arm GNU Toolchain</b> 하나로 빌드하고, F446 은 <code>-mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16</code>. 플래시 = text + data, RAM = data + bss.",
+  u08:"<b>CubeMX</b> 는 설정 · 코드 생성, <b>CubeCLT</b> 는 빌드 · 굽기 · 디버그, <b>CubeIDE</b> 는 둘을 묶은 IDE. 처음엔 CubeIDE, 팀이면 CubeMX + CubeCLT + VS Code.",
+  u09:"프로브는 USB 를 <b>SWD(SWCLK · SWDIO · GND)</b> 로 바꾸는 하드웨어이고, PC 쪽은 <b>OpenOCD</b> 가 GDB 서버가 되어 VS Code 에서 F5 로 디버그합니다.",
+  u10:"<code>platformio.ini</code> 의 <b>[env:이름]</b> 하나가 보드 하나이고, 툴체인 · 프레임워크 · 업로더를 <b>npm 처럼 자동으로</b> 받아 옵니다.",
+  u11:"눈으로 배우기는 <b>Wokwi · SimulIDE</b>, 자동 테스트는 <b>simavr · QEMU · Renode</b>. 시뮬레이터는 <b>로직까지만</b> 보증합니다.",
+  u12:"<b>Uno R3 + Nucleo-F446RE + 로직 분석기 + 멀티미터</b>가 최소 세트입니다. <b>Uno R4 는 AVR 이 아니고</b>, Blue Pill 은 호환 칩이 흔합니다.",
+  u13:"<b>보이나(케이블) → 드라이버 → 점유 · 권한 → 칩 응답</b> 순서로 지웁니다. 막힌 STM32 는 <b>리셋 상태로 연결(mode=UR)</b> 해서 지웁니다.",
 };
 
 
@@ -117,6 +133,20 @@ const CAP = {
   c24:["p","증상에 맞는 도구를 골라 메모리 오류를 몇 분 만에 찾아내고, 새니타이저를 켠 테스트를 CI 에서 자동으로 돌릴 수 있습니다."],
   c25:["p","Makefile 또는 CMake 로 새 C 프로젝트를 표준 구조로 시작하고, 세 OS 를 도는 CI 와 릴리스 바이너리 배포까지 구성할 수 있습니다."],
   c26:["p","용도에 맞는 검증된 C 라이브러리를 고르고 의존성 관리 방식을 정해, 직접 만들 것과 가져다 쓸 것을 판단할 수 있습니다."],
+  /* ── setup ── */
+  u01:["p","새 펌웨어 프로젝트를 받았을 때 어떤 도구가 빠졌는지 역할별로 짚어 설치 순서를 정할 수 있습니다"],
+  u02:["s","윈도우 10 PC 에서 GCC 와 MSVC 로 C17/C23 코드를 경고를 켜고 컴파일할 수 있습니다"],
+  u03:["s","리눅스 · 맥 · WSL2 에서 같은 툴체인을 세우고 USB 보드를 연결할 수 있습니다"],
+  u04:["p","팀원 누구나 같은 자동완성 · 빌드 버튼 · F5 디버그를 쓰도록 .vscode 설정을 구성할 수 있습니다"],
+  u05:["p","CMake 툴체인 파일과 프리셋으로 같은 소스를 PC 용과 STM32 용으로 나눠 빌드할 수 있습니다"],
+  u06:["s","아두이노 IDE 없이 명령줄로 ATmega328P 펌웨어를 빌드해 Uno 에 업로드할 수 있습니다"],
+  u07:["p","Cortex-M 칩에 맞는 컴파일 플래그를 고르고 size · map 으로 플래시 · RAM 사용량을 읽을 수 있습니다"],
+  u08:["p","STM32 프로젝트를 CubeMX 로 생성하고 CubeIDE 또는 CubeCLT · VS Code 조합으로 빌드 · 굽기할 수 있습니다"],
+  u09:["p","ST-LINK · J-Link · CMSIS-DAP 로 외부 보드를 SWD 배선해 OpenOCD · Cortex-Debug 로 디버그할 수 있습니다"],
+  u10:["s","PlatformIO 한 프로젝트에서 Uno · Nucleo · PC 테스트 환경을 함께 빌드 · 업로드할 수 있습니다"],
+  u11:["s","보드 없이 시뮬레이터로 펌웨어를 실행하고 gdb 로 붙어 로직을 확인할 수 있습니다"],
+  u12:["s","가이드 전체를 따라 할 보드 · 측정 도구 · 부품을 실수 없이 고를 수 있습니다"],
+  u13:["p","보드 인식 · 업로드 실패를 에러 문구로 분류해 드라이버 · 포트 · 권한 · PATH 문제를 스스로 해결할 수 있습니다"],
 };
 
 
@@ -157,7 +187,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (0 = 10번째 탭) */
-const TAB_ORDER = ["base","sys"];
+const TAB_ORDER = ["setup","base","sys"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;
