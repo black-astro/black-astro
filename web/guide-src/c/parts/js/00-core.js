@@ -156,6 +156,7 @@ const TAB_KW = {
   avr:"AVR ATmega ATmega328P atmega328p 아트메가 아두이노 Arduino Uno R3 우노 avr-gcc avrgcc avr-libc avrdude 에이브이알 레지스터 register DDRB PORTB PINB GPIO 인터럽트 interrupt ISR 타이머 timer CTC PWM 서보 servo UART USART 시리얼 serial UBRR 보레이트 baud ADC 아날로그 I2C TWI SPI PROGMEM pgm_read_byte EEPROM 퓨즈 fuse 부트로더 bootloader Optiboot ISP USBasp 저전력 sleep 워치독 watchdog millis digitalWrite 펌웨어 마이크로컨트롤러 MCU 임베디드 아두이노없이 아트메가328",
   rtos:"FreeRTOS freertos 프리rtos 프리알토스 RTOS 알토스 실시간 운영체제 실시간OS real-time 태스크 task 스케줄러 scheduler 선점 preemption 타임슬라이스 tick 틱 큐 queue 세마포어 semaphore 세마포 뮤텍스 mutex 뮤텍 우선순위 역전 priority inversion 우선순위 상속 inheritance 인터럽트 ISR FromISR portYIELD_FROM_ISR configMAX_SYSCALL_INTERRUPT_PRIORITY NVIC 태스크 알림 notification 이벤트 그룹 event group 스트림 버퍼 stream buffer 메시지 버퍼 소프트웨어 타이머 timer heap_4 heap_5 정적 할당 스택 오버플로 stack overflow high water mark tickless 저전력 Stop 모드 워치독 IWDG 데드락 deadlock 레이스 race SystemView Tracealyzer CMSIS-RTOS osThreadNew STM32F446RE Nucleo Cortex-M4 xTaskCreate xQueueSend xSemaphoreTake 액티브 오브젝트 Zephyr ThreadX RT-Thread",
   hw:"하드웨어 기초 hardware 전기 전압 전류 저항 옴의법칙 ohm 전력 LED 저항계산 3.3V 5V 풀업 풀다운 pullup 플로팅 floating 푸시풀 오픈드레인 open-drain 바운스 디바운스 debounce 5V톨러런트 FT 레벨시프트 MCU 마이크로컨트롤러 마이컴 ATmega328P 아두이노 arduino uno STM32F446RE nucleo cortex-m4 메모리맵 레지스터 register volatile 비트조작 bitmask BSRR RMW 데이터시트 datasheet 레퍼런스매뉴얼 RM0390 에라타 errata 클럭 clock PLL HSI HSE RCC 클럭게이트 인터럽트 interrupt ISR NVIC 벡터테이블 vector table EXTI 타이머 timer PWM 프리스케일러 prescaler ADC 전압분배기 부팅 boot reset_handler 스타트업 startup 링커스크립트 linker script .data .bss map파일 베어메탈 bare metal blinky SysTick 하드웨어기쵸 레지스타 인터럽드",
+  stm32:"STM32 stm32 스티엠32 에스티엠 STM32F446RE F446 Nucleo 뉴클레오 Cortex-M 코텍스 cortex m4 M4F M0+ M7 M33 CubeMX 큐브엠엑스 cubemx HAL 할 LL CMSIS 레지스터 register 클럭 clock PLL HSE HSI SYSCLK GPIO EXTI 인터럽트 NVIC SysTick HAL_Delay 콜백 callback weak UART USART DMA IDLE ReceiveToIdle 순환버퍼 타이머 timer PWM 입력캡처 엔코더 encoder ADC 샘플링 Flash 플래시 옵션바이트 RDP HardFault 하드폴트 CFSR 저전력 Stop Standby Sleep 임베디드 펌웨어 firmware 마이컴 MCU",
 };
 
 const FIND_CHIPS = ["포인터 기초","malloc 누수","구조체 패딩","함수 포인터",
@@ -241,6 +242,19 @@ const SEC_KW = {
   h11:"부팅 boot 리셋 reset Reset_Handler 벡터테이블 초기SP _estack 스타트업 startup SystemInit .data .bss __libc_init_array main BOOT0 부트로더 리셋원인 RCC_CSR MCUSR",
   h12:"링커스크립트 linker script ld MEMORY SECTIONS .text .rodata .data .bss LMA VMA AT> KEEP 힙 스택 map파일 size nm print-memory-usage 스택칠하기",
   h13:"베어메탈 bare metal blinky LED 버튼 PA5 PC13 LD2 B1 SysTick SysTick_Config BSRR 디바운스 상태기계 WFI arm-none-eabi-gcc STM32_Programmer_CLI openocd avrdude",
+  m01:"STM32 시리즈 C0 F0 G0 F1 F4 G4 L4 U5 H5 H7 Cortex-M0+ M3 M4 M7 M33 TrustZone FPU 품번 Nucleo 블루필 보드 선택",
+  m02:"레지스터 CMSIS LL HAL 계층 BSRR ODR volatile 코드크기 이식성 HAL_GPIO_TogglePin 읽고바꾸고쓰기 원자성 LL_GPIO",
+  m03:"CubeMX ioc USER CODE BEGIN 재생성 CMake CMakePresets VS Code startup 링커스크립트 ld Drivers Core App 폴더구조 MX_DMA_Init",
+  m04:"클럭 RCC HSI HSE PLL PLLM PLLN PLLP PLLQ SYSCLK HCLK APB1 APB2 오버드라이브 FLASH_LATENCY 대기상태 SystemClock_Config MCO CSS",
+  m05:"GPIO MODER OTYPER OSPEEDR PUPDR IDR ODR BSRR AFR 풀업 오픈드레인 HAL_GPIO_Init EXTI EXTI15_10 SYSCFG 디바운스 바운스",
+  m06:"NVIC 우선순위 선점 서브우선순위 펜딩 꼬리물기 tail-chaining SysTick uwTick HAL_GetTick HAL_Delay ISR weak 약한심볼 콜백 PRIMASK",
+  m07:"UART USART HAL_UART_Transmit _IT _DMA ReceiveToIdle_DMA RxEventCallback IDLE 순환버퍼 circular 오버런 ORE 보레이트 BRR printf __io_putchar",
+  m08:"타이머 TIM PSC ARR CCR PWM 듀티 서보 입력캡처 input capture 주파수측정 엔코더 encoder 쿼드러처 TI12 고급타이머 데드타임 MOE",
+  m09:"ADC 아날로그 12비트 스캔 scan 순환DMA HalfCplt ConvCpltCallback 이중버퍼 더블버퍼 샘플링시간 TRGO 트리거 VREFINT 온도센서",
+  m10:"DMA 스트림 채널 매핑 DMAMUX 버퍼수명 스택버퍼 CCM RAM D-Cache 캐시일관성 SCB_CleanDCache_by_Addr Invalidate 32바이트정렬 H7 F7 MPU",
+  m11:"Flash 플래시 섹터 erase HAL_FLASH_Unlock HAL_FLASHEx_Erase HAL_FLASH_Program 옵션바이트 RDP BOR WRP EEPROM 에뮬레이션 링커 지우기시간",
+  m12:"HardFault 하드폴트 예외 스택프레임 EXC_RETURN MSP PSP CFSR HFSR UFSR BFSR MMFSR BFAR MMFAR INVSTATE UNALIGNED addr2line 스택오버플로",
+  m13:"저전력 low power Sleep Stop Standby WFI 웨이크업 소비전류 배터리 HAL_MAX_DELAY 타임아웃 재진입 HAL_BUSY 워치독 IWDG 체크리스트",
 };
 
 let FIDX = null;
