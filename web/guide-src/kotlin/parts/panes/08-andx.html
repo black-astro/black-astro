@@ -180,7 +180,7 @@ object NetworkModule {
     @Provides @Singleton
     fun provideRetrofit(client: OkHttpClient): Retrofit =
         Retrofit.Builder().baseUrl(BuildConfig.API_URL).client(client)
-            .addConverterFactory(json.asConverterFactory(MediaType.get("application/json")))
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
 
     @Provides @Singleton
@@ -466,7 +466,7 @@ class OrderListViewModel @Inject constructor(private val api: OrderApi) : ViewMo
     val orders: Flow&lt;PagingData&lt;OrderUi&gt;&gt; = query
         .debounce(300)
         .flatMapLatest { q -&gt;
-            Pager(PagingConfig(pageSize = 20, prefetchDistance = 5)) {
+            Pager(PagingConfig(pageSize = 20, initialLoadSize = 20, prefetchDistance = 5)) {   // 페이지 번호 키면 첫 로드도 같은 크기로 (기본 ×3 → 2페이지가 겹친다)
                 OrderPagingSource(api, q)
             }.flow.map { paging -&gt; paging.map(OrderDto::toUi) }
         }
@@ -536,7 +536,8 @@ class SyncWorker @AssistedInject constructor(
         }
     }
 
-    // 오래 걸리는 작업이면 알림을 띄워 전면 서비스로 승격
+    // 오래 걸리는 작업은 doWork 안에서 setForeground(getForegroundInfo()) 로 전면 서비스 승격
+    // (expedited 작업은 API 31 미만에서 시스템이 이 값을 직접 쓴다)
     override suspend fun getForegroundInfo(): ForegroundInfo =
         ForegroundInfo(NOTI_ID, buildNotification("동기화 중"))
 }
@@ -799,6 +800,8 @@ class TokenStore @Inject constructor(@ApplicationContext context: Context) {
     var refreshToken: String?
         get() = prefs.getString("refresh", null)
         set(v) = prefs.edit { putString("refresh", v) }
+
+    fun clear() = prefs.edit { clear() }       // 갱신 실패 시 로그아웃 처리용
 }
 
 // 2) 자동 갱신 — OkHttp Authenticator (401 을 받으면 한 번 갱신하고 재시도)
@@ -940,6 +943,7 @@ composeCompiler {
       <div class="note info" style="margin-bottom:0">
         <b>“skippable” 이 목표입니다</b> — 파라미터가 그대로면 그 컴포저블을 건너뜁니다.
         <b>불안정한 타입</b>(List·인터페이스·다른 모듈 클래스)이 파라미터에 있으면 skippable 이 깨집니다.
+        (Kotlin 2.0.20+ 에서 기본이 된 strong skipping 모드에서는 불안정 파라미터도 참조 비교(===)로 건너뛸 수 있어 문제가 줄었지만, 매번 새 객체를 넘기면 여전히 재구성됩니다.)
       </div>
     </div>
     <div class="card">
@@ -1129,7 +1133,7 @@ DisposableEffect(Unit) {
 @Test
 fun `빈 목록이면 안내가 보인다`() {
     rule.setContent {
-        AppTheme { OrderList(orders = emptyList()) }
+        AppTheme { OrderList(orders = emptyList(), onClick = {}) }
     }
     rule.onNodeWithText("주문이 없어요").assertIsDisplayed()
 }
@@ -1317,6 +1321,7 @@ android {
         }
     }
     // 환경별 빌드 (개발·스테이징·운영)
+    buildFeatures { buildConfig = true }    // AGP 8+ 는 BuildConfig 생성이 기본 꺼짐 — buildConfigField 를 쓰려면 필요
     flavorDimensions += "env"
     productFlavors {
         create("dev") { dimension = "env"; buildConfigField("String", "API_URL", "\"https://dev.api\"") }

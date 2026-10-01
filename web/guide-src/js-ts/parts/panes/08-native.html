@@ -528,6 +528,8 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "2", features = ["napi8", "async", "tokio_rt"] }
 napi-derive = "2"
+tokio = { version = "1", features = ["fs"] }   # 아래 hash_file 의 tokio::fs
+blake3 = "1"                                   # 아래 hash_file 의 해시
 
 [build-dependencies]
 napi-build = "2"
@@ -775,7 +777,8 @@ npm rebuild --runtime=electron --target=42.0.0 \
 
 # 확인 — 어떤 런타임용으로 빌드됐는지
 node -p "process.versions.modules"        # Node 의 ABI 버전
-npx electron -p "process.versions.modules"  # Electron 의 ABI 버전</code></pre>
+ELECTRON_RUN_AS_NODE=1 npx electron -p "process.versions.modules"  # Electron 의 ABI 버전
+#   ↑ 이 환경 변수 없이 -p 를 주면 Node 처럼 동작하지 않고 앱 창이 뜹니다</code></pre>
       <div class="note tip">
         <b>가장 확실한 해법은 "재빌드가 필요 없게 만드는 것"입니다.</b>
         ① <b>N-API 모듈만 고르기</b> ·
@@ -1132,8 +1135,10 @@ class VAD extends AudioWorkletProcessor {
     const rms = Math.sqrt(energy / x.length);
     const db = 20 * Math.log10(rms + 1e-9);
 
-    // 켜는 문턱과 끄는 문턱을 다르게 (-45 / -50)
-    if (db &gt; -45) { this.hold = 25; }     // 약 0.7초 유지
+    // 켜는 문턱과 끄는 문턱을 다르게 (-45 / -50) — 말하는 중이면 -50 까지는 "아직 말함"
+    const loud = this.speaking ? db &gt; -50 : db &gt; -45;
+    // process() 는 128프레임마다 = 48kHz 에서 2.67ms → 260블록 ≈ 0.7초 유지
+    if (loud) { this.hold = 260; }
     else if (this.hold &gt; 0) this.hold--;
 
     const now = this.hold &gt; 0;
@@ -1352,7 +1357,8 @@ const chunks: Blob[] = [];
 rec.ondataavailable = (e) =&gt; { if (e.data.size) chunks.push(e.data); };
 rec.onstop = async () =&gt; {
   const blob = new Blob(chunks, { type: "video/webm" });
-  const buf = Buffer.from(await blob.arrayBuffer());
+  // 렌더러(nodeIntegration:false)에는 Buffer 가 없습니다 — Uint8Array 로 넘기고 메인에서 Buffer 로
+  const buf = new Uint8Array(await blob.arrayBuffer());
   await window.api.saveRecording(buf);      // ★ 큰 파일은 스트리밍 저장이 낫습니다
 };
 

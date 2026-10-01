@@ -145,39 +145,41 @@
       <pre class="code" data-lang="yaml"><code>spring:
   cloud:
     gateway:
-      routes:
-        - id: order-service
-          uri: http://localhost:8081          # 고정 주소
-          predicates:
-            - Path=/api/orders/**
-          filters:
-            - StripPrefix=1                    # /api/orders/1 -&gt; /orders/1
-            - AddRequestHeader=X-Gateway, true
+      server:
+        webflux:              # ★ 2025.x 부터 접두사가 spring.cloud.gateway.server.webflux
+          routes:
+            - id: order-service
+              uri: http://localhost:8081          # 고정 주소
+              predicates:
+                - Path=/api/orders/**
+              filters:
+                - StripPrefix=1                    # /api/orders/1 -&gt; /orders/1
+                - AddRequestHeader=X-Gateway, true
 
-        - id: user-service
-          uri: lb://user-service               # 서비스 디스커버리 사용
-          predicates:
-            - Path=/api/users/**
-            - Method=GET,POST
-          filters:
-            - name: CircuitBreaker
-              args:
-                name: userCB
-                fallbackUri: forward:/fallback/user
+            - id: user-service
+              uri: lb://user-service               # 서비스 디스커버리 사용
+              predicates:
+                - Path=/api/users/**
+                - Method=GET,POST
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: userCB
+                    fallbackUri: forward:/fallback/user
 
-        - id: legacy
-          uri: http://legacy.internal:9090
-          predicates:
-            - Path=/legacy/**
-            - Header=X-Legacy, true
+            - id: legacy
+              uri: http://legacy.internal:9090
+              predicates:
+                - Path=/legacy/**
+                - Header=X-Legacy, true
 
-      default-filters:                          # 모든 라우트에 적용
-        - AddResponseHeader=X-Powered-By, gateway
-      globalcors:
-        cors-configurations:
-          '[/**]':
-            allowedOrigins: "https://myapp.com"
-            allowedMethods: "*"</code></pre>
+          default-filters:                          # 모든 라우트에 적용
+            - AddResponseHeader=X-Powered-By, gateway
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowedOrigins: "https://myapp.com"
+                allowedMethods: "*"</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">자바 코드 방식 — 조건이 복잡할 때</h4>
@@ -188,6 +190,13 @@ public class GatewayConfig {
     public RouteLocator routes(RouteLocatorBuilder builder) {
         return builder.routes()
 
+            // 카나리 — 헤더가 있으면 새 버전으로
+            // ★ 같은 Path 의 일반 라우트보다 먼저 등록해야 합니다 (아래에 두면 영영 안 걸림)
+            .route("order-canary", r -&gt; r
+                .path("/api/orders/**")
+                .and().header("X-Canary", "true")
+                .uri("lb://order-service-v2"))
+
             .route("order", r -&gt; r
                 .path("/api/orders/**")
                 .filters(f -&gt; f
@@ -196,14 +205,8 @@ public class GatewayConfig {
                     .retry(c -&gt; c.setRetries(3)
                                  .setMethods(HttpMethod.GET))
                     .circuitBreaker(c -&gt; c.setName("orderCB")
-                                          .setFallbackUri("forward:/fallback")))
+                                          .setFallbackUri("forward:/fallback/order")))
                 .uri("lb://order-service"))
-
-            // 카나리 — 헤더가 있으면 새 버전으로
-            .route("order-canary", r -&gt; r
-                .path("/api/orders/**")
-                .and().header("X-Canary", "true")
-                .uri("lb://order-service-v2"))
 
             // 가중치 기반 분배 (90:10)
             .route("v1", r -&gt; r.path("/api/**")
@@ -263,6 +266,11 @@ public class TenantRoutePredicateFactory
         extends AbstractRoutePredicateFactory&lt;TenantRoutePredicateFactory.Config&gt; {
 
     public TenantRoutePredicateFactory() { super(Config.class); }
+
+    // "- Tenant=acme" 처럼 축약형으로 쓰려면 값이 들어갈 필드 순서를 알려 줘야 합니다
+    // (빠뜨리면 tenant 가 null 로 남아 아래 equals 에서 NPE)
+    @Override
+    public List&lt;String&gt; shortcutFieldOrder() { return List.of("tenant"); }
 
     @Override
     public Predicate&lt;ServerWebExchange&gt; apply(Config config) {
@@ -616,9 +624,14 @@ public class FallbackController {
         redis-rate-limiter.requestedTokens: 1
         key-resolver: "#{@userKeyResolver}"</code></pre>
       <pre class="code" data-lang="java"><code>// 무엇을 기준으로 셀 것인가
+// KeyResolver 빈이 둘 이상이면 하나에 @Primary 가 필요합니다 —
+// 없으면 기본 RequestRateLimiter 필터 팩토리가 어느 것을 쓸지 몰라 기동에 실패합니다
 @Bean
+@Primary
 public KeyResolver userKeyResolver() {
     return exchange -&gt; {
+        // ★ Auth 필터가 검증 뒤 넣은 값만 믿습니다 — 클라이언트가 보낸 X-User-Id 는
+        //   default-filters 에서 지워 두세요(g08). 안 지우면 값을 바꿔 가며 한도를 피합니다
         String userId = exchange.getRequest().getHeaders().getFirst("X-User-Id");
         return Mono.just(userId != null ? userId : ipOf(exchange));
     };
@@ -642,17 +655,22 @@ eureka:
 spring:
   cloud:
     gateway:
-      discovery:
-        locator:
-          enabled: true          # 등록된 서비스를 자동 라우팅
-          lower-case-service-id: true
-      routes:
-        - id: order
-          uri: lb://order-service   # lb:// = 로드밸런싱
+      server:
+        webflux:
+          discovery:
+            locator:
+              enabled: true          # 등록된 서비스를 자동 라우팅
+              lower-case-service-id: true
+          routes:
+            - id: order
+              uri: lb://order-service   # lb:// = 로드밸런싱
 
 # 방법 2) 쿠버네티스라면 Service 이름을 그대로
 #   uri: http://order-service:8080</code></pre>
       <pre class="code" data-lang="java"><code>// 커스텀 로드밸런싱 (기본은 라운드로빈)
+// ★ @Configuration 을 붙이지 않은 클래스에 두고
+//   @LoadBalancerClient(name = "order-service", configuration = 이클래스.class) 로 연결합니다.
+//   메인 컨텍스트에 올리면 서비스별 하위 컨텍스트가 아니라서 name 이 null 이 됩니다
 @Bean
 ReactorLoadBalancer&lt;ServiceInstance&gt; randomLoadBalancer(
         Environment env, LoadBalancerClientFactory factory) {
@@ -688,61 +706,63 @@ spring:
     name: api-gateway
   cloud:
     gateway:
-      default-filters:
-        # 클라이언트가 위조해 보낸 내부 헤더를 반드시 제거 ★
-        - RemoveRequestHeader=X-User-Id
-        - RemoveRequestHeader=X-User-Roles
-        - AddResponseHeader=X-Gateway, api-gateway
+      server:
+        webflux:
+          default-filters:
+            # 클라이언트가 위조해 보낸 내부 헤더를 반드시 제거 ★
+            - RemoveRequestHeader=X-User-Id
+            - RemoveRequestHeader=X-User-Roles
+            - AddResponseHeader=X-Gateway, api-gateway
 
-      routes:
-        # 인증 불필요
-        - id: auth
-          uri: lb://auth-service
-          predicates:
-            - Path=/api/auth/**
-          filters:
-            - StripPrefix=1
-            - name: RequestRateLimiter          # 로그인은 빡빡하게
-              args:
-                redis-rate-limiter.replenishRate: 3
-                redis-rate-limiter.burstCapacity: 5
-                key-resolver: "#{@ipKeyResolver}"
+          routes:
+            # 인증 불필요
+            - id: auth
+              uri: lb://auth-service
+              predicates:
+                - Path=/api/auth/**
+              filters:
+                - StripPrefix=1
+                - name: RequestRateLimiter          # 로그인은 빡빡하게
+                  args:
+                    redis-rate-limiter.replenishRate: 3
+                    redis-rate-limiter.burstCapacity: 5
+                    key-resolver: "#{@ipKeyResolver}"
 
-        # 인증 필요
-        - id: order
-          uri: lb://order-service
-          predicates:
-            - Path=/api/orders/**
-          filters:
-            - StripPrefix=1
-            - Auth                               # 커스텀 JWT 필터
-            - name: CircuitBreaker
-              args:
-                name: orderCB
-                fallbackUri: forward:/fallback/order
-            - name: Retry
-              args:
-                retries: 2
-                methods: GET
-                backoff:
-                  firstBackoff: 100ms
-                  maxBackoff: 500ms
+            # 인증 필요
+            - id: order
+              uri: lb://order-service
+              predicates:
+                - Path=/api/orders/**
+              filters:
+                - StripPrefix=1
+                - Auth                               # 커스텀 JWT 필터
+                - name: CircuitBreaker
+                  args:
+                    name: orderCB
+                    fallbackUri: forward:/fallback/order
+                - name: Retry
+                  args:
+                    retries: 2
+                    methods: GET
+                    backoff:
+                      firstBackoff: 100ms
+                      maxBackoff: 500ms
 
-        # 관리자 — 내부망에서만
-        - id: admin
-          uri: lb://admin-service
-          predicates:
-            - Path=/api/admin/**
-            - RemoteAddr=10.0.0.0/8
-          filters:
-            - StripPrefix=1
-            - Auth
+            # 관리자 — 내부망에서만
+            - id: admin
+              uri: lb://admin-service
+              predicates:
+                - Path=/api/admin/**
+                - RemoteAddr=10.0.0.0/8
+              filters:
+                - StripPrefix=1
+                - Auth
 
-      httpclient:
-        connect-timeout: 2000
-        response-timeout: 10s
-        pool:
-          max-connections: 500
+          httpclient:
+            connect-timeout: 2000
+            response-timeout: 10s
+            pool:
+              max-connections: 500
 
 management:
   endpoints:
@@ -807,10 +827,12 @@ eureka:
 spring:
   cloud:
     gateway:
-      discovery:
-        locator:
-          enabled: true          # 등록된 서비스로 라우트 자동 생성
-          lower-case-service-id: true</code></pre>
+      server:
+        webflux:
+          discovery:
+            locator:
+              enabled: true          # 등록된 서비스로 라우트 자동 생성
+              lower-case-service-id: true</code></pre>
       <div class="note tip">
         <b>K8s 환경이라면 Eureka 를 넣지 마세요.</b>
         같은 일을 하는 계층이 두 개가 되어 <b>장애 원인만 늘어납니다.</b>
@@ -998,6 +1020,8 @@ protobuf {
       <h4 class="mini" style="margin-top:0">서버 — 생성된 base 클래스를 구현</h4>
       <pre class="code" data-lang="java"><code>// import org.springframework.grpc.server.service.GrpcService;
 @GrpcService                                   // Boot 4.1 공식 스타터
+@RequiredArgsConstructor
+@Slf4j
 public class OrderGrpcService
         extends OrderServiceGrpc.OrderServiceImplBase {
 
@@ -1008,7 +1032,8 @@ public class OrderGrpcService
     public void getOrder(GetOrderRequest req,
                          StreamObserver&lt;OrderResponse&gt; res) {
         var order = query.find(req.getOrderId())
-            .orElseThrow(() -&gt; Status.NOT_FOUND
+            // .proto 의 enum Status 와 이름이 겹치므로 gRPC 상태는 전체 이름으로 씁니다
+            .orElseThrow(() -&gt; io.grpc.Status.NOT_FOUND
                 .withDescription("주문을 찾을 수 없습니다: " + req.getOrderId())
                 .asRuntimeException());
 
@@ -1041,23 +1066,33 @@ public class OrderGrpcService
     }
     // ④ 양방향 — ③과 같은 모양에서 onNext 안에서 곧바로 res.onNext() 로 밀어 줍니다
 }</code></pre>
-      <pre class="code" data-lang="yaml"><code>grpc:
-  server:
-    port: 9090                    # ★ HTTP(8080)와 별도 포트
-  client:
-    inventory:
-      address: "static://inventory:9090"   # K8s 면 dns:///inventory:9090
-      negotiationType: PLAINTEXT           # 내부망 · mTLS 면 TLS
-      enableKeepAlive: true
-      keepAliveTime: 30s</code></pre>
+      <pre class="code" data-lang="yaml"><code># 공식 스타터는 spring.grpc.* 접두사입니다
+# (grpc.server.* · grpc.client.* · static:// 는 net.devh 스타터 형식이라 무시됩니다)
+spring:
+  grpc:
+    server:
+      port: 9090                    # ★ HTTP(8080)와 별도 포트
+    client:
+      channels:
+        inventory:
+          address: "inventory:9090"         # K8s 면 dns:///inventory:9090
+          negotiation-type: plaintext       # 내부망 · mTLS 면 tls
+          enable-keep-alive: true
+          keep-alive-time: 30s</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">클라이언트 · 데드라인 · 에러</h4>
       <pre class="code" data-lang="java"><code>@Service
 public class InventoryClient {
 
-    @GrpcClient("inventory")                    // 위 yaml 의 이름
-    private InventoryServiceGrpc.InventoryServiceBlockingStub stub;
+    private final InventoryServiceGrpc.InventoryServiceBlockingStub stub;
+
+    // 공식 스타터에는 net.devh 의 @GrpcClient 필드 주입이 없습니다 —
+    // GrpcChannelFactory 로 채널을 만들어 스텁을 직접 생성합니다
+    public InventoryClient(GrpcChannelFactory channels) {
+        this.stub = InventoryServiceGrpc.newBlockingStub(
+                channels.createChannel("inventory"));   // 위 yaml 의 채널 이름
+    }
 
     public int stockOf(long itemId) {
         try {
@@ -1142,7 +1177,12 @@ public class InventoryClient {
     <div class="card">
       <h4 class="mini" style="margin-top:0">관측 — 인터셉터</h4>
       <pre class="code" data-lang="java"><code>// REST 의 필터(g05)에 해당합니다 — 로깅·인증·추적을 여기 한 곳에
-@GrpcGlobalServerInterceptor
+// (공식 스타터의 전역 등록은 @GlobalServerInterceptor — net.devh 의 @GrpcGlobalServerInterceptor 가 아님)
+// 주의: 서비스 메서드는 이 메서드와 다른 스레드에서 돌 수 있어 여기서 넣은 MDC 가
+//       안 보이거나 남을 수 있습니다 — 실무에선 io.grpc.Context 에 담고 리스너를 감싸 옮깁니다
+@Component
+@GlobalServerInterceptor
+@Slf4j
 public class TraceServerInterceptor implements ServerInterceptor {
 
     static final Metadata.Key&lt;String&gt; TRACE =
@@ -1313,25 +1353,27 @@ grpc_health_probe -addr=localhost:9090    # 표준 헬스체크 — K8s 프로�
       <pre class="code" data-lang="yaml"><code>spring:
   cloud:
     gateway:
-      httpclient:
-        connect-timeout: 500            # ms — 연결은 빨리 포기
-        response-timeout: 2500ms        # 전체 상한
-      routes:
-        - id: order
-          uri: lb://order-service
-          predicates: [Path=/api/orders/**]
-          metadata:
-            response-timeout: 1200      # 라우트별로 더 짧게 조일 수 있다
-            connect-timeout: 300
-          filters:
-            - name: CircuitBreaker
-              args: { name: orderCB, fallbackUri: forward:/fallback/order }
-            - name: Retry
-              args:
-                retries: 2
-                methods: GET             # ★ POST 는 재시도 금지 (중복 생성)
-                series: SERVER_ERROR
-                backoff: { firstBackoff: 50ms, maxBackoff: 300ms, factor: 2 }</code></pre>
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 500            # ms — 연결은 빨리 포기
+            response-timeout: 2500ms        # 전체 상한
+          routes:
+            - id: order
+              uri: lb://order-service
+              predicates: [Path=/api/orders/**]
+              metadata:
+                response-timeout: 1200      # 라우트별로 더 짧게 조일 수 있다
+                connect-timeout: 300
+              filters:
+                - name: CircuitBreaker
+                  args: { name: orderCB, fallbackUri: forward:/fallback/order }
+                - name: Retry
+                  args:
+                    retries: 1               # 1200ms × 2번 시도 + 백오프 ≈ 2.45s — 예산 2.5s 안
+                    methods: GET             # ★ POST 는 재시도 금지 (중복 생성)
+                    series: SERVER_ERROR
+                    backoff: { firstBackoff: 50ms, maxBackoff: 300ms, factor: 2 }</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>재시도는 장애를 키우는 가장 흔한 원인입니다.</b>
         서비스가 느려서 5xx 가 뜨는데 게이트웨이가 3번씩 재시도하면
@@ -1343,10 +1385,14 @@ grpc_health_probe -addr=localhost:9090    # 표준 헬스체크 — K8s 프로�
 
     <div class="card">
       <h4 class="mini" style="margin-top:0">격벽(bulkhead) — 한 서비스가 전부를 잠식하지 않게</h4>
-      <pre class="code" data-lang="java"><code>// Resilience4j — 서비스별로 동시 호출 수를 따로 묶는다
+      <pre class="code" data-lang="java"><code>// Resilience4j — 서비스(orderCB)마다 브레이커를 따로 둔다 — 한 곳이 열려도 다른 경로는 그대로
+// (동시 호출 수 상한 자체는 Bulkhead 모듈로 따로 겁니다)
 @Bean
 public Customizer&lt;Resilience4JCircuitBreakerFactory&gt; cbConfig() {
     return factory -&gt; factory.configure(builder -&gt; builder
+        // TimeLimiter 기본값은 1초 — 지정하지 않으면 라우트 타임아웃(1.2s)보다 먼저 끊습니다
+        .timeLimiterConfig(TimeLimiterConfig.custom()
+            .timeoutDuration(Duration.ofMillis(1200)).build())
         .circuitBreakerConfig(CircuitBreakerConfig.custom()
             .slidingWindowType(SlidingWindowType.TIME_BASED)
             .slidingWindowSize(10)              // 최근 10초를 본다
@@ -1432,6 +1478,7 @@ public RouteLocator routes(RouteLocatorBuilder b) {
         .build();
 }</code></pre>
       <pre class="code" data-lang="java"><code>// 사내 사용자·특정 헤더만 먼저 (더 안전한 1단계)
+// ★ 위 가중치 라우트보다 먼저 등록해야 합니다 — 뒤에 두면 가중치 라우트가 먼저 가져갑니다
 .route("order-beta", r -&gt; r.path("/api/orders/**")
     .and().header("X-Beta", "true")
     .uri("lb://order-service-v2"))</code></pre>

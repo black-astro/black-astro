@@ -91,7 +91,8 @@
         freeCompilerArgs.addAll(
             "-Xjsr305=strict",
             "-Xcontext-parameters",
-            "-Xjvm-default=all",             // 인터페이스 기본 구현을 자바 default 로
+            // 인터페이스 기본 구현 → 자바 default 메서드: 2.2 부터는 기본값(-jvm-default=enable)이 이미 이렇게 만든다
+            //   (옛 -Xjvm-default=all 은 2.2 에서 폐기 예정 — 쓰지 않는다)
             "-Xlambdas=indy",                // 람다를 invokedynamic 으로 (기본값)
         )
         jvmTarget.set(JvmTarget.JVM_21)
@@ -205,8 +206,8 @@ fun send(to: String, type: String = "일반", retry: Int = 3) { }
 public static void send(String to, String type, int retry) { }        // 진짜 구현
 public static void send$default(String to, String type, int retry,
                                 int mask, Object marker) {
-    if ((mask & 2) != 0) type = "일반";        // 비트마스크로 '안 넘긴 인자'를 판별
-    if ((mask & 4) != 0) retry = 3;
+    if ((mask &amp; 2) != 0) type = "일반";        // 비트마스크로 '안 넘긴 인자'를 판별
+    if ((mask &amp; 4) != 0) retry = 3;
     send(to, type, retry);
 }
 // 호출부: send$default("a@b.com", null, 0, 6, null)
@@ -574,11 +575,11 @@ inline fun &lt;reified T&gt; badExample(list: List&lt;T&gt;) {
       <pre class="code" data-lang="kotlin"><code>// ① 같은 시그니처로 인식되는 오버로드
 fun handle(list: List&lt;String&gt;) { }
 // fun handle(list: List&lt;Int&gt;) { }     // ❌ 플랫폼 선언 충돌
-@JvmName("handleInts")                   // ✅ 이름을 바꿔 회피
-fun handle2(list: List&lt;Int&gt;) { }
+@JvmName("handleInts")                   // ✅ JVM 이름만 바꿔 회피
+fun handle(list: List&lt;Int&gt;) { }        //    코틀린에서는 그대로 handle 로 부른다
 
 // ② 실행 시점 타입 검사 불가
-if (obj is List&lt;String&gt;) { }             // ❌ 경고 · 사실상 List 검사일 뿐
+if (obj is List&lt;String&gt;) { }             // ❌ 컴파일 에러 — 소거된 타입은 검사할 수 없다
 if (obj is List&lt;*&gt;) { }                  // ✅ 이건 된다
 
 // ③ 제네릭 배열 생성 불가
@@ -690,8 +691,11 @@ fun main() {
   </div>
 
   <pre class="code rv" data-lang="bash"><code># 컨테이너에서의 권장 옵션
-java -XX:MaxRAMPercentage=75 \        # 고정 -Xmx 대신 비율로 (컨테이너 인식)
-     -XX:+UseZGC -XX:+ZGenerational \  # 저지연이 필요하면
+#  · MaxRAMPercentage — 고정 -Xmx 대신 비율로 (컨테이너 인식)
+#  · UseZGC + ZGenerational — 저지연이 필요하면 (JDK 21 기준, 23+ 는 세대형이 기본)
+#  (줄 끝 \ 뒤에 주석을 달면 명령이 거기서 끊기므로 설명은 위에 둔다)
+java -XX:MaxRAMPercentage=75 \
+     -XX:+UseZGC -XX:+ZGenerational \
      -XX:+HeapDumpOnOutOfMemoryError \
      -XX:HeapDumpPath=/dumps \
      -Xlog:gc*:file=/logs/gc.log:time,uptime:filecount=5,filesize=10M \
@@ -768,8 +772,9 @@ fun main() {
     jobs.filter { it.state == State.SUSPENDED }.forEach { println(it) }
 }
 
-// JVM 옵션으로도 켤 수 있다
-// -Dkotlinx.coroutines.debug=on</code></pre>
+// 코드 수정 없이 에이전트로도 켤 수 있다
+// -javaagent:kotlinx-coroutines-debug-VERSION.jar
+// (-Dkotlinx.coroutines.debug=on 은 스레드 이름에 코루틴 이름을 붙이는 디버그 모드 — DebugProbes 와는 별개)</code></pre>
 
   <div class="note warn rv">
     <b>프로파일링의 첫 번째 규칙 — 운영과 비슷한 부하에서 재세요.</b>
@@ -1095,6 +1100,7 @@ val b = if (flag) 1 else "x"        // Any — 대개 설계가 잘못된 신호
 
 // 재귀 제네릭 (F-bounded) — 빌더·DSL 에서 쓴다
 abstract class Builder&lt;T : Builder&lt;T&gt;&gt; {
+    protected var n: String = ""
     @Suppress("UNCHECKED_CAST")
     fun name(n: String): T { this.n = n; return this as T }
 }
@@ -1107,7 +1113,8 @@ fun &lt;T&gt; printAll2(list: List&lt;T&gt;) { }     // T 를 알고 쓸 수 있
 // ③ 교차 타입 (컴파일러 내부적으로 만들어진다)
 fun &lt;T&gt; pick(a: T, b: T): T = a
 val r = pick(ArrayList&lt;Int&gt;(), LinkedList&lt;Int&gt;())
-// r 의 타입은 AbstractList&lt;Int&gt; & RandomAccess ... 같은 교차 타입
+// r 의 타입은 AbstractList&lt;Int&gt; &amp; Cloneable &amp; Serializable 같은 교차 타입
+//   (RandomAccess 는 LinkedList 에 없어서 빠진다)
 
 // ④ 컨텍스트 파라미터 (2.2 실험) — 암시적으로 전달되는 의존성
 context(logger: Logger)

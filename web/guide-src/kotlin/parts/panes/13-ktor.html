@@ -278,11 +278,13 @@ dependencies {
   <div class="grid2 rv">
     <div class="card">
       <h4 class="mini" style="margin-top:0">기동 시간과 메모리 재기</h4>
-      <pre class="code" data-lang="bash"><code># ① 기동 시간 — 로그의 "Responding at" 까지 걸린 시간을 열 번 재서 중앙값을 씁니다
+      <pre class="code" data-lang="bash"><code># ① 기동 시간 — 첫 응답이 올 때까지 걸린 시간을 열 번 재서 중앙값을 씁니다
 for i in $(seq 1 10); do
-  /usr/bin/time -f "%e" java -jar app-all.jar &amp; PID=$!
+  start=$(date +%s%N)
+  java -jar app-all.jar &amp; PID=$!          # PID 가 java 자신이어야 kill 이 서버를 끈다
   until curl -sf localhost:8080/healthz &gt;/dev/null 2&gt;&amp;1; do sleep 0.01; done
-  kill $PID
+  echo "$(( ($(date +%s%N) - start) / 1000000 )) ms"
+  kill $PID; wait $PID 2&gt;/dev/null        # 다음 회차 전에 포트가 비도록 기다린다
 done
 
 # ② 실제로 쓰는 메모리는 힙이 아니라 RSS 입니다 (컨테이너가 죽이는 기준)
@@ -304,7 +306,8 @@ oha -z 60s -c 50 http://localhost:8080/api/links
       <h4 class="mini" style="margin-top:0">기동이 느린 원인을 찾는 법</h4>
       <pre class="code" data-lang="bash"><code># 스프링 쪽 — 무엇이 시간을 먹는지 나옵니다
 java -jar app.jar --debug           # 자동 설정 평가 보고서
-java -Dspring.context.startup=true -jar app.jar   # 단계별 소요 시간
+# 단계별 소요 시간 — SpringApplication 에 BufferingApplicationStartup(2048) 을 걸고
+#   액추에이터 /actuator/startup 으로 봅니다 (켜는 JVM 옵션 한 줄은 없습니다)
 
 # Ktor 쪽 — 기동이 느리면 원인은 대개 셋 중 하나입니다
 #   ① DB 마이그레이션(Flyway) — 서버 기동 전에 도니까 여기 포함됩니다
@@ -476,7 +479,7 @@ fun main() {
 
 // 설정을 더 주려면 configure 블록을 씁니다
 fun main() {
-    embeddedServer(Netty, configure = {
+    embeddedServer(Netty, port = 8080, configure = {   // port 를 빼면 기본 80 으로 뜬다
         connectionGroupSize = 2
         workerGroupSize = 4
         callGroupSize = 8                      // 핸들러를 실행할 스레드 수
@@ -586,7 +589,7 @@ ktor {
     }
 }</code></pre>
       <pre class="code" data-lang="bash"><code># 또는 실행할 때 개발 모드 플래그로
-./gradlew run -Dio.ktor.development=true</code></pre>
+./gradlew run -Pio.ktor.development=true      # -D 는 Gradle JVM 에 붙는다 — Ktor 플러그인은 -P 를 읽는다</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>핫 리로드가 갈아 끼우는 것은 "모듈"까지입니다</b> —
         <code>Application.module()</code> 안의 내용은 다시 실행되지만,
@@ -601,8 +604,9 @@ ktor {
     <b>첫 실행에서 확인할 것 두 가지</b> —
     ① 로그에 <code>Responding at http://0.0.0.0:8080</code> 이 뜨는지,
     ② <code>curl -i localhost:8080/hello</code> 의 헤더에 <code>Content-Type: application/json</code> 이 있는지.
-    ②가 <code>text/plain</code> 이면 <b><code>ContentNegotiation</code> 을 install 하지 않은 것</b>입니다.
-    Ktor 는 이때 에러를 내지 않고 <code>toString()</code> 결과를 그냥 돌려주므로 조용히 지나가기 쉽습니다.
+    <code>ContentNegotiation</code> 을 install 하지 않았다면 Map 을 응답으로 바꿀 방법이 없어 <b>500</b> 이 나고,
+    로그에 <code>Response pipeline couldn't transform ... to the OutgoingContent</code> 가 찍힙니다.
+    직렬화 의존성을 빠뜨린 것도 같은 증상이니 이 문구를 보면 플러그인부터 확인하세요.
   </div>
   <h3 class="sub" data-lv="b">두 방식 · 의존성 이름 <span class="t">한 장 정리</span> <span class="lvl e">🟢 기초</span></h3>
   <div class="grid2 rv">
@@ -1586,9 +1590,13 @@ get("/api/dashboard/{userId}") {
         val user   = async { userClient.get(userId) }          // 필수
         val orders = async { orderClient.recent(userId, 5) }   // 필수
         val coupon = async {                                    // 선택
-            runCatching {
-                withTimeout(300.milliseconds) { couponClient.available(userId) }
-            }.getOrNull()
+            try {
+                withTimeoutOrNull(300.milliseconds) { couponClient.available(userId) }   // 시간 초과 → null
+            } catch (e: CancellationException) {
+                throw e                                         // 바깥 취소는 그대로 전파
+            } catch (e: Exception) {
+                null                                            // 쿠폰 서비스 장애 → 쿠폰 없이
+            }
         }
 
         call.respond(Dashboard(user.await(), orders.await(), coupon.await()))
@@ -1599,8 +1607,8 @@ get("/api/dashboard/{userId}") {
         코루틴에서 취소는 <b>예외로 전파</b>되므로, 이걸 삼키면
         <b>취소가 안 먹는 코루틴</b>이 됩니다. 안전한 형태는 이렇게 다시 던지는 것입니다 —
         <code>catch (e: CancellationException) { throw e }</code>.
-        <code>withTimeout</code> 의 <code>TimeoutCancellationException</code> 은 예외라서
-        위 코드에서는 의도대로 잡히지만, <b>바깥 취소까지 삼키지 않게</b> 주의해야 합니다.
+        그래서 위 코드는 <code>runCatching</code> 대신 그 형태를 쓰고, 시간 초과는
+        <code>withTimeoutOrNull</code> 로 <code>null</code> 을 받아 <b>바깥 취소와 섞이지 않게</b> 했습니다.
       </div>
     </div>
   </div>
@@ -1611,9 +1619,9 @@ get("/api/dashboard/{userId}") {
       <h4 class="mini" style="margin-top:0">Ktor 의 스레드 지도</h4>
       <div class="tw"><table class="cheat" style="margin:0">
         <tr><th style="width:32%">이름</th><th>개수</th><th>여기서 하는 일</th></tr>
-        <tr><td>connectionGroup</td><td>기본 2</td><td>연결 수락(accept)</td></tr>
-        <tr><td>workerGroup</td><td>CPU × 2</td><td>소켓 읽기 · 쓰기</td></tr>
-        <tr><td><b>callGroup</b></td><td>CPU × 2</td><td><b>내 핸들러가 도는 곳</b></td></tr>
+        <tr><td>connectionGroup</td><td>CPU ÷ 2 + 1</td><td>연결 수락(accept)</td></tr>
+        <tr><td>workerGroup</td><td>CPU ÷ 2 + 1</td><td>소켓 읽기 · 쓰기</td></tr>
+        <tr><td><b>callGroup</b></td><td>CPU 개수</td><td><b>내 핸들러가 도는 곳</b></td></tr>
         <tr><td>Dispatchers.IO</td><td>기본 64</td><td>블로킹 호출 격리</td></tr>
         <tr><td>Dispatchers.Default</td><td>CPU 개수</td><td>CPU 를 쓰는 계산</td></tr>
       </table></div>
@@ -1663,8 +1671,9 @@ get("/good") {
     call.respondText("done")
 }
 
-// ② 백그라운드 작업은 애플리케이션 스코프에서 (앱이 죽으면 같이 정리됩니다)
+// ② 백그라운드 작업은 애플리케이션 스코프에서 — 앱 종료 때 함께 취소합니다
 val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+// monitor.subscribe(ApplicationStopped) { appScope.cancel() }   ← 이 줄이 있어야 '같이 정리'된다
 get("/good2") {
     appScope.launch {
         runCatching { sendEmail() }.onFailure { log.error("메일 실패", it) }
@@ -1688,7 +1697,7 @@ get("/good2") {
 suspend fun heavyPipeline(): Report {
     val rows = mutableListOf&lt;Row&gt;()
     repeat(1_000_000) { i -&gt;
-        ensureActive()                    // ★ CPU 루프에는 이걸 넣어야 취소가 먹습니다
+        currentCoroutineContext().ensureActive()   // ★ CPU 루프에는 이걸 넣어야 취소가 먹습니다
         rows += compute(i)
     }
     return Report(rows)
@@ -1696,12 +1705,15 @@ suspend fun heavyPipeline(): Report {
 
 // 취소됐는지 알아야 정리할 것이 있다면
 get("/stream") {
-    try {
-        while (true) { call.respondText(nextChunk()); delay(1000) }
-    } catch (e: CancellationException) {
-        log.info("클라이언트가 끊었습니다 — 커서를 닫습니다")
-        cursor.close()
-        throw e                            // ★ 반드시 다시 던집니다
+    // respondText 를 반복 호출하면 두 번째에서 ResponseAlreadySentException — 응답 하나를 열어 두고 씁니다
+    call.respondTextWriter {
+        try {
+            while (true) { write(nextChunk()); flush(); delay(1000) }
+        } catch (e: CancellationException) {
+            log.info("클라이언트가 끊었습니다 — 커서를 닫습니다")
+            cursor.close()
+            throw e                        // ★ 반드시 다시 던집니다
+        }
     }
 }</code></pre>
       <div class="note warn" style="margin-bottom:0">
@@ -1865,7 +1877,8 @@ val page = Links.selectAll()
     .map { it.toLink() }
 
 // 삽입 — 생성된 키를 받습니다
-val newId = Links.insertAndGetId { it[slug] = s; it[url] = u; it[ownerId] = uid }
+val newId = Links.insert { it[slug] = s; it[url] = u; it[ownerId] = uid } get Links.id
+//   (insertAndGetId 는 IdTable 전용 — 여기 Links 는 일반 Table)
 
 // 갱신 — 원자적 증가 (읽고 더해서 쓰지 않습니다 ★)
 Links.update({ Links.slug eq slug }) {
@@ -1938,8 +1951,8 @@ class ExposedLinkRepository : LinkRepository {
     }
 
     override suspend fun create(slug: String, url: String, ownerId: Long): Link = dbQuery {
-        val id = Links.insertAndGetId { it[Links.slug] = slug; it[Links.url] = url; it[Links.ownerId] = ownerId }
-        Link(id.value, slug, url, 0)
+        val id = Links.insert { it[Links.slug] = slug; it[Links.url] = url; it[Links.ownerId] = ownerId } get Links.id
+        Link(id, slug, url, 0)
     }
 
     // 원자적 증가 — 경합이 있어도 안전합니다
@@ -2191,7 +2204,7 @@ fun issueAccessToken(cfg: JwtConfig, user: User): String =
       <pre class="code" data-lang="kotlin"><code>// Ktor 에는 @PreAuthorize 가 없습니다 — 확장 함수로 직접 만듭니다
 fun Route.requireRole(vararg roles: String, build: Route.() -&gt; Unit) {
     val plugin = createRouteScopedPlugin("RequireRole") {
-        onCall { call -&gt;
+        on(AuthenticationChecked) { call -&gt;     // onCall 은 인증보다 먼저 돌 수 있다 — 인증 확인 뒤 훅을 쓴다
             val principal = call.principal&lt;UserPrincipal&gt;()
             if (principal == null || roles.none { it in principal.roles }) {
                 call.respond(HttpStatusCode.Forbidden,
@@ -2463,7 +2476,7 @@ class ChatRoom {
     suspend fun broadcast(event: ChatEvent) {
         // ★ 락을 쥔 채로 전송하지 않습니다 — 스냅샷만 뜨고 락을 놓습니다
         val targets = mutex.withLock { sessions.toMap() }
-        val dead = mutableListOf&lt;String&gt;()
+        val dead = ConcurrentLinkedQueue&lt;String&gt;()   // ★ 여러 코루틴이 동시에 추가하므로
 
         coroutineScope {
             targets.forEach { (name, session) -&gt;
@@ -2575,7 +2588,8 @@ class BufferedSession(
       <div class="note tip" style="margin-bottom:0">
         <b>왜 <code>trySend</code> 인가</b> — 브로드캐스트 루프가
         <b>단 한 세션의 네트워크 속도에 묶이면 안 됩니다</b>.
-        <code>trySend</code> 는 버퍼가 차 있으면 즉시 <code>false</code> 를 돌려주고 지나갑니다.
+        <code>trySend</code> 는 절대 기다리지 않습니다 — 여기서는 <code>DROP_OLDEST</code> 라서 버퍼가 차면
+        가장 오래된 것을 버리고 즉시 성공합니다(기본 버퍼였다면 <code>false</code> 를 돌려주고 지나갑니다).
         "느린 사람은 메시지를 좀 놓친다"가 "모두가 느려진다"보다 낫습니다.
       </div>
     </div>
@@ -2863,7 +2877,7 @@ class LinkRepositoryIT {
     fun `클릭 증가가 동시에 들어와도 정확하다`() = runTest {
         repo.create("cd34", "https://a.com", ownerId = 1)
         coroutineScope { repeat(100) { launch { repo.incrementClicks("cd34") } } }
-        assertEquals(100, repo.findBySlug("cd34")!!.clicks)
+        assertEquals(100L, repo.findBySlug("cd34")!!.clicks)   // clicks 는 Long — 100(Int) 과는 같지 않다
     }
 }</code></pre>
       <div class="note warn" style="margin-bottom:0">
@@ -3279,11 +3293,14 @@ java -XX:SharedArchiveFile=/app/app.jsa -jar /app/app.jar</code></pre>
         클래스 파싱과 검증을 건너뛰므로 <b>기동이 25~35% 빨라집니다</b>.
         JDK 19+ 의 <code>-XX:+AutoCreateSharedArchive</code> 를 쓰면
         <b>첫 실행이 알아서 아카이브를 만들고 다음부터 씁니다</b> —
-        <code>java -XX:CacheDataStorage=/tmp/app.jsa -jar app.jar</code> 한 줄로 끝나는 셈입니다.
+        <code>java -XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=/tmp/app.jsa -jar app.jar</code> 한 줄로 끝나는 셈입니다.
       </div>
       <pre class="code" data-lang="bash" style="margin-top:10px"><code># JVM 플래그 — 컨테이너에서 이 두 개는 거의 항상 씁니다
-java -XX:MaxRAMPercentage=75.0 \      # 컨테이너 메모리의 75%를 힙으로
-     -XX:+UseSerialGC \                # 코어 1~2개면 SerialGC 가 유리합니다
+#  · MaxRAMPercentage=75.0 — 컨테이너 메모리의 75%를 힙으로
+#  · UseSerialGC — 코어 1~2개면 SerialGC 가 유리합니다
+#  (줄 끝 \ 뒤에 주석을 달면 명령이 거기서 끊기므로 설명은 위에 둔다)
+java -XX:MaxRAMPercentage=75.0 \
+     -XX:+UseSerialGC \
      -jar app.jar</code></pre>
     </div>
   </div>
@@ -3798,13 +3815,15 @@ fun `없는 slug 는 표준 에러 모양으로 404`() = testApplication {
     application { testModule(FakeLinkRepository()) }
     val res = client.get("/nope")
     assertEquals(HttpStatusCode.NotFound, res.status)
-    assertEquals("NOT_FOUND", res.body&lt;ErrorResponse&gt;().code)
+    // 기본 client 에는 ContentNegotiation 이 없어 body&lt;T&gt;() 가 안 된다 — 문자열로 받아 직접 파싱
+    assertEquals("NOT_FOUND", Json.decodeFromString&lt;ErrorResponse&gt;(res.bodyAsText()).code)
 }
 
 @Test
 fun `클릭 집계가 응답을 늦추지 않는다`() = testApplication {
-    val slowCache = SlowCache(delay = 300.milliseconds)
-    application { testModule(cache = slowCache) }
+    val repo = FakeLinkRepository(Link(1, "ab12", "https://a.com", 0))
+    val slowCache = SlowCache(incrDelay = 300.milliseconds)   // 클릭 집계(incr)만 느린 캐시
+    application { testModule(repo, cache = slowCache) }
 
     val elapsed = measureTime {
         client.config { followRedirects = false }.get("/ab12")

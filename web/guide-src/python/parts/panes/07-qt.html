@@ -658,7 +658,8 @@ def start_job(self, path):
 
     # 정리 (누수 방지)
     self.worker.finished.connect(self.thread.quit)
-    self.worker.finished.connect(self.worker.deleteLater)
+    self.worker.error.connect(self.thread.quit)       # ★ 실패해도 스레드는 끝내야 합니다
+    self.thread.finished.connect(self.worker.deleteLater)
     self.thread.finished.connect(self.thread.deleteLater)
 
     self.run_btn.setEnabled(False)                # 중복 실행 방지
@@ -988,7 +989,8 @@ self.run_btn.setObjectName("primary")   # #primary 규칙 적용</code></pre>
     <p class="lead">이 문서의 모든 내용이 만나는 지점입니다. DataFrame을 화면 표로 띄웁니다.</p>
   </div>
 
-  <pre class="code rv" data-lang="python"><code>import pandas as pd
+  <pre class="code rv" data-lang="python"><code>import numbers
+import pandas as pd
 from PySide6.QtCore import QAbstractTableModel, Qt, QModelIndex
 
 class PandasModel(QAbstractTableModel):
@@ -1017,12 +1019,12 @@ class PandasModel(QAbstractTableModel):
             return str(value)
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            if isinstance(value, (int, float)):
+            if isinstance(value, numbers.Number):    # np.int64 는 int 가 아니라서
                 return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         if role == Qt.ItemDataRole.ForegroundRole:
             from PySide6.QtGui import QColor
-            if isinstance(value, (int, float)) and value &lt; 0:
+            if isinstance(value, numbers.Number) and value &lt; 0:
                 return QColor("#fb7185")           # 음수는 빨강
         return None
 
@@ -1370,7 +1372,8 @@ uv run pyinstaller --windowed --name "업무도구" ^
 AppName=업무도구
 AppVersion=1.0.0
 AppPublisher=우리팀
-DefaultDirName={autopf}\업무도구      ; C:\Program Files\업무도구
+; {autopf} = C:\Program Files (주석은 줄 맨 앞에만 — 값 뒤에 붙이면 값의 일부가 됩니다)
+DefaultDirName={autopf}\업무도구
 DefaultGroupName=업무도구
 OutputBaseFilename=업무도구_설치_v1.0.0
 OutputDir=installer
@@ -1582,8 +1585,9 @@ def add_row(self):
     self.table.edit(self.model.index(r, 1))   # 바로 입력 모드
 
 def del_row(self):
-    for idx in self.table.selectionModel().selectedRows():
-        self.model.removeRow(idx.row())
+    rows = sorted(i.row() for i in self.table.selectionModel().selectedRows())
+    for r in reversed(rows):                  # 뒤에서부터 지워야 번호가 안 밀립니다
+        self.model.removeRow(r)
     self.model.select()
 
 # 검색(필터)
@@ -2226,9 +2230,9 @@ Column {
       <h4 class="mini" style="margin-top:0">GPU 가 없는 곳에서 살아남기</h4>
       <pre class="code" data-lang="python"><code>import os
 # 원격 데스크톱·구형 VM 에서 화면이 까맣게 뜰 때
-os.environ["QSG_RHI_BACKEND"] = "software"   # 소프트웨어 렌더
-# 또는 백엔드를 명시
-# os.environ["QSG_RHI_BACKEND"] = "opengl"   # d3d11 / vulkan / metal
+os.environ["QT_QUICK_BACKEND"] = "software"  # 소프트웨어 렌더 (GPU 안 씀)
+# 또는 GPU 백엔드를 명시 (software 는 여기 값이 아닙니다)
+# os.environ["QSG_RHI_BACKEND"] = "opengl"   # d3d11 / d3d12 / vulkan / metal
 
 # 렌더링 진단 로그 (무엇이 느린지 보여 줍니다)
 os.environ["QSG_INFO"] = "1"</code></pre>
@@ -3661,7 +3665,8 @@ ApplicationWindow {
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">스레드 — 화면이 얼지 않게</h4>
-      <pre class="code" data-lang="python"><code>from PySide6.QtCore import QThread, QObject, Signal, Slot
+      <pre class="code" data-lang="python"><code>from PySide6.QtCore import (QThread, QObject, Signal, Slot,
+                            QMetaObject, Qt, Q_ARG)
 
 class Worker(QObject):
     progress = Signal(float)
@@ -3892,9 +3897,10 @@ class RowModel(QAbstractListModel):
     <div class="card">
       <h4 class="mini" style="margin-top:0">pandas DataFrame 을 그대로 띄우기</h4>
       <pre class="code" data-lang="python"><code>import pandas as pd
+from PySide6.QtCore import QAbstractTableModel
 
 @QmlElement
-class FrameModel(QAbstractListModel):
+class FrameModel(QAbstractTableModel):    # 표 모델 — TableView(열 여러 개)·ListView 둘 다 OK
     def __init__(self, parent=None):
         super().__init__(parent)
         self._df = pd.DataFrame()
@@ -3903,17 +3909,27 @@ class FrameModel(QAbstractListModel):
     def rowCount(self, parent=QModelIndex()) -&gt; int:
         return 0 if parent.isValid() else len(self._df)
 
+    def columnCount(self, parent=QModelIndex()) -&gt; int:
+        return 0 if parent.isValid() else len(self._df.columns)
+
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        col = self._roles.get(role)
-        if col is None or not index.isValid():
+        if not index.isValid():
             return None
-        v = self._df.iat[index.row(), self._df.columns.get_loc(col)]
+        if role == Qt.ItemDataRole.DisplayRole:       # TableView: 칸마다 display
+            c = index.column()
+        elif role in self._roles:                     # ListView: 열 이름으로
+            c = self._df.columns.get_loc(self._roles[role])
+        else:
+            return None
+        v = self._df.iat[index.row(), c]
         # numpy 타입은 QML 이 모릅니다 — 파이썬 기본형으로
         return v.item() if hasattr(v, "item") else str(v)
 
     def roleNames(self):
-        return {k: QByteArray(v.encode())
-                for k, v in self._roles.items()}
+        names = {Qt.ItemDataRole.DisplayRole: QByteArray(b"display")}
+        names.update({k: QByteArray(v.encode())
+                      for k, v in self._roles.items()})
+        return names
 
     @Slot(str)
     def loadExcel(self, path: str):
@@ -3976,7 +3992,7 @@ TableView {
         <table class="cheat" style="margin-top:0">
           <tr><th style="width:34%">항목</th><th>지침</th></tr>
           <tr><td><code>cacheBuffer</code></td><td>기본 320px. 스크롤이 끊기면 <code>height * 2</code> 정도까지 늘려 보세요</td></tr>
-          <tr><td><code>reuseItems</code></td><td><b>기본 true</b>. 끄면 매번 새로 만들어 급격히 느려집니다</td></tr>
+          <tr><td><code>reuseItems</code></td><td>ListView 는 <b>기본 false</b>(TableView 는 true) — <code>reuseItems: true</code> 로 켜야 델리게이트를 돌려써서 스크롤이 가벼워집니다</td></tr>
           <tr><td><code>onReused</code></td><td>재활용될 때 초기화가 필요하면 이 핸들러에서</td></tr>
           <tr><td>델리게이트 높이</td><td><b>고정값</b>이 가장 빠릅니다. 내용에 따라 다르면 스크롤바가 튑니다</td></tr>
           <tr><td><code>Loader</code></td><td>확장 영역처럼 <b>펼칠 때만</b> 필요한 부분에</td></tr>
@@ -5018,26 +5034,24 @@ Label {
   <div class="grid2 rv">
     <div class="card">
       <h4 class="mini" style="margin-top:0">resources.qrc — 넣을 것 목록</h4>
-      <pre class="code" data-lang="xml"><code>&lt;RCC&gt;
+      <pre class="code" data-lang="xml"><code>&lt;!-- 경로는 이 .qrc 파일(프로젝트 루트) 기준 — prefix "/" 아래 폴더째 적으면
+     ui/main.qml → qrc:/ui/main.qml, assets/fonts/… → qrc:/assets/fonts/… --&gt;
+&lt;RCC&gt;
   &lt;qresource prefix="/"&gt;
     &lt;file&gt;qtquickcontrols2.conf&lt;/file&gt;
-  &lt;/qresource&gt;
 
-  &lt;qresource prefix="/ui"&gt;
-    &lt;file&gt;main.qml&lt;/file&gt;
-    &lt;file&gt;Theme.qml&lt;/file&gt;
-    &lt;file&gt;AppIcon.qml&lt;/file&gt;
-    &lt;file&gt;AppButton.qml&lt;/file&gt;
-    &lt;file&gt;qmldir&lt;/file&gt;
-    &lt;file&gt;pages/HomePage.qml&lt;/file&gt;
-    &lt;file&gt;pages/SettingsPage.qml&lt;/file&gt;
-  &lt;/qresource&gt;
+    &lt;file&gt;ui/main.qml&lt;/file&gt;
+    &lt;file&gt;ui/Theme.qml&lt;/file&gt;
+    &lt;file&gt;ui/AppIcon.qml&lt;/file&gt;
+    &lt;file&gt;ui/AppButton.qml&lt;/file&gt;
+    &lt;file&gt;ui/qmldir&lt;/file&gt;
+    &lt;file&gt;ui/pages/HomePage.qml&lt;/file&gt;
+    &lt;file&gt;ui/pages/SettingsPage.qml&lt;/file&gt;
 
-  &lt;qresource prefix="/assets"&gt;
-    &lt;file&gt;fonts/MaterialSymbolsRounded.ttf&lt;/file&gt;
-    &lt;file&gt;fonts/Pretendard-Regular.otf&lt;/file&gt;
-    &lt;file&gt;icons/save.svg&lt;/file&gt;
-    &lt;file&gt;icons/settings.svg&lt;/file&gt;
+    &lt;file&gt;assets/fonts/MaterialSymbolsRounded.ttf&lt;/file&gt;
+    &lt;file&gt;assets/fonts/Pretendard-Regular.otf&lt;/file&gt;
+    &lt;file&gt;assets/icons/save.svg&lt;/file&gt;
+    &lt;file&gt;assets/icons/settings.svg&lt;/file&gt;
   &lt;/qresource&gt;
 &lt;/RCC&gt;</code></pre>
       <pre class="code" data-lang="bash"><code># 컴파일 — 파이썬 모듈 하나가 나옵니다
@@ -5076,7 +5090,7 @@ if __name__ == "__main__":
     app.setOrganizationName("우리회사")
     app.setApplicationName("업무도구")
 
-    QQuickStyle.setStyle("Material")      # load 前에
+    QQuickStyle.setStyle("Material")      # load 전에
 
     engine = QQmlApplicationEngine()
     engine.addImportPath("qrc:/ui" if not DEV
@@ -5139,7 +5153,7 @@ uv run pyinstaller main.py \
           <tr><td><code>module "MyTool.Backend" is not installed</code></td><td><code>import backend.bridge</code> 가 빌드에서 빠짐 → <code>--hidden-import</code></td></tr>
           <tr><td><code>Theme is not a type</code></td><td><code>qmldir</code> 를 qrc 에 안 넣음</td></tr>
           <tr><td>글꼴이 PC 마다 다름</td><td>폰트를 임베딩하지 않음 (§q27)</td></tr>
-          <tr><td>원격 데스크톱에서 화면이 깨짐</td><td>GPU 없음 → <code>QSG_RHI_BACKEND=software</code> (§q17)</td></tr>
+          <tr><td>원격 데스크톱에서 화면이 깨짐</td><td>GPU 없음 → <code>QT_QUICK_BACKEND=software</code> (§q17)</td></tr>
         </table>
       </div>
       <div class="note info" style="margin-bottom:0">
@@ -5159,6 +5173,7 @@ uv run pyinstaller main.py \
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget,
                                QVBoxLayout, QTableView, QSplitter)
 from PySide6.QtQuickWidgets import QQuickWidget
+from backend.bridge import Bridge
 from PySide6.QtCore import QUrl, Qt
 
 class Main(QMainWindow):
@@ -5171,6 +5186,7 @@ class Main(QMainWindow):
         quick = QQuickWidget()            # ② QML 을 위젯처럼
         quick.setResizeMode(
             QQuickWidget.ResizeMode.SizeRootObjectToView)
+        self.bridge = Bridge(self)        # QML 과 공유할 파이썬 객체 (§q23)
         quick.rootContext().setContextProperty("bridge", self.bridge)
         quick.setSource(QUrl("qrc:/ui/dashboard.qml"))
 

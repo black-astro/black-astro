@@ -159,8 +159,8 @@ suspend fun main() {
 }
 
 // Thread.sleep(1000) 이었다면?
-// 스레드가 묶이므로 기본 디스패처의 스레드 수(=CPU 코어 수)만큼만 동시에 자고,
-// 나머지는 줄을 서서 기다린다 → 수십 초 이상 걸린다</code></pre>
+// runBlocking 안의 launch 는 runBlocking 스레드 하나를 같이 쓴다 → 한 번에 하나씩 자서 약 10만 초.
+// (launch(Dispatchers.Default) 로 띄워도 코어 수만큼만 동시에 자고 나머지는 줄을 선다)</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>suspend 함수 안에서 블로킹 호출을 하면 이득이 통째로 사라집니다.</b>
         JDBC·파일 IO·<code>Thread.sleep</code>은 <code>withContext(Dispatchers.IO)</code>로 감싸야 합니다
@@ -1416,10 +1416,11 @@ combine(items, query, filter) { list, q, f -&gt;
 flow {
     repeat(3) { emit(it); println("보냄 $it") }
 }.collect { delay(1000); println("처리 $it") }
-// 보냄0 처리0 보냄1 처리1 … (총 3초)
+// 처리 0 → 보냄 0 → 처리 1 → 보냄 1 … (emit 이 처리가 끝나야 돌아온다, 총 3초)
 
 // buffer — 생산과 소비를 분리해 겹쳐 돌린다
-    .buffer(capacity = 64)              // 총 1초대로 줄어든다
+    .buffer(capacity = 64)              // 보냄 0·1·2 가 먼저 찍힌다 (생산자가 안 기다림)
+// (총 시간은 처리 3초 그대로 — 생산에도 시간이 걸릴 때 둘이 겹쳐 줄어든다)
 
 // conflate — 처리 중에 온 값은 버리고 '최신값만' (UI 갱신에 적합)
     .conflate()
@@ -1438,7 +1439,7 @@ flow {
     .flowOn(Dispatchers.IO)         // 여기부터 '위쪽'에 적용
     .collect { updateUi(it) }       // ← 수집자의 컨텍스트 (Main)
 
-// ⚠️ collect 안에서 withContext 로 바꾸지 마세요 — 컨텍스트 보존 규칙 위반
+// ⚠️ flow { } 안에서 withContext 로 바꿔 emit 하지 마세요 — 컨텍스트 보존 규칙 위반
 // flow { withContext(IO) { emit(x) } }  → IllegalStateException
 // 반드시 flowOn 을 쓴다</code></pre>
     </div>
@@ -1889,7 +1890,7 @@ suspend fun Call.await(): Response = suspendCancellableCoroutine { cont -&gt;
     <div class="card">
       <h4 class="mini" style="margin-top:0">③ Future · Reactor 와 상호 변환</h4>
       <pre class="code" data-lang="kotlin"><code>// CompletableFuture → suspend
-// implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8")
+// (코루틴 1.7+ 은 core 에 포함 — 예전 kotlinx-coroutines-jdk8 의존성은 필요 없다)
 val result = someFuture.await()
 
 // suspend → CompletableFuture (자바 호출자에게 줄 때)
@@ -2018,6 +2019,7 @@ fun `상태가 로딩에서 성공으로 바뀐다`() = runTest {
 // Turbine 없이도 가능하지만 장황하다
 @Test
 fun withoutTurbine() = runTest {
+    val vm = UserViewModel(fakeRepo)
     val values = mutableListOf&lt;UiState&gt;()
     val job = launch(UnconfinedTestDispatcher()) { vm.state.toList(values) }
     vm.load(1)

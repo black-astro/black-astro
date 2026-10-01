@@ -301,6 +301,11 @@ jcmd &lt;pid&gt; GC.heap_dump /tmp/heap.hprof
     private final String currency;
     private final long amount;
 
+    public Money(String currency, long amount) {
+        this.currency = currency;
+        this.amount = amount;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -579,10 +584,10 @@ try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
     ids.forEach(id -&gt; pool.submit(() -&gt; callExternalApi(id)));
 }   // 1만 개를 던져도 됩니다
 
-// 주기 작업
-try (var sched = Executors.newScheduledThreadPool(1)) {
-    sched.scheduleAtFixedRate(this::cleanup, 0, 1, TimeUnit.HOURS);
-}</code></pre>
+// 주기 작업 — 앱이 사는 동안 유지해야 하므로 필드로 두고 종료 시 shutdown()
+//   (try-with-resources 로 감싸면 블록을 나가는 순간 close() → 주기 작업이 취소됩니다)
+private final ScheduledExecutorService sched = Executors.newScheduledThreadPool(1);
+sched.scheduleAtFixedRate(this::cleanup, 0, 1, TimeUnit.HOURS);   // @PreDestroy 에서 sched.shutdown()</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b><code>Future.get()</code> 을 타임아웃 없이 부르지 마세요.</b>
         상대가 응답을 안 주면 <b>영원히 기다립니다</b> —
@@ -608,7 +613,7 @@ var pool = new ThreadPoolExecutor(
     8, 16,                                   // core, max
     60L, TimeUnit.SECONDS,
     new ArrayBlockingQueue&lt;&gt;(1000),          // ★ 큐 상한
-    new ThreadFactoryBuilder()
+    new ThreadFactoryBuilder()               // Guava. JDK 21+ 는 Thread.ofPlatform().name("report-", 0).factory()
         .setNameFormat("report-%d").build(), // ★ 이름 — 덤프에서 결정적입니다
     new ThreadPoolExecutor.CallerRunsPolicy());  // 넘치면 호출자가 직접 실행
     //  = 자연스러운 배압(backpressure). AbortPolicy 는 예외를 던집니다.
@@ -620,7 +625,7 @@ if (!pool.awaitTermination(30, TimeUnit.SECONDS)) pool.shutdownNow();</code></pr
         <b>스레드에 이름을 붙이는 것만으로 디버깅 시간이 절반이 됩니다.</b>
         <code>pool-1-thread-7</code> 과 <code>report-7</code> 은
         스레드 덤프를 볼 때 <b>완전히 다른 정보량</b>을 줍니다.
-        <b><code>Executors.newFixedThreadPool</code></b> 은 이름을 못 주므로,
+        <b><code>Executors.newFixedThreadPool</code></b> 은 큐가 무한(<code>LinkedBlockingQueue</code>)이라 상한·거절 정책을 못 걸므로,
         오래 쓰는 풀은 <b><code>ThreadPoolExecutor</code> 로 직접</b> 만드는 편이 낫습니다.
       </div>
     </div>
@@ -786,8 +791,8 @@ try {
     pool.submit(task);
 } finally {
     pool.shutdown();                   // 새 작업 거부, 진행 중인 건 마침
-    pool.awaitTermination(30, TimeUnit.SECONDS);
-    pool.shutdownNow();                // 강제 종료
+    if (!pool.awaitTermination(30, TimeUnit.SECONDS))
+        pool.shutdownNow();            // 시간 안에 안 끝나면 강제 종료
 }
 
 // 여러 작업을 한 번에
@@ -932,11 +937,11 @@ List&lt;String&gt; results = Stream.of(f1, f2, f3).map(CompletableFuture::join).
 CompletableFuture.anyOf(f1, f2).join();
 
 // 7) 예외 처리
-userF.exceptionally(e -&gt; {                       // 실패하면 대체값
+userF.orTimeout(3, TimeUnit.SECONDS)             // 타임아웃 (Java 9+) — 대체값보다 먼저 걸어야
+     .exceptionally(e -&gt; {                       //   타임아웃도 여기서 대체값으로 바뀝니다
         log.error("조회 실패", e);
         return User.unknown();
      })
-     .orTimeout(3, TimeUnit.SECONDS)             // 타임아웃 (Java 9+)
      .whenComplete((result, err) -&gt; {            // 성공·실패 모두
         if (err != null) log.error("실패", err);
      });</code></pre>
@@ -978,7 +983,7 @@ f.join()   // CompletionException 로 감싸서 (unchecked)
       <h4 class="mini" style="margin-top:0">③ allOf 부분 실패 수집 · ④ 취소와 타임아웃의 배신</h4>
       <pre class="code" data-lang="java"><code>// ③ allOf 는 하나만 실패해도 통째로 실패합니다.
 //    "성공한 것만 모으고 실패는 따로" 가 실무 요구 — 이렇게 만듭니다
-List&lt;CompletableFuture&lt;Item&gt;&gt; fs = ids.stream()
+List&lt;CompletableFuture&lt;Result&gt;&gt; fs = ids.stream()
         .map(id -&gt; fetch(id).handle((v, e) -&gt;
                 e == null ? Result.ok(v) : Result.fail(id, e)))  // 실패를 값으로
         .toList();

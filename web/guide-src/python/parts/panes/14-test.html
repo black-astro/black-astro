@@ -890,6 +890,7 @@ def notify_order(order_id: int) -&gt; bool:
     return send_slack(f"주문 {order_id} 접수")</code></pre>
       <pre class="code" data-lang="python"><code># tests/test_notify.py
 from unittest.mock import patch, MagicMock
+import httpx, pytest
 from app import notify
 
 <span class="t-ann">@patch</span>("app.notify.httpx.post")          # ★ "쓰이는 곳" 기준으로 경로를 씁니다
@@ -1078,7 +1079,8 @@ def fake_user():
 def admin_client(client):
     app.dependency_overrides[get_current_user] = fake_user
     yield client
-    app.dependency_overrides.clear()     # ★ 반드시 되돌립니다
+    app.dependency_overrides.pop(get_current_user, None)   # ★ 반드시 되돌립니다
+    # (clear() 는 다른 fixture 가 걸어 둔 get_db 오버라이드까지 지웁니다)
 
 def test_관리자만_삭제할_수_있다(admin_client):
     assert admin_client.delete("/users/7").status_code == 204
@@ -1608,7 +1610,8 @@ from sqlalchemy.orm import sessionmaker
 @pytest.fixture(scope="session")
 def pg():
     # 세션당 한 번만 띄운다 — 테스트마다 띄우면 몇 분씩 걸린다
-    with PostgresContainer("postgres:17-alpine") as c:
+    # driver="psycopg" — 기본값(psycopg2)이면 URL 이 postgresql+psycopg2:// 로 나옵니다
+    with PostgresContainer("postgres:17-alpine", driver="psycopg") as c:
         yield c
 
 @pytest.fixture(scope="session")
@@ -1693,12 +1696,13 @@ uv run pytest -p no:randomly       # 문제가 나면 이 옵션으로 순서 �
 # 병렬 실행 (코어 수만큼) — 공유 상태가 있으면 여기서 터진다
 uv run pytest -n auto
 
-# 재시도로 '숨기지' 말고, 표시해 두고 고친다
-uv run pytest --reruns 2 -m "not flaky"</code></pre>
+# 재시도로 '숨기지' 말고, 표시(@pytest.mark.flaky)해 두고 고친다
+uv run pytest -m "not flaky"              # 본 테스트는 재시도 없이
+uv run pytest -m flaky --reruns 2         # 격리해 둔 플레이키만 임시로 재시도</code></pre>
       <ul class="tx">
         <li><b>원인 1위 — 전역 상태</b>: 모듈 변수·싱글턴·캐시가 테스트 사이에 남습니다</li>
         <li><b>원인 2위 — 시간·랜덤</b>: <code>datetime.now()</code>, <code>random</code>,
-          정렬 없는 <code>dict</code> 순회</li>
+          정렬 없는 <code>set</code> 순회(문자열 해시는 실행마다 바뀝니다)</li>
         <li><b>원인 3위 — 비동기 대기</b>: <code>sleep(0.1)</code> 로 맞춘 타이밍은
           CI 의 느린 머신에서 깨집니다</li>
         <li>플레이키는 <b>따로 표시하고 기한을 정해</b> 고치세요 —

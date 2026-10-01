@@ -575,7 +575,9 @@ queueMicrotask(() =&gt; console.log("5: microtask"));
 
 console.log("2: 동기");
 
-// 1 → 2 → 3 → 4 → 5 → 그리고 6·7
+// 1 → 2 → 3 → 4 → 5 → 그리고 6·7   (CommonJS 기준)
+// ★ ESM(.mjs · "type": "module")에서는 1 → 2 → 4 → 5 → 3 입니다 —
+//   모듈 본문이 이미 마이크로태스크 안에서 돌아서, nextTick 큐는 그 뒤에 비워집니다
 // ★ 단, 6(timeout) vs 7(immediate) 순서는 메인 모듈에선 보장되지
 //   않습니다 — I/O 콜백 안에서만 immediate 가 항상 먼저 (n03)</code></pre>
       <div class="note warn">
@@ -601,7 +603,7 @@ async function drain() {
 // ✅ 주기적으로 매크로태스크에 양보
 if (++n % 100 === 0) await new Promise(r =&gt; setImmediate(r));
 
-// ③ await 이 없는 async 함수는 "동기처럼" 시작합니다
+// ③ async 함수는 첫 await 전까지 "동기처럼" 실행됩니다
 async function f() {
   console.log("A");        // 즉시 실행
   await null;
@@ -705,18 +707,19 @@ npx 0x dist/index.js</code></pre>
       <h4 class="mini" style="margin-top:0">코드 안에서 측정</h4>
       <pre class="code" data-lang="javascript"><code>import { performance, PerformanceObserver } from "node:perf_hooks";
 
-// 구간 측정
-performance.mark("db:start");
-await query();
-performance.mark("db:end");
-performance.measure("db", "db:start", "db:end");
-
+// ★ 관찰자를 먼저 등록합니다 — 등록 전에 생긴 항목은 전달되지 않습니다
 const obs = new PerformanceObserver((list) =&gt; {
   for (const e of list.getEntries()) {
     metrics.histogram(`perf_${e.name}`, e.duration);
   }
 });
 obs.observe({ entryTypes: ["measure", "function"] });
+
+// 구간 측정
+performance.mark("db:start");
+await query();
+performance.mark("db:end");
+performance.measure("db", "db:start", "db:end");
 
 // 함수 단위 자동 측정
 const timed = performance.timerify(heavyFunction);</code></pre>
@@ -760,12 +763,13 @@ console.table(bench.table());</code></pre>
       <pre class="code" data-lang="typescript"><code>const controller = new AbortController();
 
 // 여러 작업에 같은 시그널을 전달
-const [a, b] = await Promise.all([
+const pending = Promise.all([
   fetch(url1, { signal: controller.signal }),
   fetch(url2, { signal: controller.signal }),
 ]);
 
-controller.abort();                    // ★ 둘 다 즉시 취소
+// 화면을 떠나는 등 결과가 더 필요 없어지면
+controller.abort();                    // ★ 둘 다 즉시 취소 → pending 은 AbortError 로 reject
 
 // 타임아웃 · 결합
 const timeout = AbortSignal.timeout(3000);
@@ -799,13 +803,12 @@ class Semaphore {
   constructor(private readonly limit: number) {}
 
   async acquire(): Promise&lt;() =&gt; void&gt; {
-    if (this.active &gt;= this.limit) {
-      await new Promise&lt;void&gt;(r =&gt; this.queue.push(r));
-    }
-    this.active++;
+    if (this.active &lt; this.limit) this.active++;
+    else await new Promise&lt;void&gt;(r =&gt; this.queue.push(r));   // 깨어나면 슬롯을 넘겨받은 상태
     return () =&gt; {                       // release
-      this.active--;
-      this.queue.shift()?.();
+      const next = this.queue.shift();
+      if (next) next();                  // ★ 슬롯을 대기자에게 바로 넘김 (active 그대로)
+      else this.active--;                //   줄였다 깨우면 그 사이 끼어든 호출이 limit 를 넘깁니다
     };
   }
 }
@@ -1006,7 +1009,7 @@ function instrument&lt;T extends object&gt;(obj: T, name: string): T {
     get(t, k, r) {
       const v = Reflect.get(t, k, r);
       if (typeof v !== "function") return v;
-      return async (...args: unknown[]) =&gt; {
+      return async (...args: unknown[]) =&gt; {   // ⚠️ 동기 메서드도 Promise 를 돌려주게 됩니다 — 비동기 메서드만 있는 객체에
         const start = performance.now();
         try { return await v.apply(t, args); }
         finally { metrics.timing(`${name}.${String(k)}`, performance.now() - start); }
@@ -1132,14 +1135,14 @@ function get(key: string) {
 
   const fresh = expensiveLoad(key);
   cache.set(key, new WeakRef(fresh));
+  registry.register(fresh, key);        // 수거되면 아래 콜백이 key 를 받습니다
   return fresh;
 }
 
 // FinalizationRegistry — 수거될 때 알림 (정리용)
 const registry = new FinalizationRegistry((key: string) =&gt; {
-  cache.delete(key);                    // 죽은 참조 제거
-});
-registry.register(fresh, key);</code></pre>
+  if (!cache.get(key)?.deref()) cache.delete(key);   // 죽은 참조만 제거 (새 값이면 유지)
+});</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>WeakRef 는 신중히 쓰세요.</b>
         <b>언제 수거될지 예측할 수 없어</b> 동작이 비결정적입니다.
@@ -1424,7 +1427,7 @@ if (DANGEROUS.includes(key)) continue;
 
 // ✅ 더 확실한 방법
 const safe = Object.create(null);            // 프로토타입이 없는 객체
-const parsed = structuredClone(input);        // __proto__ 를 일반 키로 처리
+const map = new Map(Object.entries(input));   // 키-값 저장은 Map 으로 — 프로토타입과 무관
 
 // ✅ 가장 확실 — 스키마 검증 (🧰 도구 o07)
 const data = ConfigSchema.parse(body);        // 정의된 키만 통과
@@ -1743,11 +1746,12 @@ const { instance } = await WebAssembly.instantiate(bytes, {
 
 // ★ 메모리는 직접 다뤄야 합니다 (문자열·배열을 그냥 못 넘깁니다)
 const memory = instance.exports.memory;
-const view = new Uint8Array(memory.buffer);
 
 function passString(str) {
   const bytes = new TextEncoder().encode(str);
   const ptr = instance.exports.alloc(bytes.length);   // wasm 쪽 할당 함수
+  // ★ 뷰는 할당 "뒤에" 만듭니다 — alloc 이 메모리를 늘리면 예전 뷰는 길이 0 으로 무효가 됩니다
+  const view = new Uint8Array(memory.buffer);
   view.set(bytes, ptr);
   return [ptr, bytes.length];
 }

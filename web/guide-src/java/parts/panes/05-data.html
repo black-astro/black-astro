@@ -114,9 +114,8 @@
     <div class="card">
       <pre class="code" data-lang="yaml"><code>spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/mydb?
-         useSSL=false&amp;serverTimezone=Asia/Seoul&amp;
-         characterEncoding=UTF-8&amp;rewriteBatchedStatements=true
+    # ⚠️ URL 은 한 줄로 — YAML 은 줄바꿈을 공백으로 접어서 파라미터가 깨집니다
+    url: jdbc:mysql://localhost:3306/mydb?useSSL=false&amp;serverTimezone=Asia/Seoul&amp;characterEncoding=UTF-8&amp;rewriteBatchedStatements=true
     username: ${DB_USER}
     password: ${DB_PASSWORD}
     hikari:
@@ -239,10 +238,11 @@
 
 // 계층
 //   Repository
-//    └ CrudRepository        기본 CRUD
-//       └ ListCrudRepository  List 반환
-//          └ PagingAndSortingRepository  페이징
-//             └ JpaRepository            JPA 전용 (flush, saveAndFlush …)</code></pre>
+//    ├ CrudRepository → ListCrudRepository                       기본 CRUD (List 반환)
+//    └ PagingAndSortingRepository → ListPagingAndSortingRepository 페이징·정렬
+//         (Spring Data 3.0 부터 PagingAndSorting 은 CrudRepository 를 상속하지 않습니다)
+//   JpaRepository = ListCrud + ListPagingAndSorting + QueryByExample
+//                   + JPA 전용 (flush, saveAndFlush …)</code></pre>
 
       <h4 class="mini">쿼리 메서드 — 이름이 곧 쿼리</h4>
       <pre class="code" data-lang="java"><code>List&lt;Order&gt; findByStatus(OrderStatus status);
@@ -321,6 +321,7 @@ void deleteByStatus(OrderStatus s);</code></pre>
            @Index(name = "idx_order_no", columnList = "order_no", unique = true),
            @Index(name = "idx_user_status", columnList = "user_id, status")
        })
+@EntityListeners(AuditingEntityListener.class)        // @CreatedDate 등을 채우려면 필요
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)   // JPA 는 기본 생성자 필요
 public class Order {
@@ -781,6 +782,7 @@ public void bulkCreate(List&lt;OrderReq&gt; reqs) {
     for (var r : reqs) {
         orderRepository.save(r.toEntity());    // 아직 DB 에 안 감
         // 영속성 컨텍스트에 쌓입니다
+        // ⚠️ 단, ID 전략이 IDENTITY(MySQL AUTO_INCREMENT)면 ID 를 얻으려고 즉시 INSERT
     }
 }   // 커밋 시점에 INSERT 들이 한꺼번에
 
@@ -789,7 +791,7 @@ public void bulkCreate(List&lt;OrderReq&gt; reqs) {
 public void bulkCreate(List&lt;OrderReq&gt; reqs) {
     for (int i = 0; i &lt; reqs.size(); i++) {
         em.persist(reqs.get(i).toEntity());
-        if (i % 500 == 0) {
+        if ((i + 1) % 500 == 0) {   // 500건마다 (i % 500 이면 첫 건에서 바로 비움)
             em.flush();     // DB 로 내보내고
             em.clear();     // ★ 1차 캐시를 비웁니다 — 안 하면 OOM
         }
@@ -797,7 +799,8 @@ public void bulkCreate(List&lt;OrderReq&gt; reqs) {
 }
 // application.yml 에 배치 설정도 함께
 // spring.jpa.properties.hibernate.jdbc.batch_size: 500
-// spring.jpa.properties.hibernate.order_inserts: true</code></pre>
+// spring.jpa.properties.hibernate.order_inserts: true
+// ⚠️ IDENTITY 전략이면 하이버네이트가 INSERT 배치를 끕니다 — 대량 INSERT 는 JdbcTemplate 배치로</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>10만 건을 JPA 로 넣으면 힙이 터집니다.</b>
         영속성 컨텍스트가 <b>엔티티와 스냅샷을 전부 들고 있기</b> 때문입니다.
@@ -860,7 +863,9 @@ public interface OrderView {
     Long getId();
     String getOrderNo();
     int getAmount();
-    String getUserName();          // o.user.name 에 매핑
+    UserInfo getUser();            // 중첩 프로젝션 — o.user.name
+    interface UserInfo { String getName(); }
+    // (String getUserName() 처럼 쓰면 Order 에 userName 속성이 없어 실패)
 }
 List&lt;OrderView&gt; findByStatus(OrderStatus status);
 
@@ -1297,7 +1302,7 @@ long updated = query.update(order)
         .set(order.status, OrderStatus.CANCELLED)
         .where(order.createdAt.lt(deadline))
         .execute();
-em.flush(); em.clear();      // ★ 영속성 컨텍스트 초기화 필수
+em.clear();      // ★ 영속성 컨텍스트 초기화 필수 (보류 중인 변경은 execute() '전에' em.flush())
 
 // 결과 가져오기
 .fetch()          // List
@@ -1529,6 +1534,8 @@ public interface OrderMapper {
 @Options(fetchSize = 1000, resultSetType = ResultSetType.FORWARD_ONLY)
 Cursor&lt;OrderDto&gt; scanAll();
 
+// ⚠️ 트랜잭션(@Transactional) 안에서 열어야 합니다 — 밖이면 세션이 바로 닫혀 Cursor 도 닫힙니다
+//    MySQL 은 URL 에 useCursorFetch=true 가 있어야 fetchSize 가 먹습니다 (없으면 통째로 적재)
 try (Cursor&lt;OrderDto&gt; cursor = mapper.scanAll()) {
     for (OrderDto o : cursor) { process(o); }
 }</code></pre>
@@ -1773,7 +1780,10 @@ CREATE TABLE orders (
     user_id     BIGINT       NOT NULL,
     amount      INT          NOT NULL,
     status      VARCHAR(20)  NOT NULL,
+    memo        TEXT,
     created_at  DATETIME     NOT NULL,
+    updated_at  DATETIME,
+    version     BIGINT       NOT NULL DEFAULT 0,   -- @Version (validate 가 컬럼을 확인합니다)
     UNIQUE KEY uk_order_no (order_no),
     KEY idx_user_status (user_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;</code></pre>
@@ -1922,13 +1932,14 @@ public void saveAll(List&lt;Order&gt; orders) {
 public void saveAll(List&lt;Order&gt; orders) {
     for (int i = 0; i &lt; orders.size(); i++) {
         em.persist(orders.get(i));
-        if (i % 500 == 0) { em.flush(); em.clear(); }
+        if ((i + 1) % 500 == 0) { em.flush(); em.clear(); }
     }
 }
 // application.yml
 //   spring.jpa.properties.hibernate.jdbc.batch_size: 500
 //   spring.jpa.properties.hibernate.order_inserts: true
 //   (MySQL URL 에 rewriteBatchedStatements=true 필수)
+//   ⚠️ ID 가 IDENTITY 전략이면 INSERT 배치가 꺼집니다 — 그럴 땐 해법 2
 
 // ✅ 해법 2 — JdbcTemplate 배치 (가장 빠름) ★
 jdbcTemplate.batchUpdate("""
@@ -1945,6 +1956,7 @@ jdbcTemplate.batchUpdate("""
 
 // ✅ 대량 조회 — 스트리밍으로
 @Query("SELECT o FROM Order o")
+@QueryHints(@QueryHint(name = "org.hibernate.fetchSize", value = "1000"))   // 없으면 드라이버가 통째로 적재할 수 있음
 Stream&lt;Order&gt; streamAll();
 
 @Transactional(readOnly = true)

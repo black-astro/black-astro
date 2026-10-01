@@ -1399,7 +1399,8 @@ const feed = useInfiniteQuery({
   queryFn: ({ pageParam, signal }) =&gt; feedApi.list(pageParam, signal),
   initialPageParam: null as string | null,
   getNextPageParam: (last) =&gt; last.nextCursor,   // null 이면 끝
-  maxPages: 10,                                  // 오래 내리면 앞 페이지는 버림 (메모리)
+  getPreviousPageParam: (first) =&gt; first.prevCursor,  // maxPages 를 쓰면 필수 — 버린 앞 페이지를 위로 올라갈 때 다시 받음
+  maxPages: 10,                                 // 오래 내리면 앞 페이지는 버림 (메모리)
 });
 const items = feed.data?.pages.flatMap((p) =&gt; p.items) ?? [];
 // 바닥 감지는 IntersectionObserver → feed.fetchNextPage()
@@ -2271,12 +2272,14 @@ useEffect(() =&gt; {
 const cache = new Map&lt;string, Result&gt;();
 export function memo(key: string) { /* cache.set(…) 만 하고 지우지 않음 */ }
 
-// ✅ 크기 상한(LRU) 또는 객체 키면 WeakMap
+// ✅ 크기 상한 또는 객체 키면 WeakMap
 const byNode = new WeakMap&lt;Element, Meta&gt;();   // 요소가 사라지면 같이 사라짐
 const MAX = 500;
 function put(k: string, v: Result) {
+  cache.delete(k);                                // 다시 넣으면 맨 뒤로 (Map 은 삽입 순서)
   cache.set(k, v);
-  if (cache.size &gt; MAX) cache.delete(cache.keys().next().value!);  // 가장 오래된 것
+  if (cache.size &gt; MAX) cache.delete(cache.keys().next().value!);  // 가장 오래 안 쓴 것
+  // 읽을 때도 delete → set 으로 맨 뒤로 옮기면 LRU 가 됩니다
 }
 
 // ❌ 떨어진 DOM 을 변수로 붙잡기
@@ -2650,8 +2653,9 @@ const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;  // "America/New_Yo
 
 // 시간대 약어까지
 new Intl.DateTimeFormat("en-US", {
-  timeZone: "America/New_York", timeStyle: "short", timeZoneName: "short",
+  timeZone: "America/New_York", hour: "numeric", minute: "2-digit", timeZoneName: "short",
 }).format(new Date("2026-03-08T15:30:00Z"));      // "11:30 AM EDT"
+// ※ timeStyle · dateStyle 은 timeZoneName 과 함께 쓰면 TypeError — 개별 옵션으로
 
 // 상대 시간 — "3분 전" 을 직접 만들지 마세요
 const rtf = new Intl.RelativeTimeFormat("ko", { numeric: "auto" });

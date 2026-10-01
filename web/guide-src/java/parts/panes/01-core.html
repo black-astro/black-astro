@@ -1125,6 +1125,7 @@ OrderRes res = OrderRes.from(order);   // 클래스와 똑같이 import 해서 �
       <h4 class="mini" style="margin-top:0">② 컨트롤러 안에 중첩 — 실무에서 제일 흔한 모양</h4>
       <pre class="code" data-lang="java"><code>@RestController
 @RequestMapping("/api/users")
+@RequiredArgsConstructor               // final 필드 생성자 주입 (Lombok)
 public class UserController {
 
     private final UserService service;
@@ -1327,11 +1328,13 @@ public record UserSummary(Long id, String name, long orderCount) { }
 """)
 List&lt;UserSummary&gt; findSummaries();
 
-// ② 파생 쿼리 + record 프로젝션
-List&lt;UserSummary&gt; findByActiveTrue();
+// ② 파생 쿼리 + record 프로젝션 — 컴포넌트 이름이 엔티티 필드와 같아야 합니다
+//    (orderCount 같은 집계값은 엔티티에 없으니 ①처럼 JPQL 로)
+public record UserBrief(Long id, String name) { }
+List&lt;UserBrief&gt; findByActiveTrue();
 
 // ③ JdbcClient (Boot 3.2+)
-var rows = jdbcClient.sql("select id, name, cnt from v_user")
+var rows = jdbcClient.sql("select id, name, cnt as order_count from v_user")   // 컬럼명 ↔ orderCount 매칭
         .query(UserSummary.class).list();</code></pre>
       <div class="note tip" style="margin-bottom:0">
         엔티티를 그대로 응답하면 <b>지연 로딩이 컨트롤러에서 터지거나
@@ -1391,13 +1394,13 @@ var rows = jdbcClient.sql("select id, name, cnt from v_user")
     <div class="card">
       <h4 class="mini" style="margin-top:0">제네릭 record · 통째 분해</h4>
       <pre class="code" data-lang="java"><code>// 제네릭도 그대로 됩니다
-public record Page&lt;T&gt;(List&lt;T&gt; content, int page, long total) {
+public record Page&lt;T&gt;(List&lt;T&gt; content, int page, int size, long total) {
     public boolean hasNext() {
-        return (long) (page + 1) * content.size() &lt; total;
+        return (long) (page + 1) * size &lt; total;   // content.size() 를 쓰면 마지막 페이지에서 틀립니다
     }
 }
 
-Page&lt;OrderRes&gt; p = new Page&lt;&gt;(list, 0, 137);
+Page&lt;OrderRes&gt; p = new Page&lt;&gt;(list, 0, 20, 137);
 
 // 패턴 매칭으로 통째 분해 (Java 21+)
 record Point(int x, int y) { }
@@ -2139,8 +2142,9 @@ orders.sort(Comparator
         .thenComparing(Order::amount, reverseOrder()) // 2순위 금액 내림차순
         .thenComparing(Order::id));                   // 동점 처리
 
-// null 이 섞일 때
-Comparator.nullsLast(Comparator.comparing(Order::memo));</code></pre>
+// memo 가 null 일 수 있을 때 — nullsLast 는 키 비교기 쪽에 둡니다
+Comparator.comparing(Order::memo, Comparator.nullsLast(Comparator.naturalOrder()));
+// ⚠️ Comparator.nullsLast(comparing(Order::memo)) 는 Order 자체가 null 일 때만 처리 — memo 가 null 이면 NPE</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <code>Predicate.not(String::isBlank)</code> 처럼
         <b>메서드 참조를 그대로 뒤집는</b> 정적 메서드도 있습니다
@@ -2279,8 +2283,8 @@ repo.findById(id).orElseThrow(() -&gt; new NotFoundException(id));
 // 로그도 같은 원리 — SLF4J 2.x 의 fluent API 를 쓰면
 // DEBUG 가 꺼져 있을 때 heavyToString 을 아예 부르지 않습니다
 log.atDebug().addArgument(() -&gt; heavyToString(result)).log("결과: {}");
-// ⚠️ log.debug("결과: {}", () -&gt; heavyToString(result)) 는 지연 평가가 아닙니다
-//    — 람다 객체의 toString() 이 그대로 찍힙니다
+// ⚠️ log.debug("결과: {}", () -&gt; heavyToString(result)) 는 컴파일 에러입니다
+//    — SLF4J 의 debug(String, Object) 에는 Supplier 오버로드가 없어 람다를 못 받습니다
 
 // 직접 만들 때도 "비싼 값"은 Supplier 로 받으세요
 public void check(boolean ok, Supplier&lt;String&gt; message) {
@@ -2571,14 +2575,14 @@ Optional&lt;User&gt; o2 = Optional.ofNullable(user);  // null 허용 ✅
 Optional&lt;User&gt; o3 = Optional.empty();           // 빈 것
 
 // 꺼내기 — 상황별로
-user.orElse(defaultUser);              // 없으면 기본값
-user.orElseGet(() -&gt; createUser());    // 없을 때만 생성 (비용이 크면 이걸로)
-user.orElseThrow();                    // 없으면 NoSuchElementException
-user.orElseThrow(() -&gt; new UserNotFoundException(id));   // ✅ 실무에서 가장 많이
+o2.orElse(defaultUser);                // 없으면 기본값
+o2.orElseGet(() -&gt; createUser());      // 없을 때만 생성 (비용이 크면 이걸로)
+o2.orElseThrow();                      // 없으면 NoSuchElementException
+o2.orElseThrow(() -&gt; new UserNotFoundException(id));   // ✅ 실무에서 가장 많이
 
 // 있을 때만 실행
-user.ifPresent(u -&gt; log.info("찾음: {}", u.getName()));
-user.ifPresentOrElse(
+o2.ifPresent(u -&gt; log.info("찾음: {}", u.getName()));
+o2.ifPresentOrElse(
         u -&gt; log.info("찾음"),
         () -&gt; log.warn("없음"));
 

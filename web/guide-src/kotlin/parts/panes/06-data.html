@@ -113,7 +113,7 @@
       <pre class="code" data-lang="kotlin"><code>@Entity
 data class Order(                      // ❌ data class
     @Id @GeneratedValue
-    val id: Long = 0,                  // ❌ val — JPA 가 값을 넣지 못한다
+    val id: Long = 0,                  // ❌ 모든 필드 val — 아래 ④
 
     @ManyToOne(fetch = FetchType.LAZY)
     val user: User,                    // ❌ toString 이 프록시를 건드린다
@@ -173,7 +173,7 @@ class Order(                            // 일반 class
       <tr><td>모든 필드 <code>val</code></td><td>JPA 는 상태를 바꾼다 → 식별자만 val, 나머지 <b>var</b></td></tr>
       <tr><td><code>hashCode()</code>를 id 로</td><td>저장 전 id=0 → 저장 후 값이 바뀌어 Set 에서 사라진다 → <b>클래스 상수</b></td></tr>
       <tr><td>기본 <code>toString()</code></td><td>연관을 전부 로딩 → <b>id·기본 필드만</b> 출력</td></tr>
-      <tr><td>클래스가 final</td><td>지연 로딩 프록시 불가 → <b>plugin.jpa/allopen</b>이 열어 준다</td></tr>
+      <tr><td>클래스가 final</td><td>지연 로딩 프록시 불가 → <b>allOpen</b>에 <code>@Entity</code>를 등록해 연다 (plugin.jpa 는 열지 않음)</td></tr>
       <tr><td>기본 생성자 없음</td><td>JPA 요구 → <b>plugin.jpa(no-arg)</b></td></tr>
       <tr><td><code>@Enumerated</code> 기본값</td><td>ORDINAL 은 순서가 바뀌면 데이터가 밀린다 → <b>STRING</b></td></tr>
       <tr><td>가변 컬렉션 노출</td><td>밖에서 마음대로 추가 → <b>private + 읽기 전용 getter</b></td></tr>
@@ -181,8 +181,8 @@ class Order(                            // 일반 class
   </div>
 
   <div class="note info rv">
-    <b>allopen 플러그인을 엔티티까지 확장하기</b> — 기본 설정은 <code>@Entity</code>도 열어 주지만,
-    직접 만든 애너테이션이나 추상 클래스를 쓴다면 <code>build.gradle.kts</code>에 추가하세요.
+    <b>allopen 플러그인을 엔티티까지 확장하기</b> — <code>plugin.jpa</code>는 인자 없는 생성자만 만들고,
+    <code>plugin.spring</code>도 <code>@Entity</code>는 열지 않습니다. 엔티티를 열려면 <code>build.gradle.kts</code>에 직접 추가하세요.
     <pre class="code" data-lang="kotlin" style="margin:10px 0 0"><code>allOpen {
     annotation("jakarta.persistence.Entity")
     annotation("jakarta.persistence.MappedSuperclass")
@@ -389,8 +389,8 @@ var coupon: Coupon? = null          // optional = true 와 짝을 맞춘다
 var user: User                       // ? 없음
 
 // ③ 지연 로딩 프록시를 == 로 비교하지 말 것
-if (order.user.id == userId) { }     // 프록시가 초기화된다
-if (order.user.id == userId) { }     // id 만 쓰면 초기화 없이도 가능(설정에 따라)
+if (order.user == currentUser) { }   // ❌ equals 호출 → 프록시가 초기화된다
+if (order.user.id == userId) { }     // ✅ id 만 쓰면 초기화 없이도 가능(설정에 따라)
 
 // ④ 컬렉션 초기화는 프로퍼티 선언에서
 private val _items = mutableListOf&lt;OrderItem&gt;()   // lateinit 쓰지 말 것</code></pre>
@@ -472,7 +472,7 @@ class OrderService(private val repo: OrderRepository) {
   <div class="grid2 rv">
     <div class="card">
       <h4 class="mini" style="margin-top:0">1차 캐시 · 쓰기 지연</h4>
-      <pre class="code" data-lang="kotlin"><code>@Transactional(readOnly = true)
+      <pre class="code" data-lang="kotlin"><code>@Transactional                // 쓰기가 있으니 readOnly 가 아니다
 fun demo(id: Long) {
     val a = repo.findByIdOrNull(id)
     val b = repo.findByIdOrNull(id)
@@ -481,6 +481,7 @@ fun demo(id: Long) {
     // 쓰기 지연: INSERT 도 모았다가 flush 시점에 나간다
     repeat(3) { repo.save(Order(...)) }
     // 여기까지 SQL 없음 → 커밋(또는 flush) 때 한꺼번에
+    // ⚠️ 단, id 가 IDENTITY 전략이면 키를 받아야 해서 persist 즉시 INSERT 된다 (da13)
 }
 
 // 강제로 반영해야 할 때
@@ -644,7 +645,7 @@ class Order(...) : BaseEntity()      // 상속받기만 하면 된다</code></pr
     fun summaries(from: LocalDateTime): List&lt;OrderSummary&gt;
 
     // 인터페이스 프로젝션 — 더 가볍다 (프록시가 만들어진다)
-    @Query("select o.id as id, o.orderNo as orderNo from Order o where o.userId = :userId")
+    @Query("select o.id as id, o.orderNo as orderNo from Order o where o.user.id = :userId")
     fun findProjections(userId: Long): List&lt;OrderIdAndNo&gt;
 
     // 네이티브 쿼리 — DB 함수·힌트가 필요할 때
@@ -693,7 +694,8 @@ fun expireAll() {
     println(order.status)                      // 여전히 NEW (캐시가 모른다)
 }
 
-// 해결 — @Modifying(clearAutomatically = true) 로 캐시를 비우거나
+// 해결 — @Modifying(clearAutomatically = true) 로 캐시를 비운 뒤 '다시 조회'하거나
+//        (이미 꺼내 둔 order 변수는 비워도 옛 값 그대로다)
 //        벌크 연산을 별도 트랜잭션·별도 메서드로 분리한다
 
 // 벌크 연산은
@@ -868,7 +870,8 @@ class OrderQueryRepository(private val query: JPAQueryFactory) {
             .limit(pageable.pageSize.toLong())
             .fetch()
 
-        val total = query.select(o.count()).from(o).where(where).fetchOne() ?: 0L
+        val total = query.select(o.count()).from(o).join(o.user, u)   // where 가 u 를 쓰므로 조인도 같이
+            .where(where).fetchOne() ?: 0L
         return PageImpl(content, pageable, total)
     }
 }</code></pre>
@@ -958,7 +961,7 @@ interface OrderRepository : JpaRepository&lt;Order, Long&gt;, KotlinJdslJpqlExec
 @Service
 class OrderService(private val repo: OrderRepository) {
 
-    fun findPaid(minAmount: Long, pageable: Pageable): Page&lt;Order&gt; =
+    fun findPaid(minAmount: Long, pageable: Pageable): Page&lt;Order?&gt; =   // JDSL 실행기는 T? 로 돌려준다
         repo.findPage(pageable) {
             select(entity(Order::class))
                 .from(entity(Order::class))
@@ -1522,7 +1525,8 @@ class OrderRepositoryTest(
 
     @Test
     fun `주문번호로 조회한다`() {
-        val saved = em.persistAndFlush(order(orderNo = "ORD-1"))
+        val user = em.persist(user())                // 연관에 cascade 가 없으니 사용자부터 저장
+        val saved = em.persistAndFlush(order(orderNo = "ORD-1", user = user))
         em.clear()                                   // 1차 캐시를 비워야 진짜 쿼리가 나간다
 
         val found = repo.findByOrderNo("ORD-1")
@@ -1531,7 +1535,8 @@ class OrderRepositoryTest(
 
     @Test
     fun `N+1 이 발생하지 않는다`() {
-        repeat(10) { em.persist(order(orderNo = "ORD-$it")) }
+        val user = em.persist(user())
+        repeat(10) { em.persist(order(orderNo = "ORD-$it", user = user)) }
         em.flush(); em.clear()
 
         val stats = em.entityManager.entityManagerFactory

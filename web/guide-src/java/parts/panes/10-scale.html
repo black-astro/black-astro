@@ -278,7 +278,9 @@ class CacheConfig {
 <span class="t-ann">@Service</span>
 class ProductService {
 
-    <span class="t-ann">@Cacheable</span>(value = "product", key = "#id")
+    // 위에서 null 저장을 막았으므로 null 결과는 넣지 말라고 알려 줘야 합니다
+    // (빠뜨리면 없는 id 를 조회할 때 "does not allow 'null' values" 예외)
+    <span class="t-ann">@Cacheable</span>(value = "product", key = "#id", unless = "#result == null")
     public ProductDto find(Long id) { ... }        // 결과를 캐싱
 
     <span class="t-ann">@CacheEvict</span>(value = "product", key = "#dto.id")
@@ -519,13 +521,17 @@ redis.executePipelined((RedisCallback&lt;Object&gt;) conn -&gt; {
             long ttl = 600 + ThreadLocalRandom.current().nextInt(60);   // ★ 흩뿌리기
             redis.opsForValue().set(key, dto, Duration.ofSeconds(ttl));
             return dto;
-        } finally { redis.delete(lockKey); }
+        } finally { redis.delete(lockKey); }   // DB 조회가 3초를 넘기면 남의 락을 지울 수 있음 — 엄밀함이 필요하면 k06 Redisson
     }
-    // 못 얻은 요청은 짧게 기다렸다가 캐시를 다시 본다
-    try { Thread.sleep(50); }
-    catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-    var retry = redis.opsForValue().get(key);
-    return retry != null ? (ProductDto) retry : repository.findDto(id);
+    // 못 얻은 요청은 캐시가 채워질 때까지 짧게 여러 번 다시 본다 (최대 약 1초)
+    // — 한 번만 보고 DB 로 가면, 쿼리가 50ms 보다 느릴 때 나머지 요청이 전부 DB 로 몰립니다
+    for (int i = 0; i &lt; 20; i++) {
+        try { Thread.sleep(50); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+        var retry = redis.opsForValue().get(key);
+        if (retry != null) return (ProductDto) retry;
+    }
+    return repository.findDto(id);   // 그래도 없으면 최후의 수단
 }</code></pre>
     </div>
     <div class="card">
@@ -855,14 +861,25 @@ class PaymentController {
 create index idx_pm_at on processed_message (processed_at);  -- 오래된 것 정리용</code></pre>
       <pre class="code" data-lang="java"><code><span class="t-ann">@Transactional</span>
 public void handle(OrderEvent e) {
-    try {
-        processedRepo.save(new Processed(e.messageId(), "order-consumer"));
-    } catch (DataIntegrityViolationException dup) {
+    // save() 후 중복 예외를 잡는 방식은 안 됩니다 — JPA 는 INSERT 를 커밋(flush) 때 보내고,
+    // id 를 직접 넣은 엔티티는 merge 로 처리돼 중복이어도 예외가 안 날 수 있으며,
+    // 예외가 나도 트랜잭션이 rollback-only 가 됩니다. 그래서 "넣어 보고 몇 건 들어갔나"로 판정합니다
+    int inserted = processedRepo.insertIfAbsent(e.messageId(), "order-consumer");
+    if (inserted == 0) {
         log.info("이미 처리한 메시지 {} — 건너뜁니다", e.messageId());
         return;                                     // ★ 조용히 성공 처리
     }
     orderService.apply(e);      // 같은 트랜잭션 → 실패하면 이력도 롤백
-}</code></pre>
+}
+
+// Repository
+<span class="t-ann">@Modifying</span>
+<span class="t-ann">@Query</span>(value = """
+    insert into processed_message (message_id, consumer, processed_at)
+    values (:id, :consumer, now())
+    on conflict (message_id) do nothing
+    """, nativeQuery = true)            // MySQL 이면 insert ignore
+int insertIfAbsent(<span class="t-ann">@Param</span>("id") String id, <span class="t-ann">@Param</span>("consumer") String consumer);</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">더 나은 방법 — 애초에 멱등한 연산으로</h4>
@@ -990,6 +1007,8 @@ on conflict (tx_id) do nothing;</code></pre>
       auto-offset-reset: latest     # 새 그룹이 어디부터 읽을지 (earliest = 처음부터)
       enable-auto-commit: false     # ★ 수동 커밋 (처리 성공 후에만)
       max-poll-records: 100
+      key-deserializer:   org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer   # 없으면 String 으로 와서 OrderCreated 변환 실패
       properties:
         max.poll.interval.ms: 300000   # 이 시간 넘게 처리하면 그룹에서 쫓겨납니다
         spring.json.trusted.packages: "com.myapp.event"
@@ -1120,7 +1139,7 @@ kafka-metadata-quorum.sh --bootstrap-server kafka1:9092 describe --status</code>
       <h4 class="mini" style="margin-top:0">재시도 · DLQ — 죽은 메시지 보관소</h4>
       <pre class="code" data-lang="java"><code><span class="t-ann">@Bean</span>
 DefaultErrorHandler errorHandler(KafkaTemplate&lt;String, Object&gt; template) {
-    // 3회 실패하면 order.created.DLT 토픽으로 보낸다
+    // 처음 1번 + 재시도 3번이 모두 실패하면 order.created.DLT 토픽으로 보낸다
     var recoverer = new DeadLetterPublishingRecoverer(template,
         (record, ex) -&gt; new TopicPartition(record.topic() + ".DLT", -1));
 
@@ -1214,9 +1233,11 @@ public void order(OrderRequest req) {
 // ② 별도 스케줄러가 안 보낸 것만 골라 발행
 <span class="t-ann">@Scheduled</span>(fixedDelay = 1000)
 <span class="t-ann">@Transactional</span>
-public void relay() {
+public void relay() throws Exception {
     for (var box : outboxRepository.findTop100Pending()) {
-        kafka.send(box.getEventType(), box.getKey(), box.getPayload());
+        // send() 는 비동기 — 결과를 기다리지 않고 표시하면 발행 실패분이 "보냄"으로 남아 사라집니다
+        kafka.send(box.getEventType(), box.getKey(), box.getPayload())
+             .get(5, TimeUnit.SECONDS);    // 브로커 확인(ack)을 받은 뒤에만
         box.markPublished();               // 더티 체킹으로 UPDATE
     }
 }</code></pre>
@@ -1373,6 +1394,9 @@ public void relay() {
       </div>
       <pre class="code" data-lang="yaml"><code>resilience4j:
   circuitbreaker:
+    # 기본 순서는 Retry 가 서킷 브레이커 "바깥" 입니다 — 그러면 브레이커의 폴백이 먼저
+    # 실패를 삼켜 재시도가 한 번도 안 일어납니다. 숫자가 작을수록 바깥이므로 뒤집어 줍니다
+    circuit-breaker-aspect-order: 1
     instances:
       recommend:
         sliding-window-type: COUNT_BASED
@@ -1383,16 +1407,20 @@ public void relay() {
         slow-call-rate-threshold: 60      # 느린 호출도 실패로 셈
         wait-duration-in-open-state: 10s  # 10초 뒤 HALF_OPEN 으로 탐색
         permitted-number-of-calls-in-half-open-state: 3
-  timelimiter:
-    instances:
+  timelimiter:                     # @TimeLimiter + CompletableFuture 반환 메서드에만 걸립니다
+    instances:                     # (아래 동기 메서드는 HTTP 클라이언트 읽기 타임아웃으로 끊으세요)
       recommend: { timeout-duration: 2s }
   retry:
+    retry-aspect-order: 2          # ★ 서킷 브레이커(1) 안쪽
     instances:
       recommend:
         max-attempts: 3
         wait-duration: 200ms
         exponential-backoff-multiplier: 2
-        retry-exceptions: [java.io.IOException]
+        # RestClient·RestTemplate 은 IOException 을 ResourceAccessException 으로 감싸 던집니다
+        retry-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - java.io.IOException
   bulkhead:
     instances:
       recommend: { max-concurrent-calls: 20 }   # ★ 이 기능은 최대 20개까지만</code></pre>
@@ -1562,9 +1590,10 @@ resilience4j:
         timeout-duration: 500ms       # 500ms 까지는 줄 서서 기다림</code></pre>
       <pre class="code" data-lang="java"><code><span class="t-ann">@RateLimiter(name = "orderApi", fallbackMethod = "tooMany")</span>
 <span class="t-ann">@PostMapping("/orders")</span>
-OrderRes create(<span class="t-ann">@RequestBody</span> OrderReq req) { ... }
+ResponseEntity&lt;OrderRes&gt; create(<span class="t-ann">@RequestBody</span> OrderReq req) { ... }
 
-ResponseEntity&lt;?&gt; tooMany(OrderReq req, RequestNotPermitted e) {
+// 폴백은 원본과 반환 타입이 같아야 합니다 — 다르면 "No fallback method match found"
+ResponseEntity&lt;OrderRes&gt; tooMany(OrderReq req, RequestNotPermitted e) {
     return ResponseEntity.status(429)
         .header("Retry-After", "1").build();
 }</code></pre>

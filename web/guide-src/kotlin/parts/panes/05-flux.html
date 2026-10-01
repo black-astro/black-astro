@@ -179,7 +179,7 @@ fun findUser(id: Long): Mono&lt;User&gt; =
         .switchIfEmpty(Mono.error(NotFound(id)))
         .flatMap { u -&gt; enrich(u) }
         .timeout(Duration.ofSeconds(3))
-        .onErrorResume { Mono.just(User.GUEST) }
+        .onErrorResume(TimeoutException::class.java) { Mono.just(User.GUEST) }   // 타임아웃만 폴백 (NotFound 는 그대로)
 
 // 코틀린 코루틴 스타일 — 같은 일
 suspend fun findUser(id: Long): User =
@@ -344,7 +344,9 @@ class OrderHandler(private val service: OrderService) {
     }
 
     // 스트리밍 — Flow 를 그대로 넘긴다
-    fun stream(req: ServerRequest): ServerResponse = TODO()
+    suspend fun stream(req: ServerRequest): ServerResponse =
+        ServerResponse.ok().contentType(MediaType.TEXT_EVENT_STREAM)
+            .bodyAndAwait(service.stream())
 }</code></pre>
     </div>
   </div>
@@ -485,11 +487,10 @@ class OrderClient(private val client: WebClient) {
             .awaitBody&lt;Order&gt;()
 
     // 없을 수 있으면
+    // (onStatus 에서 Mono.empty() 를 돌려주면 404 응답 본문을 Order 로 읽으려 들어 실패할 수 있다)
     suspend fun findOrNull(id: Long): Order? =
-        client.get().uri("/{id}", id)
-            .retrieve()
-            .onStatus({ it == HttpStatus.NOT_FOUND }) { Mono.empty() }
-            .awaitBodyOrNull&lt;Order&gt;()
+        try { get(id) }
+        catch (e: WebClientResponseException.NotFound) { null }   // 404 만 null 로
 
     // 목록 스트리밍
     fun stream(userId: Long): Flow&lt;Order&gt; =
@@ -1117,12 +1118,18 @@ suspend fun currentTraceId(): String? =
       </div>
       <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// BlockHound — 블로킹 호출을 실행 중에 잡는다
 // testImplementation("io.projectreactor.tools:blockhound:1.0.10")
-@BeforeAll
-fun setup() = BlockHound.install(
-    BlockHoundIntegration { builder -&gt;
-        builder.allowBlockingCallsInside("java.util.UUID", "randomUUID")
+class BlockingCheckTest {
+    companion object {
+        // @BeforeAll 은 static 이어야 한다 — 코틀린에선 companion + @JvmStatic
+        // (또는 클래스에 @TestInstance(TestInstance.Lifecycle.PER_CLASS) 를 붙이고 일반 함수로)
+        @BeforeAll @JvmStatic
+        fun setup() = BlockHound.install(
+            BlockHoundIntegration { builder -&gt;
+                builder.allowBlockingCallsInside("java.util.UUID", "randomUUID")
+            }
+        )
     }
-)</code></pre>
+}</code></pre>
     </div>
   </div>
 
@@ -1158,7 +1165,7 @@ class OrderApiTest(@Autowired val client: WebTestClient) {
             .expectStatus().isCreated
             .expectHeader().exists("Location")
             .expectBody&lt;OrderResponse&gt;()
-            .consumeWith { assertEquals(24_000, it.responseBody?.totalAmount) }
+            .consumeWith { assertEquals(24_000L, it.responseBody?.totalAmount) }   // totalAmount 는 Long — 24_000(Int)이면 equals 가 실패
     }
 
     @Test
@@ -1199,7 +1206,7 @@ class PricingClientTest {
 
     @BeforeEach fun setUp() {
         server.start()
-        client = PricingClient(WebClient.create(server.url("/").toString()))
+        client = PricingClient(WebClient.create(server.url("/").toString()), CircuitBreakerRegistry.ofDefaults())
     }
     @AfterEach fun tearDown() = server.shutdown()
 

@@ -582,7 +582,9 @@ app.use("/api/*", cors({
   credentials: true,
   maxAge: 86400,
 }));
-app.use("/admin/*", bearerAuth({ token: c =&gt; [c.env.ADMIN_TOKEN] }));
+app.use("/admin/*", bearerAuth({
+  verifyToken: async (token, c) =&gt; token === c.env.ADMIN_TOKEN,   // env 값은 요청 때 읽습니다
+}));
 app.use("/api/*", jwt({ secret: "값은 env 에서" }));   // c.get("jwtPayload")
 
 app.get("/static/*",
@@ -1231,7 +1233,7 @@ await $`mkdir -p dist &amp;&amp; cp README.md dist/`;
 const { exitCode } = await $`npm run lint`.nothrow();
 
 // ⑥ .env 를 자동으로 읽습니다 (dotenv 불필요)
-//    .env → .env.local → .env.$NODE_ENV 순으로 겹쳐 읽습니다
+//    .env → .env.$NODE_ENV → .env.local 순으로 겹쳐 읽습니다 (뒤가 이김)
 const url = Bun.env.DATABASE_URL ?? process.env.DATABASE_URL;
 
 // ⑦ 워커 — CPU 작업 분리 (Node 의 worker_threads 자리)
@@ -1378,13 +1380,13 @@ curl -fsSL https://deno.land/install.sh | sh          # macOS · Linux
 irm https://deno.land/install.ps1 | iex               # Windows
 deno --version
 
-# 권한 없이 실행하면 거부됩니다
+# 권한 없이 실행하면 거부됩니다 (터미널이면 y/n 을 묻고, CI 처럼 비대화형이면 바로 에러)
 deno run server.ts
 #   error: Requires net access to "0.0.0.0:8000",
 #   run again with the --allow-net flag
 
 # 필요한 것만 열어 줍니다 ★ 범위를 좁힐 수 있습니다
-deno run --allow-net=:8000 server.ts             # 이 포트만
+deno run --allow-net=0.0.0.0:8000 server.ts      # 이 주소·포트만
 deno run --allow-net=api.example.com app.ts      # 이 호스트만
 deno run --allow-read=./data --allow-write=./tmp app.ts
 deno run --allow-env=DATABASE_URL,JWT_SECRET app.ts
@@ -1523,8 +1525,8 @@ app.use("/static/*", serveStatic({ root: "./public" }));
 const kv = await Deno.openKv();
 
 app.get("/hits", async (c) =&gt; {
-  const r = await kv.get&lt;bigint&gt;(["hits"]);
-  return c.json({ hits: Number(r.value ?? 0n) });
+  const r = await kv.get&lt;Deno.KvU64&gt;(["hits"]);   // sum() 으로 쌓은 값은 KvU64
+  return c.json({ hits: Number(r.value?.value ?? 0n) });
 });
 
 app.post("/hits", async (c) =&gt; {
@@ -2460,7 +2462,7 @@ app.get("/raw-sse", (c) =&gt; {
   const body = new ReadableStream({
     async start(ctrl) {
       for (let i = 0; i &lt; 5; i++) {
-        ctrl.enqueue(enc.encode(`data: ${i}\n\n`));   // 빈 줄 두 개가 끝 표시
+        ctrl.enqueue(enc.encode(`data: ${i}\n\n`));   // \n\n (빈 줄 하나)이 이벤트 끝 표시
         await new Promise((r) =&gt; setTimeout(r, 500));
       }
       ctrl.close();
@@ -2741,7 +2743,8 @@ describe("posts API", () =&gt; {
   it("본문이 틀리면 400", async () =&gt; {
     const res = await app.request("/api/posts", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json",
+                 authorization: `Bearer ${token}` },   // 인증은 통과시켜야 검증까지 갑니다
       body: JSON.stringify({ title: "" }),              // min(1) 위반
     });
     expect(res.status).toBe(400);
@@ -2777,7 +2780,7 @@ const client = testClient(app);
 
 const r = await client.api.posts.$post({
   json: { title: "제목", body: "본문" },     // ❌ 스키마와 다르면 컴파일 에러
-});
+}, { headers: { authorization: `Bearer ${token}` } });   // 두 번째 인자로 헤더
 expect(r.status).toBe(201);</code></pre>
       <pre class="code" data-lang="ts"><code>// ③ Workers 라면 진짜 workerd 위에서 돌릴 수 있습니다 (D1·KV 가 진짜로 동작)
 // vitest.config.ts
@@ -2852,7 +2855,7 @@ app.use(async (c, next) =&gt; {
       <pre class="code" data-lang="bash"><code># ① 실시간 꼬리보기 — 배포 직후 가장 먼저 하는 일
 npx wrangler tail
 npx wrangler tail --status error          # 에러만
-npx wrangler tail --search "rid=abc"      # 특정 요청만
+npx wrangler tail --search "abc123"       # 특정 요청만 (로그의 rid 값으로)
 npx wrangler tail --format json | jq 'select(.outcome != "ok")'
 
 # ② 대시보드에 남기기 — wrangler.jsonc
@@ -3141,7 +3144,8 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 
-USER bun                     # ★ root 로 돌리지 마세요
+# ★ root 로 돌리지 마세요 (Dockerfile 주석은 줄 맨 앞에서만 — 명령 뒤에 붙이면 인자가 됩니다)
+USER bun
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD bun --eval "fetch('http://127.0.0.1:3000/health').then(r=&gt;process.exit(r.ok?0:1))"

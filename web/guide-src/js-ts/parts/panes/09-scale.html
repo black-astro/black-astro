@@ -329,7 +329,8 @@ async function getWithLock(id: number) {
   if (got) {
     try {
       const data = await db.product.findUnique({ where: { id } });
-      await redis.setex(key, 300 + Math.random() * 60, JSON.stringify(data));
+      // ★ SETEX 는 정수 초만 받습니다 — 소수면 "value is not an integer" 에러
+      await redis.setex(key, 300 + Math.floor(Math.random() * 60), JSON.stringify(data));
       return data;
     } finally { await redis.del(lockKey); }
   }
@@ -718,7 +719,7 @@ export const emailQueue = new Queue("email", {
   connection,
   defaultJobOptions: {
     attempts: 3,
-    backoff: { type: "exponential", delay: 1000 },   // 1s → 2s → 4s
+    backoff: { type: "exponential", delay: 1000 },   // 재시도 1s → 2s (attempts 3 = 첫 시도 + 재시도 2번)
     removeOnComplete: { age: 3600, count: 1000 },     // ★ 안 지우면 Redis 가 참
     removeOnFail: { age: 86400 },
   },
@@ -833,7 +834,8 @@ async function retry&lt;T&gt;(fn: () =&gt; Promise&lt;T&gt;, max = 3): Promise&l
     catch (e) {
       lastErr = e;
       if (!isRetryable(e)) throw e;          // ★ 4xx 는 재시도해도 소용없습니다
-      const base = 200 * 2 ** i;             // 200 → 400 → 800
+      if (i === max - 1) break;              // 마지막 시도 뒤에는 기다릴 필요 없음
+      const base = 200 * 2 ** i;             // 200 → 400 → 800 …
       const jitter = Math.random() * base;   // ★ 지터 — 동시 재시도 방지
       await new Promise(r =&gt; setTimeout(r, base + jitter));
     }
@@ -930,7 +932,7 @@ const items = await breaker.fire(userId);</code></pre>
         </table>
       </div>
       <pre class="code" data-lang="typescript"><code>// ★ 서버가 여러 대면 메모리 카운터는 무의미합니다 (10대 = 한도 10배)
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import RedisStore from "rate-limit-redis";
 
 app.use("/api", rateLimit({
@@ -938,7 +940,10 @@ app.use("/api", rateLimit({
   windowMs: 60_000,
   limit: 100,
   standardHeaders: "draft-8",   // express-rate-limit v8 기준 (구형 클라이언트는 "draft-6")
-  keyGenerator: (req) =&gt; req.user?.id ?? req.ip,   // 로그인 전은 IP, 후는 사용자
+  // 로그인 전은 IP, 후는 사용자 — 키는 문자열이어야 하고,
+  // v8 은 req.ip 를 직접 쓰면 경고합니다 (IPv6 는 /64 단위로 묶어야 우회가 안 됨)
+  keyGenerator: (req) =&gt;
+    req.user ? `user:${req.user.id}` : ipKeyGenerator(req.ip ?? ""),
   handler: (req, res) =&gt; res.status(429)
     .set("Retry-After", "10")
     .json({ code: "TOO_MANY_REQUESTS" }),
@@ -1451,7 +1456,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev &amp;&amp; npm cache clean --force
 COPY --from=build /app/dist ./dist
 
-USER node                                  # ★ root 로 실행 금지
+# ★ root 로 실행 금지 (Dockerfile 은 줄 끝 # 주석을 지원하지 않아 따로 한 줄로)
+USER node
 EXPOSE 3000
 # ★ npm start 로 하면 SIGTERM 이 Node 까지 전달되지 않습니다
 CMD ["node", "dist/index.js"]</code></pre>
@@ -1466,7 +1472,8 @@ CMD ["node", "dist/index.js"]</code></pre>
         ③ 값을 못 박아야 OOMKilled(exit 137) 대신
         V8 의 heap out of memory 스택을 로그로 받을 수 있기 때문입니다.
       </div>
-      <pre class="code" data-lang="bash"><code>CMD ["node", "--max-old-space-size=1536", "dist/index.js"]   # 2GB 컨테이너</code></pre>
+      <pre class="code" data-lang="bash"><code># 2GB 컨테이너 기준 (주석은 CMD 와 같은 줄에 두면 안 됩니다)
+CMD ["node", "--max-old-space-size=1536", "dist/index.js"]</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">무중단 배포 — 끊기는 진짜 이유</h4>

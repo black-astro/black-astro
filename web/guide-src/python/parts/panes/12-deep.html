@@ -124,8 +124,11 @@ dis.dis("a = (1,2,3)")        # LOAD_CONST — ★ 튜플은 상수로 미리 �
       <pre class="code" data-lang="text"><code># ① 작은 정수·짧은 문자열은 캐시됩니다 (인터닝)
 a, b = 256, 256
 a is b            # True  (-5 ~ 256 은 미리 만들어 둔 객체)
-c, d = 257, 257
+c = 257
+d = int("257")    # 실행 중에 새로 만든 257
 c is d            # False (별도 객체)  ★ 그래서 is 로 값 비교를 하면 안 됩니다
+# ※ c, d = 257, 257 처럼 한 파일·한 줄에 쓰면 컴파일러가 상수를 합쳐 True 가 나오기도 합니다
+#   — 결과가 상황마다 달라진다는 것 자체가 is 를 쓰면 안 되는 이유입니다
 
 # ② .pyc 는 소스가 안 바뀌면 재사용됩니다
 #    (셸에서) python -X importtime app.py   # ★ 임포트가 느린 모듈 찾기
@@ -227,7 +230,7 @@ sys.getsizeof({})           # 64
 sys.getsizeof(0)            # 28  ★ 정수 하나가 28바이트
 
 # ★ 그래서 파이썬은 메모리를 많이 씁니다
-#   1,000만 개의 정수를 리스트에 담으면 400MB+
+#   1,000만 개의 정수를 리스트에 담으면 약 360MB (정수 28B + 리스트 칸 8B)
 #   → numpy 배열이면 80MB (🔢 NumPy 탭)</code></pre>
       <div class="note tip">
         <b>참조 카운팅의 장단점</b> —
@@ -249,10 +252,11 @@ class SlotPoint:
     def __init__(self, x, y):
         self.x, self.y = x, y
 
-sys.getsizeof(Point(1,2).__dict__)   # 104 bytes (dict 만)
-# 100만 개 생성 시
-#   Point      → 약 180MB
-#   SlotPoint  → 약  56MB   ★ 3배 차이
+sys.getsizeof(Point(1,2).__dict__)   # 수십~수백 bytes (dict 만 · 버전마다 다름)
+# 100만 개 생성 시 (3.14 실측, 리스트 포함)
+#   Point      → 약 92MB
+#   SlotPoint  → 약 54MB   ★ 약 1.7배 차이
+#   (3.11 이전엔 인스턴스 dict 가 따로 붙어 차이가 2~3배였습니다)
 
 # 제약: 동적 속성 추가 불가, 다중 상속 시 주의
 p = SlotPoint(1, 2)
@@ -396,7 +400,7 @@ import gc
 gc.collect()                     # 수동 수거
 print(gc.get_stats())            # 세대별 통계</code></pre>
       <pre class="code" data-lang="text"><code>세대별 GC (generational)
-  0세대  새 객체 — 자주 검사 (임계치 700)
+  0세대  새 객체 — 자주 검사 (임계치 700 · 3.14 는 2000)
   1세대  0세대에서 살아남은 것
   2세대  오래 산 것 — 드물게 검사
 
@@ -443,7 +447,7 @@ finally:
     gc.enable()
     gc.collect()
 
-# 임계치 조정 (기본 700, 10, 10)
+# 임계치 조정 (기본: 3.13 까지 700, 10, 10 · 3.14 는 2000, 10, 0)
 gc.set_threshold(2000, 20, 20)   # GC 를 덜 자주 → CPU 절약, 메모리 더 씀
 
 # 디버깅 — 수거되지 않는 객체 추적
@@ -956,12 +960,14 @@ def outer():
       <pre class="code" data-lang="python"><code># 코루틴도 결국 상태 머신입니다
 async def fetch():
     print("A")
-    await asyncio.sleep(1)     # ★ 여기서 제어권을 이벤트 루프에 반납
+    await asyncio.sleep(0)     # ★ 여기서 제어권을 이벤트 루프에 반납
+                               #   (sleep(1) 이면 루프 없이 send 할 때 RuntimeError)
     print("B")
 
 coro = fetch()
 type(coro)                     # &lt;class 'coroutine'&gt;
 coro.send(None)                # "A" 출력 후 정지 (제너레이터와 같은 인터페이스)
+coro.send(None)                # "B" 출력 후 StopIteration — 코루틴 끝
 # 이벤트 루프가 이 send 를 반복 호출하며 진행시킵니다</code></pre>
     </div>
     <div class="card">
@@ -1414,6 +1420,7 @@ with InterpreterPoolExecutor(max_workers=4) as ex:
         </table>
       </div>
       <pre class="code" data-lang="python"><code># ① Numba — 가장 손쉬운 고속화
+import random
 from numba import njit
 
 <span class="t-ann">@njit</span>(cache=True)                       # ★ 기계어로 컴파일
@@ -1614,7 +1621,7 @@ u.name = "x"                          # FrozenInstanceError
 <span class="t-ann">@dataclass</span>
 class Bad:
     items: list = []      # ❌ ValueError — dataclass 는 아예 막아 줍니다
-    # ValueError: mutable default &lt;class 'list'&gt; for field items is not allowed
+    # ValueError: mutable default &lt;class 'list'&gt; for field items is not allowed: use default_factory
     # ★ 클래스를 정의하는 순간 터집니다 (인스턴스를 만들기도 전에)
 
 <span class="t-ann">@dataclass</span>
@@ -1920,10 +1927,11 @@ class Order:
         if not self.items:
             raise EmptyOrderError()
 
-    def cancel(self) -&gt; None:
+    def cancel(self) -&gt; "Order":
         if self.status is OrderStatus.SHIPPED:
             raise CannotCancelError()      # ★ 규칙이 엔티티 안에
-        object.__setattr__(self, "status", OrderStatus.CANCELLED)
+        # frozen 이므로 고치지 않고 새 객체를 돌려줍니다 (dataclasses.replace)
+        return replace(self, status=OrderStatus.CANCELLED)
 
     <span class="t-ann">@property</span>
     def total(self) -&gt; int:

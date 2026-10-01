@@ -305,7 +305,7 @@ class IosKeyValueStore : KeyValueStore {
       <h4 class="mini" style="margin-top:0">기억할 규칙</h4>
       <ul class="tx" style="margin-bottom:0">
         <li><b>모든 타깃에 actual 이 있어야</b> 컴파일됩니다 — 하나만 빠져도 에러</li>
-        <li><b>기본값·기본 구현</b>을 expect 쪽에 둘 수 있습니다(2.0+ 에서 개선)</li>
+        <li><b>기본 인자값</b>은 expect 선언에 둡니다 — actual 에는 다시 적을 수 없고, expect 함수에는 본문(기본 구현)을 둘 수 없습니다</li>
         <li><b>expect 클래스는 실험적 경고</b>가 뜰 수 있습니다 —
           인터페이스 + DI 로 대체 가능하면 그쪽이 안정적입니다</li>
         <li><b>중간 소스셋</b>(appleMain)에 actual 을 두면 iOS·macOS 가 함께 씁니다</li>
@@ -424,6 +424,7 @@ class ApiClient(engine: HttpClientEngine, private val tokenProvider: suspend () 
             exponentialDelay()
         }
         install(Logging) { level = LogLevel.HEADERS }
+        expectSuccess = true    // ★ 4xx·5xx 를 예외로 — 아래 apiCall 의 ResponseException 분기가 동작하려면 필요 (기본 false)
         defaultRequest {
             url("https://api.example.com/")
             contentType(ContentType.Application.Json)
@@ -463,7 +464,7 @@ sealed interface ApiError {
 suspend fun &lt;T&gt; apiCall(block: suspend () -&gt; T): Result&lt;T&gt; =
     try { Result.success(block()) }
     catch (e: CancellationException) { throw e }
-    catch (e: ClientRequestException) {
+    catch (e: ResponseException) {               // 4xx(ClientRequest)·5xx(ServerResponse) 의 부모
         Result.failure(ApiException(ApiError.Http(e.response.status.value, e.message)))
     }
     catch (e: HttpRequestTimeoutException) { Result.failure(ApiException(ApiError.Timeout)) }
@@ -541,9 +542,9 @@ DELETE FROM orderEntity;</code></pre>
 
     // Flow 로 관찰 — 데이터가 바뀌면 자동 방출
     fun observeAll(): Flow&lt;List&lt;Order&gt;&gt; =
-        q.selectAll().asFlow().mapToList(Dispatchers.IO).map { rows -&gt; rows.map { it.toDomain() } }
+        q.selectAll().asFlow().mapToList(ioDispatcher).map { rows -&gt; rows.map { it.toDomain() } }
 
-    suspend fun replaceAll(orders: List&lt;Order&gt;) = withContext(Dispatchers.IO) {
+    suspend fun replaceAll(orders: List&lt;Order&gt;) = withContext(ioDispatcher) {   // mp11 의 expect val
         db.transaction {                       // 트랜잭션도 지원
             q.deleteAll()
             orders.forEach { o -&gt;
@@ -988,7 +989,7 @@ fun OrderScreen(vm: OrderViewModel = koinViewModel()) {
 val commonModule = module {
     single { ApiClient(get(), get()) }
     single&lt;OrderRepository&gt; { OrderRepositoryImpl(get(), get()) }
-    factory { OrderViewModel(get()) }
+    viewModel { OrderViewModel(get()) }              // koinViewModel() 로 받으려면 viewModel 정의
 }
 
 expect val platformModule: Module
@@ -1009,7 +1010,7 @@ actual val platformModule = module {
 fun initKoin(extra: Module = module {}) = startKoin {
     modules(commonModule, platformModule, extra)
 }
-// Android: initKoin { single { androidContext() } }  (Application.onCreate)
+// Android: initKoin(module { single&lt;Context&gt; { this@MyApp } })  (Application.onCreate)
 // iOS:     KoinKt.doInitKoin()                       (AppDelegate)</code></pre>
     </div>
     <div class="card">
@@ -1021,13 +1022,13 @@ fun initKoin(extra: Module = module {}) = startKoin {
         <li>대신 <b>자바와 같은 동시성 문제</b>가 생깁니다 —
           공유 가변 상태에는 <code>Mutex</code>·<code>AtomicReference</code>가 필요합니다</li>
         <li>iOS 의 <code>Dispatchers.Main</code>은 메인 큐, <code>Dispatchers.Default</code>는
-          <b>워커 스레드 풀</b>입니다 (<code>Dispatchers.IO</code>는 네이티브에 없어
-          <code>Default.limitedParallelism</code>이나 커스텀 디스패처를 씁니다)</li>
+          <b>워커 스레드 풀</b>입니다 (<code>Dispatchers.IO</code>는 코루틴 1.7 부터 네이티브에도 있지만
+          JS 에는 없어서 <b>commonMain</b>에서는 바로 못 씁니다)</li>
       </ul>
       <pre class="code" data-lang="kotlin" style="margin-bottom:0"><code>// commonMain 에서 IO 를 쓰고 싶다면 expect/actual 로
 expect val ioDispatcher: CoroutineDispatcher
 // androidMain: actual val ioDispatcher = Dispatchers.IO
-// iosMain:     actual val ioDispatcher = Dispatchers.Default</code></pre>
+// iosMain:     actual val ioDispatcher = Dispatchers.IO   // import kotlinx.coroutines.IO (1.7+)</code></pre>
     </div>
   </div>
 </section>
@@ -1101,7 +1102,7 @@ class OrderRepositoryTest {
           <tr><td>문자열 정렬·비교</td><td>로케일 동작 차이</td></tr>
           <tr><td>부동소수점 출력</td><td><code>toString()</code> 결과가 다를 수 있다</td></tr>
           <tr><td>정규식</td><td>엔진 차이로 일부 패턴 동작이 다르다</td></tr>
-          <tr><td>동시성</td><td>네이티브에는 <code>Dispatchers.IO</code> 가 없다</td></tr>
+          <tr><td>동시성</td><td><code>Dispatchers.IO</code> 는 JVM·네이티브에만 — commonMain 에서는 expect/actual 로</td></tr>
         </table>
       </div>
     </div>
@@ -1422,7 +1423,10 @@ val terms: ByteArray = Res.readBytes("files/terms.md")</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">1. 모듈 하나를 추가합니다</h4>
       <pre class="code" data-lang="kotlin"><code>// shared/build.gradle.kts
-plugins { kotlin("multiplatform") }
+plugins {
+    kotlin("multiplatform")
+    id("com.android.library")      // androidTarget() 에 필요
+}
 
 kotlin {
     androidTarget()

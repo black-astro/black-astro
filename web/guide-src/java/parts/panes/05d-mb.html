@@ -604,10 +604,12 @@ WHERE name LIKE '%' || #{keyword} || '%'          &lt;!-- PostgreSQL·Oracle --&
       <h4 class="mini" style="margin-top:0">별도 쿼리로 채우기 (select 속성)</h4>
       <pre class="code" data-lang="xml"><code>&lt;resultMap id="orderLazy" type="OrderDto"&gt;
   &lt;id property="id" column="id"/&gt;
+  &lt;!-- column: 이 값을 인자로 넘긴다 · select: 별도 쿼리 실행 · fetchType: 지연 로딩 --&gt;
+  &lt;!-- (주석은 태그 밖에 — 속성 사이에 넣으면 XML 파싱 오류) --&gt;
   &lt;collection property="items"
-              column="id"                        &lt;!-- 이 값을 인자로 넘긴다 --&gt;
-              select="findItemsByOrderId"        &lt;!-- 별도 쿼리 실행 --&gt;
-              fetchType="lazy"/&gt;                 &lt;!-- 지연 로딩 --&gt;
+              column="id"
+              select="findItemsByOrderId"
+              fetchType="lazy"/&gt;
 &lt;/resultMap&gt;
 
 &lt;select id="findItemsByOrderId" resultType="OrderItemDto"&gt;
@@ -670,7 +672,7 @@ WHERE name LIKE '%' || #{keyword} || '%'          &lt;!-- PostgreSQL·Oracle --&
     &lt;/if&gt;
     &lt;if test="from != null and to != null"&gt;
       AND o.created_at &gt;= #{from}
-      AND o.created_at &lt; #{to}
+      AND o.created_at &amp;lt; #{to}           &lt;!-- XML 안에서 &lt; 는 &amp;lt; 로 --&gt;
     &lt;/if&gt;
     &lt;if test="statuses != null and !statuses.isEmpty()"&gt;
       AND o.status IN
@@ -723,7 +725,7 @@ WHERE id IN
   &lt;/foreach&gt;
 &lt;/insert&gt;
 
-&lt;!-- Map 순회 --&gt;
+&lt;!-- Map 순회 — ⚠️ ${key} 는 문자열 치환이므로 키는 코드에서 정한 값만 (03 참고) --&gt;
 &lt;foreach collection="params" index="key" item="value" separator=" AND "&gt;
   ${key} = #{value}
 &lt;/foreach&gt;</code></pre>
@@ -747,13 +749,14 @@ WHERE id IN
 &lt;if test="status != null"&gt;
 &lt;if test="keyword != null and keyword != ''"&gt;
 &lt;if test="list != null and list.size() &gt; 0"&gt;
-&lt;if test="type == 'A'"&gt;                   &lt;!-- 문자열 비교는 홑따옴표 --&gt;
+&lt;if test="type == 'AB'"&gt;                  &lt;!-- 문자열 비교는 홑따옴표 (한 글자는 아래 함정) --&gt;
 &lt;if test="flag"&gt;                          &lt;!-- Boolean --&gt;
 &lt;if test="cond.status != null"&gt;           &lt;!-- @Param 객체 접근 --&gt;
 
 &lt;!-- ⚠️ 함정: 문자 하나를 비교할 때 --&gt;
-&lt;if test="type == 'A'"&gt;    &lt;!-- String 이면 OK --&gt;
-&lt;if test='type == "A"'&gt;    &lt;!-- char 라면 이렇게 --&gt;</code></pre>
+&lt;if test="type == 'A'"&gt;    &lt;!-- ❌ OGNL 은 'A' 를 char 로 읽어 String 과 비교가 안 맞습니다 --&gt;
+&lt;if test='type == "A"'&gt;    &lt;!-- ✅ 바깥을 홑따옴표, 안을 쌍따옴표로 --&gt;
+&lt;if test="type == 'A'.toString()"&gt;   &lt;!-- ✅ 또는 이렇게 --&gt;</code></pre>
     </div>
   </div>
   <div class="diag rv">
@@ -818,9 +821,10 @@ WHERE id IN
 &lt;sql id="searchConditions"&gt;
   &lt;where&gt;
     o.deleted = false
-    &lt;if test="status != null"&gt;AND o.status = #{status}&lt;/if&gt;
-    &lt;if test="from != null"&gt;AND o.created_at &gt;= #{from}&lt;/if&gt;
-    &lt;if test="to != null"&gt;AND o.created_at &lt; #{to}&lt;/if&gt;
+    &lt;!-- 매퍼가 @Param("cond") 로 받으므로 cond. 을 붙인다 (08 의 인터페이스) --&gt;
+    &lt;if test="cond.status != null"&gt;AND o.status = #{cond.status}&lt;/if&gt;
+    &lt;if test="cond.from != null"&gt;AND o.created_at &gt;= #{cond.from}&lt;/if&gt;
+    &lt;if test="cond.to != null"&gt;AND o.created_at &amp;lt; #{cond.to}&lt;/if&gt;
   &lt;/where&gt;
 &lt;/sql&gt;
 
@@ -847,7 +851,7 @@ WHERE id IN
 &lt;/sql&gt;
 &lt;select id="findPartitioned" resultType="OrderDto"&gt;
   SELECT * FROM &lt;include refid="tableName"&gt;
-    &lt;property name="yearMonth" value="#{ym}"/&gt;
+    &lt;property name="yearMonth" value="${ym}"/&gt;   &lt;!-- 테이블명은 ? 바인딩 불가 → ${} 치환. ym 은 yyyyMM 형식 검증 필수 --&gt;
   &lt;/include&gt;
 &lt;/select&gt;</code></pre>
 
@@ -923,7 +927,7 @@ public PageInfo&lt;OrderDto&gt; search(OrderCondition cond, int page, int size) 
     FROM orders o
    WHERE o.deleted = false
   &lt;if test="lastId != null"&gt;
-     AND o.id &lt; #{lastId}
+     AND o.id &amp;lt; #{lastId}
   &lt;/if&gt;
    ORDER BY o.id DESC
    LIMIT #{size}
@@ -987,7 +991,7 @@ public class BulkService {
             OrderItemMapper mapper = session.getMapper(OrderItemMapper.class);
             for (int i = 0; i &lt; items.size(); i++) {
                 mapper.insert(items.get(i));
-                if (i % 1000 == 0) session.flushStatements();   // 주기적으로 전송
+                if ((i + 1) % 1000 == 0) session.flushStatements();   // 1000건마다 전송
             }
             session.flushStatements();
             session.commit();
@@ -1024,7 +1028,8 @@ public void export2() {
         for (OrderDto o : cursor) { process(o); }
     }
 }
-// ⚠️ 커서는 트랜잭션·세션이 열려 있는 동안만 유효하다</code></pre>
+// ⚠️ 커서는 트랜잭션·세션이 열려 있는 동안만 유효하다
+// ⚠️ MySQL 은 URL 에 useCursorFetch=true 가 있어야 fetchSize 대로 끊어 읽습니다</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>MySQL 에서 fetchSize 가 안 먹는 이유</b> —
         커넥터가 기본적으로 <b>전체 결과를 메모리로</b> 가져옵니다.
@@ -1656,7 +1661,7 @@ decorator:
 logging:
   level:
     com.example.mapper: debug     # 매퍼 패키지 (쿼리 + 파라미터 + 결과 건수)
-    jdbc.sqltiming: info          # 실행 시간</code></pre>
+    p6spy: info                   # p6spy 로그 (실행 시간 포함)</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>MyBatis 로그가 안 나오면</b> 로거 이름이 <b>매퍼 인터페이스의 패키지</b>인지 확인하세요.
         <code>org.mybatis</code> 가 아니라 <b>내 매퍼 패키지</b>가 기준입니다.

@@ -95,8 +95,8 @@ console.warn  = console.error;   // ★ warn 도 stderr 입니다 (자주 놓칩
 console.info  = console.log;
 console.debug = console.log;     // ★ 이름만 debug — 끄는 스위치가 없습니다
 
-// 객체를 넘기면 util.inspect 가 돕니다 — 순환 참조를 따라가고,
-// getter 를 호출하고, 색 코드를 붙이고, 깊이 2까지 펼칩니다.
+// 객체를 넘기면 util.inspect 가 돕니다 — 순환 참조는 [Circular *1] 로,
+// getter 는 부르지 않고 [Getter] 로 적고, TTY 면 색 코드를 붙이고, 깊이 2까지 펼칩니다.
 console.log({ user: { id: 1, roles: ['admin'] } });
 // → { user: { id: 1, roles: [ 'admin' ] } }   ← JSON 이 아닙니다. 파싱 못 합니다</code></pre>
       <div class="note warn" style="margin-bottom:0">
@@ -152,9 +152,10 @@ console.log(structuredClone(cart));             // 또는 JSON.parse(JSON.string
       <h4 class="mini" style="margin-top:0">배포물에서 console 을 지우는 세 가지 방법</h4>
       <pre class="code" data-lang="js"><code>// ① 번들러가 통째로 들어내기 — 가장 확실합니다
 // vite.config.ts
-export default {
-  esbuild: { drop: ['console', 'debugger'] },        // 프로덕션 빌드에서 제거
-};
+export default defineConfig(({ command }) =&gt; ({
+  // esbuild 옵션은 dev 에도 적용되므로, build 일 때만 지웁니다
+  esbuild: { drop: command === 'build' ? ['console', 'debugger'] : [] },
+}));
 
 // ② terser 로 특정 함수만 남기기
 // { compress: { pure_funcs: ['console.log', 'console.debug'] } }
@@ -637,18 +638,18 @@ const logger = pino(dest);
 
 // ★ 종료 직전에 반드시 비웁니다
 const flushAndExit = (code: number) =&gt; {
-  logger.flush();                 // 버퍼를 밀어냄
-  dest.on('drain', () =&gt; process.exit(code));
-};
+  logger.flush(() =&gt; process.exit(code));   // 버퍼를 다 밀어낸 뒤 종료
+};                                          // (버퍼가 비어 있으면 'drain' 은 안 옵니다 — 콜백으로)
 
 process.on('SIGTERM', () =&gt; flushAndExit(0));     // k8s 가 보내는 신호
 process.on('SIGINT',  () =&gt; flushAndExit(0));
 
-// 잡히지 않은 예외 — pino.final 이 안전하게 마지막 줄을 씁니다
-process.on('uncaughtException', pino.final(logger, (err, finalLogger) =&gt; {
-  finalLogger.fatal({ err }, 'uncaught exception');
+// 잡히지 않은 예외 — 예전 문서의 pino.final 은 지금 pino 에 없습니다.
+// fatal 은 항상 동기로 flush 하므로 찍고 바로 나가면 됩니다
+process.on('uncaughtException', (err) =&gt; {
+  logger.fatal({ err }, 'uncaught exception');
   process.exit(1);
-}));</code></pre>
+});</code></pre>
       <div class="note info" style="margin-bottom:0">
         <b><code>sync: true</code> 는 언제 쓰나</b> — <b>짧은 CLI·배치·람다</b>처럼
         “끝나면 바로 죽는” 프로그램입니다. 이때는 버퍼가 날아가는 위험이 손해보다 큽니다.
@@ -1306,13 +1307,16 @@ export function elog(level: Level, fields: Record&lt;string, unknown&gt;, msg: s
   (level === 'error' || level === 'warn' ? console.error : console.log)(line);
 }
 
-// middleware.ts
+// middleware.ts (엣지 런타임. Next 16 의 proxy.ts 는 Node 런타임이라 pino 를 그대로 씁니다)
 export function middleware(req: NextRequest) {
   const reqId = req.headers.get('x-request-id') ?? crypto.randomUUID();
   elog('info', { reqId, path: req.nextUrl.pathname }, 'edge request');
 
-  const res = NextResponse.next();
-  res.headers.set('x-request-id', reqId);   // ★ 아래 런타임으로 ID 를 넘겨줍니다
+  // ★ 아래 런타임(라우트·서버 컴포넌트)으로 넘기려면 "요청" 헤더를 바꿔야 합니다
+  const headers = new Headers(req.headers);
+  headers.set('x-request-id', reqId);
+  const res = NextResponse.next({ request: { headers } });
+  res.headers.set('x-request-id', reqId);   // 응답 헤더 — 브라우저에게 돌려주는 쪽
   return res;
 }</code></pre>
       <div class="note info" style="margin-bottom:0">
@@ -1398,6 +1402,7 @@ export interface RequestContext {
   reqId: string;
   userId?: string;
   traceId?: string;
+  spanId?: string;
 }
 
 const als = new AsyncLocalStorage&lt;RequestContext&gt;();
@@ -1486,7 +1491,8 @@ app.post('/orders', (req, res) =&gt; {
 
 // ③ ✗ 진짜로 끊기는 곳 — 다른 사슬에 등록된 콜백
 const emitter = new EventEmitter();          // 앱 시작 때 만든 객체
-emitter.on('done', () =&gt; logger.info('x'));  // ← 등록 시점의 문맥(=없음)을 씁니다
+emitter.on('done', () =&gt; logger.info('x'));  // ← emit 을 부른 쪽의 문맥을 씁니다
+//   (라이브러리 내부 콜백에서 emit 되면 =없음, 남의 요청에서 emit 되면 =남의 reqId)
 // 해결: 값을 미리 꺼내서 클로저에 담습니다
 const { reqId } = getContext() ?? {};
 emitter.on('done', () =&gt; logger.info({ reqId }, 'x'));
@@ -1496,7 +1502,7 @@ worker.postMessage({ reqId, payload });      // 값으로 직접 넘겨야 합�
       <div class="note warn" style="margin-bottom:0">
         <b>판단 기준 한 줄</b> — <b>“이 콜백은 요청 처리 중에 만들어졌는가?”</b>
         요청 처리 중에 만든 프로미스·타이머·스트림은 문맥을 물려받고,
-        <b>서버 시작 때 만들어 둔 객체에 나중에 등록한 콜백</b>은 물려받지 못합니다.
+        <b>서버 시작 때 만들어 둔 객체(이미터·커넥션 풀)의 콜백</b>은 그 객체를 깨운 쪽의 문맥을 따르므로 믿을 수 없습니다.
       </div>
     </div>
     <div class="card">
@@ -1543,8 +1549,8 @@ export async function call(url: string, init: RequestInit = {}) {
 
   const headers = new Headers(init.headers);
   if (ctx?.reqId) headers.set('x-request-id', ctx.reqId);   // ★ 그대로 전달
-  if (ctx?.traceId) headers.set('traceparent',
-    `00-${ctx.traceId}-${ctx.spanId ?? '0'.repeat(16)}-01`); // W3C Trace Context
+  if (ctx?.traceId &amp;&amp; ctx.spanId) headers.set('traceparent',   // span ID 가 0 뿐이면 무효
+    `00-${ctx.traceId}-${ctx.spanId}-01`);                     // W3C Trace Context
 
   try {
     const res = await fetch(url, { ...init, headers });
@@ -1693,9 +1699,14 @@ const logger2 = pino({
 });
 
 // ④ 로그로 나가면 안 되는 타입을 타입 시스템으로 막기 (lg10 의 예방책)
-declare const brand: unique symbol;
-export type Secret&lt;T&gt; = T &amp; { readonly [brand]: 'secret' };
-export const asSecret = &lt;T,&gt;(v: T) =&gt; v as Secret&lt;T&gt;;
+//    ※ string &amp; { 브랜드 } 는 여전히 string 이라 아래 검사를 통과해 버립니다 — 객체로 감쌉니다
+export class Secret&lt;T&gt; {
+  readonly #value: T;
+  constructor(v: T) { this.#value = v; }
+  reveal(): T { return this.#value; }          // 꺼낼 때는 이름이 드러나게
+  toJSON() { return '[REDACTED]'; }            // 그래도 새면 런타임에서 한 번 더 가립니다
+}
+export const asSecret = &lt;T,&gt;(v: T) =&gt; new Secret(v);
 
 interface SafeFields { [k: string]: string | number | boolean | undefined }
 function safeLog(f: SafeFields, msg: string) { logger.info(f, msg); }
@@ -1704,7 +1715,7 @@ const token = asSecret('eyJhbGciOi...');
 safeLog({ token }, 'x');   // ✗ Secret&lt;string&gt; 은 SafeFields 에 안 맞습니다</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>④ 가 실무에서 가장 값어치가 큽니다</b> —
-        토큰·비밀번호·주민번호를 담는 값에 <b>브랜드 타입</b>을 씌워 두면
+        토큰·비밀번호·주민번호를 담는 값을 <b>Secret 으로 감싸</b> 두면
         <b>실수로 로그에 넣는 순간 컴파일이 막습니다.</b>
         런타임 마스킹(<b>lg10</b>)은 <b>마지막 그물</b>이고, 이건 <b>애초에 안 담기게</b> 하는 방법입니다.
       </div>
@@ -1735,7 +1746,10 @@ event({ event: 'user.login_failed', reason: 'expired' });              // ✗ �
 export const EVENT_NAMES = [
   'order.paid', 'payment.failed', 'user.login', 'user.login_failed',
 ] as const satisfies readonly LogEvent['event'][];
-// ★ satisfies — 목록에 빠진 사건이 생기면 여기서 컴파일이 막습니다</code></pre>
+// ★ satisfies — 목록에 오타·없는 사건 이름이 들어가면 여기서 컴파일이 막습니다
+//   (빠진 사건은 satisfies 로는 못 잡습니다 — 빠짐까지 막으려면 한 줄 더)
+type Missing = Exclude&lt;LogEvent['event'], (typeof EVENT_NAMES)[number]&gt;;
+const _allEvents: [Missing] extends [never] ? true : Missing = true;   // 빠지면 에러</code></pre>
     <div class="note info">
       <b>과하지 않나요?</b> — 사건이 열 개 미만인 서비스라면 과합니다.
       하지만 <b>알림 규칙이 붙은 사건</b>이나 <b>매출·정산 분석의 근거가 되는 사건</b>은
@@ -1753,7 +1767,7 @@ export const EVENT_NAMES = [
 
   <div class="ez mid"><b>정리 —</b> 레벨은 <b>리터럴 유니온</b>, 필드는 <b>인터페이스</b>,
   사건은 <b>판별 유니온</b>으로 잠급니다. 타입은 컴파일 뒤 사라지므로 <b>런타임 비용이 0</b>이고,
-  <b>브랜드 타입</b>이면 비밀 값이 로그에 담기는 것 자체를 막을 수 있습니다.</div>
+  비밀 값을 <b>Secret 으로 감싸면</b> 로그에 담기는 것 자체를 막을 수 있습니다.</div>
 </section>
 
 
@@ -1855,16 +1869,16 @@ await run('transport', pino({ transport: { target: 'pino/file', options: { desti
       <h4 class="mini" style="margin-top:0">쓰기 방식 네 가지 — 무엇을 얻고 무엇을 잃나</h4>
       <div class="tw"><table class="cheat" style="margin:0">
         <tr><th style="width:30%">방식</th><th>루프 정지</th><th>죽을 때 유실</th><th>언제</th></tr>
-        <tr><td><code>sync: true</code> (pino 기본)</td><td><b>줄마다</b> — 목적지가 빠르면 짧게</td><td><b>없음</b></td><td>stdout 으로 나가는 컨테이너 · 짧은 CLI</td></tr>
+        <tr><td><code>sync: true</code> (직접 켤 때)</td><td><b>줄마다</b> — 목적지가 빠르면 짧게</td><td><b>없음</b></td><td>stdout 으로 나가는 컨테이너 · 짧은 CLI</td></tr>
         <tr><td><code>sync: false</code> + <code>minLength</code></td><td>버퍼가 찰 때만</td><td><b>버퍼만큼</b> (flush 로 막음)</td><td>파일에 직접 쓰는 VM 서버</td></tr>
         <tr><td><code>transport</code> (워커)</td><td>거의 없음</td><td>워커 큐만큼</td><td>포맷·전송 비용이 클 때(원격·pretty)</td></tr>
         <tr><td><code>console.log</code> → 파일 리다이렉트</td><td><b>줄마다 · 길게</b></td><td>없음</td><td><b>운영에서는 쓰지 않습니다</b>(<b>lg01</b>)</td></tr>
       </table></div>
       <div class="note info">
-        <b>pino 의 기본이 “동기”인데 왜 빠른가</b> — 목적지가 <b>stdout 파이프</b>이면
-        <code>write</code> 는 커널 버퍼(리눅스 기본 64KB)에 넣고 <b>바로 돌아옵니다.</b>
-        진짜 디스크까지 기다리는 건 <b>파일이 목적지일 때</b>입니다. 그래서 컨테이너에서는
-        기본값 그대로가 제일 단순하고 안전하며, <b>파일에 직접 쓸 때만</b> <code>sync: false</code> 를 고민합니다.
+        <b>pino 의 기본값은 무엇인가</b> — <code>pino()</code> 의 기본 목적지는 <code>sync: false</code> ·
+        <code>minLength: 0</code> 인 sonic-boom 입니다. 모아 두지 않고 <b>곧바로 비동기 write</b> 를 걸기 때문에
+        루프가 거의 멈추지 않고, 죽을 때 잃는 것도 진행 중인 write 만큼으로 작습니다(정상 종료 때는 pino 가 알아서 비웁니다).
+        그래서 컨테이너에서는 <b>기본값 그대로</b>가 제일 단순하며, <b>파일에 직접 쓸 때만</b> <code>minLength</code> 로 더 모을지 고민합니다.
       </div>
       <div class="note warn" style="margin-bottom:0">
         <b>유실과 지연은 맞바꾸는 것</b>입니다 — 비동기로 돌리면 빠르지만
@@ -2046,7 +2060,7 @@ export const logger = pino({
       '*.password',                       // 최상위 아무 키 아래의 password
       'orders[*].customer.email',         // 배열 요소마다
     ],
-    censor: '[REDACTED]',                 // 기본값. remove: true 면 키째 지웁니다
+    censor: '[REDACTED]',                 // 기본값은 '[Redacted]'. remove: true 면 키째 지웁니다
   },
 });
 
@@ -2103,7 +2117,14 @@ function mask(v: unknown, depth = 0): unknown {
   return out;
 }
 
-const redact = format((info) =&gt; mask(info) as winston.Logform.TransformableInfo);
+// ★ info 를 고쳐서 그대로 돌려줍니다 — 새 객체를 돌려주면 winston 내부의
+//   Symbol(level) 이 빠져서 트랜스포트가 줄을 통째로 버립니다 (아무것도 안 찍힘)
+const redact = format((info) =&gt; {
+  for (const k of Object.keys(info)) {
+    info[k] = SECRET_KEYS.has(k.toLowerCase()) ? '[REDACTED]' : mask(info[k], 1);
+  }
+  return info;
+});
 
 export const logger = winston.createLogger({
   format: combine(redact(), timestamp(), json()),   // ★ redact 가 json() 앞
@@ -2131,7 +2152,7 @@ export function scrub(s: string): string {
   return out;
 }
 
-// pino 에서는 msg 와 문자열 값에만 적용 — 모든 줄에 정규식 넷을 돌리는 비용을 감수하는 것
+// pino 에서는 msg(마지막 문자열 인자)에만 적용 — 모든 줄에 정규식 넷을 돌리는 비용을 감수하는 것
 const logger = pino({
   hooks: {
     logMethod(args, method) {
@@ -2160,7 +2181,8 @@ const logger = pino({
 
 # ③ 저장소에서 지웁니다 — 저장소마다 방법이 다릅니다
 # Loki: 삭제 API (compactor 에서 retention·deletion 이 켜져 있어야 합니다)
-curl -X POST 'http://loki:3100/loki/api/v1/delete' \
+#   -G: 아래 값들을 본문이 아니라 URL 쿼리로 붙입니다 (삭제 API 는 쿼리 파라미터를 읽습니다)
+curl -G -X POST 'http://loki:3100/loki/api/v1/delete' \
   --data-urlencode 'query={service="checkout-api"} |= "eyJ"' \
   --data-urlencode 'start=2026-08-14T00:00:00Z' --data-urlencode 'end=2026-08-15T00:00:00Z'
 
@@ -2177,7 +2199,7 @@ POST logs-*/_delete_by_query
     </div>
     <div class="note tip" style="margin-bottom:0">
       <b>미리 해 두면 그날이 훨씬 짧아지는 것</b> — ① 로그 보관 기간을 <b>필요한 만큼만</b>(<b>lg12</b>)
-      ② <b>브랜드 타입</b>으로 비밀 값이 로그 함수에 못 들어가게(<b>lg08</b>)
+      ② <b>Secret 으로 감싸</b> 비밀 값이 로그 함수에 못 들어가게(<b>lg08</b>)
       ③ CI 에서 <code>eyJ</code> · <code>Bearer</code> 같은 패턴을 <b>테스트 로그 출력에서 검사</b>하는 한 줄.
       셋 다 반나절이면 됩니다.
     </div>
@@ -2498,7 +2520,8 @@ WORKDIR /app
 COPY dist ./dist
 COPY node_modules ./node_modules
 ENV NODE_ENV=production LOG_LEVEL=info
-CMD ["node", "dist/main.js"]           # ★ pino-pretty 도, 파일 경로도 없습니다
+# ★ pino-pretty 도, 파일 경로도 없습니다 (Dockerfile 주석은 줄 맨 앞에만 — 끝에 붙이면 CMD 가 깨집니다)
+CMD ["node", "dist/main.js"]
 
 # 확인 — 컨테이너 밖에서 그대로 보입니다
 docker logs -f --since 5m my-api | jq -c 'select(.level=="error")'
@@ -2525,17 +2548,17 @@ inputs = ["k8s"]
 source = '''
   parsed, err = parse_json(.message)      # pino 가 쓴 한 줄
   if err == null {
-    . = merge(., parsed)                  # level · reqId · msg 가 필드가 됩니다
+    . = merge(., object!(parsed))         # level · reqId · msg 가 필드가 됩니다
     del(.message)
   }                                       # JSON 이 아닌 줄(다른 도구)은 그대로 둡니다
-  .level = downcase(string!(.level ?? "info"))
+  .level = downcase(string(.level) ?? "info")   # 없거나 문자열이 아니면 "info"
 '''
 
 [transforms.scrub]                        # lg10 의 셋째 겹 — 앱이 놓친 토큰을 여기서
 type   = "remap"
 inputs = ["parse"]
 source = '''
-  .msg = replace(string!(.msg ?? ""), r'eyJ[\w-]+\.[\w-]+\.[\w-]+', "[JWT]")
+  .msg = replace(string(.msg) ?? "", r'eyJ[\w-]+\.[\w-]+\.[\w-]+', "[JWT]")
 '''
 
 [sinks.loki]

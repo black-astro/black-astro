@@ -697,11 +697,16 @@ textField.textProperty().bindBidirectional(model.nameProperty());</code></pre>
     public IntegerProperty qtyProperty()      { return qty; }
     public IntegerProperty priceProperty()    { return price; }
     public BooleanProperty savingProperty()   { return saving; }
+
+    // Spinner 연결용 — asObject() 결과는 꼭 필드로 붙잡아 둡니다 (아래 설명)
+    public final ObjectProperty&lt;Integer&gt; qtyObject = qty.asObject();
 }</code></pre>
       <pre class="code" data-lang="java"><code>// 화면과 묶기 — 이게 전부입니다
 customerField.textProperty().bindBidirectional(form.customerProperty());
+// 양방향 바인딩은 양쪽을 약한 참조로만 쥡니다 — 여기서 form.qtyProperty().asObject() 를
+// 바로 넘기면 그 임시 객체가 GC 되는 순간 연결이 조용히 끊깁니다
 qtySpinner.getValueFactory().valueProperty()
-          .bindBidirectional(form.qtyProperty().asObject());
+          .bindBidirectional(form.qtyObject);
 
 totalLabel.textProperty().bind(form.total.asString("합계 %,d 원"));
 
@@ -722,18 +727,21 @@ progress.visibleProperty().bind(form.savingProperty());</code></pre>
           <tr><td>값이 두 번 갱신됨</td><td>양방향 바인딩 + 리스너를 함께 걸었을 때</td></tr>
         </table>
       </div>
-      <pre class="code" data-lang="java"><code>// ✗ 중간 바인딩을 지역 변수로 두면 GC 되어 조용히 멈춥니다
+      <pre class="code" data-lang="java"><code>// ✗ 중간 바인딩을 지역 변수로 두고 리스너만 달면 GC 되어 조용히 멈춥니다
+//   (바인딩은 원본 프로퍼티를 약한 참조로만 구독합니다 — b 를 붙잡는 곳이 없음)
 {
     var b = form.qtyProperty().multiply(form.priceProperty());
-    label.textProperty().bind(b.asString());
-}   // b 가 수거되면 갱신이 끊깁니다
+    b.addListener((obs, o, n) -&gt; updateChart(n));
+}   // b 가 수거되면 리스너도 함께 끊깁니다
+//   label.textProperty().bind(b.asString()) 처럼 UI 에 bind 해 두면
+//   라벨이 b 를 붙잡으므로 이 문제는 없습니다
 
 // ✓ 필드로 보관하세요
 private final NumberBinding total =
         form.qtyProperty().multiply(form.priceProperty());
 
 // ✗ 백그라운드 스레드에서 UI 프로퍼티 변경
-new Thread(() -&gt; statusLabel.setText("완료")).start();   // 예외
+new Thread(() -&gt; statusLabel.setText("완료")).start();   // 예외가 나거나, 예외 없이 화면이 깨집니다
 
 // ✓ FX 스레드로 넘기거나
 Platform.runLater(() -&gt; statusLabel.setText("완료"));
@@ -943,6 +951,7 @@ public class OrderRow {
     public ObjectProperty&lt;LocalDate&gt; orderDateProperty() { return orderDate; }
 
     public String getOrderNo() { return orderNo.get(); }
+    public String getCustomerName() { return customerName.get(); }   // 아래 검색 필터가 씁니다
     public int getAmount() { return amount.get(); }
     public void setAmount(int v) { amount.set(v); }    // 값을 바꾸면 표가 자동 갱신 ✅
 }
@@ -990,6 +999,8 @@ searchField.textProperty().addListener((obs, old, keyword) -&gt;
 
 // 5) 편집 가능하게
 table.setEditable(true);
+// ★ 3) 의 셀 팩토리를 덮어씁니다 — 콤마·색 서식이 사라집니다.
+//   서식과 편집을 함께 원하면 TextFieldTableCell 을 상속해 updateItem 에 3) 의 서식을 넣으세요
 amountCol.setCellFactory(TextFieldTableCell.forTableColumn(
         new NumberStringConverter()));
 amountCol.setOnEditCommit(e -&gt;
@@ -1197,7 +1208,8 @@ button.setId("myButton");</code></pre>
   <div class="note warn rv">
     <b>절대 규칙</b> — 모든 UI 조작은 <b>JavaFX 애플리케이션 스레드</b>에서만 해야 합니다.
     <br>· UI 스레드에서 <b>오래 걸리는 작업</b>(DB·파일·API)을 하면 <b>화면이 멈춥니다.</b>
-    <br>· 반대로 <b>다른 스레드에서 UI 를 건드리면</b> <code>IllegalStateException: Not on FX application thread</code> 가 납니다.
+    <br>· 반대로 <b>다른 스레드에서 UI 를 건드리면</b> <code>IllegalStateException: Not on FX application thread</code> 가 나거나(노드 추가·창 열기 등),
+    검사하지 않는 조작(<code>setText</code> 등)은 <b>예외 없이 화면이 조용히 깨집니다</b> — 예외가 안 났다고 안전한 게 아닙니다.
   </div>
 
   <div class="vs rv">
@@ -1347,6 +1359,10 @@ new SequentialTransition(fade, move).play();</code></pre>
       <h4 class="mini" style="margin-top:0">jpackage — JDK 내장 (권장)</h4>
       <pre class="code" data-lang="bash"><code># 1) 실행 가능한 jar 를 먼저 만든다
 ./gradlew build
+#    ★ build/libs 에는 내 jar 하나뿐입니다. JavaFX jar 가 없으면 설치본이
+#      "JavaFX runtime components are missing" 으로 뜨지 않습니다 —
+#      의존성 jar 까지 한 폴더에 모아 --input 으로 주거나(installDist 의 lib),
+#      아래 jlink 플러그인 방식으로 런타임에 JavaFX 모듈을 넣으세요
 
 # 2) 런타임을 포함한 설치 파일 생성
 jpackage \
@@ -1382,7 +1398,7 @@ jlink {
     <div class="card">
       <h4 class="mini" style="margin-top:0">배포 체크리스트</h4>
       <ul class="tx">
-        <li><b>인코딩</b> — <code>-Dfile.encoding=UTF-8</code> 을 꼭 넣으세요. 안 넣으면 윈도우에서 한글이 깨집니다</li>
+        <li><b>인코딩</b> — JDK 18 부터 <code>file.encoding</code> 기본값이 UTF-8 이라 25 에서는 생략해도 되지만, <code>-Dfile.encoding=UTF-8</code> 을 명시해 두면 JDK 17 이하 런타임에서도 윈도우 한글이 안 깨집니다</li>
         <li><b>아이콘</b> — 윈도우는 <code>.ico</code>, 맥은 <code>.icns</code></li>
         <li><b>설정 파일 위치</b> — 설치 폴더는 <b>쓰기 권한이 없을 수</b> 있습니다.
             사용자 설정은 <code>System.getProperty("user.home")</code> 아래에 저장하세요</li>
@@ -1504,6 +1520,8 @@ public class LazyRows extends AbstractList&lt;Row&gt; {
     };
     private final int total, pageSize = 200;
 
+    public LazyRows(int total) { this.total = total; }   // 전체 건수만 먼저 받는다
+
     @Override public Row get(int i) {
         List&lt;Row&gt; page = pages.computeIfAbsent(i / pageSize, repo::loadPage);
         return page.get(i % pageSize);
@@ -1544,7 +1562,9 @@ table.setItems(FXCollections.observableList(new LazyRows(repo.count())));</code>
     <div class="card">
       <h4 class="mini" style="margin-top:0">jpackage — JRE 를 품은 설치본</h4>
       <pre class="code" data-lang="bash"><code># 1) 필요한 모듈만 담은 런타임을 만든다 (용량 절반 이하)
-jlink --add-modules java.base,java.logging,java.sql,\
+#    JavaFX 는 JDK 에 없으므로 javafx-jmods 폴더를 --module-path 로 알려 줘야 합니다
+jlink --module-path "$JAVAFX_JMODS" \
+      --add-modules java.base,java.logging,java.sql,\
 javafx.controls,javafx.fxml \
       --strip-debug --no-header-files --no-man-pages --compress=zip-6 \
       --output build/runtime

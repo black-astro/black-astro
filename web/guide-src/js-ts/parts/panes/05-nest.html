@@ -435,9 +435,10 @@ export class UsersService {
     const exists = await this.repo.findByEmail(dto.email);
     if (exists) throw new ConflictException("이미 가입된 이메일입니다");
 
+    const { password, ...rest } = dto;          // ★ 평문 비밀번호는 저장 객체에서 뺍니다
     const user = await this.repo.save({
-      ...dto,
-      passwordHash: await bcrypt.hash(dto.password, 12),
+      ...rest,
+      passwordHash: await bcrypt.hash(password, 12),
     });
 
     this.logger.log(`사용자 생성 id=${user.id}`);
@@ -876,6 +877,8 @@ export class TimeoutInterceptor implements NestInterceptor {
 export class User {
   id: number;
   email: string;
+  name: string;
+  role: string;
 
   <span class="t-ann">@Exclude</span>()                 // ★ 응답에서 자동 제거
   passwordHash: string;
@@ -1328,7 +1331,7 @@ async update(id: number, dto: UpdateUserDto) {
     connection: { url: cfg.getOrThrow("REDIS_URL") },
     defaultJobOptions: {
       attempts: 3,
-      backoff: { type: "exponential", delay: 1000 },   // 1s → 2s → 4s
+      backoff: { type: "exponential", delay: 1000 },   // 재시도 1s → 2s (attempts 3 = 첫 시도 + 재시도 2번)
       removeOnComplete: { age: 3600, count: 1000 },     // ★ 안 지우면 Redis 가 참
       removeOnFail: { age: 86400 },
     },
@@ -1785,7 +1788,8 @@ ClsModule.forRoot({
     mount: true,
     setup: (cls, req) =&gt; {
       cls.set("requestId", req.headers["x-request-id"] ?? randomUUID());
-      cls.set("userId", req.user?.id);
+      // ★ 여기서 req.user 는 아직 없습니다 — 미들웨어는 가드(인증)보다 먼저 돕니다.
+      //   userId 는 인증 가드나 인터셉터에서 cls.set("userId", ...) 로 넣으세요
     },
   },
 });

@@ -270,9 +270,8 @@ public Mono&lt;Dashboard&gt; slow(Long id) {
 public Mono&lt;Dashboard&gt; fast(Long id) {
     return Mono.zip(
             userClient.get(id),
-            orderClient.get(id),
-            couponClient.get(id)
-    ).map(t -&gt; new Dashboard(t.getT1(), t.getT2(), t.getT3()));
+            orderClient.get(id)
+    ).map(t -&gt; new Dashboard(t.getT1(), t.getT2()));
 }
 
 // 개수가 많으면 Tuple 대신 조합 함수
@@ -970,7 +969,8 @@ try {
     return service.find(id);     // Mono 를 만들 뿐, 에러는 나중에 흐름
 } catch (Exception e) { }        // 절대 안 걸림
 
-// ✅ 연산자로 처리
+// ✅ 연산자로 처리 — 아래는 '골라 쓰는' 목록입니다
+//    (전부 이으면 1) 이 모든 에러를 먼저 삼켜 2)~4) 는 영영 안 걸립니다)
 service.find(id)
     // 1) 대체값
     .onErrorReturn(Order.empty())
@@ -1258,7 +1258,7 @@ return orderService.find(id)               // boundedElastic 을 넘나들어도
     <div class="card">
       <h4 class="mini" style="margin-top:0">Context 의 두 가지 반전 — 모르면 하루를 버립니다</h4>
       <pre class="code" data-lang="java"><code>// 반전 ① Context 는 '아래에서 위로' 흐릅니다 (구독 시점에 전파)
-Mono.deferContextual(ctx -&gt; ctx.get("k"))   // 읽기는 위에서
+Mono.deferContextual(ctx -&gt; Mono.just(ctx.&lt;String&gt;get("k")))   // 읽기는 위에서
     .contextWrite(ctx -&gt; ctx.put("k", "v")) // 쓰기는 '아래'에 있어야 보임 ★
 // contextWrite 를 읽는 코드보다 '위'에 두면 못 읽습니다
 // (연산자 체인은 아래→위로 구독되기 때문)
@@ -1412,7 +1412,7 @@ EventLoopGroup worker = new MultiThreadIoEventLoopGroup(NioIoHandler.newFactory(
 
 // ★ 한 Channel 은 평생 같은 EventLoop 에 묶인다 (스레드 어피니티)
 //    → 그 채널의 핸들러 안에서는 동기화가 필요 없다
-//    → 대신 그 스레드를 막으면 '그 채널에 붙은 다른 수천 연결'도 같이 멈춘다</code></pre>
+//    → 대신 그 스레드를 막으면 '그 EventLoop 에 붙은 다른 수천 연결'도 같이 멈춘다</code></pre>
     </div>
 
     <div class="card">
@@ -1935,13 +1935,13 @@ ch.pipeline()
     .maxIdleTime(Duration.ofSeconds(20))            // 놀고 있는 커넥션 폐기 ★★
     .maxLifeTime(Duration.ofMinutes(5))             // 오래된 커넥션 강제 교체
     .evictInBackground(Duration.ofSeconds(30))      // 유휴 커넥션 청소 주기
-    .lifo()                                         // 최근 쓴 것부터 재사용 (기본)
+    .lifo()                                         // 최근 쓴 것부터 재사용 (기본은 fifo)
     .metrics(true)                                  // ★ 마이크로미터 연동
     .build();
 
 HttpClient httpClient = HttpClient.create(provider)
     .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 2000)
-    .responseTimeout(Duration.ofSeconds(5))         // 응답 전체 한계 ★
+    .responseTimeout(Duration.ofSeconds(5))         // 응답 읽기 사이 최대 공백 (요청 단위) ★
     .doOnConnected(c -&gt; c
         .addHandlerLast(new ReadTimeoutHandler(5))  // 5초간 수신 없음
         .addHandlerLast(new WriteTimeoutHandler(5)))
@@ -1969,7 +1969,7 @@ WebClient orderClient(WebClient.Builder b) {
     <div class="card">
       <h4 class="mini" style="margin-top:0">가장 흔한 사고 — keep-alive 타임아웃 불일치 ★★</h4>
       <pre class="code" data-lang="text"><code>우리 쪽 풀:   maxIdleTime = 무한 (기본값)
-상대 서버:    keepAliveTimeout = 5초  (nginx 기본)
+상대 서버:    keepAliveTimeout = 5초  (Node.js 기본 · nginx 는 75초)
 
 t=0    요청 → 커넥션 A 사용 → 풀에 반납
 t=5s   상대 서버가 A 를 조용히 닫음 (FIN)
@@ -1991,15 +1991,15 @@ t=6s   요청 → 풀에서 A 를 꺼내 전송
         <table class="cheat">
           <tr><th style="width:38%">타임아웃</th><th>어디를 재는가</th></tr>
           <tr><td>CONNECT_TIMEOUT_MILLIS</td><td>TCP 핸드셰이크까지</td></tr>
-          <tr><td><b>responseTimeout</b></td><td>요청 전송 → <b>응답 헤더 도착</b>까지 ★</td></tr>
-          <tr><td>ReadTimeoutHandler</td><td><b>패킷 사이</b> 무응답 시간 (스트리밍에 필요)</td></tr>
+          <tr><td><b>responseTimeout</b></td><td>요청을 보낸 뒤 <b>응답 읽기 사이</b>의 최대 공백 — <b>요청 단위</b>로 걸리고 풀어짐 ★</td></tr>
+          <tr><td>ReadTimeoutHandler</td><td><b>패킷 사이</b> 무응답 시간 — <b>커넥션 단위</b> (풀에서 놀 때도 남아 있음)</td></tr>
           <tr><td>Mono <code>.timeout()</code></td><td>리액티브 체인 전체 (최후 방어선)</td></tr>
         </table>
       </div>
       <div class="note tip" style="margin-bottom:0">
-        SSE·NDJSON 같은 <b>장시간 스트리밍</b>에 <code>responseTimeout</code> 을 걸면
-        <b>정상 연결이 끊깁니다.</b> 스트리밍 클라이언트는
-        <code>responseTimeout</code> 대신 <b><code>ReadTimeoutHandler</code> 만</b> 쓰세요.
+        SSE·NDJSON 같은 <b>장시간 스트리밍</b>은 이벤트 간격이 <code>responseTimeout</code> 보다 길면
+        <b>정상 연결이 끊깁니다.</b> 스트리밍 요청만
+        <code>httpRequest(r -&gt; r.responseTimeout(...))</code> 로 <b>넉넉하게 따로</b> 주세요 (전체 체인 한계는 <code>.timeout()</code>).
       </div>
     </div>
   </div>
@@ -2058,13 +2058,15 @@ reactor.netty.http.client.connect.time</code></pre>
           <tr><td>커넥션이 계속 늘어남</td><td>응답 본문을 <b>소비하지 않아</b> 반납이 안 됨 ★</td></tr>
         </table>
       </div>
-      <pre class="code" data-lang="java"><code>// ⚠️ 커넥션 누수 1위 — 본문을 안 읽고 버리기
+      <pre class="code" data-lang="java"><code>// ⚠️ 커넥션 누수 1위 — 본문을 안 읽고 버리기 (옛 exchange() 시절의 대표 사고)
+//    exchangeToMono 는 함수가 끝나면 남은 본문을 자동 해제하지만,
+//    ClientResponse 를 함수 밖으로 들고 나가 나중에 읽으면 같은 사고가 납니다
 client.get().uri("/ping").exchangeToMono(res -&gt; {
     if (res.statusCode().is2xxSuccessful()) return Mono.just("ok");
-    return Mono.just("fail");        // 💥 본문 미소비 → 커넥션 반납 안 됨
+    return Mono.just("fail");        // 본문은 여기서 끝나면 자동 해제
 });
 
-// ✅ 반드시 본문을 비우고 끝낸다
+// ✅ 본문이 필요 없으면 명시적으로 비우는 습관이 가장 안전
 client.get().uri("/ping").exchangeToMono(res -&gt;
     res.releaseBody().thenReturn(res.statusCode().value()));
 

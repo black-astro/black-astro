@@ -456,8 +456,10 @@ ipcMain.handle("report:save", async (event, data: unknown) =&gt; {
   const parsed = ReportSchema.parse(data);
 
   // ③ 경로·권한 검증
-  const target = path.join(app.getPath("documents"), parsed.filename);
-  if (!target.startsWith(app.getPath("documents"))) throw new Error("거부");
+  const docs = path.resolve(app.getPath("documents"));
+  const target = path.resolve(docs, parsed.filename);
+  //  ★ + path.sep 까지 붙여 비교 — 없으면 "Documents-evil\x" 같은 형제 폴더가 통과합니다
+  if (!target.startsWith(docs + path.sep)) throw new Error("거부");
 
   await fs.writeFile(target, JSON.stringify(parsed));
 });</code></pre>
@@ -1533,7 +1535,7 @@ npm i -D @electron/rebuild &amp;&amp; npx electron-rebuild</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">메인 프로세스 — 세션 관리</h4>
       <pre class="code" data-lang="ts"><code>import * as pty from 'node-pty';
-import { ipcMain, BrowserWindow } from 'electron';
+import { app, ipcMain, BrowserWindow } from 'electron';
 import os from 'node:os';
 
 const shell = process.platform === 'win32'
@@ -1638,11 +1640,13 @@ ro.observe(document.getElementById('term')!);</code></pre>
   build:  ['npm', ['run', 'build']],
   deploy: ['node', ['scripts/deploy.js']],
 } as const;
+const run = promisify(execFile);   // node:util
 
-ipcMain.handle('run', (_e, key: keyof typeof TASKS) =&gt; {
+ipcMain.handle('run', async (_e, key: keyof typeof TASKS) =&gt; {
   const t = TASKS[key];
   if (!t) throw new Error('unknown task');
-  return execFile(t[0], t[1], { shell: false });
+  const { stdout } = await run(t[0], [...t[1]], { shell: false });
+  return stdout;   // ★ ChildProcess 객체는 IPC 로 못 넘깁니다 — 결과만 돌려줍니다
 });</code></pre>
         </div>
       </div>
@@ -1878,7 +1882,11 @@ const save = () =&gt; {
 };
 win.on('resize', save);
 win.on('move', save);
-win.on('close', save);</code></pre>
+// ★ 닫을 때는 즉시 — 400ms 뒤에는 창이 이미 없어서 위의 save 로는 저장되지 않습니다
+win.on('close', () =&gt; {
+  clearTimeout(t);
+  store.set('win', { ...win.getNormalBounds(), max: win.isMaximized() });
+});</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b><code>getBounds()</code> 가 아니라 <code>getNormalBounds()</code> 입니다.</b>
         최대화 상태에서 <code>getBounds()</code> 를 저장하면
@@ -1951,14 +1959,12 @@ function loadToken(): string | null {
       </ul>
       <pre class="code" data-lang="yaml"><code># electron-builder.yml — Azure Trusted Signing (요즘 가장 현실적)
 win:
-  signtoolOptions:
-    publisherName: "MyCompany Inc."
   target: [{ target: nsis, arch: [x64, arm64] }]
-azureSignOptions:
-  publisherName: "MyCompany Inc."
-  endpoint: "https://eus.codesigning.azure.net"
-  certificateProfileName: "myapp-profile"
-  codeSigningAccountName: "myapp-signing"
+  azureSignOptions:              # ★ win 아래에 둡니다 (최상위에 두면 설정 오류)
+    publisherName: "MyCompany Inc."
+    endpoint: "https://eus.codesigning.azure.net"
+    certificateProfileName: "myapp-profile"
+    codeSigningAccountName: "myapp-signing"
 nsis:
   oneClick: false                # 설치 경로를 고를 수 있게
   perMachine: false              # 관리자 권한 없이 설치 (사내 배포에 유리)

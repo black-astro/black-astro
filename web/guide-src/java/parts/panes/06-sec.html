@@ -486,7 +486,8 @@ boolean ok = passwordEncoder.matches(rawPassword, user.getPassword());</code></p
 
   <div class="card rv">
     <h4 class="mini" style="margin-top:0">① 토큰 발급·검증 컴포넌트</h4>
-    <pre class="code" data-lang="java"><code>@Component
+    <pre class="code" data-lang="java"><code>@Slf4j
+@Component
 public class JwtTokenProvider {
 
     private final SecretKey key;
@@ -560,16 +561,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (token != null &amp;&amp; tokenProvider.validate(token)) {
             Claims claims = tokenProvider.parse(token);
 
-            List&lt;SimpleGrantedAuthority&gt; authorities =
-                    ((List&lt;?&gt;) claims.get("roles")).stream()
-                            .map(r -&gt; new SimpleGrantedAuthority(r.toString()))
-                            .toList();
+            // 리프레시 토큰에는 roles 가 없습니다 — 액세스 토큰 자리에 오면 인증하지 않는다
+            // (그냥 캐스팅하면 NPE 로 500 이 나고, 14일짜리 토큰이 API 열쇠가 될 뻔합니다)
+            if (claims.get("roles") instanceof List&lt;?&gt; roles) {
+                List&lt;SimpleGrantedAuthority&gt; authorities = roles.stream()
+                        .map(r -&gt; new SimpleGrantedAuthority(r.toString()))
+                        .toList();
 
-            var auth = new UsernamePasswordAuthenticationToken(
-                    Long.valueOf(claims.getSubject()), null, authorities);
-            auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
+                var auth = new UsernamePasswordAuthenticationToken(
+                        Long.valueOf(claims.getSubject()), null, authorities);
+                auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
 
-            SecurityContextHolder.getContext().setAuthentication(auth);
+                SecurityContextHolder.getContext().setAuthentication(auth);
+            }
         }
         chain.doFilter(req, res);      // ★ 실패해도 여기서 막지 말고 넘긴다
     }                                  //   최종 판단은 AuthorizationFilter 가 함
@@ -786,6 +790,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
     private final UserRepository userRepository;
 
     @Override
+    @Transactional          // 없으면 updateOAuthInfo() 의 변경이 DB 에 반영되지 않습니다
     public OAuth2User loadUser(OAuth2UserRequest req) {
         OAuth2User oAuth2User = super.loadUser(req);
         String provider = req.getClientRegistration().getRegistrationId();
@@ -793,7 +798,8 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         OAuthAttributes attrs = OAuthAttributes.of(provider, oAuth2User.getAttributes());
 
         // 있으면 갱신, 없으면 가입 (자동 회원가입)
-        User user = userRepository.findByEmail(attrs.email())
+        // 이메일이 아니라 (제공자, 제공자 고유 ID) 로 찾습니다 — 이메일은 바뀔 수 있습니다
+        User user = userRepository.findByProviderAndProviderId(provider, attrs.providerId())
                 .map(u -&gt; u.updateOAuthInfo(attrs.name()))
                 .orElseGet(() -&gt; userRepository.save(attrs.toEntity()));
 
@@ -1078,8 +1084,11 @@ public CorsConfigurationSource corsConfigurationSource() {
         </table>
       </div>
       <pre class="code" data-lang="java"><code>// 켜는 경우 (SPA + 쿠키)
+// withHttpOnlyFalse() 만 바꾸면 안 됩니다 — 6.0 부터 기본 처리기가 토큰을 XOR 마스킹하고
+// 쿠키도 지연 발급이라, 프런트가 쿠키 값을 그대로 헤더에 실으면 403 이 납니다.
+// spa() 가 XSRF-TOKEN 쿠키 발급 + X-XSRF-TOKEN 헤더 검증을 한 번에 맞춰 줍니다
 .csrf(csrf -&gt; csrf
-    .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+    .spa()
     .ignoringRequestMatchers("/api/webhook/**"))    // 외부 웹훅은 제외
 
 // 끄는 경우 (JWT 헤더 방식)
@@ -1341,10 +1350,13 @@ public class RefreshToken {
     private String ip;
     private Instant lastSeenAt;
 }</code></pre>
-      <pre class="code" data-lang="java"><code>@Transactional
+      <pre class="code" data-lang="java"><code>// 재사용을 감지해 계열을 폐기한 뒤 예외를 던지므로, 그 예외로 폐기까지 롤백되면 안 됩니다
+@Transactional(noRollbackFor = BadCredentialsException.class)
 public TokenPair refresh(String raw) {
     String hash = sha256(raw);
-    RefreshToken t = repo.findByTokenHash(hash)
+    // @Lock(PESSIMISTIC_WRITE) 조회 — 같은 토큰으로 두 요청이 동시에 오면
+    // 둘 다 usedAt == null 을 보고 통과하는 레이스를 행 잠금으로 막는다
+    RefreshToken t = repo.findByTokenHashForUpdate(hash)
         .orElseThrow(() -> new BadCredentialsException("unknown token"));
 
     // ① 이미 쓴 토큰이 다시 왔다 = 어딘가에서 복제됐다
@@ -1436,7 +1448,7 @@ public void signOutDevice(@AuthenticationPrincipal Long userId,
       <h4 class="mini" style="margin-top:0">TOTP — 라이브러리 없이 이해하기</h4>
       <pre class="code" data-lang="java"><code>// 인증 앱(Google Authenticator 등)은 표준 알고리즘입니다.
 // 서버와 앱이 '같은 비밀 + 현재 시각'으로 같은 숫자를 만듭니다.
-public boolean verify(String base32Secret, String code) {
+public boolean verify(String base32Secret, String code) throws GeneralSecurityException {
     byte[] key = new Base32().decode(base32Secret);
     long   now = Instant.now().getEpochSecond() / 30;   // 30초 창
 
@@ -1447,7 +1459,7 @@ public boolean verify(String base32Secret, String code) {
     return false;
 }
 
-private String totp(byte[] key, long counter) {
+private String totp(byte[] key, long counter) throws GeneralSecurityException {
     byte[] data = ByteBuffer.allocate(8).putLong(counter).array();
     Mac mac = Mac.getInstance("HmacSHA1");
     mac.init(new SecretKeySpec(key, "HmacSHA1"));
@@ -1574,6 +1586,9 @@ public class TenantFilter extends OncePerRequestFilter {
 }
 
 // Hibernate 필터로 모든 쿼리에 조건을 강제한다 — 빼먹을 수 없게
+// 단, 필터는 기본이 꺼짐입니다 — 요청마다(세션마다)
+//   session.enableFilter("tenant").setParameter("tid", TenantContext.get());
+// 를 공통 지점(AOP·인터셉터)에서 켜 줘야 실제로 걸립니다
 @FilterDef(name = "tenant", parameters = @ParamDef(name = "tid", type = Long.class))
 @Filter(name = "tenant", condition = "tenant_id = :tid")
 @Entity public class Document { ... }</code></pre>

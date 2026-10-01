@@ -370,7 +370,8 @@ Address copy = new Address(addr.getZipCode(), addr.getAddress1(), addr.getAddres
 private Set&lt;String&gt; tags = new HashSet&lt;&gt;();
 
 // 문제
-// · 원소를 하나 바꾸면 전체 DELETE 후 전체 INSERT (기본 동작)
+// · List(bag) 로 두면 원소 하나만 바꿔도 전체 DELETE 후 전체 INSERT
+//   (Set 은 행 단위로 지우지만, 그래도 원소를 값으로만 식별한다)
 // · 원소에 기본키가 없어 추적이 안 된다
 // · 지연 로딩·페이징이 어렵다
 
@@ -734,7 +735,7 @@ public void demo() {
     // 대량 처리에서는 주기적으로 flush + clear
     for (int i = 0; i &lt; 100_000; i++) {
         em.persist(new Order(...));
-        if (i % 500 == 0) { em.flush(); em.clear(); }   // ★ 메모리 관리
+        if ((i + 1) % 500 == 0) { em.flush(); em.clear(); }   // ★ 메모리 관리 (500건마다)
     }
 }
 
@@ -960,7 +961,12 @@ public Page&lt;OrderDto&gt; search(OrderCondition cond, Pageable pageable) {
     // 2단계: 그 id 들로 상세 조회 (fetch join 자유롭게)
     List&lt;Order&gt; orders = orderRepository.findAllWithDetailsByIdIn(ids.getContent());
 
-    return new PageImpl&lt;&gt;(toDto(orders), pageable, ids.getTotalElements());
+    // ⚠️ IN 조회는 순서를 보장하지 않습니다 — 1단계의 id 순서대로 다시 정렬
+    Map&lt;Long, Order&gt; byId = orders.stream()
+            .collect(Collectors.toMap(Order::getId, Function.identity()));
+    List&lt;Order&gt; sorted = ids.getContent().stream().map(byId::get).toList();
+
+    return new PageImpl&lt;&gt;(toDto(sorted), pageable, ids.getTotalElements());
 }
 
 @Query("select distinct o from Order o " +
@@ -1137,6 +1143,7 @@ public class StockService {
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE, region = "code")
 public class CodeGroup {          // 거의 안 바뀌는 코드 테이블
     @Id private String code;
+    private String type;
     private String name;
 }
 
@@ -1486,8 +1493,9 @@ public Long create(OrderRequest req) {
     return saved.getId();
 }
 public OrderDto createAndGet(OrderRequest req) {
-    Long id = create(req);                    // writer 에 씀
-    return findById(id);                       // @Transactional(readOnly) → reader! 아직 없을 수 있다
+    // (다른 빈을 거쳐야 @Transactional 이 먹습니다 — 같은 클래스 자기 호출이면 둘 다 트랜잭션 없음)
+    Long id = commandService.create(req);      // writer 에 씀
+    return queryService.findById(id);          // @Transactional(readOnly) → reader! 아직 없을 수 있다
 }
 
 // ✅ 같은 트랜잭션 안에서 처리하거나, 저장 결과를 그대로 반환

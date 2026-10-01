@@ -892,7 +892,8 @@ const MapView = dynamic(() =&gt; import("./map-view"), {
       <h4 class="mini" style="margin-top:0">기본 — 서버 컴포넌트에서 그냥 await</h4>
       <pre class="code" data-lang="tsx"><code>// app/posts/page.tsx
 export default async function Posts() {
-  // Next 15 기본값 = cache: "no-store"  ★ 매 요청 새로 가져옵니다
+  // Next 15 기본값 = 데이터 캐시 안 함. 단, 이 라우트에 cookies() 같은 동적 함수가 없으면
+  // 빌드 때 한 번 가져와 정적 HTML 로 굳습니다 ★ 매 요청 새로 받으려면 no-store · connection()
   const res = await fetch("https://api.example.com/posts");
   if (!res.ok) throw new Error("목록을 가져오지 못했습니다");
   const posts: Post[] = await res.json();
@@ -927,7 +928,7 @@ await fetch(url, { next: { revalidate: 60 } });
 // ③ 태그를 붙여 두고 나중에 이름으로 지우기 ★ 실무 핵심
 await fetch(url, { next: { tags: ["posts", `post:${id}`] } });
 
-// 캐시하지 않음 (Next 15 기본값이라 안 적어도 같습니다)
+// 캐시하지 않음 — 기본값과 달리 이 라우트를 '동적'(매 요청 렌더)으로 만듭니다
 await fetch(url, { cache: "no-store" });
 
 // 파일 전체의 기본값을 정하는 세그먼트 옵션 (page.tsx · layout.tsx 최상단)
@@ -970,6 +971,8 @@ export async function updatePost(id: number, data: PostInput) {
   revalidatePath("/posts");                 // 그 페이지
   revalidatePath("/posts/[id]", "page");    // 동적 라우트 전부
   revalidatePath("/", "layout");            // 그 레이아웃 아래 전부
+  // Next 16: 인자 하나짜리 revalidateTag 는 deprecated — revalidateTag("posts", "max"),
+  //          액션 안에서 '쓴 직후 바로 읽기'가 필요하면 updateTag("posts")
 }</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>이 조합이 2026년 App Router 의 표준 패턴</b>입니다 —
@@ -992,6 +995,7 @@ export const getPopularPosts = unstable_cache(
 // 인자는 자동으로 키에 포함됩니다 — getPopularPosts(10) 과 (20) 은 별개
 
 // Next 16 (Cache Components) — 디렉티브로 더 간단해집니다
+import { cacheLife, cacheTag } from "next/cache";   // next.config 에 cacheComponents: true
 export async function getPopularPosts(limit: number) {
   "use cache";
   cacheLife("minutes");            // 수명 프리셋
@@ -1317,7 +1321,7 @@ export function TodoList({ todos }: { todos: Todo[] }) {
       <h4 class="mini" style="margin-top:0">가장 흔한 사고와 그 처방</h4>
       <pre class="code" data-lang="typescript"><code>"use server";
 import { auth } from "@/auth";
-import { forbidden } from "next/navigation";
+import { revalidateTag } from "next/cache";
 
 // ❌ 위험 — 화면에서 버튼을 숨겼으니 안전하다고 생각하는 코드
 export async function deletePost(id: number) {
@@ -1470,7 +1474,8 @@ export default async function Post({ params }: {
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">동적 함수 — 이 한 줄이 전략을 바꿉니다</h4>
-      <pre class="code" data-lang="tsx"><code>import { cookies, headers, connection } from "next/headers";
+      <pre class="code" data-lang="tsx"><code>import { cookies, headers } from "next/headers";
+import { connection } from "next/server";
 
 // 아래 중 하나라도 쓰면 그 라우트는 '동적'이 됩니다 (요청마다 렌더)
 await cookies();                 // 쿠키 읽기
@@ -2481,7 +2486,7 @@ export async function transfer(fromId: string, toId: string, amount: number) {
 @custom-variant dark (&amp;:where(.dark, .dark *));
 
 @layer components {
-  .card-lite { @apply rounded-[--radius-card] border p-4; }
+  .card-lite { @apply rounded-(--radius-card) border p-4; }   /* v4 의 CSS 변수 문법은 ( ) */
 }</code></pre>
       <div class="tw"><table class="cheat" style="margin:0">
         <tr><th style="width:38%">Tailwind 3</th><th>Tailwind 4</th></tr>
@@ -2620,7 +2625,7 @@ export default function RootLayout({ children }) {
 //  sizes = "이 이미지가 화면에서 차지할 폭" ★ 안 주면 항상 큰 파일
 
 // ③ import 한 이미지는 크기도 흐린 미리보기도 자동
-import hero from "@/public/hero.jpg";
+import hero from "./hero.jpg";          // 정적 import 한 로컬 이미지
 &lt;Image src={hero} alt="" placeholder="blur" /&gt;</code></pre>
       <pre class="code" data-lang="typescript"><code>// next.config.ts — 외부 이미지는 도메인을 허용해야 합니다
 export default {
@@ -2788,7 +2793,8 @@ import withBundleAnalyzer from "@next/bundle-analyzer";
 export default withBundleAnalyzer({ enabled: process.env.ANALYZE === "true" })({
   // 나머지 설정
 });</code></pre>
-      <pre class="code" data-lang="bash"><code>ANALYZE=true npm run build      # 브라우저에 트리맵이 열립니다
+      <pre class="code" data-lang="bash"><code>ANALYZE=true npx next build --webpack   # 브라우저에 트리맵이 열립니다
+#  (이 플러그인은 webpack 전용 — Next 16 의 기본 Turbopack 빌드에서는 동작하지 않습니다)
 
 # 자주 발견되는 범인
 #  · moment / date-fns 전체   → dayjs 나 Intl.DateTimeFormat 로
@@ -2859,8 +2865,9 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 export const alt = "글 공유 이미지";
 
-export default async function OG({ params }: { params: { slug: string } }) {
-  const post = await getPost(params.slug);
+export default async function OG({ params }: { params: Promise&lt;{ slug: string }&gt; }) {
+  const { slug } = await params;            // Next 16 — 여기 params 도 Promise
+  const post = await getPost(slug);
 
   return new ImageResponse(
     (
@@ -2911,7 +2918,8 @@ export default async function Post({ params }) {
   return (
     &lt;&gt;
       &lt;script type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }} /&gt;
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(ld).replace(/&lt;/g, "\\u003c") }} /&gt;
+      {/* ↑ 제목에 &lt;/script&gt; 가 들어 있어도 태그가 닫히지 않게 */}
       &lt;article&gt;…&lt;/article&gt;
     &lt;/&gt;
   );
@@ -3079,7 +3087,8 @@ FROM node:24-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-ARG NEXT_PUBLIC_SITE_URL              # ★ 빌드 때 필요한 공개 변수
+# ★ 빌드 때 필요한 공개 변수 (Dockerfile 은 줄 끝 주석을 지원하지 않습니다)
+ARG NEXT_PUBLIC_SITE_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
@@ -3395,13 +3404,13 @@ export const getBySlug = unstable_cache(
 );</code></pre>
       <pre class="code" data-lang="tsx"><code>// src/app/(blog)/posts/[slug]/page.tsx
 import { notFound } from "next/navigation";
-import { getBySlug } from "@/features/posts/queries";
+import { getBySlug, listPublished } from "@/features/posts/queries";
 
 export const revalidate = 3600;
 
 export async function generateStaticParams() {
-  const rows = await listPublished();
-  return rows.slice(0, 200).map((p) =&gt; ({ slug: p.slug }));  // 인기 200개만
+  const rows = await listPublished();                  // 최신 50개(limit 50)
+  return rows.map((p) =&gt; ({ slug: p.slug }));  // 나머지는 첫 요청 때 생성
 }
 
 export async function generateMetadata({ params }) {
@@ -3413,12 +3422,14 @@ export async function generateMetadata({ params }) {
 export default async function PostPage({ params }) {
   const post = await getBySlug((await params).slug);
   if (!post) notFound();
+  // ★ unstable_cache 는 결과를 JSON 으로 저장합니다 — 캐시 적중 때 Date 가 문자열로 옵니다
+  const created = new Date(post.createdAt);
 
   return (
     &lt;article className="prose mx-auto py-10"&gt;
       &lt;h1&gt;{post.title}&lt;/h1&gt;
-      &lt;time dateTime={post.createdAt.toISOString()}&gt;
-        {post.createdAt.toLocaleDateString("ko-KR")}
+      &lt;time dateTime={created.toISOString()}&gt;
+        {created.toLocaleDateString("ko-KR")}
       &lt;/time&gt;
       &lt;div&gt;{post.body}&lt;/div&gt;
     &lt;/article&gt;

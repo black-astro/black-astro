@@ -220,7 +220,8 @@ type(s)                 # &lt;class 'pandas.core.series.Series'&gt;
 
 # 되돌리기
 s.to_frame()            # Series -> 1컬럼 DataFrame
-s.to_dict()  s.to_list()</code></pre>
+s.to_dict()             # {인덱스: 값}
+s.to_list()             # [값, 값, ...]</code></pre>
     </div>
   </div>
 
@@ -514,7 +515,7 @@ assert df["주문일"].notna().all(),  f"날짜 파싱 실패 {df['주문일'].i
 assert (df["수량"] > 0).all(),      "수량이 0 이하인 행이 있습니다"
 assert df["지점코드"].str.len().eq(5).all(), "지점코드 자릿수 이상"
 
-print(df.info(memory_usage="deep"))   # 실제 메모리 사용량</code></pre>
+df.info(memory_usage="deep")   # 실제 메모리 사용량 (info 는 직접 출력하고 None 을 반환)</code></pre>
 
   <div class="note warn rv">
     <b>파일이 커서 메모리에 안 올라가면</b> — <code>usecols</code> 와 <code>dtype</code> 만으로
@@ -1583,7 +1584,7 @@ a.merge(b, on="id", suffixes=("_기존","_신규"))
 
 # 조인 결과 검증 — 실무 필수!
 사원.merge(부서, on="id", how="left",
-           validate="many_to_one",   # 1:N 관계 위반 시 에러
+           validate="many_to_one",   # 오른쪽(부서) id 가 중복이면 에러
            indicator=True)           # _merge 컬럼으로 출처 표시</code></pre>
     </div>
     <div class="card">
@@ -1984,15 +1985,16 @@ df["날짜"] = pd.to_datetime(df["날짜"])
 df["날짜"] = pd.to_datetime(df["날짜"], format="%Y-%m-%d")
 df["날짜"] = pd.to_datetime(df["날짜"], errors="coerce")  # 실패 시 NaT
 
-# 날짜를 인덱스로 (시계열 기능의 전제조건)
-df = df.set_index("날짜").sort_index()
-
-# 날짜 부품 꺼내기 (.dt 접근자)
+# 날짜 부품 꺼내기 (.dt 접근자 — 날짜가 '컬럼'일 때)
 df["연"]     = df["날짜"].dt.year
 df["월"]     = df["날짜"].dt.month
 df["요일"]   = df["날짜"].dt.day_name()
 df["주차"]   = df["날짜"].dt.isocalendar().week
 df["분기"]   = df["날짜"].dt.quarter
+
+# 날짜를 인덱스로 (시계열 기능의 전제조건)
+df = df.set_index("날짜").sort_index()
+# 이제 날짜는 컬럼이 아니므로 df["날짜"] 는 KeyError → df.index.year 처럼 씁니다
 
 # 날짜 인덱스 슬라이싱 — .loc 에 문자열로 바로!
 df.loc["2026"]            # 2026년 전체
@@ -2059,8 +2061,9 @@ s = pd.to_datetime(df["ts"], utc=True)          # 일단 UTC 로 통일
 df["한국시각"] = s.dt.tz_convert("Asia/Seoul")   # 표시할 때 변환
 
 # 타임존 없는 값에 시간대 붙이기 / 떼기
-s.dt.tz_localize("Asia/Seoul")   # naive → KST 로 선언
-s.dt.tz_localize(None)           # 시간대 정보 제거
+naive = pd.to_datetime(df["입력시각"])   # 시간대 정보 없음 (naive)
+naive.dt.tz_localize("Asia/Seoul")   # naive → KST 로 선언 (이미 tz 가 있는 s 에 하면 TypeError)
+s.dt.tz_localize(None)               # 시간대 정보 제거 (aware → naive)
 
 # 파싱 실패를 걸러내는 검증 패턴
 dt = pd.to_datetime(df["날짜"], errors="coerce")
@@ -2072,7 +2075,8 @@ pd.to_datetime(s, format="%Y-%m-%d")   # 100만 행이면 체감 차이</code></
       <pre class="code" data-lang="python"><code># 날짜 만들기·계산 — 자주 쓰는 세 가지
 pd.date_range("2026-01-01", periods=31, freq="D")   # 달력 만들기
 df["마감"] = df["주문일"] + pd.Timedelta(days=3)      # 3일 뒤
-df["월초"] = df["주문일"] - pd.offsets.MonthBegin(1)  # 그 달 1일</code></pre>
+df["월초"] = df["주문일"].dt.to_period("M").dt.to_timestamp()  # 그 달 1일
+# ※ 주문일 - pd.offsets.MonthBegin(1) 은 1일인 날짜를 '전달 1일'로 보냅니다</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b><code>parse_dates</code> 로 읽었는데 object 그대로라면</b> 파싱이 실패한 것입니다 —
         read_csv 는 실패해도 에러를 내지 않습니다.
@@ -2336,9 +2340,10 @@ print(df.memory_usage(deep=True).sum() / 1024**2, "MB")</code></pre>
         <tr>
           <td>③ 체인 대입</td>
           <td>경고를 띄우고 동작은 불확실</td>
-          <td><b>경고 없이 조용히 무시</b>됩니다. <code>df["a"][0] = 5</code> 나
-              <code>df[df.x &gt; 0]["y"] = 1</code> 은 원본을 바꾸지도, 에러를 내지도 않습니다.
-              <code>SettingWithCopyWarning</code> 자체가 <b>3.0 에서 삭제</b>되어 신호도 없습니다 →
+          <td><b>원본에 절대 반영되지 않습니다.</b> <code>df["a"][0] = 5</code> 나
+              <code>df[df.x &gt; 0]["y"] = 1</code> 은 에러 없이 <code>ChainedAssignmentError</code> 경고만 냅니다.
+              <code>SettingWithCopyWarning</code> 은 <b>3.0 에서 삭제</b>되어, <code>sub = df[...]</code> 로 받아 둔 뒤
+              <code>sub["y"] = 1</code> 하는 두 줄짜리는 <b>아무 신호도 없습니다</b> →
               <code>df.loc[조건, "y"] = 1</code> 한 방으로</td>
         </tr>
         <tr>
@@ -2374,9 +2379,10 @@ pd.to_datetime(["2026-03-15"]).dtype          # 3.0: datetime64[us]
 df["날짜"].astype("int64")                    # 3.0 은 us → 예전보다 1000배 작음
 df["날짜"].dt.as_unit("ns").astype("int64")   # ✅ 2.x 와 같은 값
 
-# ③ 체인 대입은 조용히 무시된다 (경고도 에러도 없음)
-df["a"][0] = 5                          # ❌ 아무 일도 일어나지 않음
+# ③ 체인 대입은 원본에 절대 반영되지 않는다 (에러 아님, 경고만)
+df["a"][0] = 5                          # ❌ 원본 그대로 + ChainedAssignmentError 경고
 df[df["매출"] &gt; 300]["등급"] = "S"      # ❌ 마찬가지
+sub = df[df["매출"] &gt; 300]; sub["등급"] = "S"   # ❌ 두 줄로 나누면 경고조차 없음
 df.loc[0, "a"] = 5                      # ✅ 유일하게 확실한 방법
 df.loc[df["매출"] &gt; 300, "등급"] = "S"   # ✅
 
@@ -2414,8 +2420,8 @@ df.rename(columns={"a":"b"}, copy=False)   # ⚠️ 무시됨 → 인자를 지�
     </ul>
     <div class="note warn" style="margin-bottom:0">
       <b>가장 위험한 건 ③</b> — 나머지는 에러나 눈에 띄는 차이로 드러나지만,
-      체인 대입은 <b>경고도 에러도 없이 그냥 안 먹습니다</b>.
-      2.x 시절 경고를 보고 고치던 자리가 3.0 에서는 아무 신호도 주지 않으니,
+      체인 대입은 <b>에러 없이 그냥 안 먹습니다</b>. 한 줄짜리는 경고라도 뜨지만,
+      2.x 시절 경고를 보고 고치던 두 줄짜리(<code>sub = df[...]</code> → <code>sub[...] = 값</code>)는 3.0 에서 아무 신호도 주지 않으니,
       값 대입은 <b>무조건 <code>df.loc[행조건, "열"] = 값</code> 한 방</b>으로 쓰세요.
     </div>
   </div>
@@ -2426,7 +2432,7 @@ df.rename(columns={"a":"b"}, copy=False)   # ⚠️ 무시됨 → 인자를 지�
       <pre class="code" data-lang="python"><code># Copy-on-Write — 3.0 부터 '항상 켜져 있고 끌 수 없습니다'.
 # 모든 슬라이스는 '수정하는 순간에만' 복사되고,
 # view/copy 고민이 사라져 동작이 예측 가능해집니다.
-# 옵션을 설정할 필요가 없고, 설정하면 오히려 FutureWarning 이 납니다
+# 옵션을 설정할 필요가 없고, 설정하면 오히려 deprecated 경고(Pandas4Warning)가 납니다
 # (pd.options.mode.copy_on_write 는 3.0 에서 deprecated, 4.0 제거 예정)
 
 # PyArrow 백엔드 — 문자열 메모리 절반, NaN 없는 정수
@@ -2523,7 +2529,8 @@ result = df3.sort_values(ascending=False)
         <li>점(<code>.</code>)을 줄 <b>앞에</b> 두면 단계가 눈에 띕니다</li>
         <li>직전 단계 결과를 참조할 땐 <span class="kw">lambda d: …</span></li>
         <li><span class="kw">inplace=True</span>는 체인을 끊으니 쓰지 않습니다</li>
-        <li>디버깅은 <span class="kw">.pipe(print)</span> 를 중간에 끼워 확인</li>
+        <li>디버깅은 <span class="kw">.pipe(lambda d: (print(d.shape), d)[1])</span> 를 중간에 끼워 확인
+            — <code>.pipe(print)</code> 는 None 을 넘겨 체인이 끊깁니다</li>
       </ul>
       <pre class="code" data-lang="python"><code># 커스텀 함수도 체인에 끼워넣기
 def 이상치제거(d, col, n=3):
@@ -2799,8 +2806,8 @@ df["코드"] = df["코드"].astype(str).str.zfill(6)           # 123 -> 000123
 
 # 5) 눈에 안 보이는 유령 문자 제거 (엑셀·웹에서 자주 딸려옵니다)
 df["이름"] = (df["이름"]
-              .str.replace(" ", " ", regex=False)   # NBSP(줄바꿈 없는 공백)
-              .str.replace("﻿", "",  regex=False)   # BOM
+              .str.replace("\u00a0", " ", regex=False)   # NBSP(줄바꿈 없는 공백)
+              .str.replace("\ufeff", "",  regex=False)   # BOM
               .str.strip())</code></pre>
     </div>
 

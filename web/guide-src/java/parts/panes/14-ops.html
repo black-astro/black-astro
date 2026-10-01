@@ -361,7 +361,7 @@ kubectl -n shop logs order-api-7d9f8-x2k4p --since=1m &gt; td.txt</code></pre>
         <tr><td><b>RUNNABLE</b></td><td>CPU 를 쓰거나 <b>소켓 · 파일 I/O 대기</b></td><td>맨 위 프레임이 read 면 외부가 느림</td></tr>
         <tr><td><b>BLOCKED</b></td><td><code>synchronized</code> 입구 대기</td><td><b>락 경합</b> — 쥔 쪽을 찾기</td></tr>
         <tr><td><b>WAITING</b></td><td><code>park</code> · <code>wait()</code> 무기한</td><td>풀 대기면 <b>자원 고갈</b></td></tr>
-        <tr><td>TIMED_WAITING</td><td><code>sleep</code> · 시간 제한 대기</td><td>대개 유휴 스레드 — 정상</td></tr>
+        <tr><td>TIMED_WAITING</td><td><code>sleep</code> · 시간 제한 대기</td><td>대개 유휴 스레드 — 정상. 단 맨 위가 <code>HikariPool.getConnection</code> 이면 풀 고갈</td></tr>
         <tr><td>NEW · TERMINATED</td><td>덤프에 거의 안 나옴</td><td>—</td></tr>
       </table></div>
       <pre class="code" data-lang="bash"><code># 상태별 개수 — 첫 10초 요약
@@ -492,8 +492,9 @@ Java stack information for the threads listed above:
     - waiting to lock &lt;0x00000006c1a2b3c8&gt; (a java.lang.Object)
 → 쥔 쪽(locked &lt;0x...3c8&gt;)이 synchronized 안에서 DB · HTTP 호출 중
 
-③ 풀 고갈 — WAITING(parking), 맨 위가 Hikari 의 대기열
-"http-nio-8080-exec-88" ... WAITING (parking)
+③ 풀 고갈 — TIMED_WAITING(parking), 맨 위가 Hikari 의 대기열
+   (connection-timeout 만큼만 기다리는 poll 이라 WAITING 이 아니라 TIMED_WAITING 입니다)
+"http-nio-8080-exec-88" ... TIMED_WAITING (parking)
     at jdk.internal.misc.Unsafe.park(Native Method)
     - parking to wait for &lt;0x...&gt; (a java.util.concurrent.SynchronousQueue$TransferStack)
     at com.zaxxer.hikari.util.ConcurrentBag.borrow(ConcurrentBag.java:...)
@@ -508,7 +509,7 @@ Java stack information for the threads listed above:
   </div>
 
   <div class="ez mid"><b>정리 —</b> 덤프는 <b>5초 간격 세 장</b>, 읽을 때는 <b>상태별 개수 → 맨 위 프레임 집계 → 락 주소 추적</b> 순서입니다.
-    BLOCKED 가 몰리면 락 경합, Hikari 에서 WAITING 이 몰리면 풀 고갈,
+    BLOCKED 가 몰리면 락 경합, Hikari 에서 TIMED_WAITING 이 몰리면 풀 고갈,
     맨 위가 socket read 인 RUNNABLE 이 몰리면 <b>외부가 느린 것</b>입니다.</div>
 </section>
 
@@ -1678,8 +1679,11 @@ RetryConfigCustomizer paymentRetry() {
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">무엇을 재시도해도 되나 — 멱등성</h4>
-      <pre class="code" data-lang="java"><code>@CircuitBreaker(name = "payment", fallbackMethod = "pending")
-@Retry(name = "payment")          // 기본 순서: Retry 가 바깥, CircuitBreaker 가 안쪽
+      <pre class="code" data-lang="java"><code>// 기본 순서: Retry 가 바깥, CircuitBreaker 가 안쪽 — 시도마다 브레이커를 거치고,
+// 열려 있으면 CallNotPermittedException(재시도 제외)으로 바로 끝납니다.
+// 폴백은 바깥(Retry)에 둡니다 — 안쪽 브레이커에 두면 첫 실패를 폴백이 삼켜 재시도가 아예 안 일어납니다
+@CircuitBreaker(name = "payment")
+@Retry(name = "payment", fallbackMethod = "pending")
 public PaymentResult approve(PaymentRequest req, String idemKey) {
     return paymentClient.post().uri("/approve")
             .header("Idempotency-Key", idemKey)   // 같은 키 = 같은 결과
@@ -1706,7 +1710,7 @@ private PaymentResult pending(PaymentRequest req, String idemKey, Throwable t) {
   </div>
 
   <div class="ez mid"><b>정리 —</b> 타임아웃은 <b>상대 p99.9 에서 출발</b>해 정하고, <b>상위 예산 ≥ 하위 합 × 시도 횟수</b>를 계산으로 확인합니다.
-    재시도는 <b>한 계층 · 1회 · 지터 · 멱등 요청만</b>, 그리고 서킷 브레이커 안쪽에서.
+    재시도는 <b>한 계층 · 1회 · 지터 · 멱등 요청만</b>, 그리고 서킷 브레이커가 열리면 재시도하지 않게.
     "기본값 그대로"는 대개 <b>무한 대기</b>라는 뜻입니다.</div>
 </section>
 

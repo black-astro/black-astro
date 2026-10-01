@@ -129,7 +129,7 @@ public class MyBench {
       <rect class="bx bx-hi" x="16" y="192" width="648" height="60"/>
       <text x="32" y="212" class="val">여기서 따라 나오는 실무 규칙</text>
       <text x="32" y="230" class="ann">벤치마크는 예열 구간을 빼고 재세요 — 첫 회 수치는 아무 의미가 없습니다</text>
-      <text x="32" y="246" class="ann">같은 자리에 늘 같은 타입이 오는 코드가 유리합니다 — 인터페이스 구현이 두세 개면 인라인이 됩니다</text>
+      <text x="32" y="246" class="ann">같은 자리에 늘 같은 타입이 오는 코드가 유리합니다 — 구현 1~2개는 인라인, 3개부터(메가모픽)는 안 됨</text>
 
       <text x="16" y="270" class="lbl">시작 속도가 중요한 워크로드라면 AOT 나 네이티브 이미지를 검토하세요 — 예열이 필요 없습니다</text>
       <text x="16" y="286" class="lbl">확인은 -XX:+PrintCompilation 이나 JFR 로 — 무엇이 컴파일되고 되돌아갔는지 볼 수 있습니다</text>
@@ -199,7 +199,7 @@ ServiceLoader.load(PaymentProvider.class)
              .forEach(p -&gt; registry.put(p.name(), p));
 // ★ jar 만 추가하면 기능이 늘어나는 구조 (JDBC 드라이버가 이 방식)</code></pre>
       <div class="note tip" style="margin-bottom:0">
-        <b>스프링 부트의 fat jar</b> 는 자체 <code>LaunchedURLClassLoader</code> 로
+        <b>스프링 부트의 fat jar</b> 는 자체 <code>LaunchedClassLoader</code>(Boot 3.1 이하는 <code>LaunchedURLClassLoader</code>) 로
         <code>BOOT-INF/lib</code> 안의 jar 를 로딩합니다.
         그래서 <b>jar 안의 jar</b> 를 그냥 클래스패스에 넣으면 동작하지 않습니다.
       </div>
@@ -887,7 +887,7 @@ ByteBuffer direct = ByteBuffer.allocateDirect(1024);
 //   → 힙에 여유가 있으면 GC 가 안 돌고 → 네이티브 메모리만 계속 증가
 //   → OutOfMemoryError: Direct buffer memory
 // 해결: 풀링(Netty 가 하는 일)하거나 MaxDirectMemorySize 를 명시</code></pre>
-      <pre class="code" data-lang="java"><code>// Java 21+ — Foreign Function &amp; Memory API (Unsafe 의 공식 후계)
+      <pre class="code" data-lang="java"><code>// Java 22+ — Foreign Function &amp; Memory API (Unsafe 의 공식 후계 · 21 에서는 프리뷰)
 try (Arena arena = Arena.ofConfined()) {          // ★ 명시적 수명 관리
     MemorySegment seg = arena.allocate(1024);
     seg.set(ValueLayout.JAVA_INT, 0, 42);
@@ -1006,7 +1006,7 @@ try {
       <pre class="code" data-lang="java"><code>// 리플렉션 — 매 호출마다 접근 검사·박싱
 Method m = User.class.getMethod("getName");
 m.setAccessible(true);
-Object name = m.invoke(user);              // 느림
+Object viaReflection = m.invoke(user);     // 느림
 
 // MethodHandle — JIT 이 인라이닝할 수 있습니다
 MethodHandles.Lookup lookup = MethodHandles.lookup();
@@ -1025,7 +1025,8 @@ Function&lt;User, String&gt; getter = (Function&lt;User, String&gt;) LambdaMetaf
         mh, MethodType.methodType(String.class, User.class))
     .getTarget().invokeExact();
 getter.apply(user);        // 직접 호출과 거의 같은 속도
-// ★ Jackson·MapStruct 같은 라이브러리가 내부에서 쓰는 기법입니다</code></pre>
+// ★ Jackson 의 Blackbird 모듈 같은 라이브러리가 내부에서 쓰는 기법입니다
+//   (MapStruct 는 이것조차 없이 컴파일 때 평범한 코드를 생성합니다 — 아래)</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>람다도 이 위에 서 있습니다.</b>
         자바 람다는 익명 클래스가 아니라
@@ -1221,7 +1222,7 @@ trivy image myapp:latest
 grype myapp:latest</code></pre>
       <pre class="code" data-lang="kotlin"><code>// 버전을 한 곳에서 고정 — BOM
 dependencies {
-    implementation(platform("org.springframework.boot:spring-boot-dependencies:3.4.0"))
+    implementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
     implementation("org.springframework.boot:spring-boot-starter-webmvc")  // 버전 생략
 }
 
@@ -1497,7 +1498,9 @@ RestClient restClient(RestClient.Builder builder) {
         new HttpComponentsClientHttpRequestFactory(
             HttpClients.custom()
                 .setConnectionManager(PoolingHttpClientConnectionManagerBuilder
-                    .create().setMaxConnTotal(100).build())
+                    .create().setMaxConnTotal(100)
+                    .setMaxConnPerRoute(50)   // ★ 기본은 호스트당 5개 — 안 올리면 한 API 에 5개만 동시에
+                    .build())
                 .build())).build();
 }
 
@@ -1505,6 +1508,8 @@ RestClient restClient(RestClient.Builder builder) {
 if (log.isDebugEnabled()) log.debug("복잡한 계산: {}", expensive());
 // 또는 람다로 (Log4j2)
 log.debug("결과: {}", () -&gt; expensive());
+// SLF4J(@Slf4j) 라면 2.x 의 fluent API 로
+log.atDebug().addArgument(() -&gt; expensive()).log("결과: {}");
 
 // ③ 응답에서 필요 없는 필드 제거
 // 100KB → 10KB 면 직렬화·전송·파싱이 모두 10배 빨라집니다</code></pre>
@@ -1778,7 +1783,7 @@ jlink --add-modules "$DEPS" \
       <pre class="code" data-lang="text"><code>Dockerfile 2단계 빌드에 그대로 붙습니다
 
   FROM eclipse-temurin:25-jdk AS build
-  RUN jlink --add-modules java.base,java.logging,java.sql,jdk.crypto.ec \
+  RUN jlink --add-modules java.base,java.logging,java.sql \
             --strip-debug --no-header-files --no-man-pages --output /runtime
 
   FROM debian:stable-slim
@@ -1786,7 +1791,8 @@ jlink --add-modules "$DEPS" \
   COPY app.jar /app.jar
   ENTRYPOINT ["/opt/java/bin/java","-jar","/app.jar"]
 
-⚠️ jdk.crypto.ec 를 빼면 TLS 핸드셰이크가 조용히 실패합니다.
+⚠️ JDK 21 이하라면 jdk.crypto.ec 를 빼면 TLS 핸드셰이크가 조용히 실패합니다.
+   (JDK 22 부터 EC 구현이 java.base 로 옮겨져 25 에서는 넣지 않아도 됩니다)
    jdk.unsupported 를 빼면 Unsafe 를 쓰는 라이브러리가 죽습니다.
    ★ 줄인 뒤에는 반드시 통합 테스트를 다시 돌리세요.</code></pre>
       <div class="note tip" style="margin-bottom:0">

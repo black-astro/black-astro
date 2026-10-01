@@ -43,7 +43,7 @@
         </table>
       </div>
       <pre class="code" data-lang="bash"><code># pnpm — 요즘 신규 프로젝트의 기본
-corepack enable                        # Node 내장 (별도 설치 불필요)
+corepack enable                        # Node 24 까지 내장 (Node 25+ 는 npm i -g corepack)
 pnpm install
 pnpm add express
 pnpm add -D typescript
@@ -71,7 +71,7 @@ pnpm install --frozen-lockfile         # pnpm 의 ci 에 해당
 npm outdated                           # 오래된 패키지
 npm audit                              # ★ 취약점 검사 (CI 에 포함)
 npm ls some-pkg                        # 왜 설치됐는지 추적
-npm why some-pkg                       # (pnpm) 의존 경로</code></pre>
+pnpm why some-pkg                      # (pnpm) 의존 경로</code></pre>
       <h4 class="mini">의존성을 늘리기 전에</h4>
       <ul class="tx">
         <li><b>내장 기능으로 되는가?</b> — UUID·날짜 포맷·깊은 복사·fetch 는 이제 전부 내장(🟩 Node n14)</li>
@@ -227,7 +227,7 @@ packages:
 }</code></pre>
       <pre class="code" data-lang="bash"><code>turbo build                    # 바뀐 것만 빌드 (캐시 활용)
 turbo build --filter=api       # 특정 앱만
-turbo build --filter=...[HEAD^]  # 변경된 것과 그 의존만 ★ CI 에서 유용
+turbo build --filter=...[HEAD^]  # 변경된 것과 그것에 의존하는 패키지만 ★ CI 에서 유용
 
 # 효과: 안 바뀐 패키지는 캐시에서 즉시 복원 → CI 시간이 크게 줄어듭니다</code></pre>
       <pre class="code" data-lang="json"><code>// apps/api/package.json — 내부 패키지 참조
@@ -320,11 +320,11 @@ export default defineConfig({
   },
   build: {
     sourcemap: true,
-    rollupOptions: {
+    rolldownOptions: {                  // Vite 8 — rollupOptions 는 이 이름으로 바뀜
       output: {
-        manualChunks: {                 // ★ 자주 안 바뀌는 것을 분리 → 캐시 효율
-          vendor: ["react", "react-dom"],
-        },
+        codeSplitting: {                // ★ 자주 안 바뀌는 것을 분리 → 캐시 효율
+          groups: [{ name: "vendor", test: /node_modules[\\/]react(-dom)?[\\/]/ }],
+        },                              //   (manualChunks 객체 형식은 Vite 8 에서 미지원)
       },
     },
   },
@@ -644,8 +644,8 @@ export default defineConfig({
       reporter: ["text", "lcov"],
       exclude: ["**/*.config.*", "**/dist/**"],
     },
-    // 통합 테스트는 순차로 (DB 충돌 방지)
-    poolOptions: { threads: { singleThread: false } },
+    // 통합 테스트는 파일 단위로 순차 실행 (DB 충돌 방지)
+    fileParallelism: false,
   },
 });</code></pre>
       <pre class="code" data-lang="typescript"><code>import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -1048,7 +1048,7 @@ export const logger = pino({
 const reqLog = logger.child({ requestId, userId });
 reqLog.info({ orderId }, "주문 생성 완료");</code></pre>
       <pre class="code" data-lang="text"><code>운영 출력 (JSON 한 줄 — 검색·집계가 됩니다)
-{"level":30,"time":1754283121412,"service":"order-api",
+{"level":30,"time":1754283121412,"service":"order-api","env":"production",
  "requestId":"a1b2","userId":7,"orderId":"O-1","msg":"주문 생성 완료"}
 
 로그 레벨 기준
@@ -1226,10 +1226,15 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production            # ★ 승인 게이트를 걸 수 있습니다
-    permissions: { id-token: write, contents: read }
+    permissions: { id-token: write, contents: read, packages: write }   # ghcr 푸시 권한
 
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/login-action@v3   # ★ 푸시 전에 레지스트리 로그인
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/build-push-action@v6
         with:

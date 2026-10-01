@@ -1198,9 +1198,12 @@ ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm ci --omit=dev &amp;&amp; npm cache clean --force
 COPY --from=build /app/dist ./dist
-USER node                              # ★ root 로 실행하지 마세요
+# ★ root 로 실행하지 마세요
+USER node
 EXPOSE 3000
-CMD ["node", "dist/server.js"]         # ★ npm start 로 하면 SIGTERM 이 안 옵니다</code></pre>
+# ★ npm start 로 하면 SIGTERM 이 안 옵니다
+#   (Dockerfile 은 줄 끝 # 주석을 지원하지 않습니다 — 주석은 항상 따로 한 줄로)
+CMD ["node", "dist/server.js"]</code></pre>
       <pre class="code" data-lang="typescript"><code>// /health — 진짜 상태를 확인해야 의미가 있습니다
 app.get("/health", async (req, res) =&gt; {
   try {
@@ -1271,7 +1274,9 @@ app.get('/events', requireAuth, (req, res) =&gt; {
   });
   res.flushHeaders();
 
-  const id = crypto.randomUUID();
+  // ★ push() 가 사용자 ID 로 찾으므로 키도 사용자 ID 로
+  //   (한 사람이 탭을 여러 개 연다면 Map&lt;string, Set&lt;Response&gt;&gt; 로)
+  const id = String(req.user!.id);
   clients.set(id, res);
 
   // 15초마다 주석 한 줄 — 프록시가 유휴 연결을 끊는 것을 막는다
@@ -1430,7 +1435,8 @@ wss.on('connection', (ws, req, tenant: string) =&gt; {
 });
 
 // 외부 요청 → 해당 테넌트의 에이전트로
-app.all('/t/:tenant/*', async (req, res) =&gt; {
+// ★ Express 5 는 와일드카드에 이름이 필요합니다 (그냥 * 는 시작할 때 에러)
+app.all('/t/:tenant/*rest', async (req, res) =&gt; {
   const ws = agents.get(req.params.tenant);
   if (!ws || ws.readyState !== ws.OPEN)
     return res.status(503).json({ error: 'agent offline' });
@@ -1445,7 +1451,7 @@ app.all('/t/:tenant/*', async (req, res) =&gt; {
 
   ws.send(JSON.stringify({
     id, method: req.method,
-    path: '/' + (req.params[0] ?? ''),
+    path: '/' + req.params.rest.join('/'),            // *rest 는 경로 조각 배열
     headers: stripHopByHop(req.headers),
     body: body.toString('base64'),
   }));
@@ -1586,7 +1592,8 @@ connect();</code></pre>
   <div class="grid2 rv">
     <div class="card">
       <h4 class="mini" style="margin-top:0">Range 응답 — 동영상 스트리밍의 최소 조건</h4>
-      <pre class="code" data-lang="ts"><code>import { stat, createReadStream } from 'node:fs';
+      <pre class="code" data-lang="ts"><code>import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';           // ★ await 하려면 promises 쪽
 
 app.get('/media/:id', async (req, res) =&gt; {
   const file = await resolveSafe(req.params.id);   // 경로 조작 방어
@@ -1603,8 +1610,9 @@ app.get('/media/:id', async (req, res) =&gt; {
   const m = /^bytes=(\d*)-(\d*)$/.exec(range);
   if (!m) return res.status(416).set('Content-Range', `bytes */${size}`).end();
 
-  const start = m[1] ? Number(m[1]) : 0;
-  const end   = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  // "bytes=-500" 은 "끝에서 500바이트" 라는 뜻입니다 (접미 범위)
+  const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
+  const end   = m[1] &amp;&amp; m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
   if (start &gt;= size || start &gt; end)
     return res.status(416).set('Content-Range', `bytes */${size}`).end();
 
@@ -1776,6 +1784,8 @@ app.post('/orders', requireAuth, async (req, res) =&gt; {
 
   // 같은 키로 이미 처리했다면 그때 결과를 그대로 돌려준다
   const hit = await db.idempotency.findUnique({ where: { key } });
+  // (status 0 = 아직 처리 중 — res.status(0) 은 RangeError 이므로 따로 답한다)
+  if (hit?.status === 0) return res.status(409).json({ error: '처리 중입니다' });
   if (hit) return res.status(hit.status).json(hit.body);
 
   // 동시에 두 번 들어온 경우 — DB 유니크 제약이 한쪽을 막아 준다

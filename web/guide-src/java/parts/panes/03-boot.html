@@ -267,9 +267,9 @@ public class AppConfig {
     // import tools.jackson.databind.json.JsonMapper;  (groupId 도 tools.jackson)
     @Bean
     public JsonMapper jsonMapper() {
+        // java.time 지원은 Jackson 3 에 내장 — JavaTimeModule 등록이 필요 없습니다
         return JsonMapper.builder()
-                .addModule(new JavaTimeModule())
-                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)   // 3.x 에서 옮겨진 자리 (기본값도 false)
                 .build();
     }
 }</code></pre>
@@ -642,7 +642,8 @@ spring:
     active: local          # 기본 프로파일
 
 ---
-# application-local.yml
+# 같은 파일의 두 번째 문서 — local 프로파일일 때만 적용
+# (application-local.yml 로 따로 빼면 on-profile 은 빼세요 — 파일명이 이미 조건이고, 넣으면 기동 오류)
 spring:
   config:
     activate:
@@ -1322,8 +1323,8 @@ public class OrderService {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -&gt; new OrderNotFoundException(id));
 
+        order.pay();                           // ← 상태 변경 규칙은 '도메인'에 (먼저 검증)
         stockService.decrease(order.getProductId(), order.getQuantity());
-        order.pay();                           // ← 상태 변경 규칙은 '도메인'에
 
         // 트랜잭션이 커밋된 뒤에 알림 (실패해도 주문은 유지)
         notifier.sendAfterCommit(order.getEmail(), "결제 완료");
@@ -1699,7 +1700,8 @@ public UploadRes upload(@RequestPart("file") MultipartFile file,
     if (name.contains("..")) throw new BadRequestException("잘못된 경로");
 
     String ext = StringUtils.getFilenameExtension(name);
-    if (!List.of("xlsx", "csv", "png", "jpg").contains(ext)) {
+    if (ext == null                    // 확장자 없음 — List.of().contains(null) 은 NPE
+            || !List.of("xlsx", "csv", "png", "jpg").contains(ext.toLowerCase())) {
         throw new BadRequestException("허용되지 않는 형식입니다");
     }
 
@@ -1774,6 +1776,7 @@ public void export(HttpServletResponse res) throws IOException {
 class OrderServiceTest {
 
     @Mock OrderRepository repository;
+    @Mock StockService stockService;
     @Mock Notifier notifier;
     @InjectMocks OrderService service;
 
@@ -1977,16 +1980,18 @@ FROM eclipse-temurin:25-jre AS base
 WORKDIR /app
 
 FROM base AS builder
-COPY build/libs/*.jar app.jar
-RUN java -Djarmode=tools -jar app.jar extract --layers --destination extracted
+# *.jar 로 쓰면 Gradle 의 -plain.jar 까지 잡혀 COPY 가 실패합니다 — 정확한 이름으로
+COPY build/libs/app-1.0.0.jar application.jar
+RUN java -Djarmode=tools -jar application.jar extract --layers --destination extracted
 
 FROM base
 COPY --from=builder /app/extracted/dependencies/ ./
 COPY --from=builder /app/extracted/spring-boot-loader/ ./
+COPY --from=builder /app/extracted/snapshot-dependencies/ ./
 COPY --from=builder /app/extracted/application/ ./
 
 EXPOSE 8080
-# extract --layers 로 풀면 application/ 안의 application.jar 을 그냥 -jar 로 실행합니다
+# extract 는 원본 jar 이름(application.jar)을 그대로 application/ 에 남깁니다 — 그것을 -jar 로 실행
 # (JarLauncher 를 직접 부르려면 -cp 가 필요해서 그대로 쓰면 ClassNotFoundException 이 납니다)
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "application.jar"]</code></pre>
     </div>

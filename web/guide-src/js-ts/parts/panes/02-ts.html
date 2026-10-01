@@ -478,8 +478,11 @@ function area(s: Shape): number {
       <pre class="code" data-lang="typescript"><code>function f(user: { name?: string }) {
   if (user.name) {
     // 여기서는 string
-    doSomething();          // ★ 이 함수가 name 을 지울 수도 있다고 TS 는 봅니다
-    user.name.trim();       // ❌ 에러? — 콜백 안이면 좁히기가 풀립니다
+    doSomething();          // 이 함수가 name 을 지워도 TS 는 모른 척합니다 (낙관적)
+    user.name.trim();       // ✅ 통과 — 바로 쓰는 건 좁히기가 유지됩니다
+    setTimeout(() =&gt; user.name.trim(), 100);
+    //                ❌ 'user.name' is possibly 'undefined'
+    //                ★ 콜백 안에서는 좁히기가 풀립니다 (나중에 실행되니까)
   }
 }
 
@@ -1061,7 +1064,9 @@ declare function call&lt;T, R extends boolean = false&gt;(
   url: string, raw?: R): Promise&lt;ApiResult&lt;T, R&gt;&gt;;
 
 const a = await call&lt;User&gt;("/u");          // { data: User; ok: boolean }
-const b = await call&lt;User&gt;("/u", true);    // string ★
+const b = await call&lt;User, true&gt;("/u", true);  // string ★
+// ⚠ call&lt;User&gt;("/u", true) 는 에러입니다 — 타입 인자를 하나라도 적으면
+//   나머지(R)는 추론되지 않고 기본값 false 로 고정되기 때문입니다
 
 // ② 옵션에 따라 필수 필드가 달라지는 함수
 type Options =
@@ -1437,7 +1442,9 @@ declare global {
   }
 }
 process.env.DATABASE_URL;   // ✅ string 으로 자동완성
-process.env.TYPO;           // ❌ 오타를 잡아 줍니다
+process.env.TYPO;           // ⚠ 에러 아님 — string | undefined
+//   @types/node 에 [key: string] 인덱스 시그니처가 있어 오타는 못 잡습니다.
+//   "선언한 키는 string 으로 확정"까지가 이 방법의 효과입니다
 
 // ② Express Request 확장 (인증 미들웨어가 붙이는 값)
 declare global {
@@ -1713,9 +1720,11 @@ interface UserEntity {
 }
 
 // API 응답 (외부) — ★ 엔티티를 그대로 내보내지 마세요
-type UserDto = Omit&lt;UserEntity, "passwordHash" | "deletedAt"&gt; &amp; {
+type UserDto = Omit&lt;UserEntity, "passwordHash" | "deletedAt" | "createdAt"&gt; &amp; {
   createdAt: string;                  // 날짜는 ISO 문자열로
 };
+// ★ createdAt 도 Omit 에 넣어야 합니다 — 안 빼면 Date &amp; string 이 되어
+//   아래 toDto 의 toISOString() 결과를 넣을 수 없습니다
 
 // 요청 (입력)
 type CreateUserDto = Pick&lt;UserEntity, "email"&gt; &amp; { password: string };
@@ -1839,7 +1848,7 @@ type Reverse&lt;S extends string&gt; =
   S extends `${infer H}${infer R}` ? `${Reverse&lt;R&gt;}${H}` : "";
 type A = Reverse&lt;"hello"&gt;;      // "olleh"
 
-// 유니온을 튜플로
+// 문자열을 구분자로 쪼개 튜플로
 type Split&lt;S extends string, D extends string&gt; =
   S extends `${infer H}${D}${infer R}` ? [H, ...Split&lt;R, D&gt;] : [S];
 type B = Split&lt;"a,b,c", ","&gt;;   // ["a", "b", "c"]
@@ -1865,7 +1874,7 @@ type C = Paths&lt;{ user: { name: string; addr: { city: string } } }&gt;;
     <div class="card">
       <h4 class="mini" style="margin-top:0">한계와 주의</h4>
       <pre class="code" data-lang="text"><code>제약
-  · 재귀 깊이 제한 (기본 약 50, 꼬리 재귀 최적화 시 1000)
+  · 재귀 깊이 제한 (기본 약 100, 꼬리 재귀 최적화 시 1000)
   · "Type instantiation is excessively deep" 에러를 만나게 됨
   · 타입 계산이 느려지면 에디터 자동완성이 눈에 띄게 느려짐
   · 유니온 조합이 커지면 폭발 (10 × 10 × 10 = 1000 가지)

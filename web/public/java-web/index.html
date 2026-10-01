@@ -2831,6 +2831,29 @@ nav.side{view-transition-name:lx-side}
 .tabbar .lx-reset.armed{color:var(--rose);border:1px solid var(--rose)}
 .tabbar .lx-toolbtn, .tabbar .lx-theme{padding:7px 12px;font-size:13px;font-weight:500;background:transparent}
 .tabbar .lx-toolbtn .aa{font-weight:700}
+
+/* ---------- 7.13 언어 비교 화살표 ----------
+   두 칸(.vs · .grid2) 사이 가운데 열에 강조색 원 + 화살표, 아래에 "코틀린으로" 같은 짧은 말.
+   좁은 화면에서 두 칸이 위아래로 쌓이면 화살표도 아래를 가리킨다. */
+.lx-cmp{grid-template-columns:minmax(0,1fr) 52px minmax(0,1fr)!important;column-gap:10px!important;align-items:stretch}
+.lx-arrow{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:0}
+.lx-arrow-c{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex:0 0 auto;
+  background:var(--blue);color:#fff;box-shadow:0 0 0 5px rgba(var(--ac-rgb),.16), 0 6px 16px rgba(var(--ac-rgb),.28)}
+.lx-arrow-c svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.lx-arrow-t{font-size:11px;font-weight:650;color:var(--blue-l);white-space:nowrap;letter-spacing:-.01em}
+@media (max-width:860px){
+  .lx-cmp{grid-template-columns:1fr!important;row-gap:4px!important}
+  .lx-arrow{flex-direction:row;padding:2px 0}
+  .lx-arrow-c{width:34px;height:34px;transform:rotate(90deg)}
+}
+@media (prefers-reduced-motion: no-preference){
+  .lx-cmp.in .lx-arrow-c, .rv.in .lx-arrow-c{animation:lxNudge .7s .25s var(--ease) both}
+  @keyframes lxNudge{0%{opacity:0;translate:-6px 0}100%{opacity:1;translate:0 0}}
+}
+/* 표 머리의 언어 대 언어 열 */
+.lx-tharrow{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;margin-right:7px;vertical-align:-5px;
+  background:var(--blue);color:#fff;box-shadow:0 0 0 3px rgba(var(--ac-rgb),.16)}
+.lx-tharrow svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
 /* ================================================================
    8. 테마 — 강조색 하나 · 다크 / 라이트 두 벌 (2026-10)
    ----------------------------------------------------------------
@@ -4721,6 +4744,7 @@ OrderRes res = OrderRes.from(order);   // 클래스와 똑같이 import 해서 �
       <h4 class="mini" style="margin-top:0">② 컨트롤러 안에 중첩 — 실무에서 제일 흔한 모양</h4>
       <pre class="code" data-lang="java"><code>@RestController
 @RequestMapping("/api/users")
+@RequiredArgsConstructor               // final 필드 생성자 주입 (Lombok)
 public class UserController {
 
     private final UserService service;
@@ -4923,11 +4947,13 @@ public record UserSummary(Long id, String name, long orderCount) { }
 """)
 List&lt;UserSummary&gt; findSummaries();
 
-// ② 파생 쿼리 + record 프로젝션
-List&lt;UserSummary&gt; findByActiveTrue();
+// ② 파생 쿼리 + record 프로젝션 — 컴포넌트 이름이 엔티티 필드와 같아야 합니다
+//    (orderCount 같은 집계값은 엔티티에 없으니 ①처럼 JPQL 로)
+public record UserBrief(Long id, String name) { }
+List&lt;UserBrief&gt; findByActiveTrue();
 
 // ③ JdbcClient (Boot 3.2+)
-var rows = jdbcClient.sql("select id, name, cnt from v_user")
+var rows = jdbcClient.sql("select id, name, cnt as order_count from v_user")   // 컬럼명 ↔ orderCount 매칭
         .query(UserSummary.class).list();</code></pre>
       <div class="note tip" style="margin-bottom:0">
         엔티티를 그대로 응답하면 <b>지연 로딩이 컨트롤러에서 터지거나
@@ -4987,13 +5013,13 @@ var rows = jdbcClient.sql("select id, name, cnt from v_user")
     <div class="card">
       <h4 class="mini" style="margin-top:0">제네릭 record · 통째 분해</h4>
       <pre class="code" data-lang="java"><code>// 제네릭도 그대로 됩니다
-public record Page&lt;T&gt;(List&lt;T&gt; content, int page, long total) {
+public record Page&lt;T&gt;(List&lt;T&gt; content, int page, int size, long total) {
     public boolean hasNext() {
-        return (long) (page + 1) * content.size() &lt; total;
+        return (long) (page + 1) * size &lt; total;   // content.size() 를 쓰면 마지막 페이지에서 틀립니다
     }
 }
 
-Page&lt;OrderRes&gt; p = new Page&lt;&gt;(list, 0, 137);
+Page&lt;OrderRes&gt; p = new Page&lt;&gt;(list, 0, 20, 137);
 
 // 패턴 매칭으로 통째 분해 (Java 21+)
 record Point(int x, int y) { }
@@ -5735,8 +5761,9 @@ orders.sort(Comparator
         .thenComparing(Order::amount, reverseOrder()) // 2순위 금액 내림차순
         .thenComparing(Order::id));                   // 동점 처리
 
-// null 이 섞일 때
-Comparator.nullsLast(Comparator.comparing(Order::memo));</code></pre>
+// memo 가 null 일 수 있을 때 — nullsLast 는 키 비교기 쪽에 둡니다
+Comparator.comparing(Order::memo, Comparator.nullsLast(Comparator.naturalOrder()));
+// ⚠️ Comparator.nullsLast(comparing(Order::memo)) 는 Order 자체가 null 일 때만 처리 — memo 가 null 이면 NPE</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <code>Predicate.not(String::isBlank)</code> 처럼
         <b>메서드 참조를 그대로 뒤집는</b> 정적 메서드도 있습니다
@@ -5875,8 +5902,8 @@ repo.findById(id).orElseThrow(() -&gt; new NotFoundException(id));
 // 로그도 같은 원리 — SLF4J 2.x 의 fluent API 를 쓰면
 // DEBUG 가 꺼져 있을 때 heavyToString 을 아예 부르지 않습니다
 log.atDebug().addArgument(() -&gt; heavyToString(result)).log("결과: {}");
-// ⚠️ log.debug("결과: {}", () -&gt; heavyToString(result)) 는 지연 평가가 아닙니다
-//    — 람다 객체의 toString() 이 그대로 찍힙니다
+// ⚠️ log.debug("결과: {}", () -&gt; heavyToString(result)) 는 컴파일 에러입니다
+//    — SLF4J 의 debug(String, Object) 에는 Supplier 오버로드가 없어 람다를 못 받습니다
 
 // 직접 만들 때도 "비싼 값"은 Supplier 로 받으세요
 public void check(boolean ok, Supplier&lt;String&gt; message) {
@@ -6167,14 +6194,14 @@ Optional&lt;User&gt; o2 = Optional.ofNullable(user);  // null 허용 ✅
 Optional&lt;User&gt; o3 = Optional.empty();           // 빈 것
 
 // 꺼내기 — 상황별로
-user.orElse(defaultUser);              // 없으면 기본값
-user.orElseGet(() -&gt; createUser());    // 없을 때만 생성 (비용이 크면 이걸로)
-user.orElseThrow();                    // 없으면 NoSuchElementException
-user.orElseThrow(() -&gt; new UserNotFoundException(id));   // ✅ 실무에서 가장 많이
+o2.orElse(defaultUser);                // 없으면 기본값
+o2.orElseGet(() -&gt; createUser());      // 없을 때만 생성 (비용이 크면 이걸로)
+o2.orElseThrow();                      // 없으면 NoSuchElementException
+o2.orElseThrow(() -&gt; new UserNotFoundException(id));   // ✅ 실무에서 가장 많이
 
 // 있을 때만 실행
-user.ifPresent(u -&gt; log.info("찾음: {}", u.getName()));
-user.ifPresentOrElse(
+o2.ifPresent(u -&gt; log.info("찾음: {}", u.getName()));
+o2.ifPresentOrElse(
         u -&gt; log.info("찾음"),
         () -&gt; log.warn("없음"));
 
@@ -7146,6 +7173,11 @@ jcmd &lt;pid&gt; GC.heap_dump /tmp/heap.hprof
     private final String currency;
     private final long amount;
 
+    public Money(String currency, long amount) {
+        this.currency = currency;
+        this.amount = amount;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -7424,10 +7456,10 @@ try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
     ids.forEach(id -&gt; pool.submit(() -&gt; callExternalApi(id)));
 }   // 1만 개를 던져도 됩니다
 
-// 주기 작업
-try (var sched = Executors.newScheduledThreadPool(1)) {
-    sched.scheduleAtFixedRate(this::cleanup, 0, 1, TimeUnit.HOURS);
-}</code></pre>
+// 주기 작업 — 앱이 사는 동안 유지해야 하므로 필드로 두고 종료 시 shutdown()
+//   (try-with-resources 로 감싸면 블록을 나가는 순간 close() → 주기 작업이 취소됩니다)
+private final ScheduledExecutorService sched = Executors.newScheduledThreadPool(1);
+sched.scheduleAtFixedRate(this::cleanup, 0, 1, TimeUnit.HOURS);   // @PreDestroy 에서 sched.shutdown()</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b><code>Future.get()</code> 을 타임아웃 없이 부르지 마세요.</b>
         상대가 응답을 안 주면 <b>영원히 기다립니다</b> —
@@ -7453,7 +7485,7 @@ var pool = new ThreadPoolExecutor(
     8, 16,                                   // core, max
     60L, TimeUnit.SECONDS,
     new ArrayBlockingQueue&lt;&gt;(1000),          // ★ 큐 상한
-    new ThreadFactoryBuilder()
+    new ThreadFactoryBuilder()               // Guava. JDK 21+ 는 Thread.ofPlatform().name("report-", 0).factory()
         .setNameFormat("report-%d").build(), // ★ 이름 — 덤프에서 결정적입니다
     new ThreadPoolExecutor.CallerRunsPolicy());  // 넘치면 호출자가 직접 실행
     //  = 자연스러운 배압(backpressure). AbortPolicy 는 예외를 던집니다.
@@ -7465,7 +7497,7 @@ if (!pool.awaitTermination(30, TimeUnit.SECONDS)) pool.shutdownNow();</code></pr
         <b>스레드에 이름을 붙이는 것만으로 디버깅 시간이 절반이 됩니다.</b>
         <code>pool-1-thread-7</code> 과 <code>report-7</code> 은
         스레드 덤프를 볼 때 <b>완전히 다른 정보량</b>을 줍니다.
-        <b><code>Executors.newFixedThreadPool</code></b> 은 이름을 못 주므로,
+        <b><code>Executors.newFixedThreadPool</code></b> 은 큐가 무한(<code>LinkedBlockingQueue</code>)이라 상한·거절 정책을 못 걸므로,
         오래 쓰는 풀은 <b><code>ThreadPoolExecutor</code> 로 직접</b> 만드는 편이 낫습니다.
       </div>
     </div>
@@ -7631,8 +7663,8 @@ try {
     pool.submit(task);
 } finally {
     pool.shutdown();                   // 새 작업 거부, 진행 중인 건 마침
-    pool.awaitTermination(30, TimeUnit.SECONDS);
-    pool.shutdownNow();                // 강제 종료
+    if (!pool.awaitTermination(30, TimeUnit.SECONDS))
+        pool.shutdownNow();            // 시간 안에 안 끝나면 강제 종료
 }
 
 // 여러 작업을 한 번에
@@ -7777,11 +7809,11 @@ List&lt;String&gt; results = Stream.of(f1, f2, f3).map(CompletableFuture::join).
 CompletableFuture.anyOf(f1, f2).join();
 
 // 7) 예외 처리
-userF.exceptionally(e -&gt; {                       // 실패하면 대체값
+userF.orTimeout(3, TimeUnit.SECONDS)             // 타임아웃 (Java 9+) — 대체값보다 먼저 걸어야
+     .exceptionally(e -&gt; {                       //   타임아웃도 여기서 대체값으로 바뀝니다
         log.error("조회 실패", e);
         return User.unknown();
      })
-     .orTimeout(3, TimeUnit.SECONDS)             // 타임아웃 (Java 9+)
      .whenComplete((result, err) -&gt; {            // 성공·실패 모두
         if (err != null) log.error("실패", err);
      });</code></pre>
@@ -7823,7 +7855,7 @@ f.join()   // CompletionException 로 감싸서 (unchecked)
       <h4 class="mini" style="margin-top:0">③ allOf 부분 실패 수집 · ④ 취소와 타임아웃의 배신</h4>
       <pre class="code" data-lang="java"><code>// ③ allOf 는 하나만 실패해도 통째로 실패합니다.
 //    "성공한 것만 모으고 실패는 따로" 가 실무 요구 — 이렇게 만듭니다
-List&lt;CompletableFuture&lt;Item&gt;&gt; fs = ids.stream()
+List&lt;CompletableFuture&lt;Result&gt;&gt; fs = ids.stream()
         .map(id -&gt; fetch(id).handle((v, e) -&gt;
                 e == null ? Result.ok(v) : Result.fail(id, e)))  // 실패를 값으로
         .toList();
@@ -8816,9 +8848,9 @@ public class AppConfig {
     // import tools.jackson.databind.json.JsonMapper;  (groupId 도 tools.jackson)
     @Bean
     public JsonMapper jsonMapper() {
+        // java.time 지원은 Jackson 3 에 내장 — JavaTimeModule 등록이 필요 없습니다
         return JsonMapper.builder()
-                .addModule(new JavaTimeModule())
-                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)   // 3.x 에서 옮겨진 자리 (기본값도 false)
                 .build();
     }
 }</code></pre>
@@ -9191,7 +9223,8 @@ spring:
     active: local          # 기본 프로파일
 
 ---
-# application-local.yml
+# 같은 파일의 두 번째 문서 — local 프로파일일 때만 적용
+# (application-local.yml 로 따로 빼면 on-profile 은 빼세요 — 파일명이 이미 조건이고, 넣으면 기동 오류)
 spring:
   config:
     activate:
@@ -9871,8 +9904,8 @@ public class OrderService {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -&gt; new OrderNotFoundException(id));
 
+        order.pay();                           // ← 상태 변경 규칙은 '도메인'에 (먼저 검증)
         stockService.decrease(order.getProductId(), order.getQuantity());
-        order.pay();                           // ← 상태 변경 규칙은 '도메인'에
 
         // 트랜잭션이 커밋된 뒤에 알림 (실패해도 주문은 유지)
         notifier.sendAfterCommit(order.getEmail(), "결제 완료");
@@ -10248,7 +10281,8 @@ public UploadRes upload(@RequestPart("file") MultipartFile file,
     if (name.contains("..")) throw new BadRequestException("잘못된 경로");
 
     String ext = StringUtils.getFilenameExtension(name);
-    if (!List.of("xlsx", "csv", "png", "jpg").contains(ext)) {
+    if (ext == null                    // 확장자 없음 — List.of().contains(null) 은 NPE
+            || !List.of("xlsx", "csv", "png", "jpg").contains(ext.toLowerCase())) {
         throw new BadRequestException("허용되지 않는 형식입니다");
     }
 
@@ -10323,6 +10357,7 @@ public void export(HttpServletResponse res) throws IOException {
 class OrderServiceTest {
 
     @Mock OrderRepository repository;
+    @Mock StockService stockService;
     @Mock Notifier notifier;
     @InjectMocks OrderService service;
 
@@ -10526,16 +10561,18 @@ FROM eclipse-temurin:25-jre AS base
 WORKDIR /app
 
 FROM base AS builder
-COPY build/libs/*.jar app.jar
-RUN java -Djarmode=tools -jar app.jar extract --layers --destination extracted
+# *.jar 로 쓰면 Gradle 의 -plain.jar 까지 잡혀 COPY 가 실패합니다 — 정확한 이름으로
+COPY build/libs/app-1.0.0.jar application.jar
+RUN java -Djarmode=tools -jar application.jar extract --layers --destination extracted
 
 FROM base
 COPY --from=builder /app/extracted/dependencies/ ./
 COPY --from=builder /app/extracted/spring-boot-loader/ ./
+COPY --from=builder /app/extracted/snapshot-dependencies/ ./
 COPY --from=builder /app/extracted/application/ ./
 
 EXPOSE 8080
-# extract --layers 로 풀면 application/ 안의 application.jar 을 그냥 -jar 로 실행합니다
+# extract 는 원본 jar 이름(application.jar)을 그대로 application/ 에 남깁니다 — 그것을 -jar 로 실행
 # (JarLauncher 를 직접 부르려면 -cp 가 필요해서 그대로 쓰면 ClassNotFoundException 이 납니다)
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "application.jar"]</code></pre>
     </div>
@@ -11038,9 +11075,8 @@ public Mono&lt;Dashboard&gt; slow(Long id) {
 public Mono&lt;Dashboard&gt; fast(Long id) {
     return Mono.zip(
             userClient.get(id),
-            orderClient.get(id),
-            couponClient.get(id)
-    ).map(t -&gt; new Dashboard(t.getT1(), t.getT2(), t.getT3()));
+            orderClient.get(id)
+    ).map(t -&gt; new Dashboard(t.getT1(), t.getT2()));
 }
 
 // 개수가 많으면 Tuple 대신 조합 함수
@@ -11738,7 +11774,8 @@ try {
     return service.find(id);     // Mono 를 만들 뿐, 에러는 나중에 흐름
 } catch (Exception e) { }        // 절대 안 걸림
 
-// ✅ 연산자로 처리
+// ✅ 연산자로 처리 — 아래는 '골라 쓰는' 목록입니다
+//    (전부 이으면 1) 이 모든 에러를 먼저 삼켜 2)~4) 는 영영 안 걸립니다)
 service.find(id)
     // 1) 대체값
     .onErrorReturn(Order.empty())
@@ -12026,7 +12063,7 @@ return orderService.find(id)               // boundedElastic 을 넘나들어도
     <div class="card">
       <h4 class="mini" style="margin-top:0">Context 의 두 가지 반전 — 모르면 하루를 버립니다</h4>
       <pre class="code" data-lang="java"><code>// 반전 ① Context 는 '아래에서 위로' 흐릅니다 (구독 시점에 전파)
-Mono.deferContextual(ctx -&gt; ctx.get("k"))   // 읽기는 위에서
+Mono.deferContextual(ctx -&gt; Mono.just(ctx.&lt;String&gt;get("k")))   // 읽기는 위에서
     .contextWrite(ctx -&gt; ctx.put("k", "v")) // 쓰기는 '아래'에 있어야 보임 ★
 // contextWrite 를 읽는 코드보다 '위'에 두면 못 읽습니다
 // (연산자 체인은 아래→위로 구독되기 때문)
@@ -12180,7 +12217,7 @@ EventLoopGroup worker = new MultiThreadIoEventLoopGroup(NioIoHandler.newFactory(
 
 // ★ 한 Channel 은 평생 같은 EventLoop 에 묶인다 (스레드 어피니티)
 //    → 그 채널의 핸들러 안에서는 동기화가 필요 없다
-//    → 대신 그 스레드를 막으면 '그 채널에 붙은 다른 수천 연결'도 같이 멈춘다</code></pre>
+//    → 대신 그 스레드를 막으면 '그 EventLoop 에 붙은 다른 수천 연결'도 같이 멈춘다</code></pre>
     </div>
 
     <div class="card">
@@ -12703,13 +12740,13 @@ ch.pipeline()
     .maxIdleTime(Duration.ofSeconds(20))            // 놀고 있는 커넥션 폐기 ★★
     .maxLifeTime(Duration.ofMinutes(5))             // 오래된 커넥션 강제 교체
     .evictInBackground(Duration.ofSeconds(30))      // 유휴 커넥션 청소 주기
-    .lifo()                                         // 최근 쓴 것부터 재사용 (기본)
+    .lifo()                                         // 최근 쓴 것부터 재사용 (기본은 fifo)
     .metrics(true)                                  // ★ 마이크로미터 연동
     .build();
 
 HttpClient httpClient = HttpClient.create(provider)
     .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 2000)
-    .responseTimeout(Duration.ofSeconds(5))         // 응답 전체 한계 ★
+    .responseTimeout(Duration.ofSeconds(5))         // 응답 읽기 사이 최대 공백 (요청 단위) ★
     .doOnConnected(c -&gt; c
         .addHandlerLast(new ReadTimeoutHandler(5))  // 5초간 수신 없음
         .addHandlerLast(new WriteTimeoutHandler(5)))
@@ -12737,7 +12774,7 @@ WebClient orderClient(WebClient.Builder b) {
     <div class="card">
       <h4 class="mini" style="margin-top:0">가장 흔한 사고 — keep-alive 타임아웃 불일치 ★★</h4>
       <pre class="code" data-lang="text"><code>우리 쪽 풀:   maxIdleTime = 무한 (기본값)
-상대 서버:    keepAliveTimeout = 5초  (nginx 기본)
+상대 서버:    keepAliveTimeout = 5초  (Node.js 기본 · nginx 는 75초)
 
 t=0    요청 → 커넥션 A 사용 → 풀에 반납
 t=5s   상대 서버가 A 를 조용히 닫음 (FIN)
@@ -12759,15 +12796,15 @@ t=6s   요청 → 풀에서 A 를 꺼내 전송
         <table class="cheat">
           <tr><th style="width:38%">타임아웃</th><th>어디를 재는가</th></tr>
           <tr><td>CONNECT_TIMEOUT_MILLIS</td><td>TCP 핸드셰이크까지</td></tr>
-          <tr><td><b>responseTimeout</b></td><td>요청 전송 → <b>응답 헤더 도착</b>까지 ★</td></tr>
-          <tr><td>ReadTimeoutHandler</td><td><b>패킷 사이</b> 무응답 시간 (스트리밍에 필요)</td></tr>
+          <tr><td><b>responseTimeout</b></td><td>요청을 보낸 뒤 <b>응답 읽기 사이</b>의 최대 공백 — <b>요청 단위</b>로 걸리고 풀어짐 ★</td></tr>
+          <tr><td>ReadTimeoutHandler</td><td><b>패킷 사이</b> 무응답 시간 — <b>커넥션 단위</b> (풀에서 놀 때도 남아 있음)</td></tr>
           <tr><td>Mono <code>.timeout()</code></td><td>리액티브 체인 전체 (최후 방어선)</td></tr>
         </table>
       </div>
       <div class="note tip" style="margin-bottom:0">
-        SSE·NDJSON 같은 <b>장시간 스트리밍</b>에 <code>responseTimeout</code> 을 걸면
-        <b>정상 연결이 끊깁니다.</b> 스트리밍 클라이언트는
-        <code>responseTimeout</code> 대신 <b><code>ReadTimeoutHandler</code> 만</b> 쓰세요.
+        SSE·NDJSON 같은 <b>장시간 스트리밍</b>은 이벤트 간격이 <code>responseTimeout</code> 보다 길면
+        <b>정상 연결이 끊깁니다.</b> 스트리밍 요청만
+        <code>httpRequest(r -&gt; r.responseTimeout(...))</code> 로 <b>넉넉하게 따로</b> 주세요 (전체 체인 한계는 <code>.timeout()</code>).
       </div>
     </div>
   </div>
@@ -12826,13 +12863,15 @@ reactor.netty.http.client.connect.time</code></pre>
           <tr><td>커넥션이 계속 늘어남</td><td>응답 본문을 <b>소비하지 않아</b> 반납이 안 됨 ★</td></tr>
         </table>
       </div>
-      <pre class="code" data-lang="java"><code>// ⚠️ 커넥션 누수 1위 — 본문을 안 읽고 버리기
+      <pre class="code" data-lang="java"><code>// ⚠️ 커넥션 누수 1위 — 본문을 안 읽고 버리기 (옛 exchange() 시절의 대표 사고)
+//    exchangeToMono 는 함수가 끝나면 남은 본문을 자동 해제하지만,
+//    ClientResponse 를 함수 밖으로 들고 나가 나중에 읽으면 같은 사고가 납니다
 client.get().uri("/ping").exchangeToMono(res -&gt; {
     if (res.statusCode().is2xxSuccessful()) return Mono.just("ok");
-    return Mono.just("fail");        // 💥 본문 미소비 → 커넥션 반납 안 됨
+    return Mono.just("fail");        // 본문은 여기서 끝나면 자동 해제
 });
 
-// ✅ 반드시 본문을 비우고 끝낸다
+// ✅ 본문이 필요 없으면 명시적으로 비우는 습관이 가장 안전
 client.get().uri("/ping").exchangeToMono(res -&gt;
     res.releaseBody().thenReturn(res.statusCode().value()));
 
@@ -13276,9 +13315,8 @@ r.enableStompBrokerRelay("/topic", "/queue")        // SimpleBroker 대신
     <div class="card">
       <pre class="code" data-lang="yaml"><code>spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/mydb?
-         useSSL=false&amp;serverTimezone=Asia/Seoul&amp;
-         characterEncoding=UTF-8&amp;rewriteBatchedStatements=true
+    # ⚠️ URL 은 한 줄로 — YAML 은 줄바꿈을 공백으로 접어서 파라미터가 깨집니다
+    url: jdbc:mysql://localhost:3306/mydb?useSSL=false&amp;serverTimezone=Asia/Seoul&amp;characterEncoding=UTF-8&amp;rewriteBatchedStatements=true
     username: ${DB_USER}
     password: ${DB_PASSWORD}
     hikari:
@@ -13401,10 +13439,11 @@ r.enableStompBrokerRelay("/topic", "/queue")        // SimpleBroker 대신
 
 // 계층
 //   Repository
-//    └ CrudRepository        기본 CRUD
-//       └ ListCrudRepository  List 반환
-//          └ PagingAndSortingRepository  페이징
-//             └ JpaRepository            JPA 전용 (flush, saveAndFlush …)</code></pre>
+//    ├ CrudRepository → ListCrudRepository                       기본 CRUD (List 반환)
+//    └ PagingAndSortingRepository → ListPagingAndSortingRepository 페이징·정렬
+//         (Spring Data 3.0 부터 PagingAndSorting 은 CrudRepository 를 상속하지 않습니다)
+//   JpaRepository = ListCrud + ListPagingAndSorting + QueryByExample
+//                   + JPA 전용 (flush, saveAndFlush …)</code></pre>
 
       <h4 class="mini">쿼리 메서드 — 이름이 곧 쿼리</h4>
       <pre class="code" data-lang="java"><code>List&lt;Order&gt; findByStatus(OrderStatus status);
@@ -13483,6 +13522,7 @@ void deleteByStatus(OrderStatus s);</code></pre>
            @Index(name = "idx_order_no", columnList = "order_no", unique = true),
            @Index(name = "idx_user_status", columnList = "user_id, status")
        })
+@EntityListeners(AuditingEntityListener.class)        // @CreatedDate 등을 채우려면 필요
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)   // JPA 는 기본 생성자 필요
 public class Order {
@@ -13943,6 +13983,7 @@ public void bulkCreate(List&lt;OrderReq&gt; reqs) {
     for (var r : reqs) {
         orderRepository.save(r.toEntity());    // 아직 DB 에 안 감
         // 영속성 컨텍스트에 쌓입니다
+        // ⚠️ 단, ID 전략이 IDENTITY(MySQL AUTO_INCREMENT)면 ID 를 얻으려고 즉시 INSERT
     }
 }   // 커밋 시점에 INSERT 들이 한꺼번에
 
@@ -13951,7 +13992,7 @@ public void bulkCreate(List&lt;OrderReq&gt; reqs) {
 public void bulkCreate(List&lt;OrderReq&gt; reqs) {
     for (int i = 0; i &lt; reqs.size(); i++) {
         em.persist(reqs.get(i).toEntity());
-        if (i % 500 == 0) {
+        if ((i + 1) % 500 == 0) {   // 500건마다 (i % 500 이면 첫 건에서 바로 비움)
             em.flush();     // DB 로 내보내고
             em.clear();     // ★ 1차 캐시를 비웁니다 — 안 하면 OOM
         }
@@ -13959,7 +14000,8 @@ public void bulkCreate(List&lt;OrderReq&gt; reqs) {
 }
 // application.yml 에 배치 설정도 함께
 // spring.jpa.properties.hibernate.jdbc.batch_size: 500
-// spring.jpa.properties.hibernate.order_inserts: true</code></pre>
+// spring.jpa.properties.hibernate.order_inserts: true
+// ⚠️ IDENTITY 전략이면 하이버네이트가 INSERT 배치를 끕니다 — 대량 INSERT 는 JdbcTemplate 배치로</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>10만 건을 JPA 로 넣으면 힙이 터집니다.</b>
         영속성 컨텍스트가 <b>엔티티와 스냅샷을 전부 들고 있기</b> 때문입니다.
@@ -14022,7 +14064,9 @@ public interface OrderView {
     Long getId();
     String getOrderNo();
     int getAmount();
-    String getUserName();          // o.user.name 에 매핑
+    UserInfo getUser();            // 중첩 프로젝션 — o.user.name
+    interface UserInfo { String getName(); }
+    // (String getUserName() 처럼 쓰면 Order 에 userName 속성이 없어 실패)
 }
 List&lt;OrderView&gt; findByStatus(OrderStatus status);
 
@@ -14459,7 +14503,7 @@ long updated = query.update(order)
         .set(order.status, OrderStatus.CANCELLED)
         .where(order.createdAt.lt(deadline))
         .execute();
-em.flush(); em.clear();      // ★ 영속성 컨텍스트 초기화 필수
+em.clear();      // ★ 영속성 컨텍스트 초기화 필수 (보류 중인 변경은 execute() '전에' em.flush())
 
 // 결과 가져오기
 .fetch()          // List
@@ -14691,6 +14735,8 @@ public interface OrderMapper {
 @Options(fetchSize = 1000, resultSetType = ResultSetType.FORWARD_ONLY)
 Cursor&lt;OrderDto&gt; scanAll();
 
+// ⚠️ 트랜잭션(@Transactional) 안에서 열어야 합니다 — 밖이면 세션이 바로 닫혀 Cursor 도 닫힙니다
+//    MySQL 은 URL 에 useCursorFetch=true 가 있어야 fetchSize 가 먹습니다 (없으면 통째로 적재)
 try (Cursor&lt;OrderDto&gt; cursor = mapper.scanAll()) {
     for (OrderDto o : cursor) { process(o); }
 }</code></pre>
@@ -14935,7 +14981,10 @@ CREATE TABLE orders (
     user_id     BIGINT       NOT NULL,
     amount      INT          NOT NULL,
     status      VARCHAR(20)  NOT NULL,
+    memo        TEXT,
     created_at  DATETIME     NOT NULL,
+    updated_at  DATETIME,
+    version     BIGINT       NOT NULL DEFAULT 0,   -- @Version (validate 가 컬럼을 확인합니다)
     UNIQUE KEY uk_order_no (order_no),
     KEY idx_user_status (user_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;</code></pre>
@@ -15084,13 +15133,14 @@ public void saveAll(List&lt;Order&gt; orders) {
 public void saveAll(List&lt;Order&gt; orders) {
     for (int i = 0; i &lt; orders.size(); i++) {
         em.persist(orders.get(i));
-        if (i % 500 == 0) { em.flush(); em.clear(); }
+        if ((i + 1) % 500 == 0) { em.flush(); em.clear(); }
     }
 }
 // application.yml
 //   spring.jpa.properties.hibernate.jdbc.batch_size: 500
 //   spring.jpa.properties.hibernate.order_inserts: true
 //   (MySQL URL 에 rewriteBatchedStatements=true 필수)
+//   ⚠️ ID 가 IDENTITY 전략이면 INSERT 배치가 꺼집니다 — 그럴 땐 해법 2
 
 // ✅ 해법 2 — JdbcTemplate 배치 (가장 빠름) ★
 jdbcTemplate.batchUpdate("""
@@ -15107,6 +15157,7 @@ jdbcTemplate.batchUpdate("""
 
 // ✅ 대량 조회 — 스트리밍으로
 @Query("SELECT o FROM Order o")
+@QueryHints(@QueryHint(name = "org.hibernate.fetchSize", value = "1000"))   // 없으면 드라이버가 통째로 적재할 수 있음
 Stream&lt;Order&gt; streamAll();
 
 @Transactional(readOnly = true)
@@ -15666,7 +15717,8 @@ Address copy = new Address(addr.getZipCode(), addr.getAddress1(), addr.getAddres
 private Set&lt;String&gt; tags = new HashSet&lt;&gt;();
 
 // 문제
-// · 원소를 하나 바꾸면 전체 DELETE 후 전체 INSERT (기본 동작)
+// · List(bag) 로 두면 원소 하나만 바꿔도 전체 DELETE 후 전체 INSERT
+//   (Set 은 행 단위로 지우지만, 그래도 원소를 값으로만 식별한다)
 // · 원소에 기본키가 없어 추적이 안 된다
 // · 지연 로딩·페이징이 어렵다
 
@@ -16030,7 +16082,7 @@ public void demo() {
     // 대량 처리에서는 주기적으로 flush + clear
     for (int i = 0; i &lt; 100_000; i++) {
         em.persist(new Order(...));
-        if (i % 500 == 0) { em.flush(); em.clear(); }   // ★ 메모리 관리
+        if ((i + 1) % 500 == 0) { em.flush(); em.clear(); }   // ★ 메모리 관리 (500건마다)
     }
 }
 
@@ -16256,7 +16308,12 @@ public Page&lt;OrderDto&gt; search(OrderCondition cond, Pageable pageable) {
     // 2단계: 그 id 들로 상세 조회 (fetch join 자유롭게)
     List&lt;Order&gt; orders = orderRepository.findAllWithDetailsByIdIn(ids.getContent());
 
-    return new PageImpl&lt;&gt;(toDto(orders), pageable, ids.getTotalElements());
+    // ⚠️ IN 조회는 순서를 보장하지 않습니다 — 1단계의 id 순서대로 다시 정렬
+    Map&lt;Long, Order&gt; byId = orders.stream()
+            .collect(Collectors.toMap(Order::getId, Function.identity()));
+    List&lt;Order&gt; sorted = ids.getContent().stream().map(byId::get).toList();
+
+    return new PageImpl&lt;&gt;(toDto(sorted), pageable, ids.getTotalElements());
 }
 
 @Query("select distinct o from Order o " +
@@ -16433,6 +16490,7 @@ public class StockService {
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE, region = "code")
 public class CodeGroup {          // 거의 안 바뀌는 코드 테이블
     @Id private String code;
+    private String type;
     private String name;
 }
 
@@ -16782,8 +16840,9 @@ public Long create(OrderRequest req) {
     return saved.getId();
 }
 public OrderDto createAndGet(OrderRequest req) {
-    Long id = create(req);                    // writer 에 씀
-    return findById(id);                       // @Transactional(readOnly) → reader! 아직 없을 수 있다
+    // (다른 빈을 거쳐야 @Transactional 이 먹습니다 — 같은 클래스 자기 호출이면 둘 다 트랜잭션 없음)
+    Long id = commandService.create(req);      // writer 에 씀
+    return queryService.findById(id);          // @Transactional(readOnly) → reader! 아직 없을 수 있다
 }
 
 // ✅ 같은 트랜잭션 안에서 처리하거나, 저장 결과를 그대로 반환
@@ -17399,7 +17458,8 @@ private BooleanExpression createdBetween(LocalDateTime from, LocalDateTime to) {
 }
 
 // ★ 장점 — 이 메서드들을 '다른 쿼리에서도 재사용'할 수 있다
-// ★ 조합도 된다: statusEq(s).and(amountGoe(a))</code></pre>
+// ★ 조합도 된다: statusEq(s).and(amountGoe(a))
+//   단 왼쪽이 null 이면 NPE — 오른쪽 null 만 무시됩니다 (where 의 쉼표 나열이 안전)</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">BooleanBuilder — 조건이 복잡할 때</h4>
@@ -17801,8 +17861,10 @@ List&lt;Tuple&gt; byStatus = queryFactory
     .fetch();
 
 // 날짜별 집계 — DB 함수 호출
+// 포맷은 템플릿에 직접 — {1} 로 넘기면 select·group by 에 바인딩 파라미터가 따로 붙어
+// PostgreSQL 이 같은 식으로 보지 않습니다 ("must appear in the GROUP BY clause")
 StringTemplate dayFormat = Expressions.stringTemplate(
-        "function('to_char', {0}, {1})", order.createdAt, "YYYY-MM-DD");
+        "function('to_char', {0}, 'YYYY-MM-DD')", order.createdAt);
 
 List&lt;DailySales&gt; daily = queryFactory
     .select(Projections.constructor(DailySales.class,
@@ -17993,6 +18055,7 @@ List&lt;OrderSummary&gt; content = queryFactory
 
   <pre class="code rv" data-lang="java"><code>@Transactional
 public long expireOldOrders(LocalDateTime before) {
+    em.flush();          // 보류 중인 변경을 먼저 내보낸다 (벌크 뒤에 플러시되면 결과를 덮어씀)
     long updated = queryFactory
         .update(order)
         .set(order.status, OrderStatus.EXPIRED)
@@ -18002,7 +18065,6 @@ public long expireOldOrders(LocalDateTime before) {
                order.createdAt.lt(before))
         .execute();
 
-    em.flush();
     em.clear();          // ★ 1차 캐시를 비운다 — 안 하면 옛 값을 보게 된다
     return updated;
 }
@@ -18255,14 +18317,15 @@ BooleanTemplate raw = Expressions.booleanTemplate(
         "JSON_EXTRACT({0}, '$.type') = {1}", product.options, "premium");
 
 // 정렬 — null 순서 지정
-.orderBy(new OrderSpecifier&lt;&gt;(Order.DESC, order.paidAt).nullsLast())
+.orderBy(order.paidAt.desc().nullsLast())
 
 // 동적 정렬 (Pageable.getSort() 를 QueryDSL 로)
 private OrderSpecifier&lt;?&gt;[] toOrderSpecifiers(Sort sort) {
     return sort.stream().map(o -&gt; {
         com.querydsl.core.types.Order dir =
             o.isAscending() ? ASC : DESC;
-        PathBuilder&lt;Order&gt; path = new PathBuilder&lt;&gt;(Order.class, "order");
+        // 별칭은 Q타입 것을 그대로 — "order" 는 예약어라 실제 별칭은 order1 입니다
+        PathBuilder&lt;Order&gt; path = new PathBuilder&lt;&gt;(order.getType(), order.getMetadata());
         return new OrderSpecifier(dir, path.get(o.getProperty()));
     }).toArray(OrderSpecifier[]::new);
 }</code></pre>
@@ -18592,8 +18655,8 @@ public class OrderRepositoryImpl implements OrderRepositoryCustom {
 }
 
 public List&lt;DailySales&gt; dailySales(LocalDate from, LocalDate to) {
-    StringTemplate day = Expressions.stringTemplate(
-            "function('to_char', {0}, {1})", order.paidAt, "YYYY-MM-DD");
+    StringTemplate day = Expressions.stringTemplate(      // 포맷은 템플릿에 직접 (q07 참고)
+            "function('to_char', {0}, 'YYYY-MM-DD')", order.paidAt);
 
     return queryFactory
         .select(new QDailySales(
@@ -19428,10 +19491,12 @@ WHERE name LIKE '%' || #{keyword} || '%'          &lt;!-- PostgreSQL·Oracle --&
       <h4 class="mini" style="margin-top:0">별도 쿼리로 채우기 (select 속성)</h4>
       <pre class="code" data-lang="xml"><code>&lt;resultMap id="orderLazy" type="OrderDto"&gt;
   &lt;id property="id" column="id"/&gt;
+  &lt;!-- column: 이 값을 인자로 넘긴다 · select: 별도 쿼리 실행 · fetchType: 지연 로딩 --&gt;
+  &lt;!-- (주석은 태그 밖에 — 속성 사이에 넣으면 XML 파싱 오류) --&gt;
   &lt;collection property="items"
-              column="id"                        &lt;!-- 이 값을 인자로 넘긴다 --&gt;
-              select="findItemsByOrderId"        &lt;!-- 별도 쿼리 실행 --&gt;
-              fetchType="lazy"/&gt;                 &lt;!-- 지연 로딩 --&gt;
+              column="id"
+              select="findItemsByOrderId"
+              fetchType="lazy"/&gt;
 &lt;/resultMap&gt;
 
 &lt;select id="findItemsByOrderId" resultType="OrderItemDto"&gt;
@@ -19494,7 +19559,7 @@ WHERE name LIKE '%' || #{keyword} || '%'          &lt;!-- PostgreSQL·Oracle --&
     &lt;/if&gt;
     &lt;if test="from != null and to != null"&gt;
       AND o.created_at &gt;= #{from}
-      AND o.created_at &lt; #{to}
+      AND o.created_at &amp;lt; #{to}           &lt;!-- XML 안에서 &lt; 는 &amp;lt; 로 --&gt;
     &lt;/if&gt;
     &lt;if test="statuses != null and !statuses.isEmpty()"&gt;
       AND o.status IN
@@ -19547,7 +19612,7 @@ WHERE id IN
   &lt;/foreach&gt;
 &lt;/insert&gt;
 
-&lt;!-- Map 순회 --&gt;
+&lt;!-- Map 순회 — ⚠️ ${key} 는 문자열 치환이므로 키는 코드에서 정한 값만 (03 참고) --&gt;
 &lt;foreach collection="params" index="key" item="value" separator=" AND "&gt;
   ${key} = #{value}
 &lt;/foreach&gt;</code></pre>
@@ -19571,13 +19636,14 @@ WHERE id IN
 &lt;if test="status != null"&gt;
 &lt;if test="keyword != null and keyword != ''"&gt;
 &lt;if test="list != null and list.size() &gt; 0"&gt;
-&lt;if test="type == 'A'"&gt;                   &lt;!-- 문자열 비교는 홑따옴표 --&gt;
+&lt;if test="type == 'AB'"&gt;                  &lt;!-- 문자열 비교는 홑따옴표 (한 글자는 아래 함정) --&gt;
 &lt;if test="flag"&gt;                          &lt;!-- Boolean --&gt;
 &lt;if test="cond.status != null"&gt;           &lt;!-- @Param 객체 접근 --&gt;
 
 &lt;!-- ⚠️ 함정: 문자 하나를 비교할 때 --&gt;
-&lt;if test="type == 'A'"&gt;    &lt;!-- String 이면 OK --&gt;
-&lt;if test='type == "A"'&gt;    &lt;!-- char 라면 이렇게 --&gt;</code></pre>
+&lt;if test="type == 'A'"&gt;    &lt;!-- ❌ OGNL 은 'A' 를 char 로 읽어 String 과 비교가 안 맞습니다 --&gt;
+&lt;if test='type == "A"'&gt;    &lt;!-- ✅ 바깥을 홑따옴표, 안을 쌍따옴표로 --&gt;
+&lt;if test="type == 'A'.toString()"&gt;   &lt;!-- ✅ 또는 이렇게 --&gt;</code></pre>
     </div>
   </div>
   <div class="diag rv">
@@ -19642,9 +19708,10 @@ WHERE id IN
 &lt;sql id="searchConditions"&gt;
   &lt;where&gt;
     o.deleted = false
-    &lt;if test="status != null"&gt;AND o.status = #{status}&lt;/if&gt;
-    &lt;if test="from != null"&gt;AND o.created_at &gt;= #{from}&lt;/if&gt;
-    &lt;if test="to != null"&gt;AND o.created_at &lt; #{to}&lt;/if&gt;
+    &lt;!-- 매퍼가 @Param("cond") 로 받으므로 cond. 을 붙인다 (08 의 인터페이스) --&gt;
+    &lt;if test="cond.status != null"&gt;AND o.status = #{cond.status}&lt;/if&gt;
+    &lt;if test="cond.from != null"&gt;AND o.created_at &gt;= #{cond.from}&lt;/if&gt;
+    &lt;if test="cond.to != null"&gt;AND o.created_at &amp;lt; #{cond.to}&lt;/if&gt;
   &lt;/where&gt;
 &lt;/sql&gt;
 
@@ -19671,7 +19738,7 @@ WHERE id IN
 &lt;/sql&gt;
 &lt;select id="findPartitioned" resultType="OrderDto"&gt;
   SELECT * FROM &lt;include refid="tableName"&gt;
-    &lt;property name="yearMonth" value="#{ym}"/&gt;
+    &lt;property name="yearMonth" value="${ym}"/&gt;   &lt;!-- 테이블명은 ? 바인딩 불가 → ${} 치환. ym 은 yyyyMM 형식 검증 필수 --&gt;
   &lt;/include&gt;
 &lt;/select&gt;</code></pre>
 
@@ -19747,7 +19814,7 @@ public PageInfo&lt;OrderDto&gt; search(OrderCondition cond, int page, int size) 
     FROM orders o
    WHERE o.deleted = false
   &lt;if test="lastId != null"&gt;
-     AND o.id &lt; #{lastId}
+     AND o.id &amp;lt; #{lastId}
   &lt;/if&gt;
    ORDER BY o.id DESC
    LIMIT #{size}
@@ -19811,7 +19878,7 @@ public class BulkService {
             OrderItemMapper mapper = session.getMapper(OrderItemMapper.class);
             for (int i = 0; i &lt; items.size(); i++) {
                 mapper.insert(items.get(i));
-                if (i % 1000 == 0) session.flushStatements();   // 주기적으로 전송
+                if ((i + 1) % 1000 == 0) session.flushStatements();   // 1000건마다 전송
             }
             session.flushStatements();
             session.commit();
@@ -19848,7 +19915,8 @@ public void export2() {
         for (OrderDto o : cursor) { process(o); }
     }
 }
-// ⚠️ 커서는 트랜잭션·세션이 열려 있는 동안만 유효하다</code></pre>
+// ⚠️ 커서는 트랜잭션·세션이 열려 있는 동안만 유효하다
+// ⚠️ MySQL 은 URL 에 useCursorFetch=true 가 있어야 fetchSize 대로 끊어 읽습니다</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>MySQL 에서 fetchSize 가 안 먹는 이유</b> —
         커넥터가 기본적으로 <b>전체 결과를 메모리로</b> 가져옵니다.
@@ -20480,7 +20548,7 @@ decorator:
 logging:
   level:
     com.example.mapper: debug     # 매퍼 패키지 (쿼리 + 파라미터 + 결과 건수)
-    jdbc.sqltiming: info          # 실행 시간</code></pre>
+    p6spy: info                   # p6spy 로그 (실행 시간 포함)</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>MyBatis 로그가 안 나오면</b> 로거 이름이 <b>매퍼 인터페이스의 패키지</b>인지 확인하세요.
         <code>org.mybatis</code> 가 아니라 <b>내 매퍼 패키지</b>가 기준입니다.
@@ -21080,7 +21148,8 @@ boolean ok = passwordEncoder.matches(rawPassword, user.getPassword());</code></p
 
   <div class="card rv">
     <h4 class="mini" style="margin-top:0">① 토큰 발급·검증 컴포넌트</h4>
-    <pre class="code" data-lang="java"><code>@Component
+    <pre class="code" data-lang="java"><code>@Slf4j
+@Component
 public class JwtTokenProvider {
 
     private final SecretKey key;
@@ -21154,16 +21223,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (token != null &amp;&amp; tokenProvider.validate(token)) {
             Claims claims = tokenProvider.parse(token);
 
-            List&lt;SimpleGrantedAuthority&gt; authorities =
-                    ((List&lt;?&gt;) claims.get("roles")).stream()
-                            .map(r -&gt; new SimpleGrantedAuthority(r.toString()))
-                            .toList();
+            // 리프레시 토큰에는 roles 가 없습니다 — 액세스 토큰 자리에 오면 인증하지 않는다
+            // (그냥 캐스팅하면 NPE 로 500 이 나고, 14일짜리 토큰이 API 열쇠가 될 뻔합니다)
+            if (claims.get("roles") instanceof List&lt;?&gt; roles) {
+                List&lt;SimpleGrantedAuthority&gt; authorities = roles.stream()
+                        .map(r -&gt; new SimpleGrantedAuthority(r.toString()))
+                        .toList();
 
-            var auth = new UsernamePasswordAuthenticationToken(
-                    Long.valueOf(claims.getSubject()), null, authorities);
-            auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
+                var auth = new UsernamePasswordAuthenticationToken(
+                        Long.valueOf(claims.getSubject()), null, authorities);
+                auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
 
-            SecurityContextHolder.getContext().setAuthentication(auth);
+                SecurityContextHolder.getContext().setAuthentication(auth);
+            }
         }
         chain.doFilter(req, res);      // ★ 실패해도 여기서 막지 말고 넘긴다
     }                                  //   최종 판단은 AuthorizationFilter 가 함
@@ -21380,6 +21452,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
     private final UserRepository userRepository;
 
     @Override
+    @Transactional          // 없으면 updateOAuthInfo() 의 변경이 DB 에 반영되지 않습니다
     public OAuth2User loadUser(OAuth2UserRequest req) {
         OAuth2User oAuth2User = super.loadUser(req);
         String provider = req.getClientRegistration().getRegistrationId();
@@ -21387,7 +21460,8 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         OAuthAttributes attrs = OAuthAttributes.of(provider, oAuth2User.getAttributes());
 
         // 있으면 갱신, 없으면 가입 (자동 회원가입)
-        User user = userRepository.findByEmail(attrs.email())
+        // 이메일이 아니라 (제공자, 제공자 고유 ID) 로 찾습니다 — 이메일은 바뀔 수 있습니다
+        User user = userRepository.findByProviderAndProviderId(provider, attrs.providerId())
                 .map(u -&gt; u.updateOAuthInfo(attrs.name()))
                 .orElseGet(() -&gt; userRepository.save(attrs.toEntity()));
 
@@ -21672,8 +21746,11 @@ public CorsConfigurationSource corsConfigurationSource() {
         </table>
       </div>
       <pre class="code" data-lang="java"><code>// 켜는 경우 (SPA + 쿠키)
+// withHttpOnlyFalse() 만 바꾸면 안 됩니다 — 6.0 부터 기본 처리기가 토큰을 XOR 마스킹하고
+// 쿠키도 지연 발급이라, 프런트가 쿠키 값을 그대로 헤더에 실으면 403 이 납니다.
+// spa() 가 XSRF-TOKEN 쿠키 발급 + X-XSRF-TOKEN 헤더 검증을 한 번에 맞춰 줍니다
 .csrf(csrf -&gt; csrf
-    .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+    .spa()
     .ignoringRequestMatchers("/api/webhook/**"))    // 외부 웹훅은 제외
 
 // 끄는 경우 (JWT 헤더 방식)
@@ -21935,10 +22012,13 @@ public class RefreshToken {
     private String ip;
     private Instant lastSeenAt;
 }</code></pre>
-      <pre class="code" data-lang="java"><code>@Transactional
+      <pre class="code" data-lang="java"><code>// 재사용을 감지해 계열을 폐기한 뒤 예외를 던지므로, 그 예외로 폐기까지 롤백되면 안 됩니다
+@Transactional(noRollbackFor = BadCredentialsException.class)
 public TokenPair refresh(String raw) {
     String hash = sha256(raw);
-    RefreshToken t = repo.findByTokenHash(hash)
+    // @Lock(PESSIMISTIC_WRITE) 조회 — 같은 토큰으로 두 요청이 동시에 오면
+    // 둘 다 usedAt == null 을 보고 통과하는 레이스를 행 잠금으로 막는다
+    RefreshToken t = repo.findByTokenHashForUpdate(hash)
         .orElseThrow(() -> new BadCredentialsException("unknown token"));
 
     // ① 이미 쓴 토큰이 다시 왔다 = 어딘가에서 복제됐다
@@ -22030,7 +22110,7 @@ public void signOutDevice(@AuthenticationPrincipal Long userId,
       <h4 class="mini" style="margin-top:0">TOTP — 라이브러리 없이 이해하기</h4>
       <pre class="code" data-lang="java"><code>// 인증 앱(Google Authenticator 등)은 표준 알고리즘입니다.
 // 서버와 앱이 '같은 비밀 + 현재 시각'으로 같은 숫자를 만듭니다.
-public boolean verify(String base32Secret, String code) {
+public boolean verify(String base32Secret, String code) throws GeneralSecurityException {
     byte[] key = new Base32().decode(base32Secret);
     long   now = Instant.now().getEpochSecond() / 30;   // 30초 창
 
@@ -22041,7 +22121,7 @@ public boolean verify(String base32Secret, String code) {
     return false;
 }
 
-private String totp(byte[] key, long counter) {
+private String totp(byte[] key, long counter) throws GeneralSecurityException {
     byte[] data = ByteBuffer.allocate(8).putLong(counter).array();
     Mac mac = Mac.getInstance("HmacSHA1");
     mac.init(new SecretKeySpec(key, "HmacSHA1"));
@@ -22168,6 +22248,9 @@ public class TenantFilter extends OncePerRequestFilter {
 }
 
 // Hibernate 필터로 모든 쿼리에 조건을 강제한다 — 빼먹을 수 없게
+// 단, 필터는 기본이 꺼짐입니다 — 요청마다(세션마다)
+//   session.enableFilter("tenant").setParameter("tid", TenantContext.get());
+// 를 공통 지점(AOP·인터셉터)에서 켜 줘야 실제로 걸립니다
 @FilterDef(name = "tenant", parameters = @ParamDef(name = "tid", type = Long.class))
 @Filter(name = "tenant", condition = "tenant_id = :tid")
 @Entity public class Document { ... }</code></pre>
@@ -22338,39 +22421,41 @@ public class TenantFilter extends OncePerRequestFilter {
       <pre class="code" data-lang="yaml"><code>spring:
   cloud:
     gateway:
-      routes:
-        - id: order-service
-          uri: http://localhost:8081          # 고정 주소
-          predicates:
-            - Path=/api/orders/**
-          filters:
-            - StripPrefix=1                    # /api/orders/1 -&gt; /orders/1
-            - AddRequestHeader=X-Gateway, true
+      server:
+        webflux:              # ★ 2025.x 부터 접두사가 spring.cloud.gateway.server.webflux
+          routes:
+            - id: order-service
+              uri: http://localhost:8081          # 고정 주소
+              predicates:
+                - Path=/api/orders/**
+              filters:
+                - StripPrefix=1                    # /api/orders/1 -&gt; /orders/1
+                - AddRequestHeader=X-Gateway, true
 
-        - id: user-service
-          uri: lb://user-service               # 서비스 디스커버리 사용
-          predicates:
-            - Path=/api/users/**
-            - Method=GET,POST
-          filters:
-            - name: CircuitBreaker
-              args:
-                name: userCB
-                fallbackUri: forward:/fallback/user
+            - id: user-service
+              uri: lb://user-service               # 서비스 디스커버리 사용
+              predicates:
+                - Path=/api/users/**
+                - Method=GET,POST
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: userCB
+                    fallbackUri: forward:/fallback/user
 
-        - id: legacy
-          uri: http://legacy.internal:9090
-          predicates:
-            - Path=/legacy/**
-            - Header=X-Legacy, true
+            - id: legacy
+              uri: http://legacy.internal:9090
+              predicates:
+                - Path=/legacy/**
+                - Header=X-Legacy, true
 
-      default-filters:                          # 모든 라우트에 적용
-        - AddResponseHeader=X-Powered-By, gateway
-      globalcors:
-        cors-configurations:
-          '[/**]':
-            allowedOrigins: "https://myapp.com"
-            allowedMethods: "*"</code></pre>
+          default-filters:                          # 모든 라우트에 적용
+            - AddResponseHeader=X-Powered-By, gateway
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowedOrigins: "https://myapp.com"
+                allowedMethods: "*"</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">자바 코드 방식 — 조건이 복잡할 때</h4>
@@ -22381,6 +22466,13 @@ public class GatewayConfig {
     public RouteLocator routes(RouteLocatorBuilder builder) {
         return builder.routes()
 
+            // 카나리 — 헤더가 있으면 새 버전으로
+            // ★ 같은 Path 의 일반 라우트보다 먼저 등록해야 합니다 (아래에 두면 영영 안 걸림)
+            .route("order-canary", r -&gt; r
+                .path("/api/orders/**")
+                .and().header("X-Canary", "true")
+                .uri("lb://order-service-v2"))
+
             .route("order", r -&gt; r
                 .path("/api/orders/**")
                 .filters(f -&gt; f
@@ -22389,14 +22481,8 @@ public class GatewayConfig {
                     .retry(c -&gt; c.setRetries(3)
                                  .setMethods(HttpMethod.GET))
                     .circuitBreaker(c -&gt; c.setName("orderCB")
-                                          .setFallbackUri("forward:/fallback")))
+                                          .setFallbackUri("forward:/fallback/order")))
                 .uri("lb://order-service"))
-
-            // 카나리 — 헤더가 있으면 새 버전으로
-            .route("order-canary", r -&gt; r
-                .path("/api/orders/**")
-                .and().header("X-Canary", "true")
-                .uri("lb://order-service-v2"))
 
             // 가중치 기반 분배 (90:10)
             .route("v1", r -&gt; r.path("/api/**")
@@ -22456,6 +22542,11 @@ public class TenantRoutePredicateFactory
         extends AbstractRoutePredicateFactory&lt;TenantRoutePredicateFactory.Config&gt; {
 
     public TenantRoutePredicateFactory() { super(Config.class); }
+
+    // "- Tenant=acme" 처럼 축약형으로 쓰려면 값이 들어갈 필드 순서를 알려 줘야 합니다
+    // (빠뜨리면 tenant 가 null 로 남아 아래 equals 에서 NPE)
+    @Override
+    public List&lt;String&gt; shortcutFieldOrder() { return List.of("tenant"); }
 
     @Override
     public Predicate&lt;ServerWebExchange&gt; apply(Config config) {
@@ -22809,9 +22900,14 @@ public class FallbackController {
         redis-rate-limiter.requestedTokens: 1
         key-resolver: "#{@userKeyResolver}"</code></pre>
       <pre class="code" data-lang="java"><code>// 무엇을 기준으로 셀 것인가
+// KeyResolver 빈이 둘 이상이면 하나에 @Primary 가 필요합니다 —
+// 없으면 기본 RequestRateLimiter 필터 팩토리가 어느 것을 쓸지 몰라 기동에 실패합니다
 @Bean
+@Primary
 public KeyResolver userKeyResolver() {
     return exchange -&gt; {
+        // ★ Auth 필터가 검증 뒤 넣은 값만 믿습니다 — 클라이언트가 보낸 X-User-Id 는
+        //   default-filters 에서 지워 두세요(g08). 안 지우면 값을 바꿔 가며 한도를 피합니다
         String userId = exchange.getRequest().getHeaders().getFirst("X-User-Id");
         return Mono.just(userId != null ? userId : ipOf(exchange));
     };
@@ -22835,17 +22931,22 @@ eureka:
 spring:
   cloud:
     gateway:
-      discovery:
-        locator:
-          enabled: true          # 등록된 서비스를 자동 라우팅
-          lower-case-service-id: true
-      routes:
-        - id: order
-          uri: lb://order-service   # lb:// = 로드밸런싱
+      server:
+        webflux:
+          discovery:
+            locator:
+              enabled: true          # 등록된 서비스를 자동 라우팅
+              lower-case-service-id: true
+          routes:
+            - id: order
+              uri: lb://order-service   # lb:// = 로드밸런싱
 
 # 방법 2) 쿠버네티스라면 Service 이름을 그대로
 #   uri: http://order-service:8080</code></pre>
       <pre class="code" data-lang="java"><code>// 커스텀 로드밸런싱 (기본은 라운드로빈)
+// ★ @Configuration 을 붙이지 않은 클래스에 두고
+//   @LoadBalancerClient(name = "order-service", configuration = 이클래스.class) 로 연결합니다.
+//   메인 컨텍스트에 올리면 서비스별 하위 컨텍스트가 아니라서 name 이 null 이 됩니다
 @Bean
 ReactorLoadBalancer&lt;ServiceInstance&gt; randomLoadBalancer(
         Environment env, LoadBalancerClientFactory factory) {
@@ -22881,61 +22982,63 @@ spring:
     name: api-gateway
   cloud:
     gateway:
-      default-filters:
-        # 클라이언트가 위조해 보낸 내부 헤더를 반드시 제거 ★
-        - RemoveRequestHeader=X-User-Id
-        - RemoveRequestHeader=X-User-Roles
-        - AddResponseHeader=X-Gateway, api-gateway
+      server:
+        webflux:
+          default-filters:
+            # 클라이언트가 위조해 보낸 내부 헤더를 반드시 제거 ★
+            - RemoveRequestHeader=X-User-Id
+            - RemoveRequestHeader=X-User-Roles
+            - AddResponseHeader=X-Gateway, api-gateway
 
-      routes:
-        # 인증 불필요
-        - id: auth
-          uri: lb://auth-service
-          predicates:
-            - Path=/api/auth/**
-          filters:
-            - StripPrefix=1
-            - name: RequestRateLimiter          # 로그인은 빡빡하게
-              args:
-                redis-rate-limiter.replenishRate: 3
-                redis-rate-limiter.burstCapacity: 5
-                key-resolver: "#{@ipKeyResolver}"
+          routes:
+            # 인증 불필요
+            - id: auth
+              uri: lb://auth-service
+              predicates:
+                - Path=/api/auth/**
+              filters:
+                - StripPrefix=1
+                - name: RequestRateLimiter          # 로그인은 빡빡하게
+                  args:
+                    redis-rate-limiter.replenishRate: 3
+                    redis-rate-limiter.burstCapacity: 5
+                    key-resolver: "#{@ipKeyResolver}"
 
-        # 인증 필요
-        - id: order
-          uri: lb://order-service
-          predicates:
-            - Path=/api/orders/**
-          filters:
-            - StripPrefix=1
-            - Auth                               # 커스텀 JWT 필터
-            - name: CircuitBreaker
-              args:
-                name: orderCB
-                fallbackUri: forward:/fallback/order
-            - name: Retry
-              args:
-                retries: 2
-                methods: GET
-                backoff:
-                  firstBackoff: 100ms
-                  maxBackoff: 500ms
+            # 인증 필요
+            - id: order
+              uri: lb://order-service
+              predicates:
+                - Path=/api/orders/**
+              filters:
+                - StripPrefix=1
+                - Auth                               # 커스텀 JWT 필터
+                - name: CircuitBreaker
+                  args:
+                    name: orderCB
+                    fallbackUri: forward:/fallback/order
+                - name: Retry
+                  args:
+                    retries: 2
+                    methods: GET
+                    backoff:
+                      firstBackoff: 100ms
+                      maxBackoff: 500ms
 
-        # 관리자 — 내부망에서만
-        - id: admin
-          uri: lb://admin-service
-          predicates:
-            - Path=/api/admin/**
-            - RemoteAddr=10.0.0.0/8
-          filters:
-            - StripPrefix=1
-            - Auth
+            # 관리자 — 내부망에서만
+            - id: admin
+              uri: lb://admin-service
+              predicates:
+                - Path=/api/admin/**
+                - RemoteAddr=10.0.0.0/8
+              filters:
+                - StripPrefix=1
+                - Auth
 
-      httpclient:
-        connect-timeout: 2000
-        response-timeout: 10s
-        pool:
-          max-connections: 500
+          httpclient:
+            connect-timeout: 2000
+            response-timeout: 10s
+            pool:
+              max-connections: 500
 
 management:
   endpoints:
@@ -23000,10 +23103,12 @@ eureka:
 spring:
   cloud:
     gateway:
-      discovery:
-        locator:
-          enabled: true          # 등록된 서비스로 라우트 자동 생성
-          lower-case-service-id: true</code></pre>
+      server:
+        webflux:
+          discovery:
+            locator:
+              enabled: true          # 등록된 서비스로 라우트 자동 생성
+              lower-case-service-id: true</code></pre>
       <div class="note tip">
         <b>K8s 환경이라면 Eureka 를 넣지 마세요.</b>
         같은 일을 하는 계층이 두 개가 되어 <b>장애 원인만 늘어납니다.</b>
@@ -23191,6 +23296,8 @@ protobuf {
       <h4 class="mini" style="margin-top:0">서버 — 생성된 base 클래스를 구현</h4>
       <pre class="code" data-lang="java"><code>// import org.springframework.grpc.server.service.GrpcService;
 @GrpcService                                   // Boot 4.1 공식 스타터
+@RequiredArgsConstructor
+@Slf4j
 public class OrderGrpcService
         extends OrderServiceGrpc.OrderServiceImplBase {
 
@@ -23201,7 +23308,8 @@ public class OrderGrpcService
     public void getOrder(GetOrderRequest req,
                          StreamObserver&lt;OrderResponse&gt; res) {
         var order = query.find(req.getOrderId())
-            .orElseThrow(() -&gt; Status.NOT_FOUND
+            // .proto 의 enum Status 와 이름이 겹치므로 gRPC 상태는 전체 이름으로 씁니다
+            .orElseThrow(() -&gt; io.grpc.Status.NOT_FOUND
                 .withDescription("주문을 찾을 수 없습니다: " + req.getOrderId())
                 .asRuntimeException());
 
@@ -23234,23 +23342,33 @@ public class OrderGrpcService
     }
     // ④ 양방향 — ③과 같은 모양에서 onNext 안에서 곧바로 res.onNext() 로 밀어 줍니다
 }</code></pre>
-      <pre class="code" data-lang="yaml"><code>grpc:
-  server:
-    port: 9090                    # ★ HTTP(8080)와 별도 포트
-  client:
-    inventory:
-      address: "static://inventory:9090"   # K8s 면 dns:///inventory:9090
-      negotiationType: PLAINTEXT           # 내부망 · mTLS 면 TLS
-      enableKeepAlive: true
-      keepAliveTime: 30s</code></pre>
+      <pre class="code" data-lang="yaml"><code># 공식 스타터는 spring.grpc.* 접두사입니다
+# (grpc.server.* · grpc.client.* · static:// 는 net.devh 스타터 형식이라 무시됩니다)
+spring:
+  grpc:
+    server:
+      port: 9090                    # ★ HTTP(8080)와 별도 포트
+    client:
+      channels:
+        inventory:
+          address: "inventory:9090"         # K8s 면 dns:///inventory:9090
+          negotiation-type: plaintext       # 내부망 · mTLS 면 tls
+          enable-keep-alive: true
+          keep-alive-time: 30s</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">클라이언트 · 데드라인 · 에러</h4>
       <pre class="code" data-lang="java"><code>@Service
 public class InventoryClient {
 
-    @GrpcClient("inventory")                    // 위 yaml 의 이름
-    private InventoryServiceGrpc.InventoryServiceBlockingStub stub;
+    private final InventoryServiceGrpc.InventoryServiceBlockingStub stub;
+
+    // 공식 스타터에는 net.devh 의 @GrpcClient 필드 주입이 없습니다 —
+    // GrpcChannelFactory 로 채널을 만들어 스텁을 직접 생성합니다
+    public InventoryClient(GrpcChannelFactory channels) {
+        this.stub = InventoryServiceGrpc.newBlockingStub(
+                channels.createChannel("inventory"));   // 위 yaml 의 채널 이름
+    }
 
     public int stockOf(long itemId) {
         try {
@@ -23335,7 +23453,12 @@ public class InventoryClient {
     <div class="card">
       <h4 class="mini" style="margin-top:0">관측 — 인터셉터</h4>
       <pre class="code" data-lang="java"><code>// REST 의 필터(g05)에 해당합니다 — 로깅·인증·추적을 여기 한 곳에
-@GrpcGlobalServerInterceptor
+// (공식 스타터의 전역 등록은 @GlobalServerInterceptor — net.devh 의 @GrpcGlobalServerInterceptor 가 아님)
+// 주의: 서비스 메서드는 이 메서드와 다른 스레드에서 돌 수 있어 여기서 넣은 MDC 가
+//       안 보이거나 남을 수 있습니다 — 실무에선 io.grpc.Context 에 담고 리스너를 감싸 옮깁니다
+@Component
+@GlobalServerInterceptor
+@Slf4j
 public class TraceServerInterceptor implements ServerInterceptor {
 
     static final Metadata.Key&lt;String&gt; TRACE =
@@ -23506,25 +23629,27 @@ grpc_health_probe -addr=localhost:9090    # 표준 헬스체크 — K8s 프로�
       <pre class="code" data-lang="yaml"><code>spring:
   cloud:
     gateway:
-      httpclient:
-        connect-timeout: 500            # ms — 연결은 빨리 포기
-        response-timeout: 2500ms        # 전체 상한
-      routes:
-        - id: order
-          uri: lb://order-service
-          predicates: [Path=/api/orders/**]
-          metadata:
-            response-timeout: 1200      # 라우트별로 더 짧게 조일 수 있다
-            connect-timeout: 300
-          filters:
-            - name: CircuitBreaker
-              args: { name: orderCB, fallbackUri: forward:/fallback/order }
-            - name: Retry
-              args:
-                retries: 2
-                methods: GET             # ★ POST 는 재시도 금지 (중복 생성)
-                series: SERVER_ERROR
-                backoff: { firstBackoff: 50ms, maxBackoff: 300ms, factor: 2 }</code></pre>
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 500            # ms — 연결은 빨리 포기
+            response-timeout: 2500ms        # 전체 상한
+          routes:
+            - id: order
+              uri: lb://order-service
+              predicates: [Path=/api/orders/**]
+              metadata:
+                response-timeout: 1200      # 라우트별로 더 짧게 조일 수 있다
+                connect-timeout: 300
+              filters:
+                - name: CircuitBreaker
+                  args: { name: orderCB, fallbackUri: forward:/fallback/order }
+                - name: Retry
+                  args:
+                    retries: 1               # 1200ms × 2번 시도 + 백오프 ≈ 2.45s — 예산 2.5s 안
+                    methods: GET             # ★ POST 는 재시도 금지 (중복 생성)
+                    series: SERVER_ERROR
+                    backoff: { firstBackoff: 50ms, maxBackoff: 300ms, factor: 2 }</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>재시도는 장애를 키우는 가장 흔한 원인입니다.</b>
         서비스가 느려서 5xx 가 뜨는데 게이트웨이가 3번씩 재시도하면
@@ -23536,10 +23661,14 @@ grpc_health_probe -addr=localhost:9090    # 표준 헬스체크 — K8s 프로�
 
     <div class="card">
       <h4 class="mini" style="margin-top:0">격벽(bulkhead) — 한 서비스가 전부를 잠식하지 않게</h4>
-      <pre class="code" data-lang="java"><code>// Resilience4j — 서비스별로 동시 호출 수를 따로 묶는다
+      <pre class="code" data-lang="java"><code>// Resilience4j — 서비스(orderCB)마다 브레이커를 따로 둔다 — 한 곳이 열려도 다른 경로는 그대로
+// (동시 호출 수 상한 자체는 Bulkhead 모듈로 따로 겁니다)
 @Bean
 public Customizer&lt;Resilience4JCircuitBreakerFactory&gt; cbConfig() {
     return factory -&gt; factory.configure(builder -&gt; builder
+        // TimeLimiter 기본값은 1초 — 지정하지 않으면 라우트 타임아웃(1.2s)보다 먼저 끊습니다
+        .timeLimiterConfig(TimeLimiterConfig.custom()
+            .timeoutDuration(Duration.ofMillis(1200)).build())
         .circuitBreakerConfig(CircuitBreakerConfig.custom()
             .slidingWindowType(SlidingWindowType.TIME_BASED)
             .slidingWindowSize(10)              // 최근 10초를 본다
@@ -23625,6 +23754,7 @@ public RouteLocator routes(RouteLocatorBuilder b) {
         .build();
 }</code></pre>
       <pre class="code" data-lang="java"><code>// 사내 사용자·특정 헤더만 먼저 (더 안전한 1단계)
+// ★ 위 가중치 라우트보다 먼저 등록해야 합니다 — 뒤에 두면 가중치 라우트가 먼저 가져갑니다
 .route("order-beta", r -&gt; r.path("/api/orders/**")
     .and().header("X-Beta", "true")
     .uri("lb://order-service-v2"))</code></pre>
@@ -23811,6 +23941,487 @@ Order changed = o.toBuilder().customerName("이서연").build();</code></pre>
     <br>③ <b><code>@EqualsAndHashCode</code> 전체 필드 사용 금지</b> —
     엔티티는 <b>ID 기준</b>으로만. <code>@EqualsAndHashCode(of = "id")</code>
   </div>
+  <!-- ===== t01 보강: 롬복 생성자 · 긴 옵션 · 실무 규칙 ===== -->
+  <h3 class="sub" data-lv="e">생성자 3종 — <span class="t">누구를 인자로 가져가나</span> <span class="lvl e">🟢 기초</span></h3>
+  <p class="tx rv">
+    이름이 길어서 헷갈리지만 읽어 보면 뜻이 그대로 들어 있습니다.
+    <code>@NoArgsConstructor</code>(노 아그스 컨스트럭터)는 “인자 없는 생성자”,
+    <code>@RequiredArgsConstructor</code>(리콰이어드 아그스 컨스트럭터)는 “꼭 필요한 인자만 받는 생성자”,
+    <code>@AllArgsConstructor</code>(올 아그스 컨스트럭터)는 “모든 필드를 받는 생성자”입니다.
+    현업에서는 줄여서 <b>노아그 · 리콰이어드 · 올아그</b>라고 부릅니다.
+    핵심은 <b>“꼭 필요한”의 기준이 <code>final</code> 과 <code>@NonNull</code></b>이라는 점입니다.
+  </p>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 264" role="img" aria-label="롬복 생성자 어노테이션 세 개가 필드 종류별로 무엇을 인자로 가져가는지 보여 주는 매트릭스. 초기화하지 않은 final 필드는 RequiredArgs와 AllArgs가 인자로 받고 NoArgs는 컴파일 오류가 난다. NonNull 필드는 RequiredArgs와 AllArgs가 인자로 받으며 null 검사를 넣는다. 일반 필드는 AllArgs만 받는다. 값으로 초기화한 final 필드와 static 필드는 세 어노테이션 모두 제외한다">
+      <text x="16" y="18" class="lbl">필드 종류 × 생성자 어노테이션 — 칸이 진하면 인자로 받습니다</text>
+
+      <text x="302" y="44" class="ann" text-anchor="middle">@NoArgsConstructor</text>
+      <text x="452" y="44" class="ann" text-anchor="middle">@RequiredArgsConstructor</text>
+      <text x="602" y="44" class="ann" text-anchor="middle">@AllArgsConstructor</text>
+
+      <text x="16" y="73" class="ann">final 필드 (초기화 안 함)</text>
+      <rect class="cel h1" x="232" y="54" width="140" height="30"/><text x="302" y="73" class="tk" text-anchor="middle">컴파일 오류 *</text>
+      <rect class="cel h4" x="382" y="54" width="140" height="30"/><text x="452" y="73" class="tk" text-anchor="middle">인자로 받음</text>
+      <rect class="cel h4" x="532" y="54" width="140" height="30"/><text x="602" y="73" class="tk" text-anchor="middle">인자로 받음</text>
+
+      <text x="16" y="107" class="ann">@NonNull 필드</text>
+      <rect class="cel h0" x="232" y="88" width="140" height="30"/><text x="302" y="107" class="tk" text-anchor="middle">제외 (검사 없음)</text>
+      <rect class="cel h4" x="382" y="88" width="140" height="30"/><text x="452" y="107" class="tk" text-anchor="middle">인자 + null 검사</text>
+      <rect class="cel h4" x="532" y="88" width="140" height="30"/><text x="602" y="107" class="tk" text-anchor="middle">인자 + null 검사</text>
+
+      <text x="16" y="141" class="ann">일반 필드 (final 아님)</text>
+      <rect class="cel h0" x="232" y="122" width="140" height="30"/><text x="302" y="141" class="tk" text-anchor="middle">제외</text>
+      <rect class="cel h0" x="382" y="122" width="140" height="30"/><text x="452" y="141" class="tk" text-anchor="middle">제외</text>
+      <rect class="cel h4" x="532" y="122" width="140" height="30"/><text x="602" y="141" class="tk" text-anchor="middle">인자로 받음</text>
+
+      <text x="16" y="175" class="ann">final 필드 (= 값으로 초기화)</text>
+      <rect class="cel h0" x="232" y="156" width="140" height="30"/><text x="302" y="175" class="tk" text-anchor="middle">제외</text>
+      <rect class="cel h0" x="382" y="156" width="140" height="30"/><text x="452" y="175" class="tk" text-anchor="middle">제외</text>
+      <rect class="cel h0" x="532" y="156" width="140" height="30"/><text x="602" y="175" class="tk" text-anchor="middle">제외</text>
+
+      <text x="16" y="209" class="ann">static 필드</text>
+      <rect class="cel h0" x="232" y="190" width="140" height="30"/><text x="302" y="209" class="tk" text-anchor="middle">제외</text>
+      <rect class="cel h0" x="382" y="190" width="140" height="30"/><text x="452" y="209" class="tk" text-anchor="middle">제외</text>
+      <rect class="cel h0" x="532" y="190" width="140" height="30"/><text x="602" y="209" class="tk" text-anchor="middle">제외</text>
+
+      <text x="16" y="240" class="lbl">* force = true 를 주면 final 필드를 0 · null · false 로 채워 컴파일됩니다</text>
+      <text x="16" y="256" class="lbl">인자 순서는 언제나 필드를 선언한 순서 그대로입니다</text>
+    </svg>
+    <div class="cap">생성자 3종 — <b>리콰이어드는 final·@NonNull 만</b>, 올아그는 static·초기화된 final 을 뺀 전부를 받습니다.</div>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:24%">어노테이션 (읽는 법)</th><th>인자로 받는 필드</th><th>final 규칙</th><th>@NonNull 규칙</th><th>주 용도</th></tr>
+      <tr><td><b>@NoArgsConstructor</b><br>노 아그스 컨스트럭터</td><td>없음</td><td>초기화 안 된 <code>final</code> 이 있으면 <b>컴파일 오류</b> — <code>force = true</code> 면 기본값으로 채움</td><td>검사 안 함</td><td>JPA 엔티티 · Jackson 역직렬화</td></tr>
+      <tr><td><b>@RequiredArgsConstructor</b><br>리콰이어드 아그스 컨스트럭터</td><td>초기화 안 된 <code>final</code> + <code>@NonNull</code> 필드</td><td>초기화된 <code>final</code> 은 제외</td><td><code>if (x == null) throw new NullPointerException(...)</code> 삽입</td><td><b>스프링 생성자 주입</b></td></tr>
+      <tr><td><b>@AllArgsConstructor</b><br>올 아그스 컨스트럭터</td><td><code>static</code> 과 초기화된 <code>final</code> 을 뺀 전부</td><td>초기화 안 된 <code>final</code> 포함</td><td>null 검사 삽입</td><td><code>@Builder</code> 의 짝 · 테스트 픽스처</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이렇게 쓰면</h4>
+      <pre class="code" data-lang="java"><code>@RequiredArgsConstructor
+@AllArgsConstructor
+public class Member {
+    private static final int MAX = 10;   // static → 모두 제외
+    private final Long id;               // final(미초기화) → 리콰이어드 O
+    @NonNull private String name;        // @NonNull → 리콰이어드 O + null 검사
+    private String nickname;             // 일반 → 올아그만
+    private final String role = "USER";  // 초기화된 final → 모두 제외
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">실제로 생성되는 코드 (델롬복 결과)</h4>
+      <pre class="code" data-lang="java"><code>// @RequiredArgsConstructor
+public Member(Long id, @NonNull String name) {
+    if (name == null) {
+        throw new NullPointerException("name is marked non-null but is null");
+    }
+    this.id = id;
+    this.name = name;
+}
+
+// @AllArgsConstructor  (role · MAX 는 없음)
+public Member(Long id, @NonNull String name, String nickname) {
+    if (name == null) {
+        throw new NullPointerException("name is marked non-null but is null");
+    }
+    this.id = id;
+    this.name = name;
+    this.nickname = nickname;
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="note warn rv">
+    <b>필드 순서 = 인자 순서</b> — 같은 타입 필드 둘(<code>String name</code>, <code>String email</code>)의 선언 순서를 바꾸면
+    <code>new Member(id, "a@b.com", "홍길동")</code> 같은 호출이 <b>컴파일은 되는데 값이 뒤바뀝니다</b>.
+    올아그 생성자를 직접 부르는 코드가 많다면 <code>@Builder</code> 로 바꾸는 편이 안전합니다.
+  </div>
+
+  <h3 class="sub" data-lv="m">긴 옵션들 — <span class="t">괄호 안의 한 줄마다 이유가 있다</span> <span class="lvl m">🟡 중급</span></h3>
+  <p class="tx rv">
+    실무 코드에서 보는 롬복 어노테이션은 대부분 괄호가 붙어 있습니다. 하나씩 <b>무엇을 만들어 주나 → 생성되는 코드 → 언제 쓰고 언제 피하나</b> 순서로 봅니다.
+  </p>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① @NoArgsConstructor(access = AccessLevel.PROTECTED)</h4>
+      <p class="tx">읽는 법: “노아그 컨스트럭터, 액세스 레벨 프로텍티드”. <b>JPA 엔티티의 표준 관례</b>입니다.</p>
+      <pre class="code" data-lang="java"><code>@Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Order { ... }
+
+// ↓ 생성되는 코드
+protected Order() {
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0"><b>왜 protected 인가</b> —
+        ① JPA 명세가 엔티티에 <b>public 또는 protected 기본 생성자</b>를 요구합니다(리플렉션으로 빈 객체를 만든 뒤 값을 채움).
+        ② 하이버네이트의 <b>지연 로딩 프록시</b>는 엔티티를 상속한 클래스라서 부모 생성자를 부를 수 있어야 합니다 — <code>private</code> 이면 막힙니다.
+        ③ <code>public</code> 이면 아무 데서나 <code>new Order()</code> 로 <b>빈 껍데기 엔티티</b>를 만들 수 있습니다. protected 는 이 둘 사이의 타협점입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② @AllArgsConstructor(staticName = "of")</h4>
+      <p class="tx">읽는 법: “올아그 컨스트럭터, 스태틱 네임 오브”. 생성자를 <b>private 으로 숨기고 정적 팩토리</b>를 만듭니다.</p>
+      <pre class="code" data-lang="java"><code>@Getter
+@AllArgsConstructor(staticName = "of")
+public class Money {
+    private final long amount;
+    private final String currency;
+}
+
+// ↓ 생성되는 코드
+private Money(long amount, String currency) { ... }
+
+public static Money of(long amount, String currency) {
+    return new Money(amount, currency);
+}
+
+Money m = Money.of(1000, "KRW");   // List.of 와 같은 읽기 감각</code></pre>
+      <div class="note info" style="margin-bottom:0"><b>쓸 때</b> — 값 객체(Money, Point)처럼 인자가 2~3개이고 순서가 분명할 때.
+        <b>피할 때</b> — 인자가 4개를 넘거나 같은 타입이 연달아 나오면 <code>@Builder</code> 가 낫습니다.
+        <code>@RequiredArgsConstructor(staticName = "of")</code> 도 똑같이 동작합니다.</div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ @RequiredArgsConstructor(onConstructor_ = @Autowired)</h4>
+      <p class="tx">읽는 법: “온 컨스트럭터 언더바”. 생성된 생성자에 <b>어노테이션을 붙여 달라</b>는 옵션입니다. 이름 끝의 <code>_</code> 는 javac 8 이상에서 쓰는 문법 우회용 표기입니다.</p>
+      <pre class="code" data-lang="java"><code>// 옛날 코드에서 자주 보임
+@Service
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
+public class PayService {
+    private final PayClient client;
+}
+
+// ↓ 생성되는 코드
+@Autowired
+public PayService(PayClient client) {
+    this.client = client;
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0"><b>이제는 필요 없습니다</b> — 스프링 4.3 부터 <b>생성자가 하나뿐이면 <code>@Autowired</code> 없이도 자동 주입</b>합니다.
+        새 코드에서는 그냥 <code>@RequiredArgsConstructor</code> 만 쓰세요. 생성자가 둘 이상인 클래스에서만 의미가 있는데, 그런 빈은 설계부터 다시 보는 게 맞습니다.</div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">④ @Builder(toBuilder = true) · @Builder.Default</h4>
+      <p class="tx">읽는 법: “빌더 투빌더 트루”, “빌더 닷 디폴트”. toBuilder 는 <b>기존 객체를 복사한 빌더</b>를, Default 는 <b>빌더에서 안 부른 필드의 기본값</b>을 살려 줍니다.</p>
+      <pre class="code" data-lang="java"><code>@Builder(toBuilder = true)
+public class Coupon {
+    private final String code;
+    @Builder.Default
+    private final int rate = 10;
+}
+
+// ↓ 생성되는 코드 (요약)
+public static class CouponBuilder {
+    private String code;
+    private boolean rate$set;     // 불렀는지 기억
+    private int rate$value;
+    public CouponBuilder rate(int rate) {
+        this.rate$value = rate; this.rate$set = true; return this;
+    }
+    public Coupon build() {
+        int rate = this.rate$value;
+        if (!this.rate$set) rate = Coupon.$default$rate();  // ← 기본값 10
+        return new Coupon(this.code, rate);
+    }
+}
+public CouponBuilder toBuilder() {
+    return new CouponBuilder().code(this.code).rate(this.rate);
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 160" role="img" aria-label="빌더 체인이 객체가 되기까지의 파이프라인. builder 호출로 빈 빌더가 생기고, name과 qty 호출이 빌더 필드에 값을 저장하며, build 호출이 부르지 않은 필드를 Builder.Default 값으로 채운 뒤 전체 인자 생성자를 불러 Order 객체를 만든다">
+      <text x="16" y="18" class="lbl">빌더 체인 — 값은 빌더에 모였다가 build() 에서 한 번에 생성자로 넘어갑니다</text>
+
+      <polygon class="chev" points="16,40 116,40 132,64 116,88 16,88 32,64"/>
+      <text x="76" y="61" class="val" text-anchor="middle">builder()</text>
+      <text x="76" y="76" class="ann" text-anchor="middle">빈 빌더 생성</text>
+
+      <polygon class="chev" points="142,40 242,40 258,64 242,88 142,88 158,64"/>
+      <text x="202" y="61" class="val" text-anchor="middle">.name(..)</text>
+      <text x="202" y="76" class="ann" text-anchor="middle">빌더 필드에 저장</text>
+
+      <polygon class="chev" points="268,40 368,40 384,64 368,88 268,88 284,64"/>
+      <text x="328" y="61" class="val" text-anchor="middle">.qty(3)</text>
+      <text x="328" y="76" class="ann" text-anchor="middle">같은 방식 반복</text>
+
+      <polygon class="chev" points="394,40 494,40 510,64 494,88 394,88 410,64"/>
+      <text x="454" y="61" class="val" text-anchor="middle">.build()</text>
+      <text x="454" y="76" class="ann" text-anchor="middle">빠진 값 Default</text>
+
+      <polygon class="chev s4" points="520,40 620,40 636,64 620,88 520,88 536,64"/>
+      <text x="578" y="61" class="val" text-anchor="middle">Order</text>
+      <text x="578" y="76" class="ann" text-anchor="middle">올아그 생성자</text>
+
+      <path class="brk" d="M16 100 L16 106 L384 106 L384 100"/>
+      <text x="200" y="122" class="ann" text-anchor="middle">여기까지는 Order 가 아직 없습니다 — 빌더 객체만 있습니다</text>
+
+      <text x="16" y="150" class="lbl">final 이 아닌 필드는 @Builder.Default 가 없으면 초기값(= 10) 대신 0 이 됩니다</text>
+    </svg>
+    <div class="cap">빌더 파이프라인 — <b>build() 가 유일한 생성 지점</b>이라 기본값 처리도 여기서 일어납니다.</div>
+  </div>
+
+  <h4 class="mini rv">⑤ @Builder + @NoArgsConstructor + @AllArgsConstructor — 왜 셋을 같이 붙이나</h4>
+  <p class="tx rv">
+    <code>@Builder</code> 를 클래스에 붙이면 롬복은 <b>“다른 생성자가 하나도 없을 때만”</b> 올아그 생성자를 몰래 만들어 씁니다.
+    그런데 JPA·Jackson 때문에 <code>@NoArgsConstructor</code> 를 붙이는 순간 생성자가 생겼으니 올아그 생성자를 만들지 않고,
+    빌더의 <code>build()</code> 가 부를 생성자가 없어 <b>컴파일 오류</b>가 납니다.
+    그래서 <code>@AllArgsConstructor</code> 를 명시해 빌더 전용 생성자를 돌려놓는 것이고, 바깥에서 못 쓰게 <code>access = AccessLevel.PRIVATE</code> 로 숨깁니다.
+  </p>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>컴파일 오류</h5>
+      <pre class="code" data-lang="java"><code>@Builder
+@NoArgsConstructor
+public class OrderDto {
+    private Long id;
+    private String name;
+}
+// error: constructor OrderDto in class OrderDto
+//        cannot be applied to given types;
+//   required: no arguments
+//   found:    Long,String</code></pre>
+    </div>
+    <div class="good">
+      <h5>세 개를 같이 — 또는 생성자에 @Builder</h5>
+      <pre class="code" data-lang="java"><code>// DTO: 셋을 같이
+@Getter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
+public class OrderDto { ... }
+
+// 엔티티: 빌더가 받을 필드를 직접 고른다 (권장)
+@Entity @Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Order {
+    @Id @GeneratedValue private Long id;
+    private String name;
+    private int qty;
+
+    @Builder
+    private Order(String name, int qty) {   // id 는 빌더에 안 나옴
+        this.name = name;
+        this.qty = qty;
+    }
+}</code></pre>
+    </div>
+  </div>
+  <div class="note tip rv"><b>엔티티는 생성자에 @Builder</b> — 클래스에 붙이면 <code>id</code>·<code>createdAt</code>·연관 컬렉션까지 빌더에 열려
+    <code>Order.builder().id(99L)</code> 같은 위험한 코드가 가능해집니다. 생성자 레벨 <code>@Builder</code> 는 <b>받을 값을 직접 고르는</b> 방법입니다.</div>
+
+  <h3 class="sub" data-lv="m">스프링 생성자 주입 — <span class="t">@RequiredArgsConstructor + private final</span> <span class="lvl m">🟡 중급</span></h3>
+  <p class="tx rv">
+    스프링 빈은 <b>필드를 전부 <code>private final</code> 로 두고 클래스에 <code>@RequiredArgsConstructor</code></b> 하나만 붙이는 것이 현업 표준입니다.
+    final 이라 주입 후 바뀌지 않고, 생성자가 하나라 <code>@Autowired</code> 가 필요 없고, 테스트에서 <code>new OrderService(fakeRepo, fakeNotifier)</code> 로 바로 만들 수 있습니다.
+    필드 주입(<code>@Autowired private ...</code>)은 final 을 못 쓰고 순환 참조를 늦게 발견하게 만듭니다.
+  </p>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">함정 — @Qualifier 가 생성자로 안 넘어간다</h4>
+      <pre class="code" data-lang="java"><code>@Service
+@RequiredArgsConstructor
+public class PayService {
+    @Qualifier("tossClient")              // 필드에만 붙어 있음
+    private final PayClient payClient;    // PayClient 빈이 둘이라면?
+}
+
+// ↓ 롬복이 만든 생성자 — @Qualifier 가 없다
+public PayService(PayClient payClient) {
+    this.payClient = payClient;
+}
+// 기동 실패:
+// NoUniqueBeanDefinitionException: expected single matching bean
+//   but found 2: tossClient,kakaoClient</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">해결 — lombok.config 에 복사 대상 등록</h4>
+      <pre class="code" data-lang="ini"><code># 프로젝트 루트(또는 src/main/java)의 lombok.config
+lombok.copyableAnnotations += org.springframework.beans.factory.annotation.Qualifier
+lombok.copyableAnnotations += org.springframework.beans.factory.annotation.Value</code></pre>
+      <pre class="code" data-lang="java"><code>// ↓ 등록 후 생성되는 코드
+public PayService(@Qualifier("tossClient") PayClient payClient) {
+    this.payClient = payClient;
+}</code></pre>
+      <div class="note info" style="margin-bottom:0"><b>copyableAnnotations</b>(카피어블 어노테이션스) — 필드에 붙은 어노테이션을 생성자 파라미터·세터로 <b>복사해 줄 목록</b>입니다.
+        롬복 기본 목록은 null 관련 어노테이션 위주라 스프링 <code>@Qualifier</code>·<code>@Value</code> 는 직접 넣어야 합니다.
+        설정을 바꾼 뒤에는 <b>클린 빌드</b>(<code>./gradlew clean build</code>)를 해야 반영됩니다.</div>
+    </div>
+  </div>
+  <div class="note warn rv"><b>config 없이 넘어가는 방법</b> — 생성자를 직접 쓰고 파라미터에 <code>@Qualifier</code> 를 붙이거나,
+    필드 이름을 빈 이름과 같게(<code>private final PayClient tossClient;</code>) 지어 스프링의 이름 매칭에 기대는 방법도 있습니다.
+    다만 이름 매칭은 리네임 한 번에 조용히 깨지므로 <b>config 등록이 가장 안전</b>합니다.</div>
+
+  <h3 class="sub" data-lv="m">엔티티에서 피할 것 — <span class="t">@Data · @Setter · @EqualsAndHashCode · @ToString</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:26%">어노테이션 (읽는 법)</th><th>엔티티에서 무슨 일이</th><th>대신 이렇게</th></tr>
+      <tr><td><b>@Data</b><br>데이터</td><td>Getter·Setter·RequiredArgs·ToString·EqualsAndHashCode 를 한꺼번에 — 아래 문제가 <b>전부</b> 따라옴</td><td><code>@Getter</code> 만 + 필요한 것만 골라 붙임</td></tr>
+      <tr><td><b>@Setter</b><br>세터</td><td>어디서든 <code>order.setStatus(PAID)</code> — 결제 검증 같은 도메인 규칙 우회, 변경 지점 추적 불가</td><td><code>order.pay()</code> 같은 <b>의도가 드러나는 메서드</b></td></tr>
+      <tr><td><b>@EqualsAndHashCode</b><br>이퀄스 앤 해시코드</td><td>전체 필드 비교 → 연관 필드 접근 시 <b>지연 로딩 발동</b>·<code>LazyInitializationException</code>, 값이 바뀌면 hashCode 가 바뀌어 <code>HashSet</code> 에서 못 찾음</td><td><code>onlyExplicitlyIncluded = true</code> + id 에만 <code>@EqualsAndHashCode.Include</code></td></tr>
+      <tr><td><b>@ToString</b><br>투스트링</td><td><code>Order → items → Order → …</code> <b>순환 참조로 StackOverflowError</b>, 로그 한 줄에 쿼리 수십 개</td><td>연관 필드에 <code>@ToString.Exclude</code></td></tr>
+    </table>
+  </div>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>@Data 엔티티</h5>
+      <pre class="code" data-lang="java"><code>@Entity
+@Data                      // 💥 전부 열림
+public class Order {
+    @Id @GeneratedValue
+    private Long id;
+    private OrderStatus status;
+
+    @OneToMany(mappedBy = "order")
+    private List&lt;OrderItem&gt; items;   // toString·equals 가 여기까지 따라감
+}
+
+log.info("주문 {}", order);
+// → items 지연 로딩 쿼리 → OrderItem.toString → order.toString → ...
+// → StackOverflowError</code></pre>
+    </div>
+    <div class="good">
+      <h5>필요한 것만 골라서</h5>
+      <pre class="code" data-lang="java"><code>@Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
+@ToString
+public class Order {
+    @Id @GeneratedValue
+    @EqualsAndHashCode.Include         // id 만 비교
+    private Long id;
+    private OrderStatus status;
+
+    @OneToMany(mappedBy = "order")
+    @ToString.Exclude                  // 순환 차단
+    private List&lt;OrderItem&gt; items = new ArrayList&lt;&gt;();
+
+    public void pay() {                // setter 대신 의도 메서드
+        if (status != OrderStatus.CREATED) throw new IllegalStateException();
+        this.status = OrderStatus.PAID;
+    }
+}</code></pre>
+    </div>
+  </div>
+  <div class="note warn rv"><b>id 기준 equals 의 남은 함정</b> — 저장 전 엔티티는 <code>id == null</code> 이라
+    새 엔티티 두 개가 <b>서로 같다고</b> 판정됩니다. 저장 전 엔티티를 <code>Set</code> 에 담지 않는 규칙을 두거나,
+    엄밀함이 필요하면 equals/hashCode 를 직접 작성합니다(id 가 null 이면 false, hashCode 는 <code>getClass().hashCode()</code> 고정).
+    기존 코드의 <code>@EqualsAndHashCode(of = "id")</code> 도 같은 뜻이지만, 롬복 문서는 <code>onlyExplicitlyIncluded</code> 방식을 권장합니다.</div>
+
+  <h3 class="sub" data-lv="m">@Value vs record — <span class="t">언제 무엇을</span> <span class="lvl m">🟡 중급</span></h3>
+  <p class="tx rv">
+    롬복의 <code>@Value</code>(밸류 — 스프링의 <code>@Value("${...}")</code> 와 이름만 같고 전혀 다른 것)는
+    클래스를 <code>final</code>, 필드를 <code>private final</code> 로 만들고 getter·equals·hashCode·toString·올아그 생성자를 붙입니다.
+    자바 16 부터 언어에 들어온 <code>record</code>(레코드)가 같은 일을 문법으로 합니다.
+  </p>
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:22%">비교</th><th>@Value (롬복)</th><th>record (자바 16+)</th></tr>
+      <tr><td>접근자 이름</td><td><code>getAmount()</code></td><td><code>amount()</code></td></tr>
+      <tr><td>상속</td><td>final 클래스 — 다른 클래스를 상속은 가능</td><td>상속 불가(<code>java.lang.Record</code> 고정), 인터페이스 구현만</td></tr>
+      <tr><td>검증</td><td>직접 생성자를 써야 함</td><td><b>콤팩트 생성자</b>로 짧게</td></tr>
+      <tr><td>빌더 · 복사</td><td><code>@Builder</code> · <code>@With</code></td><td>롬복 <code>@Builder</code>·<code>@With</code> 를 record 에도 붙일 수 있음</td></tr>
+      <tr><td>의존성</td><td>롬복 필요</td><td>없음 — IDE·도구 지원이 가장 좋음</td></tr>
+      <tr><td>JPA 엔티티</td><td>불가(기본 생성자·변경 불가)</td><td>불가 — DTO·임베디드 값으로만</td></tr>
+    </table>
+  </div>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">새 코드 — record</h4>
+      <pre class="code" data-lang="java"><code>public record Money(long amount, String currency) {
+    public Money {                       // 콤팩트 생성자
+        if (amount &lt; 0) throw new IllegalArgumentException("음수 금액");
+        Objects.requireNonNull(currency);
+    }
+}
+Money m = new Money(1000, "KRW");
+m.amount();                              // getAmount() 아님</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">@Value 가 여전히 나은 경우</h4>
+      <pre class="code" data-lang="java"><code>@Value
+@Builder
+public class LegacyRes {       // getXxx() 규칙을 기대하는 라이브러리·JSP EL
+    String code;               // @Value 가 private final 을 붙여 줌
+    String message;
+}
+// ↓ 생성: private final String code; public String getCode() ...</code></pre>
+      <div class="note tip" style="margin-bottom:0"><b>기준</b> — 자바 17 이상 새 코드의 DTO·값 객체는 <b>record</b>.
+        <code>getXxx()</code> 이름이 꼭 필요하거나(구형 프레임워크·BeanUtils), 자바 11 이하 프로젝트면 <b>@Value</b>.</div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">lombok.config 기본 세트 · <span class="t">델롬복으로 생성 코드 보기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">프로젝트 루트 lombok.config — 실무 기본값</h4>
+      <pre class="code" data-lang="ini"><code># 상위 폴더의 config 를 더 찾아 올라가지 않음
+config.stopBubbling = true
+
+# 생성 코드에 @lombok.Generated → JaCoCo 커버리지에서 제외
+lombok.addLombokGeneratedAnnotation = true
+
+# 스프링 어노테이션을 생성자 파라미터로 복사
+lombok.copyableAnnotations += org.springframework.beans.factory.annotation.Qualifier
+lombok.copyableAnnotations += org.springframework.beans.factory.annotation.Value
+
+# 상속 클래스에 @EqualsAndHashCode 를 붙이면 super 를 부를지 경고
+lombok.equalsAndHashCode.callSuper = warn
+
+# 팀 규칙으로 막고 싶은 것에 경고(또는 error)
+lombok.data.flagUsage = warning
+lombok.sneakyThrows.flagUsage = warning</code></pre>
+      <div class="note info" style="margin-bottom:0"><b>위치</b> — <code>lombok.config</code> 는 해당 폴더와 하위 패키지 전체에 적용됩니다.
+        멀티 모듈이면 루트에 하나 두고 <code>config.stopBubbling = true</code> 로 끝을 막습니다.
+        <code>@SneakyThrows</code>(스니키 스로우즈)는 checked 예외를 선언 없이 던지게 해 호출부가 예외를 모르게 되므로 경고 대상에 넣는 팀이 많습니다.</div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">델롬복 — 롬복이 실제로 뭘 만들었나</h4>
+      <p class="tx"><b>IntelliJ</b>: 클래스나 어노테이션에 커서 → <b>Refactor → Delombok</b> → 전체 또는 특정 어노테이션 선택.
+        롬복 어노테이션이 사라지고 생성된 자바 코드가 그 자리에 펼쳐집니다. <b>보기만 하고 되돌리기</b>(Ctrl+Z)가 기본 사용법입니다.</p>
+      <p class="tx">펼치지 않고 보려면 <b>Structure 창</b>(Alt+7)에서 생성된 생성자·메서드 목록을 확인합니다.</p>
+      <pre class="code" data-lang="bash"><code># 컴파일된 결과를 직접 확인 — private 멤버까지
+javap -p build/classes/java/main/com/example/Order.class
+
+# Gradle 로 소스 전체 델롬복 (io.freefair.lombok 플러그인)
+./gradlew delombok      # build/delombok/ 에 펼친 소스</code></pre>
+      <div class="note tip" style="margin-bottom:0"><b>언제 보나</b> — 생성자 인자 순서가 의심될 때, <code>@Builder.Default</code> 가 먹었는지,
+        <code>@Qualifier</code> 가 생성자로 복사됐는지 확인할 때. 추측하지 말고 펼쳐 보는 것이 가장 빠릅니다.</div>
+    </div>
+  </div>
+
+  <h4 class="mini rv">읽는 법 모음 — 회의에서 이렇게 부릅니다</h4>
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:36%">어노테이션</th><th style="width:30%">읽는 법</th><th>현업에서 줄여 부르는 말</th></tr>
+      <tr><td>@NoArgsConstructor</td><td>노 아그스 컨스트럭터</td><td>노아그 · 기본 생성자</td></tr>
+      <tr><td>@RequiredArgsConstructor</td><td>리콰이어드 아그스 컨스트럭터</td><td>리콰이어드 · 리콰이어드 생성자</td></tr>
+      <tr><td>@AllArgsConstructor</td><td>올 아그스 컨스트럭터</td><td>올아그 · 전체 생성자</td></tr>
+      <tr><td>@Builder / @Builder.Default</td><td>빌더 / 빌더 닷 디폴트</td><td>빌더 · 빌더 디폴트</td></tr>
+      <tr><td>@Value</td><td>밸류</td><td>롬복 밸류 (스프링 @Value 와 구분)</td></tr>
+      <tr><td>@Data</td><td>데이터</td><td>“데이터 붙이지 마세요”</td></tr>
+      <tr><td>@EqualsAndHashCode</td><td>이퀄스 앤 해시코드</td><td>이퀄스 해시코드</td></tr>
+      <tr><td>@ToString.Exclude</td><td>투스트링 닷 익스클루드</td><td>투스트링 제외</td></tr>
+      <tr><td>@Slf4j</td><td>에스엘에프포제이</td><td>로거 · 로그 어노테이션</td></tr>
+      <tr><td>@SneakyThrows</td><td>스니키 스로우즈</td><td>스니키</td></tr>
+      <tr><td>@With</td><td>위드</td><td>위더 — withXxx 복사 메서드</td></tr>
+      <tr><td>@Accessors(chain = true)</td><td>액세서스 체인 트루</td><td>체인 세터</td></tr>
+    </table>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 스프링 빈은 <code>@RequiredArgsConstructor</code> + <code>private final</code>,
+    엔티티는 <code>@Getter</code> + <code>@NoArgsConstructor(access = PROTECTED)</code> + 생성자 레벨 <code>@Builder</code>,
+    DTO 는 record. 헷갈리면 델롬복으로 펼쳐 보면 됩니다.</div>
 </section>
 
 
@@ -23878,8 +24489,11 @@ dependencies {
         &lt;TimeBasedTriggeringPolicy/&gt;
         &lt;SizeBasedTriggeringPolicy size="100MB"/&gt;
       &lt;/Policies&gt;
-      &lt;DefaultRolloverStrategy max="30"&gt;         &lt;!-- 30개까지 보관 --&gt;
+      &lt;!-- max 는 "하루 안에서 %i 번호 상한" 입니다 — 전체 보관 개수가 아닙니다.
+           보관 기간은 아래 Delete 가 정합니다 --&gt;
+      &lt;DefaultRolloverStrategy max="30"&gt;
         &lt;Delete basePath="logs" maxDepth="1"&gt;
+          &lt;IfFileName glob="app-*.log.gz"/&gt;   &lt;!-- 없으면 logs 안의 다른 파일까지 지웁니다 --&gt;
           &lt;IfLastModified age="30d"/&gt;
         &lt;/Delete&gt;
       &lt;/DefaultRolloverStrategy&gt;
@@ -24004,11 +24618,12 @@ public class MdcFilter extends OncePerRequestFilter {
 public class JacksonConfig {
     @Bean
     public JsonMapper jsonMapper() {
+        // Jackson 3 는 java.time 지원이 내장이라 JavaTimeModule 등록이 필요 없고,
+        // 날짜도 기본이 숫자 타임스탬프가 아니라 ISO-8601 문자열입니다
         return JsonMapper.builder()
-                .addModule(new JavaTimeModule())              // LocalDateTime 지원
-                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
                 .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES) // 모르는 필드 무시
-                .serializationInclusion(JsonInclude.Include.NON_NULL)
+                .changeDefaultPropertyInclusion(                            // null 필드 생략
+                        incl -&gt; incl.withValueInclusion(JsonInclude.Include.NON_NULL))
                 .build();
     }
 }
@@ -24023,7 +24638,7 @@ Map&lt;String, Object&gt; map = mapper.readValue(json, new TypeReference&lt;&gt;
 
 // 트리 모델 — 구조를 모를 때
 JsonNode root = mapper.readTree(json);
-String name = root.path("user").path("name").asText();
+String name = root.path("user").path("name").asString();   // Jackson 2 의 asText()
 int count = root.path("items").size();
 for (JsonNode item : root.path("items")) { ... }</code></pre>
     </div>
@@ -24127,6 +24742,8 @@ public interface OrderMapper {
     List&lt;OrderRes&gt; toResList(List&lt;Order&gt; orders);   // 컬렉션도 자동
 
     // 기존 객체에 덮어쓰기 (부분 수정)
+    // 대상에 세터가 있어야 하고, ERROR 정책이라 req 에 없는 대상 필드는 무시를 명시해야 컴파일됩니다
+    @Mapping(target = "id", ignore = true)
     @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
     void update(@MappingTarget Order target, OrderUpdateReq req);
 
@@ -24343,7 +24960,8 @@ public class ExcelReader {
              consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
 public UploadResult upload(@RequestPart("file") MultipartFile file) throws IOException {
     String ext = StringUtils.getFilenameExtension(file.getOriginalFilename());
-    if (!List.of("xlsx", "xls").contains(ext)) {
+    // 확장자가 없으면 ext 가 null — List.of(..).contains(null) 은 NPE 이므로 먼저 거릅니다
+    if (ext == null || !List.of("xlsx", "xls").contains(ext.toLowerCase())) {
         throw new BadRequestException("엑셀 파일만 업로드할 수 있습니다");
     }
     try (InputStream in = file.getInputStream()) {
@@ -24583,8 +25201,14 @@ public void readLarge(InputStream in, Consumer&lt;List&lt;String&gt;&gt; rowHand
                     private final List&lt;String&gt; row = new ArrayList&lt;&gt;();
 
                     @Override public void startRow(int rowNum) { row.clear(); }
+                    // 빈 셀은 이벤트가 아예 안 옵니다 — 그냥 add 하면 뒤 열이 앞으로 당겨지므로
+                    // 셀 주소(B3 등)에서 열 번호를 구해 빈칸을 ""로 채운다
                     @Override public void cell(String ref, String value,
-                                               XSSFComment c) { row.add(value); }
+                                               XSSFComment c) {
+                        int col = new CellReference(ref).getCol();
+                        while (row.size() &lt; col) row.add("");
+                        row.add(value);
+                    }
                     @Override public void endRow(int rowNum) {
                         if (rowNum &gt; 0) rowHandler.accept(List.copyOf(row));
                     }
@@ -24753,6 +25377,7 @@ String total = xp.evaluate("/orders/@total", doc);</code></pre>
       <pre class="code" data-lang="java"><code>XMLInputFactory factory = XMLInputFactory.newInstance();
 factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);            // XXE 방지
 factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
+factory.setProperty(XMLInputFactory.IS_COALESCING, true);   // 텍스트 하나가 CHARACTERS 여러 번으로 쪼개지지 않게
 
 XMLStreamReader r = factory.createXMLStreamReader(inputStream);
 
@@ -24835,14 +25460,13 @@ m.marshal(list, outputStream);</code></pre>
         <br><span style="opacity:.75">Jackson 3 좌표입니다. Boot 3(Jackson 2)이라면 <code>com.fasterxml.jackson.dataformat</code>.</span>
       </div>
       <pre class="code" data-lang="java"><code>XmlMapper xmlMapper = XmlMapper.builder()
-        .defaultUseWrapper(false)
-        .addModule(new JavaTimeModule())
+        .defaultUseWrapper(false)           // java.time 은 Jackson 3 에 내장 — 모듈 등록 불필요
         .build();
 
 // 읽기
 OrderList list = xmlMapper.readValue(xml, OrderList.class);
 // 쓰기
-String xml = xmlMapper.writeValueAsString(list);
+String out = xmlMapper.writeValueAsString(list);
 
 // 매핑
 @JacksonXmlRootElement(localName = "orders")
@@ -24921,7 +25545,8 @@ given(client.call(any())).willThrow(new TimeoutException());
 willDoNothing().given(notifier).send(anyString(), anyString());
 
 then(notifier).should(times(1)).send("a@b.c", "완료");
-then(notifier).shouldHaveNoInteractions();
+then(notifier).shouldHaveNoMoreInteractions();   // 위에서 확인한 것 말고는 호출 없음
+// (shouldHaveNoInteractions() 는 "한 번도 안 불렸다" — 위 검증과 함께 쓰면 실패합니다)
 
 // 인자 캡처 — 실제로 무엇이 넘어갔는지 확인
 ArgumentCaptor&lt;Order&gt; captor = ArgumentCaptor.forClass(Order.class);
@@ -25440,7 +26065,7 @@ LoadingCache&lt;Long, Product&gt; cache = Caffeine.newBuilder()
     .maximumSize(10_000)                       // 넘치면 LFU 근사로 축출
     .expireAfterWrite(Duration.ofMinutes(5))   // TTL
     .recordStats()                             // 히트율 측정
-    .build(id -&gt; productRepo.findById(id));    // 미스 시 로딩
+    .build(id -&gt; productRepo.findById(id).orElse(null));  // 미스 시 로딩 (null 이면 캐시 안 함)
 
 Product p = cache.get(15L);   // 있으면 즉시, 없으면 DB → 캐시</code></pre>
       <div class="note" style="margin-bottom:0">
@@ -25548,7 +26173,7 @@ spring:
       mail.smtp.auth: true
       mail.smtp.starttls.enable: true</code></pre>
       <pre class="code" data-lang="java"><code><span class="t-ann">@Async</span>                              // ★ 발송은 반드시 비동기로
-public void sendWelcome(User user) {
+public void sendWelcome(User user) throws MessagingException {
     MimeMessage msg = mailSender.createMimeMessage();
     MimeMessageHelper h = new MimeMessageHelper(msg, true, "UTF-8");
     h.setTo(user.email());
@@ -25640,7 +26265,10 @@ MatrixToImageWriter.writeToPath(m, "PNG", Path.of("qr.png"));
       <h4 class="mini" style="margin-top:0">CSV — Commons CSV 로 안전하게</h4>
       <pre class="code" data-lang="java"><code>// implementation "org.apache.commons:commons-csv"
 // 읽기 — 따옴표·쉼표 포함 필드·줄바꿈까지 규격대로 처리
-try (Reader r = Files.newBufferedReader(path, UTF_8)) {
+// 엑셀이 저장한 UTF-8 CSV 는 BOM 이 붙어 첫 헤더가 "﻿이름" 이 됩니다 —
+// 그대로 읽으면 rec.get("이름") 이 실패하므로 BOMInputStream 으로 걷어 내고 읽습니다
+try (Reader r = new InputStreamReader(
+        BOMInputStream.builder().setPath(path).get(), UTF_8)) {
     for (CSVRecord rec : CSVFormat.RFC4180.builder()
             .setHeader().setSkipHeaderRecord(true).build().parse(r)) {
         String name = rec.get("이름");
@@ -25926,8 +26554,8 @@ public class OrderService {
             .ifPresent(System.out::println);
     }
 
-    void returnNull() {
-        // return null;            // ❌ non-null 로 선언한 메서드가 null 반환
+    Order returnNull() {
+        return null;               // ❌ non-null 로 선언한 메서드가 null 반환
     }
 }</code></pre>
     </div>
@@ -26714,11 +27342,16 @@ textField.textProperty().bindBidirectional(model.nameProperty());</code></pre>
     public IntegerProperty qtyProperty()      { return qty; }
     public IntegerProperty priceProperty()    { return price; }
     public BooleanProperty savingProperty()   { return saving; }
+
+    // Spinner 연결용 — asObject() 결과는 꼭 필드로 붙잡아 둡니다 (아래 설명)
+    public final ObjectProperty&lt;Integer&gt; qtyObject = qty.asObject();
 }</code></pre>
       <pre class="code" data-lang="java"><code>// 화면과 묶기 — 이게 전부입니다
 customerField.textProperty().bindBidirectional(form.customerProperty());
+// 양방향 바인딩은 양쪽을 약한 참조로만 쥡니다 — 여기서 form.qtyProperty().asObject() 를
+// 바로 넘기면 그 임시 객체가 GC 되는 순간 연결이 조용히 끊깁니다
 qtySpinner.getValueFactory().valueProperty()
-          .bindBidirectional(form.qtyProperty().asObject());
+          .bindBidirectional(form.qtyObject);
 
 totalLabel.textProperty().bind(form.total.asString("합계 %,d 원"));
 
@@ -26739,18 +27372,21 @@ progress.visibleProperty().bind(form.savingProperty());</code></pre>
           <tr><td>값이 두 번 갱신됨</td><td>양방향 바인딩 + 리스너를 함께 걸었을 때</td></tr>
         </table>
       </div>
-      <pre class="code" data-lang="java"><code>// ✗ 중간 바인딩을 지역 변수로 두면 GC 되어 조용히 멈춥니다
+      <pre class="code" data-lang="java"><code>// ✗ 중간 바인딩을 지역 변수로 두고 리스너만 달면 GC 되어 조용히 멈춥니다
+//   (바인딩은 원본 프로퍼티를 약한 참조로만 구독합니다 — b 를 붙잡는 곳이 없음)
 {
     var b = form.qtyProperty().multiply(form.priceProperty());
-    label.textProperty().bind(b.asString());
-}   // b 가 수거되면 갱신이 끊깁니다
+    b.addListener((obs, o, n) -&gt; updateChart(n));
+}   // b 가 수거되면 리스너도 함께 끊깁니다
+//   label.textProperty().bind(b.asString()) 처럼 UI 에 bind 해 두면
+//   라벨이 b 를 붙잡으므로 이 문제는 없습니다
 
 // ✓ 필드로 보관하세요
 private final NumberBinding total =
         form.qtyProperty().multiply(form.priceProperty());
 
 // ✗ 백그라운드 스레드에서 UI 프로퍼티 변경
-new Thread(() -&gt; statusLabel.setText("완료")).start();   // 예외
+new Thread(() -&gt; statusLabel.setText("완료")).start();   // 예외가 나거나, 예외 없이 화면이 깨집니다
 
 // ✓ FX 스레드로 넘기거나
 Platform.runLater(() -&gt; statusLabel.setText("완료"));
@@ -26960,6 +27596,7 @@ public class OrderRow {
     public ObjectProperty&lt;LocalDate&gt; orderDateProperty() { return orderDate; }
 
     public String getOrderNo() { return orderNo.get(); }
+    public String getCustomerName() { return customerName.get(); }   // 아래 검색 필터가 씁니다
     public int getAmount() { return amount.get(); }
     public void setAmount(int v) { amount.set(v); }    // 값을 바꾸면 표가 자동 갱신 ✅
 }
@@ -27007,6 +27644,8 @@ searchField.textProperty().addListener((obs, old, keyword) -&gt;
 
 // 5) 편집 가능하게
 table.setEditable(true);
+// ★ 3) 의 셀 팩토리를 덮어씁니다 — 콤마·색 서식이 사라집니다.
+//   서식과 편집을 함께 원하면 TextFieldTableCell 을 상속해 updateItem 에 3) 의 서식을 넣으세요
 amountCol.setCellFactory(TextFieldTableCell.forTableColumn(
         new NumberStringConverter()));
 amountCol.setOnEditCommit(e -&gt;
@@ -27214,7 +27853,8 @@ button.setId("myButton");</code></pre>
   <div class="note warn rv">
     <b>절대 규칙</b> — 모든 UI 조작은 <b>JavaFX 애플리케이션 스레드</b>에서만 해야 합니다.
     <br>· UI 스레드에서 <b>오래 걸리는 작업</b>(DB·파일·API)을 하면 <b>화면이 멈춥니다.</b>
-    <br>· 반대로 <b>다른 스레드에서 UI 를 건드리면</b> <code>IllegalStateException: Not on FX application thread</code> 가 납니다.
+    <br>· 반대로 <b>다른 스레드에서 UI 를 건드리면</b> <code>IllegalStateException: Not on FX application thread</code> 가 나거나(노드 추가·창 열기 등),
+    검사하지 않는 조작(<code>setText</code> 등)은 <b>예외 없이 화면이 조용히 깨집니다</b> — 예외가 안 났다고 안전한 게 아닙니다.
   </div>
 
   <div class="vs rv">
@@ -27364,6 +28004,10 @@ new SequentialTransition(fade, move).play();</code></pre>
       <h4 class="mini" style="margin-top:0">jpackage — JDK 내장 (권장)</h4>
       <pre class="code" data-lang="bash"><code># 1) 실행 가능한 jar 를 먼저 만든다
 ./gradlew build
+#    ★ build/libs 에는 내 jar 하나뿐입니다. JavaFX jar 가 없으면 설치본이
+#      "JavaFX runtime components are missing" 으로 뜨지 않습니다 —
+#      의존성 jar 까지 한 폴더에 모아 --input 으로 주거나(installDist 의 lib),
+#      아래 jlink 플러그인 방식으로 런타임에 JavaFX 모듈을 넣으세요
 
 # 2) 런타임을 포함한 설치 파일 생성
 jpackage \
@@ -27399,7 +28043,7 @@ jlink {
     <div class="card">
       <h4 class="mini" style="margin-top:0">배포 체크리스트</h4>
       <ul class="tx">
-        <li><b>인코딩</b> — <code>-Dfile.encoding=UTF-8</code> 을 꼭 넣으세요. 안 넣으면 윈도우에서 한글이 깨집니다</li>
+        <li><b>인코딩</b> — JDK 18 부터 <code>file.encoding</code> 기본값이 UTF-8 이라 25 에서는 생략해도 되지만, <code>-Dfile.encoding=UTF-8</code> 을 명시해 두면 JDK 17 이하 런타임에서도 윈도우 한글이 안 깨집니다</li>
         <li><b>아이콘</b> — 윈도우는 <code>.ico</code>, 맥은 <code>.icns</code></li>
         <li><b>설정 파일 위치</b> — 설치 폴더는 <b>쓰기 권한이 없을 수</b> 있습니다.
             사용자 설정은 <code>System.getProperty("user.home")</code> 아래에 저장하세요</li>
@@ -27521,6 +28165,8 @@ public class LazyRows extends AbstractList&lt;Row&gt; {
     };
     private final int total, pageSize = 200;
 
+    public LazyRows(int total) { this.total = total; }   // 전체 건수만 먼저 받는다
+
     @Override public Row get(int i) {
         List&lt;Row&gt; page = pages.computeIfAbsent(i / pageSize, repo::loadPage);
         return page.get(i % pageSize);
@@ -27561,7 +28207,9 @@ table.setItems(FXCollections.observableList(new LazyRows(repo.count())));</code>
     <div class="card">
       <h4 class="mini" style="margin-top:0">jpackage — JRE 를 품은 설치본</h4>
       <pre class="code" data-lang="bash"><code># 1) 필요한 모듈만 담은 런타임을 만든다 (용량 절반 이하)
-jlink --add-modules java.base,java.logging,java.sql,\
+#    JavaFX 는 JDK 에 없으므로 javafx-jmods 폴더를 --module-path 로 알려 줘야 합니다
+jlink --module-path "$JAVAFX_JMODS" \
+      --add-modules java.base,java.logging,java.sql,\
 javafx.controls,javafx.fxml \
       --strip-debug --no-header-files --no-man-pages --compress=zip-6 \
       --output build/runtime
@@ -27902,7 +28550,9 @@ class CacheConfig {
 <span class="t-ann">@Service</span>
 class ProductService {
 
-    <span class="t-ann">@Cacheable</span>(value = "product", key = "#id")
+    // 위에서 null 저장을 막았으므로 null 결과는 넣지 말라고 알려 줘야 합니다
+    // (빠뜨리면 없는 id 를 조회할 때 "does not allow 'null' values" 예외)
+    <span class="t-ann">@Cacheable</span>(value = "product", key = "#id", unless = "#result == null")
     public ProductDto find(Long id) { ... }        // 결과를 캐싱
 
     <span class="t-ann">@CacheEvict</span>(value = "product", key = "#dto.id")
@@ -28143,13 +28793,17 @@ redis.executePipelined((RedisCallback&lt;Object&gt;) conn -&gt; {
             long ttl = 600 + ThreadLocalRandom.current().nextInt(60);   // ★ 흩뿌리기
             redis.opsForValue().set(key, dto, Duration.ofSeconds(ttl));
             return dto;
-        } finally { redis.delete(lockKey); }
+        } finally { redis.delete(lockKey); }   // DB 조회가 3초를 넘기면 남의 락을 지울 수 있음 — 엄밀함이 필요하면 k06 Redisson
     }
-    // 못 얻은 요청은 짧게 기다렸다가 캐시를 다시 본다
-    try { Thread.sleep(50); }
-    catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-    var retry = redis.opsForValue().get(key);
-    return retry != null ? (ProductDto) retry : repository.findDto(id);
+    // 못 얻은 요청은 캐시가 채워질 때까지 짧게 여러 번 다시 본다 (최대 약 1초)
+    // — 한 번만 보고 DB 로 가면, 쿼리가 50ms 보다 느릴 때 나머지 요청이 전부 DB 로 몰립니다
+    for (int i = 0; i &lt; 20; i++) {
+        try { Thread.sleep(50); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+        var retry = redis.opsForValue().get(key);
+        if (retry != null) return (ProductDto) retry;
+    }
+    return repository.findDto(id);   // 그래도 없으면 최후의 수단
 }</code></pre>
     </div>
     <div class="card">
@@ -28479,14 +29133,25 @@ class PaymentController {
 create index idx_pm_at on processed_message (processed_at);  -- 오래된 것 정리용</code></pre>
       <pre class="code" data-lang="java"><code><span class="t-ann">@Transactional</span>
 public void handle(OrderEvent e) {
-    try {
-        processedRepo.save(new Processed(e.messageId(), "order-consumer"));
-    } catch (DataIntegrityViolationException dup) {
+    // save() 후 중복 예외를 잡는 방식은 안 됩니다 — JPA 는 INSERT 를 커밋(flush) 때 보내고,
+    // id 를 직접 넣은 엔티티는 merge 로 처리돼 중복이어도 예외가 안 날 수 있으며,
+    // 예외가 나도 트랜잭션이 rollback-only 가 됩니다. 그래서 "넣어 보고 몇 건 들어갔나"로 판정합니다
+    int inserted = processedRepo.insertIfAbsent(e.messageId(), "order-consumer");
+    if (inserted == 0) {
         log.info("이미 처리한 메시지 {} — 건너뜁니다", e.messageId());
         return;                                     // ★ 조용히 성공 처리
     }
     orderService.apply(e);      // 같은 트랜잭션 → 실패하면 이력도 롤백
-}</code></pre>
+}
+
+// Repository
+<span class="t-ann">@Modifying</span>
+<span class="t-ann">@Query</span>(value = """
+    insert into processed_message (message_id, consumer, processed_at)
+    values (:id, :consumer, now())
+    on conflict (message_id) do nothing
+    """, nativeQuery = true)            // MySQL 이면 insert ignore
+int insertIfAbsent(<span class="t-ann">@Param</span>("id") String id, <span class="t-ann">@Param</span>("consumer") String consumer);</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">더 나은 방법 — 애초에 멱등한 연산으로</h4>
@@ -28614,6 +29279,8 @@ on conflict (tx_id) do nothing;</code></pre>
       auto-offset-reset: latest     # 새 그룹이 어디부터 읽을지 (earliest = 처음부터)
       enable-auto-commit: false     # ★ 수동 커밋 (처리 성공 후에만)
       max-poll-records: 100
+      key-deserializer:   org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer   # 없으면 String 으로 와서 OrderCreated 변환 실패
       properties:
         max.poll.interval.ms: 300000   # 이 시간 넘게 처리하면 그룹에서 쫓겨납니다
         spring.json.trusted.packages: "com.myapp.event"
@@ -28744,7 +29411,7 @@ kafka-metadata-quorum.sh --bootstrap-server kafka1:9092 describe --status</code>
       <h4 class="mini" style="margin-top:0">재시도 · DLQ — 죽은 메시지 보관소</h4>
       <pre class="code" data-lang="java"><code><span class="t-ann">@Bean</span>
 DefaultErrorHandler errorHandler(KafkaTemplate&lt;String, Object&gt; template) {
-    // 3회 실패하면 order.created.DLT 토픽으로 보낸다
+    // 처음 1번 + 재시도 3번이 모두 실패하면 order.created.DLT 토픽으로 보낸다
     var recoverer = new DeadLetterPublishingRecoverer(template,
         (record, ex) -&gt; new TopicPartition(record.topic() + ".DLT", -1));
 
@@ -28838,9 +29505,11 @@ public void order(OrderRequest req) {
 // ② 별도 스케줄러가 안 보낸 것만 골라 발행
 <span class="t-ann">@Scheduled</span>(fixedDelay = 1000)
 <span class="t-ann">@Transactional</span>
-public void relay() {
+public void relay() throws Exception {
     for (var box : outboxRepository.findTop100Pending()) {
-        kafka.send(box.getEventType(), box.getKey(), box.getPayload());
+        // send() 는 비동기 — 결과를 기다리지 않고 표시하면 발행 실패분이 "보냄"으로 남아 사라집니다
+        kafka.send(box.getEventType(), box.getKey(), box.getPayload())
+             .get(5, TimeUnit.SECONDS);    // 브로커 확인(ack)을 받은 뒤에만
         box.markPublished();               // 더티 체킹으로 UPDATE
     }
 }</code></pre>
@@ -28997,6 +29666,9 @@ public void relay() {
       </div>
       <pre class="code" data-lang="yaml"><code>resilience4j:
   circuitbreaker:
+    # 기본 순서는 Retry 가 서킷 브레이커 "바깥" 입니다 — 그러면 브레이커의 폴백이 먼저
+    # 실패를 삼켜 재시도가 한 번도 안 일어납니다. 숫자가 작을수록 바깥이므로 뒤집어 줍니다
+    circuit-breaker-aspect-order: 1
     instances:
       recommend:
         sliding-window-type: COUNT_BASED
@@ -29007,16 +29679,20 @@ public void relay() {
         slow-call-rate-threshold: 60      # 느린 호출도 실패로 셈
         wait-duration-in-open-state: 10s  # 10초 뒤 HALF_OPEN 으로 탐색
         permitted-number-of-calls-in-half-open-state: 3
-  timelimiter:
-    instances:
+  timelimiter:                     # @TimeLimiter + CompletableFuture 반환 메서드에만 걸립니다
+    instances:                     # (아래 동기 메서드는 HTTP 클라이언트 읽기 타임아웃으로 끊으세요)
       recommend: { timeout-duration: 2s }
   retry:
+    retry-aspect-order: 2          # ★ 서킷 브레이커(1) 안쪽
     instances:
       recommend:
         max-attempts: 3
         wait-duration: 200ms
         exponential-backoff-multiplier: 2
-        retry-exceptions: [java.io.IOException]
+        # RestClient·RestTemplate 은 IOException 을 ResourceAccessException 으로 감싸 던집니다
+        retry-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - java.io.IOException
   bulkhead:
     instances:
       recommend: { max-concurrent-calls: 20 }   # ★ 이 기능은 최대 20개까지만</code></pre>
@@ -29186,9 +29862,10 @@ resilience4j:
         timeout-duration: 500ms       # 500ms 까지는 줄 서서 기다림</code></pre>
       <pre class="code" data-lang="java"><code><span class="t-ann">@RateLimiter(name = "orderApi", fallbackMethod = "tooMany")</span>
 <span class="t-ann">@PostMapping("/orders")</span>
-OrderRes create(<span class="t-ann">@RequestBody</span> OrderReq req) { ... }
+ResponseEntity&lt;OrderRes&gt; create(<span class="t-ann">@RequestBody</span> OrderReq req) { ... }
 
-ResponseEntity&lt;?&gt; tooMany(OrderReq req, RequestNotPermitted e) {
+// 폴백은 원본과 반환 타입이 같아야 합니다 — 다르면 "No fallback method match found"
+ResponseEntity&lt;OrderRes&gt; tooMany(OrderReq req, RequestNotPermitted e) {
     return ResponseEntity.status(429)
         .header("Retry-After", "1").build();
 }</code></pre>
@@ -29772,7 +30449,7 @@ public class MyBench {
       <rect class="bx bx-hi" x="16" y="192" width="648" height="60"/>
       <text x="32" y="212" class="val">여기서 따라 나오는 실무 규칙</text>
       <text x="32" y="230" class="ann">벤치마크는 예열 구간을 빼고 재세요 — 첫 회 수치는 아무 의미가 없습니다</text>
-      <text x="32" y="246" class="ann">같은 자리에 늘 같은 타입이 오는 코드가 유리합니다 — 인터페이스 구현이 두세 개면 인라인이 됩니다</text>
+      <text x="32" y="246" class="ann">같은 자리에 늘 같은 타입이 오는 코드가 유리합니다 — 구현 1~2개는 인라인, 3개부터(메가모픽)는 안 됨</text>
 
       <text x="16" y="270" class="lbl">시작 속도가 중요한 워크로드라면 AOT 나 네이티브 이미지를 검토하세요 — 예열이 필요 없습니다</text>
       <text x="16" y="286" class="lbl">확인은 -XX:+PrintCompilation 이나 JFR 로 — 무엇이 컴파일되고 되돌아갔는지 볼 수 있습니다</text>
@@ -29842,7 +30519,7 @@ ServiceLoader.load(PaymentProvider.class)
              .forEach(p -&gt; registry.put(p.name(), p));
 // ★ jar 만 추가하면 기능이 늘어나는 구조 (JDBC 드라이버가 이 방식)</code></pre>
       <div class="note tip" style="margin-bottom:0">
-        <b>스프링 부트의 fat jar</b> 는 자체 <code>LaunchedURLClassLoader</code> 로
+        <b>스프링 부트의 fat jar</b> 는 자체 <code>LaunchedClassLoader</code>(Boot 3.1 이하는 <code>LaunchedURLClassLoader</code>) 로
         <code>BOOT-INF/lib</code> 안의 jar 를 로딩합니다.
         그래서 <b>jar 안의 jar</b> 를 그냥 클래스패스에 넣으면 동작하지 않습니다.
       </div>
@@ -30530,7 +31207,7 @@ ByteBuffer direct = ByteBuffer.allocateDirect(1024);
 //   → 힙에 여유가 있으면 GC 가 안 돌고 → 네이티브 메모리만 계속 증가
 //   → OutOfMemoryError: Direct buffer memory
 // 해결: 풀링(Netty 가 하는 일)하거나 MaxDirectMemorySize 를 명시</code></pre>
-      <pre class="code" data-lang="java"><code>// Java 21+ — Foreign Function &amp; Memory API (Unsafe 의 공식 후계)
+      <pre class="code" data-lang="java"><code>// Java 22+ — Foreign Function &amp; Memory API (Unsafe 의 공식 후계 · 21 에서는 프리뷰)
 try (Arena arena = Arena.ofConfined()) {          // ★ 명시적 수명 관리
     MemorySegment seg = arena.allocate(1024);
     seg.set(ValueLayout.JAVA_INT, 0, 42);
@@ -30649,7 +31326,7 @@ try {
       <pre class="code" data-lang="java"><code>// 리플렉션 — 매 호출마다 접근 검사·박싱
 Method m = User.class.getMethod("getName");
 m.setAccessible(true);
-Object name = m.invoke(user);              // 느림
+Object viaReflection = m.invoke(user);     // 느림
 
 // MethodHandle — JIT 이 인라이닝할 수 있습니다
 MethodHandles.Lookup lookup = MethodHandles.lookup();
@@ -30668,7 +31345,8 @@ Function&lt;User, String&gt; getter = (Function&lt;User, String&gt;) LambdaMetaf
         mh, MethodType.methodType(String.class, User.class))
     .getTarget().invokeExact();
 getter.apply(user);        // 직접 호출과 거의 같은 속도
-// ★ Jackson·MapStruct 같은 라이브러리가 내부에서 쓰는 기법입니다</code></pre>
+// ★ Jackson 의 Blackbird 모듈 같은 라이브러리가 내부에서 쓰는 기법입니다
+//   (MapStruct 는 이것조차 없이 컴파일 때 평범한 코드를 생성합니다 — 아래)</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>람다도 이 위에 서 있습니다.</b>
         자바 람다는 익명 클래스가 아니라
@@ -30864,7 +31542,7 @@ trivy image myapp:latest
 grype myapp:latest</code></pre>
       <pre class="code" data-lang="kotlin"><code>// 버전을 한 곳에서 고정 — BOM
 dependencies {
-    implementation(platform("org.springframework.boot:spring-boot-dependencies:3.4.0"))
+    implementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
     implementation("org.springframework.boot:spring-boot-starter-webmvc")  // 버전 생략
 }
 
@@ -31140,7 +31818,9 @@ RestClient restClient(RestClient.Builder builder) {
         new HttpComponentsClientHttpRequestFactory(
             HttpClients.custom()
                 .setConnectionManager(PoolingHttpClientConnectionManagerBuilder
-                    .create().setMaxConnTotal(100).build())
+                    .create().setMaxConnTotal(100)
+                    .setMaxConnPerRoute(50)   // ★ 기본은 호스트당 5개 — 안 올리면 한 API 에 5개만 동시에
+                    .build())
                 .build())).build();
 }
 
@@ -31148,6 +31828,8 @@ RestClient restClient(RestClient.Builder builder) {
 if (log.isDebugEnabled()) log.debug("복잡한 계산: {}", expensive());
 // 또는 람다로 (Log4j2)
 log.debug("결과: {}", () -&gt; expensive());
+// SLF4J(@Slf4j) 라면 2.x 의 fluent API 로
+log.atDebug().addArgument(() -&gt; expensive()).log("결과: {}");
 
 // ③ 응답에서 필요 없는 필드 제거
 // 100KB → 10KB 면 직렬화·전송·파싱이 모두 10배 빨라집니다</code></pre>
@@ -31421,7 +32103,7 @@ jlink --add-modules "$DEPS" \
       <pre class="code" data-lang="text"><code>Dockerfile 2단계 빌드에 그대로 붙습니다
 
   FROM eclipse-temurin:25-jdk AS build
-  RUN jlink --add-modules java.base,java.logging,java.sql,jdk.crypto.ec \
+  RUN jlink --add-modules java.base,java.logging,java.sql \
             --strip-debug --no-header-files --no-man-pages --output /runtime
 
   FROM debian:stable-slim
@@ -31429,7 +32111,8 @@ jlink --add-modules "$DEPS" \
   COPY app.jar /app.jar
   ENTRYPOINT ["/opt/java/bin/java","-jar","/app.jar"]
 
-⚠️ jdk.crypto.ec 를 빼면 TLS 핸드셰이크가 조용히 실패합니다.
+⚠️ JDK 21 이하라면 jdk.crypto.ec 를 빼면 TLS 핸드셰이크가 조용히 실패합니다.
+   (JDK 22 부터 EC 구현이 java.base 로 옮겨져 25 에서는 넣지 않아도 됩니다)
    jdk.unsupported 를 빼면 Unsafe 를 쓰는 라이브러리가 죽습니다.
    ★ 줄인 뒤에는 반드시 통합 테스트를 다시 돌리세요.</code></pre>
       <div class="note tip" style="margin-bottom:0">
@@ -32109,10 +32792,11 @@ where.exe java
 # C:\Program Files\Eclipse Adoptium\jdk-25.0.2.12-hotspot\bin\java.exe
 # ↑ 여러 줄이 나오면 JDK 가 여러 개 깔린 것입니다. 맨 윗줄이 이깁니다 (st03)
 
-# ⑤ 진짜로 도는지 — 컴파일 없이 한 줄 실행
-'System.out.println("설치 성공! " + Runtime.version());' | Out-File -Encoding utf8 T.jsh
-jshell --execution local T.jsh
-# 설치 성공! 25.0.2+12</code></pre>
+# ⑤ 진짜로 도는지 — 컴파일 없이 한 줄 실행 (jshell 대화형)
+jshell
+jshell&gt; System.out.println("설치 성공! " + Runtime.version())
+# 설치 성공! 25.0.2+12
+jshell&gt; /exit</code></pre>
     <div class="grid2" style="margin-top:14px">
       <div class="note tip" style="margin-bottom:0">
         <b>네 개가 전부 나와야 “깔렸다”입니다.</b>
@@ -32362,8 +33046,10 @@ Get-ChildItem 'C:\Program Files\Eclipse Adoptium','C:\Program Files\Java' -Error
   'User')
 
 # PATH 앞에 붙이기 (기존 값을 읽어 앞에 이어 붙입니다)
+# ⚠️ 이 방법은 REG_SZ 로 저장돼 %JAVA_HOME% 이 펼쳐지지 않습니다 → 실제 경로를 넣습니다
 $old = [Environment]::GetEnvironmentVariable('Path','User')
-[Environment]::SetEnvironmentVariable('Path', '%JAVA_HOME%\bin;' + $old, 'User')
+[Environment]::SetEnvironmentVariable('Path',
+  'C:\Program Files\Eclipse Adoptium\jdk-25.0.2.12-hotspot\bin;' + $old, 'User')
 # ↑ 저장 후에는 터미널을 새로 열어야 반영됩니다
 
 # ── 이 창에서만 (실험용 · 재부팅 없이 즉시) ──
@@ -32796,12 +33482,16 @@ java {
 &lt;plugin&gt;
   &lt;artifactId&gt;maven-toolchains-plugin&lt;/artifactId&gt;
   &lt;version&gt;3.2.0&lt;/version&gt;
+  &lt;executions&gt;
+    &lt;execution&gt;&lt;goals&gt;&lt;goal&gt;toolchain&lt;/goal&gt;&lt;/goals&gt;&lt;/execution&gt;
+  &lt;/executions&gt;
   &lt;configuration&gt;
     &lt;toolchains&gt;
       &lt;jdk&gt;&lt;version&gt;21&lt;/version&gt;&lt;/jdk&gt;
     &lt;/toolchains&gt;
   &lt;/configuration&gt;
-&lt;/plugin&gt;</code></pre>
+&lt;/plugin&gt;
+&lt;!-- JDK 위치는 ~/.m2/toolchains.xml 에 적어 둡니다 --&gt;</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b><code>release</code> 와 <code>source/target</code> 의 차이</b> —
         옛날 방식인 <code>source</code>/<code>target</code> 은 <b>문법만</b> 옛 버전으로 맞추고
@@ -34173,7 +34863,8 @@ RUN ./gradlew dependencies --no-daemon   # 의존성만 먼저 (캐시 층)
 COPY src src
 RUN ./gradlew bootJar --no-daemon
 
-FROM eclipse-temurin:21-jre             # 실행에는 JRE 이미지로 충분합니다
+# 실행에는 JRE 이미지로 충분합니다 (Dockerfile 은 명령 줄 끝 주석을 허용하지 않습니다)
+FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=build /src/build/libs/*.jar app.jar
 ENV TZ=Asia/Seoul
@@ -35196,7 +35887,7 @@ private static final DateTimeFormatter FMT =
 private static final ScopedValue&lt;RequestCtx&gt; CTX = ScopedValue.newInstance();
 
 // ✅ 해법 3 — 진짜 풀링이 필요하면 명시적 객체 풀 (드뭅니다)</code></pre>
-      <pre class="code" data-lang="bash"><code># Java 24+ : 가상 스레드가 ThreadLocal 을 쓰는 지점을 찾아 줍니다
+      <pre class="code" data-lang="bash"><code># Java 21+ : 가상 스레드가 ThreadLocal 을 쓰는 지점을 찾아 줍니다
 java -Djdk.traceVirtualThreadLocals -jar app.jar
 #   ThreadLocal.set() 이 호출될 때마다 스택을 찍습니다 (개발용)</code></pre>
     </div>
@@ -35205,7 +35896,8 @@ java -Djdk.traceVirtualThreadLocals -jar app.jar
       <pre class="code" data-lang="bash"><code># ① 지금 살아 있는 가상 스레드가 몇 개인가 — jstack 은 못 씁니다 ★
 jcmd &lt;pid&gt; Thread.dump_to_file -format=json /tmp/vt.json
 #   가상 스레드까지 포함한 전체 덤프입니다.
-#   -format=text 는 플랫폼 스레드만 나옵니다(= jstack 과 동일).
+#   -format=text 도 가상 스레드를 포함하지만, 세고 묶으려면 json 이 편합니다.
+#   (jstack · jcmd Thread.print 는 가상 스레드를 보여 주지 않습니다)
 
 # 개수만 빠르게 세기
 python3 -c "import json;d=json.load(open('/tmp/vt.json'));\
@@ -35643,8 +36335,8 @@ AsyncTaskExecutor applicationTaskExecutor() {
 
   <div class="note warn">
     <b>버전 상태를 먼저 확인하세요 (2026-08 기준)</b> —
-    <code>StructuredTaskScope</code> 는 Java 21 에서 <b>인큐베이터</b>로 나와
-    24 에서 프리뷰(JEP 499), <b>25 에서 5차 프리뷰</b>(JEP 505), 26 에서 6차 프리뷰(JEP 525)로 이어졌습니다.
+    <code>StructuredTaskScope</code> 는 Java 19 에서 <b>인큐베이터</b>로 나와
+    21 에서 프리뷰(JEP 453)가 됐고, 24 에서 4차 프리뷰(JEP 499), <b>25 에서 5차 프리뷰</b>(JEP 505), 26 에서 6차 프리뷰(JEP 525)로 이어졌습니다.
     <b>아직 정식 API 가 아니며</b> <code>--enable-preview</code> 가 필요하고,
     <b>21~24 와 25+ 의 API 모양이 다릅니다.</b> 아래 코드는 <b>Java 25 기준</b>이며,
     옛 형태도 함께 적어 둡니다. 공용 라이브러리에는 아직 넣지 마세요.
@@ -35697,7 +36389,7 @@ try (var scope = StructuredTaskScope.open(
 
 // ② 전부 성공해야 하고, 결과를 스트림으로 받기
 try (var scope = StructuredTaskScope.open(
-        Joiner.&lt;Item, Stream&lt;Subtask&lt;Item&gt;&gt;&gt;allSuccessfulOrThrow())) {
+        Joiner.&lt;Item&gt;allSuccessfulOrThrow())) {      // 타입 인자는 하나 — 결과는 Stream&lt;Subtask&lt;Item&gt;&gt;
     ids.forEach(id -&gt; scope.fork(() -&gt; itemClient.find(id)));
     return scope.join().map(Subtask::get).toList();
 }
@@ -35720,7 +36412,8 @@ try (var scope = StructuredTaskScope.open(Joiner.&lt;Widget&gt;awaitAll())) {
       <h4 class="mini" style="margin-top:0">타임아웃을 하나만 걸면 됩니다</h4>
       <pre class="code" data-lang="java"><code>// 스코프 설정으로 이름과 제한 시간을 함께
 try (var scope = StructuredTaskScope.open(
-        Joiner.&lt;Dashboard&gt;awaitAllSuccessfulOrThrow(),
+        // 타입 인자는 "자식 작업의 결과 타입" — User·Order 를 함께 fork 하므로 Object
+        Joiner.&lt;Object&gt;awaitAllSuccessfulOrThrow(),
         cf -&gt; cf.withName("dashboard")
                 .withTimeout(Duration.ofMillis(800)))) {
 
@@ -35755,8 +36448,8 @@ CompletableFuture.allOf(f1, f2).join();
     if (cause instanceof HttpTimeoutException) return Dashboard.degraded();
     throw new ServiceException("대시보드 조회 실패", cause);
 
-} catch (TimeoutException e) {
-    // withTimeout 으로 걸었을 때
+} catch (StructuredTaskScope.TimeoutException e) {
+    // withTimeout 으로 걸었을 때 (java.util.concurrent.TimeoutException 이 아닙니다)
     return Dashboard.degraded();
 }
 
@@ -35803,7 +36496,7 @@ try {
         <div class="good">
           <h5>✅ 지금 — 새는 곳이 없습니다</h5>
           <pre class="code" data-lang="java"><code>try (var scope = StructuredTaskScope.open(
-        Joiner.&lt;Detail&gt;awaitAllSuccessfulOrThrow(),
+        Joiner.&lt;Object&gt;awaitAllSuccessfulOrThrow(),   // 자식 결과 타입이 제각각이라 Object
         cf -&gt; cf.withName("product-detail")
                 .withTimeout(Duration.ofSeconds(2)))) {
 
@@ -36176,7 +36869,7 @@ if (o instanceof Line(Point(var x1, var y1), Point p2)) {
     System.out.println(x1 + " → " + p2.x());
 }
 
-// ④ var 패턴 · 무시 패턴 (Java 21+)
+// ④ var 패턴 (Java 21+) · 무시 패턴 _ (Java 22+)
 if (o instanceof Line(var a, var _)) {     // _ = 안 쓰는 값
     System.out.println(a);
 }</code></pre>
@@ -36345,8 +37038,10 @@ if (o instanceof Box&lt;?&gt;(String s)) { s.length(); }   // s 는 String
 // enum 과 섞어 쓰기 — 한정된 이름을 그대로 씁니다
 sealed interface Cmd { record Move(Dir d, int n) implements Cmd {} }
 switch (cmd) {
-    case Move(Dir.UP, int n)   -&gt; y -= n;      // enum 상수도 패턴입니다
-    case Move(Dir.DOWN, int n) -&gt; y += n;
+    // 레코드 패턴 안에 enum 상수를 직접 쓸 수는 없습니다 — Move(Dir.UP, …) 는 컴파일 에러
+    // (상수를 case 라벨로 쓰는 건 enum 자체를 switch 할 때뿐) → 가드로 비교합니다
+    case Move(var d, var n) when d == Dir.UP   -&gt; y -= n;
+    case Move(var d, var n) when d == Dir.DOWN -&gt; y += n;
     case Move(var d, var n)    -&gt; other(d, n);
 }
 
@@ -36598,8 +37293,8 @@ Valhalla 프로젝트의 '값 클래스'는 여기에 답을 줍니다.
   · 배열이 진짜 '값의 배열'이 되어 C 구조체 배열처럼 촘촘해집니다
   · 동기화(synchronized)와 정체성 해시가 금지됩니다
 
-2026-08 기준: 아직 정식이 아닙니다. 프리뷰 단계의 기능이라
-운영 코드에 넣을 단계가 아닙니다.
+2026-08 기준: 아직 어떤 JDK 릴리스에도 프리뷰로조차 들어오지 않았습니다
+(JEP 401 — 🔬 전문가 탭 z05 참고). 운영 코드에 넣을 단계가 아닙니다.
 
 ★ 지금 할 수 있는 준비는 이것뿐입니다 —
   ① 값 타입은 record 로, 불변으로 만들어 두기
@@ -37113,7 +37808,9 @@ try (Arena arena = Arena.ofConfined()) {
     MemorySegment cmpPtr = linker.upcallStub(
             cmpHandle,
             FunctionDescriptor.of(ValueLayout.JAVA_INT,
-                                  ValueLayout.ADDRESS, ValueLayout.ADDRESS),
+                                  // ★ 그냥 ADDRESS 면 크기 0 짜리 세그먼트가 와서 get() 이 실패합니다
+                                  ValueLayout.ADDRESS.withTargetLayout(ValueLayout.JAVA_INT),
+                                  ValueLayout.ADDRESS.withTargetLayout(ValueLayout.JAVA_INT)),
             arena);                       // ★ 스텁의 수명도 arena 가 관리
 
     // ② qsort 에 넘깁니다
@@ -37311,7 +38008,8 @@ MemorySegment real = ptr.reinterpret(1024);   // 크기를 내가 알려 줍니�
       <pre class="code" data-lang="bash"><code># Java 25 기준 — 켜는 법은 한 줄뿐입니다
 java -XX:+UseZGC -jar app.jar
 #   세대별 ZGC 가 Java 23부터 기본입니다.
-#   -XX:+ZGenerational 플래그는 24부터 없어졌으니 넣지 마세요 (기동 실패)
+#   -XX:+ZGenerational 플래그는 24부터 없어졌으니 넣지 마세요
+#   (24 에서는 경고 후 무시되고, 플래그가 완전히 만료되면 기동 실패)
 
 # Shenandoah 도 세대별이 되었습니다 (Java 25, JEP 521)
 java -XX:+UseShenandoahGC -XX:ShenandoahGCMode=generational -jar app.jar
@@ -37342,8 +38040,8 @@ jcmd &lt;pid&gt; GC.class_histogram | head -5
 # 객체 하나의 크기를 직접 재기 (JOL)
 java -jar jol-cli.jar internals java.lang.Integer
 #   OFF  SZ   TYPE DESCRIPTION
-#     0   8   (object header: mark)     ← 압축 시 여기가 4바이트로
-#     8   4   (object header: class)</code></pre>
+#     0   8   (object header: mark)     ← 압축 시 클래스 정보가 여기로 합쳐집니다
+#     8   4   (object header: class)    ← 압축 시 이 줄이 사라져 헤더가 8바이트</code></pre>
       <p class="tx" style="font-size:13.6px">
         효과가 큰 쪽은 <b>작은 객체가 아주 많은 서비스</b>입니다 —
         엔티티 수십만 건을 올려 두는 캐시, 문자열·<code>Integer</code> 가 많은 파싱 서버,
@@ -37446,6 +38144,8 @@ jfr summary rec.jfr
 # Java 25 는 CPU 시간 기반 프로파일링이 추가됐습니다 (JEP 509, 리눅스)
 #   기존 샘플링은 '실행 중인 스레드'만 봤는데,
 #   이제 CPU 를 실제로 쓴 시간 기준으로 볼 수 있습니다
+#   기본 설정에서는 꺼져 있습니다 — 녹화 옵션에
+#   jdk.CPUTimeSample#enabled=true 를 더해야 이벤트가 쌓입니다
 jfr print --events jdk.CPUTimeSample rec.jfr | head -40
 
 # ② 마이크로 벤치는 반드시 JMH 로 — System.nanoTime 손계산은 거의 항상 틀립니다
@@ -37557,12 +38257,10 @@ dependencies {
           model: claude-opus-5
           max-tokens: 4096
           temperature: 0.2               # 사실 기반 답변은 낮게</code></pre>
-      <pre class="code" data-lang="java"><code>@RestController
-@RequiredArgsConstructor
-class AiController {
-
-    private final ChatClient chat;        // 아래 빈으로 주입
-
+      <pre class="code" data-lang="java"><code>// 빈은 설정 클래스에 둡니다 — 컨트롤러 안의 @Bean 이 자기 생성자에 주입되면
+// "컨트롤러를 만들려면 ChatClient, ChatClient 를 만들려면 컨트롤러" 순환으로 기동 실패
+@Configuration
+class AiConfig {
     @Bean
     ChatClient chatClient(ChatClient.Builder builder) {
         return builder
@@ -37573,6 +38271,13 @@ class AiController {
                 """)
             .build();
     }
+}
+
+@RestController
+@RequiredArgsConstructor
+class AiController {
+
+    private final ChatClient chat;        // 위 빈으로 주입
 
     @GetMapping("/ask")
     String ask(@RequestParam String q) {
@@ -37659,6 +38364,7 @@ public class IndexService {
       <h4 class="mini" style="margin-top:0">② 질의 — 검색 결과를 근거로 넣기</h4>
       <pre class="code" data-lang="java"><code>// 방법 A — 어드바이저에 맡기기 (가장 짧습니다)
 @Bean
+// ChatClient 빈이 둘이 되면 주입하는 쪽에 @Qualifier("ragClient") 를 붙입니다
 ChatClient ragClient(ChatClient.Builder b, VectorStore store) {
     return b.defaultAdvisors(
                 QuestionAnswerAdvisor.builder(store)
@@ -37706,6 +38412,7 @@ public Answer ask(String question) {
     <div class="card">
       <h4 class="mini" style="margin-top:0">툴 호출 — 모델이 내 코드를 부르게 하기</h4>
       <pre class="code" data-lang="java"><code>@Component
+@RequiredArgsConstructor
 public class OrderTools {
 
     private final OrderRepository repo;
@@ -37764,7 +38471,8 @@ meter.counter("ai.tokens", "type", "out").increment(usage.getCompletionTokens())
 private final Semaphore aiLimit = new Semaphore(20);   // 동시 호출 상한
 
 // ③ 캐시 — 같은 질문이 반복되는 서비스라면 효과가 아주 큽니다
-@Cacheable(value = "aiFaq", key = "#q.hashCode()")
+// key 를 hashCode 로 잡으면 해시 충돌 시 다른 질문의 답이 나갑니다 — 질문 자체를 키로
+@Cacheable(value = "aiFaq", key = "#q")
 String answerFaq(String q) { ... }
 
 // ④ 관측 — Spring AI 는 마이크로미터 관측을 기본 제공합니다
@@ -38837,7 +39545,8 @@ SLF4J(W): Actual provider is of type [...LogbackServiceProvider]
 #       \--- runtimeClasspath
 
 # ③ 실제 실행 시점의 클래스패스에서 중복 확인
-jar tf build/libs/app.jar | grep -i "SLF4JServiceProvider"</code></pre>
+#    (부트 fat jar 는 라이브러리가 BOOT-INF/lib 안의 jar 로 들어 있어 jar 이름으로 봅니다)
+jar tf build/libs/app.jar | grep -i -E "BOOT-INF/lib/(logback-classic|log4j-slf4j2?-impl|slf4j-(simple|reload4j|jdk14|log4j12))"</code></pre>
       <pre class="code" data-lang="kotlin"><code>// build.gradle.kts
 
 // ── A. 프로젝트 전체에서 특정 모듈을 빼기 (가장 확실)
@@ -38996,7 +39705,8 @@ configurations.all {
   &lt;include resource="org/springframework/boot/logging/logback/defaults.xml"/&gt;
 
   &lt;!-- application.yml 의 값을 XML 로 끌어오기 --&gt;
-  &lt;springProperty scope="context" name="APP" source="spring.application.name"/&gt;
+  &lt;springProperty scope="context" name="APP" source="spring.application.name"
+                  defaultValue="app"/&gt;   &lt;!-- 없으면 파일명이 APP_IS_UNDEFINED.log --&gt;
 
   &lt;property name="PATTERN"
       value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{traceId:-}] - %msg%n"/&gt;
@@ -39206,7 +39916,7 @@ java -Dlogback.debug=true -jar app.jar 2&gt;&amp;1 | head -40
         <tr><td>비동기 지점</td><td><b>appender 앞</b></td><td><b>logger 호출 직후</b></td></tr>
         <tr><td>자료구조</td><td><code>ArrayBlockingQueue</code></td><td><b>LMAX Disruptor</b> 링버퍼</td></tr>
         <tr><td>락</td><td>있음</td><td><b>락 없음</b> (CAS)</td></tr>
-        <tr><td>포맷 시점</td><td>큐에 넣기 전</td><td>소비 스레드에서</td></tr>
+        <tr><td>포맷 시점</td><td>큐에 넣기 전</td><td>호출 스레드(기본) — formatMsgAsync 로 미룰 수 있음</td></tr>
         <tr><td>가득 찼을 때</td><td>버리거나 블록</td><td>정책 선택 가능</td></tr>
         <tr><td>설정</td><td>XML 몇 줄</td><td>의존성 + 설정</td></tr>
       </table></div>
@@ -39214,7 +39924,7 @@ java -Dlogback.debug=true -jar app.jar 2&gt;&amp;1 | head -40
 &lt;appender name="ASYNC" class="ch.qos.logback.classic.AsyncAppender"&gt;
   &lt;queueSize&gt;8192&lt;/queueSize&gt;            &lt;!-- 기본 256 은 너무 작습니다 --&gt;
   &lt;discardingThreshold&gt;0&lt;/discardingThreshold&gt;
-  &lt;!-- 기본값 20 이면 큐가 80% 차는 순간 INFO 이하를 버립니다 ★ --&gt;
+  &lt;!-- 기본값(큐 크기의 1/5)이면 남은 칸이 20% 아래로 떨어지는 순간 INFO 이하를 버립니다 ★ --&gt;
   &lt;neverBlock&gt;false&lt;/neverBlock&gt;
   &lt;!-- true 면 큐가 꽉 찼을 때 로그를 버리고 애플리케이션은 안 멈춥니다 --&gt;
   &lt;includeCallerData&gt;false&lt;/includeCallerData&gt;
@@ -39223,7 +39933,7 @@ java -Dlogback.debug=true -jar app.jar 2&gt;&amp;1 | head -40
 &lt;/appender&gt;</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>기본값이 조용히 로그를 버립니다</b> — Logback <code>AsyncAppender</code> 의
-        <code>discardingThreshold</code> 기본값은 <b>20</b>입니다.
+        <code>discardingThreshold</code> 기본값은 <b>큐 크기의 1/5</b>(남은 칸 20%)입니다.
         큐가 80% 차면 <b>TRACE·DEBUG·INFO 를 말없이 버립니다</b>.
         “부하가 몰릴 때만 로그가 사라진다”는 신고의 원인이 대개 이것입니다.
         <b>버리기 싫으면 <code>0</code></b>, 대신 큐가 꽉 차면 애플리케이션이 기다립니다.
@@ -39273,8 +39983,9 @@ java -Dlog4j2.contextSelector=org.apache.logging.log4j.core.async.AsyncLoggerCon
       <div class="note tip" style="margin-bottom:0">
         <b>비동기의 대가</b> — ① <b>순서가 살짝 흔들릴 수 있고</b>,
         ② <b>프로세스가 죽으면 큐에 남은 로그가 사라지며</b>(그래서 종료 훅이 중요),
-        ③ 예외 스택을 나중에 포맷하므로 <b>가변 객체를 로그 인자로 넘기면 값이 달라집니다</b>.
-        마지막 항목은 실제로 디버깅을 어렵게 만드니, <b>불변 값이나 문자열을 넘기세요</b>.
+        ③ 기본값으로는 메시지를 호출 스레드에서 미리 포맷하지만(<code>log4j2.formatMsgAsync=false</code>),
+        이걸 켜서 포맷을 소비 스레드로 미루면 <b>가변 객체를 로그 인자로 넘겼을 때 값이 달라집니다</b>.
+        그 옵션을 켤 거라면 <b>불변 값이나 문자열을 넘기세요</b>.
       </div>
     </div>
   </div>
@@ -39416,11 +40127,15 @@ implementation("co.elastic.logging:logback-ecs-encoder:1.6.0")       // ECS 규�
   &lt;encoder class="net.logstash.logback.encoder.LogstashEncoder"&gt;
     &lt;includeMdcKeyName&gt;traceId&lt;/includeMdcKeyName&gt;
     &lt;includeMdcKeyName&gt;userId&lt;/includeMdcKeyName&gt;
+    &lt;!-- MDC 키를 ECS 식 필드 이름으로 바꿔 내보냅니다 (아래 출력·검색 예와 맞춤) --&gt;
+    &lt;mdcKeyFieldName&gt;traceId=trace.id&lt;/mdcKeyFieldName&gt;
+    &lt;mdcKeyFieldName&gt;userId=user.id&lt;/mdcKeyFieldName&gt;
     &lt;customFields&gt;{"service":"order-api","env":"prod"}&lt;/customFields&gt;
     &lt;fieldNames&gt;
       &lt;timestamp&gt;@timestamp&lt;/timestamp&gt;
       &lt;level&gt;log.level&lt;/level&gt;
       &lt;logger&gt;log.logger&lt;/logger&gt;
+      &lt;thread&gt;process.thread.name&lt;/thread&gt;
     &lt;/fieldNames&gt;
     &lt;throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter"&gt;
       &lt;maxDepthPerThrowable&gt;30&lt;/maxDepthPerThrowable&gt;
@@ -40034,7 +40749,8 @@ ls -l logs/app.log            # 크기 ÷ 줄 수
 #    30일 보관이면 압축해도 수백 GB — 여기서 비용이 결정됩니다
 
 # ④ 어떤 로거가 대부분을 차지하는지
-awk '{print $4}' logs/app.log | sort | uniq -c | sort -rn | head -20
+#    LOG 05 패턴이면 날짜·시각·[스레드]·레벨 다음 다섯째 칸이 로거입니다
+awk '{print $5}' logs/app.log | sort | uniq -c | sort -rn | head -20
 #   대개 상위 3개 로거가 전체의 80% 를 차지합니다 ★
 
 # ⑤ 같은 문구가 반복되는지 (묶어서 줄일 후보)
@@ -40055,22 +40771,21 @@ public class SamplingFilter extends OncePerRequestFilter {
     protected void doFilterInternal(...) {
         boolean sampled = ThreadLocalRandom.current().nextDouble() &lt; RATE;
         MDC.put("sampled", String.valueOf(sampled));
-        try { chain.doFilter(req, res); } finally { MDC.clear(); }
+        try { chain.doFilter(req, res); } finally { MDC.remove("sampled"); }   // 남의 키(traceId)까지 지우지 않게
     }
 }</code></pre>
-      <pre class="code" data-lang="xml"><code>&lt;!-- MDC 값으로 appender 를 통과시키기 --&gt;
-&lt;appender name="DEBUG_FILE" class="...RollingFileAppender"&gt;
-  &lt;filter class="ch.qos.logback.core.filter.EvaluatorFilter"&gt;
-    &lt;evaluator class="ch.qos.logback.classic.boolex.OnMarkerEvaluator"&gt;
-      &lt;marker&gt;SAMPLED&lt;/marker&gt;
-    &lt;/evaluator&gt;
-    &lt;OnMismatch&gt;DENY&lt;/OnMismatch&gt;
-    &lt;OnMatch&gt;ACCEPT&lt;/OnMatch&gt;
-  &lt;/filter&gt;
-  ...
-&lt;/appender&gt;
+      <pre class="code" data-lang="xml"><code>&lt;!-- MDC 값(sampled=true)으로 뽑힌 요청만 레벨 검사를 건너뛰게 합니다
+     터보 필터는 로거 레벨 검사보다 먼저 돌아서, 로거가 INFO 여도 DEBUG 가 통과합니다 --&gt;
+&lt;turboFilter class="ch.qos.logback.classic.turbo.MDCFilter"&gt;
+  &lt;MDCKey&gt;sampled&lt;/MDCKey&gt;
+  &lt;Value&gt;true&lt;/Value&gt;
+  &lt;OnMatch&gt;ACCEPT&lt;/OnMatch&gt;        &lt;!-- 뽑힌 요청: 모든 레벨 통과 --&gt;
+  &lt;OnMismatch&gt;NEUTRAL&lt;/OnMismatch&gt;  &lt;!-- 나머지: 평소 레벨대로 --&gt;
+&lt;/turboFilter&gt;
 
-&lt;!-- 같은 문구가 쏟아질 때 초당 개수를 제한 --&gt;
+&lt;!-- 같은 문구가 쏟아질 때 반복 횟수를 제한 — 시간 창이 아니라 캐시에서 밀려날 때까지 막힙니다
+     ⚠️ 인자를 넣기 전의 "틀"로 비교하므로 log.info("order={}", id) 도 5번 뒤부터 버려집니다.
+        문구가 고정된 시끄러운 로그에만 쓰세요 --&gt;
 &lt;turboFilter class="ch.qos.logback.classic.turbo.DuplicateMessageFilter"&gt;
   &lt;allowedRepetitions&gt;5&lt;/allowedRepetitions&gt;
   &lt;cacheSize&gt;200&lt;/cacheSize&gt;
@@ -40979,7 +41694,7 @@ kubectl -n shop logs order-api-7d9f8-x2k4p --since=1m &gt; td.txt</code></pre>
         <tr><td><b>RUNNABLE</b></td><td>CPU 를 쓰거나 <b>소켓 · 파일 I/O 대기</b></td><td>맨 위 프레임이 read 면 외부가 느림</td></tr>
         <tr><td><b>BLOCKED</b></td><td><code>synchronized</code> 입구 대기</td><td><b>락 경합</b> — 쥔 쪽을 찾기</td></tr>
         <tr><td><b>WAITING</b></td><td><code>park</code> · <code>wait()</code> 무기한</td><td>풀 대기면 <b>자원 고갈</b></td></tr>
-        <tr><td>TIMED_WAITING</td><td><code>sleep</code> · 시간 제한 대기</td><td>대개 유휴 스레드 — 정상</td></tr>
+        <tr><td>TIMED_WAITING</td><td><code>sleep</code> · 시간 제한 대기</td><td>대개 유휴 스레드 — 정상. 단 맨 위가 <code>HikariPool.getConnection</code> 이면 풀 고갈</td></tr>
         <tr><td>NEW · TERMINATED</td><td>덤프에 거의 안 나옴</td><td>—</td></tr>
       </table></div>
       <pre class="code" data-lang="bash"><code># 상태별 개수 — 첫 10초 요약
@@ -41110,8 +41825,9 @@ Java stack information for the threads listed above:
     - waiting to lock &lt;0x00000006c1a2b3c8&gt; (a java.lang.Object)
 → 쥔 쪽(locked &lt;0x...3c8&gt;)이 synchronized 안에서 DB · HTTP 호출 중
 
-③ 풀 고갈 — WAITING(parking), 맨 위가 Hikari 의 대기열
-"http-nio-8080-exec-88" ... WAITING (parking)
+③ 풀 고갈 — TIMED_WAITING(parking), 맨 위가 Hikari 의 대기열
+   (connection-timeout 만큼만 기다리는 poll 이라 WAITING 이 아니라 TIMED_WAITING 입니다)
+"http-nio-8080-exec-88" ... TIMED_WAITING (parking)
     at jdk.internal.misc.Unsafe.park(Native Method)
     - parking to wait for &lt;0x...&gt; (a java.util.concurrent.SynchronousQueue$TransferStack)
     at com.zaxxer.hikari.util.ConcurrentBag.borrow(ConcurrentBag.java:...)
@@ -41126,7 +41842,7 @@ Java stack information for the threads listed above:
   </div>
 
   <div class="ez mid"><b>정리 —</b> 덤프는 <b>5초 간격 세 장</b>, 읽을 때는 <b>상태별 개수 → 맨 위 프레임 집계 → 락 주소 추적</b> 순서입니다.
-    BLOCKED 가 몰리면 락 경합, Hikari 에서 WAITING 이 몰리면 풀 고갈,
+    BLOCKED 가 몰리면 락 경합, Hikari 에서 TIMED_WAITING 이 몰리면 풀 고갈,
     맨 위가 socket read 인 RUNNABLE 이 몰리면 <b>외부가 느린 것</b>입니다.</div>
 </section>
 
@@ -42296,8 +43012,11 @@ RetryConfigCustomizer paymentRetry() {
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">무엇을 재시도해도 되나 — 멱등성</h4>
-      <pre class="code" data-lang="java"><code>@CircuitBreaker(name = "payment", fallbackMethod = "pending")
-@Retry(name = "payment")          // 기본 순서: Retry 가 바깥, CircuitBreaker 가 안쪽
+      <pre class="code" data-lang="java"><code>// 기본 순서: Retry 가 바깥, CircuitBreaker 가 안쪽 — 시도마다 브레이커를 거치고,
+// 열려 있으면 CallNotPermittedException(재시도 제외)으로 바로 끝납니다.
+// 폴백은 바깥(Retry)에 둡니다 — 안쪽 브레이커에 두면 첫 실패를 폴백이 삼켜 재시도가 아예 안 일어납니다
+@CircuitBreaker(name = "payment")
+@Retry(name = "payment", fallbackMethod = "pending")
 public PaymentResult approve(PaymentRequest req, String idemKey) {
     return paymentClient.post().uri("/approve")
             .header("Idempotency-Key", idemKey)   // 같은 키 = 같은 결과
@@ -42324,7 +43043,7 @@ private PaymentResult pending(PaymentRequest req, String idemKey, Throwable t) {
   </div>
 
   <div class="ez mid"><b>정리 —</b> 타임아웃은 <b>상대 p99.9 에서 출발</b>해 정하고, <b>상위 예산 ≥ 하위 합 × 시도 횟수</b>를 계산으로 확인합니다.
-    재시도는 <b>한 계층 · 1회 · 지터 · 멱등 요청만</b>, 그리고 서킷 브레이커 안쪽에서.
+    재시도는 <b>한 계층 · 1회 · 지터 · 멱등 요청만</b>, 그리고 서킷 브레이커가 열리면 재시도하지 않게.
     "기본값 그대로"는 대개 <b>무한 대기</b>라는 뜻입니다.</div>
 </section>
 
@@ -45514,6 +46233,281 @@ function jtxSet(q){
 
 /* 탭별 최초 1회 초기화 */
 TAB_INIT.tool = function(){ jtxFilter(); };
+/* 읽는 법 사전 — java · shared/js/07-study.js 가 본문 인라인 코드의 탭별 첫 등장에 * 를 붙인다.
+   [표기, 읽는 법, 실무에서 부르는 말·한 줄 뜻(선택)] — 표기는 코드에 나오는 그대로(대소문자 구분) */
+window.LX_SAY = [
+  /* ── 롬복 ── */
+  ["@RequiredArgsConstructor", "리콰이어드 아그스 컨스트럭터", "롬복 — final 필드 생성자. 줄여서 '리콰이어드'"],
+  ["@NoArgsConstructor", "노 아그스 컨스트럭터", "롬복 — 인자 없는 기본 생성자. '노아그'"],
+  ["@AllArgsConstructor", "올 아그스 컨스트럭터", "롬복 — 모든 필드 생성자. '올아그'"],
+  ["@Builder", "빌더", "롬복 — 빌더 패턴 자동 생성"],
+  ["@Builder.Default", "빌더 닷 디폴트", "빌더에서 안 부른 필드의 기본값 유지"],
+  ["@Value", "밸류", "롬복이면 불변 클래스, 스프링이면 설정값 주입"],
+  ["@Data", "데이터", "롬복 — getter·setter·equals 등 한 번에"],
+  ["@EqualsAndHashCode", "이퀄스 앤 해시코드", "equals·hashCode 자동 생성"],
+  ["@EqualsAndHashCode.Include", "이퀄스 앤 해시코드 닷 인클루드", "비교에 넣을 필드 지정"],
+  ["@ToString.Exclude", "투스트링 닷 익스클루드", "toString 에서 뺄 필드 — 순환 참조 차단"],
+  ["@SneakyThrows", "스니키 스로우즈", "checked 예외를 선언 없이 던짐"],
+  ["@With", "위드", "withXxx 복사 메서드 생성 — '위더'"],
+  ["@NonNull", "논널 / 넌널", "null 이면 안 됨 — 롬복은 null 검사 삽입"],
+  ["@Nullable", "널러블", "null 일 수 있음 표시"],
+  ["@NullMarked", "널 마크드", "JSpecify — 이 범위는 기본 non-null"],
+  ["@NullUnmarked", "널 언마크드", "NullMarked 범위에서 다시 해제"],
+  ["onlyExplicitlyIncluded", "온리 익스플리시틀리 인클루디드", "Include 붙인 필드만 비교"],
+  ["toBuilder", "투빌더", "기존 객체를 복사한 빌더"],
+
+  /* ── 스프링 · 부트 ── */
+  ["@Transactional", "트랜잭셔널", "트랜잭션 경계 — '트랜잭셔널 붙인다'"],
+  ["@Transactional(readOnly = true)", "트랜잭셔널 리드온리 트루", "읽기 전용 트랜잭션"],
+  ["readOnly = true", "리드온리 트루", "읽기 전용 — 더티 체킹 생략"],
+  ["REQUIRES_NEW", "리콰이어스 뉴", "전파 옵션 — 항상 새 트랜잭션"],
+  ["@ConfigurationProperties", "컨피규레이션 프로퍼티즈", "설정 묶음을 객체로 바인딩 — '컨피그 프로퍼티'"],
+  ["@Configuration", "컨피규레이션", "빈 설정 클래스"],
+  ["@ConditionalOnMissingBean", "컨디셔널 온 미싱 빈", "같은 빈이 없을 때만 등록"],
+  ["@Async", "어싱크 / 에이싱크", "별도 스레드에서 비동기 실행"],
+  ["@Cacheable", "캐셔블", "결과를 캐시에 저장·재사용"],
+  ["@Scheduled", "스케줄드", "주기 실행 작업"],
+  ["@Validated", "밸리데이티드", "검증 활성화 — 그룹·메서드 검증"],
+  ["@Retryable", "리트라이어블", "실패 시 재시도"],
+  ["@Lazy", "레이지", "빈을 처음 쓸 때 생성"],
+  ["@PostConstruct", "포스트 컨스트럭트", "빈 생성·주입 직후 한 번 실행"],
+  ["@EventListener", "이벤트 리스너", "스프링 이벤트 수신"],
+  ["@RestControllerAdvice", "레스트 컨트롤러 어드바이스", "전역 예외 처리 — JSON 응답"],
+  ["@ControllerAdvice", "컨트롤러 어드바이스", "전역 예외 처리"],
+  ["@SpringBootTest", "스프링부트 테스트", "컨텍스트 전체를 띄우는 통합 테스트"],
+  ["@DataJpaTest", "데이터 제이피에이 테스트", "JPA 계층만 띄우는 슬라이스 테스트"],
+  ["@WebMvcTest", "웹 엠브이씨 테스트", "컨트롤러만 띄우는 슬라이스 테스트"],
+  ["@MockitoBean", "모키토 빈", "@MockBean 의 후속 — 빈을 목으로 교체"],
+  ["@MockBean", "목 빈", "빈을 목으로 교체(구버전)"],
+  ["@SpyBean", "스파이 빈", "실제 빈을 감싸 일부만 가짜로"],
+  ["@MockitoSpyBean", "모키토 스파이 빈", "@SpyBean 의 후속"],
+  ["@JsonComponent", "제이슨 컴포넌트", "잭슨 직렬화기 등록(Boot 3)"],
+  ["@JacksonComponent", "잭슨 컴포넌트", "@JsonComponent 의 후속(Boot 4)"],
+  ["@JsonProperty", "제이슨 프로퍼티", "JSON 필드 이름 지정"],
+  ["@JsonIgnore", "제이슨 이그노어", "JSON 에서 제외"],
+  ["@JsonFormat", "제이슨 포맷", "날짜 등 JSON 표현 형식 지정"],
+  ["@FunctionalInterface", "펑셔널 인터페이스", "추상 메서드 하나 — 람다 대상"],
+  ["@Deprecated", "디프리케이티드", "지원 중단 예정 — '디프리케이트됐다'"],
+  ["${}", "달러 중괄호", "플레이스홀더 · MyBatis 에선 문자열 치환(인젝션 위험)"],
+  ["#{}", "샵 중괄호", "MyBatis 바인딩 파라미터 — 안전"],
+  ["${value}", "달러 밸류", "문자열 그대로 치환 — SQL 인젝션 주의"],
+  ["#{value}", "샵 밸류", "PreparedStatement 바인딩"],
+  ["RestTemplate", "레스트 템플릿", "구형 동기 HTTP 클라이언트"],
+  ["RestClient", "레스트 클라이언트", "RestTemplate 후속 동기 클라이언트"],
+  ["JdbcTemplate", "제이디비씨 템플릿", "스프링 JDBC 헬퍼"],
+  ["ObjectMapper", "오브젝트 매퍼", "잭슨 JSON 변환기"],
+  ["JsonMapper", "제이슨 매퍼", "잭슨 3 의 ObjectMapper 후속"],
+  ["graceful", "그레이스풀", "진행 중 요청을 끝내고 종료"],
+  ["preStop", "프리스톱", "k8s — 종료 직전 훅"],
+
+  /* ── JPA · QueryDSL · MyBatis ── */
+  ["@ManyToOne", "매니 투 원", "다대일 연관 — '다대일'"],
+  ["@OneToMany", "원 투 매니", "일대다 연관 — '일대다'"],
+  ["LAZY", "레이지", "지연 로딩 — 'FetchType.LAZY'"],
+  ["LazyInitializationException", "레이지 이니셜라이제이션 익셉션", "세션 밖 지연 로딩 실패 — '레이지 에러'"],
+  ["@EntityGraph", "엔티티 그래프", "연관을 한 번에 페치 조인"],
+  ["@Modifying", "모디파잉", "@Query 로 UPDATE·DELETE 할 때 필수"],
+  ["@QueryProjection", "쿼리 프로젝션", "QueryDSL — DTO 생성자로 Q타입 생성"],
+  ["@Enumerated(EnumType.STRING)", "이뉴머레이티드 이넘타입 스트링", "enum 을 이름 문자열로 저장"],
+  ["@GeneratedValue", "제너레이티드 밸류", "PK 자동 생성"],
+  ["@DiscriminatorColumn", "디스크리미네이터 컬럼", "상속 매핑에서 하위 타입 구분 컬럼"],
+  ["ddl-auto", "디디엘 오토", "스키마 자동 생성 옵션"],
+  ["default_batch_fetch_size", "디폴트 배치 페치 사이즈", "지연 로딩을 IN 절로 묶어 N+1 완화"],
+  ["flush()", "플러시", "영속성 컨텍스트 변경을 DB 로 반영"],
+  ["persist", "퍼시스트", "새 엔티티를 영속 상태로"],
+  ["detach()", "디태치", "영속성 컨텍스트에서 분리"],
+  ["cascade", "캐스케이드", "연관 엔티티에 작업 전파"],
+  ["orphanRemoval", "오펀 리무벌", "고아 객체 자동 삭제"],
+  ["fetchJoin()", "페치 조인", "연관을 한 쿼리로 함께 조회"],
+  ["JPAQueryFactory", "제이피에이 쿼리 팩토리", "QueryDSL 쿼리 시작점"],
+  ["QOrder", "큐오더", "QueryDSL 이 만든 Q타입"],
+  ["Tuple", "튜플 / 터플", "여러 컬럼 묶음 결과"],
+  ["map-underscore-to-camel-case", "맵 언더스코어 투 카멜 케이스", "user_name → userName 자동 매핑"],
+  ["ROWNUM", "로우넘", "오라클·티베로 행 번호"],
+  ["@Param", "파람", "MyBatis 파라미터 이름 지정"],
+  ["javax.persistence", "자박스 퍼시스턴스", "구 JPA 패키지 — jakarta 로 바뀜"],
+  ["jakarta", "자카르타", "javax 의 새 이름 — Jakarta EE"],
+  ["javax", "자박스 / 자바엑스", "구 Java EE 패키지 접두사"],
+
+  /* ── 시큐리티 ── */
+  ["SecurityFilterChain", "시큐리티 필터 체인", "시큐리티 설정 빈"],
+  ["AuthenticationEntryPoint", "오센티케이션 엔트리 포인트", "인증 실패(401) 처리기"],
+  ["AccessDeniedHandler", "액세스 디나이드 핸들러", "인가 실패(403) 처리기"],
+  ["AuthorizationManager", "오서라이제이션 매니저", "인가 판단기 — AccessDecisionManager 후속"],
+  ["SecurityContextHolder", "시큐리티 컨텍스트 홀더", "현재 인증 정보 보관소"],
+  ["ROLE_ADMIN", "롤 어드민", "ROLE_ 접두사가 붙은 권한 이름"],
+  ["hasRole(\"ADMIN\")", "해즈 롤 어드민", "ROLE_ 을 자동으로 붙여 검사"],
+  ["hasAuthority()", "해즈 오소리티", "권한 문자열 그대로 검사"],
+  ["csrf.disable()", "씨서프 디스에이블", "CSRF 보호 끄기 — 씨서프 / 씨에스알에프"],
+  ["SameSite", "세임사이트", "쿠키의 교차 사이트 전송 제한"],
+
+  /* ── 언어 · 문법 ── */
+  ["synchronized", "싱크로나이즈드", "모니터 락 — 한 번에 한 스레드만"],
+  ["volatile", "볼라타일 / 볼러틸", "가시성 보장 — 캐시 말고 메모리에서 읽음"],
+  ["sealed", "실드", "상속 가능한 하위 타입을 제한"],
+  ["permits", "퍼밋츠", "sealed 의 허용 하위 타입 목록"],
+  ["instanceof", "인스턴스오브", "타입 검사 — 패턴 매칭과 함께"],
+  ["->", "화살표 / 애로우", "람다 · switch 화살표"],
+  ["::", "더블 콜론", "메서드 레퍼런스 — '메서드 참조'"],
+  ["\"\"\"", "트리플 쿼트", "텍스트 블록 — 여러 줄 문자열"],
+  ["==", "이퀄 이퀄", "참조 비교 — 값 비교는 equals"],
+  ["invokedynamic", "인보크다이내믹", "람다가 쓰는 바이트코드 — '인디'"],
+  ["LambdaMetafactory", "람다 메타팩토리", "람다 객체를 런타임에 만드는 곳"],
+  ["invokeExact", "인보크 이그잭트", "MethodHandle 정확한 시그니처 호출"],
+  ["Callable", "콜러블", "값을 돌려주는 작업"],
+  ["Runnable", "러너블", "값 없는 작업"],
+  ["Predicate", "프레디케이트", "참·거짓 판단 함수"],
+  ["Supplier", "서플라이어", "인자 없이 값을 주는 함수"],
+  ["Comparator", "컴퍼레이터", "정렬 비교 기준"],
+  ["UnaryOperator<T>", "유너리 오퍼레이터", "T → T 함수"],
+  ["BinaryOperator<T>", "바이너리 오퍼레이터", "(T, T) → T 함수"],
+  ["BiFunction<T,U,R>", "바이 펑션", "인자 두 개 함수"],
+  ["orElseGet", "오얼엘스 겟", "비었을 때만 함수 실행"],
+  ["orElse", "오얼엘스", "비었을 때 기본값 — 인자는 항상 계산됨"],
+  ["orElseThrow()", "오얼엘스 스로우", "비었으면 예외"],
+  ["ifPresentOrElse", "이프 프레즌트 오얼엘스", "있으면 A, 없으면 B"],
+  ["computeIfAbsent", "컴퓨트 이프 앱선트", "키가 없을 때만 계산해 넣음"],
+  ["parallelStream", "패럴렐 스트림", "병렬 스트림 — 공용 풀 사용"],
+  ["flatMap", "플랫맵", "펼쳐서 하나로 이어 붙임"],
+  ["peek", "픽", "중간에 엿보기 — 디버깅용"],
+  ["reversed()", "리버스드", "역순 뷰"],
+  ["SequencedCollection", "시퀀스드 컬렉션", "순서 있는 컬렉션 공통 인터페이스"],
+  ["mapConcurrent", "맵 컨커런트", "Gatherers — 가상 스레드로 동시 매핑"],
+  ["O(n²)", "빅오 엔 제곱", "입력 제곱에 비례하는 시간"],
+  ["finalize()", "파이널라이즈", "폐기된 종료자 — Cleaner 로 대체"],
+  ["ArrayDeque", "어레이 덱", "Stack 대신 쓰는 양방향 큐"],
+
+  /* ── 동시성 ── */
+  ["CompletableFuture", "컴플리터블 퓨처", "비동기 결과 조합 — 'CF'"],
+  ["ConcurrentHashMap", "컨커런트 해시맵", "스레드 안전 맵 — 'CHM'"],
+  ["ExecutorService", "익스큐터 서비스 / 이그제큐터 서비스", "스레드 풀"],
+  ["ThreadLocal", "스레드 로컬", "스레드마다 따로 갖는 변수"],
+  ["ScopedValue", "스코프드 밸류", "ThreadLocal 의 불변·범위 한정 대안"],
+  ["StructuredTaskScope", "스트럭처드 태스크 스코프", "구조적 동시성 — 묶어서 시작·종료"],
+  ["AtomicInteger", "아토믹 인티저", "락 없는 원자적 정수"],
+  ["CopyOnWriteArrayList", "카피 온 라이트 어레이리스트", "쓸 때 복사 — 읽기 많은 목록"],
+  ["ReentrantLock", "리엔트런트 락", "재진입 가능한 명시적 락"],
+  ["ForkJoinPool.commonPool", "포크조인풀 커먼풀", "병렬 스트림·CF 기본 풀"],
+  ["newVirtualThreadPerTaskExecutor()", "뉴 버추얼 스레드 퍼 태스크 익스큐터", "작업마다 가상 스레드"],
+  ["TaskDecorator", "태스크 데코레이터", "@Async 작업에 MDC 등 전달"],
+
+  /* ── 리액티브 · 네티 ── */
+  ["Flux", "플럭스", "0~N개 비동기 스트림"],
+  [".block()", "블록", "리액티브를 동기로 기다림 — 이벤트 루프에서 금지"],
+  ["subscribe()", "섭스크라이브", "구독 — 이때 실제 실행"],
+  ["boundedElastic", "바운디드 일래스틱", "블로킹 작업용 스케줄러"],
+  ["publishOn", "퍼블리시온", "이후 연산을 다른 스케줄러로"],
+  ["contextWrite", "컨텍스트 라이트", "리액터 Context 에 값 넣기"],
+  ["ByteBuf", "바이트버프", "네티 버퍼 — release 필수"],
+  ["BlockHound", "블록하운드", "이벤트 루프 블로킹 감지 도구"],
+
+  /* ── 빌드 · JDK 도구 · JVM ── */
+  ["./gradlew", "그래들 래퍼 / 그래들W", "프로젝트에 고정된 Gradle 실행"],
+  ["./mvnw", "메이븐 래퍼", "프로젝트에 고정된 Maven 실행"],
+  ["javac", "자바씨", "자바 컴파일러"],
+  ["jlink", "제이링크", "필요한 모듈만 담은 런타임 생성"],
+  ["jpackage", "제이패키지", "설치 파일(exe·msi) 생성"],
+  ["jshell", "제이쉘", "자바 REPL"],
+  ["jcmd", "제이커맨드 / 제이씨엠디", "실행 중 JVM 진단 만능 도구"],
+  ["jstack", "제이스택", "스레드 덤프"],
+  ["jmap", "제이맵", "힙 정보·덤프"],
+  ["keytool", "키툴", "인증서·키스토어 관리"],
+  ["JAVA_HOME", "자바 홈", "JDK 설치 경로 환경 변수"],
+  ["-Xmx", "엑스엠엑스", "최대 힙 크기"],
+  ["-Xms", "엑스엠에스", "시작 힙 크기"],
+  ["MaxRAMPercentage", "맥스 램 퍼센티지", "컨테이너 메모리 대비 힙 비율"],
+  ["HeapDumpOnOutOfMemoryError", "힙덤프 온 아웃오브메모리 에러", "OOM 때 힙 덤프 자동 저장"],
+  ["Metaspace", "메타스페이스", "클래스 메타데이터 영역"],
+  ["OutOfMemoryError", "아웃 오브 메모리 에러", "'OOM(오오엠)'"],
+  ["StackOverflowError", "스택 오버플로 에러", "재귀·순환 참조로 스택 초과"],
+  ["NullPointerException", "널 포인터 익셉션", "'NPE(엔피이)'"],
+  ["NoClassDefFoundError", "노 클래스 데프 파운드 에러", "컴파일 땐 있던 클래스가 런타임에 없음"],
+  ["NoSuchMethodError", "노 서치 메서드 에러", "라이브러리 버전 충돌의 대표 증상"],
+  ["ClassNotFoundException", "클래스 낫 파운드 익셉션", "'CNFE' — 클래스패스에 없음"],
+  ["--add-opens", "애드 오픈스", "모듈 내부를 리플렉션에 열어 줌"],
+  ["--enable-preview", "이네이블 프리뷰", "미리보기 기능 켜기"],
+  ["-XX:AOTCache", "에이오티 캐시", "기동 가속용 AOT 캐시"],
+  ["sun.misc.Unsafe", "썬 미스크 언세이프", "JDK 내부 저수준 API — 퇴출 중"],
+  ["module-info.java", "모듈 인포", "모듈 선언 파일"],
+  ["package-info.java", "패키지 인포", "패키지 단위 어노테이션 파일"],
+  ["BOOT-INF/lib", "부트 인프 립", "부트 실행 jar 안 의존성 폴더"],
+  ["Arena", "아레나", "FFM — 네이티브 메모리 수명 관리"],
+  ["MemorySegment", "메모리 세그먼트", "FFM — 네이티브 메모리 조각"],
+
+  /* ── 로깅 · 관측 ── */
+  ["SLF4J", "에스엘에프포제이", "로깅 퍼사드 — 구현체는 따로"],
+  ["log4j-core", "로그포제이 코어", "Log4j2 구현체"],
+  ["log4j-to-slf4j", "로그포제이 투 에스엘에프포제이", "Log4j API 호출을 SLF4J 로 넘김"],
+  ["jul-to-slf4j", "제이유엘 투 에스엘에프포제이", "java.util.logging 을 SLF4J 로"],
+  ["java.util.logging", "자바 유틸 로깅", "'JUL(제이유엘)'"],
+  ["commons-logging", "커먼즈 로깅", "'JCL' — 아파치 로깅 퍼사드"],
+  ["reload4j", "리로드포제이", "log4j 1.x 보안 패치 포크"],
+  ["logback-spring.xml", "로그백 스프링 엑스엠엘", "스프링 프로필을 쓰는 로그백 설정"],
+  ["AsyncAppender", "어싱크 어펜더", "로그를 큐에 넣고 별도 스레드가 기록"],
+  ["additivity", "애디티비티", "상위 로거로 로그 전파 여부"],
+  ["MDC.clear()", "엠디씨 클리어", "스레드별 로그 컨텍스트 비우기"],
+  ["traceId", "트레이스 아이디", "요청 하나를 잇는 추적 ID"],
+  ["spanId", "스팬 아이디", "추적 안의 구간 ID"],
+  ["traceparent", "트레이스페어런트", "W3C 추적 헤더"],
+  ["p6spy-spring-boot-starter", "피식스스파이", "실제 바인딩된 SQL 로그"],
+
+  /* ── 기타 ── */
+  ["Platform.runLater", "플랫폼 런레이터", "JavaFX UI 스레드에서 실행"],
+  ["bindBidirectional", "바인드 바이디렉셔널", "양방향 바인딩"],
+  ["MS949", "엠에스 구사구", "윈도우 한글 인코딩 — CP949"],
+  ["chcp 65001", "씨에이치씨피 육오공공일", "콘솔 코드페이지를 UTF-8 로"],
+  ["EF BB BF", "봄(BOM)", "UTF-8 BOM 바이트"],
+  [".proto", "프로토", "gRPC 프로토콜 버퍼 정의 파일"],
+  ["@GrpcService", "지알피씨 서비스", "gRPC 서버 구현 등록"],
+  ["max.poll.interval.ms", "맥스 폴 인터벌", "카프카 — poll 사이 최대 간격"],
+  ["bootstrap-servers", "부트스트랩 서버스", "카프카 — 처음 접속할 브로커 목록"],
+  ["FeignClient", "페인 클라이언트", "선언형 HTTP 클라이언트 — '페인'"],
+
+  /* ── 추가: 본문 인라인 토큰 ── */
+  ["var", "바", "지역 변수 타입 추론"],
+  ["@Autowired", "오토와이어드", "의존성 주입 지점 표시"],
+  ["@Qualifier", "퀄리파이어", "같은 타입 빈 중 하나를 이름으로 지정"],
+  ["@Version", "버전", "낙관적 락 버전 컬럼"],
+  ["staticName", "스태틱 네임", "롬복 — 정적 팩토리 이름 지정"],
+  ["-parameters", "파라미터스", "파라미터 이름을 바이트코드에 남기는 컴파일 옵션"],
+  ["Serializable", "시리얼라이저블", "직렬화 가능 표시 인터페이스"],
+  ["BigDecimal", "빅데시멀", "돈 계산용 정확한 소수"],
+  ["try-with-resources", "트라이 위드 리소시즈", "자동 close — '트라이 위드 리소스'"],
+  ["thenApply", "덴 어플라이", "CF 결과를 변환"],
+  ["supplyAsync", "서플라이 어싱크", "값을 돌려주는 비동기 작업 시작"],
+  ["tryLock", "트라이 락", "기다리지 않고(또는 시간 제한) 락 시도"],
+  ["park", "파크", "스레드를 멈춰 세움 — 덤프의 'parking'"],
+  ["LinkedBlockingQueue", "링크드 블로킹 큐", "기본 무제한 큐 — 풀 큐로 쓰면 OOM 위험"],
+  ["setAccessible(true)", "셋 액세서블 트루", "리플렉션으로 private 접근"],
+  ["Hibernate.unproxy()", "하이버네이트 언프록시", "프록시를 실제 엔티티로"],
+  ["open-in-view", "오픈 인 뷰", "'OSIV(오시브)' — 뷰까지 영속성 컨텍스트 유지"],
+  ["leak-detection-threshold", "릭 디텍션 스레숄드", "Hikari — 커넥션 누수 감지 시간"],
+  ["resultType", "리절트 타입", "MyBatis 결과 매핑 타입"],
+  ["WebClient", "웹클라이언트", "리액티브 HTTP 클라이언트"],
+  ["JdbcClient", "제이디비씨 클라이언트", "JdbcTemplate 의 유창한 후속 API"],
+  ["r2dbc", "알투디비씨", "리액티브 DB 드라이버 규격"],
+  ["PARANOID", "패러노이드", "네티 누수 감지 최고 단계"],
+  ["io_uring", "아이오 유링", "리눅스 비동기 I/O 인터페이스"],
+  ["tools.jackson", "툴즈 잭슨", "잭슨 3 패키지"],
+  ["com.fasterxml", "컴 패스터엑스엠엘", "잭슨 2 패키지"],
+  ["FAIL_ON_UNKNOWN_PROPERTIES", "페일 온 언노운 프로퍼티즈", "모르는 JSON 필드면 실패하는 옵션"],
+  ["mapstruct", "맵스트럭트", "컴파일 타임 DTO 매퍼"],
+  ["springdoc-openapi", "스프링독 오픈에이피아이", "Swagger UI 자동 생성"],
+  ["jakarta.xml.bind", "자카르타 엑스엠엘 바인드", "'JAXB(잭스비)' — XML 바인딩"],
+  ["WebSecurityConfigurerAdapter", "웹 시큐리티 컨피규어러 어댑터", "구 시큐리티 설정 방식 — 제거됨"],
+  ["authorizeHttpRequests()", "오서라이즈 HTTP 리퀘스츠", "URL 별 인가 규칙"],
+  ["requestMatchers", "리퀘스트 매처스", "인가 규칙을 걸 URL 패턴"],
+  ["-XX:+UseZGC", "유즈 제트지씨", "ZGC 사용 — '제트지씨 / 지지씨'"],
+  ["NativeMemoryTracking", "네이티브 메모리 트래킹", "'NMT' — 힙 밖 메모리 추적"],
+  ["SIGKILL", "시그킬", "강제 종료 신호 — kill -9"],
+  ["log4j", "로그포제이", "아파치 로깅 라이브러리"],
+  ["jps", "제이피에스", "실행 중 자바 프로세스 목록"],
+  ["jdeps", "제이뎁스", "클래스·모듈 의존성 분석"],
+  ["temurin", "테무린", "Adoptium 의 OpenJDK 배포판"],
+  ["PKIX", "피킥스", "인증서 경로 검증 실패 오류에 나오는 말"],
+  ["changeit", "체인지잇", "cacerts 기본 비밀번호"],
+  ["psvm", "피에스브이엠", "IntelliJ main 메서드 단축 입력"],
+];
 /* ================================================================
    학습 레이어 (2026-10 개편) — java · python · kotlin · js-ts
    ----------------------------------------------------------------
@@ -45750,7 +46744,13 @@ TAB_INIT.tool = function(){ jtxFilter(); };
     // 탭이 바뀔 때 펼친 그룹 · 현재 탭 갱신
     const orig = window.switchTab;
     if (typeof orig === "function" && !orig.lxWrapped){
-      window.switchTab = function(name){ const r = orig.apply(this, arguments); paint(); return r; };
+      window.switchTab = function(name){
+        const r = orig.apply(this, arguments); paint();
+        // 새로 연 탭의 읽는 법 * (탭마다 한 번) — 전환이 끝난 뒤 한가할 때 훑어 탭 전환을 늦추지 않는다
+        const pane = Q(".pane.on");
+        (window.requestIdleCallback || (f => setTimeout(f, 60)))(() => { try { sayPane(pane); } catch(e){} }, { timeout:800 });
+        return r;
+      };
       window.switchTab.lxWrapped = true;
     }
     // 읽는 섹션이 사이드바 밖으로 나가면 따라간다 (사이드바만 스크롤 · 본문은 그대로)
@@ -45840,7 +46840,7 @@ TAB_INIT.tool = function(){ jtxFilter(); };
      옵션은 lx:prefs 한 키에 저장해 모든 가이드가 같이 쓴다(진도만 가이드별 st:<가이드>).
      첫 그리기 전 적용은 <head> 스크립트가 하고, 여기서는 바꿀 때만 반영한다. */
   const PKEY = "lx:prefs";
-  let P = { fs:"m", lh:"n", side:false, head:false, focus:false };
+  let P = { fs:"m", lh:"n", side:false, head:false, focus:false, say:true };
   try { Object.assign(P, JSON.parse(localStorage.getItem(PKEY) || "{}")); } catch(e){}
   if (S.fs && S.fs !== "m" && P.fs === "m") P.fs = S.fs;          // 예전(가이드별) 저장값 옮기기
   if (S.focus && !P.focus) P.focus = true;
@@ -45902,6 +46902,7 @@ TAB_INIT.tool = function(){ jtxFilter(); };
           sw("side", "사이드바 접기", "목차를 숨기고 본문을 넓게") +
           sw("head", "헤더 접기", "위 탭 줄을 숨기고 본문을 높게") +
           sw("focus", "집중 모드", "가운데 좁은 한 열로만") +
+          sw("say", "읽는 법 표시 (*)", "처음 나오는 용어에 실무 발음") +
           '<div class="lx-line"><span><b>테마</b></span>' + seg("theme", [["light", "라이트"], ["dark", "다크"]]) + "</div>" +
         "</section>" +
         '<section class="lx-progress"><h6>학습 진도 <span class="lx-pct"></span></h6>' +
@@ -45942,6 +46943,7 @@ TAB_INIT.tool = function(){ jtxFilter(); };
       const k = e.target.dataset.k;
       if (k === "side") P.side = e.target.checked;
       else if (k === "head") P.head = e.target.checked;
+      else if (k === "say") P.say = e.target.checked;
       else if (k === "focus") P.focus = e.target.checked;
       else return;
       saveP(); fold(applyPrefs);
@@ -45959,6 +46961,8 @@ TAB_INIT.tool = function(){ jtxFilter(); };
     if (P.lh === "w") h.dataset.lh = "w"; else delete h.dataset.lh;
     h.classList.toggle("lx-side-off", !!P.side);
     h.classList.toggle("lx-head-off", !!P.head);
+    h.classList.toggle("lx-say-off", P.say === false);
+    const sayIn = Q('.lx-pop input[data-k="say"]'); if (sayIn) sayIn.checked = P.say !== false;
     // 앵커 여백(--tabh)을 바로 맞춘다 — 00-core 의 ResizeObserver 를 기다리면 창이 가려졌을 때 늦는다
     const tb = Q("#tabbar") || Q(".tabbar");
     if (tb) h.style.setProperty("--tabh", (P.head ? 0 : tb.offsetHeight) + "px");
@@ -45976,6 +46980,121 @@ TAB_INIT.tool = function(){ jtxFilter(); };
       sb.title = off ? "사이드바 펼치기" : "사이드바 접기";
       sb.setAttribute("aria-label", sb.title);
     }
+  }
+
+  /* ---------- ③-b 언어 비교 화살표 ----------
+     "자바 → 코틀린"처럼 다른 언어와 나란히 비교하는 두 칸 사이에 화살표를 세운다
+     (왼쪽이 오른쪽으로 바뀌어 쓰인다는 뜻). 장점/단점 같은 일반 비교에는 넣지 않도록
+     ① 두 칸의 첫 코드 언어가 서로 다른 프로그래밍 언어이거나 ② 두 제목이 서로 다른 언어 이름으로 시작할 때만. */
+  (function langArrows(){
+    const LANGS = [["kotlin","코틀린","kt","kts"],["java","자바"],["python","파이썬","py"],["javascript","자바스크립트","js","jsx","mjs"],
+      ["typescript","타입스크립트","ts","tsx"],["csharp","c#","씨샵","cs"],["cpp","c++","씨플플"],["c","c언어"],["rust","러스트","rs"],
+      ["go","고","golang"],["swift","스위프트"],["ruby","루비","rb"],["php"],["scala","스칼라"],["dart","다트"]];
+    const NAME = { kotlin:"코틀린", java:"자바", python:"파이썬", javascript:"JS", typescript:"TS", csharp:"C#", cpp:"C++", c:"C",
+      rust:"Rust", go:"Go", swift:"Swift", ruby:"Ruby", php:"PHP", scala:"Scala", dart:"Dart" };
+    const norm = w => { w = (w || "").toLowerCase(); const hit = LANGS.find(l => l.includes(w)); return hit ? hit[0] : null; };
+    const fromHead = h => {
+      const t = (h?.textContent || "").trim().toLowerCase().replace(/^[^a-z가-힣#+]+/, "");
+      const hit = LANGS.flat().filter(w => w.length > 1 || w === "c").sort((a, b) => b.length - a.length)
+        .find(w => t.startsWith(w) && !/[a-z가-힣0-9]/.test(t.charAt(w.length) || " ") || (w.length > 1 && /[가-힣]/.test(w) && t.startsWith(w)));
+      return hit ? norm(hit) : null;
+    };
+    // "다른 언어 → 이 가이드의 언어"일 때만 — 대안끼리(C# P/Invoke · Go cgo)나 FFI 양쪽(Rust 쪽 · C# 쪽) 비교는 바뀜이 아니다
+    const HOME = { java:["java"], kotlin:["kotlin"], python:["python"], "js-ts":["javascript","typescript"],
+      csharp:["csharp"], cpp:["cpp","c"], rust:["rust"] }[GUIDE] || [];
+    const ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>';
+    QA("main .pane .vs, main .pane .grid2").forEach(box => {
+      const kids = [...box.children].filter(c => !c.classList.contains("lx-arrow"));
+      if (kids.length !== 2 || Q(".lx-arrow", box)) return;
+      const codeLang = k => norm(Q("pre.code", k)?.dataset.lang);
+      const ha = fromHead(Q("h5, h4", kids[0])), hb = fromHead(Q("h5, h4", kids[1]));
+      const ca = codeLang(kids[0]), cb = codeLang(kids[1]);
+      let a = null, b = null;
+      if (ha && hb && ha !== hb){ a = ha; b = hb; }                                   // 제목이 둘 다 언어 이름
+      else if (box.classList.contains("vs") && ca && cb && ca !== cb && (ha || hb)){ a = ca; b = cb; }  // 코드 언어가 다르고 제목 하나가 언어
+      if (!a || !HOME.includes(b) || HOME.includes(a)) return;
+      const ar = document.createElement("div");
+      ar.className = "lx-arrow";
+      ar.innerHTML = '<span class="lx-arrow-c">' + ARROW + '</span><span class="lx-arrow-t"></span>';
+      Q(".lx-arrow-t", ar).textContent = (NAME[b] || b) + "로";
+      ar.title = (NAME[a] || a) + " → " + (NAME[b] || b) + " — 이렇게 바뀌어 쓰입니다";
+      ar.setAttribute("aria-hidden", "true");
+      kids[0].after(ar);
+      box.classList.add("lx-cmp");
+    });
+    // 표 — 머리줄에 서로 다른 언어 열이 나란히 있으면(자바 | 코틀린) 두 번째 열 제목 앞에 화살표
+    QA("main .pane table").forEach(t => {
+      const ths = QA("tr:first-child > th", t);
+      for (let i = 1; i < ths.length; i++){
+        const a = fromHead(ths[i - 1]), b = fromHead(ths[i]);
+        if (a && b && a !== b && HOME.includes(b) && !HOME.includes(a) && !Q(".lx-tharrow", ths[i])){
+          ths[i].insertAdjacentHTML("afterbegin", '<span class="lx-tharrow" aria-hidden="true">' + ARROW + "</span>");
+          ths[i].title = (NAME[a] || a) + " → " + (NAME[b] || b);
+        }
+      }
+    });
+  })();
+
+  /* ---------- ③-c 읽는 법 (*) ----------
+     가이드별 사전(js/85-say.js 의 window.LX_SAY = [[표기, 읽는 법, 부르는 말]])을 보고
+     본문 인라인 코드에서 각 용어가 "그 탭에서 처음" 나올 때만 * 를 붙인다. 누르거나 올리면 말풍선.
+     탭은 처음 열릴 때 한 번만 훑는다(2~3MB 문서 전체를 한 번에 돌지 않게). */
+  const SAY = Array.isArray(window.LX_SAY) ? window.LX_SAY.filter(x => x && x[0] && x[1]) : [];
+  const sayMap = new Map(SAY.map(x => [x[0], x]));
+  const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const sayRe = SAY.length ? new RegExp(
+    [...sayMap.keys()].sort((a, b) => b.length - a.length).map(t =>
+      (/^[\w$]/.test(t) ? "(?<![\\w$@.])" : "") + reEsc(t) + (/[\w$]$/.test(t) ? "(?![\\w$])" : "")).join("|"), "g") : null;
+  function sayPane(pane){
+    if (!sayRe || !pane || pane.dataset.lxSay) return;
+    pane.dataset.lxSay = "1";
+    const seen = new Set();
+    for (const el of pane.querySelectorAll("code, .kw")){
+      if (el.closest("pre, svg, .sec-head h2, .lx-saytip, .stage, nav") || el.parentElement.closest("code, .kw")) continue;
+      const txt = el.textContent;
+      if (!txt || txt.length > 160) continue;
+      sayRe.lastIndex = 0;
+      const fresh = [];
+      for (let m; (m = sayRe.exec(txt));){ if (!seen.has(m[0]) && !fresh.includes(m[0])) fresh.push(m[0]); }
+      if (!fresh.length) continue;
+      fresh.forEach(t => seen.add(t));
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "lx-say"; b.textContent = "*";
+      b.dataset.t = fresh.join("\u0001");
+      b.setAttribute("aria-label", "읽는 법: " + fresh.map(t => t + " — " + sayMap.get(t)[1]).join(", "));
+      el.after(b);
+    }
+  }
+  if (sayRe){
+    const tip = document.createElement("div");
+    tip.className = "lx-saytip"; tip.setAttribute("role", "tooltip");
+    document.body.appendChild(tip);
+    let cur = null, hideT = 0;
+    const show = b => {
+      clearTimeout(hideT); cur = b;
+      tip.innerHTML = b.dataset.t.split("\u0001").map(t => {
+        const [w, r, n] = sayMap.get(t);
+        return '<div class="row"><code></code><b></b>' + (n ? "<small></small>" : "") + "</div>";
+      }).join("");
+      b.dataset.t.split("\u0001").forEach((t, i) => {
+        const [w, r, n] = sayMap.get(t), row = tip.children[i];
+        Q("code", row).textContent = w; Q("b", row).textContent = r; if (n) Q("small", row).textContent = n;
+      });
+      tip.classList.add("on");
+      const r = b.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+      let x = Math.min(innerWidth - tw - 10, Math.max(10, r.left + r.width / 2 - tw / 2));
+      let y = r.top - th - 10; if (y < 10) y = r.bottom + 10;
+      tip.style.left = x + "px"; tip.style.top = y + "px";
+    };
+    const hide = () => { hideT = setTimeout(() => { tip.classList.remove("on"); cur = null; }, 120); };
+    document.addEventListener("pointerover", e => { const b = e.target.closest(".lx-say"); if (b) show(b); });
+    document.addEventListener("pointerout", e => { if (e.target.closest(".lx-say")) hide(); });
+    document.addEventListener("focusin", e => { const b = e.target.closest(".lx-say"); if (b) show(b); });
+    document.addEventListener("focusout", e => { if (e.target.closest(".lx-say")) hide(); });
+    document.addEventListener("click", e => { const b = e.target.closest(".lx-say"); if (b){ e.preventDefault(); cur === b && tip.classList.contains("on") ? hide() : show(b); } });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") hide(); });
+    addEventListener("scroll", () => { if (cur) { tip.classList.remove("on"); cur = null; } }, { passive:true });
+    sayPane(Q(".pane.on"));
   }
 
   /* ---------- ④ 이어 읽기 ---------- */

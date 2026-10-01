@@ -322,9 +322,10 @@ suspend fun increaseView(id: Long): Long = redis.incr("view:$id") ?: 0
 suspend fun markViewed(userId: Long, id: Long): Boolean =
     redis.sadd("viewed:$id:${today()}", userId.toString()) == 1L
 
-// 파이프라인 — 왕복을 줄인다
+// MGET — 여러 키를 한 번의 왕복으로
 suspend fun getMany(ids: List&lt;Long&gt;): List&lt;String?&gt; =
-    redis.mget(*ids.map { "product:$it" }.toTypedArray()).map { it.value }.toList()</code></pre>
+    redis.mget(*ids.map { "product:$it" }.toTypedArray())
+        .map { if (it.hasValue()) it.value else null }.toList()   // 없는 키에 .value 를 부르면 예외</code></pre>
     </div>
   </div>
 
@@ -562,12 +563,14 @@ suspend fun tryIssueCoupon(couponId: Long, userId: Long): Boolean {
 // ③ Redisson 분산 락 — 코루틴에서
 suspend fun withDistributedLock(key: String, block: suspend () -&gt; Unit) {
     val lock = redisson.getLock(key)
-    val acquired = lock.tryLockAsync(3, 10, TimeUnit.SECONDS).awaitSingle()   // 대기 3초, 임대 10초
+    // ★ Redisson 락의 주인은 '스레드 id' — 코루틴은 재개될 때 스레드가 바뀌므로 고정 id 를 직접 넘긴다
+    val ownerId = Random.nextLong()
+    val acquired = lock.tryLockAsync(3, 10, TimeUnit.SECONDS, ownerId).await()   // 대기 3초, 임대 10초
     check(acquired) { "락 획득 실패: $key" }
     try {
         block()
     } finally {
-        if (lock.isHeldByCurrentThread) lock.unlockAsync().awaitSingleOrNull()
+        lock.unlockAsync(ownerId).await()   // 임대가 이미 끝났다면 여기서 예외 — 작업이 너무 길었다는 신호
     }
 }</code></pre>
 
@@ -656,6 +659,7 @@ class IdempotencyService(
 
         // 이미 처리됐다면 저장된 응답을 돌려준다
         redis.get(redisKey)?.let { stored -&gt;
+            if (stored == PROCESSING) throw ConflictException("같은 요청이 처리 중입니다")   // 아직 결과가 없다
             val record = json.decodeFromString&lt;IdemRecord&gt;(stored)
             require(record.requestHash == requestHash) { "같은 키로 다른 요청이 왔습니다" }
             return json.decodeFromString(serializer, record.response)
@@ -762,6 +766,7 @@ sealed interface OrderEvent {
 class OrderEventConsumer(
     private val notifier: Notifier,
     private val processed: ProcessedEventRepository,
+    private val json: Json,
 ) {
     @KafkaListener(topics = ["order-events"], groupId = "notification")
     fun consume(record: ConsumerRecord&lt;String, String&gt;, ack: Acknowledgment) {
@@ -879,19 +884,23 @@ class OrderService(
 class OutboxPublisher(
     private val outboxRepo: OutboxRepository,
     private val kafka: KafkaTemplate&lt;String, String&gt;,
+    private val tx: TransactionTemplate,
 ) : DisposableBean {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("outbox"))
 
     @PostConstruct
-    fun start() = scope.launch {
-        while (isActive) {
-            runCatching { publishBatch() }.onFailure { log.error("아웃박스 발행 실패", it) }
-            delay(500)
+    fun start() {
+        scope.launch {
+            while (isActive) {
+                // ★ 같은 클래스 안에서 부르면 @Transactional 프록시를 안 탄다 → TransactionTemplate 로 감싼다
+                runCatching { tx.executeWithoutResult { publishBatch() } }
+                    .onFailure { log.error("아웃박스 발행 실패", it) }
+                delay(500)
+            }
         }
     }
 
-    @Transactional
-    fun publishBatch() {
+    private fun publishBatch() {           // FOR UPDATE 라 반드시 트랜잭션 안에서
         // 여러 인스턴스가 함께 돌아도 안전하게 (SKIP LOCKED)
         val events = outboxRepo.findUnpublishedForUpdate(limit = 100)
         events.forEach { e -&gt;
@@ -985,11 +994,12 @@ class LoadShedder(private val registry: MeterRegistry) {
     private val max = 500
 
     suspend fun &lt;T&gt; execute(block: suspend () -&gt; T): T {
-        if (inFlight.get() &gt;= max) {
+        // 먼저 올리고 검사한다 — get() 후 increment 는 동시 요청이 함께 통과해 max 를 넘는다
+        if (inFlight.incrementAndGet() &gt; max) {
+            inFlight.decrementAndGet()
             registry.counter("requests.shed").increment()
             throw TooManyRequestsException("잠시 후 다시 시도해 주세요")   // 429
         }
-        inFlight.incrementAndGet()
         return try { block() } finally { inFlight.decrementAndGet() }
     }
 }
@@ -1092,8 +1102,9 @@ suspend fun handle(req: Request): Response = withTimeout(3.seconds) {
 
   <div class="grid2 rv">
     <div class="card">
-      <h4 class="mini" style="margin-top:0">Rate Limit — 토큰 버킷</h4>
-      <pre class="code" data-lang="kotlin"><code>// Redis Lua 스크립트로 원자적으로 처리
+      <h4 class="mini" style="margin-top:0">Rate Limit — 가장 단순한 고정 윈도 카운터</h4>
+      <pre class="code" data-lang="kotlin"><code>// Redis Lua 스크립트로 원자적으로 처리 — 이건 '분당 N건' 고정 윈도입니다
+// (위 그림의 경계 몰림이 문제라면 토큰 버킷: Bucket4j · Redisson RRateLimiter)
 private val script = """
     local key = KEYS[1]
     local limit = tonumber(ARGV[1])
@@ -1187,12 +1198,18 @@ class DataSourceConfig {
     fun routingDataSource(
         @Qualifier("writer") writer: DataSource,
         @Qualifier("reader") reader: DataSource,
-    ): DataSource = object : AbstractRoutingDataSource() {
-        override fun determineCurrentLookupKey(): Any =
-            if (TransactionSynchronizationManager.isCurrentTransactionReadOnly()) "reader" else "writer"
-    }.apply {
-        setTargetDataSources(mapOf("writer" to writer, "reader" to reader))
-        setDefaultTargetDataSource(writer)
+    ): DataSource {
+        val routing = object : AbstractRoutingDataSource() {
+            override fun determineCurrentLookupKey(): Any =
+                if (TransactionSynchronizationManager.isCurrentTransactionReadOnly()) "reader" else "writer"
+        }.apply {
+            setTargetDataSources(mapOf("writer" to writer, "reader" to reader))
+            setDefaultTargetDataSource(writer)
+            afterPropertiesSet()
+        }
+        // ★ JPA 는 트랜잭션 시작 때 커넥션을 먼저 잡는다 — 그 시점엔 readOnly 표시가 아직 없어 늘 writer 로 간다.
+        //   Lazy 프록시로 감싸 '첫 쿼리 때' 커넥션을 얻게 해야 라우팅이 동작한다
+        return LazyConnectionDataSourceProxy(routing)
     }
 }
 
@@ -1321,8 +1338,8 @@ export const options = {
     { duration: '3m', target: 0 },     // 감소
   ],
   thresholds: {
-    http_req_duration: ['p(95)<500', 'p(99)<1500'],
-    http_req_failed: ['rate<0.01'],
+    http_req_duration: ['p(95)&lt;500', 'p(99)&lt;1500'],
+    http_req_failed: ['rate&lt;0.01'],
   },
 };
 

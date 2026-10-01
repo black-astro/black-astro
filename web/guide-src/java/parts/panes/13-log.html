@@ -760,7 +760,8 @@ SLF4J(W): Actual provider is of type [...LogbackServiceProvider]
 #       \--- runtimeClasspath
 
 # ③ 실제 실행 시점의 클래스패스에서 중복 확인
-jar tf build/libs/app.jar | grep -i "SLF4JServiceProvider"</code></pre>
+#    (부트 fat jar 는 라이브러리가 BOOT-INF/lib 안의 jar 로 들어 있어 jar 이름으로 봅니다)
+jar tf build/libs/app.jar | grep -i -E "BOOT-INF/lib/(logback-classic|log4j-slf4j2?-impl|slf4j-(simple|reload4j|jdk14|log4j12))"</code></pre>
       <pre class="code" data-lang="kotlin"><code>// build.gradle.kts
 
 // ── A. 프로젝트 전체에서 특정 모듈을 빼기 (가장 확실)
@@ -919,7 +920,8 @@ configurations.all {
   &lt;include resource="org/springframework/boot/logging/logback/defaults.xml"/&gt;
 
   &lt;!-- application.yml 의 값을 XML 로 끌어오기 --&gt;
-  &lt;springProperty scope="context" name="APP" source="spring.application.name"/&gt;
+  &lt;springProperty scope="context" name="APP" source="spring.application.name"
+                  defaultValue="app"/&gt;   &lt;!-- 없으면 파일명이 APP_IS_UNDEFINED.log --&gt;
 
   &lt;property name="PATTERN"
       value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{traceId:-}] - %msg%n"/&gt;
@@ -1129,7 +1131,7 @@ java -Dlogback.debug=true -jar app.jar 2&gt;&amp;1 | head -40
         <tr><td>비동기 지점</td><td><b>appender 앞</b></td><td><b>logger 호출 직후</b></td></tr>
         <tr><td>자료구조</td><td><code>ArrayBlockingQueue</code></td><td><b>LMAX Disruptor</b> 링버퍼</td></tr>
         <tr><td>락</td><td>있음</td><td><b>락 없음</b> (CAS)</td></tr>
-        <tr><td>포맷 시점</td><td>큐에 넣기 전</td><td>소비 스레드에서</td></tr>
+        <tr><td>포맷 시점</td><td>큐에 넣기 전</td><td>호출 스레드(기본) — formatMsgAsync 로 미룰 수 있음</td></tr>
         <tr><td>가득 찼을 때</td><td>버리거나 블록</td><td>정책 선택 가능</td></tr>
         <tr><td>설정</td><td>XML 몇 줄</td><td>의존성 + 설정</td></tr>
       </table></div>
@@ -1137,7 +1139,7 @@ java -Dlogback.debug=true -jar app.jar 2&gt;&amp;1 | head -40
 &lt;appender name="ASYNC" class="ch.qos.logback.classic.AsyncAppender"&gt;
   &lt;queueSize&gt;8192&lt;/queueSize&gt;            &lt;!-- 기본 256 은 너무 작습니다 --&gt;
   &lt;discardingThreshold&gt;0&lt;/discardingThreshold&gt;
-  &lt;!-- 기본값 20 이면 큐가 80% 차는 순간 INFO 이하를 버립니다 ★ --&gt;
+  &lt;!-- 기본값(큐 크기의 1/5)이면 남은 칸이 20% 아래로 떨어지는 순간 INFO 이하를 버립니다 ★ --&gt;
   &lt;neverBlock&gt;false&lt;/neverBlock&gt;
   &lt;!-- true 면 큐가 꽉 찼을 때 로그를 버리고 애플리케이션은 안 멈춥니다 --&gt;
   &lt;includeCallerData&gt;false&lt;/includeCallerData&gt;
@@ -1146,7 +1148,7 @@ java -Dlogback.debug=true -jar app.jar 2&gt;&amp;1 | head -40
 &lt;/appender&gt;</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>기본값이 조용히 로그를 버립니다</b> — Logback <code>AsyncAppender</code> 의
-        <code>discardingThreshold</code> 기본값은 <b>20</b>입니다.
+        <code>discardingThreshold</code> 기본값은 <b>큐 크기의 1/5</b>(남은 칸 20%)입니다.
         큐가 80% 차면 <b>TRACE·DEBUG·INFO 를 말없이 버립니다</b>.
         “부하가 몰릴 때만 로그가 사라진다”는 신고의 원인이 대개 이것입니다.
         <b>버리기 싫으면 <code>0</code></b>, 대신 큐가 꽉 차면 애플리케이션이 기다립니다.
@@ -1196,8 +1198,9 @@ java -Dlog4j2.contextSelector=org.apache.logging.log4j.core.async.AsyncLoggerCon
       <div class="note tip" style="margin-bottom:0">
         <b>비동기의 대가</b> — ① <b>순서가 살짝 흔들릴 수 있고</b>,
         ② <b>프로세스가 죽으면 큐에 남은 로그가 사라지며</b>(그래서 종료 훅이 중요),
-        ③ 예외 스택을 나중에 포맷하므로 <b>가변 객체를 로그 인자로 넘기면 값이 달라집니다</b>.
-        마지막 항목은 실제로 디버깅을 어렵게 만드니, <b>불변 값이나 문자열을 넘기세요</b>.
+        ③ 기본값으로는 메시지를 호출 스레드에서 미리 포맷하지만(<code>log4j2.formatMsgAsync=false</code>),
+        이걸 켜서 포맷을 소비 스레드로 미루면 <b>가변 객체를 로그 인자로 넘겼을 때 값이 달라집니다</b>.
+        그 옵션을 켤 거라면 <b>불변 값이나 문자열을 넘기세요</b>.
       </div>
     </div>
   </div>
@@ -1339,11 +1342,15 @@ implementation("co.elastic.logging:logback-ecs-encoder:1.6.0")       // ECS 규�
   &lt;encoder class="net.logstash.logback.encoder.LogstashEncoder"&gt;
     &lt;includeMdcKeyName&gt;traceId&lt;/includeMdcKeyName&gt;
     &lt;includeMdcKeyName&gt;userId&lt;/includeMdcKeyName&gt;
+    &lt;!-- MDC 키를 ECS 식 필드 이름으로 바꿔 내보냅니다 (아래 출력·검색 예와 맞춤) --&gt;
+    &lt;mdcKeyFieldName&gt;traceId=trace.id&lt;/mdcKeyFieldName&gt;
+    &lt;mdcKeyFieldName&gt;userId=user.id&lt;/mdcKeyFieldName&gt;
     &lt;customFields&gt;{"service":"order-api","env":"prod"}&lt;/customFields&gt;
     &lt;fieldNames&gt;
       &lt;timestamp&gt;@timestamp&lt;/timestamp&gt;
       &lt;level&gt;log.level&lt;/level&gt;
       &lt;logger&gt;log.logger&lt;/logger&gt;
+      &lt;thread&gt;process.thread.name&lt;/thread&gt;
     &lt;/fieldNames&gt;
     &lt;throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter"&gt;
       &lt;maxDepthPerThrowable&gt;30&lt;/maxDepthPerThrowable&gt;
@@ -1957,7 +1964,8 @@ ls -l logs/app.log            # 크기 ÷ 줄 수
 #    30일 보관이면 압축해도 수백 GB — 여기서 비용이 결정됩니다
 
 # ④ 어떤 로거가 대부분을 차지하는지
-awk '{print $4}' logs/app.log | sort | uniq -c | sort -rn | head -20
+#    LOG 05 패턴이면 날짜·시각·[스레드]·레벨 다음 다섯째 칸이 로거입니다
+awk '{print $5}' logs/app.log | sort | uniq -c | sort -rn | head -20
 #   대개 상위 3개 로거가 전체의 80% 를 차지합니다 ★
 
 # ⑤ 같은 문구가 반복되는지 (묶어서 줄일 후보)
@@ -1978,22 +1986,21 @@ public class SamplingFilter extends OncePerRequestFilter {
     protected void doFilterInternal(...) {
         boolean sampled = ThreadLocalRandom.current().nextDouble() &lt; RATE;
         MDC.put("sampled", String.valueOf(sampled));
-        try { chain.doFilter(req, res); } finally { MDC.clear(); }
+        try { chain.doFilter(req, res); } finally { MDC.remove("sampled"); }   // 남의 키(traceId)까지 지우지 않게
     }
 }</code></pre>
-      <pre class="code" data-lang="xml"><code>&lt;!-- MDC 값으로 appender 를 통과시키기 --&gt;
-&lt;appender name="DEBUG_FILE" class="...RollingFileAppender"&gt;
-  &lt;filter class="ch.qos.logback.core.filter.EvaluatorFilter"&gt;
-    &lt;evaluator class="ch.qos.logback.classic.boolex.OnMarkerEvaluator"&gt;
-      &lt;marker&gt;SAMPLED&lt;/marker&gt;
-    &lt;/evaluator&gt;
-    &lt;OnMismatch&gt;DENY&lt;/OnMismatch&gt;
-    &lt;OnMatch&gt;ACCEPT&lt;/OnMatch&gt;
-  &lt;/filter&gt;
-  ...
-&lt;/appender&gt;
+      <pre class="code" data-lang="xml"><code>&lt;!-- MDC 값(sampled=true)으로 뽑힌 요청만 레벨 검사를 건너뛰게 합니다
+     터보 필터는 로거 레벨 검사보다 먼저 돌아서, 로거가 INFO 여도 DEBUG 가 통과합니다 --&gt;
+&lt;turboFilter class="ch.qos.logback.classic.turbo.MDCFilter"&gt;
+  &lt;MDCKey&gt;sampled&lt;/MDCKey&gt;
+  &lt;Value&gt;true&lt;/Value&gt;
+  &lt;OnMatch&gt;ACCEPT&lt;/OnMatch&gt;        &lt;!-- 뽑힌 요청: 모든 레벨 통과 --&gt;
+  &lt;OnMismatch&gt;NEUTRAL&lt;/OnMismatch&gt;  &lt;!-- 나머지: 평소 레벨대로 --&gt;
+&lt;/turboFilter&gt;
 
-&lt;!-- 같은 문구가 쏟아질 때 초당 개수를 제한 --&gt;
+&lt;!-- 같은 문구가 쏟아질 때 반복 횟수를 제한 — 시간 창이 아니라 캐시에서 밀려날 때까지 막힙니다
+     ⚠️ 인자를 넣기 전의 "틀"로 비교하므로 log.info("order={}", id) 도 5번 뒤부터 버려집니다.
+        문구가 고정된 시끄러운 로그에만 쓰세요 --&gt;
 &lt;turboFilter class="ch.qos.logback.classic.turbo.DuplicateMessageFilter"&gt;
   &lt;allowedRepetitions&gt;5&lt;/allowedRepetitions&gt;
   &lt;cacheSize&gt;200&lt;/cacheSize&gt;

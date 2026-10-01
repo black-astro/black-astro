@@ -221,7 +221,7 @@ class SearchViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 }</code></pre>
       <div class="note warn" style="margin-bottom:0">
-        <b>SavedStateHandle 에는 작은 값만</b> 넣으세요(수백 KB 이하).
+        <b>SavedStateHandle 에는 작은 값만</b> 넣으세요(공식 권장은 50KB 미만 — Bundle 전체 한도가 약 1MB).
         Bundle 크기를 넘기면 <code>TransactionTooLargeException</code>으로 앱이 죽습니다.
         목록 데이터는 <b>DB 에 두고 id 만</b> 저장하는 것이 정석입니다.
       </div>
@@ -369,7 +369,7 @@ Modifier
     <pre class="code" data-lang="kotlin" style="margin:10px 0 0"><code>@Preview(showBackground = true, name = "빈 목록")
 @Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES, name = "다크")
 @Composable
-private fun OrderListPreview() = AppTheme { OrderList(orders = emptyList()) }</code></pre>
+private fun OrderListPreview() = AppTheme { OrderList(orders = emptyList(), onClick = {}) }</code></pre>
   </div>
 </section>
 
@@ -882,7 +882,11 @@ class OrderViewModel @Inject constructor(
         _state.update { if (it is OrderUiState.Success) it.copy(isRefreshing = true) else it }
         runCatching { repo.list() }
             .onSuccess { _state.value = OrderUiState.Success(it.map(Order::toUi)) }
-            .onFailure { _events.emit(OrderEvent.ShowMessage("새로고침 실패")) }
+            .onFailure {
+                // 실패해도 당김 표시는 꺼야 한다 — 안 그러면 스피너가 영영 돈다
+                _state.update { s -&gt; if (s is OrderUiState.Success) s.copy(isRefreshing = false) else s }
+                _events.emit(OrderEvent.ShowMessage("새로고침 실패"))
+            }
     }
 
     fun onItemClick(id: Long) = viewModelScope.launch {
@@ -898,7 +902,7 @@ class FeedViewModel @Inject constructor(repo: FeedRepository) : ViewModel() {
 
     // Room 이 Flow 를 주면 데이터가 바뀔 때마다 화면이 자동 갱신된다
     val state: StateFlow&lt;FeedUiState&gt; = repo.observeFeed()
-        .map { FeedUiState.Success(it.map(Post::toUi)) }
+        .map&lt;_, FeedUiState&gt; { FeedUiState.Success(it.map(Post::toUi)) }   // 상위 타입으로 — catch 에서 Error 를 내보내려면
         .catch { emit(FeedUiState.Error(it.message ?: "오류")) }
         .stateIn(
             scope = viewModelScope,
@@ -968,7 +972,7 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
 
 // 백스택 조작
 navController.navigate(HomeRoute) {
-    popUpTo(HomeRoute) { inclusive = true }    // 로그인 후 되돌아가지 못하게
+    popUpTo(LoginRoute) { inclusive = true }   // 로그인 화면까지 스택에서 지운다 → 뒤로 가기로 못 돌아감
     launchSingleTop = true                      // 같은 화면 중복 방지
 }</code></pre>
 
@@ -1409,6 +1413,7 @@ data class OrderEntity(              // Room 은 data class 가 자연스럽다
     val status: String,
     val totalAmount: Long,
     @ColumnInfo(name = "created_at") val createdAt: Long,
+    val memo: String? = null,        // v2 에서 추가 — 아래 MIGRATION_1_2 와 짝 (없으면 스키마 검증 실패)
 )
 
 @Dao

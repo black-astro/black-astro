@@ -194,6 +194,7 @@ try:
     img.verify()          # 손상 여부 검사 (이후 재오픈 필요)
 except Exception as e:
     print(f"손상된 이미지: {path} - {e}")
+img = Image.open(path)    # ★ verify() 한 객체는 더 못 씁니다 — 다시 열기
 
 # 메모리에서 다루기 (웹 응답 등)
 import io
@@ -1177,19 +1178,22 @@ arr.mean(axis=(0, 1))      # 채널별 평균 밝기
 
 def make_thumb(src: str, dst: str, box=(640, 640)) -&gt; None:
     with Image.open(src) as im:
-        # ① EXIF 회전 반영 — 안 하면 아이폰 사진이 옆으로 눕는다
-        im = ImageOps.exif_transpose(im)
-
-        # ② 큰 원본은 draft 로 빠르게 축소 (JPEG 디코딩 자체를 줄인다)
+        # ① 큰 원본은 draft 로 빠르게 축소 (JPEG 디코딩 자체를 줄인다)
+        #    ★ 열자마자 해야 합니다 — exif_transpose 뒤에는 새 이미지라 아무 효과가 없습니다
         im.draft("RGB", box)
+
+        # ② EXIF 회전 반영 — 안 하면 아이폰 사진이 옆으로 눕는다
+        im = ImageOps.exif_transpose(im)
 
         # ③ 비율 유지 축소 — thumbnail 은 원본보다 크게 만들지 않는다
         im.thumbnail(box, Image.Resampling.LANCZOS)
 
-        # ④ 색 프로파일 — 무시하면 웹에서 색이 달라 보인다
+        # ④ 모드 통일 (CMYK·P·RGBA → RGB) + 색 프로파일은 그대로 넘겨 보존
+        #    — 프로파일을 버리면 웹에서 색이 달라 보인다
+        icc = im.info.get("icc_profile")
         im = im.convert("RGB")
 
-        im.save(dst, "WEBP", quality=82, method=4)
+        im.save(dst, "WEBP", quality=82, method=4, icc_profile=icc)
 
 # 폭탄 이미지 방어 — 압축을 풀면 수십 GB 가 되는 파일이 있다
 Image.MAX_IMAGE_PIXELS = 80_000_000</code></pre>
@@ -1280,6 +1284,8 @@ def preprocess(path: str) -&gt; np.ndarray:
     coords = np.column_stack(np.where(bw &lt; 255))
     angle  = cv2.minAreaRect(coords)[-1]
     angle  = -(90 + angle) if angle &lt; -45 else -angle
+    #   ⚠ OpenCV 4.5.1 부터 minAreaRect 의 각도 범위가 바뀌어(-90~0 → 0~90)
+    #     이 공식이 90° 가까이 엇나갈 수 있습니다 — 설치 버전에서 결과를 꼭 눈으로 확인
     h, w   = bw.shape
     M      = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
     return cv2.warpAffine(bw, M, (w, h),

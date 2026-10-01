@@ -385,7 +385,8 @@ private BooleanExpression createdBetween(LocalDateTime from, LocalDateTime to) {
 }
 
 // ★ 장점 — 이 메서드들을 '다른 쿼리에서도 재사용'할 수 있다
-// ★ 조합도 된다: statusEq(s).and(amountGoe(a))</code></pre>
+// ★ 조합도 된다: statusEq(s).and(amountGoe(a))
+//   단 왼쪽이 null 이면 NPE — 오른쪽 null 만 무시됩니다 (where 의 쉼표 나열이 안전)</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">BooleanBuilder — 조건이 복잡할 때</h4>
@@ -787,8 +788,10 @@ List&lt;Tuple&gt; byStatus = queryFactory
     .fetch();
 
 // 날짜별 집계 — DB 함수 호출
+// 포맷은 템플릿에 직접 — {1} 로 넘기면 select·group by 에 바인딩 파라미터가 따로 붙어
+// PostgreSQL 이 같은 식으로 보지 않습니다 ("must appear in the GROUP BY clause")
 StringTemplate dayFormat = Expressions.stringTemplate(
-        "function('to_char', {0}, {1})", order.createdAt, "YYYY-MM-DD");
+        "function('to_char', {0}, 'YYYY-MM-DD')", order.createdAt);
 
 List&lt;DailySales&gt; daily = queryFactory
     .select(Projections.constructor(DailySales.class,
@@ -979,6 +982,7 @@ List&lt;OrderSummary&gt; content = queryFactory
 
   <pre class="code rv" data-lang="java"><code>@Transactional
 public long expireOldOrders(LocalDateTime before) {
+    em.flush();          // 보류 중인 변경을 먼저 내보낸다 (벌크 뒤에 플러시되면 결과를 덮어씀)
     long updated = queryFactory
         .update(order)
         .set(order.status, OrderStatus.EXPIRED)
@@ -988,7 +992,6 @@ public long expireOldOrders(LocalDateTime before) {
                order.createdAt.lt(before))
         .execute();
 
-    em.flush();
     em.clear();          // ★ 1차 캐시를 비운다 — 안 하면 옛 값을 보게 된다
     return updated;
 }
@@ -1241,14 +1244,15 @@ BooleanTemplate raw = Expressions.booleanTemplate(
         "JSON_EXTRACT({0}, '$.type') = {1}", product.options, "premium");
 
 // 정렬 — null 순서 지정
-.orderBy(new OrderSpecifier&lt;&gt;(Order.DESC, order.paidAt).nullsLast())
+.orderBy(order.paidAt.desc().nullsLast())
 
 // 동적 정렬 (Pageable.getSort() 를 QueryDSL 로)
 private OrderSpecifier&lt;?&gt;[] toOrderSpecifiers(Sort sort) {
     return sort.stream().map(o -&gt; {
         com.querydsl.core.types.Order dir =
             o.isAscending() ? ASC : DESC;
-        PathBuilder&lt;Order&gt; path = new PathBuilder&lt;&gt;(Order.class, "order");
+        // 별칭은 Q타입 것을 그대로 — "order" 는 예약어라 실제 별칭은 order1 입니다
+        PathBuilder&lt;Order&gt; path = new PathBuilder&lt;&gt;(order.getType(), order.getMetadata());
         return new OrderSpecifier(dir, path.get(o.getProperty()));
     }).toArray(OrderSpecifier[]::new);
 }</code></pre>
@@ -1578,8 +1582,8 @@ public class OrderRepositoryImpl implements OrderRepositoryCustom {
 }
 
 public List&lt;DailySales&gt; dailySales(LocalDate from, LocalDate to) {
-    StringTemplate day = Expressions.stringTemplate(
-            "function('to_char', {0}, {1})", order.paidAt, "YYYY-MM-DD");
+    StringTemplate day = Expressions.stringTemplate(      // 포맷은 템플릿에 직접 (q07 참고)
+            "function('to_char', {0}, 'YYYY-MM-DD')", order.paidAt);
 
     return queryFactory
         .select(new QDailySales(
