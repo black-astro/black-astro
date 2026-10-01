@@ -52,6 +52,7 @@ const TAB_LABEL = {
   batch:"🗂️ 배치 · 파일 · 통신",
   host:"🖧 서버 구축 · 배포",
   log:"📝 로깅 · 로그",
+  sq:"🥞 스택 · 큐 · 덱",
 };
 
 function tabDrop(force){
@@ -98,6 +99,7 @@ const SEC_LV = {
   /* batch */ f01:"b", f02:"b", f03:"i", f04:"a", f05:"a", f06:"a", f07:"a", f08:"a", f09:"a", f10:"a", f11:"a", f12:"i", f13:"a",
   /* host */ h01:"b", h02:"i", h03:"b", h04:"i", h05:"b", h06:"i", h07:"i", h08:"i", h09:"i", h10:"a", h11:"i", h12:"a", h13:"b", h14:"i",
   /* log */ lg01:"b", lg02:"b", lg03:"b", lg04:"b", lg05:"a", lg06:"i", lg07:"i", lg08:"i", lg09:"a", lg10:"a", lg11:"i", lg12:"i",
+  /* sq */ sq01:"b", sq02:"b", sq03:"b", sq04:"i", sq05:"i", sq06:"i", sq07:"a", sq08:"i", sq09:"a", sq10:"i", sq11:"b", sq12:"a",
 };
 
 
@@ -337,6 +339,19 @@ const EZ = {
   lg10:"비싼 자리는 <b>문자열 만들기 · 박싱 · 동기 I/O · 저장 요금</b> 넷입니다. 줄이기 전에 재세요.",
   lg11:"로그는 <b>네 곳으로 자동 복제</b>됩니다 — 마스킹보다 애초에 안 넣는 설계가 유일하게 통합니다.",
   lg12:"컨테이너는 <b>stdout JSON</b>, 윈도우 서비스는 <b>파일 + EventLog</b> — 환경이 남길 곳을 정합니다.",
+  /* ── sq ── */
+  sq01:"C# 은 <b>Stack&lt;T&gt; · Queue&lt;T&gt; 가 그대로 정답</b>이고, 덱은 표준에 없어 직접 만들며, 기다림이 필요하면 <b>Channel</b> 입니다.",
+  sq02:"Stack&lt;T&gt; 의 속은 <b>배열 하나와 개수 하나</b>. 열거는 <b>꼭대기부터</b>, 빈 스택은 <b>TryPop</b> 으로.",
+  sq03:"Queue&lt;T&gt; 는 <b>배열을 원형으로 돌려 쓰는</b> 구조라 앞에서 꺼내도 O(1). <b>List.RemoveAt(0)</b> 은 O(n) 입니다.",
+  sq04:".NET 에는 <b>덱이 없습니다</b>. LinkedList 는 노드마다 할당하므로 <b>원형 버퍼 Deque&lt;T&gt; 한 파일</b>을 넣어 씁니다.",
+  sq05:"PriorityQueue 는 <b>최소 힙</b>이고 <b>같은 우선순위끼리는 순서가 없으며</b> 우선순위를 바꾸는 API 도 없습니다.",
+  sq06:"ConcurrentQueue 는 <b>락 없이 안전</b>하지만 <b>기다리지는 않습니다</b>. 기다림과 상한이 필요하면 BlockingCollection 이나 Channel 로.",
+  sq07:"Channel 은 <b>async 판 BlockingCollection</b>. 꽉 차면 <b>await 로 기다려</b> 배압을 걸고, <b>Writer.Complete()</b> 로 끝을 알립니다.",
+  sq08:"괄호 · 다음 큰 수는 <b>Stack + TryPeek</b>, 최단 거리는 <b>Queue + while TryDequeue</b>, 윈도우 최댓값 · 0-1 BFS 는 <b>덱</b>.",
+  sq09:"O(1) 끼리도 <b>할당이 있느냐</b>로 몇 배가 갈립니다. 배열 기반 제네릭이 기본이고, 수치는 <b>직접 잽니다</b>.",
+  sq10:"버그의 절반은 <b>확인하고 꺼내기</b>, 나머지는 <b>순서에 대한 착각</b>. Try 패턴과 상한 있는 큐가 대부분을 막습니다.",
+  sq11:"C# 은 <b>스택 · 큐 전용 타입, 덱 없음, 힙은 최소</b>. C++ · Rust 의 힙은 <b>최대</b>라 옮길 때 거꾸로 나옵니다.",
+  sq12:"실무의 타입은 <b>상한이 있나 · 기다려야 하나 · 여러 스레드인가</b> 세 질문으로 정해집니다.",
 };
 
 
@@ -577,6 +592,19 @@ const CAP = {
   lg10:["e","로깅이 진짜 병목인지 수치로 확인하고, 지연과 유실 중 무엇을 포기할지 정할 수 있습니다"],
   lg11:["p","커넥션 문자열·개인정보가 로그로 새는 대표 경로 다섯 개를 코드로 막을 수 있습니다"],
   lg12:["p","환경별로 로그 목적지를 나누고, 디스크가 차서 서버가 멈추는 사고를 막습니다"],
+  /* ── sq ── */
+  sq01:["p","스택 · 큐 · 덱 · 우선순위 큐 · 동시성 큐 · 채널 중 상황에 맞는 .NET 타입을 바로 고르고 레거시 타입을 리뷰에서 걸러낼 수 있다"],
+  sq02:["p","Stack<T> 의 내부와 열거 순서를 이해해 TryPop 패턴, 스택 복사 뒤집힘, Unity 오브젝트 풀을 올바르게 짤 수 있다"],
+  sq03:["p","Queue<T> 의 _head/_tail 동작과 용량 규칙을 알고 List 기반 큐 · 열거 중 수정 같은 실수를 고칠 수 있다"],
+  sq04:["s","원형 버퍼 덱을 직접 구현하고 LinkedList 대비 메모리 · 속도 차이를 설명할 수 있다"],
+  sq05:["p","PriorityQueue 로 최대 힙 · 다중 키 · 안정 정렬 · top-k · 지연 삭제 다익스트라를 함정 없이 짤 수 있다"],
+  sq06:["p","ConcurrentQueue · ConcurrentStack · BlockingCollection 의 차이를 알고 생산자-소비자와 Unity 메인 스레드 디스패치를 구현할 수 있다"],
+  sq07:["p","Bounded Channel 로 배압이 있는 생산자-소비자를 만들고 FullMode · 종료 · 오류 전파를 올바르게 설계할 수 있다"],
+  sq08:["s","단조 스택 · BFS · 단조 덱 · 0-1 BFS · undo/redo 를 C# 관용 코드로 바로 작성할 수 있다"],
+  sq09:["e","박싱 · 노드 할당 · 큰 struct 복사 · 동기화 비용을 근거로 큐 타입을 고르고 BenchmarkDotNet 으로 검증할 수 있다"],
+  sq10:["p","스택 · 큐 관련 경쟁 상태 · 순서 착각 · 메모리 누적 버그를 코드 리뷰에서 찾아 고칠 수 있다"],
+  sq11:["s","자바 · 파이썬 · JS · C++ · Rust 의 스택 · 큐 코드를 C# 으로 (또는 반대로) 정확히 옮길 수 있다"],
+  sq12:["p","ASP.NET Core 백그라운드 작업 큐 · 최근 N개 · 레이트 리미터 · 재시도 큐 · 이벤트 묶음 · Unity 이벤트 큐를 바로 구현할 수 있다"],
 };
 
 
@@ -617,7 +645,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (0 = 10번째 탭) */
-const TAB_ORDER = ["setup","lang","adv","unity","ugame","net","api","blazor","ent","batch"];
+const TAB_ORDER = ["setup","lang","sq","adv","unity","ugame","net","api","blazor","ent"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;

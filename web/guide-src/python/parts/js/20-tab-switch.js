@@ -61,6 +61,7 @@ const TAB_LABEL = {
   setup:"🧰 설치 · 환경 세팅",
   log:"📝 로깅 · 로그",
   prod:"🏭 실무 프로젝트 · 운영",
+  sq:"🥞 스택 · 큐 · 덱",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -114,6 +115,7 @@ const SEC_LV = {
   /* setup */ st01:"b", st02:"b", st03:"b", st04:"b", st05:"i", st06:"b", st07:"i", st08:"b", st09:"i", st10:"i", st11:"a", st12:"b",
   /* log */ lg01:"b", lg02:"b", lg03:"b", lg04:"b", lg05:"i", lg06:"i", lg07:"a", lg08:"i", lg09:"i", lg10:"i", lg11:"a", lg12:"i",
   /* prod */ pj01:"b", pj02:"b", pj03:"i", pj04:"b", pj05:"i", pj06:"a", pj07:"i", pj08:"i", pj09:"a", pj10:"i", pj11:"i", pj12:"b", pj13:"i",
+  /* sq */ sq01:"b", sq02:"b", sq03:"b", sq04:"i", sq05:"i", sq06:"i", sq07:"a", sq08:"i", sq09:"a", sq10:"i", sq11:"b", sq12:"a",
 };
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 기초 한 줄 번역 (항상 표시) */
 const EZ = {
@@ -433,6 +435,19 @@ const EZ = {
   pj11:"외부 값은 <b>문 앞에서 pydantic 으로 한 번</b>, 안쪽은 가벼운 dataclass 로 다룹니다.",
   pj12:"기계가 잡는 것은 ruff 에 맡기고, 리뷰어는 <b>\"영원히 안 끝나면? · 예외 시 풀리나? · 두 번 돌면?\"</b>에 집중합니다.",
   pj13:"배포는 <b>하루짜리 절차</b>이고, 문제가 보이면 <b>고치지 말고 먼저 롤백</b>합니다.",
+  /* ── sq ── */
+  sq01:"혼자 쓰면 <b>list(스택) · deque(큐) · heapq(우선순위)</b>, 여럿이 같이 쓰면 경계에 맞는 <b>queue · asyncio.Queue · multiprocessing.Queue</b>.",
+  sq02:"파이썬엔 Stack 클래스가 없습니다. <b>list 의 오른쪽 끝이 top</b> — append 로 넣고 pop 으로 뺍니다.",
+  sq03:"list 앞에서 빼면 뒤의 원소가 <b>전부 한 칸씩 당겨져</b> 느립니다. 큐는 <b>deque 의 popleft</b>.",
+  sq04:"CPython deque 는 <b>64칸짜리 블록을 양방향으로 이은 사슬</b>이라 양끝은 O(1), 가운데 인덱싱은 O(n) 입니다.",
+  sq05:"heapq 는 list 를 힙처럼 다루는 함수 모음입니다. <b>(우선순위, 순번, 항목)</b> 으로 넣으면 TypeError 와 순서 문제가 함께 풀립니다.",
+  sq06:"스레드끼리는 <b>queue.Queue(maxsize=N)</b> — 기다림·배압·완료 추적·종료(3.13 shutdown)가 다 들어 있습니다.",
+  sq07:"async 에는 <b>asyncio.Queue</b>, 프로세스 사이엔 <b>multiprocessing.Queue</b>(pickle). 세 큐는 서로 섞이지 않습니다.",
+  sq08:"괄호 검사·다음 큰 수·BFS·0-1 BFS·슬라이딩 윈도우 최댓값·undo/redo 를 <b>파이썬 관용 코드</b>로 정리합니다.",
+  sq09:"연산 자체는 50~100ns. 비싼 건 <b>잘못된 쪽 끝 · 불필요한 락 · 원소 객체</b>입니다.",
+  sq10:"힙 원소 직접 수정, 작업 큐에 maxlen, empty() 확인 후 get, task_done 누락 — <b>에러 없이 틀리는</b> 실수들입니다.",
+  sq11:"Java <b>ArrayDeque ≈ deque</b>, PriorityQueue ≈ heapq+튜플, BlockingQueue ≈ queue.Queue, 채널 ≈ asyncio.Queue.",
+  sq12:"최근 N개 로그는 deque(maxlen), 레이트 리미터는 deque, 예약은 heapq, 재시도는 asyncio.Queue, 깊은 순회는 <b>명시적 스택</b>.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -780,6 +795,19 @@ const CAP = {
   pj11:["p","입력·출력 모델을 분리해 경계에서 검증하고 TypeAdapter.validate_json 으로 빠르게 직렬화하며, dataclass·pydantic·attrs 를 기준에 따라 고를 수 있습니다"],
   pj12:["p","가변 기본 인자·늦은 바인딩·예외 삼키기·타임아웃 없음·리소스 미해제 같은 사고 패턴을 리뷰에서 바로 짚고 PR 템플릿으로 습관화할 수 있습니다"],
   pj13:["p","배포 전후 체크리스트·장애 첫 15분 절차·RED 지표와 알람 세 개·런북 템플릿으로 서비스를 혼자 맡아 운영할 수 있습니다"],
+  /* ── sq ── */
+  sq01:["p","요구사항을 듣고 파이썬 표준 라이브러리에서 맞는 스택·큐 타입을 바로 고르고, 잘못 고른 레거시 코드를 짚어낼 수 있다"],
+  sq02:["p","list 로 스택을 쓰고 빈 스택·순회 순서·분할 상환 O(1) 재할당을 설명할 수 있다"],
+  sq03:["p","list.pop(0) 이 O(n) 인 이유를 설명하고 deque 로 바꿔 n=10만에서 수백 배 빠른 큐를 만들 수 있다"],
+  sq04:["s","deque 의 내부 구조로 연산별 비용과 maxlen · rotate · 스레드 안전 범위를 설명할 수 있다"],
+  sq05:["p","heapq 로 다중 키 우선순위 큐·top-k·지연 삭제를 구현하고 3.14 최대 힙 함수를 쓸 수 있다"],
+  sq06:["p","생산자-소비자를 유한 큐·task_done/join·shutdown 또는 sentinel 로 끝까지 안전하게 짤 수 있다"],
+  sq07:["p","asyncio.Queue 와 TaskGroup 으로 비동기 작업 큐를 만들고, 스레드·프로세스와의 경계를 안전하게 넘길 수 있다"],
+  sq08:["s","스택·큐·덱 문제 유형을 알아보고 단조 스택·단조 덱·0-1 BFS 를 파이썬답게 구현할 수 있다"],
+  sq09:["e","list·deque·queue·heapq·array 의 실제 비용을 재고, 메모리·속도 병목을 근거로 타입을 바꿀 수 있다"],
+  sq10:["p","코드 리뷰에서 스택·큐 관련 경쟁 조건·데이터 유실·교착·성능 함정을 찾아 고칠 수 있다"],
+  sq11:["s","자바·C#·C++·Rust·Go 의 스택·큐 코드를 파이썬으로 옮기며 힙 방향·빈 상태 동작 차이를 바로잡을 수 있다"],
+  sq12:["p","로그 버퍼·레이트 리미터·재시도 작업 큐·스케줄러·묶음 전송·명시적 스택 순회를 운영 코드로 만들 수 있다"],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 (표시 필터는 없음 — 항상 전부 보입니다) */
@@ -820,7 +848,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (11번째부터 — 웹 기초·테스트·대규모 트래픽·전문가은 단축키 없음) */
-const TAB_ORDER = ["setup","python","uv","pandas","numpy","img","web","db","test","log"];
+const TAB_ORDER = ["setup","python","sq","uv","pandas","numpy","img","web","db","test"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;

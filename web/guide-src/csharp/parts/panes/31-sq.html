@@ -1,0 +1,2936 @@
+<!-- ============================================================
+     스택 · 큐 · 덱 PANE
+     ============================================================ -->
+<div class="pane" id="pane-sq">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> Stack&lt;T&gt; · Queue&lt;T&gt; · PriorityQueue · Concurrent* · Channels · .NET 10 LTS · C# 14</div>
+  <h1>넣은 순서가<br>곧 처리 순서인<br>자료구조</h1>
+  <p class="tx">
+    C# 에서 스택·큐는 <b>"어떤 타입을 고르느냐"</b>가 이야기의 절반입니다.
+    자바는 <code>Stack</code> 을 버리고 <code>ArrayDeque</code> 로 갔지만, C# 은 반대로 <b><code>Stack&lt;T&gt;</code> · <code>Queue&lt;T&gt;</code> 가 그대로 정답</b>이고,
+    대신 <b>표준 덱(Deque)이 없다</b>는 구멍이 있습니다.
+    이 탭은 <b>내부 원형 배열(_head · _tail) · Try 패턴 · PriorityQueue 의 함정 · ConcurrentQueue 와 Channel 의 차이 · 배압</b>까지
+    2026 년 현업에서 실제로 쓰는 타입과 관용구를 소스 수준으로 뜯어 봅니다.
+    <b>끝나면 작업 큐 · 최근 N개 버퍼 · 레이트 리미터 · 다익스트라를 "왜 이 타입인지" 설명하며 짤 수 있습니다.</b>
+  </p>
+  <div class="stats">
+    <div><b>12</b><span>SECTIONS</span></div>
+    <div><b>.NET 10</b><span>기준 LTS</span></div>
+    <div><b>10</b><span>다루는 타입</span></div>
+    <div><b>100%</b><span>복붙해서 도는 예제</span></div>
+  </div>
+</header>
+
+
+<!-- ==================== sq01 ==================== -->
+<section class="sec" id="sq01">
+  <div class="sec-head rv">
+    <span class="no">SQ 01</span>
+    <h2>한 장 지도 — <span class="t">C# 은 무엇으로 쓰나</span></h2>
+    <p class="lead">
+      스택 · 큐 · 덱 · 우선순위 큐 · 스레드 안전 큐 · 비동기 채널 — 여섯 가지 일을 .NET 이 각각 어떤 타입으로 하는지,
+      그리고 <b>무엇을 새 코드에서 쓰면 안 되는지</b>를 먼저 한 장으로 정리합니다.
+      이 표 하나만 외워 두면 나머지 섹션은 "왜 그런가"를 확인하는 과정입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">2026 권장 vs 쓰지 말 것</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th>하려는 일</th><th>권장 (.NET 10)</th><th>쓰지 말 것</th></tr></thead>
+          <tbody>
+            <tr><td>스택 (LIFO)</td><td><b>Stack&lt;T&gt;</b></td><td><code>System.Collections.Stack</code> (object · 박싱)</td></tr>
+            <tr><td>큐 (FIFO)</td><td><b>Queue&lt;T&gt;</b></td><td><code>List&lt;T&gt;.RemoveAt(0)</code> (O(n)) · 비제네릭 <code>Queue</code></td></tr>
+            <tr><td>덱 (양쪽 끝)</td><td><b>직접 만든 원형 버퍼</b> · 급하면 <code>LinkedList&lt;T&gt;</code></td><td><code>List&lt;T&gt;.Insert(0, x)</code> (O(n))</td></tr>
+            <tr><td>우선순위 큐</td><td><b>PriorityQueue&lt;TElement, TPriority&gt;</b> <span class="ver">.NET 6+</span></td><td><code>SortedSet</code> 로 흉내 (중복 키가 사라짐)</td></tr>
+            <tr><td>스레드 안전 큐 · 스택</td><td><b>ConcurrentQueue&lt;T&gt;</b> · <b>ConcurrentStack&lt;T&gt;</b></td><td><code>Queue.Synchronized(...)</code> · <code>lock</code> + <code>Queue</code> 남발</td></tr>
+            <tr><td>생산자 · 소비자 (기다림 포함)</td><td><b>Channel&lt;T&gt;</b> (System.Threading.Channels)</td><td><code>BlockingCollection&lt;T&gt;</code> <span class="ver old">레거시 쪽</span></td></tr>
+            <tr><td>불변 스냅숏 · undo</td><td><b>ImmutableStack&lt;T&gt;</b> · <b>ImmutableQueue&lt;T&gt;</b></td><td>매번 <code>new Stack&lt;T&gt;(old)</code> 로 복사 (뒤집힘 함정)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>자바와 정반대인 점</b> — 자바의 <code>Stack</code> 은 <code>Vector</code> 를 상속한 탓에 버려졌지만,
+        C# 의 <code>Stack&lt;T&gt;</code> 는 처음부터 <b>배열 하나 + 개수 하나</b>인 깔끔한 설계라 지금도 1순위입니다.
+        C# 에서 버려진 것은 <b>제네릭 이전(.NET 1.x)의 비제네릭 <code>Stack</code> · <code>Queue</code></b> 쪽입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">여섯 가지를 한 화면에서</h4>
+      <pre class="code" data-lang="csharp"><code>using System.Collections.Concurrent;
+using System.Collections.Immutable;
+using System.Threading.Channels;
+
+var stack = new Stack&lt;int&gt;();               // LIFO
+stack.Push(1); stack.Push(2);
+Console.WriteLine(stack.Pop());             // 2
+
+var queue = new Queue&lt;string&gt;();            // FIFO
+queue.Enqueue("a"); queue.Enqueue("b");
+Console.WriteLine(queue.Dequeue());         // a
+
+var pq = new PriorityQueue&lt;string, int&gt;();  // 작은 우선순위가 먼저
+pq.Enqueue("나중", 5); pq.Enqueue("먼저", 1);
+Console.WriteLine(pq.Dequeue());            // 먼저
+
+var cq = new ConcurrentQueue&lt;int&gt;();        // 여러 스레드가 동시에
+cq.Enqueue(42);
+Console.WriteLine(cq.TryDequeue(out var v) ? v : -1);   // 42
+
+var ch = Channel.CreateBounded&lt;int&gt;(100);  // async 로 기다리는 큐
+await ch.Writer.WriteAsync(7);
+Console.WriteLine(await ch.Reader.ReadAsync());          // 7
+
+var undo = ImmutableStack&lt;string&gt;.Empty.Push("v1").Push("v2");
+Console.WriteLine(undo.Peek());             // v2 (undo 자체는 안 바뀜)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>usings</b> — <code>Stack</code> · <code>Queue</code> · <code>PriorityQueue</code> · <code>LinkedList</code> 는
+        <code>System.Collections.Generic</code> 이라 <b>ImplicitUsings 로 이미 들어와 있습니다</b>.
+        Concurrent · Immutable · Channels 세 네임스페이스만 직접 적습니다.
+        세 가지 모두 <b>.NET 10 에 기본 포함</b>이라 NuGet 설치가 필요 없습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 460" role="img" aria-label="어떤 타입을 쓸지 고르는 결정 흐름도. async 로 기다리며 주고받으면 Channel, 여러 스레드가 동시에 넣고 빼면 ConcurrentQueue, 우선순위가 높은 것부터 꺼내면 PriorityQueue, 양쪽 끝에서 넣고 빼야 하면 표준에 없으므로 원형 버퍼 Deque 를 직접 구현, 마지막에 넣은 것을 먼저 꺼내면 Stack, 그 밖에는 Queue 를 쓴다. 비제네릭 Stack 과 Queue, BlockingCollection 은 레거시다">
+      <text x="16" y="18" class="lbl">무엇을 쓸까 — 위에서부터 질문하고, 처음 "예"가 나온 곳이 답입니다</text>
+
+      <polygon class="dia" points="120,34 224,60 120,86 16,60"/>
+      <text x="120" y="57" class="ann" text-anchor="middle">async 로 기다리며</text>
+      <text x="120" y="69" class="ann" text-anchor="middle">주고받나?</text>
+      <path class="ln ar" d="M228 60 L282 60"/>
+      <text x="240" y="54" class="ann">예</text>
+      <rect class="bx bx-ok" x="286" y="40" width="176" height="40"/>
+      <text x="374" y="58" class="ann ok-t" text-anchor="middle">Channel&lt;T&gt;</text>
+      <text x="374" y="72" class="ann" text-anchor="middle">배압 · await · 종료 신호</text>
+      <text x="476" y="58" class="ann">레거시 대체: BlockingCollection</text>
+      <text x="476" y="72" class="ann">System.Threading.Channels</text>
+
+      <path class="ln ar" d="M120 90 L120 100"/>
+      <text x="128" y="98" class="ann">아니오</text>
+
+      <polygon class="dia" points="120,104 224,130 120,156 16,130"/>
+      <text x="120" y="127" class="ann" text-anchor="middle">스레드 여럿이</text>
+      <text x="120" y="139" class="ann" text-anchor="middle">동시에 넣고 빼나?</text>
+      <path class="ln ar" d="M228 130 L282 130"/>
+      <text x="240" y="124" class="ann">예</text>
+      <rect class="bx bx-ok" x="286" y="110" width="176" height="40"/>
+      <text x="374" y="128" class="ann ok-t" text-anchor="middle">ConcurrentQueue&lt;T&gt;</text>
+      <text x="374" y="142" class="ann" text-anchor="middle">락 없이 · 스레드 안전</text>
+      <text x="476" y="128" class="ann">ConcurrentStack&lt;T&gt; 도 같은 계열</text>
+      <text x="476" y="142" class="ann">기다림이 필요하면 Channel 로</text>
+
+      <path class="ln ar" d="M120 160 L120 170"/>
+      <text x="128" y="168" class="ann">아니오</text>
+
+      <polygon class="dia" points="120,174 224,200 120,226 16,200"/>
+      <text x="120" y="197" class="ann" text-anchor="middle">우선순위가 높은 것</text>
+      <text x="120" y="209" class="ann" text-anchor="middle">부터 꺼내나?</text>
+      <path class="ln ar" d="M228 200 L282 200"/>
+      <text x="240" y="194" class="ann">예</text>
+      <rect class="bx bx-ok" x="286" y="180" width="176" height="40"/>
+      <text x="374" y="198" class="ann ok-t" text-anchor="middle">PriorityQueue&lt;E, P&gt;</text>
+      <text x="374" y="212" class="ann" text-anchor="middle">4-ary 최소 힙 · .NET 6+</text>
+      <text x="476" y="198" class="ann">같은 우선순위 순서는 보장 없음</text>
+      <text x="476" y="212" class="ann">최대 힙은 Comparer 를 뒤집어서</text>
+
+      <path class="ln ar" d="M120 230 L120 240"/>
+      <text x="128" y="238" class="ann">아니오</text>
+
+      <polygon class="dia" points="120,244 224,270 120,296 16,270"/>
+      <text x="120" y="267" class="ann" text-anchor="middle">양쪽 끝에서</text>
+      <text x="120" y="279" class="ann" text-anchor="middle">넣고 빼야 하나?</text>
+      <path class="ln ar" d="M228 270 L282 270"/>
+      <text x="240" y="264" class="ann">예</text>
+      <rect class="bx bx-hi" x="286" y="250" width="176" height="40"/>
+      <text x="374" y="268" class="ann am-t" text-anchor="middle">Deque&lt;T&gt; 직접 구현</text>
+      <text x="374" y="282" class="ann" text-anchor="middle">표준 라이브러리에 없습니다</text>
+      <text x="476" y="268" class="ann">LinkedList&lt;T&gt; 는 노드마다 할당</text>
+      <text x="476" y="282" class="ann">SQ 04 의 원형 버퍼 코드를 복사</text>
+
+      <path class="ln ar" d="M120 300 L120 310"/>
+      <text x="128" y="308" class="ann">아니오</text>
+
+      <polygon class="dia" points="120,314 224,340 120,366 16,340"/>
+      <text x="120" y="337" class="ann" text-anchor="middle">마지막에 넣은 것을</text>
+      <text x="120" y="349" class="ann" text-anchor="middle">먼저 꺼내나?</text>
+      <path class="ln ar" d="M228 340 L282 340"/>
+      <text x="240" y="334" class="ann">예</text>
+      <rect class="bx bx-ok" x="286" y="320" width="176" height="40"/>
+      <text x="374" y="338" class="ann ok-t" text-anchor="middle">Stack&lt;T&gt;</text>
+      <text x="374" y="352" class="ann" text-anchor="middle">Push · Pop · TryPop</text>
+      <text x="476" y="338" class="ann">비제네릭 Stack · Queue 는 레거시</text>
+      <text x="476" y="352" class="ann">object 박싱 — 새 코드에서 금지</text>
+
+      <path class="ln ar" d="M120 370 L120 384"/>
+      <text x="128" y="381" class="ann">아니오</text>
+      <rect class="bx bx-ok" x="32" y="388" width="176" height="40"/>
+      <text x="120" y="406" class="ann ok-t" text-anchor="middle">Queue&lt;T&gt;</text>
+      <text x="120" y="420" class="ann" text-anchor="middle">Enqueue · TryDequeue</text>
+      <text x="226" y="412" class="ann">줄 세우기 · BFS · 작업 대기열 — 가장 흔한 답</text>
+
+      <text x="16" y="452" class="lbl">질문 순서가 곧 우선순위입니다 — 위에서 걸리면 아래는 볼 필요가 없습니다</text>
+    </svg>
+    <div class="cap">타입 선택은 <b>"기다려야 하나 → 동시에 만지나 → 순서 규칙은 무엇인가"</b> 순으로 묻습니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="m">어디에 들어 있나 — <span class="t">네임스페이스 · 도입 버전 · Unity</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <thead><tr><th>타입</th><th>네임스페이스</th><th>도입</th><th>Unity 6 (.NET Standard 2.1)</th></tr></thead>
+      <tbody>
+        <tr><td><b>Stack&lt;T&gt;</b> · <b>Queue&lt;T&gt;</b></td><td>System.Collections.Generic</td><td>.NET Framework 2.0</td><td>✅ (TryPop · TryDequeue 포함)</td></tr>
+        <tr><td><b>LinkedList&lt;T&gt;</b></td><td>System.Collections.Generic</td><td>.NET Framework 2.0</td><td>✅</td></tr>
+        <tr><td><b>PriorityQueue&lt;TElement, TPriority&gt;</b></td><td>System.Collections.Generic</td><td><span class="ver">.NET 6</span></td><td>❌ 없음 — 직접 힙을 짜거나 SortedSet 대체</td></tr>
+        <tr><td><b>ConcurrentQueue&lt;T&gt;</b> · <b>ConcurrentStack&lt;T&gt;</b></td><td>System.Collections.Concurrent</td><td>.NET Framework 4.0</td><td>✅</td></tr>
+        <tr><td><b>BlockingCollection&lt;T&gt;</b></td><td>System.Collections.Concurrent</td><td>.NET Framework 4.0</td><td>✅ (스레드를 막으므로 메인 스레드 금지)</td></tr>
+        <tr><td><b>Channel&lt;T&gt;</b></td><td>System.Threading.Channels</td><td>.NET Core 3.0 부터 기본 포함</td><td>⚠️ 기본 없음 — DLL 을 직접 넣어야 함</td></tr>
+        <tr><td><b>ImmutableStack&lt;T&gt;</b> · <b>ImmutableQueue&lt;T&gt;</b></td><td>System.Collections.Immutable</td><td>.NET Core 부터 기본 포함</td><td>⚠️ 기본 없음 — DLL 을 직접 넣어야 함</td></tr>
+        <tr><td><code>System.Collections.Stack</code> · <code>Queue</code></td><td>System.Collections</td><td>.NET 1.0</td><td>있지만 쓰지 말 것 <span class="ver old">레거시</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="note info">
+      <b>이 탭이 다루지 않는 것</b> — 컬렉션 전체를 고르는 기준(List · Dictionary · HashSet)은
+      🔷 C# 기초 탭 <b>C# 07 컬렉션 완전정복</b>, Kafka · RabbitMQ 같은 <b>분산 메시지 큐</b>는 📈 확장 탭 <b>SCALE 06</b>,
+      콜스택과 관리 힙(이름만 같은 "스택")은 🧬 깊이 탭 <b>Z 02</b> 에 있습니다. 스택 · 큐의 이론(ADT · 증명)은 CS 가이드 몫입니다.
+    </div>
+    <div class="note warn">
+      <b>Unity 에서 <code>PriorityQueue</code> 를 쓰려고 하면 컴파일 에러</b>가 납니다 —
+      Unity 6 의 API 호환 수준은 <b>.NET Standard 2.1</b> 이고, PriorityQueue 는 .NET 6 에서 생긴 타입이라 그 안에 없습니다.
+      A* 경로 탐색처럼 힙이 필요하면 <b>SQ 05 의 원리로 이진 힙을 직접</b> 짜는 것이 가장 흔한 해법입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> C# 은 <b>Stack&lt;T&gt; · Queue&lt;T&gt; 가 그대로 정답</b>이고, 덱만 직접 만들며,
+    동시성은 "기다림이 필요하면 Channel, 아니면 ConcurrentQueue" 로 나눕니다. 비제네릭 컬렉션은 전부 레거시입니다.</div>
+</section>
+
+
+<!-- ==================== sq02 ==================== -->
+<section class="sec" id="sq02">
+  <div class="sec-head rv">
+    <span class="no">SQ 02</span>
+    <h2>스택 — <span class="t">Stack&lt;T&gt;</span> 하나면 됩니다</h2>
+    <p class="lead">
+      <code>Stack&lt;T&gt;</code> 의 속은 <b>배열 <code>_array</code> 와 개수 <code>_size</code></b> 두 필드가 전부입니다.
+      그래서 빠르고 단순하지만, <b>열거 순서가 꼭대기부터</b>라는 점과 <b>빈 스택에서 Pop 하면 예외</b>라는 점은 꼭 알고 써야 합니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 사용 — 출력까지</h4>
+      <pre class="code" data-lang="csharp"><code>// Program.cs (.NET 10 · top-level)
+var s = new Stack&lt;int&gt;();
+s.Push(10);
+s.Push(20);
+s.Push(30);
+
+Console.WriteLine(s.Peek());               // 30 (꺼내지 않고 보기)
+Console.WriteLine(s.Count);                // 3
+Console.WriteLine(string.Join(",", s));    // 30,20,10  ← 꼭대기부터!
+
+Console.WriteLine(s.Pop());                // 30
+Console.WriteLine(s.Contains(10));         // True  (O(n) 선형 탐색)
+
+// ★ 비울 때까지 꺼내기 — Count 확인 + Pop 대신 TryPop 한 번
+while (s.TryPop(out var top))
+    Console.Write($"{top} ");              // 20 10
+Console.WriteLine();
+
+// 빈 스택에서 Pop / Peek → 예외
+try { s.Pop(); }
+catch (InvalidOperationException e)
+{
+    Console.WriteLine(e.Message);          // Stack empty.
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Try 패턴이 기본입니다.</b> <code>TryPop(out T)</code> · <code>TryPeek(out T)</code> 는 비어 있으면 <code>false</code> 를 돌려줍니다.
+        "비어 있을 수 있다"가 정상 흐름이면 Try, "비어 있으면 버그다"면 <code>Pop</code> 으로 예외를 내게 둡니다 —
+        <b>예외를 흐름 제어에 쓰지 않는다</b>는 .NET 의 규칙 그대로입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">API 한 장 — 비용까지</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th>메서드</th><th>비어 있으면</th><th>비용</th></tr></thead>
+          <tbody>
+            <tr><td><code>Push(x)</code></td><td>—</td><td>분할 상환 O(1) · 꽉 차면 2배로 늘리며 O(n) 복사</td></tr>
+            <tr><td><code>Pop()</code> · <code>Peek()</code></td><td>InvalidOperationException</td><td>O(1)</td></tr>
+            <tr><td><code>TryPop(out x)</code> · <code>TryPeek(out x)</code></td><td><code>false</code></td><td>O(1) <span class="ver">.NET Core 2.0+</span></td></tr>
+            <tr><td><code>Count</code></td><td>0</td><td>O(1) — 필드 하나</td></tr>
+            <tr><td><code>Contains(x)</code></td><td>false</td><td>O(n) — 위에서부터 훑음</td></tr>
+            <tr><td><code>ToArray()</code></td><td>빈 배열</td><td>O(n) · <b>꼭대기가 [0]</b></td></tr>
+            <tr><td><code>EnsureCapacity(n)</code></td><td>—</td><td>미리 늘리기 <span class="ver">.NET 6+</span></td></tr>
+            <tr><td><code>TrimExcess()</code></td><td>—</td><td>사용률 90% 미만일 때만 줄임</td></tr>
+            <tr><td><code>Clear()</code></td><td>—</td><td>참조형이면 O(n) 으로 칸을 비움</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>인덱서가 없습니다.</b> <code>s[0]</code> 은 컴파일되지 않습니다. 중간 요소를 봐야 한다면
+        그건 스택이 아니라 <code>List&lt;T&gt;</code> 를 스택처럼 쓰는 상황입니다
+        (<code>list.Add</code> = Push, <code>list[^1]</code> = Peek, <code>list.RemoveAt(list.Count - 1)</code> = Pop — 셋 다 O(1)).
+        자바 <code>Stack</code> 이 비판받은 "중간 삽입이 된다"는 문제가 C# 에는 애초에 없습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 290" role="img" aria-label="Stack of T 의 내부. 10, 20, 30 을 Push 하면 길이 4 배열의 0, 1, 2 번 칸에 차례로 들어가고 size 는 3 이다. 꼭대기는 size 빼기 1 번 칸이고 foreach 는 2번 칸에서 0번 칸 방향, 즉 30, 20, 10 순서로 돈다. 40, 50 을 더 넣어 배열이 꽉 차면 길이 8 배열을 새로 잡아 통째로 복사하고 옛 배열은 버린다">
+      <text x="16" y="18" class="lbl">Stack&lt;T&gt; 의 속 — 배열 하나와 _size 하나가 전부입니다</text>
+
+      <text x="16" y="44" class="ann">Push(10) · Push(20) · Push(30) 뒤 — _array.Length = 4 · _size = 3</text>
+      <text x="46" y="66" class="tk" text-anchor="middle">[0]</text>
+      <text x="110" y="66" class="tk" text-anchor="middle">[1]</text>
+      <text x="174" y="66" class="tk" text-anchor="middle">[2]</text>
+      <text x="238" y="66" class="tk" text-anchor="middle">[3]</text>
+      <rect class="bx" x="16" y="72" width="60" height="30" rx="3"/>
+      <text x="46" y="92" class="val" text-anchor="middle">10</text>
+      <rect class="bx" x="80" y="72" width="60" height="30" rx="3"/>
+      <text x="110" y="92" class="val" text-anchor="middle">20</text>
+      <rect class="bx bx-fw" x="144" y="72" width="60" height="30" rx="3"/>
+      <text x="174" y="92" class="val" text-anchor="middle">30</text>
+      <rect class="bx bx-mut" x="208" y="72" width="60" height="30" rx="3"/>
+      <text x="238" y="92" class="ann" text-anchor="middle">빈칸</text>
+      <path class="fl ar" d="M196 118 L28 118"/>
+      <text x="290" y="84" class="ann">꼭대기 = _array[_size - 1] → Peek · Pop 이 여기</text>
+      <text x="290" y="98" class="ann">다음 Push 는 [_size] = [3] 에 들어감</text>
+      <text x="290" y="122" class="ann cy-t">foreach · ToArray 순서: 30 → 20 → 10 (꼭대기부터)</text>
+
+      <text x="16" y="152" class="ann">Push(40) 으로 꽉 참 → Push(50) 때 2배 배열을 새로 잡고 통째로 복사 (Array.Resize)</text>
+      <rect class="bx bx-mut" x="16" y="162" width="60" height="26" rx="3"/>
+      <text x="46" y="179" class="ann" text-anchor="middle">10</text>
+      <rect class="bx bx-mut" x="80" y="162" width="60" height="26" rx="3"/>
+      <text x="110" y="179" class="ann" text-anchor="middle">20</text>
+      <rect class="bx bx-mut" x="144" y="162" width="60" height="26" rx="3"/>
+      <text x="174" y="179" class="ann" text-anchor="middle">30</text>
+      <rect class="bx bx-mut" x="208" y="162" width="60" height="26" rx="3"/>
+      <text x="238" y="179" class="ann" text-anchor="middle">40</text>
+      <text x="290" y="179" class="ann">옛 배열 4칸 — 참조가 끊겨 GC 대상</text>
+      <path class="fl ar" d="M142 192 L142 206"/>
+
+      <rect class="bx" x="16" y="210" width="60" height="30" rx="3"/>
+      <text x="46" y="230" class="val" text-anchor="middle">10</text>
+      <rect class="bx" x="80" y="210" width="60" height="30" rx="3"/>
+      <text x="110" y="230" class="val" text-anchor="middle">20</text>
+      <rect class="bx" x="144" y="210" width="60" height="30" rx="3"/>
+      <text x="174" y="230" class="val" text-anchor="middle">30</text>
+      <rect class="bx" x="208" y="210" width="60" height="30" rx="3"/>
+      <text x="238" y="230" class="val" text-anchor="middle">40</text>
+      <rect class="bx bx-fw" x="272" y="210" width="60" height="30" rx="3"/>
+      <text x="302" y="230" class="val" text-anchor="middle">50</text>
+      <rect class="bx bx-mut" x="336" y="210" width="60" height="30" rx="3"/>
+      <rect class="bx bx-mut" x="400" y="210" width="60" height="30" rx="3"/>
+      <rect class="bx bx-mut" x="464" y="210" width="60" height="30" rx="3"/>
+      <text x="536" y="229" class="ann">길이 8 · _size 5</text>
+
+      <text x="16" y="266" class="lbl">Pop 은 [_size-1] 을 꺼내고, 참조형이면 그 칸을 default 로 지워 객체가 GC 되게 합니다</text>
+      <text x="16" y="282" class="lbl">2배씩 늘리므로 n 번 Push 의 총 복사량은 2n 미만 — 그래서 분할 상환 O(1) 입니다</text>
+    </svg>
+    <div class="cap">Stack&lt;T&gt; 은 <b>끝에만 붙이는 배열</b>입니다. 꼭대기가 배열 끝이라 <b>열거는 끝에서 앞으로</b> 돕니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="m">비제네릭 <span class="t">System.Collections.Stack</span> 이 레거시가 된 이유 <span class="lvl m">🟡 중급</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>System.Collections.Stack (.NET 1.0)</h5>
+      <pre class="code" data-lang="csharp"><code>using System.Collections;
+
+var s = new Stack();          // 요소 타입이 object
+s.Push(1);                    // int → object 박싱 (힙 할당 24바이트)
+s.Push("문자열");             // 아무거나 들어감 — 컴파일러가 못 막음
+
+int n = (int)s.Pop();         // 💥 InvalidCastException (런타임!)
+                              //    꺼낸 건 "문자열" 이었음</code></pre>
+    </div>
+    <div class="good">
+      <h5>Stack&lt;T&gt; (.NET 2.0~)</h5>
+      <pre class="code" data-lang="csharp"><code>var s = new Stack&lt;int&gt;();     // T 가 int 로 고정
+s.Push(1);                    // int 배열에 그대로 — 박싱 없음
+// s.Push("문자열");          // ❌ 컴파일 에러 CS1503
+
+int n = s.Pop();              // 캐스트 불필요 · 실패할 일 없음</code></pre>
+    </div>
+  </div>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇이 다른가</h4>
+      <ul class="tx">
+        <li><b>박싱</b> — 비제네릭은 내부가 <code>object[]</code> 라 값 타입을 넣을 때마다 힙에 상자를 만듭니다. 100만 번 Push 면 100만 번 할당입니다.</li>
+        <li><b>타입 안전</b> — 잘못된 타입이 섞여도 <b>꺼낼 때 런타임에야</b> 터집니다.</li>
+        <li><b><code>Stack.Synchronized(s)</code></b> — 메서드마다 락을 거는 래퍼인데, "Count 확인 후 Pop" 같은 <b>두 동작 사이</b>는 보호하지 못해 실제로는 안전하지 않았습니다. 지금은 <code>ConcurrentStack&lt;T&gt;</code> 가 그 자리를 대신합니다.</li>
+        <li>타입은 지금도 남아 있고 <code>[Obsolete]</code> 도 아닙니다 — <b>옛 코드 호환용</b>일 뿐입니다.</li>
+      </ul>
+    </div>
+    <div class="note warn">
+      <b>레거시 코드를 고칠 때 순서를 조심하세요.</b> <code>new Stack(collection)</code> · <code>new Stack&lt;T&gt;(collection)</code> 모두
+      <b>컬렉션을 앞에서부터 차례로 Push</b> 합니다. 그래서 <b>스택을 스택으로 복사하면 순서가 뒤집힙니다</b> — 바로 아래에서 봅니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">열거 순서와 복사 — <span class="t">꼭대기부터</span>가 만드는 함정 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>var s = new Stack&lt;int&gt;([1, 2, 3]);   // 1,2,3 차례로 Push → 꼭대기 3
+// 컬렉션 식을 생성자 인자로 넘김 (C# 12+)
+// Stack&lt;int&gt; t = [1, 2, 3];          // ❌ Stack 에는 Add 가 없어 안 됨
+
+Console.WriteLine(string.Join(",", s));           // 3,2,1
+Console.WriteLine(string.Join(",", s.ToArray())); // 3,2,1 (ToArray 도 꼭대기부터)
+
+var copy = new Stack&lt;int&gt;(s);           // ⚠ 3,2,1 순서로 Push → 꼭대기 1
+Console.WriteLine(copy.Peek());          // 1   ← 뒤집혔다!
+
+var same = new Stack&lt;int&gt;(s.Reverse());  // LINQ Reverse: 1,2,3 → 꼭대기 3
+Console.WriteLine(same.Peek());          // 3   ← 원본과 같음</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 이렇게 설계됐나</h4>
+      <p class="tx">
+        열거를 <b>Pop 할 순서</b>와 맞춘 것입니다. <code>foreach</code> 로 훑은 순서가 그대로 앞으로 꺼낼 순서라
+        "다음에 처리될 것부터 보여 주기"에는 자연스럽습니다. 문제는 <b>생성자는 앞에서부터 Push</b> 한다는 점이 겹칠 때입니다.
+      </p>
+      <div class="note tip" style="margin-bottom:0">
+        <b>스택을 복제할 일이 잦다면 그 자체가 신호입니다.</b> undo 이력처럼 "이전 상태를 보존"해야 한다면
+        복사 대신 <code>ImmutableStack&lt;T&gt;</code>(SQ 08)를 쓰세요 — Push 가 새 스택을 돌려주고 꼬리를 공유하므로
+        <b>복사 비용이 0</b> 이고 순서 함정도 없습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">Unity — 오브젝트 풀은 <span class="t">Stack&lt;T&gt;</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>using UnityEngine;
+
+public sealed class BulletPool : MonoBehaviour
+{
+    [SerializeField] private Bullet prefab;
+    private readonly Stack&lt;Bullet&gt; _idle = new(64);  // 미리 64칸
+
+    public Bullet Rent(Vector3 pos)
+    {
+        // 남은 게 있으면 재사용, 없으면 새로 — Try 패턴으로 한 번에
+        var b = _idle.TryPop(out var cached) ? cached : Instantiate(prefab);
+        b.transform.position = pos;
+        b.gameObject.SetActive(true);
+        return b;
+    }
+
+    public void Return(Bullet b)
+    {
+        b.gameObject.SetActive(false);
+        _idle.Push(b);           // 방금 쓴 것이 다음에 먼저 나감 (LIFO)
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 큐가 아니라 스택인가</h4>
+      <ul class="tx">
+        <li><b>방금 반납한 객체가 CPU 캐시에 아직 남아 있을 확률이 높습니다</b> — LIFO 가 FIFO 보다 유리합니다.</li>
+        <li>스택은 <b>꼭대기 하나만</b> 만지므로 인덱스 계산이 가장 단순합니다.</li>
+        <li>Unity 2021.1+ 의 <code>UnityEngine.Pool.ObjectPool&lt;T&gt;</code> 도 같은 LIFO 방식으로 재사용합니다 — 직접 짜기 싫으면 그것을 쓰세요.</li>
+      </ul>
+      <div class="note warn" style="margin-bottom:0">
+        <b>같은 객체를 두 번 Return 하면</b> 스택에 두 번 들어가 두 곳에서 동시에 쓰입니다.
+        <code>Stack.Contains</code> 로 막으면 O(n) 이니, 객체에 <code>bool InPool</code> 플래그를 두고 검사하세요.
+        (<code>ObjectPool&lt;T&gt;</code> 는 <code>collectionCheck</code> 옵션이 에디터에서 이를 잡습니다.)
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 스택은 <b><code>Stack&lt;T&gt;</code> + <code>TryPop</code></b>. 열거와 <code>ToArray</code> 는 꼭대기부터, 생성자는 앞에서부터 Push — 둘이 만나면 뒤집힙니다.</div>
+</section>
+
+
+<!-- ==================== sq03 ==================== -->
+<section class="sec" id="sq03">
+  <div class="sec-head rv">
+    <span class="no">SQ 03</span>
+    <h2>큐 (FIFO) — <span class="t">Queue&lt;T&gt;</span> 와 원형 배열</h2>
+    <p class="lead">
+      <code>Queue&lt;T&gt;</code> 는 <b>배열 하나를 원형으로 돌려 쓰는</b> 구조입니다. 앞에서 꺼내도 뒤 요소를 당기지 않으므로
+      Enqueue · Dequeue 가 모두 O(1) 입니다. 이 점이 <code>List&lt;T&gt;.RemoveAt(0)</code> 과의 결정적 차이입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 사용 — 예외형과 Try 형</h4>
+      <pre class="code" data-lang="csharp"><code>var q = new Queue&lt;string&gt;();
+q.Enqueue("1번 손님");
+q.Enqueue("2번 손님");
+q.Enqueue("3번 손님");
+
+Console.WriteLine(q.Peek());      // 1번 손님 (꺼내지 않음)
+Console.WriteLine(q.Dequeue());   // 1번 손님
+Console.WriteLine(q.Count);       // 2
+Console.WriteLine(string.Join(" / ", q));   // 2번 손님 / 3번 손님 (앞부터)
+
+// 처리 루프 — 표준 관용구
+while (q.TryDequeue(out var who))
+    Console.WriteLine($"처리: {who}");
+// 처리: 2번 손님
+// 처리: 3번 손님
+
+Console.WriteLine(q.TryPeek(out _));   // False
+// q.Dequeue();   // 💥 InvalidOperationException: Queue empty.</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">"실패하면 예외" vs "실패하면 false"</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th>동작</th><th>예외형</th><th>Try 형</th><th>자바 Queue 대응</th></tr></thead>
+          <tbody>
+            <tr><td>넣기</td><td><code>Enqueue(x)</code></td><td>— (실패 안 함)</td><td><code>add</code> / <code>offer</code></td></tr>
+            <tr><td>꺼내기</td><td><code>Dequeue()</code></td><td><code>TryDequeue(out x)</code></td><td><code>remove</code> / <code>poll</code></td></tr>
+            <tr><td>앞 보기</td><td><code>Peek()</code></td><td><code>TryPeek(out x)</code></td><td><code>element</code> / <code>peek</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tx">
+        자바는 "특수값"으로 <b>null</b> 을 돌려주므로 null 을 넣을 수 없지만, C# 의 Try 형은 <b>bool + out</b> 이라
+        <code>Queue&lt;string?&gt;</code> 에 <b>null 도 정상 요소</b>로 넣고 뺄 수 있습니다. 반환값과 "없음"이 섞이지 않습니다.
+      </p>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>Queue&lt;T&gt;</code> 의 Enqueue 는 실패하지 않습니다</b> — 크기 제한이 없기 때문입니다.
+        "꽉 차면 거절 / 기다림" 이 필요하면 그건 <b>유한(bounded) 큐</b>이고, C# 에서는 <code>Channel.CreateBounded</code>(SQ 07)가 그 역할입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 290" role="img" aria-label="Queue of T 의 원형 배열 동작. 길이 4 배열에 A B C D 를 넣고 두 개를 꺼낸 뒤 E F 를 넣으면 tail 이 배열 끝에서 0번으로 돌아와 E F 가 0, 1번 칸에, C D 가 2, 3번 칸에 있고 head 와 tail 이 모두 2를 가리킨다. 여기서 G 를 넣으면 꽉 찼으므로 길이 8 배열을 새로 잡아 head 부터 끝까지인 C D 와 0번부터 tail 전까지인 E F 두 토막을 이어 복사하고, head 는 0, G 는 4번 칸에 들어가 tail 은 5가 된다">
+      <text x="16" y="18" class="lbl">Queue&lt;T&gt; — _head 에서 꺼내고 _tail 에 넣는 원형 배열</text>
+
+      <text x="16" y="44" class="ann">① A B C D 를 넣고 두 개 꺼낸 뒤 E F 를 넣음 — _tail 이 끝에서 [0] 으로 돌아옴</text>
+      <text x="52" y="66" class="tk" text-anchor="middle">[0]</text>
+      <text x="128" y="66" class="tk" text-anchor="middle">[1]</text>
+      <text x="204" y="66" class="tk" text-anchor="middle">[2]</text>
+      <text x="280" y="66" class="tk" text-anchor="middle">[3]</text>
+      <rect class="bx bx-ok" x="16" y="74" width="72" height="32" rx="3"/>
+      <text x="52" y="95" class="val" text-anchor="middle">E</text>
+      <rect class="bx bx-ok" x="92" y="74" width="72" height="32" rx="3"/>
+      <text x="128" y="95" class="val" text-anchor="middle">F</text>
+      <rect class="bx bx-fw" x="168" y="74" width="72" height="32" rx="3"/>
+      <text x="204" y="95" class="val" text-anchor="middle">C</text>
+      <rect class="bx" x="244" y="74" width="72" height="32" rx="3"/>
+      <text x="280" y="95" class="val" text-anchor="middle">D</text>
+      <path class="fl ar" d="M300 110 C 300 136, 52 136, 52 112"/>
+      <text x="176" y="148" class="ann" text-anchor="middle">D 다음 칸은 [0] — 꽉 차기 전까지는 칸만 돌려 씀</text>
+      <text x="340" y="86" class="ann">_head = 2 (다음 Dequeue 는 C) · _tail = 2 · _size = 4</text>
+      <text x="340" y="100" class="ann">head == tail 이면 비었거나 꽉 찬 것 — _size 로 구분</text>
+
+      <text x="16" y="178" class="ann">② G 를 넣으려니 꽉 참 → 2배(8칸) 새 배열에 [_head..끝] 과 [0.._tail) 두 토막을 이어 복사</text>
+      <rect class="bx" x="16" y="188" width="72" height="32" rx="3"/>
+      <text x="52" y="209" class="val" text-anchor="middle">C</text>
+      <rect class="bx" x="92" y="188" width="72" height="32" rx="3"/>
+      <text x="128" y="209" class="val" text-anchor="middle">D</text>
+      <rect class="bx bx-ok" x="168" y="188" width="72" height="32" rx="3"/>
+      <text x="204" y="209" class="val" text-anchor="middle">E</text>
+      <rect class="bx bx-ok" x="244" y="188" width="72" height="32" rx="3"/>
+      <text x="280" y="209" class="val" text-anchor="middle">F</text>
+      <rect class="bx bx-fw" x="320" y="188" width="72" height="32" rx="3"/>
+      <text x="356" y="209" class="val" text-anchor="middle">G</text>
+      <rect class="bx bx-mut" x="396" y="188" width="72" height="32" rx="3"/>
+      <rect class="bx bx-mut" x="472" y="188" width="72" height="32" rx="3"/>
+      <rect class="bx bx-mut" x="548" y="188" width="72" height="32" rx="3"/>
+      <text x="16" y="240" class="ann">_head = 0 · _tail = 5 · Capacity = 8 — 복사는 늘어날 때 한 번뿐 (분할 상환 O(1))</text>
+
+      <text x="16" y="266" class="lbl">용량이 2의 거듭제곱일 필요는 없습니다 — 끝에 닿으면 0 으로 되돌리는 비교 한 번입니다</text>
+      <text x="16" y="282" class="lbl">Dequeue 한 칸은 참조형이면 default 로 비워, 꺼낸 객체를 GC 가 회수할 수 있게 합니다</text>
+    </svg>
+    <div class="cap">Queue&lt;T&gt; 는 <b>요소를 움직이지 않고 두 인덱스만 움직입니다</b> — 그래서 앞에서 꺼내도 O(1) 입니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="m">큐로 쓰면 안 되는 것 — <span class="t">List.RemoveAt(0)</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>List 를 큐처럼 — 매번 전체를 당김</h5>
+      <pre class="code" data-lang="csharp"><code>var jobs = new List&lt;Job&gt;();
+jobs.Add(job);                  // 뒤에 추가 O(1)
+
+var next = jobs[0];
+jobs.RemoveAt(0);               // ⚠ 나머지 n-1 개를 한 칸씩 앞으로 복사 O(n)
+// 10만 건을 이렇게 비우면 약 50억 번의 요소 이동 (n²/2)
+
+// LINQ 로 흉내 — 더 나쁨
+jobs = jobs.Skip(1).ToList();   // 매번 새 리스트 할당 + 전체 복사</code></pre>
+    </div>
+    <div class="good">
+      <h5>Queue&lt;T&gt; — 인덱스만 한 칸</h5>
+      <pre class="code" data-lang="csharp"><code>var jobs = new Queue&lt;Job&gt;();
+jobs.Enqueue(job);              // O(1) 분할 상환
+
+if (jobs.TryDequeue(out var next))   // _head 만 +1 → O(1)
+    Run(next);
+
+// 10만 건을 비워도 요소 이동 0번</code></pre>
+    </div>
+  </div>
+  <div class="note info rv">
+    <b>다른 언어의 같은 함정</b> — 파이썬 <code>list.pop(0)</code>, 자바스크립트 <code>Array.prototype.shift()</code> 도 O(n) 입니다.
+    셋 다 "배열의 앞을 지우면 뒤를 당긴다"는 같은 이유입니다. 원형 배열(<code>Queue&lt;T&gt;</code> · <code>collections.deque</code> · <code>ArrayDeque</code>)이 정답인 것도 같습니다.
+  </div>
+
+  <h3 class="sub" data-lv="m">용량 관리 — <span class="t">EnsureCapacity · TrimExcess</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>var q = new Queue&lt;int&gt;();          // 처음엔 길이 0 배열 (할당 없음)
+q.Enqueue(1);                       // 길이 4 로 할당
+// 이후 4 → 8 → 16 → 32 … 로 2배씩 (최소 +4)
+
+// 크기를 안다면 처음부터
+var batch = new Queue&lt;int&gt;(10_000);  // 재할당 0회
+
+// 나중에 알게 되면 (.NET 6+)
+int cap = q.EnsureCapacity(5_000);  // 반환값 = 실제 용량
+Console.WriteLine(cap);             // 5000
+
+// 대량 처리 후 메모리 돌려주기
+for (int i = 0; i &lt; 10; i++) q.Enqueue(i);
+q.TrimExcess();                     // 사용률이 90% 미만이면 Count 로 줄임
+// 계속 쓸 큐라면 TrimExcess 는 오히려 손해 — 다시 늘어나며 복사</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">늘어나는 규칙 (dotnet/runtime 소스 기준)</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th></th><th>Stack&lt;T&gt;</th><th>Queue&lt;T&gt;</th></tr></thead>
+          <tbody>
+            <tr><td>기본 생성</td><td>길이 0 배열</td><td>길이 0 배열</td></tr>
+            <tr><td>첫 추가</td><td>4</td><td>4 (2배 = 0 이라 최소 +4)</td></tr>
+            <tr><td>그다음</td><td>2배</td><td>2배 (최소 +4)</td></tr>
+            <tr><td>늘릴 때 복사</td><td><code>Array.Resize</code> 한 번</td><td>두 토막 <code>Array.Copy</code> (감긴 경우)</td></tr>
+            <tr><td>상한</td><td colspan="2"><code>Array.MaxLength</code> (약 21억)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>큐는 저절로 줄지 않습니다.</b> 순간적으로 100만 건이 쌓였다가 다 빠져도 내부 배열은 100만 칸 그대로입니다.
+        장기 실행 서버의 "메모리가 안 내려간다"는 원인 중 하나입니다 — 피크 이후 한가할 때 <code>TrimExcess()</code> 를 부르거나,
+        애초에 <b>유한 큐로 상한을 거세요</b>(SQ 06 · 07).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="h">열거 중 수정 — <span class="t">_version</span> 이 잡아냅니다 <span class="lvl h">🔴 고급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>var q = new Queue&lt;int&gt;([1, 2, 3]);
+
+try
+{
+    foreach (var x in q)
+        if (x == 2) q.Enqueue(99);     // 열거 중에 변경
+}
+catch (InvalidOperationException e)
+{
+    Console.WriteLine(e.Message);
+    // Collection was modified; enumeration operation may not execute.
+}
+
+// ✅ 처리하면서 새 일이 생기는 구조 → foreach 가 아니라 while + TryDequeue
+var work = new Queue&lt;int&gt;([1, 2, 3]);
+while (work.TryDequeue(out var x))
+{
+    if (x == 2) work.Enqueue(99);      // 안전 — 열거자가 없음
+    Console.Write($"{x} ");            // 1 2 3 99
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">어떻게 감지하나</h4>
+      <p class="tx">
+        <code>Stack&lt;T&gt;</code> · <code>Queue&lt;T&gt;</code> 는 변경할 때마다 <b><code>_version</code> 정수를 1 올립니다</b>.
+        열거자는 시작할 때 그 값을 복사해 두고, <code>MoveNext</code> 때마다 비교해 다르면 예외를 던집니다.
+        잘못된 결과를 조용히 내는 대신 <b>즉시 실패(fail-fast)</b> 하는 설계입니다.
+      </p>
+      <div class="note tip" style="margin-bottom:0">
+        <b>BFS 가 바로 이 모양입니다</b> — 꺼낸 노드의 이웃을 다시 넣는 일. <code>while (q.TryDequeue(...))</code> 는
+        열거자를 쓰지 않으므로 안전하고, 이것이 C# BFS 의 표준 형태입니다(SQ 08).
+        반면 <code>ConcurrentQueue&lt;T&gt;</code> 의 열거는 <b>스냅숏</b>이라 예외가 나지 않습니다(SQ 06).
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> FIFO 는 <b><code>Queue&lt;T&gt;</code> + <code>TryDequeue</code></b>. 원형 배열이라 앞에서 꺼내도 O(1) 이고,
+    크기 제한이 없으며 저절로 줄지 않는다는 두 가지를 기억하세요.</div>
+</section>
+
+
+<!-- ==================== sq04 ==================== -->
+<section class="sec" id="sq04">
+  <div class="sec-head rv">
+    <span class="no">SQ 04</span>
+    <h2>덱 — <span class="t">.NET 에는 표준 Deque 가 없다</span></h2>
+    <p class="lead">
+      자바는 <code>ArrayDeque</code>, 파이썬은 <code>collections.deque</code>, C++ 은 <code>std::deque</code> 가 있지만
+      <b>.NET 10 의 BCL 에는 양쪽 끝 O(1) 덱이 없습니다.</b> 그래서 현업 코드는 <code>LinkedList&lt;T&gt;</code> 로 때우거나,
+      <b>원형 버퍼 덱을 직접 한 파일로 들고 다닙니다.</b> 이 섹션은 둘의 비용을 비교하고 완전한 구현을 드립니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">덱이 필요할 때 C# 개발자가 고르는 것</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th>방법</th><th>앞 넣기 · 빼기</th><th>인덱스 접근</th><th>판정</th></tr></thead>
+          <tbody>
+            <tr><td><b>직접 만든 원형 버퍼</b></td><td>O(1) 분할 상환</td><td>O(1)</td><td><span class="ver new">권장</span></td></tr>
+            <tr><td><code>LinkedList&lt;T&gt;</code></td><td>O(1) · 노드 할당</td><td>O(n)</td><td>요소 수가 적고 급할 때</td></tr>
+            <tr><td><code>List&lt;T&gt;</code> + <code>Insert(0, x)</code></td><td><b>O(n)</b></td><td>O(1)</td><td>쓰지 말 것</td></tr>
+            <tr><td>스택 두 개로 흉내</td><td>분할 상환 O(1)</td><td>복잡</td><td>면접용 · 실무 비추천</td></tr>
+            <tr><td>"뒤에서만 빼면 되는" 경우</td><td>—</td><td>—</td><td><code>List&lt;T&gt;</code> 를 스택처럼</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>왜 없을까?</b> dotnet/runtime 에는 Deque 제안 이슈가 오래 열려 있었지만, <code>Queue&lt;T&gt;</code> 와 겹치고
+        수요가 알고리즘 문제 쪽에 몰려 있어 들어오지 않았습니다. <code>Queue&lt;T&gt;</code> 가 내부적으로는 이미 원형 버퍼라
+        <b>앞쪽 넣기 · 뒤쪽 빼기 메서드만 빠진 덱</b>이라고 보면 정확합니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">LinkedList&lt;T&gt; 로 때우기 — 되긴 하지만</h4>
+      <pre class="code" data-lang="csharp"><code>var d = new LinkedList&lt;int&gt;();
+d.AddLast(2);              // 뒤에 넣기   → 노드 객체 new
+d.AddLast(3);
+d.AddFirst(1);             // 앞에 넣기   → 노드 객체 new
+
+Console.WriteLine(d.First!.Value);   // 1
+Console.WriteLine(d.Last!.Value);    // 3
+
+d.RemoveFirst();           // 앞에서 빼기 (값을 돌려주지 않음!)
+d.RemoveLast();            // 뒤에서 빼기
+Console.WriteLine(string.Join(",", d));   // 2
+
+// 빈 리스트의 First 는 null → RemoveFirst() 는 InvalidOperationException
+// d.ElementAt(5) 같은 인덱스 접근은 O(n) 순회</code></pre>
+      <ul class="tx">
+        <li><b>Add 할 때마다 <code>LinkedListNode&lt;T&gt;</code> 객체 하나</b>를 힙에 만듭니다 — 64비트에서 int 하나 담는 데 약 48바이트.</li>
+        <li><code>RemoveFirst</code> 가 값을 돌려주지 않아 <code>var x = d.First.Value; d.RemoveFirst();</code> 두 줄이 됩니다.</li>
+        <li>노드가 힙에 흩어져 순회가 느립니다(아래 그림).</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="길이 8 원형 배열로 만든 덱의 상태. head 는 6번 칸이고 요소 a b c d 가 실제 칸 6, 7, 0, 1 에 들어 있다. PushFront 는 head 를 한 칸 뒤인 5번 칸으로 옮겨 쓰고, PushBack 은 head 더하기 Count 위치인 2번 칸에 쓴다. 논리 위치 i 의 실제 칸은 head 더하기 i 이고 길이를 넘으면 길이를 뺀다">
+      <text x="16" y="18" class="lbl">원형 버퍼 덱 — 링을 양쪽으로 돌며 쓰는 배열</text>
+
+      <path class="ln" d="M170 70 A 80 80 0 1 1 169.9 70"/>
+      <circle class="nd nd-ok" cx="170" cy="70" r="17"/>
+      <text x="170" y="74" class="val" text-anchor="middle">c</text>
+      <circle class="nd nd-ok" cx="226.6" cy="93.4" r="17"/>
+      <text x="226.6" y="97.4" class="val" text-anchor="middle">d</text>
+      <circle class="nd nd-mut" cx="250" cy="150" r="17"/>
+      <circle class="nd nd-mut" cx="226.6" cy="206.6" r="17"/>
+      <circle class="nd nd-mut" cx="170" cy="230" r="17"/>
+      <circle class="nd nd-mut" cx="113.4" cy="206.6" r="17"/>
+      <circle class="nd nd-fw" cx="90" cy="150" r="17"/>
+      <text x="90" y="154" class="val" text-anchor="middle">a</text>
+      <circle class="nd nd-ok" cx="113.4" cy="93.4" r="17"/>
+      <text x="113.4" y="97.4" class="val" text-anchor="middle">b</text>
+
+      <text x="170" y="44" class="tk" text-anchor="middle">[0]</text>
+      <text x="250" y="78" class="tk" text-anchor="middle">[1]</text>
+      <text x="282" y="154" class="tk" text-anchor="middle">[2]</text>
+      <text x="250" y="232" class="tk" text-anchor="middle">[3]</text>
+      <text x="170" y="264" class="tk" text-anchor="middle">[4]</text>
+      <text x="92" y="240" class="tk" text-anchor="middle">[5]</text>
+      <text x="58" y="124" class="tk" text-anchor="middle">[6]</text>
+      <text x="90" y="78" class="tk" text-anchor="middle">[7]</text>
+
+      <text x="16" y="168" class="ann">_head</text>
+      <path class="fl ar" d="M40 150 L69 150"/>
+      <path class="fl ar" d="M40 207 L92 207"/>
+      <text x="16" y="198" class="ann">PushFront</text>
+      <path class="fl ar" d="M300 196 L266 164"/>
+      <text x="282" y="212" class="ann">PushBack → [2]</text>
+
+      <text x="340" y="44" class="ann">상태: Capacity 8 · _head 6 · Count 4</text>
+      <text x="340" y="60" class="ann cy-t">논리 순서 a b c d = 실제 칸 6 7 0 1</text>
+      <text x="340" y="84" class="ann">Phys(i) = _head + i, 길이를 넘으면 − 길이</text>
+      <text x="340" y="100" class="ann">PushFront: _head 를 한 칸 뒤로 (0 이면 끝 칸으로)</text>
+      <text x="340" y="116" class="ann">PushBack: Phys(Count) 칸에 쓰기 → 지금은 [2]</text>
+      <text x="340" y="132" class="ann">PopFront: [_head] 를 꺼내고 _head 를 한 칸 앞으로</text>
+      <text x="340" y="148" class="ann">PopBack: Phys(Count − 1) 칸 = [1] 을 꺼내기</text>
+      <text x="340" y="172" class="ann am-t">꽉 차면 [_head..끝] 과 [0..] 두 토막을</text>
+      <text x="340" y="186" class="ann am-t">새 배열 앞쪽에 이어 붙이고 _head = 0</text>
+
+      <text x="340" y="292" class="lbl">덱 = 양쪽으로 감기는 Queue&lt;T&gt;</text>
+    </svg>
+    <div class="cap">요소는 제자리에 두고 <b>_head 와 Count 만 움직입니다</b> — 앞으로 감으면 PushFront, 뒤로 늘리면 PushBack.</div>
+  </div>
+
+  <h3 class="sub" data-lv="h">복사해서 쓰는 <span class="t">Deque&lt;T&gt;</span> — 완전한 구현 <span class="lvl h">🔴 고급</span></h3>
+  <div class="card rv">
+    <pre class="code" data-lang="csharp"><code>// Deque.cs — .NET 10 과 Unity(C# 9 · .NET Standard 2.1) 양쪽에서 컴파일되도록 작성
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+
+/// &lt;summary&gt;원형 버퍼 덱. 양 끝 넣기 · 빼기 분할 상환 O(1), 인덱스 접근 O(1). 스레드 안전하지 않음.&lt;/summary&gt;
+public sealed class Deque&lt;T&gt; : IReadOnlyList&lt;T&gt;
+{
+    private T[] _buf;
+    private int _head;      // 맨 앞 요소가 있는 실제 칸
+    private int _count;
+    private int _version;   // 열거 중 변경 감지 — Queue&lt;T&gt; 와 같은 방식
+
+    public Deque() : this(4) { }
+    public Deque(int capacity)
+    {
+        if (capacity &lt; 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+        _buf = capacity == 0 ? Array.Empty&lt;T&gt;() : new T[capacity];
+    }
+
+    public int Count =&gt; _count;
+    public int Capacity =&gt; _buf.Length;
+
+    // 논리 위치(0 = 맨 앞) → 실제 칸. 나머지 연산(%) 대신 비교 한 번 (Queue&lt;T&gt; 와 같음)
+    private int Phys(int i)
+    {
+        int p = _head + i;
+        return p &gt;= _buf.Length ? p - _buf.Length : p;
+    }
+
+    public T this[int index]
+    {
+        get
+        {
+            if ((uint)index &gt;= (uint)_count) throw new ArgumentOutOfRangeException(nameof(index));
+            return _buf[Phys(index)];
+        }
+    }
+
+    public void PushBack(T item)
+    {
+        if (_count == _buf.Length) Grow();
+        _buf[Phys(_count)] = item;
+        _count++; _version++;
+    }
+
+    public void PushFront(T item)
+    {
+        if (_count == _buf.Length) Grow();
+        _head = _head == 0 ? _buf.Length - 1 : _head - 1;   // 한 칸 뒤로 감기
+        _buf[_head] = item;
+        _count++; _version++;
+    }
+
+    public bool TryPopFront([MaybeNullWhen(false)] out T item)
+    {
+        if (_count == 0) { item = default!; return false; }
+        item = _buf[_head];
+        _buf[_head] = default!;                              // 참조를 끊어 GC 가 회수하게
+        _head = _head + 1 == _buf.Length ? 0 : _head + 1;
+        _count--; _version++;
+        return true;
+    }
+
+    public bool TryPopBack([MaybeNullWhen(false)] out T item)
+    {
+        if (_count == 0) { item = default!; return false; }
+        int last = Phys(_count - 1);
+        item = _buf[last];
+        _buf[last] = default!;
+        _count--; _version++;
+        return true;
+    }
+
+    public bool TryPeekFront([MaybeNullWhen(false)] out T item)
+    {
+        if (_count == 0) { item = default!; return false; }
+        item = _buf[_head];
+        return true;
+    }
+
+    public bool TryPeekBack([MaybeNullWhen(false)] out T item)
+    {
+        if (_count == 0) { item = default!; return false; }
+        item = _buf[Phys(_count - 1)];
+        return true;
+    }
+
+    public T PopFront()  =&gt; TryPopFront(out var x) ? x : throw Empty();
+    public T PopBack()   =&gt; TryPopBack(out var x)  ? x : throw Empty();
+    public T PeekFront() =&gt; TryPeekFront(out var x) ? x : throw Empty();
+    public T PeekBack()  =&gt; TryPeekBack(out var x)  ? x : throw Empty();
+    private static InvalidOperationException Empty() =&gt; new("Deque empty.");
+
+    public void Clear()
+    {
+        Array.Clear(_buf, 0, _buf.Length);
+        _head = 0; _count = 0; _version++;
+    }
+
+    private void Grow()
+    {
+        int newCap = _buf.Length == 0 ? 4 : _buf.Length * 2;
+        var next = new T[newCap];
+        int first = Math.Min(_count, _buf.Length - _head);     // [_head .. 끝]
+        Array.Copy(_buf, _head, next, 0, first);
+        Array.Copy(_buf, 0, next, first, _count - first);      // [0 .. 나머지]
+        _buf = next;
+        _head = 0;
+    }
+
+    public IEnumerator&lt;T&gt; GetEnumerator()
+    {
+        int version = _version;
+        for (int i = 0; i &lt; _count; i++)
+        {
+            if (version != _version)
+                throw new InvalidOperationException("Collection was modified.");
+            yield return _buf[Phys(i)];
+        }
+    }
+    IEnumerator IEnumerable.GetEnumerator() =&gt; GetEnumerator();
+}</code></pre>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">써 보기 — 늘어나는 순간까지 따라가기</h4>
+      <pre class="code" data-lang="csharp"><code>var d = new Deque&lt;int&gt;(4);
+d.PushBack(1);      // 칸: [1, _, _, _]   head 0
+d.PushBack(2);      // 칸: [1, 2, _, _]
+d.PushFront(0);     // 칸: [1, 2, _, 0]   head 3 (감김)
+d.PushFront(-1);    // 칸: [1, 2, -1, 0]  head 2 · 꽉 참
+d.PushBack(3);      // Grow → 8칸: [-1, 0, 1, 2, 3, _, _, _] head 0
+
+Console.WriteLine(string.Join(",", d));      // -1,0,1,2,3
+Console.WriteLine(d[1]);                     // 0  (인덱스 O(1))
+Console.WriteLine(d.PopFront());             // -1
+Console.WriteLine(d.PopBack());              // 3
+Console.WriteLine($"{d.Count}/{d.Capacity}");// 3/8</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설계 메모</h4>
+      <ul class="tx">
+        <li><b>용량을 2의 거듭제곱으로 강제하지 않았습니다.</b> 자바 <code>ArrayDeque</code> 는 <code>&amp; (n - 1)</code> 마스크를 쓰지만, .NET 의 <code>Queue&lt;T&gt;</code> 는 비교 한 번으로 감습니다. 분기 예측이 잘 맞아 차이가 거의 없습니다.</li>
+        <li><b>빈 칸을 <code>default</code> 로 지웁니다.</b> 안 지우면 꺼낸 객체를 배열이 계속 붙잡아 GC 가 못 치웁니다(BCL 은 <code>RuntimeHelpers.IsReferenceOrContainsReferences&lt;T&gt;()</code> 로 값 타입일 때 이 대입을 건너뜁니다).</li>
+        <li><b><code>IReadOnlyList&lt;T&gt;</code></b> 를 구현해 LINQ · <code>foreach</code> · 인덱서가 다 됩니다.</li>
+        <li>스레드 안전하지 않습니다 — <code>Stack&lt;T&gt;</code> · <code>Queue&lt;T&gt;</code> 와 같은 계약입니다.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">연산별 시간 복잡도 — <span class="t">무엇이 어디서 O(n) 인가</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <thead><tr><th>연산</th><th>Deque&lt;T&gt; (위 구현)</th><th>Queue&lt;T&gt;</th><th>Stack&lt;T&gt;</th><th>LinkedList&lt;T&gt;</th><th>List&lt;T&gt;</th></tr></thead>
+      <tbody>
+        <tr><td>뒤에 넣기</td><td>O(1)*</td><td>O(1)* Enqueue</td><td>O(1)* Push</td><td>O(1) + 할당</td><td>O(1)* Add</td></tr>
+        <tr><td>앞에 넣기</td><td>O(1)*</td><td>—</td><td>—</td><td>O(1) + 할당</td><td>O(n) Insert(0)</td></tr>
+        <tr><td>앞에서 빼기</td><td>O(1)</td><td>O(1) Dequeue</td><td>—</td><td>O(1)</td><td>O(n) RemoveAt(0)</td></tr>
+        <tr><td>뒤에서 빼기</td><td>O(1)</td><td>—</td><td>O(1) Pop</td><td>O(1)</td><td>O(1)</td></tr>
+        <tr><td>i 번째 보기</td><td>O(1)</td><td>— (ElementAt 은 O(n))</td><td>—</td><td>O(n)</td><td>O(1)</td></tr>
+        <tr><td>Contains</td><td>O(n)</td><td>O(n)</td><td>O(n)</td><td>O(n)</td><td>O(n)</td></tr>
+        <tr><td>요소당 추가 메모리</td><td>0 (빈 칸만)</td><td>0</td><td>0</td><td>노드 ≈ 48 B (int 기준)</td><td>0</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tx rv">* 분할 상환 O(1) — 평소에는 O(1), 꽉 찼을 때 한 번 O(n) 복사가 일어나지만 2배씩 늘리므로 n 번 연산의 총비용이 O(n) 입니다.</p>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 274" role="img" aria-label="LinkedList 와 원형 배열의 메모리 비교. LinkedList 는 요소 네 개가 각각 따로 할당된 노드 객체로 힙 여기저기에 흩어져 next 참조로 이어지고, 노드 하나가 객체 헤더 16바이트와 참조 세 개 24바이트, int 4바이트와 패딩을 합쳐 약 48바이트다. 원형 배열은 같은 네 값을 int 네 칸 16바이트에 연속으로 담는다">
+      <text x="16" y="18" class="lbl">같은 1 2 3 4 — 노드 네 개 vs 배열 한 덩어리</text>
+
+      <text x="16" y="40" class="ann">LinkedList&lt;int&gt; — Add 마다 노드 객체를 새로 할당 (주소가 흩어짐)</text>
+      <rect class="bx" x="16" y="50" width="130" height="34"/>
+      <text x="81" y="66" class="val" text-anchor="middle">1</text>
+      <text x="81" y="79" class="ann" text-anchor="middle">prev · next · list</text>
+      <path class="fl ar" d="M150 67 C 163 67, 160 103, 172 103"/>
+      <rect class="bx" x="176" y="86" width="130" height="34"/>
+      <text x="241" y="102" class="val" text-anchor="middle">2</text>
+      <text x="241" y="115" class="ann" text-anchor="middle">prev · next · list</text>
+      <path class="fl ar" d="M310 103 C 323 103, 320 67, 332 67"/>
+      <rect class="bx" x="336" y="50" width="130" height="34"/>
+      <text x="401" y="66" class="val" text-anchor="middle">3</text>
+      <text x="401" y="79" class="ann" text-anchor="middle">prev · next · list</text>
+      <path class="fl ar" d="M470 67 C 483 67, 480 103, 492 103"/>
+      <rect class="bx" x="496" y="86" width="130" height="34"/>
+      <text x="561" y="102" class="val" text-anchor="middle">4</text>
+      <text x="561" y="115" class="ann" text-anchor="middle">prev · next · list</text>
+      <text x="16" y="144" class="ann rs-t">노드 하나 = 객체 헤더 16 + 참조 셋 24 + int 4 + 패딩 4 ≈ 48 B (64비트) — 값의 12배</text>
+
+      <text x="16" y="172" class="ann ok-t">Deque&lt;int&gt; · Queue&lt;int&gt; — int 칸이 한 줄로 붙어 있음 (4개 = 16 B)</text>
+      <rect class="bx bx-ok" x="16" y="182" width="60" height="30" rx="3"/>
+      <text x="46" y="202" class="val" text-anchor="middle">1</text>
+      <rect class="bx bx-ok" x="80" y="182" width="60" height="30" rx="3"/>
+      <text x="110" y="202" class="val" text-anchor="middle">2</text>
+      <rect class="bx bx-ok" x="144" y="182" width="60" height="30" rx="3"/>
+      <text x="174" y="202" class="val" text-anchor="middle">3</text>
+      <rect class="bx bx-ok" x="208" y="182" width="60" height="30" rx="3"/>
+      <text x="238" y="202" class="val" text-anchor="middle">4</text>
+      <rect class="bx bx-mut" x="272" y="182" width="60" height="30" rx="3"/>
+      <rect class="bx bx-mut" x="336" y="182" width="60" height="30" rx="3"/>
+      <text x="412" y="201" class="ann">빈 칸은 늘릴 때를 위한 여유분</text>
+
+      <text x="16" y="244" class="lbl">노드 방식은 요소마다 할당 1번 — GC 가 추적할 객체도 요소 수만큼 늘어납니다</text>
+      <text x="16" y="262" class="lbl">배열 방식은 늘릴 때만 할당 — 순회하면 CPU 가 다음 칸을 미리 읽어 둡니다</text>
+    </svg>
+    <div class="cap">연결 리스트가 지는 이유는 복잡도가 아니라 <b>할당 횟수와 캐시</b>입니다 — 둘 다 O(1) 이어도 실제 속도는 몇 배 차이가 납니다(SQ 09).</div>
+  </div>
+
+  <div class="note warn rv">
+    <b>LinkedList&lt;T&gt; 가 오히려 맞는 경우</b>도 있습니다 — <b>이미 손에 쥔 노드를 중간에서 O(1) 로 떼어 낼 때</b>입니다.
+    LRU 캐시가 대표적입니다: <code>Dictionary&lt;K, LinkedListNode&lt;V&gt;&gt;</code> 로 노드를 찾고 <code>list.Remove(node)</code> · <code>list.AddFirst(node)</code> 로
+    앞으로 옮깁니다. "양 끝만 쓰는 덱"이라면 원형 버퍼가 언제나 낫습니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> .NET 에 덱은 없습니다. <b>위 <code>Deque&lt;T&gt;</code> 한 파일을 프로젝트에 넣는 것</b>이 표준 해법이고,
+    <code>LinkedList&lt;T&gt;</code> 는 "노드를 쥐고 중간에서 뗄 때"만 고릅니다.</div>
+</section>
+
+
+<!-- ==================== sq05 ==================== -->
+<section class="sec" id="sq05">
+  <div class="sec-head rv">
+    <span class="no">SQ 05</span>
+    <h2>우선순위 큐 — <span class="t">PriorityQueue&lt;TElement, TPriority&gt;</span></h2>
+    <p class="lead">
+      .NET 6 에서야 들어온 표준 힙입니다. <b>요소와 우선순위를 따로 받는</b> 설계라 요소 타입을 고치지 않고도 쓸 수 있지만,
+      <b>같은 우선순위끼리의 순서 비보장 · 우선순위 변경 불가 · 정렬되지 않은 열거</b> 세 가지 함정이 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">기본 — 작은 값이 먼저 (최소 힙)</h4>
+      <pre class="code" data-lang="csharp"><code>var pq = new PriorityQueue&lt;string, int&gt;();
+pq.Enqueue("설거지", 3);
+pq.Enqueue("서버 장애", 1);
+pq.Enqueue("메일 답장", 2);
+
+Console.WriteLine(pq.Peek());     // 서버 장애
+Console.WriteLine(pq.Count);      // 3
+
+// 요소와 우선순위를 함께 꺼내기 — TryDequeue 는 out 이 두 개
+while (pq.TryDequeue(out var job, out var pri))
+    Console.WriteLine($"{pri} {job}");
+// 1 서버 장애
+// 2 메일 답장
+// 3 설거지
+
+// 한꺼번에 넣기
+pq.EnqueueRange([("a", 2), ("b", 1)]);
+Console.WriteLine(pq.Dequeue());  // b</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>Dequeue()</code> 는 요소만</b> 돌려줍니다. 우선순위(예: 다익스트라의 거리)도 필요하면
+        <code>TryDequeue(out e, out p)</code> 를 쓰세요 — 그래서 실무 코드에서는 TryDequeue 가 훨씬 자주 보입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">API 와 비용</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th>메서드</th><th>비용</th><th>메모</th></tr></thead>
+          <tbody>
+            <tr><td><code>Enqueue(e, p)</code></td><td>O(log n)</td><td>위로 올리기(sift-up)</td></tr>
+            <tr><td><code>Dequeue()</code> · <code>TryDequeue</code></td><td>O(log n)</td><td>마지막 요소를 루트로 내린 뒤 sift-down</td></tr>
+            <tr><td><code>Peek()</code> · <code>TryPeek</code></td><td>O(1)</td><td>루트 = 배열 [0]</td></tr>
+            <tr><td><code>EnqueueDequeue(e, p)</code></td><td>O(log n)</td><td>넣고 바로 최소를 꺼냄 — 따로 하는 것보다 빠름</td></tr>
+            <tr><td><code>DequeueEnqueue(e, p)</code></td><td>O(log n)</td><td>꺼내고 넣기 (EnqueueDequeue 보다 나중 버전에 추가)</td></tr>
+            <tr><td><code>Remove(e, out …)</code></td><td><b>O(n)</b></td><td>임의 요소 삭제 <span class="ver new">.NET 9+</span></td></tr>
+            <tr><td><code>UnorderedItems</code></td><td>O(n) 순회</td><td><b>힙 배열 순서 — 정렬 아님</b></td></tr>
+            <tr><td><code>new(items)</code> 생성자</td><td>O(n)</td><td>한 번에 힙 만들기(heapify)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>foreach (var x in pq)</code> 는 컴파일되지 않습니다.</b> PriorityQueue 자체는 <code>IEnumerable</code> 이 아닙니다.
+        일부러 그렇게 만든 것입니다 — 우선순위 순서로 열거된다고 착각하지 않도록 <code>UnorderedItems</code> 라는 이름을 붙였습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 324" role="img" aria-label="PriorityQueue 의 4갈래 최소 힙. A5 B3 C8 D1 E9 F2 G7 H6 I4 를 차례로 넣으면 루트는 우선순위 1 인 D 이고, 루트의 자식 네 개는 F2 C8 B3 E9, F 의 자식 네 개는 A5 G7 H6 I4 이다. 이 트리는 배열 한 줄 D1 F2 C8 B3 E9 A5 G7 H6 I4 로 저장되며 i 번 칸의 부모는 i 빼기 1 을 4로 나눈 칸, 첫 자식은 4i 더하기 1 칸이다">
+      <text x="16" y="18" class="lbl">4갈래(4-ary) 최소 힙 — 트리는 머릿속에만, 실제로는 배열 한 줄</text>
+
+      <circle class="nd nd-fw" cx="340" cy="56" r="20"/>
+      <text x="340" y="54" class="val" text-anchor="middle">D</text>
+      <text x="340" y="67" class="ann" text-anchor="middle">1</text>
+      <path class="ln" d="M340 76 L340 88"/>
+      <path class="ln" d="M130 88 L550 88"/>
+      <path class="ln" d="M130 88 L130 100"/>
+      <path class="ln" d="M270 88 L270 100"/>
+      <path class="ln" d="M410 88 L410 100"/>
+      <path class="ln" d="M550 88 L550 100"/>
+
+      <circle class="nd" cx="130" cy="120" r="20"/>
+      <text x="130" y="118" class="val" text-anchor="middle">F</text>
+      <text x="130" y="131" class="ann" text-anchor="middle">2</text>
+      <circle class="nd" cx="270" cy="120" r="20"/>
+      <text x="270" y="118" class="val" text-anchor="middle">C</text>
+      <text x="270" y="131" class="ann" text-anchor="middle">8</text>
+      <circle class="nd" cx="410" cy="120" r="20"/>
+      <text x="410" y="118" class="val" text-anchor="middle">B</text>
+      <text x="410" y="131" class="ann" text-anchor="middle">3</text>
+      <circle class="nd" cx="550" cy="120" r="20"/>
+      <text x="550" y="118" class="val" text-anchor="middle">E</text>
+      <text x="550" y="131" class="ann" text-anchor="middle">9</text>
+
+      <path class="ln" d="M130 140 L130 152"/>
+      <path class="ln" d="M40 152 L220 152"/>
+      <path class="ln" d="M40 152 L40 164"/>
+      <path class="ln" d="M100 152 L100 164"/>
+      <path class="ln" d="M160 152 L160 164"/>
+      <path class="ln" d="M220 152 L220 164"/>
+      <circle class="nd nd-mut" cx="40" cy="184" r="20"/>
+      <text x="40" y="182" class="val" text-anchor="middle">A</text>
+      <text x="40" y="195" class="ann" text-anchor="middle">5</text>
+      <circle class="nd nd-mut" cx="100" cy="184" r="20"/>
+      <text x="100" y="182" class="val" text-anchor="middle">G</text>
+      <text x="100" y="195" class="ann" text-anchor="middle">7</text>
+      <circle class="nd nd-mut" cx="160" cy="184" r="20"/>
+      <text x="160" y="182" class="val" text-anchor="middle">H</text>
+      <text x="160" y="195" class="ann" text-anchor="middle">6</text>
+      <circle class="nd nd-mut" cx="220" cy="184" r="20"/>
+      <text x="220" y="182" class="val" text-anchor="middle">I</text>
+      <text x="220" y="195" class="ann" text-anchor="middle">4</text>
+
+      <text x="300" y="168" class="ann">부모 칸 = (i − 1) &gt;&gt; 2</text>
+      <text x="300" y="184" class="ann">첫 자식 칸 = 4i + 1 (자식은 최대 4개)</text>
+      <text x="300" y="200" class="ann am-t">형제끼리는 순서 없음 — C8 이 B3 앞에 있어도 정상</text>
+
+      <text x="44" y="222" class="tk" text-anchor="middle">[0]</text>
+      <text x="104" y="222" class="tk" text-anchor="middle">[1]</text>
+      <text x="164" y="222" class="tk" text-anchor="middle">[2]</text>
+      <text x="224" y="222" class="tk" text-anchor="middle">[3]</text>
+      <text x="284" y="222" class="tk" text-anchor="middle">[4]</text>
+      <text x="344" y="222" class="tk" text-anchor="middle">[5]</text>
+      <text x="404" y="222" class="tk" text-anchor="middle">[6]</text>
+      <text x="464" y="222" class="tk" text-anchor="middle">[7]</text>
+      <text x="524" y="222" class="tk" text-anchor="middle">[8]</text>
+      <rect class="bx bx-fw" x="16" y="228" width="56" height="28" rx="3"/>
+      <text x="44" y="247" class="ann" text-anchor="middle">D1</text>
+      <rect class="bx" x="76" y="228" width="56" height="28" rx="3"/>
+      <text x="104" y="247" class="ann" text-anchor="middle">F2</text>
+      <rect class="bx" x="136" y="228" width="56" height="28" rx="3"/>
+      <text x="164" y="247" class="ann" text-anchor="middle">C8</text>
+      <rect class="bx" x="196" y="228" width="56" height="28" rx="3"/>
+      <text x="224" y="247" class="ann" text-anchor="middle">B3</text>
+      <rect class="bx" x="256" y="228" width="56" height="28" rx="3"/>
+      <text x="284" y="247" class="ann" text-anchor="middle">E9</text>
+      <rect class="bx bx-mut" x="316" y="228" width="56" height="28" rx="3"/>
+      <text x="344" y="247" class="ann" text-anchor="middle">A5</text>
+      <rect class="bx bx-mut" x="376" y="228" width="56" height="28" rx="3"/>
+      <text x="404" y="247" class="ann" text-anchor="middle">G7</text>
+      <rect class="bx bx-mut" x="436" y="228" width="56" height="28" rx="3"/>
+      <text x="464" y="247" class="ann" text-anchor="middle">H6</text>
+      <rect class="bx bx-mut" x="496" y="228" width="56" height="28" rx="3"/>
+      <text x="524" y="247" class="ann" text-anchor="middle">I4</text>
+      <path class="dim-ln" d="M76 264 L312 264"/>
+      <text x="194" y="278" class="ann" text-anchor="middle">[0] 의 자식 [1]~[4]</text>
+      <path class="dim-ln" d="M316 264 L552 264"/>
+      <text x="434" y="278" class="ann" text-anchor="middle">[1] 의 자식 [5]~[8]</text>
+
+      <text x="16" y="300" class="lbl">자식 넷이 배열에 붙어 있어 한 번에 비교하고, 높이는 이진 힙의 절반입니다</text>
+      <text x="16" y="316" class="lbl">보장되는 것은 "루트가 최소" 하나 — 배열(UnorderedItems)은 정렬돼 있지 않습니다</text>
+    </svg>
+    <div class="cap">A5 B3 C8 D1 E9 F2 G7 H6 I4 를 넣은 실제 결과 — <b>힙은 부모 ≤ 자식만 지키는 반쯤 정렬된 배열</b>입니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="h">함정 ① — <span class="t">같은 우선순위는 넣은 순서대로 나오지 않는다</span> <span class="lvl h">🔴 고급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>var pq = new PriorityQueue&lt;string, int&gt;();
+foreach (var name in new[] { "첫째", "둘째", "셋째", "넷째", "다섯째", "여섯째" })
+    pq.Enqueue(name, 1);           // 전부 우선순위 1
+
+while (pq.TryDequeue(out var n, out _))
+    Console.Write($"{n} ");
+// 첫째 여섯째 다섯째 넷째 셋째 둘째   ← FIFO 가 아님!</code></pre>
+      <p class="tx">
+        Dequeue 는 <b>마지막 칸 요소를 루트로 옮긴 뒤</b> 아래로 내립니다. 동점이면 내려가지 않으므로
+        맨 뒤에 넣은 "여섯째"가 루트로 올라와 두 번째로 나옵니다. 이것은 버그가 아니라 <b>힙의 성질</b>이고, 문서에도 순서를 보장하지 않는다고 적혀 있습니다.
+      </p>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">해결 — 순번을 두 번째 키로</h4>
+      <pre class="code" data-lang="csharp"><code>// 우선순위를 (등급, 순번) 튜플로 — ValueTuple 은 앞 항목부터 비교
+var pq = new PriorityQueue&lt;string, (int Level, long Seq)&gt;();
+long seq = 0;
+foreach (var name in new[] { "첫째", "둘째", "셋째", "넷째", "다섯째", "여섯째" })
+    pq.Enqueue(name, (1, seq++));
+
+while (pq.TryDequeue(out var n, out _))
+    Console.Write($"{n} ");
+// 첫째 둘째 셋째 넷째 다섯째 여섯째   ← 안정적(FIFO)</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>작업 스케줄러 · 메시지 처리처럼 "같은 등급이면 먼저 온 것부터"가 요구사항이면</b> 반드시 순번을 붙이세요.
+        <code>long</code> 순번은 초당 10억 건을 넣어도 수백 년간 넘치지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">최대 힙 · 여러 키 — <span class="t">IComparer 로 방향을 정한다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>// 최대 힙: 비교를 뒤집은 Comparer 를 생성자에
+var maxPq = new PriorityQueue&lt;string, int&gt;(
+    Comparer&lt;int&gt;.Create((a, b) =&gt; b.CompareTo(a)));
+maxPq.Enqueue("브론즈", 10);
+maxPq.Enqueue("다이아", 90);
+maxPq.Enqueue("골드", 50);
+Console.WriteLine(maxPq.Dequeue());   // 다이아
+
+// ⚠ (a, b) =&gt; b - a 는 쓰지 마세요 — int.MinValue 근처에서 오버플로로 부호가 뒤집힘</code></pre>
+    </div>
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>// 여러 키: 마감이 빠른 순, 같으면 중요도가 높은 순
+public readonly record struct TaskKey(DateTime Due, int Importance)
+    : IComparable&lt;TaskKey&gt;
+{
+    public int CompareTo(TaskKey o)
+    {
+        int c = Due.CompareTo(o.Due);              // 오름차순
+        return c != 0 ? c : o.Importance.CompareTo(Importance);  // 내림차순
+    }
+}
+
+var todo = new PriorityQueue&lt;string, TaskKey&gt;();   // Comparer 생략 → IComparable 사용
+var d = new DateTime(2026, 10, 1);
+todo.Enqueue("보고서", new(d, 1));
+todo.Enqueue("장애 회고", new(d, 5));
+Console.WriteLine(todo.Dequeue());   // 장애 회고 (마감 같고 중요도 높음)</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="h">함정 ② — <span class="t">우선순위를 바꾸는 API 가 없다</span> → 지연 삭제 <span class="lvl h">🔴 고급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">다익스트라 — "낡은 항목은 꺼낼 때 버린다"</h4>
+      <pre class="code" data-lang="csharp"><code>var graph = new Dictionary&lt;char, (char To, int W)[]&gt;
+{
+    ['A'] = [('B', 4), ('C', 1)],
+    ['C'] = [('B', 2), ('D', 5)],
+    ['B'] = [('D', 1)],
+    ['D'] = [],
+};
+
+var dist = new Dictionary&lt;char, int&gt; { ['A'] = 0 };
+var pq = new PriorityQueue&lt;char, int&gt;();
+pq.Enqueue('A', 0);
+int stale = 0;
+
+while (pq.TryDequeue(out var u, out var d))
+{
+    if (d &gt; dist[u]) { stale++; continue; }   // ★ 이미 더 짧은 길로 처리됨 → 버림
+    foreach (var (v, w) in graph[u])
+    {
+        int nd = d + w;
+        if (nd &lt; dist.GetValueOrDefault(v, int.MaxValue))
+        {
+            dist[v] = nd;
+            pq.Enqueue(v, nd);                  // decrease-key 대신 "새로 하나 더"
+        }
+    }
+}
+Console.WriteLine(string.Join(" ", dist.OrderBy(kv =&gt; kv.Key)
+    .Select(kv =&gt; $"{kv.Key}={kv.Value}")));   // A=0 B=3 C=1 D=4
+Console.WriteLine($"버린 낡은 항목 {stale}개");   // 버린 낡은 항목 2개</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 이렇게 하나</h4>
+      <p class="tx">
+        <code>PriorityQueue</code> 는 요소의 위치를 기억하지 않으므로 "B 의 우선순위를 4 → 3 으로" 같은 <b>decrease-key 가 불가능</b>합니다.
+        대신 <b>새 우선순위로 한 번 더 넣고</b>, 꺼낼 때 <code>dist</code> 와 비교해 낡은 것을 버립니다.
+        힙에 최대 간선 수만큼 항목이 쌓이지만 복잡도는 O(E log E) = O(E log V) 로 같습니다.
+      </p>
+      <div class="note info">
+        <b><code>Remove</code> <span class="ver new">.NET 9+</span></b> — <code>pq.Remove(element, out var removed, out var priority)</code> 로
+        특정 요소를 지울 수 있게 되었지만 <b>배열을 처음부터 훑는 O(n)</b> 입니다. 지우고 다시 넣어 우선순위를 바꾸는 방식은
+        항목이 많으면 지연 삭제보다 느립니다. 가끔 취소하는 용도로만 쓰세요.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>요소 객체의 필드를 고쳐도 힙은 모릅니다.</b> 우선순위는 Enqueue 순간 값으로 복사돼 저장되므로,
+        <code>job.Priority = 0</code> 처럼 바꿔도 위치가 그대로입니다. 바꿔야 한다면 "다시 넣고 낡은 것은 무시" 하세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">top-k — <span class="t">EnqueueDequeue</span> 로 크기 k 힙 유지 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>// 큰 수 k 개 — "최소 힙에 k 개만 남긴다"
+int[] nums = [5, 1, 9, 3, 7, 8, 2];
+const int k = 3;
+var heap = new PriorityQueue&lt;int, int&gt;(k);
+
+foreach (var x in nums)
+{
+    if (heap.Count &lt; k) heap.Enqueue(x, x);
+    else heap.EnqueueDequeue(x, x);   // x 가 최소보다 작으면 x 를 그대로 돌려주고 끝
+}
+
+// UnorderedItems — 힙 배열 순서 그대로 (정렬 아님)
+Console.WriteLine(string.Join(",", heap.UnorderedItems.Select(t =&gt; t.Element)));  // 7,8,9
+
+var top = new List&lt;int&gt;();
+while (heap.TryDequeue(out var v, out _)) top.Add(v);   // 작은 것부터 나옴
+top.Reverse();
+Console.WriteLine(string.Join(",", top));   // 9,8,7</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비용과 함정</h4>
+      <ul class="tx">
+        <li>n 개를 다 정렬하면 O(n log n), k 크기 힙은 <b>O(n log k)</b> 에 메모리 O(k) — 스트림에도 됩니다.</li>
+        <li><code>EnqueueDequeue</code> 는 새 값이 루트 이하면 <b>힙을 건드리지 않고 그대로 돌려줍니다</b>. Enqueue 후 Dequeue 를 따로 부르는 것보다 sift 가 한 번 적습니다.</li>
+        <li>위 예에서 <code>UnorderedItems</code> 가 7,8,9 로 정렬돼 보이는 것은 <b>우연</b>입니다. 개수가 늘면 바로 흐트러집니다 — 정렬이 필요하면 꼭 Dequeue 로 꺼내세요.</li>
+      </ul>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Unity 에는 이 타입이 없습니다</b>(SQ 01). A* 의 open 리스트를 <code>List</code> 에 넣고 매번 <code>Sort</code> 하는 코드가 흔한데 프레임마다 O(n log n) 입니다.
+        위 4-ary 힙의 부모 · 자식 공식으로 50줄짜리 이진 힙을 만들어 두면 해결됩니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>PriorityQueue</code> 는 <b>최소 힙 · 동점 순서 없음 · 우선순위 변경 없음</b>. 동점에는 순번 키, 변경에는 지연 삭제,
+    방향 반전에는 <code>Comparer.Create</code> 가 정답입니다.</div>
+</section>
+
+
+<!-- ==================== sq06 ==================== -->
+<section class="sec" id="sq06">
+  <div class="sec-head rv">
+    <span class="no">SQ 06</span>
+    <h2>스레드 안전 큐 — <span class="t">Concurrent* 와 BlockingCollection</span></h2>
+    <p class="lead">
+      <code>Queue&lt;T&gt;</code> 를 두 스레드가 동시에 만지면 <b>예외 없이 데이터가 사라지거나 중복</b>됩니다.
+      <code>ConcurrentQueue&lt;T&gt;</code> 는 <b>락 없이</b> 그 문제를 풀지만 "비었을 때 기다리기"는 하지 않습니다.
+      기다림과 상한(배압)이 필요해지는 순간 <code>BlockingCollection</code> 이나 <code>Channel</code> 로 넘어갑니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ConcurrentQueue&lt;T&gt; — Try 만 있는 큐</h4>
+      <pre class="code" data-lang="csharp"><code>using System.Collections.Concurrent;
+
+var q = new ConcurrentQueue&lt;int&gt;();
+
+// 8개 스레드가 동시에 1만 개씩 넣기
+Parallel.For(0, 8, t =&gt;
+{
+    for (int i = 0; i &lt; 10_000; i++) q.Enqueue(i);
+});
+Console.WriteLine(q.Count);              // 80000 (Queue&lt;T&gt; 였다면 들쭉날쭉)
+
+// 꺼내기는 Try 하나뿐 — Dequeue() 메서드 자체가 없음
+long sum = 0;
+Parallel.For(0, 4, _ =&gt;
+{
+    long local = 0;
+    while (q.TryDequeue(out var x)) local += x;   // 비면 false → 루프 종료
+    Interlocked.Add(ref sum, local);
+});
+Console.WriteLine(sum);                  // 399960000 (= 8 × 0~9999 합)
+Console.WriteLine(q.IsEmpty);            // True</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b><code>if (q.Count &gt; 0) q.TryDequeue(...)</code> 는 의미가 없습니다.</b> 확인과 꺼내기 사이에 다른 스레드가 가져갈 수 있습니다.
+        <b>TryDequeue 의 반환값만 믿으세요.</b> 비었는지 볼 때는 <code>Count == 0</code> 대신 <code>IsEmpty</code> — Count 는 세그먼트를 훑는 더 비싼 연산입니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">속은 어떻게 생겼나</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th></th><th>ConcurrentQueue&lt;T&gt;</th><th>ConcurrentStack&lt;T&gt;</th></tr></thead>
+          <tbody>
+            <tr><td>구조</td><td>고정 크기 배열 <b>세그먼트</b>를 연결 리스트로 이음 (처음 32칸, 다음 세그먼트는 2배씩 · 상한 있음)</td><td>노드 연결 리스트 (Treiber 스택)</td></tr>
+            <tr><td>동기화</td><td>칸 예약은 <code>Interlocked</code> (락 없음) · 새 세그먼트 붙일 때만 짧은 락</td><td>꼭대기 포인터를 <code>CompareExchange</code> 로 교체</td></tr>
+            <tr><td>요소당 할당</td><td>없음 (세그먼트 단위)</td><td><b>Push 마다 노드 1개</b></td></tr>
+            <tr><td>열거</td><td>시점 스냅숏 — 예외 없음</td><td>시점 스냅숏</td></tr>
+            <tr><td>묶음 연산</td><td>—</td><td><code>PushRange</code> · <code>TryPopRange</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="code" data-lang="csharp"><code>var cs = new ConcurrentStack&lt;int&gt;();
+cs.PushRange([1, 2, 3]);                 // 한 번의 CAS 로 3개
+var buf = new int[2];
+int got = cs.TryPopRange(buf);           // 꼭대기부터 최대 2개
+Console.WriteLine($"{got}: {buf[0]},{buf[1]}");   // 2: 3,2</code></pre>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 290" role="img" aria-label="스레드 안전 큐 여섯 가지의 기능 비교 매트릭스. Queue 에 lock 을 직접 거는 방식은 모든 것을 직접 구현해야 한다. ConcurrentQueue 와 ConcurrentStack 은 락 없이 안전하지만 비었을 때 기다리기와 상한이 없다. BlockingCollection 은 스레드를 막고 기다리며 상한이 있지만 async 를 지원하지 않는다. Bounded Channel 은 await 로 기다리고 상한과 가득 찼을 때 정책이 있으며, Unbounded Channel 은 상한만 없다">
+      <text x="16" y="18" class="lbl">무엇이 되고 무엇이 안 되나 — 진할수록 기본 제공</text>
+
+      <text x="235" y="40" class="tk" text-anchor="middle">스레드 안전</text>
+      <text x="357" y="40" class="tk" text-anchor="middle">비면 기다림</text>
+      <text x="479" y="40" class="tk" text-anchor="middle">상한 · 배압</text>
+      <text x="601" y="40" class="tk" text-anchor="middle">async 대기</text>
+
+      <text x="16" y="66" class="ann">Queue&lt;T&gt; + lock</text>
+      <rect class="cel h2" x="176" y="48" width="118" height="28"/><text x="235" y="66" class="tk" text-anchor="middle">직접 lock</text>
+      <rect class="cel h1" x="298" y="48" width="118" height="28"/><text x="357" y="66" class="tk" text-anchor="middle">Monitor.Wait 직접</text>
+      <rect class="cel h1" x="420" y="48" width="118" height="28"/><text x="479" y="66" class="tk" text-anchor="middle">직접</text>
+      <rect class="cel h0" x="542" y="48" width="118" height="28"/><text x="601" y="66" class="tk" text-anchor="middle">없음</text>
+
+      <text x="16" y="98" class="ann">ConcurrentQueue&lt;T&gt;</text>
+      <rect class="cel h5" x="176" y="80" width="118" height="28"/><text x="235" y="98" class="tk" text-anchor="middle">락 없음</text>
+      <rect class="cel h0" x="298" y="80" width="118" height="28"/><text x="357" y="98" class="tk" text-anchor="middle">없음 (Try 만)</text>
+      <rect class="cel h0" x="420" y="80" width="118" height="28"/><text x="479" y="98" class="tk" text-anchor="middle">무제한</text>
+      <rect class="cel h0" x="542" y="80" width="118" height="28"/><text x="601" y="98" class="tk" text-anchor="middle">없음</text>
+
+      <text x="16" y="130" class="ann">ConcurrentStack&lt;T&gt;</text>
+      <rect class="cel h5" x="176" y="112" width="118" height="28"/><text x="235" y="130" class="tk" text-anchor="middle">락 없음 (CAS)</text>
+      <rect class="cel h0" x="298" y="112" width="118" height="28"/><text x="357" y="130" class="tk" text-anchor="middle">없음 (Try 만)</text>
+      <rect class="cel h0" x="420" y="112" width="118" height="28"/><text x="479" y="130" class="tk" text-anchor="middle">무제한</text>
+      <rect class="cel h0" x="542" y="112" width="118" height="28"/><text x="601" y="130" class="tk" text-anchor="middle">없음</text>
+
+      <text x="16" y="162" class="ann">BlockingCollection&lt;T&gt;</text>
+      <rect class="cel h4" x="176" y="144" width="118" height="28"/><text x="235" y="162" class="tk" text-anchor="middle">예</text>
+      <rect class="cel h3" x="298" y="144" width="118" height="28"/><text x="357" y="162" class="tk" text-anchor="middle">스레드를 막음</text>
+      <rect class="cel h4" x="420" y="144" width="118" height="28"/><text x="479" y="162" class="tk" text-anchor="middle">boundedCapacity</text>
+      <rect class="cel h0" x="542" y="144" width="118" height="28"/><text x="601" y="162" class="tk" text-anchor="middle">없음</text>
+
+      <text x="16" y="194" class="ann ok-t">Channel (Bounded)</text>
+      <rect class="cel h5" x="176" y="176" width="118" height="28"/><text x="235" y="194" class="tk" text-anchor="middle">예</text>
+      <rect class="cel h5" x="298" y="176" width="118" height="28"/><text x="357" y="194" class="tk" text-anchor="middle">await (스레드 반납)</text>
+      <rect class="cel h5" x="420" y="176" width="118" height="28"/><text x="479" y="194" class="tk" text-anchor="middle">FullMode 4종</text>
+      <rect class="cel h5" x="542" y="176" width="118" height="28"/><text x="601" y="194" class="tk" text-anchor="middle">예</text>
+
+      <text x="16" y="226" class="ann">Channel (Unbounded)</text>
+      <rect class="cel h5" x="176" y="208" width="118" height="28"/><text x="235" y="226" class="tk" text-anchor="middle">예</text>
+      <rect class="cel h5" x="298" y="208" width="118" height="28"/><text x="357" y="226" class="tk" text-anchor="middle">await</text>
+      <rect class="cel h0" x="420" y="208" width="118" height="28"/><text x="479" y="226" class="tk" text-anchor="middle">무제한</text>
+      <rect class="cel h5" x="542" y="208" width="118" height="28"/><text x="601" y="226" class="tk" text-anchor="middle">예</text>
+
+      <text x="16" y="260" class="lbl">"기다림 · 상한 · async" 세 칸이 모두 진한 줄은 Bounded Channel 하나뿐입니다</text>
+      <text x="16" y="276" class="lbl">ConcurrentQueue 는 그 아래 부품입니다 — 기다림이 없으니 바쁜 대기(spin)를 부르기 쉽습니다</text>
+    </svg>
+    <div class="cap">생산자 · 소비자 구조의 새 코드라면 <b>Bounded Channel</b> 이 기본값이고, ConcurrentQueue 는 "기다릴 필요 없는 공유 버퍼"용입니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="m">BlockingCollection — <span class="t">생산자 · 소비자 완전한 예제</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>using System.Collections.Concurrent;
+
+// 내부 저장소는 기본이 ConcurrentQueue → FIFO. 3개 차면 Add 가 멈춤 (배압)
+using var bc = new BlockingCollection&lt;int&gt;(boundedCapacity: 3);
+
+var producer = Task.Run(() =&gt;
+{
+    for (int i = 1; i &lt;= 10; i++)
+        bc.Add(i);              // 꽉 차면 이 스레드가 블록
+    bc.CompleteAdding();        // ★ "더 없음" — poison pill 대신 쓰는 종료 신호
+});
+
+var consumers = Enumerable.Range(1, 2).Select(id =&gt; Task.Run(() =&gt;
+{
+    int sum = 0;
+    // 비면 블록, CompleteAdding 후 다 비면 foreach 가 자연히 끝남
+    foreach (var x in bc.GetConsumingEnumerable())
+        sum += x;
+    return sum;
+})).ToArray();
+
+await producer;
+int[] sums = await Task.WhenAll(consumers);
+Console.WriteLine($"합계 {sums.Sum()}");   // 합계 55 (두 소비자의 몫은 실행마다 다름)
+Console.WriteLine(bc.IsCompleted);         // True</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">종료 처리 — poison pill vs 완료 신호</h4>
+      <p class="tx">
+        고전적인 방법은 <b>특수값(poison pill)</b>을 넣어 "이걸 받으면 끝내라"고 하는 것입니다.
+        소비자가 N 명이면 알약도 N 개 넣어야 하고, 정상 데이터와 구분되는 값이 필요합니다.
+        <code>CompleteAdding()</code> 은 그 일을 <b>컬렉션 상태로</b> 대신합니다 — 이후 <code>Add</code> 는 <code>InvalidOperationException</code>,
+        모든 <code>GetConsumingEnumerable</code> 은 남은 것을 다 꺼낸 뒤 끝납니다.
+      </p>
+      <div class="note warn">
+        <b>왜 "레거시 쪽"인가</b> — <code>Take</code> · <code>Add</code> 가 <b>스레드를 막고</b> 기다립니다.
+        ASP.NET Core 처럼 스레드 풀을 공유하는 곳에서 소비자 여럿이 막혀 있으면 스레드 풀 고갈로 이어집니다.
+        같은 구조를 <code>await</code> 로 하는 것이 <code>Channel&lt;T&gt;</code>(SQ 07)이고, 새 코드는 그쪽입니다.
+        콘솔 · 전용 스레드 배치처럼 막아도 되는 곳에서는 여전히 간단하고 좋은 도구입니다.
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <b>생성자에 다른 저장소</b>를 넘기면 순서가 바뀝니다 — <code>new BlockingCollection&lt;int&gt;(new ConcurrentStack&lt;int&gt;(), 3)</code> 이면 LIFO 입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">Unity — <span class="t">메인 스레드 디스패치 큐</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>using System;
+using System.Collections.Concurrent;
+using UnityEngine;
+
+// 다른 스레드(소켓 수신 · Task.Run)에서 Unity API 를 부르면 예외 →
+// 할 일을 큐에 넣고, 메인 스레드의 Update 가 꺼내 실행
+public sealed class MainThread : MonoBehaviour
+{
+    private static readonly ConcurrentQueue&lt;Action&gt; _q = new();
+    private const int BudgetPerFrame = 64;     // 한 프레임에 너무 많이 하지 않게
+
+    public static void Post(Action work) =&gt; _q.Enqueue(work);   // 아무 스레드에서나
+
+    private void Update()
+    {
+        for (int i = 0; i &lt; BudgetPerFrame &amp;&amp; _q.TryDequeue(out var work); i++)
+        {
+            try { work(); }
+            catch (Exception e) { Debug.LogException(e); }   // 하나가 터져도 나머지는 계속
+        }
+    }
+}
+
+// 사용 — 네트워크 스레드에서
+// MainThread.Post(() =&gt; hpBar.value = packet.Hp);</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 ConcurrentQueue 인가</h4>
+      <ul class="tx">
+        <li>생산자는 여러 스레드, 소비자는 메인 스레드 하나 — <b>기다릴 필요가 없습니다</b>. Update 가 어차피 매 프레임 옵니다.</li>
+        <li>Unity 메인 스레드에서 <code>BlockingCollection.Take</code> 를 부르면 <b>게임이 멈춥니다</b>. 절대 금지입니다.</li>
+        <li><b>프레임 예산</b>을 두어 한 프레임에 큐가 몰려도 프레임이 튀지 않게 합니다. 남은 것은 다음 프레임에 처리됩니다.</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Unity 6 은 <code>await Awaitable.MainThreadAsync()</code></b> 로 메인 스레드에 돌아오는 방법도 제공합니다.
+        콜백이 많고 순서가 중요하면 위 큐, async 흐름 안에서 잠깐 돌아올 때는 Awaitable 이 편합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 여러 스레드가 넣고 빼기만 하면 <b>ConcurrentQueue + TryDequeue</b>, 비었을 때 기다리고 상한이 필요하면
+    <b>Channel</b>(새 코드) 또는 <b>BlockingCollection</b>(스레드를 막아도 되는 곳). Count 로 확인하고 꺼내는 코드는 전부 경쟁 상태입니다.</div>
+</section>
+
+
+<!-- ==================== sq07 ==================== -->
+<section class="sec" id="sq07">
+  <div class="sec-head rv">
+    <span class="no">SQ 07</span>
+    <h2>비동기 큐 — <span class="t">System.Threading.Channels</span></h2>
+    <p class="lead">
+      <code>Channel&lt;T&gt;</code> 는 <b>async 세계의 BlockingCollection</b> 입니다. 비었으면 <code>await</code> 로 기다리고,
+      꽉 차면 <code>await</code> 로 생산자를 늦추며(배압), <code>Writer.Complete()</code> 로 끝을 알립니다.
+      그 사이 스레드는 막히지 않고 풀로 돌아갑니다. 🧬 고급 탭 A 03 에서 한 장으로 소개한 것을 여기서 옵션 · 종료 · 함정까지 뜯어 봅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">생산자 2 · 소비자 1 — 완전한 예제</h4>
+      <pre class="code" data-lang="csharp"><code>using System.Threading.Channels;
+
+var channel = Channel.CreateBounded&lt;Order&gt;(new BoundedChannelOptions(capacity: 4)
+{
+    FullMode = BoundedChannelFullMode.Wait,  // 꽉 차면 WriteAsync 가 대기 (기본값)
+    SingleReader = true,                     // 소비자 1명 → 내부 동기화를 줄인 구현 선택
+    SingleWriter = false,                    // 생산자는 여럿
+});
+
+async Task ProduceAsync(string source, int count, CancellationToken ct)
+{
+    for (int i = 1; i &lt;= count; i++)
+    {
+        // 자리가 없으면 여기서 await — 소비자가 느리면 생산자도 느려짐 (배압)
+        await channel.Writer.WriteAsync(new Order(source, i), ct);
+        await Task.Delay(5, ct);
+    }
+}
+
+async Task&lt;int&gt; ConsumeAsync(CancellationToken ct)
+{
+    int handled = 0;
+    // Complete() 된 뒤 남은 것까지 다 읽으면 foreach 가 끝남
+    await foreach (var order in channel.Reader.ReadAllAsync(ct))
+    {
+        await Task.Delay(10, ct);            // 처리가 생산보다 느림
+        handled++;
+    }
+    return handled;
+}
+
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+var consumer = ConsumeAsync(cts.Token);                  // 소비자 먼저 시작
+await Task.WhenAll(ProduceAsync("웹", 10, cts.Token),
+                   ProduceAsync("앱", 10, cts.Token));
+channel.Writer.Complete();                               // ★ 모든 생산자가 끝난 뒤 딱 한 번
+Console.WriteLine($"처리 {await consumer}건");            // 처리 20건
+
+record Order(string Source, int No);</code></pre>
+    </div>
+
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">옵션 한 장</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th>옵션</th><th>뜻</th><th>언제</th></tr></thead>
+          <tbody>
+            <tr><td><code>CreateBounded(n)</code></td><td>최대 n 개</td><td><b>기본값으로 이것</b> — 메모리 상한 = 배압</td></tr>
+            <tr><td><code>CreateUnbounded()</code></td><td>무제한</td><td>생산 속도가 구조적으로 제한될 때만</td></tr>
+            <tr><td><code>FullMode = Wait</code></td><td>WriteAsync 대기 · TryWrite 는 false</td><td>유실 불가 (주문 · 결제)</td></tr>
+            <tr><td><code>DropOldest</code></td><td>가장 오래된 항목을 버리고 넣음</td><td>최신 값만 의미 (시세 · 위치)</td></tr>
+            <tr><td><code>DropNewest</code></td><td>채널 안 가장 최근 항목을 버리고 넣음</td><td>드묾</td></tr>
+            <tr><td><code>DropWrite</code></td><td>새로 쓰는 항목을 버림 (TryWrite 는 true)</td><td>과부하 시 신규 무시 (로그 샘플링)</td></tr>
+            <tr><td><code>SingleReader</code> · <code>SingleWriter</code></td><td>"한 명뿐"이라는 약속</td><td>지키면 더 빠른 구현 · 어기면 오동작</td></tr>
+            <tr><td><code>AllowSynchronousContinuations</code></td><td>쓰는 쪽 스레드에서 읽는 쪽 이어 실행</td><td>지연 최소화 · 기본 false 가 안전</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>Unbounded 는 "메모리가 상한"이라는 뜻입니다.</b> 소비자가 한 번 밀리기 시작하면 큐가 무한히 자라
+        결국 OutOfMemory 나 긴 GC 정지로 끝납니다. 처음에는 Bounded 로 시작하고, 꽉 찼을 때의 정책(Wait · Drop)을
+        <b>요구사항으로 정하는 것</b>이 설계의 핵심입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 294" role="img" aria-label="용량 2 인 Bounded Channel 의 시퀀스. 생산자가 A 와 B 를 쓰는 동안은 즉시 완료되고, C 를 쓸 때는 꽉 차 있어 await 로 대기한다. 소비자가 A 를 읽어 자리가 생기면 C 가 기록되고 생산자의 대기가 풀린다. 생산자가 Writer.Complete 를 부르면 소비자는 B 와 C 를 마저 읽은 뒤 ReadAllAsync 가 끝난다">
+      <text x="16" y="18" class="lbl">Bounded(2) 채널 — 꽉 차면 생산자가 "기다리며 쉰다"</text>
+
+      <rect class="actr" x="26" y="30" width="112" height="28"/>
+      <text x="82" y="49" class="ann" text-anchor="middle">생산자</text>
+      <rect class="actr" x="284" y="30" width="112" height="28"/>
+      <text x="340" y="49" class="ann" text-anchor="middle">채널 (용량 2)</text>
+      <rect class="actr" x="542" y="30" width="112" height="28"/>
+      <text x="598" y="49" class="ann" text-anchor="middle">소비자</text>
+
+      <path class="life" d="M82 60 L82 248"/>
+      <path class="life" d="M340 60 L340 248"/>
+      <path class="life" d="M598 60 L598 248"/>
+
+      <rect class="actv" x="77" y="128" width="10" height="50"/>
+      <text x="40" y="158" class="ann rs-t" text-anchor="middle">대기</text>
+
+      <path class="msg" d="M82 80 L332 80"/>
+      <text x="90" y="75" class="ann">1. WriteAsync(A) — 즉시 완료 · 1/2</text>
+      <path class="msg" d="M82 104 L332 104"/>
+      <text x="90" y="99" class="ann">2. WriteAsync(B) — 즉시 · 2/2</text>
+      <path class="msg" d="M82 128 L332 128"/>
+      <text x="90" y="123" class="ann rs-t">3. WriteAsync(C) — 꽉 참 → await 대기</text>
+
+      <path class="msg" d="M598 152 L348 152"/>
+      <text x="356" y="147" class="ann">4. ReadAsync() → A</text>
+      <path class="msg-a" d="M332 176 L90 176"/>
+      <text x="96" y="171" class="ann ok-t">5. 자리 생김 → C 기록 · 대기 해제</text>
+
+      <path class="msg" d="M82 204 L332 204"/>
+      <text x="90" y="199" class="ann">6. Writer.Complete()</text>
+      <path class="msg-a" d="M348 228 L590 228"/>
+      <text x="356" y="223" class="ann">7. B · C 전달 후 ReadAllAsync 종료</text>
+
+      <text x="16" y="270" class="lbl">대기하는 동안 스레드는 풀에 돌아갑니다 — 막히는 것은 흐름이지 스레드가 아닙니다</text>
+      <text x="16" y="286" class="lbl">Complete 를 잊으면 7번이 영영 오지 않아 소비자가 끝나지 않습니다</text>
+    </svg>
+    <div class="cap">배압은 <b>"쓰기가 기다리게 만드는 것"</b>입니다. 메모리 대신 시간으로 과부하를 흡수합니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="m">꽉 찼을 때 — <span class="t">Wait 와 DropOldest</span> 를 눈으로 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>using System.Threading.Channels;
+
+// ① Wait (기본) — TryWrite 는 자리가 없으면 false
+var w = Channel.CreateBounded&lt;int&gt;(2);
+Console.WriteLine(w.Writer.TryWrite(1));   // True
+Console.WriteLine(w.Writer.TryWrite(2));   // True
+Console.WriteLine(w.Writer.TryWrite(3));   // False  ← WriteAsync 였다면 await 대기
+
+// ② DropOldest — 항상 들어가고, 밀려난 것은 콜백으로 (.NET 6+)
+var dropped = new List&lt;int&gt;();
+var d = Channel.CreateBounded&lt;int&gt;(
+    new BoundedChannelOptions(3) { FullMode = BoundedChannelFullMode.DropOldest },
+    itemDropped: x =&gt; dropped.Add(x));
+
+for (int i = 1; i &lt;= 5; i++)
+    d.Writer.TryWrite(i);                  // 5번 모두 true
+d.Writer.Complete();
+
+await foreach (var x in d.Reader.ReadAllAsync())
+    Console.Write($"{x} ");                // 3 4 5
+Console.WriteLine($"| 버림 {string.Join(",", dropped)}");   // | 버림 1,2</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">무엇을 고를까</h4>
+      <ul class="tx">
+        <li><b>잃으면 안 되는 데이터</b>(주문 · 이메일 발송 · 결제 이벤트) → <code>Wait</code>. 생산자가 느려지는 것을 받아들입니다.</li>
+        <li><b>최신 값만 의미 있는 데이터</b>(플레이어 위치 · 센서 값 · 시세) → <code>DropOldest</code>. 오래된 위치를 처리하는 것은 낭비입니다.</li>
+        <li><b>HTTP 요청에서 바로 쓰는 경우</b> → <code>TryWrite</code> 로 시도하고 false 면 <b>503 / 429</b> 로 거절. 요청 스레드를 붙잡고 기다리게 하지 않습니다(SQ 12).</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>itemDropped</code> 콜백</b>으로 버린 개수를 메트릭으로 내보내세요. "조용히 버려지는" 데이터는 장애 분석 때 가장 찾기 어렵습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="h">종료와 오류 — <span class="t">Complete(ex)</span> 는 소비자에게 예외를 전한다 <span class="lvl h">🔴 고급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>var ch = Channel.CreateUnbounded&lt;int&gt;();
+
+_ = Task.Run(async () =&gt;
+{
+    try
+    {
+        await ch.Writer.WriteAsync(1);
+        await ch.Writer.WriteAsync(2);
+        throw new IOException("원본 파일이 잘렸음");
+    }
+    catch (Exception ex)
+    {
+        ch.Writer.Complete(ex);          // ★ 예외를 실어서 완료
+    }
+});
+
+try
+{
+    await foreach (var x in ch.Reader.ReadAllAsync())
+        Console.Write($"{x} ");          // 1 2  (남은 것은 다 받은 뒤)
+}
+catch (IOException e)
+{
+    Console.WriteLine($"| 생산자 실패: {e.Message}");   // | 생산자 실패: 원본 파일이 잘렸음
+}
+
+// 완료 후 쓰기
+Console.WriteLine(ch.Writer.TryWrite(3));            // False
+// await ch.Writer.WriteAsync(3);  // 💥 ChannelClosedException</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규칙 네 가지</h4>
+      <ol class="tx">
+        <li><b>Complete 는 "마지막 생산자"가 한 번만.</b> 두 번 부르면 <code>ChannelClosedException</code>(InvalidOperationException 의 파생) — 확실하지 않으면 <code>TryComplete()</code>.</li>
+        <li><b>생산자가 여럿이면</b> <code>Task.WhenAll(producers)</code> 뒤에 Complete 합니다(위 예제 패턴). 각 생산자가 Complete 하면 첫 번째가 나머지를 막습니다.</li>
+        <li><b>오류는 Complete(ex)</b> 로 넘기면 소비자의 <code>await foreach</code> 가 남은 항목을 다 받은 뒤 같은 예외를 던지고, <code>Reader.Completion</code> 도 실패 상태가 됩니다.</li>
+        <li><b>취소(CancellationToken)는 "그만 기다리기"</b>일 뿐 채널을 닫지 않습니다. 종료 절차는 Complete, 강제 중단은 토큰 — 둘을 구분하세요.</li>
+      </ol>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">소비자 여럿 — <span class="t">나눠 갖기</span>이지 방송이 아니다 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>var jobs = Channel.CreateBounded&lt;int&gt;(new BoundedChannelOptions(100)
+{
+    SingleReader = false,      // ★ 소비자가 여럿이면 반드시 false
+});
+
+// 워커 4개가 같은 Reader 를 읽음 → 항목 하나는 워커 하나에게만
+var workers = Enumerable.Range(1, 4).Select(id =&gt; Task.Run(async () =&gt;
+{
+    int mine = 0;
+    await foreach (var job in jobs.Reader.ReadAllAsync())
+        mine++;
+    return mine;
+})).ToArray();
+
+for (int i = 0; i &lt; 1_000; i++) await jobs.Writer.WriteAsync(i);
+jobs.Writer.Complete();
+
+int[] counts = await Task.WhenAll(workers);
+Console.WriteLine(counts.Sum());   // 1000 (각 워커 몫은 실행마다 다름)</code></pre>
+    </div>
+    <div class="card">
+      <ul class="tx">
+        <li>Channel 은 <b>작업 분배(competing consumers)</b> 구조입니다. 모든 구독자에게 같은 메시지를 뿌리는 pub/sub 이 필요하면 구독자마다 채널을 하나씩 두고 복사해 넣어야 합니다.</li>
+        <li><code>SingleReader = true</code> 인데 실제로 둘이 읽으면 <b>예외 없이 항목이 꼬일 수 있습니다</b>. 성능 옵션이 아니라 <b>계약</b>입니다.</li>
+        <li>순서: 소비자가 하나면 FIFO 가 보장되지만, 여럿이면 <b>처리 완료 순서</b>는 보장되지 않습니다.</li>
+      </ul>
+      <div class="note info" style="margin-bottom:0">
+        <b>우선순위가 있는 채널</b> — .NET 9 의 System.Threading.Channels 에 <code>Channel.CreateUnboundedPrioritized&lt;T&gt;()</code> 가 추가되었습니다
+        <span class="ver new">.NET 9+</span>. 이름처럼 <b>Unbounded</b> 뿐이므로 상한은 따로 관리해야 합니다.
+        Unity 에는 Channels 가 기본으로 없어 DLL 을 직접 넣거나 SQ 06 의 ConcurrentQueue 방식을 씁니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> async 생산자 · 소비자는 <b><code>Channel.CreateBounded</code> + <code>ReadAllAsync</code> + <code>Writer.Complete()</code></b> 세 줄이 뼈대입니다.
+    꽉 찼을 때의 정책(Wait · Drop)을 정하는 것이 배압 설계입니다.</div>
+</section>
+
+
+<!-- ==================== sq08 ==================== -->
+<section class="sec" id="sq08">
+  <div class="sec-head rv">
+    <span class="no">SQ 08</span>
+    <h2>알고리즘 패턴 — <span class="t">C# 관용 코드</span>로</h2>
+    <p class="lead">
+      스택 · 큐 · 덱이 실제로 빛나는 여섯 가지 패턴입니다. 이론은 CS 가이드에 맡기고, 여기서는 <b>C# 에서 어떤 타입과 어떤 메서드로 쓰는지</b>,
+      그리고 <b>Try 패턴이 루프를 얼마나 짧게 만드는지</b>에 집중합니다. 출력은 모두 손으로 추적해 맞춘 값입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 괄호 검사 — Stack&lt;char&gt;</h4>
+      <pre class="code" data-lang="csharp"><code>static bool IsBalanced(string s)
+{
+    var st = new Stack&lt;char&gt;();
+    foreach (var c in s)
+    {
+        switch (c)
+        {
+            case '(' or '[' or '{':
+                st.Push(c);
+                break;
+            case ')' or ']' or '}':
+            {
+                char open = c switch { ')' =&gt; '(', ']' =&gt; '[', _ =&gt; '{' };
+                // 비어 있으면 TryPop 이 false → 짝 없는 닫는 괄호
+                if (!st.TryPop(out var top) || top != open) return false;
+                break;
+            }
+        }
+    }
+    return st.Count == 0;              // 남은 여는 괄호가 있으면 실패
+}
+
+foreach (var s in new[] { "{[()]}", "([)]", "((", "a[b]{c}" })
+    Console.WriteLine($"{s} {IsBalanced(s)}");
+// {[()]} True
+// ([)] False
+// (( False
+// a[b]{c} True</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">② 단조 스택 — 다음 큰 수</h4>
+      <pre class="code" data-lang="csharp"><code>static int[] NextGreater(int[] a)
+{
+    var res = new int[a.Length];
+    Array.Fill(res, -1);
+    var st = new Stack&lt;int&gt;();      // 아직 답을 못 찾은 '인덱스'
+    for (int i = 0; i &lt; a.Length; i++)
+    {
+        // 나보다 작은 값들은 지금 답을 찾았다
+        while (st.TryPeek(out var j) &amp;&amp; a[j] &lt; a[i])
+            res[st.Pop()] = a[i];
+        st.Push(i);
+    }
+    return res;                       // 스택에 남은 것은 답 없음(-1)
+}
+
+Console.WriteLine(string.Join(",", NextGreater([2, 7, 3, 5, 4, 6, 8])));
+// 7,8,5,6,6,8,-1</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b><code>while (st.TryPeek(out var j) &amp;&amp; …)</code></b> — "비어 있지 않고, 꼭대기가 조건을 만족하는 동안"을 한 줄로 씁니다.
+        <code>st.Count &gt; 0 &amp;&amp; a[st.Peek()] &lt; a[i]</code> 보다 짧고 Peek 를 두 번 하지 않습니다. 주식 가격 span · 히스토그램 최대 직사각형도 같은 뼈대입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 248" role="img" aria-label="다음 큰 수 단조 스택의 단계별 상태. 배열 2 7 3 5 4 6 8 을 차례로 볼 때 스택은 아래에서 위로 갈수록 값이 작아지는 상태를 유지한다. 7 이 오면 2 가 답 7 을 얻고 빠지고, 5 가 오면 3 이, 6 이 오면 4 와 5 가, 8 이 오면 6 과 7 이 답을 얻고 빠진다. 마지막에 8 만 남아 답이 없다">
+      <text x="16" y="18" class="lbl">단조 스택 — 각 단계 뒤의 스택 (그림은 인덱스 대신 값으로)</text>
+
+      <text x="54" y="42" class="tk" text-anchor="middle">a[0] = 2</text>
+      <text x="146" y="42" class="tk" text-anchor="middle">a[1] = 7</text>
+      <text x="238" y="42" class="tk" text-anchor="middle">a[2] = 3</text>
+      <text x="330" y="42" class="tk" text-anchor="middle">a[3] = 5</text>
+      <text x="422" y="42" class="tk" text-anchor="middle">a[4] = 4</text>
+      <text x="514" y="42" class="tk" text-anchor="middle">a[5] = 6</text>
+      <text x="606" y="42" class="tk" text-anchor="middle">a[6] = 8</text>
+
+      <rect class="bx bx-fw" x="24" y="150" width="60" height="22" rx="3"/>
+      <text x="54" y="166" class="ann" text-anchor="middle">2</text>
+
+      <rect class="bx bx-fw" x="116" y="150" width="60" height="22" rx="3"/>
+      <text x="146" y="166" class="ann" text-anchor="middle">7</text>
+
+      <rect class="bx" x="208" y="150" width="60" height="22" rx="3"/>
+      <text x="238" y="166" class="ann" text-anchor="middle">7</text>
+      <rect class="bx bx-fw" x="208" y="126" width="60" height="22" rx="3"/>
+      <text x="238" y="142" class="ann" text-anchor="middle">3</text>
+
+      <rect class="bx" x="300" y="150" width="60" height="22" rx="3"/>
+      <text x="330" y="166" class="ann" text-anchor="middle">7</text>
+      <rect class="bx bx-fw" x="300" y="126" width="60" height="22" rx="3"/>
+      <text x="330" y="142" class="ann" text-anchor="middle">5</text>
+
+      <rect class="bx" x="392" y="150" width="60" height="22" rx="3"/>
+      <text x="422" y="166" class="ann" text-anchor="middle">7</text>
+      <rect class="bx" x="392" y="126" width="60" height="22" rx="3"/>
+      <text x="422" y="142" class="ann" text-anchor="middle">5</text>
+      <rect class="bx bx-fw" x="392" y="102" width="60" height="22" rx="3"/>
+      <text x="422" y="118" class="ann" text-anchor="middle">4</text>
+
+      <rect class="bx" x="484" y="150" width="60" height="22" rx="3"/>
+      <text x="514" y="166" class="ann" text-anchor="middle">7</text>
+      <rect class="bx bx-fw" x="484" y="126" width="60" height="22" rx="3"/>
+      <text x="514" y="142" class="ann" text-anchor="middle">6</text>
+
+      <rect class="bx bx-fw" x="576" y="150" width="60" height="22" rx="3"/>
+      <text x="606" y="166" class="ann" text-anchor="middle">8</text>
+
+      <path class="ln" d="M20 176 L660 176"/>
+      <text x="54" y="194" class="ann" text-anchor="middle">—</text>
+      <text x="146" y="194" class="ann ok-t" text-anchor="middle">2 의 답 7</text>
+      <text x="238" y="194" class="ann" text-anchor="middle">—</text>
+      <text x="330" y="194" class="ann ok-t" text-anchor="middle">3 의 답 5</text>
+      <text x="422" y="194" class="ann" text-anchor="middle">—</text>
+      <text x="514" y="194" class="ann ok-t" text-anchor="middle">4 · 5 의 답 6</text>
+      <text x="606" y="194" class="ann ok-t" text-anchor="middle">6 · 7 의 답 8</text>
+
+      <text x="16" y="224" class="lbl">스택은 위로 갈수록 작아집니다 — 더 큰 값이 오면 작은 것들이 답을 얻고 빠집니다</text>
+      <text x="16" y="240" class="lbl">인덱스마다 한 번 들어가고 한 번 나오므로 이중 루프처럼 보여도 전체 O(n) 입니다</text>
+    </svg>
+    <div class="cap">붉은 칸이 방금 Push 된 값, 아래 줄이 그 단계에서 Pop 되며 답을 얻은 값 — <b>8 만 끝까지 남아 -1</b> 입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ BFS 최단 거리 — Queue&lt;(int R, int C)&gt;</h4>
+      <pre class="code" data-lang="csharp"><code>string[] grid = ["S.#.", "..#.", "#...", ".#.G"];
+int H = grid.Length, W = grid[0].Length;
+var dist = new int[H, W];
+for (int r = 0; r &lt; H; r++)
+    for (int c = 0; c &lt; W; c++) dist[r, c] = -1;
+
+(int dr, int dc)[] dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+var q = new Queue&lt;(int R, int C)&gt;();     // 값 튜플 → 박싱 · 할당 없음
+q.Enqueue((0, 0));
+dist[0, 0] = 0;
+
+while (q.TryDequeue(out var cur))         // ★ foreach 가 아니라 while
+{
+    foreach (var (dr, dc) in dirs)
+    {
+        int nr = cur.R + dr, nc = cur.C + dc;
+        if (nr &lt; 0 || nc &lt; 0 || nr &gt;= H || nc &gt;= W) continue;
+        if (grid[nr][nc] == '#' || dist[nr, nc] != -1) continue;
+        dist[nr, nc] = dist[cur.R, cur.C] + 1;   // 넣을 때 방문 표시
+        q.Enqueue((nr, nc));
+    }
+}
+Console.WriteLine(dist[3, 3]);   // 6  (S → G 최단 칸 수)</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>방문 표시는 "넣을 때"</b> 합니다. 꺼낼 때 표시하면 같은 칸이 큐에 여러 번 들어가 최악의 경우 큐가 폭증합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">④ 슬라이딩 윈도우 최댓값 — 단조 덱</h4>
+      <pre class="code" data-lang="csharp"><code>// SQ 04 의 Deque&lt;T&gt; 사용
+static List&lt;int&gt; MaxSliding(int[] a, int k)
+{
+    var dq = new Deque&lt;int&gt;();   // 인덱스 — 값이 앞에서 뒤로 내림차순
+    var res = new List&lt;int&gt;();
+    for (int i = 0; i &lt; a.Length; i++)
+    {
+        if (dq.TryPeekFront(out var f) &amp;&amp; f &lt;= i - k)
+            dq.PopFront();                       // 창 밖으로 나간 인덱스
+        while (dq.TryPeekBack(out var b) &amp;&amp; a[b] &lt;= a[i])
+            dq.PopBack();                        // 나보다 작으면 다시는 최대가 못 됨
+        dq.PushBack(i);
+        if (i &gt;= k - 1) res.Add(a[dq.PeekFront()]);
+    }
+    return res;
+}
+
+Console.WriteLine(string.Join(",", MaxSliding([1, 3, -1, -3, 5, 3, 6, 7], 3)));
+// 3,3,5,5,6,7</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>코딩 테스트에서 Deque 클래스가 없다면</b> — 각 인덱스는 한 번만 들어가므로 <code>int[] buf = new int[n]; int head = 0, tail = 0;</code>
+        배열 하나에 두 포인터로 충분합니다(감을 필요가 없음). 앞에서 빼기는 <code>head++</code>, 뒤에서 빼기는 <code>tail--</code>.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">⑤ 0-1 BFS — 비용 0 은 앞에, 1 은 뒤에</h4>
+      <pre class="code" data-lang="csharp"><code>var adj = new List&lt;(int To, int W)&gt;[5];
+for (int i = 0; i &lt; 5; i++) adj[i] = [];
+foreach (var (u, v, w) in new[] { (0, 1, 1), (0, 2, 0), (2, 1, 0),
+                                  (1, 3, 1), (2, 3, 1), (3, 4, 0) })
+    adj[u].Add((v, w));
+
+var dist = Enumerable.Repeat(int.MaxValue, 5).ToArray();
+dist[0] = 0;
+var dq = new Deque&lt;int&gt;();
+dq.PushBack(0);
+
+while (dq.TryPopFront(out var u))
+{
+    foreach (var (v, w) in adj[u])
+    {
+        if (dist[u] + w &gt;= dist[v]) continue;
+        dist[v] = dist[u] + w;
+        if (w == 0) dq.PushFront(v);    // 같은 거리 → 지금 바로 처리
+        else        dq.PushBack(v);     // 거리 +1 → 다음 차례
+    }
+}
+Console.WriteLine(string.Join(",", dist));   // 0,0,0,1,1</code></pre>
+      <p class="tx">가중치가 0 과 1 뿐이면 다익스트라의 O(E log V) 대신 <b>덱으로 O(V + E)</b> 입니다. 덱이 없는 .NET 에서 SQ 04 구현이 필요한 대표적 이유입니다.</p>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">⑥ undo / redo — 스택 두 개</h4>
+      <pre class="code" data-lang="csharp"><code>var ed = new Editor();
+ed.Type("안녕");
+ed.Type("하세요");
+ed.Undo();  Console.WriteLine(ed.Text);   // 안녕
+ed.Redo();  Console.WriteLine(ed.Text);   // 안녕하세요
+ed.Undo();  ed.Type("!");
+Console.WriteLine(ed.Text);               // 안녕!
+Console.WriteLine(ed.CanRedo);            // False (새 입력이 redo 를 지움)
+
+sealed class Editor
+{
+    private readonly Stack&lt;string&gt; _undo = new();
+    private readonly Stack&lt;string&gt; _redo = new();
+    public string Text { get; private set; } = "";
+    public bool CanRedo =&gt; _redo.Count &gt; 0;
+
+    public void Type(string s)
+    {
+        _undo.Push(Text);
+        Text += s;
+        _redo.Clear();                    // 새 편집은 '미래'를 무효화
+    }
+    public void Undo()
+    {
+        if (!_undo.TryPop(out var prev)) return;
+        _redo.Push(Text);
+        Text = prev;
+    }
+    public void Redo()
+    {
+        if (!_redo.TryPop(out var next)) return;
+        _undo.Push(Text);
+        Text = next;
+    }
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="h">불변 스택 · 큐 — <span class="t">ImmutableStack · ImmutableQueue</span> 로 스냅숏 <span class="lvl h">🔴 고급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>using System.Collections.Immutable;
+
+var h0 = ImmutableStack&lt;string&gt;.Empty;
+var h1 = h0.Push("v1");
+var h2 = h1.Push("v2");                 // h1 은 그대로 — 새 노드 하나만 생김
+var h3 = h2.Pop(out var top);
+
+Console.WriteLine(top);                        // v2
+Console.WriteLine(string.Join(",", h2));       // v2,v1  (h2 는 안 바뀜)
+Console.WriteLine(ReferenceEquals(h3, h1));    // True — Pop 은 꼬리를 그대로 돌려줌
+
+var q1 = ImmutableQueue&lt;int&gt;.Empty.Enqueue(1).Enqueue(2);
+var q2 = q1.Dequeue(out var first);
+Console.WriteLine($"{first} | {string.Join(",", q1)} | {string.Join(",", q2)}");
+// 1 | 1,2 | 2</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">언제 쓰나</h4>
+      <ul class="tx">
+        <li><b>ImmutableStack</b> 은 단일 연결 리스트입니다. Push 는 새 머리 노드 하나, Pop 은 꼬리를 돌려줄 뿐 — <b>버전마다 전체를 복사하지 않고 꼬리를 공유</b>합니다.</li>
+        <li><b>상태 이력 · 시간 여행 디버깅 · Redux 식 상태</b>처럼 "모든 과거 버전을 들고 있어야" 할 때, 버전 하나당 비용이 O(1) 입니다.</li>
+        <li><b>여러 스레드에 락 없이 넘기기</b> — 바뀌지 않으므로 그냥 공유하면 됩니다. 갱신은 <code>ImmutableInterlocked.Push(ref stack, x)</code> 로 원자적으로.</li>
+        <li><b>ImmutableQueue</b> 는 내부적으로 불변 스택 두 개(앞 · 뒤)로 만든 큐입니다.</li>
+      </ul>
+      <div class="note warn" style="margin-bottom:0">
+        <b>빠른 큐 · 스택이 아닙니다.</b> 노드마다 할당이 있어 단순 처리 루프에서는 <code>Stack&lt;T&gt;</code> 보다 몇 배 느립니다.
+        "과거 버전을 공유해야 한다"는 요구가 있을 때만 고르세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 괄호 · 다음 큰 수는 <b>Stack + TryPeek 루프</b>, 최단 거리는 <b>Queue + while TryDequeue</b>,
+    윈도우 최댓값 · 0-1 BFS 는 <b>덱</b>, undo 는 <b>스택 두 개</b>(이력 공유가 필요하면 ImmutableStack).</div>
+</section>
+
+
+<!-- ==================== sq09 ==================== -->
+<section class="sec" id="sq09">
+  <div class="sec-head rv">
+    <span class="no">SQ 09</span>
+    <h2>성능과 메모리 — <span class="t">어디서 느려지나</span></h2>
+    <p class="lead">
+      스택 · 큐 연산은 전부 O(1) 이라 복잡도로는 차이가 안 보입니다. 실제 속도를 가르는 것은 <b>할당(박싱 · 노드) · 요소 크기 · 재할당 · 캐시 지역성 · 동기화 비용</b>
+      다섯 가지입니다. 아래 수치는 <b>예시</b>이며, 반드시 자기 환경에서 BenchmarkDotNet 으로 다시 재야 합니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 280" role="img" aria-label="천만 번 넣고 꺼내기를 단일 스레드에서 한 예시 벤치마크의 상대 시간. Queue of int 를 1 로 볼 때 Stack of int 는 0.9, 직접 만든 Deque 는 1.1, ConcurrentQueue 는 2.4, LinkedList 는 5.5, 비제네릭 Queue 는 7.0 배이고, 뒤의 둘은 연산마다 48바이트와 24바이트를 할당한다">
+      <text x="16" y="18" class="lbl">1,000만 번 넣고 꺼내기 (int · 단일 스레드) — 상대 시간, 예시 수치</text>
+
+      <path class="ax" d="M190 34 L190 214"/>
+      <path class="gr" d="M285 34 L285 214"/>
+      <path class="gr" d="M380 34 L380 214"/>
+      <path class="gr" d="M475 34 L475 214"/>
+      <path class="gr" d="M570 34 L570 214"/>
+      <path class="ax" d="M190 214 L630 214"/>
+      <text x="190" y="230" class="tk" text-anchor="middle">0</text>
+      <text x="285" y="230" class="tk" text-anchor="middle">2×</text>
+      <text x="380" y="230" class="tk" text-anchor="middle">4×</text>
+      <text x="475" y="230" class="tk" text-anchor="middle">6×</text>
+      <text x="570" y="230" class="tk" text-anchor="middle">8×</text>
+
+      <text x="16" y="52" class="ann ok-t">Stack&lt;int&gt;</text>
+      <rect class="bar" x="190" y="40" width="43" height="18" style="fill:rgba(52,211,153,.22);stroke:rgba(52,211,153,.55)"/>
+      <text x="241" y="53" class="tk">0.9× · 할당 0</text>
+
+      <text x="16" y="82" class="ann ok-t">Queue&lt;int&gt; (기준)</text>
+      <rect class="bar" x="190" y="70" width="48" height="18" style="fill:rgba(52,211,153,.22);stroke:rgba(52,211,153,.55)"/>
+      <text x="246" y="83" class="tk">1.0× · 할당 0</text>
+
+      <text x="16" y="112" class="ann">Deque&lt;int&gt; (SQ 04)</text>
+      <rect class="bar" x="190" y="100" width="52" height="18"/>
+      <text x="250" y="113" class="tk">1.1× · 할당 0</text>
+
+      <text x="16" y="142" class="ann">ConcurrentQueue&lt;int&gt;</text>
+      <rect class="bar" x="190" y="130" width="114" height="18"/>
+      <text x="312" y="143" class="tk">2.4× · Interlocked 비용</text>
+
+      <text x="16" y="172" class="ann rs-t">LinkedList&lt;int&gt;</text>
+      <rect class="bar" x="190" y="160" width="261" height="18" style="fill:rgba(251,113,133,.18);stroke:rgba(251,113,133,.5)"/>
+      <text x="459" y="173" class="tk">5.5× · 48 B/회</text>
+
+      <text x="16" y="202" class="ann rs-t">비제네릭 Queue</text>
+      <rect class="bar" x="190" y="190" width="333" height="18" style="fill:rgba(251,113,133,.18);stroke:rgba(251,113,133,.5)"/>
+      <text x="531" y="203" class="tk">7.0× · 24 B/회</text>
+
+      <text x="16" y="256" class="lbl">예시 수치입니다 — CPU · .NET 버전 · 요소 수에 따라 배율은 달라지고 순서는 대체로 같습니다</text>
+      <text x="16" y="272" class="lbl">붉은 두 줄의 공통점은 연산마다 힙 할당이 있다는 것 — 느린 이유의 대부분이 GC 입니다</text>
+    </svg>
+    <div class="cap">O(1) 끼리도 <b>할당이 있느냐 없느냐</b>로 5~7배가 갈립니다. 배열 기반이 이기는 이유입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">직접 재기 — BenchmarkDotNet</h4>
+      <pre class="code" data-lang="bash"><code>dotnet new console -o QBench &amp;&amp; cd QBench
+dotnet add package BenchmarkDotNet
+dotnet run -c Release          # Debug 로 재면 수치가 의미 없음</code></pre>
+      <pre class="code" data-lang="csharp"><code>using System.Collections;
+using System.Collections.Concurrent;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Running;
+
+BenchmarkRunner.Run&lt;QueueBench&gt;();
+
+[MemoryDiagnoser]                       // 연산당 할당 바이트도 표시
+public class QueueBench
+{
+    private const int N = 10_000_000;
+
+    [Benchmark(Baseline = true)]
+    public long GenericQueue()
+    {
+        var q = new Queue&lt;int&gt;(); long s = 0;
+        for (int i = 0; i &lt; N; i++) { q.Enqueue(i); s += q.Dequeue(); }
+        return s;
+    }
+
+    [Benchmark]
+    public long LinkedListAsQueue()
+    {
+        var q = new LinkedList&lt;int&gt;(); long s = 0;
+        for (int i = 0; i &lt; N; i++) { q.AddLast(i); s += q.First!.Value; q.RemoveFirst(); }
+        return s;
+    }
+
+    [Benchmark]
+    public long NonGenericQueue()
+    {
+        var q = new Queue(); long s = 0;
+        for (int i = 0; i &lt; N; i++) { q.Enqueue(i); s += (int)q.Dequeue()!; }  // 박싱 · 언박싱
+        return s;
+    }
+
+    [Benchmark]
+    public long Concurrent()
+    {
+        var q = new ConcurrentQueue&lt;int&gt;(); long s = 0;
+        for (int i = 0; i &lt; N; i++) { q.Enqueue(i); q.TryDequeue(out var x); s += x; }
+        return s;
+    }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비용은 어디서 오나</h4>
+      <div class="tw">
+        <table class="cheat">
+          <thead><tr><th>원인</th><th>어디서</th><th>대책</th></tr></thead>
+          <tbody>
+            <tr><td><b>박싱</b></td><td>비제네릭 Stack · Queue 에 값 타입</td><td>제네릭으로 — JIT 가 값 타입마다 전용 코드를 만듦</td></tr>
+            <tr><td><b>노드 할당</b></td><td>LinkedList · ConcurrentStack · Immutable*</td><td>배열 기반 타입 · 원형 버퍼</td></tr>
+            <tr><td><b>재할당 · 복사</b></td><td>용량 부족 시 2배 확장</td><td>생성자에 용량 · <code>EnsureCapacity</code></td></tr>
+            <tr><td><b>큰 struct 복사</b></td><td>Enqueue · Dequeue · Peek 마다 값 복사</td><td>요소를 작게 · 큰 데이터는 class 나 인덱스로</td></tr>
+            <tr><td><b>동기화</b></td><td>Concurrent* 를 단일 스레드에서</td><td>공유하지 않는 큐는 그냥 Queue&lt;T&gt;</td></tr>
+            <tr><td><b>커스텀 Comparer</b></td><td>PriorityQueue 의 인터페이스 호출</td><td>기본 비교자 경로가 가장 빠름 (아래)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note tip">
+        <b>PriorityQueue 는 Comparer 를 안 주면 더 빠릅니다.</b> 우선순위가 값 타입이고 비교자가 null 이면 내부에서 <code>Comparer&lt;T&gt;.Default</code> 를
+        직접 부르는 경로를 타서 JIT 가 인라인할 수 있습니다. 정수 최대 힙이라면 비교자 대신 <b>우선순위를 음수로</b>(<code>-score</code>) 넣는 것도 방법입니다 —
+        단 <code>int.MinValue</code> 는 부호를 뒤집을 수 없으니 범위를 확인하세요.
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>큰 struct 를 Peek 하면 복사본</b>이 나옵니다. <code>Queue&lt;T&gt;</code> · <code>Stack&lt;T&gt;</code> 에는 <code>List&lt;T&gt;</code> 의
+        <code>CollectionsMarshal.AsSpan</code> 같은 내부 참조 접근이 없습니다. 64바이트를 넘는 struct 를 대량으로 돌린다면 class 로 바꾸거나 배열 인덱스만 큐에 넣으세요.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">메모리 — <span class="t">요소 하나가 실제로 차지하는 바이트</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <thead><tr><th>컨테이너 (64비트)</th><th>int 요소 하나</th><th>string 요소 하나 (문자열 자체 제외)</th><th>비고</th></tr></thead>
+      <tbody>
+        <tr><td><b>Stack&lt;int&gt;</b> · <b>Queue&lt;int&gt;</b></td><td>4 B (+ 빈 칸 여유)</td><td>8 B (참조)</td><td>배열 하나 — 최대 약 2배까지 빈 칸</td></tr>
+        <tr><td><b>PriorityQueue&lt;E, P&gt;</b></td><td>(E, P) 튜플 — int, int 면 8 B</td><td>참조 8 + 우선순위</td><td>요소와 우선순위를 나란히 저장</td></tr>
+        <tr><td><b>LinkedList&lt;int&gt;</b></td><td>≈ 48 B (노드 객체)</td><td>≈ 48 B</td><td>+ 할당 1회 · GC 추적 대상 1개</td></tr>
+        <tr><td><b>비제네릭 Queue</b></td><td>8 B 참조 + 24 B 박스</td><td>8 B</td><td>값 타입이면 넣을 때마다 상자</td></tr>
+        <tr><td><b>ConcurrentQueue&lt;int&gt;</b></td><td>4 B + 칸마다 순번 4 B (+ 정렬)</td><td>8 B + 순번</td><td>세그먼트 칸마다 상태용 순번을 함께 둠</td></tr>
+        <tr><td><b>ImmutableStack&lt;int&gt;</b></td><td>≈ 32 B (노드)</td><td>≈ 32 B</td><td>버전 간 공유 — 복사보다는 쌈</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid2 rv">
+    <div class="note info">
+      <b>캐시 지역성</b> — CPU 는 메모리를 64바이트 줄 단위로 가져옵니다. <code>Queue&lt;int&gt;</code> 는 한 줄에 16개 요소가 들어 있어 순회 · 연속 Dequeue 때
+      다음 요소가 이미 캐시에 있습니다. 연결 리스트는 노드마다 다른 줄이라 거의 매번 메모리까지 다녀옵니다.
+    </div>
+    <div class="note tip">
+      <b>Unity · 게임 루프</b> — 프레임마다 <code>new Queue&lt;T&gt;()</code> 를 만들지 말고 필드로 두고 <code>Clear()</code> 해서 재사용하세요.
+      Clear 는 배열을 유지하므로 다음 프레임에 할당이 0 입니다. GC 스파이크로 인한 프레임 튐의 흔한 원인입니다.
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 스택 · 큐의 속도는 <b>할당 횟수</b>가 정합니다. 제네릭 배열 기반(Stack · Queue · 원형 버퍼)이 기본이고,
+    노드 기반은 이유가 있을 때만 — 그리고 수치는 항상 직접 잽니다.</div>
+</section>
+
+
+<!-- ==================== sq10 ==================== -->
+<section class="sec" id="sq10">
+  <div class="sec-head rv">
+    <span class="no">SQ 10</span>
+    <h2>흔한 실수 모음 — <span class="t">코드 리뷰에서 매번 나오는 것</span></h2>
+    <p class="lead">
+      스택 · 큐 버그는 대부분 <b>예외 없이 조용히</b> 틀립니다 — 순서가 뒤집히거나, 항목이 사라지거나, 메모리가 서서히 찹니다.
+      아래는 실제 리뷰에서 자주 보는 순서대로 모은 것입니다. 왼쪽이 흔히 쓰는 코드, 오른쪽이 고친 코드입니다.
+    </p>
+  </div>
+
+  <h3 class="sub" data-lv="m">① 확인하고 꺼내기 — <span class="t">멀티스레드에서는 경쟁 상태</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="vs rv">
+    <div class="bad">
+      <h5>Count / IsEmpty 확인 → 꺼내기</h5>
+      <pre class="code" data-lang="csharp"><code>// 여러 워커가 공유하는 큐
+if (!queue.IsEmpty)
+{
+    // ← 이 틈에 다른 스레드가 마지막 항목을 가져감
+    queue.TryDequeue(out var job);
+    Process(job!);          // 💥 job 은 null (default)
+}
+
+// Queue&lt;T&gt; + lock 에서도 같은 실수
+if (q.Count &gt; 0) { lock (_gate) { q.Dequeue(); } }   // 확인이 락 밖</code></pre>
+    </div>
+    <div class="good">
+      <h5>확인과 꺼내기를 한 동작으로</h5>
+      <pre class="code" data-lang="csharp"><code>if (queue.TryDequeue(out var job))
+    Process(job);           // 성공했을 때만 — 원자적
+
+lock (_gate)
+{
+    if (q.TryDequeue(out var item)) Process(item);   // 확인도 락 안에서
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 246" role="img" aria-label="두 스레드의 경쟁 상태를 시간 순으로 보인 스윔레인. 스레드 A 가 큐가 비어 있지 않음을 확인한 직후 스레드 B 가 마지막 항목을 TryDequeue 로 가져가 큐의 개수가 1 에서 0 이 된다. 그 뒤 A 가 꺼내려 하면 이미 비어 있어 Queue 라면 예외, ConcurrentQueue 라면 false 가 나온다">
+      <text x="16" y="18" class="lbl">확인과 꺼내기 사이의 틈 — 왼쪽에서 오른쪽으로 시간이 흐릅니다</text>
+
+      <rect class="lane" x="106" y="30" width="558" height="52"/>
+      <rect class="lane-alt" x="106" y="86" width="558" height="52"/>
+      <rect class="lane" x="106" y="142" width="558" height="52"/>
+      <rect class="lane-hd" x="16" y="30" width="84" height="52"/>
+      <text x="58" y="61" class="val" text-anchor="middle">스레드 A</text>
+      <rect class="lane-hd" x="16" y="86" width="84" height="52"/>
+      <text x="58" y="117" class="val" text-anchor="middle">스레드 B</text>
+      <rect class="lane-hd" x="16" y="142" width="84" height="52"/>
+      <text x="58" y="173" class="val" text-anchor="middle">큐 상태</text>
+
+      <rect class="bx" x="120" y="40" width="130" height="32"/>
+      <text x="185" y="60" class="ann" text-anchor="middle">IsEmpty == false 확인</text>
+      <path class="fl ar" d="M254 64 L276 98"/>
+      <rect class="bx bx-fw" x="280" y="96" width="130" height="32"/>
+      <text x="345" y="116" class="ann" text-anchor="middle">TryDequeue → 성공</text>
+      <path class="fl ar" d="M414 104 L436 66"/>
+      <rect class="bx bx-warn" x="440" y="40" width="200" height="32"/>
+      <text x="540" y="54" class="ann rs-t" text-anchor="middle">꺼내기 → 이미 비었음</text>
+      <text x="540" y="67" class="ann" text-anchor="middle">Queue 면 예외 · Concurrent 면 false</text>
+
+      <text x="185" y="172" class="ann" text-anchor="middle">Count 1</text>
+      <text x="345" y="172" class="ann rs-t" text-anchor="middle">Count 1 → 0</text>
+      <text x="540" y="172" class="ann" text-anchor="middle">Count 0</text>
+
+      <text x="16" y="220" class="lbl">확인한 사실은 확인한 순간에만 참입니다 — 다음 줄에서는 이미 거짓일 수 있습니다</text>
+      <text x="16" y="236" class="lbl">해결은 하나: 확인과 꺼내기를 TryDequeue 한 번으로 합치거나, 둘 다 같은 락 안에 둡니다</text>
+    </svg>
+    <div class="cap">테스트에서는 거의 안 터지고 <b>운영 트래픽에서만</b> 터지는 버그 — 코드 리뷰에서 패턴으로 잡아야 합니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="vs">
+      <div class="bad">
+        <h5>② foreach 로 큐 비우기</h5>
+        <pre class="code" data-lang="csharp"><code>foreach (var job in queue)
+{
+    Run(job);
+    queue.Dequeue();   // 💥 Collection was modified
+}</code></pre>
+      </div>
+      <div class="good">
+        <h5>while + TryDequeue</h5>
+        <pre class="code" data-lang="csharp"><code>while (queue.TryDequeue(out var job))
+    Run(job);          // 처리 중 Enqueue 해도 안전</code></pre>
+      </div>
+    </div>
+    <div class="vs">
+      <div class="bad">
+        <h5>③ 스택 복사</h5>
+        <pre class="code" data-lang="csharp"><code>var backup = new Stack&lt;Cmd&gt;(history);
+// 꼭대기부터 열거 → 앞에서부터 Push
+// → backup 은 뒤집혀 있음</code></pre>
+      </div>
+      <div class="good">
+        <h5>Reverse 하거나 불변 스택</h5>
+        <pre class="code" data-lang="csharp"><code>var backup = new Stack&lt;Cmd&gt;(history.Reverse());
+// 또는 처음부터 ImmutableStack&lt;Cmd&gt; — 복사가 필요 없음</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="vs">
+      <div class="bad">
+        <h5>④ 힙 안의 객체 우선순위를 직접 수정</h5>
+        <pre class="code" data-lang="csharp"><code>var pq = new PriorityQueue&lt;Job, int&gt;();
+pq.Enqueue(job, job.Priority);
+job.Priority = 0;      // 힙은 모름 — 위치 그대로
+// 우선순위는 Enqueue 순간의 값으로 복사돼 저장됨</code></pre>
+      </div>
+      <div class="good">
+        <h5>새로 넣고 낡은 것은 버림</h5>
+        <pre class="code" data-lang="csharp"><code>// 요소에 '넣을 때의 버전'을 함께 담는다
+var pq = new PriorityQueue&lt;(Job Job, int Ver), int&gt;();
+job.Version++;
+pq.Enqueue((job, job.Version), 0);   // 새 우선순위로 한 번 더
+// 꺼낼 때: if (e.Ver != e.Job.Version) continue;  // 낡은 항목 버림 (SQ 05)</code></pre>
+      </div>
+    </div>
+    <div class="vs">
+      <div class="bad">
+        <h5>⑤ UnorderedItems 를 정렬 결과로</h5>
+        <pre class="code" data-lang="csharp"><code>var top3 = pq.UnorderedItems
+             .Take(3)              // ❌ 힙 배열 앞 3칸일 뿐
+             .Select(x =&gt; x.Element);</code></pre>
+      </div>
+      <div class="good">
+        <h5>Dequeue 로 꺼내거나 정렬</h5>
+        <pre class="code" data-lang="csharp"><code>var top3 = pq.UnorderedItems
+             .OrderBy(x =&gt; x.Priority)   // 원본은 그대로 · O(n log n)
+             .Take(3).Select(x =&gt; x.Element);</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="vs">
+      <div class="bad">
+        <h5>⑥ Peek 결과(struct)를 고치기</h5>
+        <pre class="code" data-lang="csharp"><code>struct Unit { public int Hp; }
+var s = new Stack&lt;Unit&gt;();
+s.Push(new Unit { Hp = 10 });
+s.Peek().Hp = 5;   // ❌ CS1612 — 복사본이라 수정 불가</code></pre>
+      </div>
+      <div class="good">
+        <h5>꺼내서 고치고 다시 넣기</h5>
+        <pre class="code" data-lang="csharp"><code>var u = s.Pop();
+u.Hp = 5;
+s.Push(u);
+// 자주 고친다면 Unit 을 class 로, 또는 인덱스를 담기</code></pre>
+      </div>
+    </div>
+    <div class="vs">
+      <div class="bad">
+        <h5>⑦ 채널 Complete 누락</h5>
+        <pre class="code" data-lang="csharp"><code>foreach (var f in files)
+    await ch.Writer.WriteAsync(f);
+// Complete() 없음
+await consumerTask;   // ⏳ 영원히 안 끝남</code></pre>
+      </div>
+      <div class="good">
+        <h5>finally 에서 TryComplete</h5>
+        <pre class="code" data-lang="csharp"><code>try
+{
+    foreach (var f in files) await ch.Writer.WriteAsync(f);
+}
+finally { ch.Writer.TryComplete(); }   // 예외가 나도 닫힘
+await consumerTask;</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="vs">
+      <div class="bad">
+        <h5>⑧ 상한 없는 큐</h5>
+        <pre class="code" data-lang="csharp"><code>static readonly Queue&lt;LogLine&gt; Pending = new();
+// 디스크가 느려지는 날 → 수백만 건 적재 → OOM
+var ch = Channel.CreateUnbounded&lt;LogLine&gt;();</code></pre>
+      </div>
+      <div class="good">
+        <h5>상한 + 넘칠 때의 정책</h5>
+        <pre class="code" data-lang="csharp"><code>var ch = Channel.CreateBounded&lt;LogLine&gt;(
+    new BoundedChannelOptions(10_000)
+    { FullMode = BoundedChannelFullMode.DropOldest });
+// 버린 수는 itemDropped 콜백으로 메트릭에</code></pre>
+      </div>
+    </div>
+    <div class="vs">
+      <div class="bad">
+        <h5>⑨ 컬렉션 초기화자</h5>
+        <pre class="code" data-lang="csharp"><code>var s = new Stack&lt;int&gt; { 1, 2, 3 };  // ❌ CS1061: Add 없음
+Stack&lt;int&gt; t = [1, 2, 3];            // ❌ 컬렉션 식도 안 됨</code></pre>
+      </div>
+      <div class="good">
+        <h5>IEnumerable 생성자</h5>
+        <pre class="code" data-lang="csharp"><code>var s = new Stack&lt;int&gt;([1, 2, 3]);   // 꼭대기 3
+var q = new Queue&lt;int&gt;([1, 2, 3]);   // 맨 앞 1</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">한 장 요약 — <span class="t">증상에서 원인으로</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <thead><tr><th>증상</th><th>원인</th><th>처방</th></tr></thead>
+      <tbody>
+        <tr><td>가끔 null · default 를 처리함</td><td>확인 후 꺼내기 경쟁 (①)</td><td>TryDequeue 반환값만 믿기</td></tr>
+        <tr><td>Collection was modified</td><td>열거 중 Enqueue · Push (②)</td><td>while + Try 패턴</td></tr>
+        <tr><td>되돌리기 순서가 거꾸로</td><td>스택을 생성자로 복사 (③)</td><td>Reverse() · ImmutableStack</td></tr>
+        <tr><td>다익스트라 결과가 틀림 · 느림</td><td>우선순위 변경을 기대 (④) · 낡은 항목 미처리</td><td>지연 삭제 + 꺼낼 때 비교</td></tr>
+        <tr><td>"상위 N개"가 가끔 틀림</td><td>UnorderedItems 순서 의존 (⑤)</td><td>Dequeue 로 꺼내기</td></tr>
+        <tr><td>같은 우선순위의 처리 순서가 뒤죽박죽</td><td>힙은 안정적이지 않음</td><td>(우선순위, 순번) 튜플</td></tr>
+        <tr><td>소비자 태스크가 안 끝남</td><td>Complete 누락 (⑦)</td><td>finally { TryComplete() }</td></tr>
+        <tr><td>메모리가 계속 오르고 안 내려감</td><td>상한 없는 큐 (⑧) · 피크 후 배열 유지</td><td>Bounded · TrimExcess</td></tr>
+        <tr><td>값 타입인데 GC 가 잦음</td><td>비제네릭 컬렉션 박싱 · LinkedList 노드</td><td>Stack&lt;T&gt; · Queue&lt;T&gt;</td></tr>
+        <tr><td>큐를 도는 루프가 n² 으로 느림</td><td><code>queue.ElementAt(i)</code> 를 루프에서</td><td>ToArray 한 번 또는 List</td></tr>
+        <tr><td>앱이 멈춤 (UI · Unity)</td><td>메인 스레드에서 BlockingCollection.Take</td><td>ConcurrentQueue + 프레임 처리 · Channel + await</td></tr>
+        <tr><td>여러 소비자인데 항목이 꼬임</td><td>SingleReader = true 계약 위반</td><td>소비자 수에 맞게 옵션</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note warn rv">
+    <b>Queue&lt;T&gt; 를 lock 없이 여러 스레드에서 쓰면</b> 예외조차 나지 않을 때가 많습니다. <code>_tail</code> 을 두 스레드가 동시에 읽고 같은 칸에 써서
+    <b>한 항목이 조용히 덮어써지거나</b>, <code>_size</code> 가 실제와 달라집니다. "스레드 안전하지 않음"은 "가끔 예외"가 아니라 "가끔 데이터가 틀림"입니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 스택 · 큐 버그의 절반은 <b>"확인하고 꺼내기"</b>, 나머지 절반은 <b>"순서에 대한 착각"</b>(스택 복사 · 힙 동점 · UnorderedItems)입니다.
+    Try 패턴과 상한 있는 큐가 대부분을 막습니다.</div>
+</section>
+
+
+<!-- ==================== sq11 ==================== -->
+<section class="sec" id="sq11">
+  <div class="sec-head rv">
+    <span class="no">SQ 11</span>
+    <h2>다른 언어와 비교 — <span class="t">같은 일, 다른 이름</span></h2>
+    <p class="lead">
+      여러 언어를 오가는 팀이라면 "자바의 ArrayDeque 는 C# 에서 무엇인가"를 빨리 찾을 수 있어야 합니다.
+      특히 <b>힙의 방향(최소 / 최대)</b>과 <b>"레거시 함정"</b>이 언어마다 달라서 옮겨 적을 때 버그가 납니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <thead><tr><th>하려는 일</th><th>C# (.NET 10)</th><th>Java 21+</th><th>Python 3.13</th><th>JS / TS</th><th>C++23</th><th>Rust</th></tr></thead>
+      <tbody>
+        <tr><td>스택</td><td><b>Stack&lt;T&gt;</b></td><td>ArrayDeque (push/pop)</td><td>list (append/pop)</td><td>Array (push/pop)</td><td>std::stack · vector</td><td>Vec</td></tr>
+        <tr><td>큐</td><td><b>Queue&lt;T&gt;</b></td><td>ArrayDeque (offer/poll)</td><td>collections.deque</td><td>직접 구현 (head 인덱스)</td><td>std::queue · deque</td><td>VecDeque</td></tr>
+        <tr><td>덱</td><td><b>없음</b> — 직접 · LinkedList</td><td>ArrayDeque</td><td>collections.deque</td><td>없음 — 직접</td><td>std::deque</td><td>VecDeque</td></tr>
+        <tr><td>우선순위 큐</td><td><b>PriorityQueue — 최소</b></td><td>PriorityQueue — 최소</td><td>heapq — 최소 (함수)</td><td>없음 — 직접</td><td>priority_queue — <b>최대</b></td><td>BinaryHeap — <b>최대</b></td></tr>
+        <tr><td>스레드 안전 큐</td><td><b>ConcurrentQueue&lt;T&gt;</b></td><td>ConcurrentLinkedQueue</td><td>queue.Queue</td><td>— (워커 간 postMessage)</td><td>표준 없음 (mutex + queue)</td><td>crossbeam · Mutex&lt;VecDeque&gt;</td></tr>
+        <tr><td>블로킹 유한 큐</td><td><b>BlockingCollection</b> · Channel</td><td>ArrayBlockingQueue</td><td>queue.Queue(maxsize)</td><td>—</td><td>표준 없음</td><td>mpsc::sync_channel</td></tr>
+        <tr><td>async 채널</td><td><b>Channel&lt;T&gt;</b></td><td>— (가상 스레드 + BlockingQueue)</td><td>asyncio.Queue</td><td>— (스트림 · 이벤트)</td><td>—</td><td>tokio::sync::mpsc</td></tr>
+        <tr><td>버려진 것</td><td>비제네릭 Stack · Queue</td><td>Stack (Vector 상속)</td><td>list.pop(0) 로 큐</td><td>Array.shift 로 큐 (O(n))</td><td>—</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">같은 "최대 힙 top-1" 을 각 언어로</h4>
+      <pre class="code" data-lang="csharp"><code>// C# — 최소 힙이 기본 → 비교자를 뒤집음
+var pq = new PriorityQueue&lt;int, int&gt;(Comparer&lt;int&gt;.Create((a, b) =&gt; b.CompareTo(a)));
+foreach (var x in new[] { 3, 9, 4 }) pq.Enqueue(x, x);
+Console.WriteLine(pq.Peek());   // 9</code></pre>
+      <pre class="code" data-lang="java"><code>// Java — 최소 힙이 기본
+var pq = new PriorityQueue&lt;Integer&gt;(Comparator.reverseOrder());
+pq.addAll(List.of(3, 9, 4));
+System.out.println(pq.peek());  // 9</code></pre>
+      <pre class="code" data-lang="python"><code># Python — 최소 힙 함수뿐 → 부호를 뒤집는 관용구
+import heapq
+h = [-x for x in (3, 9, 4)]
+heapq.heapify(h)
+print(-h[0])                    # 9</code></pre>
+      <pre class="code" data-lang="cpp"><code>// C++ — 최대 힙이 기본! (C# 에서 옮길 때 가장 자주 틀림)
+std::priority_queue&lt;int&gt; pq;
+for (int x : {3, 9, 4}) pq.push(x);
+std::cout &lt;&lt; pq.top();          // 9</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">C# 개발자가 옮겨 갈 때 / 옮겨 올 때</h4>
+      <ul class="tx">
+        <li><b>자바 → C#</b>: ArrayDeque 를 찾다가 없어서 LinkedList 로 가기 쉽습니다. 스택 · 큐로만 쓰던 것이면 <b>Stack&lt;T&gt; · Queue&lt;T&gt; 로 나눠</b> 옮기세요. 진짜 양쪽이 필요하면 SQ 04.</li>
+        <li><b>자바 → C#</b>: 자바 <code>Stack</code> 이 레거시라고 C# <code>Stack&lt;T&gt;</code> 까지 피할 필요는 없습니다. 이름만 같고 설계가 다릅니다.</li>
+        <li><b>C++ · Rust → C#</b>: 힙 방향이 반대입니다. <code>priority_queue</code> 코드를 옮기면 <b>결과가 정확히 거꾸로</b> 나옵니다.</li>
+        <li><b>파이썬 → C#</b>: <code>deque(maxlen=N)</code> 의 "자동으로 밀어내기"는 C# 에 없습니다. SQ 12 의 RecentLog 처럼 Count 를 확인해 Dequeue 하세요.</li>
+        <li><b>C# → 파이썬</b>: <code>queue.Queue</code> 는 스레드용이라 단일 스레드 BFS 에서는 락 비용만 듭니다. <code>collections.deque</code> 가 맞습니다.</li>
+        <li><b>C# → JS</b>: <code>shift()</code> 로 큐를 만들면 O(n) 입니다. 큰 BFS 는 배열 + head 인덱스로.</li>
+      </ul>
+      <div class="note info" style="margin-bottom:0">
+        <b>빈 컨테이너에서 꺼내기</b>도 다릅니다 — C# 은 <b>예외</b>(Pop · Dequeue) 또는 <b>Try 패턴</b>, 자바는 예외 또는 <b>null</b>(poll),
+        파이썬은 <b>IndexError</b>, JS 는 <b>undefined</b>, C++ 은 <b>정의되지 않은 동작</b>, Rust 는 <b>Option</b> 입니다.
+        C# 의 bool + out 은 Rust 의 Option 과 가장 가까운 안전한 형태입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 254" role="img" aria-label="자바와 C# 의 스택 큐 역사 대조. 자바는 1.0 의 Stack 이 Vector 를 상속해 동기화 비용과 중간 삽입 문제를 안았고, 제네릭이 들어온 뒤에도 같은 클래스를 유지하다가 6 에서 ArrayDeque 로 갈아탔으며 21 에서 SequencedCollection 이 추가되었다. C# 은 1.0 의 비제네릭 Stack 이 object 기반이었지만 2.0 에서 Stack of T 를 배열과 개수만 가진 새 설계로 만들어 지금도 1순위이고, .NET 6 에서 PriorityQueue 가 추가되었으나 .NET 10 에도 Deque 는 없다">
+      <text x="16" y="18" class="lbl">같은 시작, 다른 결말 — 자바는 Stack 을 버렸고 C# 은 새로 만들었습니다</text>
+
+      <text x="175" y="42" class="ttl" text-anchor="middle">Java</text>
+      <text x="505" y="42" class="ttl" text-anchor="middle">C#</text>
+      <path class="ln-t" d="M340 30 L340 204"/>
+
+      <rect class="bx bx-warn" x="30" y="52" width="290" height="32"/>
+      <text x="175" y="72" class="ann" text-anchor="middle">1.0 — Stack extends Vector (동기화 · 중간 삽입)</text>
+      <rect class="bx bx-warn" x="360" y="52" width="290" height="32"/>
+      <text x="505" y="72" class="ann" text-anchor="middle">1.0 — System.Collections.Stack (object · 박싱)</text>
+
+      <rect class="bx bx-warn" x="30" y="90" width="290" height="32"/>
+      <text x="175" y="110" class="ann" text-anchor="middle">5 — 제네릭 Stack&lt;E&gt; (여전히 Vector 상속)</text>
+      <rect class="bx bx-ok" x="360" y="90" width="290" height="32"/>
+      <text x="505" y="110" class="ann ok-t" text-anchor="middle">2.0 — Stack&lt;T&gt; 새 설계 (배열 + 개수)</text>
+
+      <rect class="bx bx-ok" x="30" y="128" width="290" height="32"/>
+      <text x="175" y="148" class="ann ok-t" text-anchor="middle">6 — ArrayDeque · Deque 인터페이스</text>
+      <rect class="bx bx-ok" x="360" y="128" width="290" height="32"/>
+      <text x="505" y="148" class="ann ok-t" text-anchor="middle">.NET 6 — PriorityQueue&lt;E, P&gt; 추가</text>
+
+      <rect class="bx bx-ok" x="30" y="166" width="290" height="32"/>
+      <text x="175" y="186" class="ann ok-t" text-anchor="middle">21 — SequencedCollection (getLast · reversed)</text>
+      <rect class="bx bx-hi" x="360" y="166" width="290" height="32"/>
+      <text x="505" y="186" class="ann am-t" text-anchor="middle">.NET 10 — 여전히 표준 Deque 없음</text>
+
+      <text x="340" y="228" class="ann am-t" text-anchor="middle">자바는 하위 호환 때문에 낡은 클래스를 못 고치고 새 타입(ArrayDeque)으로 갈아탔고</text>
+      <text x="340" y="244" class="ann" text-anchor="middle">C# 은 제네릭 도입 때 Stack&lt;T&gt; 를 처음부터 다시 만들어 지금도 1순위입니다</text>
+    </svg>
+    <div class="cap">"자바에서 Stack 은 쓰지 말라"는 조언을 C# 에 그대로 옮기면 틀립니다 — <b>이름만 같고 설계가 다릅니다</b>.</div>
+  </div>
+
+  <h3 class="sub" data-lv="m">자바 개발자를 위한 <span class="t">1:1 번역</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="java"><code>// Java 21
+Deque&lt;Integer&gt; stack = new ArrayDeque&lt;&gt;();
+stack.push(1); stack.push(2);
+int top = stack.pop();                 // 2
+Integer maybe = stack.peek();          // 1 (비면 null)
+
+Queue&lt;String&gt; q = new ArrayDeque&lt;&gt;();
+q.offer("a"); q.offer("b");
+String head = q.poll();                // "a" (비면 null)
+
+BlockingQueue&lt;Job&gt; jobs = new ArrayBlockingQueue&lt;&gt;(100);
+jobs.put(job);                         // 꽉 차면 스레드 블록
+Job next = jobs.take();                // 비면 스레드 블록</code></pre>
+    </div>
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>// C# 14 · .NET 10
+var stack = new Stack&lt;int&gt;();
+stack.Push(1); stack.Push(2);
+int top = stack.Pop();                 // 2
+bool has = stack.TryPeek(out var maybe);   // true, 1 (비면 false)
+
+var q = new Queue&lt;string&gt;();
+q.Enqueue("a"); q.Enqueue("b");
+q.TryDequeue(out var head);            // "a" (비면 false)
+
+var jobs = Channel.CreateBounded&lt;Job&gt;(100);
+await jobs.Writer.WriteAsync(job);     // 꽉 차면 await — 스레드는 반납
+Job next = await jobs.Reader.ReadAsync();  // 비면 await</code></pre>
+    </div>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <thead><tr><th>동작</th><th>C#</th><th>Java (Deque)</th><th>Python</th><th>JS</th><th>C++</th><th>Rust</th></tr></thead>
+      <tbody>
+        <tr><td>스택에 넣기</td><td><b>Push</b></td><td>push</td><td>append</td><td>push</td><td>push / push_back</td><td>push</td></tr>
+        <tr><td>스택에서 빼기</td><td><b>Pop · TryPop</b></td><td>pop</td><td>pop</td><td>pop</td><td>top + pop (pop 은 void)</td><td>pop → Option</td></tr>
+        <tr><td>큐에 넣기</td><td><b>Enqueue</b></td><td>offer / addLast</td><td>append</td><td>push</td><td>push / push_back</td><td>push_back</td></tr>
+        <tr><td>큐에서 빼기</td><td><b>Dequeue · TryDequeue</b></td><td>poll / pollFirst</td><td>popleft</td><td>shift (O(n))</td><td>front + pop</td><td>pop_front → Option</td></tr>
+        <tr><td>앞 보기</td><td><b>Peek · TryPeek</b></td><td>peek</td><td>q[0]</td><td>q[0]</td><td>front / top</td><td>front → Option</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> C# 은 <b>스택 · 큐는 전용 타입, 덱은 없음, 힙은 최소</b>. 다른 언어에서 옮길 때는 힙 방향과 "빈 컨테이너에서 꺼낼 때의 동작"을 먼저 확인하세요.</div>
+</section>
+
+
+<!-- ==================== sq12 ==================== -->
+<section class="sec" id="sq12">
+  <div class="sec-head rv">
+    <span class="no">SQ 12</span>
+    <h2>실무 사례 — <span class="t">어떤 타입으로 어떻게 짜나</span></h2>
+    <p class="lead">
+      작업 큐 · 최근 N개 보관 · 레이트 리미터 · 재시도 큐 · 이벤트 묶음 처리 · 게임 이벤트 큐 — 현업에서 실제로 만나는 여섯 가지를
+      <b>타입 선택의 이유</b>와 함께 완전한 코드로 정리합니다.
+    </p>
+  </div>
+
+  <h3 class="sub" data-lv="h">① ASP.NET Core 백그라운드 작업 큐 — <span class="t">Channel + BackgroundService</span> <span class="lvl h">🔴 고급</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 204" role="img" aria-label="ASP.NET Core 백그라운드 작업 큐의 흐름. POST 요청이 들어오면 엔드포인트가 TryWrite 로 용량 100 짜리 Bounded Channel 에 작업을 넣고, 성공하면 202 Accepted 로 즉시 응답하며 꽉 차 있으면 503 으로 거절한다. 채널 뒤의 QueuedWorker 백그라운드 서비스가 ReadAllAsync 로 하나씩 꺼내 try catch 로 감싼 채 실행한다">
+      <text x="16" y="18" class="lbl">요청은 접수만, 일은 뒤에서 — 앞으로만 흐르는 파이프라인</text>
+
+      <polygon class="chev" points="16,40 116,40 132,64 116,88 16,88 32,64"/>
+      <text x="74" y="61" class="val" text-anchor="middle">POST</text>
+      <text x="74" y="76" class="ann" text-anchor="middle">요청 스레드</text>
+
+      <polygon class="chev" points="142,40 242,40 258,64 242,88 142,88 158,64"/>
+      <text x="200" y="61" class="val" text-anchor="middle">TryWrite</text>
+      <text x="200" y="76" class="ann" text-anchor="middle">기다리지 않음</text>
+
+      <polygon class="chev s2" points="268,40 368,40 384,64 368,88 268,88 284,64"/>
+      <text x="326" y="61" class="val" text-anchor="middle">Channel</text>
+      <text x="326" y="76" class="ann" text-anchor="middle">Bounded 100</text>
+
+      <polygon class="chev" points="394,40 494,40 510,64 494,88 394,88 410,64"/>
+      <text x="452" y="61" class="val" text-anchor="middle">Worker</text>
+      <text x="452" y="76" class="ann" text-anchor="middle">ReadAllAsync</text>
+
+      <polygon class="chev s4" points="520,40 620,40 636,64 620,88 520,88 536,64"/>
+      <text x="578" y="61" class="val" text-anchor="middle">실행</text>
+      <text x="578" y="76" class="ann" text-anchor="middle">try/catch 격리</text>
+
+      <path class="ln ar" d="M200 92 L200 114"/>
+      <rect class="bx bx-ok" x="16" y="118" width="116" height="40"/>
+      <text x="74" y="135" class="ann ok-t" text-anchor="middle">true → 202</text>
+      <text x="74" y="149" class="ann" text-anchor="middle">접수만 하고 응답</text>
+      <rect class="bx bx-warn" x="142" y="118" width="116" height="40"/>
+      <text x="200" y="135" class="ann rs-t" text-anchor="middle">false → 503</text>
+      <text x="200" y="149" class="ann" text-anchor="middle">꽉 참 = 배압</text>
+
+      <text x="300" y="134" class="ann">앱이 내려가면 채널 안의 작업은 사라집니다</text>
+      <text x="300" y="148" class="ann am-t">유실 불가면 DB 아웃박스 · Hangfire 같은 영속 큐로</text>
+
+      <text x="16" y="190" class="lbl">채널 용량이 곧 "서버가 떠안을 밀린 일"의 상한입니다</text>
+    </svg>
+    <div class="cap">요청 처리와 무거운 일을 <b>채널 하나로 끊어</b> 응답 시간은 일정하게, 과부하는 503 으로 바깥에 알립니다.</div>
+  </div>
+
+  <div class="card rv">
+    <pre class="code" data-lang="csharp"><code>// Program.cs — dotnet new web (.NET 10)
+using System.Threading.Channels;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton(new BackgroundTaskQueue(capacity: 100));
+builder.Services.AddHostedService&lt;QueuedWorker&gt;();
+var app = builder.Build();
+
+app.MapPost("/reports/{id:int}", (int id, BackgroundTaskQueue queue, ILogger&lt;Program&gt; log) =&gt;
+{
+    bool accepted = queue.TryEnqueue(async ct =&gt;
+    {
+        await Task.Delay(TimeSpan.FromSeconds(2), ct);   // 무거운 보고서 생성 자리
+        log.LogInformation("보고서 {Id} 완료", id);
+    });
+
+    return accepted
+        ? Results.Accepted($"/reports/{id}")                        // 202 — 접수 완료
+        : Results.StatusCode(StatusCodes.Status503ServiceUnavailable); // 큐가 꽉 참
+});
+
+app.Run();
+
+public sealed class BackgroundTaskQueue
+{
+    private readonly Channel&lt;Func&lt;CancellationToken, ValueTask&gt;&gt; _ch;
+
+    public BackgroundTaskQueue(int capacity) =&gt;
+        _ch = Channel.CreateBounded&lt;Func&lt;CancellationToken, ValueTask&gt;&gt;(
+            new BoundedChannelOptions(capacity)
+            {
+                FullMode = BoundedChannelFullMode.Wait,   // 꽉 차면 TryWrite 가 false
+                SingleReader = true,                      // 워커 하나
+            });
+
+    // HTTP 요청처럼 기다리면 안 되는 쪽
+    public bool TryEnqueue(Func&lt;CancellationToken, ValueTask&gt; work) =&gt; _ch.Writer.TryWrite(work);
+
+    // 배치 · 내부 호출처럼 기다려도 되는 쪽
+    public ValueTask EnqueueAsync(Func&lt;CancellationToken, ValueTask&gt; work, CancellationToken ct) =&gt;
+        _ch.Writer.WriteAsync(work, ct);
+
+    public IAsyncEnumerable&lt;Func&lt;CancellationToken, ValueTask&gt;&gt; ReadAllAsync(CancellationToken ct) =&gt;
+        _ch.Reader.ReadAllAsync(ct);
+}
+
+public sealed class QueuedWorker(BackgroundTaskQueue queue, ILogger&lt;QueuedWorker&gt; log) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await foreach (var work in queue.ReadAllAsync(stoppingToken))
+        {
+            try
+            {
+                await work(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;                                   // 종료 중 — 조용히 빠져나감
+            }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "백그라운드 작업 실패");  // ★ 하나가 실패해도 워커는 계속
+            }
+        }
+    }
+}</code></pre>
+  </div>
+  <div class="grid2 rv">
+    <div class="note warn">
+      <b>try/catch 가 꼭 필요한 이유</b> — .NET 6 부터 <code>BackgroundService</code> 에서 처리되지 않은 예외가 나면 <b>호스트 전체가 종료</b>됩니다
+      (<code>BackgroundServiceExceptionBehavior.StopHost</code> 가 기본). 작업 하나의 실패가 서버를 내리지 않도록 항목 단위로 감쌉니다.
+    </div>
+    <div class="note tip">
+      <b>병렬로 처리하려면</b> 워커를 여러 개 띄우고 <code>SingleReader = false</code> 로 바꿉니다. 또는 워커 안에서
+      <code>Parallel.ForEachAsync(queue.ReadAllAsync(ct), new ParallelOptions { MaxDegreeOfParallelism = 4 }, …)</code> 처럼 동시 실행 수를 제한합니다.
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">② 최근 N개 보관 · ③ 레이트 리미터 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">최근 N개 — 넘치면 가장 오래된 것을 밀어냄</h4>
+      <pre class="code" data-lang="csharp"><code>public sealed class RecentLog&lt;T&gt;(int capacity)
+{
+    private readonly Queue&lt;T&gt; _q = new(capacity);   // 미리 N칸 → 재할당 0
+
+    public void Add(T item)
+    {
+        if (_q.Count == capacity) _q.Dequeue();      // 파이썬 deque(maxlen) 과 같은 동작
+        _q.Enqueue(item);
+    }
+
+    public IReadOnlyCollection&lt;T&gt; Items =&gt; _q;      // 오래된 것 → 최신 순
+}
+
+var recent = new RecentLog&lt;string&gt;(3);
+foreach (var e in new[] { "a", "b", "c", "d", "e" }) recent.Add(e);
+Console.WriteLine(string.Join(",", recent.Items));   // c,d,e</code></pre>
+      <p class="tx">
+        최근 에러 50건 · 최근 채팅 100줄 · 이동 평균용 샘플 같은 곳에 씁니다. <code>Queue&lt;T&gt;</code> 가 원형 배열이므로
+        용량이 N 으로 고정된 뒤에는 <b>할당 없이 칸만 돌려 씁니다</b>. 여러 스레드가 쓰면 <code>lock</code> 으로 감싸세요.
+      </p>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">슬라이딩 윈도우 로그 — 최근 1초 안에 3번까지</h4>
+      <pre class="code" data-lang="csharp"><code>public sealed class SlidingWindowLog(int limit, long windowMs)
+{
+    private readonly Queue&lt;long&gt; _hits = new();    // 허용된 요청의 시각
+    private readonly Lock _gate = new();           // .NET 9+ 전용 락 타입
+
+    public bool TryAcquire() =&gt; TryAcquire(Environment.TickCount64);
+
+    public bool TryAcquire(long nowMs)             // 테스트용으로 시각을 주입
+    {
+        lock (_gate)
+        {
+            // 창 밖으로 나간 기록을 앞에서부터 버림 — 큐가 시간순이라 가능
+            while (_hits.TryPeek(out var t) &amp;&amp; nowMs - t &gt;= windowMs)
+                _hits.Dequeue();
+            if (_hits.Count &gt;= limit) return false;
+            _hits.Enqueue(nowMs);
+            return true;
+        }
+    }
+}
+
+var rl = new SlidingWindowLog(limit: 3, windowMs: 1000);
+foreach (var t in new long[] { 0, 100, 200, 300, 1050, 1150, 1200, 1300 })
+    Console.Write($"{t}:{(rl.TryAcquire(t) ? "허용" : "거절")} ");
+// 0:허용 100:허용 200:허용 300:거절 1050:허용 1150:허용 1200:허용 1300:거절</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>운영에서는 내장 기능을</b> — ASP.NET Core 7+ 의 <code>AddRateLimiter</code> 와 <code>System.Threading.RateLimiting</code> 의
+        <code>SlidingWindowRateLimiter</code> · <code>TokenBucketRateLimiter</code> 가 있습니다. 서버가 여러 대면 Redis 같은 공유 저장소가 필요합니다.
+        위 코드는 원리 이해 · 단일 프로세스 내부 보호용입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">④ 재시도 큐 · ⑤ 이벤트 묶음 처리 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">재시도 큐 — 우선순위 = 다음 시도 시각</h4>
+      <pre class="code" data-lang="csharp"><code>var retry = new PriorityQueue&lt;string, DateTimeOffset&gt;();
+var now = DateTimeOffset.Parse("2026-10-01T09:00:00Z");
+
+retry.Enqueue("메일#7", now.AddSeconds(30));
+retry.Enqueue("웹훅#3", now.AddSeconds(5));
+retry.Enqueue("메일#9", now.AddSeconds(10));
+
+var at = now.AddSeconds(12);              // 지금이 09:00:12 라면
+// 시각이 된 것만 꺼냄 — 루트가 가장 이른 시각
+while (retry.TryPeek(out var job, out var due) &amp;&amp; due &lt;= at)
+{
+    retry.Dequeue();
+    Console.WriteLine($"재시도 {job} (예정 {due:HH:mm:ss})");
+}
+Console.WriteLine($"남은 {retry.Count}건");
+// 재시도 웹훅#3 (예정 09:00:05)
+// 재시도 메일#9 (예정 09:00:10)
+// 남은 1건
+
+// 다음 시각 계산 — 지수 백오프 + 지터 (동시에 몰리지 않게)
+static DateTimeOffset NextDue(DateTimeOffset now, int attempt) =&gt;
+    now + TimeSpan.FromSeconds(Math.Min(300, Math.Pow(2, attempt)))
+        + TimeSpan.FromMilliseconds(Random.Shared.Next(0, 1000));</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이벤트 묶음 처리 — 채널에서 최대 N개씩</h4>
+      <pre class="code" data-lang="csharp"><code>using System.Runtime.CompilerServices;
+using System.Threading.Channels;
+
+static async IAsyncEnumerable&lt;List&lt;T&gt;&gt; ReadBatchesAsync&lt;T&gt;(
+    ChannelReader&lt;T&gt; reader, int maxBatch,
+    [EnumeratorCancellation] CancellationToken ct = default)
+{
+    // 하나라도 생길 때까지 기다린 뒤, 지금 쌓인 것을 최대 maxBatch 개까지 한꺼번에
+    while (await reader.WaitToReadAsync(ct))
+    {
+        var batch = new List&lt;T&gt;(maxBatch);
+        while (batch.Count &lt; maxBatch &amp;&amp; reader.TryRead(out var item))
+            batch.Add(item);
+        if (batch.Count &gt; 0) yield return batch;
+    }
+}
+
+var events = Channel.CreateBounded&lt;int&gt;(1_000);
+for (int i = 1; i &lt;= 7; i++) await events.Writer.WriteAsync(i);
+events.Writer.Complete();
+
+await foreach (var batch in ReadBatchesAsync(events.Reader, maxBatch: 3))
+    Console.WriteLine(string.Join(",", batch));
+// 1,2,3
+// 4,5,6
+// 7</code></pre>
+      <p class="tx">
+        로그 · 분석 이벤트를 DB 나 외부 API 로 보낼 때 <b>한 건씩 보내면 왕복 비용</b>이 지배합니다. 쌓인 만큼 묶어서 보내면
+        한가할 때는 1건씩 빠르게, 바쁠 때는 큰 묶음으로 효율적으로 — 부하에 따라 저절로 조절됩니다.
+      </p>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">⑥ Unity — <span class="t">프레임 단위 이벤트 큐</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="csharp"><code>using System.Collections.Generic;
+using UnityEngine;
+
+public readonly struct GameEvent
+{
+    public readonly int Type, EntityId;
+    public GameEvent(int type, int entityId) { Type = type; EntityId = entityId; }
+}
+
+public sealed class EventBus : MonoBehaviour
+{
+    // 큐 두 개를 번갈아 씀 — 처리 중에 생긴 이벤트는 다음 프레임으로
+    private Queue&lt;GameEvent&gt; _current = new Queue&lt;GameEvent&gt;(256);
+    private Queue&lt;GameEvent&gt; _next    = new Queue&lt;GameEvent&gt;(256);
+
+    public void Raise(GameEvent e) =&gt; _next.Enqueue(e);   // 메인 스레드 전용
+
+    private void LateUpdate()
+    {
+        (_current, _next) = (_next, _current);             // 교체 — 할당 없음
+        while (_current.TryDequeue(out var e))
+            Dispatch(e);                                   // 여기서 Raise 해도 _next 로
+    }
+
+    private void Dispatch(in GameEvent e) { /* 구독자에게 전달 */ }
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 이렇게 하나</h4>
+      <ul class="tx">
+        <li><b>이벤트 처리 중에 새 이벤트가 생기는</b> 연쇄(피격 → 사망 → 드롭)를 한 큐로 돌리면 한 프레임이 끝나지 않을 수 있습니다. 두 큐를 번갈아 쓰면 <b>프레임마다 끝이 보장</b>됩니다.</li>
+        <li><code>GameEvent</code> 를 <b>readonly struct</b> 로 두면 <code>Queue&lt;GameEvent&gt;</code> 안에 값으로 들어가 <b>이벤트마다 할당이 0</b> 입니다. class 이벤트는 프레임마다 쓰레기를 만듭니다.</li>
+        <li>용량 256 으로 미리 잡고 계속 재사용 — 큐는 비워도 배열을 유지하므로 GC 스파이크가 없습니다.</li>
+        <li>다른 스레드에서 올리는 이벤트는 SQ 06 의 <code>MainThread.Post</code> 를 거쳐 들어오게 하세요.</li>
+      </ul>
+      <div class="note tip" style="margin-bottom:0">
+        <b>Unity 는 C# 9 수준</b>이라 <code>record struct</code> · 컬렉션 식 <code>[]</code> · 기본 생성자(primary constructor)를 쓸 수 없습니다.
+        그래서 이 카드의 코드는 일부러 옛 문법으로 적었습니다. <code>TryDequeue</code> 는 .NET Standard 2.1 에 있어 그대로 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">사례별 타입 선택 — <span class="t">한 장 요약</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <thead><tr><th>사례</th><th>타입</th><th>핵심 이유</th></tr></thead>
+      <tbody>
+        <tr><td>웹 요청 → 백그라운드 작업</td><td><b>Channel (Bounded)</b> + BackgroundService</td><td>async 대기 · 배압 · TryWrite 로 즉시 거절</td></tr>
+        <tr><td>최근 N개 보관</td><td><b>Queue&lt;T&gt;</b> (용량 N)</td><td>원형 배열 재사용 · 할당 0</td></tr>
+        <tr><td>레이트 리미터 (로그 방식)</td><td><b>Queue&lt;long&gt;</b> + lock</td><td>시간순이라 앞에서만 지움</td></tr>
+        <tr><td>재시도 · 예약 작업</td><td><b>PriorityQueue&lt;T, DateTimeOffset&gt;</b></td><td>가장 이른 시각이 루트</td></tr>
+        <tr><td>이벤트 묶음 전송</td><td><b>Channel</b> + WaitToReadAsync / TryRead</td><td>쌓인 만큼 한 번에</td></tr>
+        <tr><td>게임 이벤트 · 명령 처리</td><td><b>Queue&lt;struct&gt;</b> 두 개 교대</td><td>프레임마다 끝 보장 · 할당 0</td></tr>
+        <tr><td>다른 스레드 → Unity 메인 스레드</td><td><b>ConcurrentQueue&lt;Action&gt;</b></td><td>기다릴 필요 없음 · 프레임 예산</td></tr>
+        <tr><td>오브젝트 풀</td><td><b>Stack&lt;T&gt;</b></td><td>LIFO — 방금 쓴 것이 캐시에 따뜻함</td></tr>
+        <tr><td>편집기 undo / 상태 이력</td><td><b>Stack&lt;T&gt;</b> 두 개 · ImmutableStack</td><td>되돌리기 = Pop · 이력 공유 = 불변</td></tr>
+        <tr><td>LRU 캐시</td><td><b>LinkedList&lt;T&gt;</b> + Dictionary</td><td>쥔 노드를 중간에서 O(1) 로 이동</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 실무의 스택 · 큐는 <b>"상한이 있는가 · 기다려야 하는가 · 여러 스레드인가"</b> 세 질문으로 타입이 정해집니다.
+    모르겠으면 SQ 01 의 결정 흐름도로 돌아가세요.</div>
+</section>
+
+</div><!-- /pane-sq -->
