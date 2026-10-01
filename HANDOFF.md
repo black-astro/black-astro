@@ -43,14 +43,11 @@
 
 대상: **server · db · cs · csharp · cpp · rust** (6개 가이드). 1차와 같은 순서로 하면 됩니다.
 
-### 0. 먼저 고칠 것 (이번에 발견한 기존 결함 — 빌드하면 사이트에서 탭이 사라집니다)
-| 가이드 | 문제 | 복구 |
-|---|---|---|
-| cpp | `panes/15-jvm.html` 이 커밋 c6a8a38 에서 삭제됨 (parts.json 에는 있음 → 빌드 실패) | `git checkout c6a8a38^ -- web/guide-src/cpp/parts/panes/15-jvm.html` |
-| rust | `panes/11-web.html` 이 같은 커밋에서 삭제됨 | `git checkout c6a8a38^ -- web/guide-src/rust/parts/panes/11-web.html` |
-| cs | `panes/13-ml.html` 파일은 있는데 parts.json·사이드바 등록이 빠짐 (공개본엔 m01~ 있음) | 등록 7곳 복구 (`git log -p -- web/guide-src/cs/parts.json`) |
-| db | `panes/13-olap.html` 같은 상태 (v01~) | 위와 같음 |
-→ 그래서 이번 커밋에는 **cs-web · db-web 결과물을 넣지 않았습니다**(빌드하면 탭이 빠짐). 복구 전엔 빌드 후 `git checkout -- web/public/cs-web web/public/db-web`.
+### 0. ✅ 해결됨 — 사라진 탭 4개 복구 (커밋 d88047f 계열, 2026-10-01)
+커밋 c6a8a38(9/11)의 일괄 그림 삽입 중 cpp `15-jvm` · rust `11-web` 삭제, cs `13-ml` · db `13-olap` 0바이트가 됐고,
+CI 빌드가 멈춰 **9/22~10/1 배포가 전부 실패**(사이트가 9/9 버전에 머묾)했다. `c6a8a38^` 내용으로 복구 → 배포 성공 확인.
+같은 커밋이 전 가이드에 **중복 그림**을 넣었다 — 1차 네 가이드는 정리했고, 나머지 6개에 **73건** 남음(2단계에서 `dupdiag --fix`).
+**교훈:** 배포 후 `gh run list --workflow deploy-portfolio.yml` 로 성공까지 확인할 것. verify 는 로컬 결과물만 본다.
 
 ### 1. 학습 레이어 붙이기 (가이드당 5분)
 - `shared/css/08-id-<가이드>.css` 를 만든다 — 08-id-java.css 를 복사해 색만. 제안:
