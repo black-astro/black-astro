@@ -19,8 +19,13 @@
    - 화면 밖 `.diag` 애니메이션 정지(CSS `.zz` + SMIL `pauseAnimations`) · 등장 효과 26px→10px
    - 클래스 접두사는 **`lx-`** — `st-` 는 파이썬 알고리즘 시각화(`st-done` 등)가 이미 씀. 바꾸지 마세요.
    - 저장은 localStorage `st:<가이드>` 한 키.
-2. **가이드 정체성 색** `shared/css/08-id-<가이드>.css` — 바탕·UI 강조(`--blue*`, `--ac-rgb`)·서명색(`--sig-a/b`)만.
-   Java 엠버/앰버 · Python 파랑→노랑 · Kotlin 보라→주황 · JS·TS 노랑+TS 파랑. **다이어그램 의미 색은 그대로.**
+2. **테마** `shared/css/08-theme.css` — 강조색 하나(파랑)로 통일 + **다크/라이트 두 벌** (사용자 요청으로 언어별 색 08-id-* 는 폐기).
+   `<head>` 의 선적용 스크립트가 `lx:theme`(light|dark, 없으면 OS 설정)를 첫 그리기 전에 붙인다 — 전 가이드 공통 키.
+   탭바 버튼으로 전환. 코드 블록 · `.stage` 데모 · `.out` 은 라이트에서도 어두운 "화면 섬"(다크 토큰 재선언).
+   다이어그램 글자는 `07-study.js` 의 `inkFix` 가 라이트에서 글자-바탕 대비 3 미만이면 `lx-ink`/`lx-inv` 로 보정
+   (인라인 `style="fill:#e8f0ff"` 같은 다크 전제 값 때문 — 네 가이드 132곳 자동 보정, 측정 0건).
+3. **사이드바 3단 · PC 전폭** — 그룹(한국어 13.5px) → 지금 그룹의 탭(진도) → 목차, 다른 가이드 접기,
+   읽는 섹션 따라가기. 셸 1720px·읽기 열 가운데 정렬 제거(문단 860px 제한만).
 3. **다이어그램 개편** — 박스형 그림을 카탈로그 모델(timeline·gantt·bar·line·matrix·tree·memory·decision…)로 다시 그림.
    **같은 섹션에 똑같은 그림이 두 번** 들어간 곳이 네 가이드에 60곳 넘게 있었음(이전 회차 삽입 도구 중복 실행 흔적).
    대부분 두 번째를 다른 모델로 다시 그렸고, 남은 25건은 `dupdiag.mjs --fix` 로 지움.
@@ -49,11 +54,14 @@ CI 빌드가 멈춰 **9/22~10/1 배포가 전부 실패**(사이트가 9/9 버�
 같은 커밋이 전 가이드에 **중복 그림**을 넣었다 — 1차 네 가이드는 정리했고, 나머지 6개에 **73건** 남음(2단계에서 `dupdiag --fix`).
 **교훈:** 배포 후 `gh run list --workflow deploy-portfolio.yml` 로 성공까지 확인할 것. verify 는 로컬 결과물만 본다.
 
-### 1. 학습 레이어 붙이기 (가이드당 5분)
-- `shared/css/08-id-<가이드>.css` 를 만든다 — 08-id-java.css 를 복사해 색만. 제안:
-  server 청록·네이비 / db 앰버·슬레이트 / cs 보라·잉크 / csharp 보라(#512bd4)·라임 / cpp 파랑(#00599c)·강철 / rust 녹·구리(#ce422b)
-- parts.json 에서 `shared/css/06-diag.css` 뒤에 `shared/css/07-study.css`, `shared/css/08-id-<가이드>.css`,
+### 1. 학습 레이어 · 테마 붙이기 (가이드당 10분)
+- parts.json 에서 `shared/css/06-diag.css` 뒤에 `shared/css/07-study.css`, `shared/css/08-theme.css`,
   `js/99-init.js` 앞에 `shared/js/07-study.js`. (네 가이드 parts.json 참고)
+- `parts/00-head.html` 의 `<meta charset>` 바로 뒤에 테마 선적용 스크립트 복사 (java 00-head.html 참고 — 없으면 라이트에서 깜빡임)
+- **라이트 대비 측정 필수** — 가이드 고유 css(06-*.css)에 다크 전제 밝은 글자색이 있다(python 표 칸, kotlin 플랫폼 배지가 그랬음).
+  측정 방법: 전환 애니메이션을 끈 상태(`*{transition:none!important}`)에서 각 탭 텍스트의 글자색과 실제 바탕(조상 배경 합성)의
+  대비를 재고 3.2 미만을 모아 `08-theme.css` §8.7 에 라이트 규칙 추가. 다이어그램은 `window.lxInkFix(svg)` 호출 후 같은 방식.
+  ⚠ 창이 가려진 탭에서는 타이머·IntersectionObserver 가 멈추니 기다리는 측정은 시간 초과난다.
 - db·cs·server 는 `90-demos.js` 가 커서 클래스 충돌 확인: `grep -rn "lx-" <가이드>/parts` 가 0 이어야 함.
 
 ### 2. 다이어그램

@@ -238,6 +238,42 @@
     });
   }
 
+  /* ---------- ②-c 테마 전환 (라이트 ↔ 다크) ----------
+     선적용은 <head> 스크립트가 한다. 여기서는 버튼과 OS 설정 변경 추적만.
+     사용자가 한 번 고르면 그 값(lx:theme)을 전 가이드가 함께 쓴다. */
+  (function theme(){
+    const anchor = Q("#lvFind");
+    if (!anchor) return;
+    const h = document.documentElement;
+    const SUN = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+    const MOON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "lx-theme";
+    const paintBtn = () => {
+      const light = h.getAttribute("data-theme") === "light";
+      // 버튼은 "누르면 바뀔 테마"를 보여 준다
+      b.innerHTML = (light ? MOON : SUN) + '<span class="lbl">' + (light ? "다크" : "라이트") + "</span>";
+      b.title = light ? "다크 테마로 바꾸기" : "라이트 테마로 바꾸기";
+      b.setAttribute("aria-label", b.title);
+    };
+    const set = (t, remember) => {
+      h.setAttribute("data-theme", t);
+      if (remember) try { localStorage.setItem("lx:theme", t); } catch(e){}
+      paintBtn();
+    };
+    b.addEventListener("click", () => set(h.getAttribute("data-theme") === "light" ? "dark" : "light", true));
+    anchor.before(b);
+    if (!h.hasAttribute("data-theme")) h.setAttribute("data-theme", "dark");
+    paintBtn();
+    new MutationObserver(paintBtn).observe(h, { attributes:true, attributeFilter:["data-theme"] });
+    // 직접 고른 적이 없으면 OS 설정이 바뀔 때 따라간다
+    const mq = window.matchMedia && matchMedia("(prefers-color-scheme: light)");
+    mq && mq.addEventListener && mq.addEventListener("change", e => {
+      let saved = null; try { saved = localStorage.getItem("lx:theme"); } catch(err){}
+      if (saved !== "light" && saved !== "dark") set(e.matches ? "light" : "dark", false);
+    });
+  })();
+
   /* ---------- ③ 읽기 도구 ---------- */
   (function tool(){
     const anchor = Q("#lvFind");
@@ -335,6 +371,7 @@
       x.type = "button"; x.className = "x"; x.textContent = "닫기 (Esc)";
       lb.appendChild(x);
       document.body.appendChild(lb);
+      inkFix(Q("svg", c));
       x.focus();
       return;
     }
@@ -344,9 +381,46 @@
   function closeLb(){ const lb = Q(".lx-lb"); if (!lb) return; lb.remove(); lbFrom?.focus({preventScroll:true}); lbFrom = null; }
   document.addEventListener("keydown", e => { if (e.key === "Escape") closeLb(); });
 
+  /* 라이트 테마 글자 보정 — 다크 기준으로 흰 글자를 직접 박아 둔 그림이 있다.
+     칸 채움이 클래스(반투명 계열색)면 라이트에서 옅어져 흰 글자가 사라지므로,
+     글자 밑 도형이 밝으면 그 글자에만 lx-ink 를 붙여 짙게 바꾼다(어두운 칸 위의 흰 글자는 그대로). */
+  const rgb = s => { const m = String(s).match(/rgba?\(([^)]+)\)/); if (!m) return null; const p = m[1].split(/[ ,\/]+/).filter(Boolean).map(Number); return { r:p[0], g:p[1], b:p[2], a:p.length > 3 ? p[3] : 1 }; };
+  const lumOf = c => { const f = v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }; return .2126 * f(c.r) + .7152 * f(c.g) + .0722 * f(c.b); };
+  function inkFix(svg){
+    if (!svg || svg.dataset.lxInk || document.documentElement.getAttribute("data-theme") !== "light") return;
+    svg.dataset.lxInk = "1";
+    // 반투명 채움은 흰 캔버스와 합성한 실제 색으로 본다
+    const onWhite = c => ({ r:c.r * c.a + 255 * (1 - c.a), g:c.g * c.a + 255 * (1 - c.a), b:c.b * c.a + 255 * (1 - c.a), a:1 });
+    const shapes = [...svg.querySelectorAll("rect,circle,ellipse,polygon")]
+      .map(s => ({ b:s.getBBox(), f:rgb(getComputedStyle(s).fill) })).filter(o => o.f && o.f.a > .05);
+    for (const tx of svg.querySelectorAll("text")){
+      const c = rgb(getComputedStyle(tx).fill);
+      if (!c) continue;
+      const b = tx.getBBox(), cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+      let bg = { r:255, g:255, b:255, a:1 };
+      // 아래에서 위로 겹친 순서대로 합성 (문서 순서 = 그리기 순서)
+      for (const o of shapes) if (cx >= o.b.x && cx <= o.b.x + o.b.width && cy >= o.b.y && cy <= o.b.y + o.b.height)
+        bg = { r:o.f.r * o.f.a + bg.r * (1 - o.f.a), g:o.f.g * o.f.a + bg.g * (1 - o.f.a), b:o.f.b * o.f.a + bg.b * (1 - o.f.a), a:1 };
+      const L1 = lumOf(onWhite(c)), L2 = lumOf(bg);
+      if ((Math.max(L1, L2) + .05) / (Math.min(L1, L2) + .05) >= 3) continue;
+      tx.classList.add(L2 > .3 ? "lx-ink" : "lx-inv");    // 밝은 칸엔 짙은 글자, 어두운 칸엔 흰 글자
+    }
+  }
+  window.lxInkFix = inkFix;            // 검증 스크립트용 (브라우저 스모크에서 직접 호출)
+  // 테마가 바뀌면 판정을 지우고, 색 전환 애니메이션이 끝난 뒤(바뀌기 전 색을 읽지 않게) 화면 안 그림부터 다시 잰다.
+  // 화면 밖 그림은 들어올 때 IntersectionObserver 가 잰다.
+  let inkT = 0;
+  new MutationObserver(() => {
+    QA(".diag svg[data-lx-ink]").forEach(s => { delete s.dataset.lxInk; });
+    QA(".diag text.lx-ink, .diag text.lx-inv").forEach(t => t.classList.remove("lx-ink", "lx-inv"));
+    clearTimeout(inkT);
+    inkT = setTimeout(() => QA("main .diag:not(.zz) svg").forEach(inkFix), 450);
+  }).observe(document.documentElement, { attributes:true, attributeFilter:["data-theme"] });
+
   if ("IntersectionObserver" in window){
     const io = new IntersectionObserver(es => es.forEach(en => {
       const d = en.target, svg = Q("svg", d), on = en.isIntersecting;
+      if (on) inkFix(svg);
       d.classList.toggle("zz", !on);
       try { if (svg && svg.pauseAnimations) on ? svg.unpauseAnimations() : svg.pauseAnimations(); } catch(err){}
     }), { rootMargin:"120px 0px" });
