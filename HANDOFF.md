@@ -76,6 +76,20 @@
 11차 §검증 순서의 "라이트 대비"(전환 끄고 본문 3.2 미만 · `window.lxInkFix(svg)` 후 3 미만)와 390/768 폭 확인을
 c-web 전체 + 각 가이드 `#pane-sq` · `#pane-struct` 에 대해. 에이전트 그림에 인라인 흰 글자(`style="fill:#e8f0ff"`)가 섞였을 수 있음.
 
+## 🩹 12차 이후 수정 — 가이드 이동 시 "예전 화면" 깜빡임 (2026-10-01)
+
+**증상**: 다른 가이드를 누르면 예전 사이드바(상자 그룹 버튼 + 가이드 칩 9개)와 닫아 둔 "처음이신가요?" 상자가 잠깐 보였다가 사라짐.
+**원인**: 사이드바·탭바를 지금 디자인으로 바꾸는 코드가 문서 맨 끝(본문 2~3MB 뒤)의 `07-study.js` 에 있어, 네트워크로 받을 때
+약 1초 동안 원본 마크업이 그려졌고 가이드 간 View Transition 이 그 첫 화면을 찍어 보여 줌. 안내 상자도 끝의 `00-core.js` 가 숨겼음.
+**수정**:
+- `shared/13-chrome.html` 신설 — 사이드바 3단 · 가이드 목록 · 목차 머리/진도 막대 · 테마 · 읽기 설정 · 접기 버튼 · `applyPrefs` 를 `07-study.js` 에서 옮김.
+  parts.json 에서 **`12-tabbar.html` 바로 다음**. 끝에 표지 `<i id="lx-chrome" hidden>`.
+- 각 `00-head.html`: `<link rel="expect" href="#lx-chrome" blocking="render">` (표지까지 첫 그리기 대기 — 미지원 브라우저는 무시) +
+  선적용 스크립트에 `dvg-hello` → `html.lx-hello-off` (CSS `07-study.css` 끝에서 `#hello` 숨김).
+- `07-study.js` 는 진도(`S`) · `paint()` 만 — `window.LX.onReset` / `LX.onPrefs` 훅으로 설정 창과 이어짐.
+- 확인: Fast 4G 로컬 서버에서 첫 프레임(0.48초)부터 완성된 사이드바 · 도구 버튼 · 안내 상자 숨김, 기능(테마 · 글자 크기 · 다 읽음 · 초기화 · 탭 전환 · 접기) 정상, 중복 생성 0.
+- **새 가이드를 만들면** parts.json 에 `shared/13-chrome.html`(12-tabbar 다음)과 00-head 의 위 두 줄도 넣어야 합니다.
+
 ## 🧰 이번 회차에 만든 것 · 알게 된 것
 
 | 파일 | 무엇 |

@@ -43,8 +43,10 @@ if(p.fs&&p.fs!=="m")d.setAttribute("data-fs",p.fs);
 if(p.lh==="w")d.setAttribute("data-lh","w");
 if(p.side)d.className+=" lx-side-off";
 if(p.head)d.className+=" lx-head-off";
-if(p.focus)d.className+=" lx-focus"})();
+if(p.focus)d.className+=" lx-focus";
+try{if(localStorage.getItem("dvg-hello"))d.className+=" lx-hello-off"}catch(e){}})();
 </script>
+<link rel="expect" href="#lx-chrome" blocking="render">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="/black-astro/logo.png">
 <link rel="apple-touch-icon" href="/black-astro/logo.png">
@@ -2925,6 +2927,10 @@ nav.side{view-transition-name:lx-side}
 /* 표 머리의 언어 대 언어 열 */
 .lx-tharrow{display:inline-block;margin-right:5px;vertical-align:-2px;color:var(--blue-l)}
 .lx-tharrow svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+/* 닫아 둔 "처음이신가요?" 상자 — <head> 선적용 스크립트가 lx-hello-off 를 붙여 첫 그리기부터 숨긴다
+   (예전엔 문서 끝의 00-core 가 숨기기까지 약 1초 보였다가 사라졌다) */
+html.lx-hello-off #hello{display:none}
 /* ================================================================
    8. 테마 — 강조색 하나 · 다크 / 라이트 두 벌 (2026-10)
    ----------------------------------------------------------------
@@ -3596,6 +3602,315 @@ html:has(.lx-tool.open) .tabbar{z-index:900}
   <button onclick="helloClose()">알겠어요 ✓</button>
 </div>
 
+<script>
+/* ================================================================
+   화면 틀 조기 구성 (2026-10) — 사이드바 3단 · 가이드 목록 · 목차 머리 · 테마/읽기 설정/접기 버튼
+   ----------------------------------------------------------------
+   예전엔 이 일을 문서 맨 끝의 07-study.js 가 했다. 본문이 2~3MB 라 네트워크로 받으면
+   그 스크립트가 돌기까지 약 1초 동안 "예전 사이드바"(상자 그룹 버튼 + 가이드 칩 9개)가 먼저 그려졌고,
+   가이드 사이 이동(View Transition)이 바로 그 첫 화면을 찍어 보여 줘 깜빡임이 더 눈에 띄었다.
+   그래서 사이드바·탭바 마크업 바로 뒤(parts.json 에서 12-tabbar.html 다음)에서 돌리고,
+   00-head 의 <link rel="expect" href="#lx-chrome" blocking="render"> 로 아래 표지가 파싱될 때까지 첫 그리기를 미룬다.
+   진도 값 · 섹션 이동처럼 본문이 필요한 일은 07-study.js 가 그대로 하고, window.LX 훅으로 이어진다.
+   ================================================================ */
+(function chrome(){
+  const Q = (s, r) => (r || document).querySelector(s);
+  const QA = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const GUIDE = (location.pathname.match(/\/([^/]+)-web\//) || [, "guide"])[1];
+  const LX = window.LX = window.LX || {};
+
+  /* ---------- 사이드바: 그룹 → 탭 → 목차 3단 ----------
+     예전 사이드바는 그룹 버튼(영문 대문자 10.5px + 이모지)만 있고 그 안의 탭은
+     마우스를 올려야 보였다. 지금 그룹만 펼쳐 탭을 이름 · 진도와 함께 세우고,
+     다른 가이드 링크는 접는다(목차를 아래로 밀어내던 9칸). 마크업은 그대로 두고 여기서 입힌다. */
+  const side = Q("nav.side");
+  const grpBtns = QA("nav.side .navgrp button[data-g]");
+  const tabBtns = QA(".tabbar .tabrow button[data-t]");
+  const tabName = b => { const c = b.cloneNode(true); c.querySelectorAll(".ic, .k").forEach(x => x.remove()); return c.textContent.trim(); };
+  const tabIcon = b => (Q(".ic", b)?.textContent || "").trim();
+  const navCount = t => QA('nav.side .navset[data-nav="' + t + '"] a[href^="#"]').length;
+  if (side && grpBtns.length){
+    side.classList.add("lx-side");
+    const curTab = (Q(".tabbar .tabrow button.on[data-t]") || tabBtns[0])?.dataset.t;
+    const curG = tabBtns.find(b => b.dataset.t === curTab)?.dataset.g;
+    grpBtns.forEach(g => {
+      // "언어 · JAVA" → 큰 글자 "언어" + 작은 보조 "JAVA" (대문자 라벨은 읽기 어렵다)
+      const lb = Q(".lb", g);
+      if (lb && !Q(".lx-g1", g)){
+        const [a, ...rest] = lb.textContent.split(" · ");
+        lb.innerHTML = '<span class="lx-g1"></span><span class="lx-g2"></span>';
+        Q(".lx-g1", lb).textContent = a;
+        // JAVA → Java, ADVANCED → Advanced 처럼 읽기 쉽게. GUI · API 같은 약어(3자 이하)는 그대로
+        Q(".lx-g2", lb).textContent = rest.join(" · ").split(" ").map(w => w.length <= 3 ? w : w[0] + w.slice(1).toLowerCase()).join(" ");
+      }
+      g.insertAdjacentHTML("beforeend", '<span class="lx-gp" aria-hidden="true"></span>');
+      const list = document.createElement("div");
+      list.className = "lx-tabs" + (g.dataset.g === curG ? " open" : ""); list.dataset.g = g.dataset.g;
+      tabBtns.filter(b => b.dataset.g === g.dataset.g).forEach(b => {
+        const t = document.createElement("button");
+        t.type = "button"; t.dataset.t = b.dataset.t;
+        t.innerHTML = '<span class="ic"></span><span class="nm"></span><span class="fr"></span>';
+        Q(".ic", t).textContent = tabIcon(b);
+        Q(".nm", t).textContent = tabName(b);
+        Q(".fr", t).textContent = navCount(b.dataset.t);      // 진도는 07-study.js 가 채운다
+        if (b.dataset.t === curTab){ t.classList.add("on"); t.setAttribute("aria-current", "page"); }
+        t.addEventListener("click", () => switchTab(b.dataset.t));   // switchTab 은 뒤(20-tab-switch.js)에서 정의 — 누를 때 찾는다
+        list.appendChild(t);
+      });
+      g.after(list);
+    });
+    // 가이드 목록 — 열한 가이드를 어디서 봐도 같은 순서로, 지금 보는 가이드도 그 자리에 표시.
+    // (예전엔 가이드마다 "나를 뺀 9개"를 제각각 순서로 나열해 위치가 매번 달랐다.) 접힘 상태는 공통으로 기억.
+    const more = Q("nav.side .navmore");
+    if (more && !more.closest("details")){
+      const GUIDES = [["java","☕","Java"],["kotlin","🟠","Kotlin"],["python","🐍","Python"],["js-ts","🟨","JS · TS"],
+        ["csharp","🟣","C# · Unity"],["cpp","🔵","C++"],["c","🔌","C · 임베디드"],["rust","🦀","Rust"],["db","🗄️","DB"],["server","🌐","서버기술"],["cs","🎓","CS 기술"]];
+      const titles = {};
+      QA("a", more).forEach(a => { const m = a.getAttribute("href").match(/([\w-]+)-web/); if (m) titles[m[1]] = a.title; });
+      more.innerHTML = "";
+      for (const [g, ic, name] of GUIDES){
+        const cur = g === GUIDE;
+        const el = document.createElement(cur ? "span" : "a");
+        el.className = "dlbtn" + (cur ? " cur" : "");
+        if (cur){ el.setAttribute("aria-current", "page"); el.title = "지금 보고 있는 가이드"; }
+        else { el.href = "../" + g + "-web/"; el.title = titles[g] || name + " 가이드로 이동"; }
+        el.innerHTML = '<span class="gi" aria-hidden="true">' + ic + '</span><span class="gn"></span>';
+        Q(".gn", el).textContent = name;
+        more.appendChild(el);
+      }
+      // 미리 불러오기 — 가이드 링크에 마우스를 올리거나 누르기 시작하면 다음 가이드를 미리 렌더해 둔다.
+      // (eagerness moderate = 호버 약 200ms). 지원 안 하면 prefetch 링크로 HTML 만이라도 받아 둔다.
+      if (HTMLScriptElement.supports && HTMLScriptElement.supports("speculationrules")){
+        const sr = document.createElement("script");
+        sr.type = "speculationrules";
+        sr.textContent = JSON.stringify({ prerender:[{ where:{ selector_matches:"nav.side .navmore a.dlbtn" }, eagerness:"moderate" }] });
+        document.head.appendChild(sr);
+      } else {
+        more.addEventListener("pointerover", e => {
+          const a = e.target.closest("a.dlbtn");
+          if (!a || a.dataset.pf) return;
+          a.dataset.pf = "1";
+          const l = document.createElement("link"); l.rel = "prefetch"; l.href = a.href; document.head.appendChild(l);
+        });
+      }
+      const curName = (GUIDES.find(x => x[0] === GUIDE) || [, , ""])[2];
+      const d = document.createElement("details");
+      d.className = "lx-more";
+      d.innerHTML = "<summary>가이드 <b></b><span>" + GUIDES.length + "</span></summary>";
+      Q("summary b", d).textContent = curName;
+      more.before(d); d.appendChild(more);
+      let open = false; try { open = localStorage.getItem("lx:guides") === "1"; } catch(e){}
+      d.open = open;
+      d.addEventListener("toggle", () => { try { localStorage.setItem("lx:guides", d.open ? "1" : "0"); } catch(e){} });
+    }
+    // 목차 머리 + 진도 막대 — 지금 어느 탭의 목차인지 (막대 값은 07-study.js 가 채운다)
+    QA("nav.side .navset[data-nav]").forEach(n => {
+      if (!Q(".lx-prog", n)){
+        const p = document.createElement("div");
+        p.className = "lx-prog";
+        p.innerHTML = '<span class="bar"><i></i></span><span><b>0</b> / ' + navCount(n.dataset.nav) + "</span>";
+        n.prepend(p);
+      }
+      const b = tabBtns.find(x => x.dataset.t === n.dataset.nav);
+      if (!b || Q(".lx-tochd", n)) return;
+      const h = document.createElement("div");
+      h.className = "lx-tochd";
+      h.textContent = "목차 · " + tabName(b);
+      Q(".lx-prog", n).before(h);
+    });
+  }
+
+  /* ---------- 테마 전환 (라이트 ↔ 다크) ----------
+     선적용은 <head> 스크립트가 한다. 여기서는 버튼과 OS 설정 변경 추적만.
+     사용자가 한 번 고르면 그 값(lx:theme)을 전 가이드가 함께 쓴다. */
+  (function theme(){
+    const anchor = Q("#lvFind");
+    if (!anchor) return;
+    const h = document.documentElement;
+    const SUN = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+    const MOON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "lx-theme";
+    const paintBtn = () => {
+      const light = h.getAttribute("data-theme") === "light";
+      // 버튼은 "누르면 바뀔 테마"를 보여 준다
+      b.innerHTML = (light ? MOON : SUN) + '<span class="lbl">' + (light ? "다크" : "라이트") + "</span>";
+      b.title = light ? "다크 테마로 바꾸기" : "라이트 테마로 바꾸기";
+      b.setAttribute("aria-label", b.title);
+    };
+    const set = (t, remember) => {
+      h.setAttribute("data-theme", t);
+      if (remember) try { localStorage.setItem("lx:theme", t); } catch(e){}
+      paintBtn();
+    };
+    b.addEventListener("click", () => set(h.getAttribute("data-theme") === "light" ? "dark" : "light", true));
+    anchor.before(b);
+    if (!h.hasAttribute("data-theme")) h.setAttribute("data-theme", "dark");
+    paintBtn();
+    new MutationObserver(paintBtn).observe(h, { attributes:true, attributeFilter:["data-theme"] });
+    // 직접 고른 적이 없으면 OS 설정이 바뀔 때 따라간다
+    const mq = window.matchMedia && matchMedia("(prefers-color-scheme: light)");
+    mq && mq.addEventListener && mq.addEventListener("change", e => {
+      let saved = null; try { saved = localStorage.getItem("lx:theme"); } catch(err){}
+      if (saved !== "light" && saved !== "dark") set(e.matches ? "light" : "dark", false);
+    });
+  })();
+
+  /* ---------- 읽기 설정 (전 가이드 공통) ----------
+     글자 크기 · 줄 간격 · 사이드바 접기 · 집중 모드 · 테마 · 진도.
+     옵션은 lx:prefs 한 키에 저장해 모든 가이드가 같이 쓴다(진도만 가이드별 st:<가이드> — 07-study.js).
+     첫 그리기 전 적용은 <head> 스크립트가 하고, 여기서는 바꿀 때만 반영한다. */
+  const PKEY = "lx:prefs";
+  let P = { fs:"m", lh:"n", side:false, head:false, focus:false, say:true };
+  try { Object.assign(P, JSON.parse(localStorage.getItem(PKEY) || "{}")); } catch(e){}
+  try {                                                         // 예전(가이드별 st:<가이드>) 저장값 옮기기
+    const S = JSON.parse(localStorage.getItem("st:" + GUIDE) || "{}") || {};
+    if (S.fs && S.fs !== "m" && P.fs === "m") P.fs = S.fs;
+    if (S.focus && !P.focus) P.focus = true;
+  } catch(e){}
+  const saveP = () => { try { localStorage.setItem(PKEY, JSON.stringify(P)); } catch(e){} };
+  const ICON_SIDE = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></svg>';
+  const ICON_HEAD = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18M9 14.5l3-2.5 3 2.5"/></svg>';
+  const ICON_DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  const ICON_X = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  const hook = (name, ...a) => { try { typeof LX[name] === "function" && LX[name](...a); } catch(e){} };
+
+  // 상단 사이드바 접기 버튼 — 탭바 맨 앞
+  (function sideToggle(){
+    const bar = Q("#tabbar") || Q(".tabbar");
+    if (!bar || Q(".lx-sidebtn", bar)) return;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "lx-sidebtn";
+    b.innerHTML = ICON_SIDE;
+    b.addEventListener("click", () => { P.side = !P.side; saveP(); fold(applyPrefs); });
+    bar.prepend(b);
+    // 헤더 접기 — 접으면 탭바가 사라지고 오른쪽 위에 작은 펼치기 손잡이만 남는다.
+    // 탭바 높이는 00-core 의 ResizeObserver 가 --tabh 로 넘기므로 앵커 · 하위 고정 바 위치가 저절로 따라온다.
+    const hb = document.createElement("button");
+    hb.type = "button"; hb.className = "lx-headbtn";
+    hb.innerHTML = ICON_HEAD;
+    hb.addEventListener("click", () => { P.head = true; saveP(); fold(applyPrefs); });
+    b.after(hb);
+    const handle = document.createElement("button");
+    handle.type = "button"; handle.className = "lx-headhandle";
+    handle.innerHTML = ICON_DOWN + "<span>헤더</span>";
+    handle.title = "헤더 펼치기"; handle.setAttribute("aria-label", "헤더 펼치기");
+    handle.addEventListener("click", () => { P.head = false; saveP(); fold(applyPrefs); });
+    document.body.appendChild(handle);
+  })();
+  // 접고 펼 때 화면이 툭 끊기지 않게 — 지원하면 같은 문서 View Transition 으로 감싼다
+  function fold(fn){
+    const reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (document.startViewTransition && !reduce) document.startViewTransition(fn); else fn();
+  }
+
+  (function tool(){
+    const anchor = Q("#lvFind");
+    if (!anchor) return;
+    const w = document.createElement("div");
+    w.className = "lx-tool";
+    const seg = (k, items) => '<div class="lx-seg" data-k="' + k + '" role="group">' +
+      items.map(([v, label, aria]) => '<button type="button" data-v="' + v + '"' + (aria ? ' aria-label="' + aria + '"' : "") + ">" + label + "</button>").join("") + "</div>";
+    const sw = (k, title, desc) => '<label class="lx-sw"><span><b>' + title + "</b>" + (desc ? "<small>" + desc + "</small>" : "") +
+      '</span><input type="checkbox" data-k="' + k + '"><i aria-hidden="true"></i></label>';
+    w.innerHTML =
+      '<button type="button" class="lx-toolbtn" aria-haspopup="dialog" aria-expanded="false" title="읽기 설정">' +
+        '<span class="aa" aria-hidden="true">Aa</span><span class="lbl">읽기 설정</span></button>' +
+      '<div class="lx-pop" role="dialog" aria-label="읽기 설정">' +
+        '<div class="lx-pop-h"><b>읽기 설정</b><button type="button" class="lx-x" aria-label="닫기">' + ICON_X + "</button></div>" +
+        '<section><h6>글자 크기</h6>' +
+          seg("fs", [["s", '<span style="font-size:12px">가</span>', "작게"], ["m", '<span style="font-size:14px">가</span>', "보통"],
+                     ["l", '<span style="font-size:16.5px">가</span>', "크게"], ["xl", '<span style="font-size:19px">가</span>', "아주 크게"]]) +
+          '<p class="lx-prev">자바는 <b>JVM</b> 위에서 돕니다. 한 줄은 이 정도 크기로 읽힙니다.</p></section>' +
+        '<section><h6>줄 간격</h6>' + seg("lh", [["n", "보통"], ["w", "넓게"]]) + "</section>" +
+        "<section><h6>화면</h6>" +
+          sw("side", "사이드바 접기", "목차를 숨기고 본문을 넓게") +
+          sw("head", "헤더 접기", "위 탭 줄을 숨기고 본문을 높게") +
+          sw("focus", "집중 모드", "가운데 좁은 한 열로만") +
+          sw("say", "읽는 법 표시 (*)", "처음 나오는 용어에 실무 발음") +
+          '<div class="lx-line"><span><b>테마</b></span>' + seg("theme", [["light", "라이트"], ["dark", "다크"]]) + "</div>" +
+        "</section>" +
+        '<section class="lx-progress"><h6>학습 진도 <span class="lx-pct"></span></h6>' +
+          '<div class="lx-pbar"><i></i></div><p class="lx-sum"></p>' +
+          '<button type="button" class="lx-reset" data-k="reset">진도 초기화</button></section>' +
+        '<p class="lx-note">설정은 이 브라우저에 저장되어 모든 가이드에 함께 적용됩니다.</p>' +
+      "</div>";
+    anchor.before(w);
+    const btn = Q(".lx-toolbtn", w);
+    const open = v => {
+      w.classList.toggle("open", v); btn.setAttribute("aria-expanded", v ? "true" : "false");
+      if (v) Q('.lx-seg[data-k="fs"] [aria-pressed="true"]', w)?.focus({ preventScroll:true });
+    };
+    btn.addEventListener("click", e => { e.stopPropagation(); open(!w.classList.contains("open")); });
+    Q(".lx-x", w).addEventListener("click", () => { open(false); btn.focus(); });
+    document.addEventListener("click", e => { if (!w.contains(e.target)) open(false); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && w.classList.contains("open")){ open(false); btn.focus(); } });
+    let armed = 0;
+    w.addEventListener("click", e => {
+      const b = e.target.closest("button");
+      if (!b || b === btn || b.classList.contains("lx-x")) return;
+      const k = b.closest("[data-k]")?.dataset.k;
+      if (k === "fs") P.fs = b.dataset.v;
+      else if (k === "lh") P.lh = b.dataset.v;
+      else if (k === "theme"){
+        document.documentElement.setAttribute("data-theme", b.dataset.v);
+        try { localStorage.setItem("lx:theme", b.dataset.v); } catch(err){}
+      }
+      else if (k === "reset"){
+        // 브라우저 확인창 대신 두 번 누르기 — 실수로 지우지 않게
+        if (Date.now() - armed > 3000){ armed = Date.now(); b.textContent = "한 번 더 누르면 지워집니다"; b.classList.add("armed"); return; }
+        armed = 0; b.textContent = "진도 초기화"; b.classList.remove("armed"); hook("onReset");
+      }
+      else return;
+      saveP(); applyPrefs(); hook("onPrefs");
+    });
+    w.addEventListener("change", e => {
+      const k = e.target.dataset.k;
+      if (k === "side") P.side = e.target.checked;
+      else if (k === "head") P.head = e.target.checked;
+      else if (k === "say") P.say = e.target.checked;
+      else if (k === "focus") P.focus = e.target.checked;
+      else return;
+      saveP(); fold(applyPrefs);
+    });
+    new MutationObserver(applyPrefs).observe(document.documentElement, { attributes:true, attributeFilter:["data-theme"] });
+  })();
+  // 다른 탭(다른 가이드)에서 바꾼 설정 · 테마를 이 탭에도 바로 반영
+  addEventListener("storage", e => {
+    if (e.key === PKEY){ try { Object.assign(P, JSON.parse(e.newValue || "{}")); } catch(err){} applyPrefs(); }
+    else if (e.key === "lx:theme" && (e.newValue === "light" || e.newValue === "dark")) document.documentElement.setAttribute("data-theme", e.newValue);
+  });
+  function applyPrefs(){
+    const h = document.documentElement;
+    if (P.fs && P.fs !== "m") h.dataset.fs = P.fs; else delete h.dataset.fs;
+    if (P.lh === "w") h.dataset.lh = "w"; else delete h.dataset.lh;
+    h.classList.toggle("lx-side-off", !!P.side);
+    h.classList.toggle("lx-head-off", !!P.head);
+    h.classList.toggle("lx-say-off", P.say === false);
+    const sayIn = Q('.lx-pop input[data-k="say"]'); if (sayIn) sayIn.checked = P.say !== false;
+    // 앵커 여백(--tabh)을 바로 맞춘다 — 00-core 의 ResizeObserver 를 기다리면 창이 가려졌을 때 늦는다
+    const tb = Q("#tabbar") || Q(".tabbar");
+    if (tb) h.style.setProperty("--tabh", (P.head ? 0 : tb.offsetHeight) + "px");
+    const headIn = Q('.lx-pop input[data-k="head"]'); if (headIn) headIn.checked = !!P.head;
+    const hb = Q(".lx-headbtn"); if (hb){ hb.title = "헤더 접기"; hb.setAttribute("aria-label", "헤더 접기"); }
+    h.classList.toggle("lx-focus", !!P.focus);
+    const press = (k, v) => QA('.lx-seg[data-k="' + k + '"] button').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v ? "true" : "false"));
+    press("fs", P.fs || "m"); press("lh", P.lh || "n"); press("theme", h.getAttribute("data-theme") || "dark");
+    const sideIn = Q('.lx-pop input[data-k="side"]'); if (sideIn) sideIn.checked = !!P.side;
+    const focIn = Q('.lx-pop input[data-k="focus"]'); if (focIn) focIn.checked = !!P.focus;
+    const sb = Q(".lx-sidebtn");
+    if (sb){
+      const off = !!(P.side || P.focus);
+      sb.setAttribute("aria-pressed", off ? "true" : "false");
+      sb.title = off ? "사이드바 펼치기" : "사이드바 접기";
+      sb.setAttribute("aria-label", sb.title);
+    }
+  }
+  Object.assign(LX, { P, saveP, applyPrefs, fold });
+  applyPrefs();
+})();
+</script>
+<i id="lx-chrome" hidden></i>
 <!-- ============================================================
      START PANE — 개념 · 설치 · 첫 접속
      ============================================================ -->
@@ -29153,14 +29468,7 @@ TAB_INIT.pro  = function(){ cheatFilter("proQ", "proTable", "proCount"); };
     if (S.done[id] && b.closest(".lx-foot")) b.closest(".lx-foot").querySelector(".lx-next")?.focus({preventScroll:true});
   });
 
-  /* ---------- ② 진도 표시 ---------- */
-  QA("nav.side .navset[data-nav]").forEach(n => {
-    if (Q(".lx-prog", n)) return;
-    const p = document.createElement("div");
-    p.className = "lx-prog";
-    p.innerHTML = '<span class="bar"><i></i></span><span><b>0</b> / 0</span>';
-    n.prepend(p);
-  });
+  /* ---------- ② 진도 표시 ---------- (막대 · 목차 머리는 13-chrome.html 이 미리 만든다) */
   function paint(){
     const byTab = {};
     for (const s of secs){
@@ -29193,96 +29501,14 @@ TAB_INIT.pro  = function(){ cheatFilter("proQ", "proTable", "proCount"); };
     const pb = Q(".lx-pop .lx-pbar i"); if (pb) pb.style.transform = "scaleX(" + (tot ? dn / tot : 0) + ")";
   }
 
-  /* ---------- ②-b 사이드바: 그룹 → 탭 → 목차 3단 ----------
-     예전 사이드바는 그룹 버튼(영문 대문자 10.5px + 이모지)만 있고 그 안의 탭은
-     마우스를 올려야 보였다. 지금 그룹만 펼쳐 탭을 이름 · 진도와 함께 세우고,
-     다른 가이드 링크는 접는다(목차를 아래로 밀어내던 9칸). 마크업은 그대로 두고 여기서 입힌다. */
+  /* ---------- ②-b 사이드바 ----------
+     그룹 → 탭 → 목차 3단 구성은 13-chrome.html 이 사이드바 마크업 바로 뒤에서 한다(첫 그리기 전).
+     여기서는 진도 반영 · 탭 전환 감싸기 · 읽는 섹션 따라가기만. */
   const side = Q("nav.side");
   const grpBtns = QA("nav.side .navgrp button[data-g]");
   const tabBtns = QA(".tabbar .tabrow button[data-t]");
-  const tabName = b => { const c = b.cloneNode(true); c.querySelectorAll(".ic, .k").forEach(x => x.remove()); return c.textContent.trim(); };
-  const tabIcon = b => (Q(".ic", b)?.textContent || "").trim();
   (function sideNav(){
     if (!side || !grpBtns.length) return;
-    side.classList.add("lx-side");
-    grpBtns.forEach(g => {
-      // "언어 · JAVA" → 큰 글자 "언어" + 작은 보조 "JAVA" (대문자 라벨은 읽기 어렵다)
-      const lb = Q(".lb", g);
-      if (lb && !Q(".lx-g1", g)){
-        const [a, ...rest] = lb.textContent.split(" · ");
-        lb.innerHTML = '<span class="lx-g1"></span><span class="lx-g2"></span>';
-        Q(".lx-g1", lb).textContent = a;
-        // JAVA → Java, ADVANCED → Advanced 처럼 읽기 쉽게. GUI · API 같은 약어(3자 이하)는 그대로
-        Q(".lx-g2", lb).textContent = rest.join(" · ").split(" ").map(w => w.length <= 3 ? w : w[0] + w.slice(1).toLowerCase()).join(" ");
-      }
-      g.insertAdjacentHTML("beforeend", '<span class="lx-gp" aria-hidden="true"></span>');
-      const list = document.createElement("div");
-      list.className = "lx-tabs"; list.dataset.g = g.dataset.g;
-      tabBtns.filter(b => b.dataset.g === g.dataset.g).forEach(b => {
-        const t = document.createElement("button");
-        t.type = "button"; t.dataset.t = b.dataset.t;
-        t.innerHTML = '<span class="ic"></span><span class="nm"></span><span class="fr"></span>';
-        Q(".ic", t).textContent = tabIcon(b);
-        Q(".nm", t).textContent = tabName(b);
-        t.addEventListener("click", () => switchTab(b.dataset.t));
-        list.appendChild(t);
-      });
-      g.after(list);
-    });
-    // 가이드 목록 — 열 가이드를 어디서 봐도 같은 순서로, 지금 보는 가이드도 그 자리에 표시.
-    // (예전엔 가이드마다 "나를 뺀 9개"를 제각각 순서로 나열해 위치가 매번 달랐다.) 접힘 상태는 공통으로 기억.
-    const more = Q("nav.side .navmore");
-    if (more && !more.closest("details")){
-      const GUIDES = [["java","☕","Java"],["kotlin","🟠","Kotlin"],["python","🐍","Python"],["js-ts","🟨","JS · TS"],
-        ["csharp","🟣","C# · Unity"],["cpp","🔵","C++"],["c","🔌","C · 임베디드"],["rust","🦀","Rust"],["db","🗄️","DB"],["server","🌐","서버기술"],["cs","🎓","CS 기술"]];
-      const titles = {};
-      QA("a", more).forEach(a => { const m = a.getAttribute("href").match(/([\w-]+)-web/); if (m) titles[m[1]] = a.title; });
-      more.innerHTML = "";
-      for (const [g, ic, name] of GUIDES){
-        const cur = g === GUIDE;
-        const el = document.createElement(cur ? "span" : "a");
-        el.className = "dlbtn" + (cur ? " cur" : "");
-        if (cur){ el.setAttribute("aria-current", "page"); el.title = "지금 보고 있는 가이드"; }
-        else { el.href = "../" + g + "-web/"; el.title = titles[g] || name + " 가이드로 이동"; }
-        el.innerHTML = '<span class="gi" aria-hidden="true">' + ic + '</span><span class="gn"></span>';
-        Q(".gn", el).textContent = name;
-        more.appendChild(el);
-      }
-      // 미리 불러오기 — 가이드 링크에 마우스를 올리거나 누르기 시작하면 다음 가이드를 미리 렌더해 둔다.
-      // (eagerness moderate = 호버 약 200ms). 지원 안 하면 prefetch 링크로 HTML 만이라도 받아 둔다.
-      if (HTMLScriptElement.supports && HTMLScriptElement.supports("speculationrules")){
-        const sr = document.createElement("script");
-        sr.type = "speculationrules";
-        sr.textContent = JSON.stringify({ prerender:[{ where:{ selector_matches:"nav.side .navmore a.dlbtn" }, eagerness:"moderate" }] });
-        document.head.appendChild(sr);
-      } else {
-        more.addEventListener("pointerover", e => {
-          const a = e.target.closest("a.dlbtn");
-          if (!a || a.dataset.pf) return;
-          a.dataset.pf = "1";
-          const l = document.createElement("link"); l.rel = "prefetch"; l.href = a.href; document.head.appendChild(l);
-        });
-      }
-      const curName = (GUIDES.find(x => x[0] === GUIDE) || [, , ""])[2];
-      const d = document.createElement("details");
-      d.className = "lx-more";
-      d.innerHTML = "<summary>가이드 <b></b><span>" + GUIDES.length + "</span></summary>";
-      Q("summary b", d).textContent = curName;
-      more.before(d); d.appendChild(more);
-      let open = false; try { open = localStorage.getItem("lx:guides") === "1"; } catch(e){}
-      d.open = open;
-      d.addEventListener("toggle", () => { try { localStorage.setItem("lx:guides", d.open ? "1" : "0"); } catch(e){} });
-    }
-    // 목차 머리 — 지금 어느 탭의 목차인지
-    QA("nav.side .navset[data-nav]").forEach(n => {
-      const b = tabBtns.find(x => x.dataset.t === n.dataset.nav);
-      const p = Q(".lx-prog", n);
-      if (!b || !p || Q(".lx-tochd", n)) return;
-      const h = document.createElement("div");
-      h.className = "lx-tochd";
-      h.textContent = "목차 · " + tabName(b);
-      p.before(h);
-    });
     // 탭이 바뀔 때 펼친 그룹 · 현재 탭 갱신
     const orig = window.switchTab;
     if (typeof orig === "function" && !orig.lxWrapped){
@@ -29341,188 +29567,12 @@ TAB_INIT.pro  = function(){ cheatFilter("proQ", "proTable", "proCount"); };
     });
   }
 
-  /* ---------- ②-c 테마 전환 (라이트 ↔ 다크) ----------
-     선적용은 <head> 스크립트가 한다. 여기서는 버튼과 OS 설정 변경 추적만.
-     사용자가 한 번 고르면 그 값(lx:theme)을 전 가이드가 함께 쓴다. */
-  (function theme(){
-    const anchor = Q("#lvFind");
-    if (!anchor) return;
-    const h = document.documentElement;
-    const SUN = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
-    const MOON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "lx-theme";
-    const paintBtn = () => {
-      const light = h.getAttribute("data-theme") === "light";
-      // 버튼은 "누르면 바뀔 테마"를 보여 준다
-      b.innerHTML = (light ? MOON : SUN) + '<span class="lbl">' + (light ? "다크" : "라이트") + "</span>";
-      b.title = light ? "다크 테마로 바꾸기" : "라이트 테마로 바꾸기";
-      b.setAttribute("aria-label", b.title);
-    };
-    const set = (t, remember) => {
-      h.setAttribute("data-theme", t);
-      if (remember) try { localStorage.setItem("lx:theme", t); } catch(e){}
-      paintBtn();
-    };
-    b.addEventListener("click", () => set(h.getAttribute("data-theme") === "light" ? "dark" : "light", true));
-    anchor.before(b);
-    if (!h.hasAttribute("data-theme")) h.setAttribute("data-theme", "dark");
-    paintBtn();
-    new MutationObserver(paintBtn).observe(h, { attributes:true, attributeFilter:["data-theme"] });
-    // 직접 고른 적이 없으면 OS 설정이 바뀔 때 따라간다
-    const mq = window.matchMedia && matchMedia("(prefers-color-scheme: light)");
-    mq && mq.addEventListener && mq.addEventListener("change", e => {
-      let saved = null; try { saved = localStorage.getItem("lx:theme"); } catch(err){}
-      if (saved !== "light" && saved !== "dark") set(e.matches ? "light" : "dark", false);
-    });
-  })();
-
-  /* ---------- ③ 읽기 설정 (전 가이드 공통) ----------
-     글자 크기 · 줄 간격 · 사이드바 접기 · 집중 모드 · 테마 · 진도.
-     옵션은 lx:prefs 한 키에 저장해 모든 가이드가 같이 쓴다(진도만 가이드별 st:<가이드>).
-     첫 그리기 전 적용은 <head> 스크립트가 하고, 여기서는 바꿀 때만 반영한다. */
-  const PKEY = "lx:prefs";
-  let P = { fs:"m", lh:"n", side:false, head:false, focus:false, say:true };
-  try { Object.assign(P, JSON.parse(localStorage.getItem(PKEY) || "{}")); } catch(e){}
-  if (S.fs && S.fs !== "m" && P.fs === "m") P.fs = S.fs;          // 예전(가이드별) 저장값 옮기기
-  if (S.focus && !P.focus) P.focus = true;
-  const saveP = () => { try { localStorage.setItem(PKEY, JSON.stringify(P)); } catch(e){} };
-  const ICON_SIDE = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></svg>';
-  const ICON_HEAD = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18M9 14.5l3-2.5 3 2.5"/></svg>';
-  const ICON_DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
-  const ICON_X = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
-
-  // 상단 사이드바 접기 버튼 — 탭바 맨 앞
-  (function sideToggle(){
-    const bar = Q("#tabbar") || Q(".tabbar");
-    if (!bar || Q(".lx-sidebtn", bar)) return;
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "lx-sidebtn";
-    b.innerHTML = ICON_SIDE;
-    b.addEventListener("click", () => { P.side = !P.side; saveP(); fold(applyPrefs); });
-    bar.prepend(b);
-    // 헤더 접기 — 접으면 탭바가 사라지고 오른쪽 위에 작은 펼치기 손잡이만 남는다.
-    // 탭바 높이는 00-core 의 ResizeObserver 가 --tabh 로 넘기므로 앵커 · 하위 고정 바 위치가 저절로 따라온다.
-    const hb = document.createElement("button");
-    hb.type = "button"; hb.className = "lx-headbtn";
-    hb.innerHTML = ICON_HEAD;
-    hb.addEventListener("click", () => { P.head = true; saveP(); fold(applyPrefs); });
-    b.after(hb);
-    const handle = document.createElement("button");
-    handle.type = "button"; handle.className = "lx-headhandle";
-    handle.innerHTML = ICON_DOWN + "<span>헤더</span>";
-    handle.title = "헤더 펼치기"; handle.setAttribute("aria-label", "헤더 펼치기");
-    handle.addEventListener("click", () => { P.head = false; saveP(); fold(applyPrefs); });
-    document.body.appendChild(handle);
-  })();
-  // 접고 펼 때 화면이 툭 끊기지 않게 — 지원하면 같은 문서 View Transition 으로 감싼다
-  function fold(fn){
-    const reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (document.startViewTransition && !reduce) document.startViewTransition(fn); else fn();
-  }
-
-  (function tool(){
-    const anchor = Q("#lvFind");
-    if (!anchor) return;
-    const w = document.createElement("div");
-    w.className = "lx-tool";
-    const seg = (k, items) => '<div class="lx-seg" data-k="' + k + '" role="group">' +
-      items.map(([v, label, aria]) => '<button type="button" data-v="' + v + '"' + (aria ? ' aria-label="' + aria + '"' : "") + ">" + label + "</button>").join("") + "</div>";
-    const sw = (k, title, desc) => '<label class="lx-sw"><span><b>' + title + "</b>" + (desc ? "<small>" + desc + "</small>" : "") +
-      '</span><input type="checkbox" data-k="' + k + '"><i aria-hidden="true"></i></label>';
-    w.innerHTML =
-      '<button type="button" class="lx-toolbtn" aria-haspopup="dialog" aria-expanded="false" title="읽기 설정">' +
-        '<span class="aa" aria-hidden="true">Aa</span><span class="lbl">읽기 설정</span></button>' +
-      '<div class="lx-pop" role="dialog" aria-label="읽기 설정">' +
-        '<div class="lx-pop-h"><b>읽기 설정</b><button type="button" class="lx-x" aria-label="닫기">' + ICON_X + "</button></div>" +
-        '<section><h6>글자 크기</h6>' +
-          seg("fs", [["s", '<span style="font-size:12px">가</span>', "작게"], ["m", '<span style="font-size:14px">가</span>', "보통"],
-                     ["l", '<span style="font-size:16.5px">가</span>', "크게"], ["xl", '<span style="font-size:19px">가</span>', "아주 크게"]]) +
-          '<p class="lx-prev">자바는 <b>JVM</b> 위에서 돕니다. 한 줄은 이 정도 크기로 읽힙니다.</p></section>' +
-        '<section><h6>줄 간격</h6>' + seg("lh", [["n", "보통"], ["w", "넓게"]]) + "</section>" +
-        "<section><h6>화면</h6>" +
-          sw("side", "사이드바 접기", "목차를 숨기고 본문을 넓게") +
-          sw("head", "헤더 접기", "위 탭 줄을 숨기고 본문을 높게") +
-          sw("focus", "집중 모드", "가운데 좁은 한 열로만") +
-          sw("say", "읽는 법 표시 (*)", "처음 나오는 용어에 실무 발음") +
-          '<div class="lx-line"><span><b>테마</b></span>' + seg("theme", [["light", "라이트"], ["dark", "다크"]]) + "</div>" +
-        "</section>" +
-        '<section class="lx-progress"><h6>학습 진도 <span class="lx-pct"></span></h6>' +
-          '<div class="lx-pbar"><i></i></div><p class="lx-sum"></p>' +
-          '<button type="button" class="lx-reset" data-k="reset">진도 초기화</button></section>' +
-        '<p class="lx-note">설정은 이 브라우저에 저장되어 모든 가이드에 함께 적용됩니다.</p>' +
-      "</div>";
-    anchor.before(w);
-    const btn = Q(".lx-toolbtn", w);
-    const open = v => {
-      w.classList.toggle("open", v); btn.setAttribute("aria-expanded", v ? "true" : "false");
-      if (v) Q('.lx-seg[data-k="fs"] [aria-pressed="true"]', w)?.focus({ preventScroll:true });
-    };
-    btn.addEventListener("click", e => { e.stopPropagation(); open(!w.classList.contains("open")); });
-    Q(".lx-x", w).addEventListener("click", () => { open(false); btn.focus(); });
-    document.addEventListener("click", e => { if (!w.contains(e.target)) open(false); });
-    document.addEventListener("keydown", e => { if (e.key === "Escape" && w.classList.contains("open")){ open(false); btn.focus(); } });
-    let armed = 0;
-    w.addEventListener("click", e => {
-      const b = e.target.closest("button");
-      if (!b || b === btn || b.classList.contains("lx-x")) return;
-      const k = b.closest("[data-k]")?.dataset.k;
-      if (k === "fs") P.fs = b.dataset.v;
-      else if (k === "lh") P.lh = b.dataset.v;
-      else if (k === "theme"){
-        document.documentElement.setAttribute("data-theme", b.dataset.v);
-        try { localStorage.setItem("lx:theme", b.dataset.v); } catch(err){}
-      }
-      else if (k === "reset"){
-        // 브라우저 확인창 대신 두 번 누르기 — 실수로 지우지 않게
-        if (Date.now() - armed > 3000){ armed = Date.now(); b.textContent = "한 번 더 누르면 지워집니다"; b.classList.add("armed"); return; }
-        S.done = {}; armed = 0; b.textContent = "진도 초기화"; b.classList.remove("armed"); save();
-      }
-      else return;
-      saveP(); applyPrefs(); paint();
-    });
-    w.addEventListener("change", e => {
-      const k = e.target.dataset.k;
-      if (k === "side") P.side = e.target.checked;
-      else if (k === "head") P.head = e.target.checked;
-      else if (k === "say") P.say = e.target.checked;
-      else if (k === "focus") P.focus = e.target.checked;
-      else return;
-      saveP(); fold(applyPrefs);
-    });
-    new MutationObserver(applyPrefs).observe(document.documentElement, { attributes:true, attributeFilter:["data-theme"] });
-  })();
-  // 다른 탭(다른 가이드)에서 바꾼 설정 · 테마를 이 탭에도 바로 반영
-  addEventListener("storage", e => {
-    if (e.key === PKEY){ try { Object.assign(P, JSON.parse(e.newValue || "{}")); } catch(err){} applyPrefs(); }
-    else if (e.key === "lx:theme" && (e.newValue === "light" || e.newValue === "dark")) document.documentElement.setAttribute("data-theme", e.newValue);
-  });
-  function applyPrefs(){
-    const h = document.documentElement;
-    if (P.fs && P.fs !== "m") h.dataset.fs = P.fs; else delete h.dataset.fs;
-    if (P.lh === "w") h.dataset.lh = "w"; else delete h.dataset.lh;
-    h.classList.toggle("lx-side-off", !!P.side);
-    h.classList.toggle("lx-head-off", !!P.head);
-    h.classList.toggle("lx-say-off", P.say === false);
-    const sayIn = Q('.lx-pop input[data-k="say"]'); if (sayIn) sayIn.checked = P.say !== false;
-    // 앵커 여백(--tabh)을 바로 맞춘다 — 00-core 의 ResizeObserver 를 기다리면 창이 가려졌을 때 늦는다
-    const tb = Q("#tabbar") || Q(".tabbar");
-    if (tb) h.style.setProperty("--tabh", (P.head ? 0 : tb.offsetHeight) + "px");
-    const headIn = Q('.lx-pop input[data-k="head"]'); if (headIn) headIn.checked = !!P.head;
-    const hb = Q(".lx-headbtn"); if (hb){ hb.title = "헤더 접기"; hb.setAttribute("aria-label", "헤더 접기"); }
-    h.classList.toggle("lx-focus", !!P.focus);
-    const press = (k, v) => QA('.lx-seg[data-k="' + k + '"] button').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v ? "true" : "false"));
-    press("fs", P.fs || "m"); press("lh", P.lh || "n"); press("theme", h.getAttribute("data-theme") || "dark");
-    const sideIn = Q('.lx-pop input[data-k="side"]'); if (sideIn) sideIn.checked = !!P.side;
-    const focIn = Q('.lx-pop input[data-k="focus"]'); if (focIn) focIn.checked = !!P.focus;
-    const sb = Q(".lx-sidebtn");
-    if (sb){
-      const off = !!(P.side || P.focus);
-      sb.setAttribute("aria-pressed", off ? "true" : "false");
-      sb.title = off ? "사이드바 펼치기" : "사이드바 접기";
-      sb.setAttribute("aria-label", sb.title);
-    }
-  }
+  /* ---------- ②-c 테마 · ③ 읽기 설정 ----------
+     버튼 · 설정 창 · 적용(applyPrefs)은 13-chrome.html 이 한다. 진도가 걸린 두 가지만 훅으로 받는다. */
+  const LX = window.LX || (window.LX = {});
+  const applyPrefs = () => { if (typeof LX.applyPrefs === "function") LX.applyPrefs(); };
+  LX.onReset = () => { S.done = {}; save(); };
+  LX.onPrefs = () => paint();
 
   /* ---------- ③-b 언어 비교 화살표 ----------
      "자바 → 코틀린"처럼 다른 언어와 나란히 비교하는 두 칸 사이에 화살표를 세운다
