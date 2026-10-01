@@ -251,8 +251,18 @@
       });
     }, { passive:true });
   })();
+  // 탭 줄이 가로로 밀릴 때 현재 탭이 가려지지 않게 가운데 쪽으로 (05-nav 가 그룹을 바꾸며 scrollLeft=0 으로 되돌린 뒤에)
+  function revealTab(){
+    const row = Q("#tabrow"), b = row && Q("button.on", row);
+    if (!b || row.scrollWidth <= row.clientWidth) return;
+    const l = b.getBoundingClientRect().left - row.getBoundingClientRect().left + row.scrollLeft, r = l + b.offsetWidth;
+    if (l < row.scrollLeft + 16 || r > row.scrollLeft + row.clientWidth - 24)
+      row.scrollTo({ left:Math.max(0, l - (row.clientWidth - b.offsetWidth) / 2) });
+  }
+  addEventListener("resize", () => setTimeout(revealTab, 0));
   function sideUpdate(byTab){
     if (!side) return;
+    setTimeout(revealTab, 0);              // rAF 는 창이 가려지면 멈추므로 타이머로
     const cur = typeof currentTab === "string" ? currentTab : (Q(".pane.on")?.id || "").replace(/^pane-/, "");
     const curG = tabBtns.find(b => b.dataset.t === cur)?.dataset.g;
     grpBtns.forEach(g => {
@@ -314,12 +324,14 @@
      옵션은 lx:prefs 한 키에 저장해 모든 가이드가 같이 쓴다(진도만 가이드별 st:<가이드>).
      첫 그리기 전 적용은 <head> 스크립트가 하고, 여기서는 바꿀 때만 반영한다. */
   const PKEY = "lx:prefs";
-  let P = { fs:"m", lh:"n", side:false, focus:false };
+  let P = { fs:"m", lh:"n", side:false, head:false, focus:false };
   try { Object.assign(P, JSON.parse(localStorage.getItem(PKEY) || "{}")); } catch(e){}
   if (S.fs && S.fs !== "m" && P.fs === "m") P.fs = S.fs;          // 예전(가이드별) 저장값 옮기기
   if (S.focus && !P.focus) P.focus = true;
   const saveP = () => { try { localStorage.setItem(PKEY, JSON.stringify(P)); } catch(e){} };
   const ICON_SIDE = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></svg>';
+  const ICON_HEAD = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18M9 14.5l3-2.5 3 2.5"/></svg>';
+  const ICON_DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
   const ICON_X = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
   // 상단 사이드바 접기 버튼 — 탭바 맨 앞
@@ -329,9 +341,27 @@
     const b = document.createElement("button");
     b.type = "button"; b.className = "lx-sidebtn";
     b.innerHTML = ICON_SIDE;
-    b.addEventListener("click", () => { P.side = !P.side; saveP(); applyPrefs(); });
+    b.addEventListener("click", () => { P.side = !P.side; saveP(); fold(applyPrefs); });
     bar.prepend(b);
+    // 헤더 접기 — 접으면 탭바가 사라지고 오른쪽 위에 작은 펼치기 손잡이만 남는다.
+    // 탭바 높이는 00-core 의 ResizeObserver 가 --tabh 로 넘기므로 앵커 · 하위 고정 바 위치가 저절로 따라온다.
+    const hb = document.createElement("button");
+    hb.type = "button"; hb.className = "lx-headbtn";
+    hb.innerHTML = ICON_HEAD;
+    hb.addEventListener("click", () => { P.head = true; saveP(); fold(applyPrefs); });
+    b.after(hb);
+    const handle = document.createElement("button");
+    handle.type = "button"; handle.className = "lx-headhandle";
+    handle.innerHTML = ICON_DOWN + "<span>헤더</span>";
+    handle.title = "헤더 펼치기"; handle.setAttribute("aria-label", "헤더 펼치기");
+    handle.addEventListener("click", () => { P.head = false; saveP(); fold(applyPrefs); });
+    document.body.appendChild(handle);
   })();
+  // 접고 펼 때 화면이 툭 끊기지 않게 — 지원하면 같은 문서 View Transition 으로 감싼다
+  function fold(fn){
+    const reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (document.startViewTransition && !reduce) document.startViewTransition(fn); else fn();
+  }
 
   (function tool(){
     const anchor = Q("#lvFind");
@@ -354,6 +384,7 @@
         '<section><h6>줄 간격</h6>' + seg("lh", [["n", "보통"], ["w", "넓게"]]) + "</section>" +
         "<section><h6>화면</h6>" +
           sw("side", "사이드바 접기", "목차를 숨기고 본문을 넓게") +
+          sw("head", "헤더 접기", "위 탭 줄을 숨기고 본문을 높게") +
           sw("focus", "집중 모드", "가운데 좁은 한 열로만") +
           '<div class="lx-line"><span><b>테마</b></span>' + seg("theme", [["light", "라이트"], ["dark", "다크"]]) + "</div>" +
         "</section>" +
@@ -394,17 +425,29 @@
     w.addEventListener("change", e => {
       const k = e.target.dataset.k;
       if (k === "side") P.side = e.target.checked;
+      else if (k === "head") P.head = e.target.checked;
       else if (k === "focus") P.focus = e.target.checked;
       else return;
-      saveP(); applyPrefs();
+      saveP(); fold(applyPrefs);
     });
     new MutationObserver(applyPrefs).observe(document.documentElement, { attributes:true, attributeFilter:["data-theme"] });
   })();
+  // 다른 탭(다른 가이드)에서 바꾼 설정 · 테마를 이 탭에도 바로 반영
+  addEventListener("storage", e => {
+    if (e.key === PKEY){ try { Object.assign(P, JSON.parse(e.newValue || "{}")); } catch(err){} applyPrefs(); }
+    else if (e.key === "lx:theme" && (e.newValue === "light" || e.newValue === "dark")) document.documentElement.setAttribute("data-theme", e.newValue);
+  });
   function applyPrefs(){
     const h = document.documentElement;
     if (P.fs && P.fs !== "m") h.dataset.fs = P.fs; else delete h.dataset.fs;
     if (P.lh === "w") h.dataset.lh = "w"; else delete h.dataset.lh;
     h.classList.toggle("lx-side-off", !!P.side);
+    h.classList.toggle("lx-head-off", !!P.head);
+    // 앵커 여백(--tabh)을 바로 맞춘다 — 00-core 의 ResizeObserver 를 기다리면 창이 가려졌을 때 늦는다
+    const tb = Q("#tabbar") || Q(".tabbar");
+    if (tb) h.style.setProperty("--tabh", (P.head ? 0 : tb.offsetHeight) + "px");
+    const headIn = Q('.lx-pop input[data-k="head"]'); if (headIn) headIn.checked = !!P.head;
+    const hb = Q(".lx-headbtn"); if (hb){ hb.title = "헤더 접기"; hb.setAttribute("aria-label", "헤더 접기"); }
     h.classList.toggle("lx-focus", !!P.focus);
     const press = (k, v) => QA('.lx-seg[data-k="' + k + '"] button').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v ? "true" : "false"));
     press("fs", P.fs || "m"); press("lh", P.lh || "n"); press("theme", h.getAttribute("data-theme") || "dark");
