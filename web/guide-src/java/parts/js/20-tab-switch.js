@@ -54,6 +54,7 @@ const TAB_LABEL = {
   modern:"🧵 최신 Java · 가상 스레드",
   log:"📝 로깅 · 로그",
   ops:"🚑 장애 대응 · 운영",
+  sq:"🥞 스택 · 큐 · 덱",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -103,6 +104,7 @@ const SEC_LV = {
   /* modern */ v01:"b", v02:"i", v03:"a", v04:"i", v05:"a", v06:"a", v07:"i", v08:"i", v09:"b", v10:"a", v11:"a", v12:"i", v13:"a",
   /* log */ lg01:"b", lg02:"b", lg03:"b", lg04:"i", lg05:"i", lg06:"a", lg07:"i", lg08:"i", lg09:"i", lg10:"a", lg11:"i", lg12:"i",
   /* ops */ op01:"b", op02:"i", op03:"i", op04:"a", op05:"i", op06:"i", op07:"i", op08:"i", op09:"i", op10:"b", op11:"a", op12:"b", op13:"b",
+  /* sq */ sq01:"b", sq02:"b", sq03:"b", sq04:"i", sq05:"i", sq06:"i", sq07:"a", sq08:"i", sq09:"a", sq10:"i", sq11:"b", sq12:"i",
 };
 
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 한 줄 번역 (항상 표시) */
@@ -396,6 +398,19 @@ const EZ = {
   op11:"프로파일러는 <b>CPU 시간이 어느 메서드에 갔는지 비율로</b> 보여 줍니다. 플레임 그래프에서는 높이가 아니라 <b>넓은 지붕</b>을 찾습니다.",
   op12:"리뷰에서는 이름 짓기보다 <b>동시성·트랜잭션 경계·예외·로깅·쿼리·타임아웃</b> 여섯 가지를 먼저 봅니다. 전부 테스트로는 안 잡힙니다.",
   op13:"포스트모템은 <b>범인이 아니라 시스템의 빈칸</b>을 찾는 글입니다. 원인을 갈래로 나누고, 액션마다 담당·기한·티켓을 붙입니다.",
+  /* ── sq ── */
+  sq01:"단일 스레드면 <b>ArrayDeque(스택·큐·덱)와 PriorityQueue</b> 두 개로 끝나고, 스레드가 끼면 <b>유한 BlockingQueue</b> 입니다. Stack · LinkedList 큐는 레거시입니다.",
+  sq02:"스택은 <b>Deque&lt;E&gt; st = new ArrayDeque&lt;&gt;()</b> 에 push · pop · peek 만 씁니다. Stack 은 중간을 건드릴 수 있고 <b>순회가 바닥부터</b> 나와서 버려졌습니다.",
+  sq03:"큐는 <b>offer · poll · peek</b> 이 기본입니다. poll 의 <b>null 은 '비었음' 신호</b>라서 ArrayDeque 에는 null 을 넣을 수 없습니다.",
+  sq04:"ArrayDeque 는 <b>배열 + head + tail</b> 입니다. tail 칸은 항상 비어 있고, 꽉 차는 순간 <b>64 미만이면 약 2배, 이상이면 1.5배</b>로 늘립니다. 줄어들지는 않습니다.",
+  sq05:"PriorityQueue 는 <b>맨 앞만 보장하는 최소 힙</b>입니다. 출력하면 정렬 순서가 아니고, 넣은 뒤 값을 바꾸면 <b>재정렬되지 않습니다</b>.",
+  sq06:"스레드 사이 큐는 <b>유한 ArrayBlockingQueue</b>, 종료는 <b>소비자 수만큼의 독약</b>입니다. 스레드 풀은 큐 종류에 따라 max 스레드가 아예 안 쓰이기도 합니다.",
+  sq07:"비동기에서도 <b>버퍼 = 큐</b>입니다. SubmissionPublisher · Reactor Sinks · Spring 작업 큐 · Semaphore 중 <b>어딘가에 상한</b>이 반드시 있어야 합니다.",
+  sq08:"괄호 검사 · 단조 스택 · BFS · 창 최댓값 · 0-1 BFS · undo/redo 는 모두 <b>ArrayDeque 하나</b>로 씁니다. 스택엔 <b>인덱스</b>를, BFS 는 <b>넣을 때</b> 방문 표시.",
+  sq09:"단일 스레드 큐는 <b>ArrayDeque 가 5~9배 빠르고</b>, Deque&lt;Integer&gt; 는 원소당 약 20바이트, LinkedList 는 40바이트입니다. 손 벤치는 쉽게 틀립니다.",
+  sq10:"스택·큐 버그는 <b>예외 없이 틀리는 것</b>이 대부분입니다. 확인과 꺼내기는 한 동작으로, 순회 중엔 removeIf, 덱 비교는 List 로 바꿔서.",
+  sq11:"자바의 특이점은 <b>스택·큐가 한 클래스(ArrayDeque)</b>, <b>PriorityQueue 가 최소 힙</b>, <b>크기 고정 덱이 표준에 없음</b>입니다. C++·Rust 는 최대 힙이 기본입니다.",
+  sq12:"최근 N개는 <b>크기 검사 덱</b>, 레이트 리미터는 <b>타임스탬프 덱</b>, 재시도는 <b>DelayQueue</b>, 깊은 트리는 <b>명시적 스택</b>입니다. 잃으면 안 되는 건 메모리 큐에 두지 않습니다.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -704,6 +719,19 @@ const CAP = {
   op11:["p","JFR 상시 녹화와 async-profiler 로 운영 프로파일을 뜨고, 플레임 그래프에서 핫스팟을 찾아 고친 뒤 같은 조건으로 재측정할 수 있습니다"],
   op12:["p","PR 에서 동시성·트랜잭션 자기 호출·예외 삼키기·비밀 로깅·N+1·타임아웃 누락을 찾아 [필수]/[제안] 코멘트로 고칠 수 있습니다"],
   op13:["p","기록 기반 타임라인과 TTD·TTM 을 남기고, 5 Whys 의 한계를 넘어 기여 요인 트리로 액션 아이템을 도출해 템플릿대로 쓸 수 있습니다"],
+  /* ── sq ── */
+  sq01:["p","새 코드에서 스택·큐·덱·우선순위 큐·스레드 간 큐를 어떤 자바 타입으로 선언할지 즉시 고를 수 있다"],
+  sq02:["p","Stack 을 ArrayDeque 로 바꾸며 순회 순서·get(i)·null·empty() 차이로 생기는 버그를 미리 막을 수 있다"],
+  sq03:["p","add/offer, remove/poll, element/peek 중 상황에 맞는 쌍을 골라 쓰고 O(n) 큐(remove(0))를 리뷰에서 잡아낼 수 있다"],
+  sq04:["s","JDK 소스를 근거로 ArrayDeque 의 연산 비용과 메모리 동작(용량 증가·비축소)을 설명할 수 있다"],
+  sq05:["p","다중 키 비교자, top-k, 지연 삭제 다익스트라를 PriorityQueue 로 올바르게 구현할 수 있다"],
+  sq06:["p","가상 스레드 생산자-소비자를 배압과 깔끔한 종료까지 갖춰 짜고, 스레드 풀의 작업 큐를 근거 있게 고를 수 있다"],
+  sq07:["e","비동기 파이프라인과 Spring @Async 실행기에서 무한 버퍼를 찾아 상한과 배압 전략을 정할 수 있다"],
+  sq08:["s","코딩 테스트와 실무에서 나오는 스택·큐·덱 패턴을 자바 관용구로 바로 작성할 수 있다"],
+  sq09:["e","큐 구현별 비용과 박싱 오버헤드를 근거로 원시 타입 컬렉션 도입 여부를 판단할 수 있다"],
+  sq10:["p","코드 리뷰에서 check-then-act, 순회 중 수정, remove(int) 혼동, equals 미재정의 같은 함정을 찾아낼 수 있다"],
+  sq11:["s","자바 스택·큐 코드를 Kotlin·Python·C#·C++·Rust 로 옮길 때 방향·빈 큐 처리 차이를 놓치지 않는다"],
+  sq12:["p","최근 N개 버퍼·슬라이딩 윈도우 레이트 리미터·지수 백오프 재시도·반복형 트리 순회를 운영 코드로 구현할 수 있다"],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 */
@@ -743,7 +771,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (0 = 10번째 탭) */
-const TAB_ORDER = ["setup","core","adv","modern","boot","flux","data","qdsl","mb","sec"];
+const TAB_ORDER = ["setup","core","sq","adv","modern","boot","flux","data","qdsl","mb"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;
