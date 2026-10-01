@@ -158,6 +158,7 @@ const TAB_KW = {
   hw:"하드웨어 기초 hardware 전기 전압 전류 저항 옴의법칙 ohm 전력 LED 저항계산 3.3V 5V 풀업 풀다운 pullup 플로팅 floating 푸시풀 오픈드레인 open-drain 바운스 디바운스 debounce 5V톨러런트 FT 레벨시프트 MCU 마이크로컨트롤러 마이컴 ATmega328P 아두이노 arduino uno STM32F446RE nucleo cortex-m4 메모리맵 레지스터 register volatile 비트조작 bitmask BSRR RMW 데이터시트 datasheet 레퍼런스매뉴얼 RM0390 에라타 errata 클럭 clock PLL HSI HSE RCC 클럭게이트 인터럽트 interrupt ISR NVIC 벡터테이블 vector table EXTI 타이머 timer PWM 프리스케일러 prescaler ADC 전압분배기 부팅 boot reset_handler 스타트업 startup 링커스크립트 linker script .data .bss map파일 베어메탈 bare metal blinky SysTick 하드웨어기쵸 레지스타 인터럽드",
   stm32:"STM32 stm32 스티엠32 에스티엠 STM32F446RE F446 Nucleo 뉴클레오 Cortex-M 코텍스 cortex m4 M4F M0+ M7 M33 CubeMX 큐브엠엑스 cubemx HAL 할 LL CMSIS 레지스터 register 클럭 clock PLL HSE HSI SYSCLK GPIO EXTI 인터럽트 NVIC SysTick HAL_Delay 콜백 callback weak UART USART DMA IDLE ReceiveToIdle 순환버퍼 타이머 timer PWM 입력캡처 엔코더 encoder ADC 샘플링 Flash 플래시 옵션바이트 RDP HardFault 하드폴트 CFSR 저전력 Stop Standby Sleep 임베디드 펌웨어 firmware 마이컴 MCU",
   sq:"스택 큐 덱 stack queue deque 데크 스텍 큐우 LIFO FIFO 링버퍼 원형버퍼 ring buffer circular buffer 환형버퍼 head tail 마스크 mask 2의거듭제곱 power of two 무한증가인덱스 free-running index 한칸비우기 count 가득참 비어있음 full empty 넘침 overflow wraparound uint32 부호없는 unsigned 정수승격 integer promotion realloc 동적스택 void* memcpy 매크로 DEFINE_STACK _Generic 제네릭 침입형 intrusive list_head container_of offsetof sys/queue.h TAILQ STAILQ 연결큐 꼬리포인터 이진힙 binary heap 우선순위큐 priority queue sift-up sift-down 비교함수 cmp 타이머 소프트웨어타이머 timer wheel 타이머휠 tick 넘침 pthread mutex condvar 조건변수 cond_wait spurious wakeup 가짜깨어남 timedwait CLOCK_MONOTONIC close drain poison pill 독약 생산자 소비자 producer consumer 배압 backpressure stdatomic atomic SPSC lock-free 락프리 memory_order acquire release relaxed volatile ISR 인터럽트 메인루프 찢어진읽기 torn read 배리어 barrier ATOMIC_BLOCK AVR Cortex-M 정적풀 static pool 메모리풀 _Static_assert static_assert 단조스택 단조덱 monotonic 슬라이딩윈도우 BFS 0-1 BFS undo redo 괄호검사 flood fill 명시적스택 재귀 호출스택 call stack 이벤트큐 event queue 상태머신 state machine 명령큐 command parser 로그링 log ring noinit",
+  arch:"대규모 C 구조 아키텍처 architecture 설계 구조 관리 모듈 module 모듈화 캡슐화 정보 은닉 불투명 포인터 opaque pointer opaque type 헤더 header include guard pragma once 전방 선언 forward declaration include-what-you-use IWYU 순환 의존 circular dependency 레이어 layer 계층 HAL BSP 드라이버 driver 디렉터리 구조 폴더 구조 directory layout 모노레포 monorepo boards products CMake 타깃 target PUBLIC PRIVATE INTERFACE 툴체인 toolchain arm-none-eabi CMakePresets 프리셋 링커 스크립트 linker script 설정 관리 config.h ifdef 지옥 Kconfig kconfiglib menuconfig 링크 타임 weak 심볼 static_assert _Static_assert vtable 함수 포인터 인터페이스 의존성 주입 dependency injection 의존성 역전 DIP 테스트 대역 fake mock 에러 처리 error handling goto cleanup assert 리셋 정책 메모리 정책 정적 할당 malloc 금지 메모리 풀 pool 아레나 arena 소유권 ownership 스택 사용량 stack usage 이벤트 큐 event queue 상태 머신 state machine FSM HSM 액티브 오브젝트 active object QP 코딩 표준 MISRA 미스라 CERT C BARR-C clang-tidy cppcheck clang-format 정적 분석 static analysis 코드 리뷰 리눅스 커널 Zephyr 제퍼 ESP-IDF SQLite amalgamation Redis ae 버전 semver 시맨틱 버전 changelog 변경 로그 빌드 정보 git describe 재현 가능한 빌드 대형 펌웨어 large scale firmware 펌웨어 구조 c언어 구조 씨언어",
 };
 
 const FIND_CHIPS = ["포인터 기초","malloc 누수","구조체 패딩","함수 포인터",
@@ -268,6 +269,19 @@ const SEC_KW = {
   sq10:"실수 함정 off-by-one 가득참 int 인덱스 UB realloc 누수 빈 pop 언더플로 마스크 2의거듭제곱 uint8 256 호출스택 call stack 스택오버플로 재귀 ATmega328P count 경쟁 sanitizer",
   sq11:"언어비교 C++ std::stack std::queue priority_queue 최대힙 Java ArrayDeque PriorityQueue Python deque heapq Rust VecDeque BinaryHeap heapless Go chan container/heap 빈 pop UB",
   sq12:"실무 이벤트큐 상태머신 dispatch 명령큐 파서 sscanf UART 로그링 덮어쓰기 noinit 워치독 이동평균 flood fill 명시적스택 재귀제거 ISR 여러개 cli disable_irq xQueueSendFromISR",
+  k01:"규모 증상 전역 변수 만능 헤더 common.h 재빌드 빌드 시간 ifdef 미로 순환 의존 리팩터링 스트랭글러 nm 진단",
+  k02:"모듈 opaque pointer 불투명 포인터 불완전 타입 static 정보 은닉 ring buffer 링 버퍼 접두사 네이밍 _internal.h 공개 헤더 내부 헤더 정적 풀 StaticQueue_t",
+  k03:"자기 완결 헤더 self-contained include guard pragma once include 순서 IncludeCategories 전방 선언 forward declaration include-what-you-use IWYU gcc -H static inline 헤더 정의 금지 순환 include",
+  k04:"레이어 계층 앱 서비스 미들웨어 디바이스 드라이버 BSP HAL CMSIS 레지스터 콜백 callback 함수 포인터 의존 방향 HAL_UART_RxCpltCallback 건너뛰기 역방향 호출",
+  k05:"디렉터리 구조 폴더 구조 project layout boards products core third_party CubeMX 격리 board.h CODEOWNERS 모노레포 include src cli tests",
+  k06:"CMake target_include_directories PUBLIC PRIVATE INTERFACE target_link_libraries 툴체인 파일 toolchain arm-none-eabi-gcc CMakePresets 프리셋 FW_BOARD 링커 스크립트 LINK_DEPENDS print-memory-usage objcopy size map",
+  k07:"config.h fw_config.h ifdef 지옥 #if FEATURE -Wundef 링크 타임 선택 weak 심볼 Kconfig kconfiglib prj.conf sdkconfig IS_ENABLED _Static_assert static_assert #error",
+  k08:"vtable 함수 포인터 구조체 ops 인터페이스 의존성 역전 의존성 주입 composition root 테스트 대역 fake 페이크 Unity container_of 간접 호출 비용 file_operations",
+  k09:"에러 처리 error code fw_err_t enum out 매개변수 goto cleanup assert FW_ASSERT warn_unused_result nodiscard noinit 리셋 원인 RCC_FLAG NVIC_SystemReset 안전 상태 크래시 루프",
+  k10:"메모리 정책 정적 할당 malloc 금지 힙 단편화 pragma GCC poison wrap 메모리 풀 free list 아레나 arena 소유권 ownership create destroy borrow fstack-usage 스택 예산 RAM 예산",
+  k11:"이벤트 기반 event driven 이벤트 큐 슈퍼루프 WFI run-to-completion 상태 머신 FSM 전이 표 HSM 계층형 상태 머신 액티브 오브젝트 active object QP QP/C 액터 모델",
+  k12:"MISRA C 2023 미스라 Mandatory Required Advisory deviation 편차 CERT C BARR-C clang-tidy cppcheck clang-format 정적 분석 static analysis 코드 리뷰 체크리스트 Wconversion ratchet 기준선",
+  k13:"리눅스 커널 Kconfig Kbuild 드라이버 모델 Zephyr devicetree ESP-IDF components REQUIRES SQLite amalgamation Redis ae 이벤트 루프 FreeRTOS portable semver 버전 git describe fw_info changelog 재현 가능한 빌드 SOURCE_DATE_EPOCH",
 };
 
 let FIDX = null;
