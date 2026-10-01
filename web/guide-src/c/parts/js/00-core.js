@@ -159,6 +159,7 @@ const TAB_KW = {
   stm32:"STM32 stm32 스티엠32 에스티엠 STM32F446RE F446 Nucleo 뉴클레오 Cortex-M 코텍스 cortex m4 M4F M0+ M7 M33 CubeMX 큐브엠엑스 cubemx HAL 할 LL CMSIS 레지스터 register 클럭 clock PLL HSE HSI SYSCLK GPIO EXTI 인터럽트 NVIC SysTick HAL_Delay 콜백 callback weak UART USART DMA IDLE ReceiveToIdle 순환버퍼 타이머 timer PWM 입력캡처 엔코더 encoder ADC 샘플링 Flash 플래시 옵션바이트 RDP HardFault 하드폴트 CFSR 저전력 Stop Standby Sleep 임베디드 펌웨어 firmware 마이컴 MCU",
   sq:"스택 큐 덱 stack queue deque 데크 스텍 큐우 LIFO FIFO 링버퍼 원형버퍼 ring buffer circular buffer 환형버퍼 head tail 마스크 mask 2의거듭제곱 power of two 무한증가인덱스 free-running index 한칸비우기 count 가득참 비어있음 full empty 넘침 overflow wraparound uint32 부호없는 unsigned 정수승격 integer promotion realloc 동적스택 void* memcpy 매크로 DEFINE_STACK _Generic 제네릭 침입형 intrusive list_head container_of offsetof sys/queue.h TAILQ STAILQ 연결큐 꼬리포인터 이진힙 binary heap 우선순위큐 priority queue sift-up sift-down 비교함수 cmp 타이머 소프트웨어타이머 timer wheel 타이머휠 tick 넘침 pthread mutex condvar 조건변수 cond_wait spurious wakeup 가짜깨어남 timedwait CLOCK_MONOTONIC close drain poison pill 독약 생산자 소비자 producer consumer 배압 backpressure stdatomic atomic SPSC lock-free 락프리 memory_order acquire release relaxed volatile ISR 인터럽트 메인루프 찢어진읽기 torn read 배리어 barrier ATOMIC_BLOCK AVR Cortex-M 정적풀 static pool 메모리풀 _Static_assert static_assert 단조스택 단조덱 monotonic 슬라이딩윈도우 BFS 0-1 BFS undo redo 괄호검사 flood fill 명시적스택 재귀 호출스택 call stack 이벤트큐 event queue 상태머신 state machine 명령큐 command parser 로그링 log ring noinit",
   arch:"대규모 C 구조 아키텍처 architecture 설계 구조 관리 모듈 module 모듈화 캡슐화 정보 은닉 불투명 포인터 opaque pointer opaque type 헤더 header include guard pragma once 전방 선언 forward declaration include-what-you-use IWYU 순환 의존 circular dependency 레이어 layer 계층 HAL BSP 드라이버 driver 디렉터리 구조 폴더 구조 directory layout 모노레포 monorepo boards products CMake 타깃 target PUBLIC PRIVATE INTERFACE 툴체인 toolchain arm-none-eabi CMakePresets 프리셋 링커 스크립트 linker script 설정 관리 config.h ifdef 지옥 Kconfig kconfiglib menuconfig 링크 타임 weak 심볼 static_assert _Static_assert vtable 함수 포인터 인터페이스 의존성 주입 dependency injection 의존성 역전 DIP 테스트 대역 fake mock 에러 처리 error handling goto cleanup assert 리셋 정책 메모리 정책 정적 할당 malloc 금지 메모리 풀 pool 아레나 arena 소유권 ownership 스택 사용량 stack usage 이벤트 큐 event queue 상태 머신 state machine FSM HSM 액티브 오브젝트 active object QP 코딩 표준 MISRA 미스라 CERT C BARR-C clang-tidy cppcheck clang-format 정적 분석 static analysis 코드 리뷰 리눅스 커널 Zephyr 제퍼 ESP-IDF SQLite amalgamation Redis ae 버전 semver 시맨틱 버전 changelog 변경 로그 빌드 정보 git describe 재현 가능한 빌드 대형 펌웨어 large scale firmware 펌웨어 구조 c언어 구조 씨언어",
+  io:"통신 드라이버 communication driver 프로토콜 protocol UART 유아트 uart 시리얼 serial USART RS-485 rs485 RS485 RS-232 rs232 I2C i2c I²C 아이투씨 TWI SPI spi 에스피아이 CAN can 캔 CAN-FD canfd FDCAN bxCAN USB usb CDC 가상COM 1-Wire 원와이어 프레이밍 framing COBS 콥스 SLIP CRC crc16 CRC-16 CCITT 체크섬 checksum 파서 parser 상태머신 링버퍼 ringbuffer 오버런 overrun ORE DMA IDLE 풀업 pullup 버스락업 클럭스트레칭 BME280 bme280 센서드라이버 SSD1306 ssd1306 OLED 올레드 프레임버퍼 W25Q w25q128 NOR플래시 flash EEPROM littlefs 웨어레벨링 Modbus modbus 모드버스 RTU 로직분석기 logic analyzer sigrok PulseView 펄스뷰 STM32F446RE HAL",
 };
 
 const FIND_CHIPS = ["포인터 기초","malloc 누수","구조체 패딩","함수 포인터",
@@ -282,6 +283,19 @@ const SEC_KW = {
   k11:"이벤트 기반 event driven 이벤트 큐 슈퍼루프 WFI run-to-completion 상태 머신 FSM 전이 표 HSM 계층형 상태 머신 액티브 오브젝트 active object QP QP/C 액터 모델",
   k12:"MISRA C 2023 미스라 Mandatory Required Advisory deviation 편차 CERT C BARR-C clang-tidy cppcheck clang-format 정적 분석 static analysis 코드 리뷰 체크리스트 Wconversion ratchet 기준선",
   k13:"리눅스 커널 Kconfig Kbuild 드라이버 모델 Zephyr devicetree ESP-IDF components REQUIRES SQLite amalgamation Redis ae 이벤트 루프 FreeRTOS portable semver 버전 git describe fw_info changelog 재현 가능한 빌드 SOURCE_DATE_EPOCH",
+  p01:"통신비교 UART RS-485 I2C SPI CAN USB 1-Wire 차동신호 differential 동기 비동기 전이중 반이중 속도 거리 토폴로지 핀충돌 레벨시프터",
+  p02:"UART 프레임 패리티 8E1 WordLength 보레이트오차 오버샘플링 RTS CTS 흐름제어 RS-232 MAX3232 TTL USB-UART CP2102 CH340 RS-485 DE RE TXE TC 종단저항 바이어스",
+  p03:"프레이밍 framing 구분자 길이접두 SLIP COBS 바이트스터핑 CRC-16 CCITT-FALSE XMODEM 0x29B1 테스트벡터 표방식 상태머신 파서 타임아웃 재동기화 시퀀스번호",
+  p04:"링버퍼 ringbuffer SPSC ISR RXNE ORE 오버런 FE NE 프레이밍에러 DMA 순환 IDLE ReceiveToIdle 덮어쓰기 오버런정책 버퍼크기 보레이트 지연 COMPILER_BARRIER",
+  p05:"I2C 오픈드레인 풀업저항 상승시간 정전용량 7비트주소 ACK NACK 리피티드스타트 repeated start 클럭스트레칭 버스락업 9펄스 HAL_I2C_Mem_Read IsDeviceReady FMPI2C",
+  p06:"SPI CPOL CPHA 모드0 모드3 SCK MOSI MISO CS NSS 소프트웨어NSS TransmitReceive DMA BSY 분주 배선길이 링잉 JEDEC 여러장치",
+  p07:"CAN CAN-FD 차동 CANH CANL 우성 열성 비트중재 arbitration 표준ID 확장ID 필터 비트타이밍 샘플포인트 TEC REC error passive bus-off bxCAN FDCAN 트랜시버 종단 120옴",
+  p08:"USB 디바이스 엔드포인트 endpoint 디스크립터 descriptor 열거 enumeration CDC ACM 가상COM VID PID 벌크 인터럽트전송 TinyUSB USB_DEVICE CDC_Transmit_FS 48MHz PLLSAI DTR",
+  p09:"센서드라이버 BME280 레지스터맵 칩ID 0x60 보정데이터 보정식 t_fine 정수연산 함수포인터 인터페이스 버스독립 어댑터 페이크 단위테스트 에러코드 강제모드",
+  p10:"SSD1306 OLED 128x64 프레임버퍼 framebuffer 페이지주소 GDDRAM 제어바이트 0x3C 초기화시퀀스 차지펌프 글꼴 font 5x7 부분갱신 dirty SH1106 번인",
+  p11:"W25Q W25Q128 SPI NOR Flash JEDEC Page Program 섹터지우기 4KB 256바이트 페이지경계 BUSY WREN 마모 웨어레벨링 wear leveling littlefs EEPROM QUADSPI",
+  p12:"Modbus 모드버스 RTU RS-485 슬레이브 마스터 함수코드 03 06 16 보유레지스터 holding register 예외응답 CRC 0xA001 t3.5 t1.5 프레임경계 40001 워드순서",
+  p13:"로직분석기 logic analyzer sigrok PulseView sigrok-cli fx2lafw Saleae 프로토콜디코더 샘플링속도 트리거 오실로스코프 디버그핀 증상 원인 NACK 보레이트불일치",
 };
 
 let FIDX = null;
