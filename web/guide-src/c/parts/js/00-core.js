@@ -155,6 +155,7 @@ const TAB_KW = {
   setup:"설치 툴체인 toolchain 환경설정 개발환경 세팅 msys2 ucrt64 mingw gcc 지씨씨 msvc cl.exe visual studio build tools 빌드툴 wsl wsl2 usbipd 리눅스 맥 macos homebrew vscode vs코드 비주얼스튜디오코드 clangd compile_commands tasks.json launch.json make makefile cmake 씨메이크 ninja 닌자 크로스컴파일 cross compiler avr-gcc avrdude 에이브이알 arm-none-eabi-gcc arm gnu toolchain newlib nano.specs objcopy hex bin elf stm32cubemx cubeide cubeclt cubeprogrammer st-link stlink 스티링크 j-link cmsis-dap openocd pyocd swd swdio swclk platformio 플랫폼아이오 wokwi qemu renode simulide simavr 시뮬레이터 아두이노 uno r3 r4 nucleo f446re 뉴클레오 로직분석기 멀티미터 드라이버 ch340 zadig com포트 udev dialout path 환경변수 not in sync 트러블슈팅",
   avr:"AVR ATmega ATmega328P atmega328p 아트메가 아두이노 Arduino Uno R3 우노 avr-gcc avrgcc avr-libc avrdude 에이브이알 레지스터 register DDRB PORTB PINB GPIO 인터럽트 interrupt ISR 타이머 timer CTC PWM 서보 servo UART USART 시리얼 serial UBRR 보레이트 baud ADC 아날로그 I2C TWI SPI PROGMEM pgm_read_byte EEPROM 퓨즈 fuse 부트로더 bootloader Optiboot ISP USBasp 저전력 sleep 워치독 watchdog millis digitalWrite 펌웨어 마이크로컨트롤러 MCU 임베디드 아두이노없이 아트메가328",
   rtos:"FreeRTOS freertos 프리rtos 프리알토스 RTOS 알토스 실시간 운영체제 실시간OS real-time 태스크 task 스케줄러 scheduler 선점 preemption 타임슬라이스 tick 틱 큐 queue 세마포어 semaphore 세마포 뮤텍스 mutex 뮤텍 우선순위 역전 priority inversion 우선순위 상속 inheritance 인터럽트 ISR FromISR portYIELD_FROM_ISR configMAX_SYSCALL_INTERRUPT_PRIORITY NVIC 태스크 알림 notification 이벤트 그룹 event group 스트림 버퍼 stream buffer 메시지 버퍼 소프트웨어 타이머 timer heap_4 heap_5 정적 할당 스택 오버플로 stack overflow high water mark tickless 저전력 Stop 모드 워치독 IWDG 데드락 deadlock 레이스 race SystemView Tracealyzer CMSIS-RTOS osThreadNew STM32F446RE Nucleo Cortex-M4 xTaskCreate xQueueSend xSemaphoreTake 액티브 오브젝트 Zephyr ThreadX RT-Thread",
+  hw:"하드웨어 기초 hardware 전기 전압 전류 저항 옴의법칙 ohm 전력 LED 저항계산 3.3V 5V 풀업 풀다운 pullup 플로팅 floating 푸시풀 오픈드레인 open-drain 바운스 디바운스 debounce 5V톨러런트 FT 레벨시프트 MCU 마이크로컨트롤러 마이컴 ATmega328P 아두이노 arduino uno STM32F446RE nucleo cortex-m4 메모리맵 레지스터 register volatile 비트조작 bitmask BSRR RMW 데이터시트 datasheet 레퍼런스매뉴얼 RM0390 에라타 errata 클럭 clock PLL HSI HSE RCC 클럭게이트 인터럽트 interrupt ISR NVIC 벡터테이블 vector table EXTI 타이머 timer PWM 프리스케일러 prescaler ADC 전압분배기 부팅 boot reset_handler 스타트업 startup 링커스크립트 linker script .data .bss map파일 베어메탈 bare metal blinky SysTick 하드웨어기쵸 레지스타 인터럽드",
 };
 
 const FIND_CHIPS = ["포인터 기초","malloc 누수","구조체 패딩","함수 포인터",
@@ -227,6 +228,19 @@ const SEC_KW = {
   r11:"데드락 deadlock 잠금 순서 레이스 race condition 크리티컬 섹션 taskENTER_CRITICAL vTaskSuspendAll atomics 런타임 통계 vTaskGetRunTimeStats configGENERATE_RUN_TIME_STATS SystemView Tracealyzer 트레이스 trace CPU 점유율",
   r12:"tickless idle configUSE_TICKLESS_IDLE configEXPECTED_IDLE_TIME_BEFORE_SLEEP configPRE_SLEEP_PROCESSING 저전력 low power Sleep Stop Standby WFI RTC 기상 타이머 WUT vTaskStepTick vPortSuppressTicksAndSleep 기상 지연 배터리",
   r13:"태스크 분할 설계 센서 처리 통신 파이프라인 워치독 IWDG 체크인 감시 태스크 액티브 오브젝트 active object 액터 QP Zephyr ThreadX RT-Thread 베어메탈 비교",
+  h01:"전압 전류 저항 옴의법칙 ohm V=IR 전력 LED 저항계산 330옴 E12 3.3V 5V 멀티미터 배터리수명 콘덴서",
+  h02:"플로팅 floating 풀업 풀다운 pullup PUPDR 푸시풀 오픈드레인 OTYPER 핀전류 absolute maximum 5V톨러런트 FT 레벨시프트 바운스 디바운스",
+  h03:"MCU 마이크로컨트롤러 코어 Flash SRAM 버스 AHB APB 주변장치 하버드 폰노이만 PROGMEM MMU MPU FPU ATmega328P STM32F446",
+  h04:"메모리맵 memory map 레지스터 register volatile 포인터 0x40020014 GPIOA ODR CMSIS GPIO_TypeDef 구조체 오프셋 최적화 -O2 지연루프",
+  h05:"비트조작 bit 마스크 시프트 set clear toggle MODER 필드 RMW 읽기수정쓰기 레이스 BSRR PINx 원자적 atomic PRIMASK ATOMIC_BLOCK 비트밴딩 rc_w1",
+  h06:"데이터시트 datasheet 레퍼런스매뉴얼 reference manual RM0390 PM0214 에라타 errata 리셋값 rw w1c rc_w1 rc_w0 대체기능 alternate function AF7 핀배치",
+  h07:"클럭 clock HSI HSE LSE 크리스털 PLL PLLM PLLN PLLP SYSCLK AHB APB1 APB2 분주 RCC AHB1ENR 클럭게이트 Flash latency 오버드라이브 CLKPR PRR 퓨즈",
+  h08:"인터럽트 interrupt 폴링 polling ISR 벡터테이블 NVIC 우선순위 priority 선점 중첩 EXTI INT0 SYSCFG volatile 원자성 ATOMIC_BLOCK PRIMASK BASEPRI 지연처리 WFI",
+  h09:"타이머 timer 카운터 프리스케일러 prescaler PSC ARR 자동재장전 CTC PWM 듀티 duty CCR OCR1A ICR1 서보 servo 입력캡처 input capture TIM2",
+  h10:"ADC 아날로그 해상도 10비트 12비트 기준전압 Vref LSB 양자화 샘플링시간 노이즈 이동평균 EMA 오버샘플링 전압분배기 divider 배터리전압 정수오버플로",
+  h11:"부팅 boot 리셋 reset Reset_Handler 벡터테이블 초기SP _estack 스타트업 startup SystemInit .data .bss __libc_init_array main BOOT0 부트로더 리셋원인 RCC_CSR MCUSR",
+  h12:"링커스크립트 linker script ld MEMORY SECTIONS .text .rodata .data .bss LMA VMA AT> KEEP 힙 스택 map파일 size nm print-memory-usage 스택칠하기",
+  h13:"베어메탈 bare metal blinky LED 버튼 PA5 PC13 LD2 B1 SysTick SysTick_Config BSRR 디바운스 상태기계 WFI arm-none-eabi-gcc STM32_Programmer_CLI openocd avrdude",
 };
 
 let FIDX = null;
