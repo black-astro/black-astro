@@ -62,6 +62,7 @@ const TAB_LABEL = {
   log:"📝 로깅 · 로그",
   prod:"🏭 실무 프로젝트 · 운영",
   sq:"🥞 스택 · 큐 · 덱",
+  struct:"📁 프로젝트 구조",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -116,6 +117,7 @@ const SEC_LV = {
   /* log */ lg01:"b", lg02:"b", lg03:"b", lg04:"b", lg05:"i", lg06:"i", lg07:"a", lg08:"i", lg09:"i", lg10:"i", lg11:"a", lg12:"i",
   /* prod */ pj01:"b", pj02:"b", pj03:"i", pj04:"b", pj05:"i", pj06:"a", pj07:"i", pj08:"i", pj09:"a", pj10:"i", pj11:"i", pj12:"b", pj13:"i",
   /* sq */ sq01:"b", sq02:"b", sq03:"b", sq04:"i", sq05:"i", sq06:"i", sq07:"a", sq08:"i", sq09:"a", sq10:"i", sq11:"b", sq12:"a",
+  /* struct */ ps01:"b", ps02:"b", ps03:"i", ps04:"i", ps05:"i", ps06:"i", ps07:"b", ps08:"i", ps09:"a", ps10:"a",
 };
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 기초 한 줄 번역 (항상 표시) */
 const EZ = {
@@ -448,6 +450,17 @@ const EZ = {
   sq10:"힙 원소 직접 수정, 작업 큐에 maxlen, empty() 확인 후 get, task_done 누락 — <b>에러 없이 틀리는</b> 실수들입니다.",
   sq11:"Java <b>ArrayDeque ≈ deque</b>, PriorityQueue ≈ heapq+튜플, BlockingQueue ≈ queue.Queue, 채널 ≈ asyncio.Queue.",
   sq12:"최근 N개 로그는 deque(maxlen), 레이트 리미터는 deque, 예약은 heapq, 재시도는 asyncio.Queue, 깊은 순회는 <b>명시적 스택</b>.",
+  /* ── struct ── */
+  ps01:"설정은 <b>pyproject.toml 하나</b>, 코드는 <b>src/패키지/</b>, 테스트는 tests/. 사람 · 진입점 · 배포 단위가 늘 때마다 한 단계씩 나눕니다.",
+  ps02:"문(진입점)은 여러 개여도 <b>약속(공개 API)은 __init__.py 한 곳</b>. 구현은 _밑줄 모듈에 숨깁니다.",
+  ps03:"<b>api → services → repositories → models</b> 한 방향. Depends · HTTPException 은 api 층에만, 영역이 늘면 같은 파일들을 기능 폴더로.",
+  ps04:"<b>config/</b> 는 설정과 URL 을 묶기만, 업무는 <b>앱 하나 = 개념 하나</b>. settings 는 base · dev · prod 로 나눕니다.",
+  ps05:"<b>data/raw 는 읽기 전용</b>, 반복되는 코드는 src 로, 노트북은 부르기만. 결과 폴더는 명령 한 줄로 다시 만들 수 있게.",
+  ps06:"Qt 를 import 하는 파일은 <b>ui/</b> 에만, 로직은 <b>core/</b> 에. 리소스는 패키지 안에 두고 importlib.resources 로 찾습니다.",
+  ps07:"os.environ 을 읽는 파일은 <b>저장소 전체에서 하나</b>. .env 는 커밋하지 않고 .env.example 만 커밋합니다.",
+  ps08:"테스트 파일 위치는 <b>src 를 거울처럼</b>, 픽스처는 쓰는 곳에서 <b>가장 가까운 conftest.py</b> 에.",
+  ps09:"<b>apps/*</b> 는 배포 단위, <b>packages/*</b> 는 공유 코드, core 는 내부 의존 0. 화살표는 한 방향, 락파일은 하나.",
+  ps10:"만드는 것이 출발 구조를, 사람 · 진입점 · 배포 단위가 다음 단계를 정합니다. 정한 import 방향은 <b>CI 에 걸어</b> 지킵니다.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -808,6 +821,17 @@ const CAP = {
   sq10:["p","코드 리뷰에서 스택·큐 관련 경쟁 조건·데이터 유실·교착·성능 함정을 찾아 고칠 수 있다"],
   sq11:["s","자바·C#·C++·Rust·Go 의 스택·큐 코드를 파이썬으로 옮기며 힙 방향·빈 상태 동작 차이를 바로잡을 수 있다"],
   sq12:["p","로그 버퍼·레이트 리미터·재시도 작업 큐·스케줄러·묶음 전송·명시적 스택 순회를 운영 코드로 만들 수 있다"],
+  /* ── struct ── */
+  ps01:["p","새 저장소를 src 레이아웃으로 세우고, 지금 프로젝트가 다음 구조 단계로 넘어갈 신호인지 판단할 수 있다"],
+  ps02:["p","[project.scripts] · __main__.py 로 CLI 를 만들고, 내부를 옮겨도 사용자 코드가 안 깨지게 공개 API 를 재노출할 수 있다"],
+  ps03:["p","FastAPI 서비스를 층별 또는 기능별 폴더로 나누고 Depends 와 업무 로직의 자리를 정할 수 있다"],
+  ps04:["p","Django 앱 경계를 정하고 settings 를 환경별로 나누며, 커진 앱의 로직을 services · selectors 로 모을 수 있다"],
+  ps05:["p","데이터 프로젝트를 raw·interim·processed · notebooks · src 로 나누고 코드·락파일·데이터·설정·시드를 고정해 결과를 재현할 수 있다"],
+  ps06:["p","PySide6 앱을 ui/core/resources 로 나눠 로직을 창 없이 테스트하고, PyInstaller 로 묶어도 리소스 경로가 깨지지 않게 할 수 있다"],
+  ps07:["p","설정을 pydantic-settings 모듈 하나로 모으고 개발·CI·운영별 값의 출처를 나눌 수 있다"],
+  ps08:["p","tests/unit · integration 으로 나누고 conftest 계층과 마커로 빠른 테스트와 느린 테스트를 갈라 돌릴 수 있다"],
+  ps09:["e","uv 워크스페이스로 여러 배포 단위가 공유 코드를 쓰게 나누고, 패키지 사이 순환과 선언 누락을 막을 수 있다"],
+  ps10:["e","프로젝트 유형별 출발 구조를 고르고 import-linter · ruff · 단독 import 테스트로 구조 규칙을 CI 에서 강제할 수 있다"],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 (표시 필터는 없음 — 항상 전부 보입니다) */
@@ -848,7 +872,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (11번째부터 — 웹 기초·테스트·대규모 트래픽·전문가은 단축키 없음) */
-const TAB_ORDER = ["setup","python","sq","uv","pandas","numpy","img","web","db","test"];
+const TAB_ORDER = ["setup","python","sq","uv","struct","pandas","numpy","img","web","db"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;
