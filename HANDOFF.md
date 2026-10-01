@@ -44,41 +44,61 @@
 - **셸에서 `node -e` 로 JS 를 고칠 때 `\b` `\s` 가 망가집니다** — `\b` 가 백스페이스(0x08)로 파일에 박혔습니다.
   정규식이 들어가는 수정은 Write/Edit 도구나 스크립트 파일로 하세요.
 
-## 🔜 다음 작업 — UX 개편 2차 (나머지 그룹 탭)
+## ✅ 공통 틀 · 테마 — 열 가이드 전부 완료 (2026-10-01)
 
-대상: **server · db · cs · csharp · cpp · rust** (6개 가이드). 1차와 같은 순서로 하면 됩니다.
+**전체 틀·디자인·테마는 공통입니다. 가이드별로 다르게 만들지 마세요.** (사용자 결정)
+- 레이아웃: 사이드바 3단(그룹 → 탭 → 목차) · PC 전폭 · 가이드 목록 10개 **고정 순서**(Java → Kotlin → Python → JS·TS →
+  C# → C++ → Rust → DB → 서버기술 → CS) + 현재 가이드 표시 · 상단 사이드바 접기 버튼
+- 테마: 강조색 하나 · 다크/라이트 (`shared/css/08-theme.css`) — 가이드 고유 css 의 다크 전제 색은 §8.4~8.10 에서 보정
+- 읽기 설정(Aa): 글자 크기 · 줄 간격 · 사이드바 접기 · 집중 모드 · 테마 · 진도. 옵션은 `lx:prefs`, 테마는 `lx:theme`,
+  가이드 목록 열림은 `lx:guides` — 전부 전 가이드 공통이고 `<head>` 스크립트가 첫 그리기 전에 적용
+- 가이드 사이 이동: 문서 간 View Transition(사이드바·탭바 고정, 본문 교차 페이드) + 링크 호버 시 다음 가이드 미리 렌더(Speculation Rules)
+- 모바일: 1080 이하 사이드바·접기 버튼 없음, 480 이하 상단 바 한 줄(검색·목차·Aa 아이콘만), 읽기 설정은 아래 시트
+- 새 가이드를 만들면: parts.json 에 `shared/css/07-study.css` · `shared/css/08-theme.css` · `shared/js/07-study.js`,
+  `00-head.html` 에 java 와 같은 선적용 스크립트. 그 다음 라이트 대비 측정(아래 §검증).
 
-### 0. ✅ 해결됨 — 사라진 탭 4개 복구 (커밋 d88047f 계열, 2026-10-01)
-커밋 c6a8a38(9/11)의 일괄 그림 삽입 중 cpp `15-jvm` · rust `11-web` 삭제, cs `13-ml` · db `13-olap` 0바이트가 됐고,
-CI 빌드가 멈춰 **9/22~10/1 배포가 전부 실패**(사이트가 9/9 버전에 머묾)했다. `c6a8a38^` 내용으로 복구 → 배포 성공 확인.
-같은 커밋이 전 가이드에 **중복 그림**을 넣었다 — 1차 네 가이드는 정리했고, 나머지 6개에 **73건** 남음(2단계에서 `dupdiag --fix`).
-**교훈:** 배포 후 `gh run list --workflow deploy-portfolio.yml` 로 성공까지 확인할 것. verify 는 로컬 결과물만 본다.
+## 🔜 다음 작업 — 언어별 시각화 모델 · 설명 개선 (콘텐츠)
 
-### 1. 학습 레이어 · 테마 붙이기 (가이드당 10분)
-- parts.json 에서 `shared/css/06-diag.css` 뒤에 `shared/css/07-study.css`, `shared/css/08-theme.css`,
-  `js/99-init.js` 앞에 `shared/js/07-study.js`. (네 가이드 parts.json 참고)
-- `parts/00-head.html` 의 `<meta charset>` 바로 뒤에 테마 선적용 스크립트 복사 (java 00-head.html 참고 — 없으면 라이트에서 깜빡임)
-- **라이트 대비 측정 필수** — 가이드 고유 css(06-*.css)에 다크 전제 밝은 글자색이 있다(python 표 칸, kotlin 플랫폼 배지가 그랬음).
-  측정 방법: 전환 애니메이션을 끈 상태(`*{transition:none!important}`)에서 각 탭 텍스트의 글자색과 실제 바탕(조상 배경 합성)의
-  대비를 재고 3.2 미만을 모아 `08-theme.css` §8.7 에 라이트 규칙 추가. 다이어그램은 `window.lxInkFix(svg)` 호출 후 같은 방식.
-  ⚠ 창이 가려진 탭에서는 타이머·IntersectionObserver 가 멈추니 기다리는 측정은 시간 초과난다.
-- db·cs·server 는 `90-demos.js` 가 커서 클래스 충돌 확인: `grep -rn "lx-" <가이드>/parts` 가 0 이어야 함.
+틀은 끝났으니 남은 일은 **각 가이드 안의 그림과 설명의 질**입니다. 1차(java·python·kotlin·js-ts)와 같은 방식으로:
+가이드당 에이전트 1~2개, 지침은 1차에 쓴 "다이어그램 개편 공통 지침"(아래 요약)을 그대로.
 
-### 2. 다이어그램
+### 1. 먼저 — 중복 그림 정리 (c6a8a38 이 넣은 것)
 ```bash
-node guide-src/tools/dupdiag.mjs server db cs csharp cpp rust          # 중복 먼저 (있으면 --fix)
-node guide-src/tools/diagaudit.mjs guide-src/<가이드>/parts/panes --summary
+node guide-src/tools/dupdiag.mjs server db cs csharp cpp      # server 18 · db 16 · cs 17 · csharp 11 · cpp 11 (rust 0)
+node guide-src/tools/dupdiag.mjs <가이드> --fix                # <div> 균형으로 지움 — 지운 뒤 브라우저에서 pane 별 섹션 수 대조
 ```
-박스형 60% 넘는 탭마다 3~4개를 다른 모델로. 1차에 쓴 에이전트 지침이 그대로 쓸 만합니다
-(가이드당 에이전트 1개, python 처럼 탭이 많으면 둘로 — 동시에 5~9개까지 문제없었음).
+1차에서는 지우는 대신 두 번째 사본을 **다른 모델로 다시 그려** 그림 수를 지켰습니다(이게 더 좋음). 시간이 없으면 --fix.
 
-### 3. 실무 탭 (선택)
-1차처럼 가이드마다 "현업 투입" 탭 하나 — 후보: server 🚑 장애 대응 런북 · db 🩺 운영 DBA 체크리스트 ·
-csharp 🧪 테스트·배포 · cpp/rust 🐞 디버깅·프로파일링. AUTHORING.md + reg.mjs 절차 그대로.
+### 2. 정렬 · 모션 결함 (diagaudit) — 현재
+| server 6 | db 24 | cs 19 | csharp 16 | cpp 5 | rust 9 |
+|---|---|---|---|---|---|
+db·cs 는 PK(흐름 점이 선을 벗어남)가 대부분입니다.
 
-### 4. 검증 순서 (1차에서 확정)
+### 3. 박스형 70% 넘는 탭 (같은 모양 반복) — 탭마다 3~4개를 카탈로그 모델로
+- **db** 13탭 전부 88~100% — 실행계획은 tree/waterfall, 인덱스는 tree, 격리 수준은 matrix, 복제는 seq, 용량은 bar
+- **server** 15탭 78~100% — TLS 핸드셰이크 seq, LB 알고리즘 bar, Kafka 파티션 matrix, k8s 스케줄링 tree
+- **cs** 01·03·04·06·09·11 (89~100%) — 자료구조는 memory/tree/graph, 아키텍처는 layer/pipe, 분산은 seq/state
+- **csharp** 01·05·08 (100%) + 7탭 78~89%
+- **cpp** 03·05·07 (100%) + 8탭 71~92% · **rust** 01·05 (100%) + 10탭 71~86%
+
+### 4. 설명 개선 (그림 다음)
+1차 실무 탭처럼 "실무에 바로 투입"되도록 — 각 탭에 운영·장애·리뷰 체크리스트가 없으면 추가, 버전 표기 2026 기준으로 점검.
+후보 실무 탭: server 🚑 장애 대응 런북 · db 🩺 운영 DBA 체크리스트 · csharp 🧪 테스트·배포 · cpp/rust 🐞 디버깅·프로파일링.
+
+### 다이어그램 개편 공통 지침 (요약 — 에이전트에게 그대로)
+- 먼저 읽기: `.claude/skills/diag/SKILL.md` → `DIAGRAM-STYLE.md` → `DIAGRAM-MODELS.md` → `shared/css/06-diag.css` §7 · `shared/models/*.html`
+- 다시 그린 그림은 원래 `.cap` 문장을 그대로 전할 것, 수치는 근거 있는 대표값(그림에 "예시" 명시), aria-label 다시 쓰기
+- 흐름 점·점선 흐름은 "무언가 이동한다"가 뜻일 때만. 화살표 끝은 도형 4px 바깥, 박스 글자는 중심, 같은 줄 y·간격 균등
+- 위치가 값인 그림(간트·막대)은 `<svg data-align="free">`. 레인 배경은 `class="lane*"`(검사에서 제외됨)
+- **흰 글자를 인라인으로 박지 말 것**(`style="fill:#e8f0ff"`) — 라이트 테마에서 inkFix 가 보정하긴 하지만 클래스(`.val` 등)를 쓰는 게 맞다
+- 금지: `web/public` 직접 수정 · 동시에 빌드 · shared 파일 수정 · bash heredoc 으로 큰 HTML · `node -e` 로 정규식 수정( 가 0x08 로 박힘)
+
+### 검증 순서
 fixcut → svgcheck → diagaudit → dupdiag → integrity → build → verify → smoke →
-**브라우저: 전 탭 switchTab + pane/navset 개수 대조 + 고아 섹션 0 + getBBox OVER/LAP 실측 + 데모 버튼 전부 클릭 오류 0**
+**브라우저: 두 테마에서 전 탭 switchTab + pane/navset 개수 대조 + 고아 섹션 0 + getBBox OVER/LAP 실측 + 데모 버튼 전부 클릭 오류 0**
++ **라이트 대비**: 전환 애니메이션을 끄고(`*{transition:none!important}`) 본문 글자 대비 3.2 미만, 다이어그램은 `window.lxInkFix(svg)` 후 3 미만을 모은다.
++ **모바일**: 390 · 768 폭 iframe 으로 상단 바 높이(한 줄 ≈ 58px) · 가로 넘침 없음 확인. 창이 가려진 탭에서는 타이머·IO 가 멈추니 기다리는 측정은 피할 것.
++ 푸시 후 `gh run list --workflow deploy-portfolio.yml` 로 **배포 성공까지** 확인.
 
 ### 1차에서 남긴 것
 - kotlin 04-boot 박스형 71%(7개), js-ts 08-native 78% · 16-next 79% · 17-edge 73% — 아직 손 안 댄 탭

@@ -134,10 +134,11 @@
       b.classList.toggle("tab-done", !!c && c.n > 0 && c.d === c.n);
     });
     sideUpdate(byTab);
-    const tot = secs.length, dn = secs.filter(s => S.done[s.id]).length;
+    const tot = secs.length, dn = secs.filter(s => S.done[s.id]).length, pct = tot ? Math.round(dn / tot * 100) : 0;
     const sum = Q(".lx-pop .lx-sum");
-    if (sum) sum.innerHTML = "전체 진도 <b>" + dn + " / " + tot + "</b> 섹션 (" + (tot ? Math.round(dn / tot * 100) : 0) + "%)" +
-      "<br>기록은 이 브라우저에만 남습니다.";
+    if (sum) sum.innerHTML = "이 가이드 <b>" + dn + " / " + tot + "</b> 섹션을 읽었습니다.";
+    const pc = Q(".lx-pop .lx-pct"); if (pc) pc.textContent = pct + "%";
+    const pb = Q(".lx-pop .lx-pbar i"); if (pb) pb.style.transform = "scaleX(" + (tot ? dn / tot : 0) + ")";
   }
 
   /* ---------- ②-b 사이드바: 그룹 → 탭 → 목차 3단 ----------
@@ -176,15 +177,49 @@
       });
       g.after(list);
     });
-    // 다른 가이드 9개는 접어 둔다 — 열림 상태는 기억
+    // 가이드 목록 — 열 가이드를 어디서 봐도 같은 순서로, 지금 보는 가이드도 그 자리에 표시.
+    // (예전엔 가이드마다 "나를 뺀 9개"를 제각각 순서로 나열해 위치가 매번 달랐다.) 접힘 상태는 공통으로 기억.
     const more = Q("nav.side .navmore");
     if (more && !more.closest("details")){
+      const GUIDES = [["java","☕","Java"],["kotlin","🟠","Kotlin"],["python","🐍","Python"],["js-ts","🟨","JS · TS"],
+        ["csharp","🟣","C# · Unity"],["cpp","🔵","C++"],["rust","🦀","Rust"],["db","🗄️","DB"],["server","🌐","서버기술"],["cs","🎓","CS 기술"]];
+      const titles = {};
+      QA("a", more).forEach(a => { const m = a.getAttribute("href").match(/([\w-]+)-web/); if (m) titles[m[1]] = a.title; });
+      more.innerHTML = "";
+      for (const [g, ic, name] of GUIDES){
+        const cur = g === GUIDE;
+        const el = document.createElement(cur ? "span" : "a");
+        el.className = "dlbtn" + (cur ? " cur" : "");
+        if (cur){ el.setAttribute("aria-current", "page"); el.title = "지금 보고 있는 가이드"; }
+        else { el.href = "../" + g + "-web/"; el.title = titles[g] || name + " 가이드로 이동"; }
+        el.innerHTML = '<span class="gi" aria-hidden="true">' + ic + '</span><span class="gn"></span>';
+        Q(".gn", el).textContent = name;
+        more.appendChild(el);
+      }
+      // 미리 불러오기 — 가이드 링크에 마우스를 올리거나 누르기 시작하면 다음 가이드를 미리 렌더해 둔다.
+      // (eagerness moderate = 호버 약 200ms). 지원 안 하면 prefetch 링크로 HTML 만이라도 받아 둔다.
+      if (HTMLScriptElement.supports && HTMLScriptElement.supports("speculationrules")){
+        const sr = document.createElement("script");
+        sr.type = "speculationrules";
+        sr.textContent = JSON.stringify({ prerender:[{ where:{ selector_matches:"nav.side .navmore a.dlbtn" }, eagerness:"moderate" }] });
+        document.head.appendChild(sr);
+      } else {
+        more.addEventListener("pointerover", e => {
+          const a = e.target.closest("a.dlbtn");
+          if (!a || a.dataset.pf) return;
+          a.dataset.pf = "1";
+          const l = document.createElement("link"); l.rel = "prefetch"; l.href = a.href; document.head.appendChild(l);
+        });
+      }
+      const curName = (GUIDES.find(x => x[0] === GUIDE) || [, , ""])[2];
       const d = document.createElement("details");
       d.className = "lx-more";
-      d.innerHTML = '<summary>다른 가이드 <span>' + QA("a", more).length + "</span></summary>";
+      d.innerHTML = "<summary>가이드 <b></b><span>" + GUIDES.length + "</span></summary>";
+      Q("summary b", d).textContent = curName;
       more.before(d); d.appendChild(more);
-      d.open = !!S.moreOpen;
-      d.addEventListener("toggle", () => { S.moreOpen = d.open; save(); });
+      let open = false; try { open = localStorage.getItem("lx:guides") === "1"; } catch(e){}
+      d.open = open;
+      d.addEventListener("toggle", () => { try { localStorage.setItem("lx:guides", d.open ? "1" : "0"); } catch(e){} });
     }
     // 목차 머리 — 지금 어느 탭의 목차인지
     QA("nav.side .navset[data-nav]").forEach(n => {
@@ -274,51 +309,114 @@
     });
   })();
 
-  /* ---------- ③ 읽기 도구 ---------- */
+  /* ---------- ③ 읽기 설정 (전 가이드 공통) ----------
+     글자 크기 · 줄 간격 · 사이드바 접기 · 집중 모드 · 테마 · 진도.
+     옵션은 lx:prefs 한 키에 저장해 모든 가이드가 같이 쓴다(진도만 가이드별 st:<가이드>).
+     첫 그리기 전 적용은 <head> 스크립트가 하고, 여기서는 바꿀 때만 반영한다. */
+  const PKEY = "lx:prefs";
+  let P = { fs:"m", lh:"n", side:false, focus:false };
+  try { Object.assign(P, JSON.parse(localStorage.getItem(PKEY) || "{}")); } catch(e){}
+  if (S.fs && S.fs !== "m" && P.fs === "m") P.fs = S.fs;          // 예전(가이드별) 저장값 옮기기
+  if (S.focus && !P.focus) P.focus = true;
+  const saveP = () => { try { localStorage.setItem(PKEY, JSON.stringify(P)); } catch(e){} };
+  const ICON_SIDE = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></svg>';
+  const ICON_X = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+
+  // 상단 사이드바 접기 버튼 — 탭바 맨 앞
+  (function sideToggle(){
+    const bar = Q("#tabbar") || Q(".tabbar");
+    if (!bar || Q(".lx-sidebtn", bar)) return;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "lx-sidebtn";
+    b.innerHTML = ICON_SIDE;
+    b.addEventListener("click", () => { P.side = !P.side; saveP(); applyPrefs(); });
+    bar.prepend(b);
+  })();
+
   (function tool(){
     const anchor = Q("#lvFind");
     if (!anchor) return;
     const w = document.createElement("div");
     w.className = "lx-tool";
+    const seg = (k, items) => '<div class="lx-seg" data-k="' + k + '" role="group">' +
+      items.map(([v, label, aria]) => '<button type="button" data-v="' + v + '"' + (aria ? ' aria-label="' + aria + '"' : "") + ">" + label + "</button>").join("") + "</div>";
+    const sw = (k, title, desc) => '<label class="lx-sw"><span><b>' + title + "</b>" + (desc ? "<small>" + desc + "</small>" : "") +
+      '</span><input type="checkbox" data-k="' + k + '"><i aria-hidden="true"></i></label>';
     w.innerHTML =
-      '<button type="button" aria-haspopup="true" aria-expanded="false" title="읽기 설정 (글자 크기 · 집중 모드)">' +
-        '<span aria-hidden="true">Aa</span><span class="lbl">읽기</span></button>' +
+      '<button type="button" class="lx-toolbtn" aria-haspopup="dialog" aria-expanded="false" title="읽기 설정">' +
+        '<span class="aa" aria-hidden="true">Aa</span><span class="lbl">읽기 설정</span></button>' +
       '<div class="lx-pop" role="dialog" aria-label="읽기 설정">' +
-        '<h6>글자 크기</h6><div class="lx-seg" data-k="fs">' +
-          '<button type="button" data-v="s">작게</button><button type="button" data-v="m">보통</button>' +
-          '<button type="button" data-v="l">크게</button><button type="button" data-v="xl">아주 크게</button></div>' +
-        '<div class="lx-row"><span>집중 모드 <small style="color:var(--dim)">(사이드바 숨김)</small></span>' +
-          '<button type="button" data-k="focus">켜기</button></div>' +
-        '<div class="lx-row"><span>진도 기록</span><button type="button" data-k="reset">초기화</button></div>' +
-        '<div class="lx-sum"></div>' +
+        '<div class="lx-pop-h"><b>읽기 설정</b><button type="button" class="lx-x" aria-label="닫기">' + ICON_X + "</button></div>" +
+        '<section><h6>글자 크기</h6>' +
+          seg("fs", [["s", '<span style="font-size:12px">가</span>', "작게"], ["m", '<span style="font-size:14px">가</span>', "보통"],
+                     ["l", '<span style="font-size:16.5px">가</span>', "크게"], ["xl", '<span style="font-size:19px">가</span>', "아주 크게"]]) +
+          '<p class="lx-prev">자바는 <b>JVM</b> 위에서 돕니다. 한 줄은 이 정도 크기로 읽힙니다.</p></section>' +
+        '<section><h6>줄 간격</h6>' + seg("lh", [["n", "보통"], ["w", "넓게"]]) + "</section>" +
+        "<section><h6>화면</h6>" +
+          sw("side", "사이드바 접기", "목차를 숨기고 본문을 넓게") +
+          sw("focus", "집중 모드", "가운데 좁은 한 열로만") +
+          '<div class="lx-line"><span><b>테마</b></span>' + seg("theme", [["light", "라이트"], ["dark", "다크"]]) + "</div>" +
+        "</section>" +
+        '<section class="lx-progress"><h6>학습 진도 <span class="lx-pct"></span></h6>' +
+          '<div class="lx-pbar"><i></i></div><p class="lx-sum"></p>' +
+          '<button type="button" class="lx-reset" data-k="reset">진도 초기화</button></section>' +
+        '<p class="lx-note">설정은 이 브라우저에 저장되어 모든 가이드에 함께 적용됩니다.</p>' +
       "</div>";
     anchor.before(w);
-    const btn = w.firstElementChild;
-    const open = v => { w.classList.toggle("open", v); btn.setAttribute("aria-expanded", v ? "true" : "false"); };
+    const btn = Q(".lx-toolbtn", w);
+    const open = v => {
+      w.classList.toggle("open", v); btn.setAttribute("aria-expanded", v ? "true" : "false");
+      if (v) Q('.lx-seg[data-k="fs"] [aria-pressed="true"]', w)?.focus({ preventScroll:true });
+    };
     btn.addEventListener("click", e => { e.stopPropagation(); open(!w.classList.contains("open")); });
+    Q(".lx-x", w).addEventListener("click", () => { open(false); btn.focus(); });
     document.addEventListener("click", e => { if (!w.contains(e.target)) open(false); });
-    document.addEventListener("keydown", e => { if (e.key === "Escape") open(false); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && w.classList.contains("open")){ open(false); btn.focus(); } });
     let armed = 0;
     w.addEventListener("click", e => {
       const b = e.target.closest("button");
-      if (!b || b === btn) return;
-      if (b.closest('[data-k="fs"]')){ S.fs = b.dataset.v; }
-      else if (b.dataset.k === "focus"){ S.focus = !S.focus; }
-      else if (b.dataset.k === "reset"){
-        // 브라우저 확인창 대신 두 번 누르기 — 실수로 지우지 않게
-        if (Date.now() - armed > 3000){ armed = Date.now(); b.textContent = "한 번 더 누르면 지움"; return; }
-        S.done = {}; armed = 0; b.textContent = "초기화";
+      if (!b || b === btn || b.classList.contains("lx-x")) return;
+      const k = b.closest("[data-k]")?.dataset.k;
+      if (k === "fs") P.fs = b.dataset.v;
+      else if (k === "lh") P.lh = b.dataset.v;
+      else if (k === "theme"){
+        document.documentElement.setAttribute("data-theme", b.dataset.v);
+        try { localStorage.setItem("lx:theme", b.dataset.v); } catch(err){}
       }
-      save(); applyPrefs(); paint();
+      else if (k === "reset"){
+        // 브라우저 확인창 대신 두 번 누르기 — 실수로 지우지 않게
+        if (Date.now() - armed > 3000){ armed = Date.now(); b.textContent = "한 번 더 누르면 지워집니다"; b.classList.add("armed"); return; }
+        S.done = {}; armed = 0; b.textContent = "진도 초기화"; b.classList.remove("armed"); save();
+      }
+      else return;
+      saveP(); applyPrefs(); paint();
     });
+    w.addEventListener("change", e => {
+      const k = e.target.dataset.k;
+      if (k === "side") P.side = e.target.checked;
+      else if (k === "focus") P.focus = e.target.checked;
+      else return;
+      saveP(); applyPrefs();
+    });
+    new MutationObserver(applyPrefs).observe(document.documentElement, { attributes:true, attributeFilter:["data-theme"] });
   })();
   function applyPrefs(){
     const h = document.documentElement;
-    if (S.fs && S.fs !== "m") h.dataset.fs = S.fs; else delete h.dataset.fs;
-    h.classList.toggle("lx-focus", !!S.focus);
-    QA('.lx-seg[data-k="fs"] button').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === (S.fs || "m") ? "true" : "false"));
-    const f = Q('.lx-pop [data-k="focus"]');
-    if (f){ f.setAttribute("aria-pressed", S.focus ? "true" : "false"); f.textContent = S.focus ? "켜짐" : "켜기"; }
+    if (P.fs && P.fs !== "m") h.dataset.fs = P.fs; else delete h.dataset.fs;
+    if (P.lh === "w") h.dataset.lh = "w"; else delete h.dataset.lh;
+    h.classList.toggle("lx-side-off", !!P.side);
+    h.classList.toggle("lx-focus", !!P.focus);
+    const press = (k, v) => QA('.lx-seg[data-k="' + k + '"] button').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v ? "true" : "false"));
+    press("fs", P.fs || "m"); press("lh", P.lh || "n"); press("theme", h.getAttribute("data-theme") || "dark");
+    const sideIn = Q('.lx-pop input[data-k="side"]'); if (sideIn) sideIn.checked = !!P.side;
+    const focIn = Q('.lx-pop input[data-k="focus"]'); if (focIn) focIn.checked = !!P.focus;
+    const sb = Q(".lx-sidebtn");
+    if (sb){
+      const off = !!(P.side || P.focus);
+      sb.setAttribute("aria-pressed", off ? "true" : "false");
+      sb.title = off ? "사이드바 펼치기" : "사이드바 접기";
+      sb.setAttribute("aria-label", sb.title);
+    }
   }
 
   /* ---------- ④ 이어 읽기 ---------- */
