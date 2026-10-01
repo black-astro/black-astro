@@ -133,10 +133,109 @@
       const c = byTab[b.dataset.t];
       b.classList.toggle("tab-done", !!c && c.n > 0 && c.d === c.n);
     });
+    sideUpdate(byTab);
     const tot = secs.length, dn = secs.filter(s => S.done[s.id]).length;
     const sum = Q(".lx-pop .lx-sum");
     if (sum) sum.innerHTML = "전체 진도 <b>" + dn + " / " + tot + "</b> 섹션 (" + (tot ? Math.round(dn / tot * 100) : 0) + "%)" +
       "<br>기록은 이 브라우저에만 남습니다.";
+  }
+
+  /* ---------- ②-b 사이드바: 그룹 → 탭 → 목차 3단 ----------
+     예전 사이드바는 그룹 버튼(영문 대문자 10.5px + 이모지)만 있고 그 안의 탭은
+     마우스를 올려야 보였다. 지금 그룹만 펼쳐 탭을 이름 · 진도와 함께 세우고,
+     다른 가이드 링크는 접는다(목차를 아래로 밀어내던 9칸). 마크업은 그대로 두고 여기서 입힌다. */
+  const side = Q("nav.side");
+  const grpBtns = QA("nav.side .navgrp button[data-g]");
+  const tabBtns = QA(".tabbar .tabrow button[data-t]");
+  const tabName = b => { const c = b.cloneNode(true); c.querySelectorAll(".ic, .k").forEach(x => x.remove()); return c.textContent.trim(); };
+  const tabIcon = b => (Q(".ic", b)?.textContent || "").trim();
+  (function sideNav(){
+    if (!side || !grpBtns.length) return;
+    side.classList.add("lx-side");
+    grpBtns.forEach(g => {
+      // "언어 · JAVA" → 큰 글자 "언어" + 작은 보조 "JAVA" (대문자 라벨은 읽기 어렵다)
+      const lb = Q(".lb", g);
+      if (lb && !Q(".lx-g1", g)){
+        const [a, ...rest] = lb.textContent.split(" · ");
+        lb.innerHTML = '<span class="lx-g1"></span><span class="lx-g2"></span>';
+        Q(".lx-g1", lb).textContent = a;
+        // JAVA → Java, ADVANCED → Advanced 처럼 읽기 쉽게. GUI · API 같은 약어(3자 이하)는 그대로
+        Q(".lx-g2", lb).textContent = rest.join(" · ").split(" ").map(w => w.length <= 3 ? w : w[0] + w.slice(1).toLowerCase()).join(" ");
+      }
+      g.insertAdjacentHTML("beforeend", '<span class="lx-gp" aria-hidden="true"></span>');
+      const list = document.createElement("div");
+      list.className = "lx-tabs"; list.dataset.g = g.dataset.g;
+      tabBtns.filter(b => b.dataset.g === g.dataset.g).forEach(b => {
+        const t = document.createElement("button");
+        t.type = "button"; t.dataset.t = b.dataset.t;
+        t.innerHTML = '<span class="ic"></span><span class="nm"></span><span class="fr"></span>';
+        Q(".ic", t).textContent = tabIcon(b);
+        Q(".nm", t).textContent = tabName(b);
+        t.addEventListener("click", () => switchTab(b.dataset.t));
+        list.appendChild(t);
+      });
+      g.after(list);
+    });
+    // 다른 가이드 9개는 접어 둔다 — 열림 상태는 기억
+    const more = Q("nav.side .navmore");
+    if (more && !more.closest("details")){
+      const d = document.createElement("details");
+      d.className = "lx-more";
+      d.innerHTML = '<summary>다른 가이드 <span>' + QA("a", more).length + "</span></summary>";
+      more.before(d); d.appendChild(more);
+      d.open = !!S.moreOpen;
+      d.addEventListener("toggle", () => { S.moreOpen = d.open; save(); });
+    }
+    // 목차 머리 — 지금 어느 탭의 목차인지
+    QA("nav.side .navset[data-nav]").forEach(n => {
+      const b = tabBtns.find(x => x.dataset.t === n.dataset.nav);
+      const p = Q(".lx-prog", n);
+      if (!b || !p || Q(".lx-tochd", n)) return;
+      const h = document.createElement("div");
+      h.className = "lx-tochd";
+      h.textContent = "목차 · " + tabName(b);
+      p.before(h);
+    });
+    // 탭이 바뀔 때 펼친 그룹 · 현재 탭 갱신
+    const orig = window.switchTab;
+    if (typeof orig === "function" && !orig.lxWrapped){
+      window.switchTab = function(name){ const r = orig.apply(this, arguments); paint(); return r; };
+      window.switchTab.lxWrapped = true;
+    }
+    // 읽는 섹션이 사이드바 밖으로 나가면 따라간다 (사이드바만 스크롤 · 본문은 그대로)
+    let tk = 0;
+    addEventListener("scroll", () => {
+      if (tk) return;
+      tk = requestAnimationFrame(() => {
+        tk = 0;
+        const a = Q("nav.side .navset.on a.on");
+        if (!a) return;
+        const sr = side.getBoundingClientRect(), ar = a.getBoundingClientRect();
+        if (ar.top < sr.top + 90 || ar.bottom > sr.bottom - 40)
+          side.scrollTop += ar.top - (sr.top + sr.height * 0.4);
+      });
+    }, { passive:true });
+  })();
+  function sideUpdate(byTab){
+    if (!side) return;
+    const cur = typeof currentTab === "string" ? currentTab : (Q(".pane.on")?.id || "").replace(/^pane-/, "");
+    const curG = tabBtns.find(b => b.dataset.t === cur)?.dataset.g;
+    grpBtns.forEach(g => {
+      let n = 0, d = 0;
+      tabBtns.filter(b => b.dataset.g === g.dataset.g).forEach(b => { const c = byTab[b.dataset.t]; if (c){ n += c.n; d += c.d; } });
+      g.style.setProperty("--gp", n ? d / n : 0);
+      g.title = (g.title.split(" — ")[0]) + (n ? " — 진도 " + d + " / " + n : "");
+    });
+    QA("nav.side .lx-tabs").forEach(l => l.classList.toggle("open", l.dataset.g === curG));
+    QA("nav.side .lx-tabs button").forEach(t => {
+      const c = byTab[t.dataset.t] || { n:0, d:0 };
+      const on = t.dataset.t === cur;
+      t.classList.toggle("on", on);
+      t.setAttribute("aria-current", on ? "page" : "false");
+      t.classList.toggle("full", c.n > 0 && c.d === c.n);
+      Q(".fr", t).textContent = c.d ? c.d + "/" + c.n : c.n;
+      t.title = Q(".nm", t).textContent + " — " + c.n + "섹션" + (c.d ? ", " + c.d + "개 읽음" : "");
+    });
   }
 
   /* ---------- ③ 읽기 도구 ---------- */
