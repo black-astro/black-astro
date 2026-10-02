@@ -63,6 +63,8 @@ const TAB_LABEL = {
   prod:"🏭 실무 프로젝트 · 운영",
   sq:"🥞 스택 · 큐 · 덱",
   struct:"📁 프로젝트 구조",
+  adv:"🚀 Python 중고급",
+  types:"🏷️ 타입 힌트",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -118,6 +120,8 @@ const SEC_LV = {
   /* prod */ pj01:"b", pj02:"b", pj03:"i", pj04:"b", pj05:"i", pj06:"a", pj07:"i", pj08:"i", pj09:"a", pj10:"i", pj11:"i", pj12:"b", pj13:"i",
   /* sq */ sq01:"b", sq02:"b", sq03:"b", sq04:"i", sq05:"i", sq06:"i", sq07:"a", sq08:"i", sq09:"a", sq10:"i", sq11:"b", sq12:"a",
   /* struct */ ps01:"b", ps02:"b", ps03:"i", ps04:"i", ps05:"i", ps06:"i", ps07:"b", ps08:"i", ps09:"a", ps10:"a",
+  /* adv */ pa01:"b", pa02:"b", pa03:"b", pa04:"i", pa05:"i", pa06:"i", pa07:"i", pa08:"i", pa09:"i", pa10:"i", pa11:"a", pa12:"i", pa13:"i", pa14:"i", pa15:"b", pa16:"b",
+  /* types */ ty01:"b", ty02:"b", ty03:"i", ty04:"i", ty05:"i", ty06:"a", ty07:"a", ty08:"a", ty09:"i", ty10:"i", ty11:"a", ty12:"a", ty13:"i", ty14:"b",
 };
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 기초 한 줄 번역 (항상 표시) */
 const EZ = {
@@ -461,6 +465,38 @@ const EZ = {
   ps08:"테스트 파일 위치는 <b>src 를 거울처럼</b>, 픽스처는 쓰는 곳에서 <b>가장 가까운 conftest.py</b> 에.",
   ps09:"<b>apps/*</b> 는 배포 단위, <b>packages/*</b> 는 공유 코드, core 는 내부 의존 0. 화살표는 한 방향, 락파일은 하나.",
   ps10:"만드는 것이 출발 구조를, 사람 · 진입점 · 배포 단위가 다음 단계를 정합니다. 정한 import 방향은 <b>CI 에 걸어</b> 지킵니다.",
+  /* ── adv ── */
+  pa01:"이 탭은 <b>라이브러리 코드를 막힘 없이 읽고</b>, 내 클래스가 for · with · == · len() 에 그대로 끼게 만드는 단계입니다.",
+  pa02:"언패킹은 <b>꺼내기</b>, := 는 <b>계산하며 이름 붙이기</b>, match 는 <b>모양으로 분기하며 꺼내기</b>입니다.",
+  pa03:"인덱스 계산이 보이면 부품을 찾으세요 — enumerate · zip(strict) · pairwise · batched · <b>정렬 후</b> groupby.",
+  pa04:"for 는 <b>iter() + next() + StopIteration</b> 의 약속이고, 제너레이터는 그 약속을 yield 로 자동 구현합니다.",
+  pa05:"이름은 <b>L→E→G→B</b> 순서로 찾고 대입은 늘 L 에 생깁니다. 클로저는 <b>값이 아니라 변수</b>를 기억합니다.",
+  pa06:"@d 는 <b>f = d(f)</b>. 인자를 받으면 <b>설정 → 함수 → 호출</b> 세 겹, 언제나 functools.wraps, 쌓으면 아래부터 감쌉니다.",
+  pa07:"“짝이 맞아야 하는 두 동작”은 with 로. @contextmanager 는 <b>try/finally 필수</b>, 개수가 가변이면 ExitStack.",
+  pa08:"__repr__ 는 항상, __eq__ 를 쓰면 __hash__ 도, 모르는 타입엔 <b>NotImplemented</b>. 컨테이너는 collections.abc 상속.",
+  pa09:"속성은 열어 두고 규칙이 생기면 @property, 대체 생성자는 @classmethod, <b>super() 는 MRO 의 다음 칸</b>입니다.",
+  pa10:"내부 데이터는 @dataclass(가변 기본값은 default_factory), 값 객체는 frozen, 상속하면 kw_only, 상태값은 StrEnum.",
+  pa11:"기본은 덕 타이핑, 구현 강제는 ABC, 구현체 자동 수집은 <b>__init_subclass__</b>, 같은 검증을 여러 필드에 쓰려면 디스크립터.",
+  pa12:"앱 예외는 <b>뿌리 하나 + code · retryable</b>, 층을 넘길 땐 raise … from e, 동시 작업 실패는 except* 로 종류별로.",
+  pa13:"결과 기억은 @cache(메서드엔 금지), 인자 고정은 partial, 타입별 분기는 singledispatch, 정렬 키는 itemgetter.",
+  pa14:"I/O 는 <b>스레드 풀 또는 asyncio</b>, CPU 는 <b>프로세스 풀</b>, 공유 상태는 만들지 말고 결과를 반환합니다.",
+  pa15:"인덱스 루프 · 문자열 += · 루프 안 in list · naive datetime 넷만 없애도 리뷰 지적의 절반이 사라집니다.",
+  pa16:"열두 함정은 전부 <b>조용히 틀립니다</b>. 리뷰 때 이 표를 옆에 두고 ruff 의 B · A · RUF 규칙을 켜세요.",
+  /* ── types ── */
+  ty01:"타입 힌트는 <b>실행에는 영향이 없고</b> 검사기 · 에디터 · pydantic 이 읽습니다. 검사기를 CI 에 걸어야 의미가 생깁니다.",
+  ty02:"list[int] · dict[str, int] · tuple[int, ...] · <b>X | None</b>. 옛 List · Optional 은 ruff UP 규칙으로 자동 변환됩니다.",
+  ty03:"인자는 collections.abc 의 <b>필요한 최소 능력</b>(Iterable · Sequence · Mapping)으로, 반환은 list · dict 처럼 구체 타입으로.",
+  ty04:"is None · isinstance · 리터럴 비교 · 조기 return 이 타입을 좁힙니다. 빠진 경우는 <b>assert_never</b>, 내 검사 함수는 TypeIs.",
+  ty05:"허용 값 목록은 Literal, 재대입 금지는 Final, 클래스 공유 값은 ClassVar, 라이브러리용 메모는 <b>Annotated</b>.",
+  ty06:"단순 콜백은 Callable[[A], R], 키워드가 중요하면 __call__ Protocol, 데코레이터는 <b>[**P, R]</b>, 인자 주입은 Concatenate.",
+  ty07:"입력과 출력 타입을 같은 변수로 묶으면 제네릭, 필요한 능력은 [T: Bound], 자기 자신을 돌려주면 <b>Self</b>.",
+  ty08:"list · dict 는 <b>불변</b>이라 list[Dog] ≠ list[Animal]. 수정하지 않는다면 Sequence · Mapping 으로 받으면 해결됩니다.",
+  ty09:"“이 메서드만 있으면 된다”는 Protocol — <b>쓰는 쪽 모듈에 정의</b>하고 테스트 가짜 객체도 그대로 넘깁니다.",
+  ty10:"JSON 은 TypedDict(NotRequired · ReadOnly), 옵션 키워드는 **kw: Unpack[Opts], 외부 입력은 <b>pydantic 으로 검증한 뒤</b> 믿습니다.",
+  ty11:"반환이 인자에 따라 다르면 @overload, 같은 int 를 구분하려면 NewType, “아무거나”는 <b>Any 가 아니라 object</b>.",
+  ty12:"3.14 는 어노테이션을 <b>읽을 때 계산</b>해 따옴표 없이 앞선 참조가 됩니다. 순환 import 는 TYPE_CHECKING 으로 끊습니다.",
+  ty13:"느슨하게 켜고 <b>새 모듈부터 strict</b>, # type: ignore[코드] 는 코드와 함께, 모르겠으면 reveal_type.",
+  ty14:"X | None 처리 · 넓은 인자 · TypedDict · Protocol 네 가지만 습관이 되면 버그의 큰 덩어리가 <b>실행 전에</b> 사라집니다.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -832,6 +868,38 @@ const CAP = {
   ps08:["p","tests/unit · integration 으로 나누고 conftest 계층과 마커로 빠른 테스트와 느린 테스트를 갈라 돌릴 수 있다"],
   ps09:["e","uv 워크스페이스로 여러 배포 단위가 공유 코드를 쓰게 나누고, 패키지 사이 순환과 선언 누락을 막을 수 있다"],
   ps10:["e","프로젝트 유형별 출발 구조를 고르고 import-linter · ruff · 단독 import 테스트로 구조 규칙을 CI 에서 강제할 수 있다"],
+  /* ── adv ── */
+  pa01:["s","파이썬 중고급 문법이 각각 무엇을 해결하는지 알고, 라이브러리 코드에서 낯선 문법을 만나면 어느 섹션을 볼지 바로 찾을 수 있습니다"],
+  pa02:["p","별표 언패킹 · 바다코끼리 연산자 · match 의 리터럴/시퀀스/매핑/클래스 패턴과 가드로 JSON 이벤트 라우팅을 짧고 안전하게 작성할 수 있습니다"],
+  pa03:["p","중첩 컴프리헨션을 읽고 itertools 12종(chain · islice · pairwise · batched · groupby · product 등)으로 반복 로직을 인덱스 없이 조립할 수 있습니다"],
+  pa04:["p","__iter__ · __next__ 를 직접 구현하거나 제너레이터로 대체하고, yield from · send · 제너레이터 파이프라인으로 대용량 파일을 일정한 메모리로 처리할 수 있습니다"],
+  pa05:["p","UnboundLocalError 와 람다 루프 버그의 원인을 설명하고 nonlocal · 기본 인자 고정 · partial 로 고칠 수 있으며, 클로저와 클래스 중 알맞은 쪽을 고를 수 있습니다"],
+  pa06:["p","wraps 를 갖춘 타이머 · 재시도 데코레이터, 괄호 선택형 데코레이터, 클래스 등록 데코레이터, async 함수용 데코레이터를 직접 만들 수 있습니다"],
+  pa07:["p","__enter__/__exit__ 와 @contextmanager 로 타이머 · 트랜잭션 · 작업 디렉터리 매니저를 만들고, ExitStack 으로 가변 개수 자원을 예외에도 안전하게 정리할 수 있습니다"],
+  pa08:["p","Money 같은 값 객체에 표시 · 비교 · 해시 · 산술 연산자를 올바르게 정의하고, NotImplemented 와 오른쪽 연산의 동작을 설명할 수 있습니다"],
+  pa09:["p","property 로 검증 속성을, classmethod 로 대체 생성자를 만들고, __slots__ 로 대량 객체 메모리를 줄이며 협력적 다중 상속과 믹스인의 호출 순서를 설명할 수 있습니다"],
+  pa10:["p","dataclass 의 field · __post_init__ · frozen · slots · kw_only 를 상황에 맞게 쓰고, NamedTuple · TypedDict · pydantic · Enum 중 알맞은 도구를 고를 수 있습니다"],
+  pa11:["p","ABC 로 구현 누락을 생성 시점에 막고, __init_subclass__ 로 if/elif 없는 플러그인 레지스트리를 만들며, __getattr__ 위임과 __set_name__ 디스크립터를 쓸 수 있습니다"],
+  pa12:["p","앱 전용 예외 계층을 설계하고 raise from · add_note 로 원인과 맥락을 보존하며, TaskGroup 의 ExceptionGroup 을 except* 로 나눠 처리할 수 있습니다"],
+  pa13:["p","cache · lru_cache · cached_property 의 함정을 피해 쓰고, partial · Placeholder · singledispatch · itemgetter · attrgetter 로 람다와 if 분기를 줄일 수 있습니다"],
+  pa14:["p","작업 종류에 맞춰 ThreadPoolExecutor · ProcessPoolExecutor · asyncio(TaskGroup · Semaphore · to_thread)를 고르고, 락 · 큐 · ContextVar 로 공유 상태를 안전하게 다룰 수 있습니다"],
+  pa15:["p","unpythonic 코드를 관용구로 바꾸고, 자료구조별 연산 비용으로 숨은 O(n²) 를 찾아 timeit · cProfile 로 개선을 확인할 수 있습니다"],
+  pa16:["p","가변 기본 인자 · 늦은 바인딩 · 순회 중 수정 · 리스트 곱셈 · 해시 누락 등 조용한 버그를 리뷰에서 짚고 ruff 규칙으로 자동 차단할 수 있습니다"],
+  /* ── types ── */
+  ty01:["s","타입 힌트가 실행기 · 검사기 · 에디터 · 라이브러리에서 각각 어떻게 쓰이는지 설명하고, 기존 코드에 어디부터 힌트를 달지 정할 수 있습니다"],
+  ty02:["p","3.10+ 표기로 변수 · 함수 · 컬렉션 · None 가능 값을 적고, 옛 typing 표기를 읽고 변환하며, None 반환과 예외 중 알맞은 설계를 고를 수 있습니다"],
+  ty03:["p","함수가 실제로 쓰는 능력에 맞춰 Iterable · Collection · Sequence · Mapping 을 고르고, 제너레이터 반환 타입을 Iterator · Generator 로 적을 수 있습니다"],
+  ty04:["p","검사기가 인정하는 좁히기 패턴으로 cast 없이 Union 을 다루고, assert_never 로 빠진 분기를 찾으며 TypeIs 로 사용자 정의 타입 가드를 만들 수 있습니다"],
+  ty05:["p","옵션 문자열을 Literal 로 제한하고 Final · ClassVar · @final 로 상수와 상속을 통제하며, Annotated 로 pydantic · FastAPI 검증 규칙을 타입에 붙일 수 있습니다"],
+  ty06:["p","콜백 · async 핸들러 타입을 Callable 과 __call__ Protocol 로 적고, ParamSpec · Concatenate 로 시그니처를 보존하거나 인자를 주입하는 데코레이터를 타입 안전하게 만들 수 있습니다"],
+  ty07:["p","3.12 제네릭 문법으로 제네릭 함수 · 클래스 · 타입 별칭을 만들고 bound · 제한 목록 · 기본값으로 타입 변수를 제약하며 Self 로 체이닝 API 를 적을 수 있습니다"],
+  ty08:["e","공변 · 반공변 · 불변의 이유를 설명하고 \"list is invariant\" 오류를 Sequence 로 해결하며, 내 제네릭 클래스의 변성을 의도대로 설계할 수 있습니다"],
+  ty09:["p","Protocol 로 구조적 인터페이스를 정의해 외부 클래스와 테스트 가짜 객체를 받고, ABC 와의 차이와 runtime_checkable 의 한계를 설명할 수 있습니다"],
+  ty10:["p","TypedDict 로 JSON 모양을 타입으로 적고 Unpack 으로 **kwargs 를 검사하며, TypedDict · NamedTuple · dataclass · pydantic 중 경계에 맞는 것을 고를 수 있습니다"],
+  ty11:["p","overload 로 인자별 반환 타입을 정확히 적고 NewType 으로 ID 혼동을 막으며, Any 의 전염을 경계에서 끊고 override · deprecated · LiteralString 을 쓸 수 있습니다"],
+  ty12:["e","3.14 어노테이션 지연 평가와 from __future__ import annotations 의 차이를 설명하고, TYPE_CHECKING 으로 순환 import 를 끊으며 get_type_hints · annotationlib 로 힌트를 읽는 도구를 만들 수 있습니다"],
+  ty13:["p","pyproject 에 mypy · pyright 를 설정해 모듈별 strict 로 점진 도입하고, 흔한 오류 메시지 15종의 원인과 해결을 바로 짚을 수 있습니다"],
+  ty14:["s","타입 힌트 문법 전체를 한 장으로 찾아 쓰고, Java · Kotlin · TypeScript 의 타입 개념을 파이썬 대응물로 바로 옮길 수 있습니다"],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 (표시 필터는 없음 — 항상 전부 보입니다) */
@@ -872,7 +940,7 @@ const CAP = {
 })();
 
 /* 키보드 1~9·0 으로 탭 전환 (11번째부터 — 웹 기초·테스트·대규모 트래픽·전문가은 단축키 없음) */
-const TAB_ORDER = ["setup","python","sq","uv","struct","pandas","numpy","img","web","db"];
+const TAB_ORDER = ["setup","python","adv","types","sq","uv","struct","pandas","numpy","img"];
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   const t = e.target.tagName;
