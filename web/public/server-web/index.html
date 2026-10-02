@@ -6327,7 +6327,9 @@ server {
     ssl_session_timeout 1d;
     ssl_session_tickets off;
 
-    ssl_stapling on;                             # OCSP 스테이플링 (인증서 검증 가속)
+    # OCSP 스테이플링 — ※ Let's Encrypt 는 2025년에 OCSP 를 종료해
+    #   LE 인증서에는 OCSP 주소가 없습니다 (켜 두면 경고만 남고 무시됨)
+    ssl_stapling on;
     ssl_stapling_verify on;
     resolver 1.1.1.1 8.8.8.8 valid=300s;
 
@@ -6835,9 +6837,9 @@ server {
         proxy_pass http://app;
     }
 
-    # 헬스체크는 제외
+    # 헬스체크는 제외 — limit_req 에는 off 가 없습니다.
+    # return 은 rewrite 단계에서 끝나므로 limit_req(preaccess 단계)까지 가지 않습니다
     location = /health {
-        limit_req off;
         return 200 "ok\n";
     }
 }</code></pre>
@@ -6946,7 +6948,8 @@ server {
     proxy_read_timeout 3600s;
 
     chunked_transfer_encoding off;
-    add_header X-Accel-Buffering no;      # 앱에서 이 헤더를 보내도 됩니다
+    # add_header X-Accel-Buffering no;  ← 효과 없음: 브라우저에게 보낼 뿐입니다.
+    #   이 헤더는 앱(업스트림)이 응답에 실어 보내야 Nginx 가 읽고 버퍼링을 끕니다
 }</code></pre>
   <div class="note tip rv d1">
     <b><code>X-Accel-Buffering: no</code></b> —
@@ -7105,8 +7108,9 @@ http {
   <pre class="code rv d1" data-lang="bash"><code>#!/usr/bin/env bash
 set -euo pipefail
 
-# 1) 백업
-sudo cp -a /etc/nginx /etc/nginx.bak.$(date +%F-%H%M)
+# 1) 백업 — ★ 설정을 고치기 '전에' 따로 떠 둡니다
+#    (고친 뒤에 백업하면 되돌릴 대상도 새 설정이 됩니다)
+#    sudo cp -a /etc/nginx /etc/nginx.bak.$(date +%F-%H%M)
 
 # 2) 문법 검사
 sudo nginx -t
@@ -7123,8 +7127,8 @@ curl -fsS -o /dev/null -w "%{http_code}\n" https://example.com/health
 
   <div class="note warn rv d2">
     <b><code>nginx -t</code> 가 통과해도 안심할 수는 없습니다.</b>
-    문법 검사는 <b>파일 존재 여부·논리적 오류</b>까지 잡지 못합니다.
-    <br>· 인증서 파일 경로 오타 → reload 시 실패
+    문법 검사는 <b>실제 동작·논리적 오류</b>까지 잡지 못합니다.
+    <br>· 인증서 파일은 읽히지만 만료·도메인 불일치 → 브라우저 경고
     <br>· <code>proxy_pass</code> 주소 오타 → 502
     <br>· location 우선순위 착각 → 엉뚱한 응답
     <br><b>반영 후 실제 요청으로 확인</b>하는 단계를 반드시 넣으세요.
@@ -7215,8 +7219,10 @@ sudo a2enconf php8.3-fpm</code></pre>
     MinSpareThreads         25
     MaxSpareThreads         75
     ThreadsPerChild         25
-    MaxRequestWorkers      400      # ★ 동시에 처리할 최대 요청 수
-    MaxConnectionsPerChild   0      # 0 = 무제한 (메모리 누수가 있으면 10000 등으로)
+    # ★ 동시에 처리할 최대 요청 수
+    MaxRequestWorkers      400
+    # 0 = 무제한 (메모리 누수가 있으면 10000 등으로)
+    MaxConnectionsPerChild   0
 &lt;/IfModule&gt;</code></pre>
   <div class="note warn rv d2">
     <b><code>MaxRequestWorkers</code> 를 무작정 올리지 마세요.</b>
@@ -7377,12 +7383,14 @@ Listen 80
 IncludeOptional mods-enabled/*.load
 IncludeOptional mods-enabled/*.conf
 IncludeOptional conf-enabled/*.conf
-IncludeOptional sites-enabled/*.conf      # ← 사이트 설정을 여기서 읽습니다
+# ← 사이트 설정을 여기서 읽습니다
+IncludeOptional sites-enabled/*.conf
 
 User  ${APACHE_RUN_USER}
 Group ${APACHE_RUN_GROUP}
 
-ServerTokens Prod                         # 응답에 버전을 노출하지 않음
+# 응답에 버전을 노출하지 않음
+ServerTokens Prod
 ServerSignature Off
 Timeout 60
 KeepAlive On
@@ -7392,7 +7400,8 @@ KeepAliveTimeout 5
 &lt;Directory /&gt;
     Options FollowSymLinks
     AllowOverride None
-    Require all denied                    # 기본은 전부 차단 (안전한 기본값)
+    # 기본은 전부 차단 (안전한 기본값)
+    Require all denied
 &lt;/Directory&gt;
 
 &lt;Directory /var/www/&gt;
@@ -7533,7 +7542,8 @@ sudo apachectl -S                  # 어떤 VirtualHost 가 어떤 순서인지 
     DocumentRoot /var/www/spa
     &lt;Directory /var/www/spa&gt;
         Options -Indexes +FollowSymLinks
-        AllowOverride None                # ★ .htaccess 를 끄면 눈에 띄게 빨라집니다
+        # ★ .htaccess 를 끄면 눈에 띄게 빨라집니다
+        AllowOverride None
         Require all granted
 
         # 클라이언트 라우팅 폴백
@@ -7544,7 +7554,8 @@ sudo apachectl -S                  # 어떤 VirtualHost 가 어떤 순서인지 
     &lt;/Directory&gt;
 
     # ── 2) API 프록시 (/api 접두사를 떼고 넘김)
-    ProxyPreserveHost On                  # 백엔드에 원래 Host 를 전달
+    # 백엔드에 원래 Host 를 전달
+    ProxyPreserveHost On
     ProxyPass        /api/ http://127.0.0.1:8080/
     ProxyPassReverse /api/ http://127.0.0.1:8080/
 
@@ -7559,7 +7570,7 @@ sudo apachectl -S                  # 어떤 VirtualHost 가 어떤 순서인지 
     RewriteCond %{HTTP:Upgrade} =websocket [NC]
     RewriteRule ^/ws/(.*) ws://127.0.0.1:8080/ws/$1 [P,L]
 
-    # ── 4) 프록시 타임아웃 — 기본 300초는 대개 너무 깁니다
+    # ── 4) 프록시 타임아웃 — 기본은 Timeout 값(2.4 기본 60초)을 따릅니다. 백엔드에 맞게 명시하세요
     ProxyTimeout 60
 
     ErrorLog  ${APACHE_LOG_DIR}/example-error.log
@@ -7640,8 +7651,10 @@ sudo apachectl -S                  # 어떤 VirtualHost 가 어떤 순서인지 
 
   <pre class="code rv d1" data-lang="conf"><code># 파일 시스템 기준 — 실제 폴더에 적용
 &lt;Directory /var/www/example&gt;
-    Options -Indexes +FollowSymLinks      # 디렉터리 목록 금지
-    AllowOverride None                    # .htaccess 무시 (성능·보안)
+    # 디렉터리 목록 금지
+    Options -Indexes +FollowSymLinks
+    # .htaccess 무시 (성능·보안)
+    AllowOverride None
     Require all granted
 &lt;/Directory&gt;
 
@@ -8025,15 +8038,17 @@ LogLevel warn rewrite:trace3
 &lt;VirtualHost *:80&gt;
     ServerName example.com
 
-    ProxyPreserveHost On                  # 원래 Host 헤더를 유지
-    ProxyRequests Off                     # ★ 정방향 프록시 금지 (켜면 오픈 프록시가 됩니다)
+    # 원래 Host 헤더를 유지
+    ProxyPreserveHost On
+    # ★ 정방향 프록시 금지 (켜면 오픈 프록시가 됩니다)
+    ProxyRequests Off
 
     ProxyPass        /api/ http://127.0.0.1:8080/api/
     ProxyPassReverse /api/ http://127.0.0.1:8080/api/
 
     # 실제 IP 전달
     RequestHeader set X-Forwarded-Proto "http"
-    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
+    RequestHeader set X-Real-IP "expr=%{REMOTE_ADDR}"
 
     # 정적 파일은 프록시하지 않음
     ProxyPass /static/ !
@@ -8054,9 +8069,11 @@ LogLevel warn rewrite:trace3
   <pre class="code rv d1" data-lang="conf"><code>&lt;Proxy balancer://mycluster&gt;
     BalancerMember http://10.0.1.11:8080 loadfactor=3
     BalancerMember http://10.0.1.12:8080
-    BalancerMember http://10.0.1.13:8080 status=+H      # H = 대기(핫 스탠바이)
+    # H = 대기(핫 스탠바이)
+    BalancerMember http://10.0.1.13:8080 status=+H
 
-    ProxySet lbmethod=byrequests                        # bytraffic · bybusyness 도 있음
+    # bytraffic · bybusyness 도 있음
+    ProxySet lbmethod=byrequests
 &lt;/Proxy&gt;
 
 ProxyPass        / balancer://mycluster/
@@ -8089,7 +8106,11 @@ ProxyPassReverse /app/ ajp://127.0.0.1:8009/app/</code></pre>
     <p class="lead">개념은 Nginx 와 같고 지시어 이름만 다릅니다.</p>
   </div>
 
-  <pre class="code rv" data-lang="conf"><code>&lt;VirtualHost *:443&gt;
+  <pre class="code rv" data-lang="conf"><code># SSLStaplingCache 는 VirtualHost 안에 둘 수 없습니다 — 서버 전역(바깥)에 한 번
+# ※ Let's Encrypt 는 2025년에 OCSP 를 종료해 LE 인증서에는 스테이플링이 동작하지 않습니다
+SSLStaplingCache "shmcb:logs/ssl_stapling(32768)"
+
+&lt;VirtualHost *:443&gt;
     ServerName example.com
     DocumentRoot /var/www/example
 
@@ -8104,7 +8125,6 @@ ProxyPassReverse /app/ ajp://127.0.0.1:8009/app/</code></pre>
     SSLCipherSuite          ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384
 
     SSLUseStapling on
-    SSLStaplingCache "shmcb:logs/ssl_stapling(32768)"
 
     Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
 &lt;/VirtualHost&gt;
@@ -8291,8 +8311,10 @@ sudo htpasswd /etc/apache2/.htpasswd user2         # 추가</code></pre>
 # 프록시 뒤에 있으면 remote_addr 이 LB IP 입니다 — 실제 IP 를 복원해야 합니다
 # sudo a2enmod remoteip
 RemoteIPHeader X-Forwarded-For
-RemoteIPTrustedProxy 10.0.0.0/8          # ★ 신뢰할 프록시만 지정
-LogFormat "%a %l %u %t \"%r\" %&gt;s %O" combined_realip   # %a 가 실제 IP
+# ★ 신뢰할 프록시만 지정
+RemoteIPTrustedProxy 10.0.0.0/8
+# %a 가 실제 IP
+LogFormat "%a %l %u %t \"%r\" %&gt;s %O" combined_realip
 
 # 민감 파일 차단 — 정적 사이트에 항상 넣으세요
 &lt;FilesMatch "^\.|\.(bak|sql|env|log|swp)$"&gt;
@@ -8365,9 +8387,9 @@ ExtendedStatus On</code></pre>
     Header set Cache-Control "public, max-age=31536000, immutable"
 &lt;/FilesMatch&gt;
 
-# index.html 은 캐시 금지
+# index.html 은 매번 재검증 (no-cache — 아래 설명 참고)
 &lt;Files "index.html"&gt;
-    Header set Cache-Control "no-store, must-revalidate"
+    Header set Cache-Control "no-cache"
 &lt;/Files&gt;</code></pre>
 
   <h3 class="sub">보안 헤더도 여기서</h3>
@@ -8380,7 +8402,7 @@ ExtendedStatus On</code></pre>
 
     # 서버 정보 제거
     Header unset X-Powered-By
-    Header unset Server
+    # Server 헤더는 mod_headers 로 지울 수 없습니다 — ServerTokens Prod 로 "Apache" 만 남깁니다
 &lt;/IfModule&gt;</code></pre>
   <div class="note tip rv d2">
     <b><code>always</code> 키워드를 붙이세요.</b>
@@ -8396,7 +8418,8 @@ ExtendedStatus On</code></pre>
     AddOutputFilterByType BROTLI_COMPRESS application/javascript application/json
     AddOutputFilterByType BROTLI_COMPRESS image/svg+xml
 
-    BrotliCompressionQuality 5        # 5 가 속도·압축률 균형점 (기본 11 은 너무 느립니다)
+    # 5 가 속도·압축률 균형점 (mod_brotli 기본값도 5 · 11 은 실시간으로는 너무 느립니다)
+    BrotliCompressionQuality 5
     BrotliCompressionWindow  18
 &lt;/IfModule&gt;
 
@@ -8479,7 +8502,8 @@ LogFormat "%h %l %u %t \"%r\" %&gt;s %b \"%{Referer}i\" \"%{User-Agent}i\" %D" c
 CustomLog ${APACHE_LOG_DIR}/access.log combined_time
 ErrorLog  ${APACHE_LOG_DIR}/error.log
 
-LogLevel warn                     # 평상시
+# 평상시
+LogLevel warn
 # LogLevel info rewrite:trace3    # rewrite 디버깅 시 (운영에서는 끄세요)
 # LogLevel debug proxy:trace5     # 프록시 디버깅
 
@@ -8509,7 +8533,7 @@ awk '{print $9}' /var/log/apache2/access.log | sort | uniq -c | sort -rn
 awk '{print $NF, $7}' /var/log/apache2/access.log | sort -rn | head -20
 
 # 실시간 오류만
-sudo tail -f /var/log/apache2/error.log | grep -E '\[(error|crit|alert|emerg)\]'</code></pre>
+sudo tail -f /var/log/apache2/error.log | grep -E '\[[a-z0-9_]*:(error|crit|alert|emerg)\]'   # 2.4 형식: [모듈:레벨]</code></pre>
 
   <h3 class="sub">서버 상태 페이지</h3>
   <pre class="code rv d2" data-lang="conf"><code># sudo a2enmod status
@@ -8517,7 +8541,8 @@ ExtendedStatus On
 &lt;Location /server-status&gt;
     SetHandler server-status
     Require ip 127.0.0.1
-    Require ip 10.0.0.0/8          # ★ 반드시 제한하세요
+    # ★ 반드시 제한하세요
+    Require ip 10.0.0.0/8
 &lt;/Location&gt;
 
 # curl http://localhost/server-status?auto</code></pre>
@@ -8986,26 +9011,33 @@ sudo journalctl -u tomcat -f</code></pre>
       <tbody>
         <tr><td><b>NIO</b> (<code>Http11NioProtocol</code>)</td><td class="ok">기본값. 논블로킹 IO — <b>대부분 이것을 씁니다</b></td></tr>
         <tr><td><b>NIO2</b></td><td>비동기 IO. 특정 워크로드에서 이점이 있으나 차이가 크지 않습니다</td></tr>
-        <tr><td><b>APR/native</b></td><td class="warn">OpenSSL 기반 네이티브. <b>10.1 에서 폐기 예고 → 11 에서 제거</b>됐습니다</td></tr>
+        <tr><td><b>APR/native</b></td><td class="warn">OpenSSL 기반 네이티브. <b>9.0·10.0 에서 폐기 예고 → 10.1 에서 커넥터가 제거</b>됐습니다 (11 에도 없음)</td></tr>
         <tr><td><b>AJP</b></td><td class="warn">Apache 전용 이진 프로토콜 — 보안 이슈로 <b>기본 비활성화</b></td></tr>
       </tbody>
     </table>
   </div>
 
-  <pre class="code rv d1" data-lang="xml"><code>&lt;!-- 프록시 뒤에 있을 때의 권장 설정 --&gt;
+  <pre class="code rv d1" data-lang="xml"><code>&lt;!-- 프록시 뒤에 있을 때의 권장 설정
+     (XML 은 태그 안에 주석을 넣을 수 없으므로 설명은 여기에 모읍니다)
+     · address="127.0.0.1"   ★ 외부에서 직접 접근 차단
+     · keepAliveTimeout      ★ Nginx 업스트림 keepalive_timeout(기본 60s) 보다 길게
+     · compression="off"     압축은 Nginx 가 담당
+     · enableLookups="false" ★ DNS 역조회 끄기 (성능)
+     · server="server"       서버 정보 숨김
+     · proxyName·proxyPort   앞단 도메인 --&gt;
 &lt;Connector port="8080"
            protocol="org.apache.coyote.http11.Http11NioProtocol"
-           address="127.0.0.1"                &lt;!-- ★ 외부에서 직접 접근 차단 --&gt;
+           address="127.0.0.1"
            maxThreads="200"
            acceptCount="200"
            connectionTimeout="20000"
-           keepAliveTimeout="20000"
+           keepAliveTimeout="65000"
            maxHttpHeaderSize="16384"
            URIEncoding="UTF-8"
-           compression="off"                   &lt;!-- 압축은 Nginx 가 담당 --&gt;
-           enableLookups="false"               &lt;!-- ★ DNS 역조회 끄기 (성능) --&gt;
-           server="server"                     &lt;!-- 서버 정보 숨김 --&gt;
-           proxyName="example.com"             &lt;!-- 앞단 도메인 --&gt;
+           compression="off"
+           enableLookups="false"
+           server="server"
+           proxyName="example.com"
            proxyPort="443"
            scheme="https"
            secure="true" /&gt;</code></pre>
@@ -9088,7 +9120,8 @@ server.tomcat.threads.max=200
 server.tomcat.accept-count=200
 server.tomcat.max-connections=8192
 server.tomcat.connection-timeout=20s
-server.tomcat.keep-alive-timeout=65s      # ★ Nginx keepalive_timeout(60s) 보다 길게
+# ★ Nginx keepalive_timeout(60s) 보다 길게
+server.tomcat.keep-alive-timeout=65s
 server.tomcat.max-http-form-post-size=10MB
 server.max-http-request-header-size=16KB
 
@@ -9099,7 +9132,7 @@ server.tomcat.remoteip.internal-proxies=127\\.0\\.0\\.1|10\\.\\d+\\.\\d+\\.\\d+
 # 접근 로그 (기본 꺼져 있습니다 — 켜 두세요)
 server.tomcat.accesslog.enabled=true
 server.tomcat.accesslog.pattern=%h %l %u %t "%r" %s %b %D
-#   %D = 처리 시간(ms) ★ 이게 없으면 "어느 요청이 느린가"를 못 봅니다</code></pre>
+#   %D = 처리 시간(Tomcat 10+ 는 마이크로초 · 9 이하는 ms) ★ 이게 없으면 "어느 요청이 느린가"를 못 봅니다</code></pre>
 
   <div class="note warn rv d2">
     <b><code>keepAliveTimeout</code> 을 Nginx 보다 짧게 두면 간헐적 502 가 납니다.</b>
@@ -9266,7 +9299,8 @@ sudo rm /opt/tomcat/webapps/myapp.war</code></pre>
 
   <pre class="code rv" data-lang="properties"><code># application.properties — 내장 톰캣 설정
 server.port=8080
-server.address=127.0.0.1                       # ★ 프록시 뒤라면 로컬만
+# ★ 프록시 뒤라면 로컬만
+server.address=127.0.0.1
 
 # 스레드 풀
 server.tomcat.threads.max=200
@@ -9276,7 +9310,8 @@ server.tomcat.max-connections=8192
 
 # 타임아웃
 server.tomcat.connection-timeout=20s
-server.tomcat.keep-alive-timeout=20s
+# Nginx 업스트림 keepalive_timeout(기본 60s) 보다 길게 — 짧으면 간헐적 502 (t04)
+server.tomcat.keep-alive-timeout=65s
 
 # 프록시 뒤에서 실제 IP·프로토콜 인식 (★ 매우 중요)
 server.forward-headers-strategy=native
@@ -9306,9 +9341,9 @@ server.error.include-message=never</code></pre>
 java -jar myapp.jar
 
 # JVM 옵션과 함께 (운영 권장)
+#   -Xmx 와 -XX:MaxRAMPercentage 를 같이 주면 -Xmx 가 이깁니다 — 컨테이너라면 비율 하나만 (t10)
 java -Xms512m -Xmx1g \
      -XX:+UseG1GC \
-     -XX:MaxRAMPercentage=75 \
      -Dspring.profiles.active=prod \
      -Dfile.encoding=UTF-8 \
      -jar myapp.jar
@@ -9326,9 +9361,11 @@ After=network.target
 User=appuser
 WorkingDirectory=/opt/myapp
 Environment="JAVA_OPTS=-Xms512m -Xmx1g -XX:+UseG1GC"
-EnvironmentFile=/etc/myapp/env               # 비밀은 이 파일에 (권한 600)
+# 비밀은 이 파일에 (권한 600)
+EnvironmentFile=/etc/myapp/env
 ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/myapp/myapp.jar
-SuccessExitStatus=143                        # SIGTERM 종료를 정상으로 취급
+# SIGTERM 종료를 정상으로 취급
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=65535
@@ -9527,8 +9564,8 @@ spring.web.resources.add-mappings=false
      세션에 담는 객체가 전부 Serializable 이어야 합니다 --&gt;</code></pre>
 
   <h3 class="sub">권장 — Spring Session + Redis</h3>
-  <pre class="code rv d1" data-lang="properties"><code># 의존성: spring-session-data-redis
-spring.session.store-type=redis
+  <pre class="code rv d1" data-lang="properties"><code># 의존성: spring-session-data-redis — 의존성만 있으면 자동 구성됩니다
+# (spring.session.store-type 속성은 Spring Boot 3.0 에서 삭제됐습니다)
 spring.session.timeout=30m
 spring.session.redis.namespace=myapp:session
 
@@ -9588,7 +9625,8 @@ upstream tomcat {
   <pre class="code rv d1" data-lang="properties"><code># Spring Boot
 server.tomcat.threads.max=200
 server.tomcat.threads.min-spare=20
-server.tomcat.accept-count=200          # 스레드가 다 차면 여기에 대기
+# 스레드가 다 차면 여기에 대기
+server.tomcat.accept-count=200
 server.tomcat.max-connections=8192
 
 # DB 커넥션 풀과 균형을 맞추세요
@@ -9722,10 +9760,14 @@ grep -A3 '"http-nio-8080-exec' dump.txt | grep -o 'at [a-z.]*' | sort | uniq -c 
   </div>
 
   <pre class="code rv" data-lang="bash"><code># 기본 옵션
-java -Xms1g -Xmx1g \                    # 초기·최대 힙 (같게 잡으면 리사이징 비용 없음)
-     -XX:+UseG1GC \                     # Java 9+ 기본
+#   -Xms1g -Xmx1g                  초기·최대 힙 (같게 잡으면 리사이징 비용 없음)
+#   -XX:+UseG1GC                   Java 9+ 기본
+#   -XX:+HeapDumpOnOutOfMemoryError ★ OOM 시 힙 덤프 저장
+#   (줄 끝 \ 뒤에는 주석을 붙일 수 없어 설명을 위로 모았습니다)
+java -Xms1g -Xmx1g \
+     -XX:+UseG1GC \
      -XX:MaxGCPauseMillis=200 \
-     -XX:+HeapDumpOnOutOfMemoryError \  # ★ OOM 시 힙 덤프 저장
+     -XX:+HeapDumpOnOutOfMemoryError \
      -XX:HeapDumpPath=/var/log/myapp/ \
      -Xlog:gc*:file=/var/log/myapp/gc.log:time,uptime:filecount=5,filesize=10M \
      -jar myapp.jar</code></pre>
@@ -9889,7 +9931,8 @@ java -XX:+PrintFlagsFinal -version | grep -E 'MaxHeapSize|ActiveProcessorCount'<
     delaycompress
     missingok
     notifempty
-    copytruncate           # ★ 톰캣을 재시작하지 않고 잘라냅니다
+    # ★ 톰캣을 재시작하지 않고 잘라냅니다
+    copytruncate
     su tomcat tomcat
 }</code></pre>
   <div class="note warn rv d1">
@@ -9907,7 +9950,7 @@ java -XX:+PrintFlagsFinal -version | grep -E 'MaxHeapSize|ActiveProcessorCount'<
        pattern="%h %l %u %t &amp;quot;%r&amp;quot; %s %b %D &amp;quot;%{User-Agent}i&amp;quot; %{X-Request-Id}i"
        rotatable="true"
        maxDays="30" /&gt;
-&lt;!-- %D = 처리 시간(ms) · %{헤더}i = 요청 헤더 --&gt;</code></pre>
+&lt;!-- %D = 처리 시간(Tomcat 10+ 는 마이크로초) · %{헤더}i = 요청 헤더 --&gt;</code></pre>
 
   <h3 class="sub">Spring Boot 라면 로그백으로</h3>
   <pre class="code rv d2" data-lang="xml"><code>&lt;!-- logback-spring.xml --&gt;
@@ -10017,6 +10060,8 @@ server.port=8080
 server.forward-headers-strategy=native
 
 # Actuator 는 별도 포트로 빼는 것도 좋은 방법입니다
+# ※ 이렇게 빼면 위 Nginx 의 /actuator/ location 은 http://127.0.0.1:8081 로 보내야 합니다
+#   (8080 의 tomcat 업스트림으로 보내면 404)
 management.server.port=8081
 management.server.address=127.0.0.1
 management.endpoints.web.exposure.include=health,info,metrics,prometheus</code></pre>
@@ -10245,8 +10290,9 @@ sudo rm -rf docs examples manager host-manager ROOT
 &lt;!-- 또는 추측 불가능한 문자열 + 방화벽 차단 --&gt;</code></pre>
 
   <h3 class="sub">③ 서버 정보 숨기기</h3>
-  <pre class="code rv d1" data-lang="xml"><code>&lt;Connector port="8080" ...
-           server="server"                  &lt;!-- Server 헤더 값 변경 --&gt;
+  <pre class="code rv d1" data-lang="xml"><code>&lt;!-- server = Server 헤더 값 변경 (태그 안에는 주석을 넣을 수 없습니다) --&gt;
+&lt;Connector port="8080" ...
+           server="server"
            xpoweredBy="false" /&gt;</code></pre>
   <pre class="code rv d1" data-lang="bash"><code># 오류 페이지의 버전 표기까지 없애려면 ServerInfo.properties 를 덮어씁니다
 cd /opt/tomcat/lib
@@ -10638,7 +10684,7 @@ intranet.local {
   <pre class="code rv" data-lang="caddy"><code># 전역 옵션 (파일 맨 위에 한 번)
 {
     email admin@example.com          # 인증서 만료 알림을 받을 주소
-    admin off                        # 관리 API 끄기 (운영 권장)
+    admin off                        # 관리 API 끄기 — 단, caddy reload·systemctl reload 도 안 됩니다(재시작으로 반영)
     servers {
         protocols h1 h2 h3
     }
@@ -10691,7 +10737,7 @@ http://internal.local {
       <tr><td><code>respond</code></td><td>즉시 응답 (헬스체크 등)</td></tr>
       <tr><td><code>rewrite</code></td><td>내부 경로 재작성</td></tr>
       <tr><td><code>try_files</code></td><td>순서대로 찾기 (SPA)</td></tr>
-      <tr><td><code>basicauth</code></td><td>기본 인증</td></tr>
+      <tr><td><code>basic_auth</code></td><td>기본 인증 (2.8 이전 이름 <code>basicauth</code>)</td></tr>
     </table>
   </div>
 
@@ -10786,7 +10832,7 @@ example.com {
 # 여러 서버 = 자동 로드 밸런싱
 example.com {
     reverse_proxy 10.0.1.11:3000 10.0.1.12:3000 10.0.1.13:3000 {
-        lb_policy least_conn          # round_robin(기본) · ip_hash · random · first
+        lb_policy least_conn          # random(기본) · round_robin · ip_hash · first
 
         health_uri      /health       # ★ 능동적 헬스체크가 기본 기능입니다
         health_interval 10s
@@ -11029,9 +11075,11 @@ internal.local {
     tls internal
 }
 
-# 인증서 관리를 아예 끄기
-example.com {
-    tls off
+# 인증서 관리를 아예 끄기 — Caddy 2 에는 tls off 가 없습니다
+# 주소 앞에 http:// 를 붙이면 그 사이트는 HTTP 로만 서비스합니다
+# (전부 끄려면 전역 옵션 { auto_https off })
+http://example.com {
+    respond "HTTP only"
 }</code></pre>
   <div class="diag rv">
     <svg viewBox="0 0 680 278" role="img" aria-label="자동 인증서 발급은 ACME 라는 절차를 따른다. 서버가 인증 기관에 이 도메인의 인증서를 달라고 요청하면 기관이 도전 과제를 주고 서버는 그것을 정해진 위치에 올려 둔다. 기관이 실제로 그 도메인에 접속해 확인하면 도메인 소유가 증명되어 인증서를 발급한다. 그래서 도메인이 이 서버를 가리키고 있어야 하며 사내망처럼 밖에서 접속할 수 없으면 DNS 레코드로 증명하는 방식을 쓴다.">
@@ -11100,9 +11148,9 @@ caddy file-server --listen :8080 --browse
     }
     header @static Cache-Control "public, max-age=31536000, immutable"
 
-    # index.html 은 캐시 금지
+    # index.html 은 매번 재검증 (no-cache — 아래 SPA 설명 참고)
     @html path /index.html /
-    header @html Cache-Control "no-store, must-revalidate"
+    header @html Cache-Control "no-cache"
 
     # 커스텀 오류 페이지
     handle_errors {
@@ -11606,9 +11654,9 @@ volumes:
 curl -s localhost:2019/config/ | jq          # 현재 설정 전체
 curl -s localhost:2019/reverse_proxy/upstreams | jq   # 업스트림 상태·헬스
 
-# 인증서 만료일 확인 — 자동 갱신이 잘 돌고 있는지 가끔 봐 두세요
+# 인증서 파일의 갱신 시각 — 자동 갱신이 잘 돌고 있는지 가끔 봐 두세요
 docker compose exec caddy sh -c \
-  'ls /data/caddy/certificates/*/*/ *.crt' 2&gt;/dev/null
+  'ls -l /data/caddy/certificates/*/*/*.crt' 2&gt;/dev/null
 
 # 밖에서 실제로 확인하는 것이 가장 확실합니다
 echo | openssl s_client -connect example.com:443 -servername example.com 2&gt;/dev/null \
@@ -11743,6 +11791,7 @@ curl -X POST localhost:2019/load \
     <b>컨테이너 안에서는 다른 컨테이너가 접근할 수 있습니다.</b>
     설정을 통째로 바꿀 수 있으므로 매우 위험합니다.
     <br>Caddyfile 전역 옵션에 <code>admin off</code> 를 넣으세요.
+    (단, 그러면 <code>caddy reload</code> 로 무중단 반영을 할 수 없어 설정 변경은 재시작으로 해야 합니다)
   </div>
 
   <h3 class="sub">플러그인 — xcaddy 로 재빌드</h3>
@@ -12054,6 +12103,9 @@ ttfb:%{time_starttransfer} total:%{time_total}\n" -o /dev/null -s https://exampl
     CA 가 느리면 <b>우리 사이트가 느려 보입니다</b>.
     스테이플링은 서버가 그 답변을 미리 받아 <b>인증서와 함께 건네주는</b> 방식입니다.
     Nginx <code>ssl_stapling on;</code>, Apache <code>SSLUseStapling on</code> 한 줄입니다.
+    <br>※ 단, <b>Let's Encrypt 는 2025년에 OCSP 서비스를 종료</b>해 LE 인증서에는 OCSP 주소가 없습니다 —
+    LE 인증서라면 스테이플링이 동작하지 않으며(경고만 남음), 폐기 확인은 CRL 로 넘어갔습니다.
+    유료 CA 인증서처럼 OCSP 주소가 있는 경우에만 의미가 있습니다.
   </div>
 </section>
 
@@ -12122,8 +12174,9 @@ openssl x509 -in fullchain.pem -noout -subject -issuer -dates
 openssl x509 -in fullchain.pem -noout -ext subjectAltName    # 포함된 도메인 목록
 
 # 개인키와 인증서가 짝이 맞는지 (해시가 같아야 합니다)
-openssl x509 -noout -modulus -in fullchain.pem | openssl md5
-openssl rsa  -noout -modulus -in privkey.pem   | openssl md5</code></pre>
+#   공개키를 비교하므로 RSA·ECDSA 모두 됩니다 (certbot 2.0+ 기본 키는 ECDSA 라 -modulus 는 실패)
+openssl x509 -noout -pubkey -in fullchain.pem | openssl md5
+openssl pkey -pubout        -in privkey.pem   | openssl md5</code></pre>
   <div class="diag rv">
     <svg viewBox="0 0 680 284" role="img" aria-label="인증서는 검증 수준과 적용 범위 두 축으로 나뉜다. 검증 수준은 도메인만 확인하는 것과 조직까지 확인하는 것으로 나뉘는데 브라우저 주소창에서 보이는 차이는 이제 거의 없어서 대부분 도메인 검증으로 충분하다. 적용 범위는 단일 도메인과 여러 도메인을 함께 담는 것과 하위 도메인 전체를 덮는 와일드카드로 나뉜다. 와일드카드는 DNS 방식으로만 발급되며 한 단계 아래만 덮는다는 점을 알아야 한다.">
       <text x="16" y="18" class="lbl">인증서 — 검증 수준과 적용 범위 두 축</text>
@@ -12423,7 +12476,8 @@ ExecStart=/usr/bin/certbot renew --quiet --deploy-hook "systemctl reload nginx"
 Description=Run certbot twice daily
 [Timer]
 OnCalendar=*-*-* 03,15:00:00
-RandomizedDelaySec=3600        # ★ 서버가 많으면 분산 (CA 부하 방지)
+# ★ 서버가 많으면 분산 (CA 부하 방지)
+RandomizedDelaySec=3600
 Persistent=true
 [Install]
 WantedBy=timers.target</code></pre>
@@ -12497,7 +12551,7 @@ WantedBy=timers.target</code></pre>
 # sudo apachectl configtest &amp;&amp; sudo systemctl reload apache2</code></pre></div>
     <div class="q-tc"><h5>Tomcat · Spring Boot</h5>
       <pre class="code" data-lang="bash"><code># PEM → PKCS12 변환이 필요합니다
-openssl pkcs13 -export \
+openssl pkcs12 -export \
   -in  /etc/letsencrypt/live/example.com/fullchain.pem \
   -inkey /etc/letsencrypt/live/example.com/privkey.pem \
   -out keystore.p12 -name tomcat \
@@ -12661,7 +12715,7 @@ openssl s_client -connect example.com:443 -servername example.com &lt; /dev/null
     <table class="cheat">
       <tr><th style="width:20%">버전</th><th>상태</th></tr>
       <tr><td>SSL 2.0 · 3.0</td><td class="no">폐기 — 절대 쓰면 안 됩니다</td></tr>
-      <tr><td>TLS 1.0 · 1.1</td><td class="no"><b>2021년 주요 브라우저에서 지원 종료</b> — 비활성화하세요</td></tr>
+      <tr><td>TLS 1.0 · 1.1</td><td class="no"><b>2020년 주요 브라우저에서 지원 종료</b> — 비활성화하세요</td></tr>
       <tr><td>TLS 1.2</td><td class="ok">현재 표준 — 호환성을 위해 켜 둡니다</td></tr>
       <tr><td>TLS 1.3</td><td class="ok">★ 최신 · 더 빠르고 안전 — 반드시 켜세요</td></tr>
     </table>
@@ -12678,6 +12732,7 @@ ssl_session_timeout 1d;
 ssl_session_tickets off;               # 티켓 키 관리가 어렵다면 끄는 편이 안전
 
 # OCSP 스테이플링 (인증서 폐기 확인을 서버가 대신)
+# ※ OCSP 주소가 있는 인증서에만 해당 — Let's Encrypt 는 2025년 OCSP 종료 (s02)
 ssl_stapling on;
 ssl_stapling_verify on;
 ssl_trusted_certificate /etc/letsencrypt/live/example.com/chain.pem;
@@ -12956,7 +13011,8 @@ server {
     location /v1/ {
         if ($ssl_client_verify != SUCCESS) { return 403; }
 
-        proxy_set_header X-Client-CN     $ssl_client_s_dn_cn;
+        # Nginx 에는 CN 만 주는 변수가 없습니다 — DN 전체를 넘기고 앱에서 CN 을 꺼내세요
+        proxy_set_header X-Client-DN     $ssl_client_s_dn;
         proxy_set_header X-Client-Serial $ssl_client_serial;
         proxy_set_header X-Client-Verify $ssl_client_verify;
         proxy_pass http://backend;
@@ -12974,8 +13030,8 @@ openssl ca -config ca.cnf -gencrl -out crl.pem        # 목록 재생성
 openssl x509 -in client.crt -noout -subject -dates -serial
 
 # 실제로 되는지 시험
-curl --cert client.crt --key client.key https://api-internal.example.com/v1/ping
-curl https://api-internal.example.com/v1/ping        # ← 403 이 나와야 정상</code></pre>
+curl --cert client.crt --key client.key https://api.example.com/v1/ping
+curl https://api.example.com/v1/ping        # ← 403 이 나와야 정상 (optional 블록)</code></pre>
 
   <div class="note warn rv d2">
     <b>인증서 수명을 짧게 잡고 자동 갱신을 먼저 만드세요.</b>
@@ -13088,7 +13144,7 @@ echo | openssl s_client -connect example.com:443 -servername example.com 2&gt;/d
 openssl x509 -in /etc/letsencrypt/live/example.com/fullchain.pem -noout -enddate
 
 # 30일 이내면 실패로 처리 (모니터링·CI 에 붙이기 좋습니다)
-openssl s_client -connect example.com:443 -servername example.com 2&gt;/dev/null \
+openssl s_client -connect example.com:443 -servername example.com &lt; /dev/null 2&gt;/dev/null \
   | openssl x509 -noout -checkend $((30*86400)) \
   &amp;&amp; echo "OK: 30일 이상 남음" || echo "WARNING: 30일 이내 만료"</code></pre>
 
@@ -13159,7 +13215,7 @@ groups:
 openssl s_client -connect example.com:443 -servername example.com &lt; /dev/null
 
 # 인증서 정보만
-openssl s_client -connect example.com:443 -servername example.com 2&gt;/dev/null \
+openssl s_client -connect example.com:443 -servername example.com &lt; /dev/null 2&gt;/dev/null \
   | openssl x509 -noout -subject -issuer -dates -ext subjectAltName
 
 # 체인 전체
@@ -13344,27 +13400,32 @@ Description=My App
 After=network.target
 # 의존 서비스가 있으면
 # Requires=postgresql.service
+# 60초 안에 5회 실패하면 포기(무한 재시작 방지) — ★ [Service] 가 아니라 [Unit] 에 둡니다
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
-User=myapp                          # ★ 전용 계정 — root 로 돌리지 마세요
+# ★ 전용 계정 — root 로 돌리지 마세요
+User=myapp
 Group=myapp
 WorkingDirectory=/opt/myapp
 
 # ── 이 줄만 언어별로 바뀝니다 ─────────────────────
-ExecStart=/usr/bin/java -jar app.jar              # Java
+# Java
+ExecStart=/usr/bin/java -jar app.jar
 # ExecStart=/opt/myapp/venv/bin/gunicorn -c gunicorn.conf.py app:app   # Python
 # ExecStart=/usr/bin/node server.js                # Node
 # ExecStart=/opt/myapp/bin/myapp                   # Go · Rust
 # ────────────────────────────────────────────────
 
 Environment=NODE_ENV=production
-EnvironmentFile=-/etc/myapp/env     # 비밀은 파일로 (권한 600)
+# 비밀은 파일로 (권한 600)
+EnvironmentFile=-/etc/myapp/env
 
-Restart=always                      # 죽으면 되살림
+# 죽으면 되살림
+Restart=always
 RestartSec=3
-StartLimitBurst=5                   # 5회 연속 실패하면 포기(무한 재시작 방지)
-StartLimitIntervalSec=60
 
 # 그레이스풀 종료 — 진행 중 요청을 마치게
 KillSignal=SIGTERM
@@ -13505,12 +13566,16 @@ ssh deploy@server '
 '</code></pre>
 
   <pre class="code rv d2" data-lang="ini"><code># JVM 옵션 — 컨테이너·systemd 어느 쪽이든 이 정도는 챙기세요
+#   MaxRAMPercentage         ★ -Xmx 대신 비율로 (컨테이너 메모리 인식)
+#   HeapDumpOnOutOfMemoryError ★ OOM 시 덤프 — 원인 추적의 유일한 단서
+#   ExitOnOutOfMemoryError   OOM 이면 죽고 재시작 (반쯤 살아있는 상태 방지)
+#   (systemd 는 줄 끝 주석을 지원하지 않아 설명을 위로 모았습니다)
 Environment=JAVA_OPTS=" \
-  -XX:MaxRAMPercentage=75.0 \        # ★ -Xmx 대신 비율로 (컨테이너 메모리 인식)
+  -XX:MaxRAMPercentage=75.0 \
   -XX:+UseG1GC \
-  -XX:+HeapDumpOnOutOfMemoryError \  # ★ OOM 시 덤프 — 원인 추적의 유일한 단서
+  -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath=/var/log/myapp/ \
-  -XX:+ExitOnOutOfMemoryError \      # OOM 이면 죽고 재시작 (반쯤 살아있는 상태 방지)
+  -XX:+ExitOnOutOfMemoryError \
   -Djava.security.egd=file:/dev/./urandom \
   -Duser.timezone=Asia/Seoul \
   -Dfile.encoding=UTF-8"</code></pre>
@@ -13565,11 +13630,13 @@ WorkingDirectory=/opt/myapp
 
 # 비밀은 파일로 (권한 600) — 명령줄 인자에 넣으면 ps 로 다 보입니다
 EnvironmentFile=/etc/myapp/env
-Environment="JAVA_OPTS=-Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxRAMPercentage=75"
+# -Xmx 와 MaxRAMPercentage 를 같이 주면 -Xmx 가 이깁니다 — 둘 중 하나만 (컨테이너면 비율)
+Environment="JAVA_OPTS=-Xms512m -Xmx1g -XX:+UseG1GC"
 
 ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/myapp/myapp.jar
 
-SuccessExitStatus=143            # SIGTERM 종료를 정상으로 취급
+# SIGTERM 종료를 정상으로 취급
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=65535
@@ -13813,7 +13880,7 @@ preload_app = True                 # 메모리 절약 (fork 전에 앱 로드)
       <tr><td><code>sync</code></td><td class="ok">기본값. 프로세스가 요청 하나씩 처리 — <b>가장 안정적</b></td></tr>
       <tr><td><code>gthread</code></td><td>프로세스 안에서 스레드로 — IO 대기가 많을 때 유리</td></tr>
       <tr><td><code>uvicorn.workers.UvicornWorker</code></td><td class="ok">ASGI 앱을 Gunicorn 으로 관리 (FastAPI)</td></tr>
-      <tr><td><code>gevent</code> · <code>eventlet</code></td><td class="warn">코루틴 기반. монки패치가 필요해 예상 밖 문제가 생길 수 있습니다</td></tr>
+      <tr><td><code>gevent</code> · <code>eventlet</code></td><td class="warn">코루틴 기반. 몽키패치가 필요해 예상 밖 문제가 생길 수 있습니다</td></tr>
     </table>
   </div>
 
@@ -13825,14 +13892,17 @@ After=network.target
 [Service]
 Type=notify
 User=appuser
-Group=www-data                    # ★ Nginx 가 소켓을 읽을 수 있게
+# ★ Nginx 가 소켓을 읽을 수 있게
+Group=www-data
 WorkingDirectory=/opt/myapp
 Environment="PATH=/opt/myapp/venv/bin"
 EnvironmentFile=/etc/myapp/env
 
-RuntimeDirectory=myapp            # /run/myapp 을 자동 생성·정리
+# /run/myapp 을 자동 생성·정리
+RuntimeDirectory=myapp
 RuntimeDirectoryMode=0755
-UMask=0007                        # 소켓 권한
+# 소켓 권한
+UMask=0007
 
 ExecStart=/opt/myapp/venv/bin/gunicorn -c /opt/myapp/gunicorn.conf.py myapp.wsgi:application
 ExecReload=/bin/kill -s HUP $MAINPID
@@ -14310,7 +14380,7 @@ server {
     조심해야 합니다 — <code>try_files $uri =404;</code> 를 함께 쓰세요.
   </div>
 
-  <pre class="code rv d1" data-lang="conf"><code># /etc/php/8.3/fpm/pool.d/www.conf — 프로세스 풀
+  <pre class="code rv d1" data-lang="conf"><code>; /etc/php/8.3/fpm/pool.d/www.conf — 프로세스 풀  (주석은 ; — PHP 7 부터 # 주석 불가)
 [www]
 user = www-data
 group = www-data
@@ -14319,12 +14389,12 @@ listen.owner = www-data
 listen.group = www-data
 listen.mode = 0660
 
-pm = dynamic                    # dynamic · static · ondemand
-pm.max_children = 50            # ★ 최대 동시 처리 (메모리로 산정)
+pm = dynamic                    ; dynamic · static · ondemand
+pm.max_children = 50            ; ★ 최대 동시 처리 (메모리로 산정)
 pm.start_servers = 10
 pm.min_spare_servers = 5
 pm.max_spare_servers = 20
-pm.max_requests = 500           # 메모리 누수 대비
+pm.max_requests = 500           ; 메모리 누수 대비
 
 ; 느린 요청 로깅
 slowlog = /var/log/php8.3-fpm-slow.log
@@ -14425,7 +14495,8 @@ rsync -avz --delete dist/ deploy@server:/var/www/spa/</code></pre>
     gzip_types text/css application/javascript application/json image/svg+xml;
 
     # ★ 해시가 붙은 빌드 산출물 — 영구 캐시
-    location ~* \.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp)$ {
+    #   정규식에 { } 가 있으면 따옴표로 감싸야 합니다 (안 그러면 nginx -t 실패)
+    location ~* "\.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp)$" {
         expires 1y;
         add_header Cache-Control "public, immutable";
         access_log off;
@@ -14461,7 +14532,8 @@ rsync -avz --delete dist/ deploy@server:/var/www/spa/</code></pre>
 
   <h3 class="sub">Next.js 처럼 서버가 필요한 경우</h3>
   <pre class="code rv d1" data-lang="bash"><code># 완전 정적으로 내보낼 수 있으면 (SSG)
-next build &amp;&amp; next export      # → out/ 폴더를 그대로 서빙
+#   next.config 에 output: 'export' 를 두고 빌드 (next export 명령은 Next 14 에서 제거됨)
+next build                     # → out/ 폴더를 그대로 서빙
 
 # SSR·API 라우트를 쓴다면 Node 프로세스가 필요합니다
 pm2 start npm --name web -- start
@@ -14562,29 +14634,35 @@ After=network-online.target
 Wants=network-online.target
 # DB 가 같은 서버에 있다면
 # After=postgresql.service
+# 60초에 5번 실패하면 포기 (무한 재시작 방지) — ★ [Unit] 에 둬야 적용됩니다
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
-Type=simple                      # simple · forking · notify · oneshot
+# simple · forking · notify · oneshot
+Type=simple
 User=appuser
 Group=appuser
 WorkingDirectory=/opt/myapp
 
 Environment="NODE_ENV=production"
-EnvironmentFile=/etc/myapp/env   # 비밀은 여기에 (권한 600)
+# 비밀은 여기에 (권한 600)
+EnvironmentFile=/etc/myapp/env
 
 ExecStartPre=/usr/bin/test -f /opt/myapp/app.js
 ExecStart=/usr/bin/node /opt/myapp/app.js
+# ※ 앱이 SIGHUP 을 직접 처리하도록 짰을 때만 — Node 는 기본적으로 SIGHUP 을 받으면 종료합니다
 ExecReload=/bin/kill -HUP $MAINPID
 
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=5                # 60초에 5번 실패하면 포기 (무한 재시작 방지)
 
-TimeoutStopSec=30                # 종료 유예
+# 종료 유예
+TimeoutStopSec=30
 KillSignal=SIGTERM
 
-LimitNOFILE=65535                # 파일 디스크립터 한계
+# 파일 디스크립터 한계
+LimitNOFILE=65535
 
 # 보안 강화 (선택이지만 권장)
 NoNewPrivileges=true
@@ -14749,8 +14827,9 @@ ls -l /run/myapp/gunicorn.sock
 # Nginx 실행 계정 확인
 ps aux | grep nginx | head -2
 
-# Nginx 가 소켓을 읽을 수 있는지 직접 테스트
-sudo -u www-data test -r /run/myapp/gunicorn.sock &amp;&amp; echo OK || echo "권한 없음"</code></pre>
+# Nginx 가 소켓에 접속할 수 있는지 직접 테스트
+# (소켓에 접속하려면 읽기가 아니라 쓰기 권한이 필요합니다)
+sudo -u www-data test -w /run/myapp/gunicorn.sock &amp;&amp; echo OK || echo "권한 없음"</code></pre>
 
   <div class="note warn rv d1">
     <b><code>502 Bad Gateway</code> + <code>Permission denied</code></b> 조합은
@@ -14764,10 +14843,13 @@ sudo -u www-data test -r /run/myapp/gunicorn.sock &amp;&amp; echo OK || echo "�
   <pre class="code rv d1" data-lang="ini"><code># systemd 로 소켓 폴더를 안전하게 관리
 [Service]
 User=appuser
-Group=www-data                    # ★ Nginx 그룹
-RuntimeDirectory=myapp            # /run/myapp 을 자동 생성 (서비스 종료 시 정리)
+# ★ Nginx 그룹
+Group=www-data
+# /run/myapp 을 자동 생성 (서비스 종료 시 정리)
+RuntimeDirectory=myapp
 RuntimeDirectoryMode=0750
-UMask=0007                        # 소켓이 660 으로 생성됩니다</code></pre>
+# 소켓이 660 으로 생성됩니다
+UMask=0007</code></pre>
 
   <h3 class="sub">SELinux 환경 (RHEL 계열)</h3>
   <pre class="code rv d2" data-lang="bash"><code># 권한이 다 맞는데도 502 라면 SELinux 를 의심하세요
@@ -15267,7 +15349,8 @@ server {
 
 server {
     # 해시가 붙은 빌드 산출물 — 영구 캐시
-    location ~* \.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp|avif)$ {
+    #   정규식에 { } 가 있으면 따옴표로 감싸야 합니다 (안 그러면 nginx -t 실패)
+    location ~* "\.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp|avif)$" {
         expires 1y;
         add_header Cache-Control "public, immutable";
         access_log off;
@@ -15319,7 +15402,8 @@ curl -I https://example.com/app.a1b2c3.js
 # expires: ...
 
 # 조건부 요청 테스트
-curl -I -H 'If-None-Match: "abc123"' https://example.com/style.css
+#   먼저 curl -I 로 받은 etag 값을 그대로 넣어야 합니다 (아무 값이면 200)
+curl -I -H 'If-None-Match: "65f1a2b3-1a2b"' https://example.com/style.css
 # HTTP/2 304   ← 본문을 안 보냄</code></pre>
 </section>
 
@@ -15444,7 +15528,7 @@ location /events {
     proxy_buffering off;
     proxy_cache off;
     proxy_read_timeout 3600s;
-    add_header X-Accel-Buffering no;
+    # add_header X-Accel-Buffering no; 는 효과 없음 — 이 헤더는 앱이 보내야 Nginx 가 읽습니다(아래)
 }
 
 # 대용량 업로드 — 요청 본문 버퍼링을 끄고 스트리밍
@@ -15764,13 +15848,17 @@ ss -tn state established '( dport = :8080 )' | wc -l
   <pre class="code rv" data-lang="conf"><code># /etc/sysctl.d/99-webserver.conf
 
 # ── 연결 대기열
-net.core.somaxconn = 65535               # accept 대기열 (기본 4096)
-net.ipv4.tcp_max_syn_backlog = 65535     # SYN 대기열
-net.core.netdev_max_backlog = 65535      # NIC 수신 대기열
+# accept 대기열 (기본 4096)
+net.core.somaxconn = 65535
+# SYN 대기열
+net.ipv4.tcp_max_syn_backlog = 65535
+# NIC 수신 대기열
+net.core.netdev_max_backlog = 65535
 
 # ── 포트·연결 재사용
 net.ipv4.ip_local_port_range = 10240 65535
-net.ipv4.tcp_tw_reuse = 1                # TIME_WAIT 소켓 재사용 (클라이언트 방향)
+# TIME_WAIT 소켓 재사용 (클라이언트 방향)
+net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_fin_timeout = 15
 
 # ── keepalive
@@ -15974,7 +16062,7 @@ cat /proc/$(pgrep -f 'nginx: master')/limits | grep -i 'open files'
   </div>
 
   <pre class="code rv d1" data-lang="conf"><code># 오리진(Nginx) 쪽 설정 — CDN 이 캐시할 수 있게 헤더를 정확히 보냅니다
-location ~* \.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp)$ {
+location ~* "\.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp)$" {     # { } 가 든 정규식은 따옴표로
     expires 1y;
     add_header Cache-Control "public, max-age=31536000, immutable";
     add_header Vary "Accept-Encoding";
@@ -16435,14 +16523,15 @@ awk '{print $7}' /var/log/nginx/access.log | sort | uniq -c | sort -rn | head -2
     # server 10.0.1.15:8080 down;        # 점검 중 — 설정에서 지우지 말고 표시
 
     keepalive 64;                        # 백엔드 연결 재사용
+                                         # (location 에 proxy_http_version 1.1 + Connection "" 필요 · b12)
 }
 
-# 일관된 해싱 — 캐시 서버 앞이라면
+# 일관된 해싱 — HTTP 캐시 서버(Varnish 등) 앞이라면
 upstream cache_nodes {
     hash $request_uri consistent;        # 같은 URL 은 항상 같은 노드로
-    server 10.0.2.11:6379;
-    server 10.0.2.12:6379;
-    server 10.0.2.13:6379;
+    server 10.0.2.11:6081;
+    server 10.0.2.12:6081;
+    server 10.0.2.13:6081;
 }</code></pre>
 
   <div class="note warn rv d2">
@@ -17764,6 +17853,7 @@ add_header Content-Security-Policy-Report-Only
   "default-src 'self'; report-uri /csp-report" always;
 
 # ② 수집된 위반을 보고 정책을 다듬은 뒤
+#    (읽기 쉽게 줄을 나눴지만, 값 안의 줄바꿈은 헤더에 그대로 들어가므로 실제로는 한 줄로)
 add_header Content-Security-Policy
   "default-src 'self';
    script-src 'self' https://cdn.example.com;
@@ -17906,7 +17996,7 @@ location ^~ /admin/ {
     proxy_pass http://backend;
 }
 
-# Basic 인증 추가 (이중 방어)
+# Basic 인증 추가 (이중 방어) — 위 블록 대신 씁니다 (같은 location 두 개는 nginx -t 오류)
 location ^~ /admin/ {
     allow 10.0.0.0/8;
     deny  all;
@@ -17986,8 +18076,9 @@ server {
         proxy_pass http://backend;
     }
 
-    # 헬스체크·정적은 제외
-    location = /health { limit_req off; return 200 "ok\n"; }
+    # 헬스체크는 제외 — return 은 limit_req 보다 앞 단계에서 끝나 제한을 받지 않습니다
+    # (limit_req 에는 off 값이 없습니다 — 쓰면 nginx -t 오류)
+    location = /health { return 200 "ok\n"; }
 }</code></pre>
 
   <div class="tw rv d1">
@@ -18024,7 +18115,7 @@ action   = iptables-multiport[name=ReqLimit, port="http,https"]
 
 [nginx-badbots]
 enabled  = true
-filter   = nginx-badbots
+filter   = apache-badbots     # nginx 전용 필터는 없어 이것을 씁니다(jail.conf 기본값과 같음)
 logpath  = /var/log/nginx/access.log
 maxretry = 2
 bantime  = 86400</code></pre>
@@ -18099,12 +18190,16 @@ server {
 # Include /etc/nginx/modsec-crs/rules/*.conf</code></pre>
 
   <pre class="code rv d1" data-lang="conf"><code># modsecurity.conf 의 핵심 설정
-SecRuleEngine DetectionOnly        # ★ 처음에는 탐지만 (차단하지 않음)
-# SecRuleEngine On                 # 검증 후 차단 모드로
+# (주석은 줄 끝에 붙이지 말고 따로 한 줄로 — 지시어 인자로 읽혀 오류가 납니다)
+# ★ 처음에는 탐지만 (차단하지 않음)
+SecRuleEngine DetectionOnly
+# 검증 후 차단 모드로
+# SecRuleEngine On
 
 SecAuditEngine RelevantOnly
 SecAuditLog /var/log/nginx/modsec_audit.log
-SecRequestBodyLimit 13107200       # 업로드 크기와 맞추세요</code></pre>
+# 업로드 크기와 맞추세요
+SecRequestBodyLimit 13107200</code></pre>
 
   <div class="note warn rv d1">
     <b>WAF 의 가장 큰 문제는 오탐(false positive)입니다.</b>
@@ -18197,10 +18292,15 @@ location ^~ /uploads/ {
   </div>
 
   <pre class="code rv d2" data-lang="python"><code># 앱 레벨 검증 예 (Python)
-import uuid, pathlib, imghdr
+import uuid, pathlib
 
 ALLOWED = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
 MAX_SIZE = 10 * 1024 * 1024
+# imghdr 는 Python 3.13 에서 제거됐습니다 — 파일 앞부분의 시그니처(매직 바이트)로 직접 확인
+MAGIC = (b'\xff\xd8\xff', b'\x89PNG\r\n\x1a\n', b'GIF87a', b'GIF89a')
+
+def is_image(head):
+    return head.startswith(MAGIC) or (head[:4] == b'RIFF' and head[8:12] == b'WEBP')
 
 def save_upload(file, dest_dir):
     ext = pathlib.Path(file.filename).suffix.lower()
@@ -18211,7 +18311,7 @@ def save_upload(file, dest_dir):
 
     # ★ 실제 내용이 이미지인지 확인 (확장자만 믿지 않습니다)
     head = file.read(512); file.seek(0)
-    if imghdr.what(None, head) is None:
+    if not is_image(head):
         raise ValueError("이미지 파일이 아닙니다")
 
     # ★ 파일명을 새로 생성 (경로 순회·덮어쓰기 방지)
@@ -18233,7 +18333,8 @@ def save_upload(file, dest_dir):
   <pre class="code rv" data-lang="conf"><code># /etc/logrotate.d/nginx (보통 패키지에 포함돼 있습니다)
 /var/log/nginx/*.log {
     daily
-    rotate 30                  # 30일 보관
+    # 30일 보관 (주석은 지시어 뒤가 아니라 따로 한 줄로)
+    rotate 30
     missingok
     notifempty
     compress
@@ -18437,7 +18538,14 @@ scrape_configs:
     metrics_path: /probe
     params: { module: [http_2xx] }
     static_configs:
-      - targets: ['https://example.com']     # 외부에서 본 응답·인증서 만료</code></pre>
+      - targets: ['https://example.com']     # 외부에서 본 응답·인증서 만료
+    relabel_configs:                         # ★ 대상 URL 을 ?target= 으로 넘기고
+      - source_labels: [__address__]         #   실제 수집은 blackbox_exporter 에게
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: localhost:9115          # blackbox_exporter 주소</code></pre>
 
   <h3 class="sub">무엇을 감시할까</h3>
   <div class="tw rv d2">
@@ -18591,6 +18699,8 @@ for s in "${SERVERS[@]}"; do
     curl -fsS "http://$s:8080/health" &gt;/dev/null &amp;&amp; break
     sleep 2
   done
+  # 끝내 준비되지 않으면 LB 에 되돌리지 말고 중단 (다음 서버로 번지지 않게)
+  curl -fsS "http://$s:8080/health" &gt;/dev/null || { echo "==== $s 헬스체크 실패 — 중단"; exit 1; }
 
   # 5) LB 에 복귀
   sudo sed -i "s|server $s:8080 down;|server $s:8080;|" /etc/nginx/conf.d/upstream.conf
@@ -19787,10 +19897,11 @@ proxy_cache_path /var/cache/nginx keys_zone=cache:100m ...;
   </div>
 
   <pre class="code rv d1" data-lang="bash"><code># 실제 메모리 사용 측정
-ps -ylC apache2 --sort:rss | awk '{sum+=$8; n++} END {print "평균 " sum/n/1024 " MB · 프로세스 " n "개"}'
+ps -ylC apache2 --sort:rss | awk 'NR&gt;1 {sum+=$8; n++} END {print "평균 " sum/n/1024 " MB · 프로세스 " n "개"}'
+#   (NR&gt;1 — 첫 줄은 헤더라 빼야 개수·평균이 맞습니다)
 
 # MaxRequestWorkers 계산
-# (가용 메모리 MB × 0.8) ÷ 프로세스당 평균 MB
+# (가용 메모리 MB × 0.7) ÷ 프로세스당 평균 MB
 free -m | awk '/^Mem:/ {print "가용: " $7 " MB"}'</code></pre>
 
   <div class="note warn rv d1">
@@ -19817,7 +19928,7 @@ Nginx : 연결 = 자료구조 (수 KB)
 
   <h3 class="sub">MaxRequestWorkers 를 실제로 계산하기</h3>
   <pre class="code rv d2" data-lang="bash"><code># ① 프로세스 하나가 실제로 쓰는 메모리 (RSS 는 공유분이 중복 계산됩니다)
-sudo smem -t -P apache2 -k | tail -1        # PSS 기준 — 더 정확합니다
+sudo smem -t -P apache2 -k | tail -1        # PSS 기준 합계 — 프로세스 수로 나누면 1개당 값 (더 정확)
 # smem 이 없으면 근사치로
 ps -ylC apache2 --sort:rss | awk 'NR>1 {s+=$8; n++} END {printf "평균 %.0f MB · %d개\n", s/n/1024, n}'
 
@@ -19832,19 +19943,26 @@ free -m | awk '/^Mem:/ {printf "가용 %d MB\n", $7}'
     StartServers             8
     MinSpareServers          8
     MaxSpareServers         20
-    MaxRequestWorkers      140     # ★ 위에서 계산한 값
-    MaxConnectionsPerChild 10000   # 누수 대비 주기적 교체 (0 = 무제한)
+    # ★ 위에서 계산한 값
+    MaxRequestWorkers      140
+    # 누수 대비 주기적 교체 (0 = 무제한)
+    MaxConnectionsPerChild 10000
 &lt;/IfModule&gt;
 
 # event — 스레드가 상한을 정합니다
+# (Apache 는 지시어 줄 끝 주석을 허용하지 않습니다 — 주석은 따로 한 줄로)
 &lt;IfModule mpm_event_module&gt;
     StartServers             4
     MinSpareThreads         50
     MaxSpareThreads        150
-    ThreadsPerChild         25     # 프로세스당 스레드
-    MaxRequestWorkers      400     # = ServerLimit × ThreadsPerChild
-    ServerLimit             16     # ★ MaxRequestWorkers ÷ ThreadsPerChild
-    AsyncRequestWorkerFactor 2     # 유휴 연결을 몇 배까지 받을지
+    # 프로세스당 스레드
+    ThreadsPerChild         25
+    # = ServerLimit × ThreadsPerChild
+    MaxRequestWorkers      400
+    # ★ MaxRequestWorkers ÷ ThreadsPerChild
+    ServerLimit             16
+    # 유휴 연결을 몇 배까지 받을지
+    AsyncRequestWorkerFactor 2
     MaxConnectionsPerChild   0
 &lt;/IfModule&gt;</code></pre>
 
@@ -20023,6 +20141,7 @@ keepalive_timeout 65s;                 # 연결 재사용 = 핸드셰이크 자�
 ssl_stapling on;                       # OCSP 응답을 서버가 미리 받아 전달
 ssl_stapling_verify on;                # (클라이언트의 별도 검증 왕복을 없앰)
 resolver 1.1.1.1 8.8.8.8 valid=300s;
+# ※ Let's Encrypt 는 2025년에 OCSP 를 종료했습니다 — LE 인증서에는 스테이플링할 OCSP 주소가 없습니다
 
 # ECDSA 인증서가 RSA 보다 가볍습니다 (둘 다 발급해 병행 제공도 가능)
 # ssl_certificate     ecdsa.crt;  ssl_certificate_key ecdsa.key;
@@ -20097,7 +20216,8 @@ output_buffers 2 512k;</code></pre>
 sudo strace -f -e trace=sendfile,write -p $(pgrep -f 'nginx: worker' | head -1) 2&gt;&amp;1 | head -20
 
 # kTLS 지원 여부 (1.21.4+ · OpenSSL 3.0+ · 커널 4.13+)
-nginx -V 2&gt;&amp;1 | grep -o ssl_conf_command
+nginx -V 2&gt;&amp;1 | grep -o 'built with OpenSSL [0-9.]*'   # 3.0 이상인지
+lsmod | grep -w tls                                       # 커널 tls 모듈 (없으면 sudo modprobe tls)
 # ssl_conf_command Options KTLS;  로 활성화</code></pre>
 
   <div class="diag rv d2">
@@ -20396,7 +20516,8 @@ sudo tee /etc/sysctl.d/99-nginx.conf &lt;&lt;'EOF'
 fs.file-max = 2097152
 net.ipv4.ip_local_port_range = 10240 65535
 net.ipv4.tcp_tw_reuse = 1
-net.core.somaxconn = 8192              # accept 대기 큐 (기본 4096)
+# accept 대기 큐 (기본 4096) — sysctl 파일은 줄 끝 주석을 값으로 읽으니 주석은 따로 한 줄로
+net.core.somaxconn = 8192
 net.ipv4.tcp_max_syn_backlog = 8192
 net.core.netdev_max_backlog = 16384
 net.ipv4.tcp_fin_timeout = 15
@@ -20683,7 +20804,7 @@ location / {
   <pre class="code rv d1" data-lang="conf"><code># 헬스체크는 로그에서 제외하고 rate limit 도 면제
 location = /health/live {
     access_log off;
-    limit_req off;
+    limit_req_dry_run on;     # 제한을 걸지 않음 (limit_req 에는 off 값이 없어 이렇게 · 1.17.1+)
     proxy_pass http://backend;
 }</code></pre>
 
@@ -20820,7 +20941,8 @@ DB    : [a1b2c3d4] SELECT * FROM orders WHERE id=123  (1.1s) ← 범인
       <pre class="code" data-lang="java"><code>@Component
 public class RequestIdFilter extends OncePerRequestFilter {
   protected void doFilterInternal(HttpServletRequest req,
-      HttpServletResponse res, FilterChain chain) throws Exception {
+      HttpServletResponse res, FilterChain chain)
+      throws ServletException, IOException {   // throws Exception 은 오버라이드 불가(컴파일 오류)
     String id = req.getHeader("X-Request-Id");
     MDC.put("requestId", id != null ? id : UUID.randomUUID().toString());
     try { chain.doFilter(req, res); }
@@ -21541,6 +21663,8 @@ location / {
   </div>
 
   <pre class="code rv d1" data-lang="protobuf"><code>// member.proto — 계약이 곧 문서이자 코드입니다
+syntax = "proto3";   // 빠뜨리면 proto2 로 해석되어 필드마다 optional/required 를 요구합니다
+
 service MemberService {
   rpc GetMember (GetMemberRequest) returns (Member);
 }
@@ -22186,12 +22310,14 @@ resilience4j:
 services:
   kafka:
     image: apache/kafka:3.8.0
+    container_name: kafka                           # 아래 docker exec kafka … 가 이 이름을 씁니다
     ports:
       - "9092:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller          # KRaft — ZooKeeper 없음
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
@@ -24303,7 +24429,8 @@ netsh advfirewall firewall delete rule name="사내도구 8080"</code></pre>
   <pre class="code rv d1" data-lang="caddy"><code># Caddyfile — 서버 PC 의 C:\caddy\Caddyfile
 # 밖에서는 8443 으로 들어오고, 뒤쪽 내 앱(8080)으로 넘깁니다
 
-회사이름도구.iptime.org {
+# (주소 뒤 :8443 이 없으면 Caddy 는 443 에서 듣습니다 — 인증서 발급에는 80 포워딩도 필요, 아래 ②)
+회사이름도구.iptime.org:8443 {
     # 로그인 요구 (아이디: staff)
     basic_auth {
         staff $2a$14$해시값을여기에
@@ -24638,7 +24765,7 @@ wevtutil qe Security /q:"*[System[(EventID=4625)]]" /c:20 /rd:true /f:text</code
   </div>
 
   <pre class="code rv d1" data-lang="bash"><code># 컨테이너가 "그냥 프로세스"라는 증거 — 호스트에서 그대로 보입니다
-docker run -d --name demo nginx:1.29
+docker run -d --name demo nginx:1.29-alpine   # alpine — ps·free 가 들어 있습니다 (데비안판엔 없음)
 ps -ef | grep nginx        # 호스트의 프로세스 목록에 nginx 가 그대로 있습니다
 
 # 컨테이너 안에서 본 프로세스 — 자기 자신뿐 (pid 네임스페이스)
@@ -24646,7 +24773,7 @@ docker exec demo ps -ef
 # PID 1 이 nginx 입니다. 호스트의 systemd·sshd 는 존재조차 보이지 않습니다
 
 # cgroup 상한 확인 — 512MB 를 걸면 커널이 그 값을 들고 있습니다
-docker run -d --name lim --memory 512m nginx:1.29
+docker run -d --name lim --memory 512m nginx:1.29-alpine
 docker exec lim cat /sys/fs/cgroup/memory.max      # 536870912
 
 # 주의 — free 는 cgroup 을 모릅니다. 호스트 전체를 보여 줍니다
@@ -25143,15 +25270,17 @@ RUN python -m venv /opt/venv &amp;&amp; \
     /opt/venv/bin/pip install -r requirements.txt
 
 FROM python:3.13-slim
+# ★ PYTHONUNBUFFERED — 로그가 안 나오는 원인 1위
+#   (Dockerfile 주석은 줄 맨 앞에서만 — 지시어 뒤에 붙이면 값으로 읽혀 빌드가 깨집니다)
 ENV PATH=/opt/venv/bin:$PATH \
-    PYTHONUNBUFFERED=1          # ★ 로그가 안 나오는 원인 1위
+    PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 COPY app ./app
 RUN useradd -u 10001 -m app
 USER 10001
 EXPOSE 8000
-CMD ["gunicorn","-w","4","-k","uvicorn.workers.UvicornWorker",
+CMD ["gunicorn","-w","4","-k","uvicorn.workers.UvicornWorker", \
      "-b","0.0.0.0:8000","app.main:app"]</code></pre>
       <div class="note warn" style="margin-bottom:0"><b><code>PYTHONUNBUFFERED=1</code> 은 필수</b>입니다. 없으면 파이썬이 stdout 을 버퍼링해 <b><code>docker logs</code> 에 아무것도 안 나옵니다</b> — "앱이 죽은 줄 알았는데 로그만 안 나온" 사고가 흔합니다.</div>
     </div>
@@ -26086,6 +26215,8 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
+          volumeMounts:              # 아래 tmp 볼륨을 실제로 /tmp 에 붙입니다
+            - { name: tmp, mountPath: /tmp }
       volumes:
         - name: tmp
           emptyDir: {}               # readOnlyRootFilesystem 을 켜면 /tmp 가 필요합니다</code></pre>
@@ -27076,9 +27207,11 @@ spec:
 [FILTER]
     Name                kubernetes
     Match               kube.*
-    Merge_Log           On        # JSON 로그를 필드로 펼침
+    # JSON 로그를 필드로 펼침 (주석은 줄 끝이 아니라 따로 한 줄로)
+    Merge_Log           On
     Keep_Log            Off
-    Labels              On        # 파드 라벨을 붙여 검색 가능하게
+    # 파드 라벨을 붙여 검색 가능하게
+    Labels              On
 
 [OUTPUT]
     Name   loki
@@ -27181,7 +27314,7 @@ spec:
             - name: OTEL_SERVICE_NAME
               value: api
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: http://otel-collector.observability:4317
+              value: http://otel-collector.observability:4318   # 자바 에이전트 2.x 기본 = http/protobuf(4318)
             - name: OTEL_TRACES_SAMPLER
               value: parentbased_traceidratio
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -27326,7 +27459,7 @@ helm upgrade --install api ./charts/api \
 
 helm history api -n prod
 helm rollback api 3 -n prod        # 3번 리비전으로 되돌리기
-helm diff upgrade api ./charts/api -f values-prod.yaml   # 플러그인</code></pre>
+helm diff upgrade api ./charts/api -n prod -f charts/api/values-prod.yaml   # 플러그인</code></pre>
     </div>
   </div>
 
@@ -27607,6 +27740,8 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'                            # 취약점 있으면 실패
 
+      - uses: sigstore/cosign-installer@v3              # 러너에 cosign 이 기본으로 없습니다
+
       - name: Sign image
         run: |
           cosign sign --yes \
@@ -27621,8 +27756,12 @@ on:
 
 jobs:
   bump-staging:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # PR 빌드는 제외 — main 푸시로 성공한 빌드만
+    if: ${{ github.event.workflow_run.conclusion == 'success' &amp;&amp; github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-latest
+    env:
+      # ★ 빌드된 커밋 — workflow_run 에서 GITHUB_SHA 는 기본 브랜치의 최신 커밋이라 다를 수 있습니다
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27632,12 +27771,12 @@ jobs:
         run: |
           cd overlays/stg
           kustomize edit set image \
-            ghcr.io/myorg/api=ghcr.io/myorg/api:sha-${GITHUB_SHA::7}
+            ghcr.io/myorg/api=ghcr.io/myorg/api:sha-${HEAD_SHA::7}
       - name: commit
         run: |
           git config user.name  "ci-bot"
           git config user.email "ci-bot@myorg.dev"
-          git commit -am "stg: api sha-${GITHUB_SHA::7}"
+          git commit -am "stg: api sha-${HEAD_SHA::7}"
           git push
       # 이후는 Argo CD 가 알아서 반영합니다(d12)
 
@@ -27645,13 +27784,18 @@ jobs:
     needs: bump-staging
     runs-on: ubuntu-latest
     environment: production        # ★ 여기서 사람 승인을 요구합니다
+    env:
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v4
         with: { repository: myorg/deploy-manifests, token: '${{ secrets.DEPLOY_REPO_TOKEN }}' }
+      # 스테이징에서 검증한 바로 그 이미지를 승격 (workflow_run 이벤트엔 release 정보가 없습니다)
       - run: |
           cd overlays/prod
-          kustomize edit set image ghcr.io/myorg/api=ghcr.io/myorg/api:${{ github.event.release.tag_name }}
-          git commit -am "prod: api ${{ github.event.release.tag_name }}" &amp;&amp; git push</code></pre>
+          kustomize edit set image ghcr.io/myorg/api=ghcr.io/myorg/api:sha-${HEAD_SHA::7}
+          git config user.name  "ci-bot"
+          git config user.email "ci-bot@myorg.dev"
+          git commit -am "prod: api sha-${HEAD_SHA::7}" &amp;&amp; git push</code></pre>
 
   <div class="tw rv d1">
     <table class="cheat">
@@ -28537,12 +28681,16 @@ metric_relabel_configs:     # ★ 긁은 "후" — 저장 전에 메트릭을 �
     <div class="card">
       <h4 class="mini" style="margin-top:0">로컬 저장소의 성질</h4>
       <pre class="code" data-lang="bash"><code># 실행 플래그 (도커라면 command 로)
+#   retention.time  기간 기준 보존
+#   retention.size  용량 기준 (둘 중 먼저 걸리는 쪽)
+#   enable-lifecycle  POST /-/reload 로 무중단 설정 갱신
+#   (줄 끝 \ 뒤에 주석을 붙이면 줄 잇기가 끊깁니다 — 주석은 위로)
 prometheus \
   --config.file=/etc/prometheus/prometheus.yml \
   --storage.tsdb.path=/prometheus \
-  --storage.tsdb.retention.time=15d \    # 기간 기준 보존
-  --storage.tsdb.retention.size=50GB \   # 용량 기준(둘 중 먼저 걸리는 쪽)
-  --web.enable-lifecycle                 # POST /-/reload 로 무중단 설정 갱신
+  --storage.tsdb.retention.time=15d \
+  --storage.tsdb.retention.size=50GB \
+  --web.enable-lifecycle
 
 # 설정을 고친 뒤 — 재시작하지 않고 반영
 promtool check config /etc/prometheus/prometheus.yml
@@ -28765,9 +28913,11 @@ sum by (pod) (kube_pod_container_info)
 
 # 일대다 — 왼쪽 여러 개에 오른쪽 하나를 붙일 때 group_left ★
 sum by (pod, route) (rate(http_requests_total[5m]))
-  * on (pod) group_left(version, team)
+  * on (pod) group_left(label_version, label_team)
     kube_pod_labels{job="kube-state-metrics"}
-#   → 결과에 version·team 라벨이 얹힙니다 (팀별로 묶어 볼 수 있게)
+#   → 결과에 label_version·label_team 라벨이 얹힙니다 (팀별로 묶어 볼 수 있게)
+#   (kube_pod_labels 는 파드 라벨을 label_ 접두사로 붙이고,
+#    kube-state-metrics 의 --metric-labels-allowlist 에 넣은 라벨만 내보냅니다)
 
 # 무시할 라벨을 지정하는 방식
 a / ignoring (instance) b</code></pre>
@@ -28987,6 +29137,7 @@ sum by (route) (
     <div class="card">
       <h4 class="mini" style="margin-top:0">배포 표시선 — 인과를 눈으로 잇습니다</h4>
       <pre class="code" data-lang="json"><code>// 패널 annotations — 배포 이벤트를 세로선으로
+// "5분 전엔 없던 version 이 나타났다" = 배포 (값이 늘 1 이라 changes() 로는 안 잡힙니다)
 {
   "annotations": {
     "list": [{
@@ -28994,7 +29145,7 @@ sum by (route) (
       "datasource": { "uid": "prom" },
       "enable": true,
       "iconColor": "rgba(255, 96, 96, 1)",
-      "expr": "changes(app_build_info[5m]) &gt; 0",
+      "expr": "count by (service, version) (app_build_info) unless count by (service, version) (app_build_info offset 5m)",
       "titleFormat": "deploy {{version}}",
       "textFormat": "{{service}} → {{version}}"
     }]
@@ -29013,7 +29164,7 @@ sum by (route) (
 apiVersion: 1
 providers:
   - name: repo
-    folder: 'Services'
+    # folder 는 비워 둡니다 — foldersFromFilesStructure 를 쓰면 하위 디렉터리 이름이 폴더가 됩니다
     type: file
     disableDeletion: true
     allowUiUpdates: false        # ★ UI 수정 금지 — 소스가 진실
@@ -29219,9 +29370,12 @@ rlog.error({ order_id, duration_ms: 1842, err: e.message }, 'order create failed
 @Component
 public class TraceIdFilter extends OncePerRequestFilter {
   protected void doFilterInternal(HttpServletRequest req,
-      HttpServletResponse res, FilterChain chain) throws Exception {
+      HttpServletResponse res, FilterChain chain)
+      throws ServletException, IOException {   // throws Exception 은 오버라이드 불가
     // ① 앞단(LB·게이트웨이)이 이미 만들었으면 그것을 씁니다
-    String tid = req.getHeader("traceparent");           // W3C 표준 (y07)
+    String tp  = req.getHeader("traceparent");           // W3C 표준 (y07)
+    String tid = (tp != null &amp;&amp; tp.length() &gt;= 55)
+        ? tp.substring(3, 35) : null;                     // 00-[trace-id 32자]-… 에서 trace-id 만
     if (tid == null) tid = req.getHeader("X-Request-Id");
     if (tid == null) tid = UUID.randomUUID().toString().replace("-", "");
 
@@ -29296,7 +29450,7 @@ source = '''
   . = parse_json!(.message)
   .ts = parse_timestamp!(.ts, "%+")
   # ★ 개인정보 마스킹 — 저장되기 "전"에 지웁니다
-  .msg = replace(.msg, r'\d{6}-\d{7}', "[RRN]")            # 주민번호
+  .msg = replace(string!(.msg), r'\d{6}-\d{7}', "[RRN]")   # 주민번호 (string! — JSON 필드는 타입이 미정이라)
   .msg = replace(.msg, r'\d{4}-\d{4}-\d{4}-\d{4}', "[CARD]")
   .msg = replace(.msg, r'Bearer\s+[A-Za-z0-9._-]+', "[TOKEN]")
   del(.password); del(.authorization)
@@ -29312,6 +29466,7 @@ exclude = '''.level == "error" || .level == "warn"'''   # ★ 에러는 전부 �
 type = "loki"
 inputs = ["sample"]
 endpoint = "http://loki:3100"
+encoding.codec = "json"                     # loki 싱크의 필수 항목
 # 라벨은 값 가짓수가 작은 것만! (Loki 도 카디널리티가 비용)
 labels = { service = "{{ service }}", env = "{{ env }}", level = "{{ level }}" }</code></pre>
       <div class="note warn" style="margin-bottom:0">
@@ -29325,12 +29480,17 @@ labels = { service = "{{ service }}", env = "{{ env }}", level = "{{ level }}" }
       <h4 class="mini" style="margin-top:0">보존 정책 · 줄이기 체크리스트</h4>
       <pre class="code" data-lang="yaml"><code># Loki — 테넌트별 보존 기간
 limits_config:
-  retention_period: 336h            # 기본 14일
+  retention_period: 336h            # 전체 기본값 14일
   max_query_length: 721h
   ingestion_rate_mb: 20
   max_streams_per_user: 10000       # ★ 카디널리티 안전벨트
 compactor:
   retention_enabled: true
+  delete_request_store: filesystem  # retention 을 켜면 필요 (Loki 3.x)
+runtime_config:
+  file: /etc/loki/overrides.yaml    # 테넌트별 값은 이 별도 파일에
+
+# /etc/loki/overrides.yaml
 overrides:
   audit:
     retention_period: 8760h         # 감사 로그만 1년</code></pre>
@@ -29552,7 +29712,7 @@ processors:
       <pre class="code" data-lang="text"><code># TraceQL — 스팬 조건으로 트레이스 찾기
 { resource.service.name = "api" &amp;&amp; duration &gt; 1s }
 { span.http.status_code = 500 &amp;&amp; span.http.route = "/orders" }
-{ span.db.system = "postgresql" &amp;&amp; span.duration &gt; 500ms }
+{ span.db.system = "postgresql" &amp;&amp; duration &gt; 500ms }   # duration 은 고유 필드 — span. 을 붙이면 "duration" 속성을 찾습니다
 
 # 구조 조건 — "api 를 거쳐서 inventory 로 간 것"
 { resource.service.name="api" } &gt;&gt; { resource.service.name="inventory" }</code></pre>
@@ -29802,7 +29962,8 @@ service:
     traces:  { receivers: [otlp], exporters: [spanmetrics, otlp/tempo] }
     metrics: { receivers: [spanmetrics], exporters: [prometheusremotewrite] }
 #   → 계측을 한 번만 했는데 RED 메트릭이 공짜로 나옵니다
-#     traces_span_metrics_duration_seconds_bucket{service_name,route,status_code}
+#     traces_span_metrics_duration_milliseconds_bucket{service_name,span_name,http_route,status_code}
+#     (히스토그램 기본 단위가 ms — 초로 받으려면 histogram: { unit: s })
 
 # ③ 예시(exemplar) — 메트릭 점 하나에 trace_id 를 붙임 ★★
 #   Grafana 의 지연 그래프에서 튀는 점을 클릭 → 그 순간의 실제 트레이스로 이동
@@ -29975,6 +30136,11 @@ route:
   repeat_interval: 4h    # 안 풀리면 4시간마다 다시
 
   routes:
+    # ⓪ 개발 환경은 버림 — 위에서부터 첫 일치로 정해지므로 맨 앞에 둡니다
+    #    (뒤에 두면 dev 알림도 위의 page·팀 라우트에 먼저 걸립니다)
+    - matchers: ['env="dev"']
+      receiver: null-receiver
+
     # ① 심각도 page 는 호출로 — 밤에도 울립니다
     - matchers: ['severity="page"']
       receiver: pagerduty
@@ -29986,10 +30152,6 @@ route:
       receiver: slack-order
     - matchers: ['team="payment"']
       receiver: slack-payment
-
-    # ③ 개발 환경은 티켓만
-    - matchers: ['env="dev"']
-      receiver: null-receiver
 
 # 억제 — 상위 장애가 켜져 있으면 하위 알림을 숨깁니다 ★
 inhibit_rules:
@@ -30015,7 +30177,12 @@ receivers:
           런북: {{ .Annotations.runbook_url }}
           대시보드: {{ .Annotations.dashboard_url }}
           {{ end }}
-  - name: null-receiver</code></pre>
+  # 위에서 이름을 쓴 receiver 는 전부 정의돼 있어야 설정이 로드됩니다
+  - name: slack-payment
+    slack_configs: [{ api_url: '&lt;웹훅&gt;' }]
+  - name: default-slack
+    slack_configs: [{ api_url: '&lt;웹훅&gt;' }]
+  - name: null-receiver                  # 아무 데도 보내지 않음</code></pre>
 
   <div class="grid2 rv d1">
     <div class="card">
@@ -30208,6 +30375,10 @@ groups:
         expr: |
           sum(rate(http_requests_total{job="api",status=~"5.."}[5m]))
           / sum(rate(http_requests_total{job="api"}[5m]))
+      - record: slo:api_error_ratio:rate30m      # 아래 Medium 알림이 씁니다
+        expr: |
+          sum(rate(http_requests_total{job="api",status=~"5.."}[30m]))
+          / sum(rate(http_requests_total{job="api"}[30m]))
       - record: slo:api_error_ratio:rate1h
         expr: |
           sum(rate(http_requests_total{job="api",status=~"5.."}[1h]))
@@ -30390,8 +30561,9 @@ groups:
 go tool pprof -http=:8081 http://localhost:6060/debug/pprof/profile?seconds=30
 go tool pprof -http=:8081 http://localhost:6060/debug/pprof/heap   # 메모리</code></pre>
       <pre class="code" data-lang="bash"><code># JVM — async-profiler (운영 중인 PID 에 붙습니다)
-./profiler.sh -d 30 -e cpu   -f cpu.html   &lt;PID&gt;
-./profiler.sh -d 30 -e alloc -f alloc.html &lt;PID&gt;   # 할당 프로파일
+# (3.0 부터 실행 파일이 bin/asprof — 예전 profiler.sh 는 사라졌습니다)
+asprof -d 30 -e cpu   -f cpu.html   &lt;PID&gt;
+asprof -d 30 -e alloc -f alloc.html &lt;PID&gt;   # 할당 프로파일
 #   -e wall 은 "대기까지 포함" — 느린데 CPU 는 안 쓰는 경우에 씁니다 ★
 
 # Python — 돌고 있는 프로세스에 붙어 실시간
@@ -30438,9 +30610,9 @@ services:
         <tr><td><b>bcc · bpftrace</b></td><td>일회성 조사 — 느린 디스크 I/O, TCP 재전송, 파일 열기 추적</td></tr>
       </table></div>
       <pre class="code" data-lang="bash"><code># bpftrace 한 줄짜리들 (조사할 때만 잠깐)
-# 프로세스별 디스크 I/O 지연 분포
+# 디스크 I/O 요청 크기 분포 (섹터 단위 — 지연 분포는 bcc 의 biolatency 로)
 sudo bpftrace -e 'tracepoint:block:block_rq_complete
-  { @us = hist(args-&gt;nr_sector); }'
+  { @sectors = hist(args-&gt;nr_sector); }'
 
 # 어떤 프로세스가 파일을 여는가
 sudo bpftrace -e 'tracepoint:syscalls:sys_enter_openat
@@ -30592,6 +30764,7 @@ services:
       - --storage.tsdb.retention.time=15d
       - --web.enable-lifecycle
       - --web.enable-otlp-receiver          # ★ OTLP 메트릭 직접 수신 (Prometheus 3.x)
+      - --web.enable-remote-write-receiver  # Tempo 메트릭 생성기의 remote_write 를 받으려면
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./rules:/etc/prometheus/rules:ro
@@ -30758,23 +30931,26 @@ docker compose ps            # 전부 running 인지
 docker run -d --name app --network obs_default \
   -e OTEL_SERVICE_NAME=order-api \
   -e OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 \
+  -e OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
   -e OTEL_RESOURCE_ATTRIBUTES='service.version=1.4.2,deployment.environment=prod' \
   -e OTEL_TRACES_SAMPLER=parentbased_traceidratio \
   -e OTEL_TRACES_SAMPLER_ARG=1.0 \
   myapp:1.4.2
 
 # ③ 순서대로 확인 — 하나씩 끊어서 봐야 원인이 보입니다 ★
-curl -s localhost:8080/metrics | head             # 앱이 메트릭을 내나
-curl -s localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job,health}'   # 긁히나
-curl -s 'localhost:9090/api/v1/query?query=up'    # 저장됐나
+#    (앱·Prometheus·Loki 포트는 밖에 열지 않았으니 같은 네트워크의 임시 컨테이너로 묻습니다)
+C="docker run --rm --network obs_default curlimages/curl -s"
+$C http://app:8080/metrics | head                 # 앱이 메트릭을 내나
+$C http://prometheus:9090/api/v1/targets | jq '.data.activeTargets[] | {job,health}'   # 긁히나
+$C 'http://prometheus:9090/api/v1/query?query=up' # 저장됐나
 docker compose logs otel-collector | tail -30     # 콜렉터가 에러 없이 도나
-curl -s 'localhost:3100/loki/api/v1/labels'       # 로키가 로그를 받았나
+$C http://loki:3100/loki/api/v1/labels            # 로키가 로그를 받았나
 
 # ④ Grafana 접속 → Explore 에서 세 소스를 각각 한 번씩 질의해 봅니다
 open http://localhost:3000
 
 # ⑤ 설정을 고쳤을 때 (재시작 없이)
-curl -X POST localhost:9090/-/reload
+$C -X POST http://prometheus:9090/-/reload
 docker compose restart otel-collector</code></pre>
 
   <div class="grid2 rv d1">
@@ -31059,8 +31235,10 @@ py-spy dump --pid 12345
 deriv(process_resident_memory_bytes[6h]) &gt; 0
   and
 predict_linear(process_resident_memory_bytes[6h], 12*3600)
-  &gt; on(instance) container_spec_memory_limit_bytes
-# → "12시간 뒤 한계를 넘을 추세" 일 때만 티켓</code></pre>
+  &gt; on(pod) max by (pod) (container_spec_memory_limit_bytes{container!=""})
+# → "12시간 뒤 한계를 넘을 추세" 일 때만 티켓
+#   (앱 메트릭의 instance 는 앱 주소, cAdvisor 의 instance 는 노드라 instance 로는 안 맞습니다 —
+#    pod 라벨로 짝짓고, 오른쪽은 파드당 하나가 되게 max by (pod))</code></pre>
     </div>
   </div>
 
@@ -31920,7 +32098,8 @@ CustomLog ${APACHE_LOG_DIR}/access.log ext
 # 에러 로그 — 포맷도 바꿀 수 있습니다(2.4부터)
 ErrorLogFormat "[%{u}t] [%-m:%l] [pid %P:tid %T] %7F: %E: [client %a] %M, referer %{Referer}i"
 LogLevel warn
-LogLevel info ssl:warn rewrite:trace3     # ★ 모듈별로 따로 줄 수 있습니다</code></pre>
+# ★ 모듈별로 따로 줄 수 있습니다 (Apache 는 줄 끝 주석 불가 — 주석은 따로 한 줄로)
+LogLevel info ssl:warn rewrite:trace3</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b><code>%L</code> 하나가 Apache 의 숨은 무기입니다.</b>
         액세스 로그와 에러 로그에 <b>같은 로그 ID</b>가 찍혀서,
@@ -31984,7 +32163,7 @@ apachectl configtest &amp;&amp; apachectl graceful</code></pre>
       <pre class="code" data-lang="text"><code># 패턴 기호 (Apache 와 비슷하지만 다른 것들이 있습니다)
 #  %a 클라이언트 IP   %h 호스트   %l 항상 -   %u 인증 사용자
 #  %t 시각  %{포맷}t  ·  %r 요청 줄  %s 상태코드  %b 본문 바이트
-#  %D 처리 시간(밀리초) ★  %T 초  %F 첫 바이트까지의 시간
+#  %D 처리 시간 ★ (Tomcat 10+ 는 마이크로초 · 9 이하는 밀리초)  %T 초  %F 첫 바이트까지의 시간
 #  %S 세션 ID   %I 스레드 이름 ★ 스레드 고갈 추적에 유용
 #  %{헤더}i 요청 헤더  %{헤더}o 응답 헤더  %{속성}r 요청 속성
 #  common · combined 는 미리 정의된 이름입니다
@@ -32001,8 +32180,11 @@ apachectl configtest &amp;&amp; apachectl graceful</code></pre>
 
 # 해법 A — 애초에 안 만들기 (systemd 로 띄우고 journald 에 맡기기) ★ 권장
 #   /etc/systemd/system/tomcat.service
+#   start 가 아니라 run — 포그라운드로 돌아 catalina.out 리다이렉트가 없고 stdout 이 그대로 journald 로
+#   (start + CATALINA_OUT=/dev/null 이면 stdout 이 /dev/null 로 사라져 journald 에도 안 남습니다)
 [Service]
-Environment=CATALINA_OUT=/dev/null
+Type=simple
+ExecStart=/opt/tomcat/bin/catalina.sh run
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=tomcat
@@ -32050,6 +32232,7 @@ handlers = 1catalina.org.apache.juli.AsyncFileHandler, java.util.logging.Console
 log { format console }
 
 # 전역(런타임) 로그는 따로입니다 — 액세스 로그가 아닙니다
+# (이름 없는 전역 옵션 블록은 Caddyfile 의 맨 처음에 와야 합니다)
 {
     log {
         output file /var/log/caddy/caddy.log
@@ -32085,7 +32268,7 @@ log { format console }
 #  replace  — 값을 고정 문자열로 치환
 #  ip_mask  — IPv4 상위 16비트만 남김 / IPv6 상위 32비트
 #  hash     — 값 대신 해시(같은 값인지 비교는 되고 원본은 모름) ★
-#  query / cookie — 쿼리스트링·쿼키 안의 특정 키만 골라 처리
+#  query / cookie — 쿼리스트링·쿠키 안의 특정 키만 골라 처리
 #  regexp   — 정규식으로 부분 치환</code></pre>
       <div class="note info" style="margin-bottom:0">
         <b>이 <code>filter</code> 가 다른 서버에는 없습니다.</b>
@@ -32238,21 +32421,30 @@ sudo journalctl --verify                  # 손상 검사</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">journald.conf — 실제로 손대는 항목</h4>
       <pre class="code" data-lang="ini"><code># /etc/systemd/journald.conf.d/00-limits.conf  (원본을 고치지 말고 드롭인으로)
+# (systemd 설정 파일은 줄 끝 주석을 값으로 읽습니다 — 주석은 항상 따로 한 줄로)
 [Journal]
-Storage=persistent          # auto=디렉터리가 있을 때만 영구. persistent 로 못 박습니다
+# auto=디렉터리가 있을 때만 영구. persistent 로 못 박습니다
+Storage=persistent
 Compress=yes
-SystemMaxUse=1G             # ★ 기본은 "파일시스템의 10%, 최대 4G" — 관대합니다
-SystemKeepFree=2G           # 이만큼은 항상 비워 둡니다
-SystemMaxFileSize=128M      # 한 조각 파일의 크기
+# ★ 기본은 "파일시스템의 10%, 최대 4G" — 관대합니다
+SystemMaxUse=1G
+# 이만큼은 항상 비워 둡니다
+SystemKeepFree=2G
+# 한 조각 파일의 크기
+SystemMaxFileSize=128M
 SystemMaxFiles=100
-MaxRetentionSec=14day       # 기간 상한 (용량 상한과 함께 걸립니다)
-MaxFileSec=1day             # 하루마다 새 조각 파일
+# 기간 상한 (용량 상한과 함께 걸립니다)
+MaxRetentionSec=14day
+# 하루마다 새 조각 파일
+MaxFileSec=1day
 
 # 폭주 방지 — 이걸 모르면 "로그가 없어졌다"고 착각합니다 ★
+# 30초에 10,000줄 넘으면 그 뒤는 버립니다
 RateLimitIntervalSec=30s
-RateLimitBurst=10000        # 30초에 10,000줄 넘으면 그 뒤는 버립니다
+RateLimitBurst=10000
 
-ForwardToSyslog=no          # rsyslog 를 안 쓰면 꺼서 중복 저장을 막습니다
+# rsyslog 를 안 쓰면 꺼서 중복 저장을 막습니다
+ForwardToSyslog=no
 ForwardToWall=no</code></pre>
       <pre class="code" data-lang="bash"><code>sudo systemctl restart systemd-journald
 journalctl --disk-usage
@@ -32375,11 +32567,12 @@ action(type="omrelp" target="10.0.0.9" port="20514")</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">설정 문법 — 실제로 쓰는 지시어 전부</h4>
       <pre class="code" data-lang="text"><code># /etc/logrotate.d/nginx
+# (줄 끝 설명은 학습용입니다 — 실제 파일에서는 주석을 지시어 뒤가 아니라 따로 한 줄로 두세요)
 /var/log/nginx/*.log /var/log/nginx/*.json {
     daily                 # hourly · daily · weekly · monthly · yearly
     rotate 14             # 몇 개를 보관할지 (14일치)
-    size 100M             # 이 크기 넘으면 주기와 무관하게 회전
-    maxsize 500M          # 주기 전이라도 이 크기면 회전 (size 와 조합)
+    # size 100M           # 주기를 무시하고 크기만으로 회전 — daily 와 함께 쓰면 뒤에 쓴 쪽이 이겨서 보통은 maxsize 를 씁니다
+    maxsize 500M          # 주기 전이라도 이 크기면 회전 (daily 와 조합)
     minsize 1M            # 이보다 작으면 주기가 와도 회전 안 함
 
     missingok             # 파일이 없어도 오류 내지 않음
@@ -32426,7 +32619,7 @@ systemctl list-timers logrotate.timer       # systemd 계열
 ls -l /etc/cron.daily/logrotate             # 옛 방식
 
 # ★ cron.daily 는 보통 새벽에 "한꺼번에" 돕니다.
-#   size 100M 을 걸어도 하루에 한 번만 검사하므로
+#   size·maxsize 를 걸어도 하루에 한 번만 검사하므로
 #   폭주하는 날엔 디스크가 먼저 찹니다 → 타이머를 시간마다로 바꾸세요.
 sudo systemctl edit logrotate.timer         # OnCalendar=hourly</code></pre>
     </div>
@@ -32585,12 +32778,14 @@ sudo systemctl edit logrotate.timer         # OnCalendar=hourly</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">Fluent Bit — 파일을 읽어 Loki 로</h4>
       <pre class="code" data-lang="ini"><code># /etc/fluent-bit/fluent-bit.conf
+# (클래식 형식은 줄 끝 주석을 값으로 읽습니다 — 주석은 따로 한 줄로)
 [SERVICE]
     Flush            5
     Daemon           Off
     Log_Level        info
     Parsers_File     parsers.conf
-    storage.path     /var/lib/fluent-bit/storage   # ★ 디스크 버퍼
+    # ★ 디스크 버퍼
+    storage.path     /var/lib/fluent-bit/storage
     storage.sync     normal
     storage.max_chunks_up 128
 
@@ -32599,10 +32794,12 @@ sudo systemctl edit logrotate.timer         # OnCalendar=hourly</code></pre>
     Path             /var/log/nginx/access.json
     Tag              nginx.access
     Parser           json
-    DB               /var/lib/fluent-bit/tail.db   # ★ 어디까지 읽었는지
+    # ★ 어디까지 읽었는지
+    DB               /var/lib/fluent-bit/tail.db
     DB.locking       true
     Mem_Buf_Limit    32MB
-    storage.type     filesystem                    # 메모리 넘치면 디스크로
+    # 메모리 넘치면 디스크로
+    storage.type     filesystem
     Skip_Long_Lines  On
     Refresh_Interval 10
 
@@ -32626,7 +32823,8 @@ sudo systemctl edit logrotate.timer         # OnCalendar=hourly</code></pre>
     labels           job=nginx, env=$env, host=$host
     label_keys       $status
     line_format      json
-    Retry_Limit      False                          # 무한 재시도</code></pre>
+    # 무한 재시도
+    Retry_Limit      False</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b><code>storage.type filesystem</code> 을 안 켜면 메모리 버퍼가 전부입니다.</b>
         저장소가 10분만 죽어도 <code>Mem_Buf_Limit</code> 를 넘긴 순간부터
@@ -32663,7 +32861,7 @@ source = '''
             to_float(split(.urt, ", ")[0]) ?? null
           } else { null }
   # 토큰·인증 헤더 마스킹 — 저장되기 전에 지웁니다
-  .uri = replace(.uri, r'token=[^&amp;]+', "token=[REDACTED]")
+  .uri = replace(string!(.uri), r'token=[^&amp;]+', "token=[REDACTED]")   # string! — JSON 필드는 타입 미정
   del(.agent)                            # User-Agent 는 아예 버림
 '''
 
@@ -32677,6 +32875,7 @@ exclude = '''.status &gt;= 400'''           # ★ 오류는 전부 통과
 type = "loki"
 inputs = ["sample", "journal"]
 endpoint = "http://loki.internal:3100"
+encoding.codec = "json"                  # loki 싱크의 필수 항목
 compression = "snappy"
 labels = { job = "nginx", env = "prod", host = "{{ host }}" }
   [sinks.loki.buffer]
@@ -32693,8 +32892,9 @@ labels = { job = "nginx", env = "prod", host = "{{ host }}" }
 vector validate --config /etc/vector/vector.toml
 
 # ② VRL 한 줄을 즉석에서 시험 ★ 이게 정말 편합니다
-echo '{"uri":"/a?token=abc123","status":"500"}' \
-  | vector vrl 'parse_json!(.) | .status = to_int!(.status)'
+#    (입력 파일의 JSON 한 줄이 이벤트 하나 = 프로그램 안의 . 입니다)
+echo '{"uri":"/a?token=abc123","status":"500"}' &gt; /tmp/ev.json
+vector vrl --input /tmp/ev.json '.status = to_int!(.status); .'
 
 # ③ 지금 흐르는 이벤트를 실시간으로 들여다보기
 vector tap --outputs-of parse
@@ -32818,10 +33018,14 @@ schema_config:
       object_store: s3
       schema: v13
       index: { prefix: index_, period: 24h }
+runtime_config:
+  file: /etc/loki/overrides.yaml    # 테넌트별 값은 메인 설정이 아니라 이 파일에
+
+# /etc/loki/overrides.yaml
 overrides:
   audit:
     retention_period: 8760h         # 감사 로그 테넌트만 1년</code></pre>
-      <pre class="code" data-lang="json"><code>// Elasticsearch / OpenSearch — ILM 으로 단계 강등
+      <pre class="code" data-lang="json"><code>// Elasticsearch — ILM 으로 단계 강등 (OpenSearch 는 ISM 이라 형식이 다릅니다)
 {
   "policy": { "phases": {
     "hot":   { "actions": { "rollover": { "max_primary_shard_size": "50gb",
@@ -32829,7 +33033,8 @@ overrides:
     "warm":  { "min_age": "3d",  "actions": {
                  "forcemerge": { "max_num_segments": 1 },
                  "shrink": { "number_of_shards": 1 } } },
-    "cold":  { "min_age": "14d", "actions": { "freeze": {} } },
+    "cold":  { "min_age": "14d", "actions": {           // freeze 는 8.0 에서 제거됨
+                 "allocate": { "number_of_replicas": 0 } } },
     "delete":{ "min_age": "90d", "actions": { "delete": {} } }
   } }
 }</code></pre>
@@ -33057,8 +33262,9 @@ WHERE req_id = '3f8a9c...' AND ts &gt;= now() - INTERVAL 2 HOUR
 ORDER BY ts;
 
 # 원본 파일밖에 없을 때 (여러 서버를 한 번에)
-pssh -h hosts.txt -i "grep -h 3f8a9c /var/log/nginx/access.json" \
-  | jq -s 'sort_by(.ts)'</code></pre>
+#   (-i 는 "[1] 15:00:01 [SUCCESS] host" 머리줄이 섞여 jq 가 깨지므로 -o 로 호스트별 파일에 받습니다)
+pssh -h hosts.txt -o /tmp/hit "grep -h 3f8a9c /var/log/nginx/access.json"
+cat /tmp/hit/* | jq -s 'sort_by(.ts)'</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">실무에서 진짜 효과가 큰 두 가지</h4>
@@ -33456,7 +33662,7 @@ log_format json escape=json
 
 # 조회
 ausearch -k log-tamper -i --start today
-ausearch -k nginx-conf -i | aureport -f -i        # 파일 기준 요약
+ausearch -k nginx-conf --raw | aureport -f -i     # 파일 기준 요약 (aureport 에는 --raw 로 넘깁니다)
 aureport --auth --failed --start this-week        # 인증 실패 요약</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>액세스 로그 파일 자체에 <code>-p w</code> 를 걸지 마세요.</b>
@@ -33474,7 +33680,8 @@ lsattr /var/log/audit/audit.log                    # ----a------
 
 # ② 오브젝트 스토리지 — 버킷 단위 잠금 (S3 Object Lock · COMPLIANCE 모드)
 aws s3api create-bucket --bucket corp-audit-logs \
-    --object-lock-enabled-for-bucket --region ap-northeast-2
+    --object-lock-enabled-for-bucket --region ap-northeast-2 \
+    --create-bucket-configuration LocationConstraint=ap-northeast-2   # us-east-1 외 리전은 필수
 aws s3api put-object-lock-configuration --bucket corp-audit-logs \
     --object-lock-configuration \
     '{"ObjectLockEnabled":"Enabled","Rule":{"DefaultRetention":{"Mode":"COMPLIANCE","Days":400}}}'
@@ -33603,27 +33810,34 @@ ls -l /var/log/pods/shop_api-7d9f_*/api/     # 0.log 0.log.20260831-060000 ...</
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">Fluent Bit DaemonSet — 실제로 손대는 설정</h4>
-      <pre class="code" data-lang="ini"><code>[INPUT]
+      <pre class="code" data-lang="ini"><code># (클래식 형식은 줄 끝 주석을 값으로 읽습니다 — 주석은 따로 한 줄로)
+[INPUT]
     Name              tail
     Path              /var/log/containers/*.log
     Exclude_Path      /var/log/containers/*_kube-system_*.log
-    multiline.parser  cri                 # ★ CRI 형식 + 잘린 줄(P) 이어 붙이기
+    # ★ CRI 형식 + 잘린 줄(P) 이어 붙이기
+    multiline.parser  cri
     Tag               kube.*
-    DB                /var/lib/fluent-bit/kube.db   # hostPath 볼륨에 두세요
+    # hostPath 볼륨에 두세요
+    DB                /var/lib/fluent-bit/kube.db
     Mem_Buf_Limit     50MB
     Skip_Long_Lines   On
     Refresh_Interval  10
 
 [FILTER]
-    Name                kubernetes         # 파일명에서 파드를 찾아 API 로 메타데이터 조회
+    # 파일명에서 파드를 찾아 API 로 메타데이터 조회
+    Name                kubernetes
     Match               kube.*
-    Merge_Log           On                 # 본문이 JSON 이면 필드로 펼침
+    # 본문이 JSON 이면 필드로 펼침
+    Merge_Log           On
     Merge_Log_Key       app
     Keep_Log            Off
-    K8S-Logging.Parser  On                 # 파드 애너테이션으로 파서 지정 가능
-    K8S-Logging.Exclude On                 # fluentbit.io/exclude: "true" 인 파드는 제외
+    # 파드 애너테이션으로 파서 지정 가능 · fluentbit.io/exclude: "true" 인 파드는 제외
+    K8S-Logging.Parser  On
+    K8S-Logging.Exclude On
     Labels              On
-    Annotations         Off                # 애너테이션은 크고 카디널리티가 높습니다
+    # 애너테이션은 크고 카디널리티가 높습니다
+    Annotations         Off
 
 [OUTPUT]
     Name   loki
@@ -37522,6 +37736,268 @@ function cheatSet(inputId, tableId, countId, q){
 /* 탭별 최초 1회 초기화 */
 TAB_INIT.nginx = function(){ locGo("/api/users", $('#locCtrl .chip[data-p="/api/users"]')); };
 TAB_INIT.lb = function(){ lbRender(); };
+/* 읽는 법 사전 — server · shared/js/07-study.js 가 본문 인라인 코드의 탭별 첫 등장에 * 를 붙인다.
+   [표기, 읽는 법, 실무에서 부르는 말·한 줄 뜻(선택)] — 표기는 코드에 나오는 그대로(대소문자 구분) */
+window.LX_SAY = [
+  /* ── nginx ── */
+  ["nginx", "엔진엑스", "웹 서버·리버스 프록시"],
+  ["nginx -t", "엔진엑스 대시 티", "설정 문법 검사 — 리로드 전에 꼭"],
+  ["nginx -s reload", "엔진엑스 리로드", "끊김 없이 설정 다시 읽기"],
+  ["nginx.conf", "엔진엑스 컨프", "nginx 메인 설정 파일"],
+  ["conf.d", "컨프 디", "추가 설정 파일 폴더"],
+  ["sites-available", "사이츠 어베일러블", "사이트 설정 보관 폴더(데비안 계열)"],
+  ["sites-enabled", "사이츠 이네이블드", "켜진 사이트 — available 로 거는 심볼릭 링크"],
+  ["location", "로케이션", "URL 경로별 처리 블록"],
+  ["upstream", "업스트림", "뒤쪽 백엔드 서버 묶음"],
+  ["proxy_pass", "프록시 패스", "요청을 백엔드로 넘기기"],
+  ["proxy_set_header", "프록시 셋 헤더", "백엔드로 보낼 헤더 지정"],
+  ["proxy_read_timeout", "프록시 리드 타임아웃", "백엔드 응답 대기 한도 — 기본 60초"],
+  ["proxy_buffering", "프록시 버퍼링", "응답을 모아 보낼지 — SSE·스트리밍은 off"],
+  ["proxy_next_upstream", "프록시 넥스트 업스트림", "실패하면 다음 서버로 재시도"],
+  ["proxy_cache", "프록시 캐시", "백엔드 응답 캐시"],
+  ["proxy_buffer_size", "프록시 버퍼 사이즈", "응답 헤더용 버퍼 크기"],
+  ["proxy_http_version", "프록시 에이치티티피 버전", "백엔드 연결 HTTP 버전 — keepalive 엔 1.1"],
+  ["try_files", "트라이 파일스", "파일이 있으면 주고 없으면 다음 후보 — SPA 폴백"],
+  ["root", "루트", "nginx — 문서 루트(경로를 이어 붙임) · 리눅스 관리자 계정"],
+  ["alias", "얼라이어스 / 앨리어스", "nginx — location 부분을 경로로 바꿔 끼움 · 셸에선 명령 별칭"],
+  ["listen", "리슨", "듣는 포트·주소"],
+  ["server_name", "서버 네임", "가상 호스트 도메인"],
+  ["default_server", "디폴트 서버", "맞는 server_name 이 없을 때 받는 블록"],
+  ["add_header", "애드 헤더", "응답 헤더 추가 — 하위 블록에서 쓰면 상속 끊김"],
+  ["keepalive", "킵얼라이브", "연결을 재사용 — upstream 연결 풀"],
+  ["keepalive_timeout", "킵얼라이브 타임아웃", "놀고 있는 연결을 유지할 시간"],
+  ["keepalive_requests", "킵얼라이브 리퀘스츠", "연결 하나당 최대 요청 수"],
+  ["worker_processes", "워커 프로세시스", "워커 수 — 보통 auto(코어 수)"],
+  ["worker_connections", "워커 커넥션스", "워커 하나당 최대 연결 수"],
+  ["worker_rlimit_nofile", "워커 알리밋 노파일", "워커가 열 수 있는 파일 수 상한"],
+  ["client_max_body_size", "클라이언트 맥스 바디 사이즈", "업로드 크기 제한 — 넘으면 413"],
+  ["least_conn", "리스트 콘", "연결이 가장 적은 서버로"],
+  ["ip_hash", "아이피 해시", "클라이언트 IP 로 서버 고정"],
+  ["max_fails", "맥스 페일스", "이만큼 실패하면 잠시 빼기"],
+  ["weight", "웨이트", "서버별 가중치"],
+  ["resolver", "리졸버", "nginx 가 쓸 DNS 서버"],
+  ["limit_req", "리밋 렉", "요청 속도 제한"],
+  ["gzip", "지집", "응답 압축"],
+  ["gzip_types", "지집 타입스", "압축할 MIME 형식"],
+  ["zstd", "지스탠더드 / 젯스탠더드", "Zstandard 압축"],
+  ["http2", "에이치티티피 투", "HTTP/2 켜기"],
+  ["h2", "에이치투", "HTTP/2 의 ALPN 이름"],
+  ["set_real_ip_from", "셋 리얼 아이피 프롬", "믿을 프록시 대역 — 진짜 클라이언트 IP 복원"],
+  ["real_ip_header", "리얼 아이피 헤더", "진짜 IP 를 읽을 헤더"],
+  ["log_format", "로그 포맷", "접근 로그 형식 정의"],
+  ["access_log", "액세스 로그", "접근 로그 위치·형식"],
+  ["error_log", "에러 로그", "오류 로그 위치·수준"],
+  ["sendfile_max_chunk", "센드파일 맥스 청크", "sendfile 한 번에 보낼 최대 크기"],
+  ["reuseport", "리유즈포트", "워커마다 따로 listen 소켓 — 부하 분산"],
+  ["$uri", "달러 유알아이", "정규화된 요청 경로"],
+  ["$host", "달러 호스트", "요청 Host"],
+  ["$remote_addr", "달러 리모트 애더", "접속한 클라이언트 IP"],
+  ["$binary_remote_addr", "달러 바이너리 리모트 애더", "IP 를 바이트로 — 속도 제한 키"],
+  ["$request_time", "달러 리퀘스트 타임", "요청 전체 처리 시간"],
+  ["$request_id", "달러 리퀘스트 아이디", "요청마다 붙는 고유 ID"],
+  ["$upstream_response_time", "달러 업스트림 리스폰스 타임", "백엔드 응답에 걸린 시간"],
+  ["$upstream_addr", "달러 업스트림 애더", "실제로 받은 백엔드 주소"],
+  ["$upstream_connect_time", "달러 업스트림 커넥트 타임", "백엔드 연결에 걸린 시간"],
+  ["$upstream_header_time", "달러 업스트림 헤더 타임", "백엔드 첫 헤더까지 시간"],
+  ["$upstream_cache_status", "달러 업스트림 캐시 스테이터스", "HIT·MISS 등 캐시 결과"],
+  ["$http_upgrade", "달러 에이치티티피 업그레이드", "Upgrade 요청 헤더 — 웹소켓"],
+  ["$status", "달러 스테이터스", "응답 상태 코드"],
+
+  /* ── Apache httpd ── */
+  ["apachectl", "아파치 컨트롤 / 아파치씨티엘", "Apache 제어 명령"],
+  ["httpd", "에이치티티피디", "Apache 데몬(레드햇 계열 이름)"],
+  ["apache2", "아파치 투", "Apache(데비안 계열 이름)"],
+  ["httpd.conf", "에이치티티피디 컨프", "Apache 메인 설정"],
+  ["apache2.conf", "아파치 투 컨프", "데비안 계열 Apache 메인 설정"],
+  [".htaccess", "에이치티액세스", "폴더별 설정 파일 — 매 요청마다 읽음"],
+  ["AllowOverride", "얼라우 오버라이드", ".htaccess 허용 범위"],
+  ["a2ensite", "에이투 엔사이트", "데비안 — 사이트 켜기"],
+  ["a2enmod", "에이투 엔모드", "데비안 — 모듈 켜기"],
+  ["ProxyPass", "프록시 패스", "Apache 리버스 프록시"],
+  ["ServerName", "서버 네임", "가상 호스트 이름"],
+  ["RewriteRule", "리라이트 룰", "mod_rewrite 주소 바꾸기 규칙"],
+  ["RewriteCond", "리라이트 콘드", "RewriteRule 적용 조건"],
+  ["SSLCertificateFile", "에스에스엘 서티피킷 파일", "Apache 인증서 경로"],
+  ["MPM", "엠피엠", "Multi-Processing Module — prefork·worker·event"],
+  ["MaxRequestWorkers", "맥스 리퀘스트 워커스", "Apache 동시 처리 상한"],
+  ["mod_php", "모드 피에이치피", "Apache 안에서 PHP 실행 — prefork 강제"],
+  ["mod_rewrite", "모드 리라이트", "URL 재작성 모듈"],
+  ["php-fpm", "피에이치피 에프피엠", "PHP FastCGI 프로세스 관리자"],
+
+  /* ── Tomcat · 앱 서버 ── */
+  ["catalina.out", "카탈리나 아웃", "Tomcat 표준 출력 로그"],
+  ["server.xml", "서버 엑스엠엘", "Tomcat 메인 설정"],
+  ["$CATALINA_HOME", "달러 카탈리나 홈", "Tomcat 설치 경로"],
+  ["maxThreads", "맥스 스레즈", "Tomcat 요청 처리 스레드 상한"],
+  ["acceptCount", "억셉트 카운트", "스레드가 다 찼을 때 대기열 길이"],
+  ["maxConnections", "맥스 커넥션스", "동시에 붙잡는 연결 상한"],
+  ["keepAliveTimeout", "킵얼라이브 타임아웃", "놀고 있는 연결 유지 시간"],
+  ["Xmx", "엑스엠엑스", "JVM 최대 힙"],
+  ["XX:MaxRAMPercentage", "맥스 램 퍼센티지", "컨테이너 메모리 대비 힙 비율"],
+  ["uvicorn", "유비콘", "파이썬 ASGI 서버"],
+  ["gthread", "지스레드", "gunicorn 스레드 워커"],
+  ["pm2", "피엠투", "Node 프로세스 관리자"],
+  ["graceful", "그레이스풀", "진행 중 요청을 끝내고 종료"],
+
+  /* ── Caddy · TLS ── */
+  ["caddy", "캐디", "자동 HTTPS 웹 서버"],
+  ["Caddyfile", "캐디파일", "Caddy 설정 파일"],
+  ["reverse_proxy", "리버스 프록시", "Caddy 프록시 지시어"],
+  ["certbot", "서트봇", "Let's Encrypt 인증서 발급 도구"],
+  ["fullchain.pem", "풀체인 피이엠 / 펨", "인증서 + 중간 인증서 묶음"],
+  ["privkey.pem", "프라이브키 피이엠 / 펨", "개인 키 파일"],
+  ["openssl", "오픈에스에스엘", "TLS·인증서 도구"],
+  ["s_client", "에스 클라이언트", "openssl TLS 접속 테스트"],
+  ["TLSv1.3", "티엘에스 일 점 삼", "최신 TLS 버전"],
+  ["ssl_stapling", "에스에스엘 스테이플링", "OCSP 응답을 서버가 붙여 보냄"],
+  ["max-age", "맥스 에이지", "캐시·HSTS 유효 시간(초)"],
+  ["no-store", "노 스토어", "아예 저장 금지"],
+  ["no-cache", "노 캐시", "저장은 하되 매번 재검증"],
+  ["immutable", "이뮤터블", "유효 기간 동안 재검증 안 함 — 해시 파일명용"],
+  ["SameSite", "세임사이트", "쿠키를 다른 사이트 요청에 실을지"],
+  ["Secure", "시큐어", "HTTPS 에서만 쿠키 전송"],
+  ["HttpOnly", "에이치티티피 온리", "JS 에서 쿠키 접근 금지"],
+  ["X-Forwarded-Proto", "엑스 포워디드 프로토", "원래 요청이 http 인지 https 인지"],
+  ["X-Forwarded-For", "엑스 포워디드 포", "원래 클라이언트 IP 목록"],
+  ["X-Real-IP", "엑스 리얼 아이피", "원래 클라이언트 IP 하나"],
+  ["X-Request-Id", "엑스 리퀘스트 아이디", "요청 추적 ID 헤더"],
+  ["Upgrade", "업그레이드", "프로토콜 전환 헤더 — 웹소켓"],
+  ["Connection", "커넥션", "연결 유지·전환 헤더"],
+  ["Connection refused", "커넥션 리퓨즈드", "그 주소·포트에 듣는 프로세스가 없음"],
+
+  /* ── 리눅스 · 운영 ── */
+  ["systemctl", "시스템씨티엘 / 시스템컨트롤", "systemd 서비스 제어"],
+  ["journalctl", "저널씨티엘 / 저널컨트롤", "systemd 로그 보기"],
+  ["LimitNOFILE", "리밋 노파일", "systemd — 열 수 있는 파일 수 상한"],
+  ["SystemMaxUse", "시스템 맥스 유즈", "journald 로그 디스크 상한"],
+  ["ulimit", "유리밋", "프로세스 자원 한도"],
+  ["fs.file-max", "에프에스 닷 파일 맥스", "시스템 전체 파일 핸들 상한"],
+  ["somaxconn", "소맥스콘", "listen 대기열 최대 길이"],
+  ["backlog", "백로그", "accept 대기 큐 길이"],
+  ["TIME_WAIT", "타임 웨이트", "닫힌 뒤 잠시 남는 TCP 상태"],
+  ["tcp_tw_reuse", "티씨피 티더블유 리유즈", "TIME_WAIT 포트를 새 연결에 재사용"],
+  ["copytruncate", "카피트렁케이트", "logrotate — 복사 후 원본 비우기"],
+  ["rsyslog", "알시스로그", "시스로그 데몬"],
+  ["ss", "에스에스", "소켓 상태 보기 — netstat 후속"],
+  ["ss -tlnp", "에스에스 티엘엔피", "듣는 TCP 포트와 프로세스"],
+  ["netstat", "넷스탯", "네트워크 연결 보기(구형)"],
+  ["lsof", "엘에스오에프 / 엘솝", "열린 파일·소켓 목록"],
+  ["curl", "컬", "HTTP 요청 도구"],
+  ["dig", "디그", "DNS 조회"],
+  ["sudo", "수도", "관리자 권한으로 실행"],
+  ["chmod", "체모드 / 씨에이치모드", "권한 바꾸기"],
+  ["www-data", "더블유더블유더블유 데이터", "데비안 계열 웹 서버 계정"],
+  ["nologin", "노로그인", "로그인 셸 없는 계정"],
+  ["restorecon", "리스토어콘", "SELinux 라벨 되돌리기"],
+  ["setsebool", "셋에스이불", "SELinux 불린 값 켜기"],
+  ["httpd_can_network_connect", "에이치티티피디 캔 네트워크 커넥트", "SELinux — 웹 서버의 바깥 연결 허용"],
+  ["SIGTERM", "시그텀", "정상 종료 요청 신호"],
+  ["USR1", "유에스알 원", "사용자 신호 1 — nginx 로그 파일 다시 열기"],
+  ["kill", "킬", "프로세스에 신호 보내기"],
+  ["Test-NetConnection", "테스트 넷커넥션", "PowerShell 포트 연결 확인"],
+
+  /* ── 컨테이너 · k8s ── */
+  ["docker", "도커", "컨테이너 도구"],
+  ["compose", "컴포즈", "여러 컨테이너 정의·실행"],
+  ["depends_on", "디펜즈 온", "compose — 시작 순서 의존"],
+  ["healthcheck", "헬스체크", "컨테이너 상태 검사"],
+  ["ENTRYPOINT", "엔트리포인트", "컨테이너 시작 명령"],
+  ["kubectl", "큐브컨트롤 / 큐브씨티엘", "쿠버네티스 CLI"],
+  ["rollout", "롤아웃", "배포 진행·되돌리기"],
+  ["preStop", "프리스톱", "종료 직전 훅 — 트래픽 빠질 시간 벌기"],
+  ["readinessProbe", "레디니스 프로브", "트래픽 받을 준비 검사"],
+  ["maxUnavailable", "맥스 언어베일러블", "롤링 중 동시에 빠질 수 있는 수"],
+  ["maxSurge", "맥스 서지", "롤링 중 더 띄울 수 있는 수"],
+  ["Pending", "펜딩", "아직 노드에 못 올라간 Pod"],
+  ["DiskPressure", "디스크 프레셔", "노드 디스크 부족 상태"],
+  ["OOMKilled", "오오엠 킬드 / 움킬드", "메모리 한도 초과로 강제 종료"],
+  ["ImagePullBackOff", "이미지 풀 백오프", "이미지 못 받아 재시도 대기"],
+  ["kustomize", "커스터마이즈", "오버레이 방식 매니페스트 조립"],
+  ["helm", "헬름", "쿠버네티스 패키지 관리자"],
+  ["argocd", "아르고씨디", "GitOps 배포 도구"],
+
+  /* ── 관측 ── */
+  ["trace_id", "트레이스 아이디", "요청 하나를 잇는 추적 ID"],
+  ["traceparent", "트레이스페어런트", "W3C 추적 전파 헤더"],
+  ["prometheus", "프로메테우스", "지표 수집·저장"],
+  ["histogram_quantile", "히스토그램 퀀타일", "PromQL — 백분위 계산(p99)"],
+  ["predict_linear", "프레딕트 리니어", "PromQL — 추세로 미래 값 예측"],
+  ["metric_relabel_configs", "메트릭 리레이블 컨피그스", "수집 뒤 라벨 정리·버리기"],
+
+  /* ── 메시징 ── */
+  ["acks=all", "액스 이퀄 올", "Kafka — 모든 ISR 복제 확인 후 성공"],
+  ["min.insync.replicas", "민 인싱크 레플리카스", "Kafka — 최소 동기 복제본 수"],
+  ["haproxy", "에이치에이프록시", "L4·L7 로드 밸런서"],
+  ["max.poll.interval.ms", "맥스 폴 인터벌 밀리초", "Kafka — poll 간격이 이보다 길면 그룹에서 쫓겨남"],
+  ["retention.ms", "리텐션 밀리초", "Kafka — 메시지 보관 기간"],
+  ["cleanup.policy", "클린업 폴리시", "Kafka — delete 또는 compact"],
+  ["exactly_once_v2", "이그잭틀리 원스 브이투", "Kafka Streams 정확히 한 번 처리"],
+  ["DeadLetterPublishingRecoverer", "데드레터 퍼블리싱 리커버러", "스프링 카프카 — 실패 메시지를 DLT 로"],
+  ["kafka-consumer-groups.sh", "카프카 컨슈머 그룹스", "컨슈머 그룹 lag 확인·오프셋 리셋"],
+
+  /* ── 추가: 본문 인라인 토큰 ── */
+  ["ssl_certificate", "에스에스엘 서티피킷", "nginx 인증서 경로"],
+  ["ProxyPassReverse", "프록시 패스 리버스", "백엔드 리다이렉트 주소를 바깥 주소로 고침"],
+  ["VirtualHost", "버추얼 호스트", "Apache 가상 호스트 블록"],
+  ["DocumentRoot", "도큐먼트 루트", "Apache 문서 루트"],
+  ["stub_status", "스텁 스테이터스", "nginx 연결 수 상태 페이지"],
+  ["Strict-Transport-Security", "스트릭트 트랜스포트 시큐리티", "HSTS — 이 도메인은 HTTPS 로만"],
+  ["Content-Security-Policy", "콘텐트 시큐리티 폴리시", "CSP — 불러올 수 있는 출처 제한"],
+  ["X-Frame-Options", "엑스 프레임 옵션스", "iframe 삽입 금지 — 클릭재킹 방어"],
+  ["nosniff", "노스니프", "MIME 추측 금지"],
+  ["stale-while-revalidate", "스테일 와일 리밸리데이트", "옛 캐시를 주면서 뒤에서 갱신"],
+  ["must-revalidate", "머스트 리밸리데이트", "만료되면 반드시 재검증"],
+  ["daemon-reload", "데몬 리로드", "systemd 유닛 파일 다시 읽기"],
+  ["ExecStart", "엑섹 스타트", "systemd — 실행 명령"],
+  ["sysctl", "시스씨티엘 / 시스컨트롤", "커널 파라미터 보기·설정"],
+  ["ip_local_port_range", "아이피 로컬 포트 레인지", "나가는 연결에 쓸 포트 범위"],
+  ["tcp_tw_recycle", "티씨피 티더블유 리사이클", "NAT 뒤에서 연결 끊김 — 커널 4.12 에서 삭제"],
+  ["io_uring", "아이오 유링", "리눅스 비동기 I/O 인터페이스"],
+  ["kTLS", "케이티엘에스", "커널 TLS — sendfile 로 암호화 전송"],
+  ["proxy_protocol", "프록시 프로토콜", "L4 로드 밸런서가 원래 IP 를 앞에 붙여 전달"],
+  ["limit_conn", "리밋 콘", "동시 연결 수 제한"],
+  ["burst", "버스트", "속도 제한에서 잠깐 허용할 초과량"],
+  ["nodelay", "노딜레이", "burst 안의 요청을 지연 없이 바로 처리"],
+  ["auth_basic", "어스 베이직", "nginx 기본 인증"],
+  ["X-Accel-Redirect", "엑스 액셀 리다이렉트", "앱이 허락하고 파일 전송은 nginx 가"],
+  ["worker_cpu_affinity", "워커 씨피유 어피니티", "워커를 특정 코어에 고정"],
+  ["Http11NioProtocol", "에이치티티피 일일 엔아이오 프로토콜", "Tomcat NIO 커넥터"],
+  ["RemoteIpValve", "리모트 아이피 밸브", "Tomcat — X-Forwarded-For 로 진짜 IP 복원"],
+  ["Metaspace", "메타스페이스", "JVM 클래스 메타데이터 영역"],
+  ["ActiveProcessorCount", "액티브 프로세서 카운트", "JVM 이 볼 CPU 수 지정"],
+  ["GOMAXPROCS", "고맥스프록스", "Go 가 동시에 쓸 OS 스레드 수"],
+  ["gevent", "지이벤트", "파이썬 그린스레드 라이브러리"],
+  ["pm.max_children", "피엠 맥스 칠드런", "php-fpm 워커 상한"],
+  ["NXDOMAIN", "엔엑스도메인", "DNS — 그런 이름 없음"],
+  ["ECDHE", "이씨디에이치이", "타원곡선 임시 키 교환 — 순방향 보안"],
+  ["SIGKILL", "시그킬", "즉시 강제 종료 신호 — 못 막음"],
+  ["tini", "티니", "컨테이너용 작은 init — 신호 전달·좀비 회수"],
+  ["podman", "파드맨", "데몬 없는 컨테이너 도구"],
+  ["crictl", "크라이씨티엘", "CRI 런타임 디버그 CLI"],
+  ["IfNotPresent", "이프 낫 프레즌트", "노드에 이미지가 없을 때만 받기"],
+  ["terminationGracePeriodSeconds", "터미네이션 그레이스 피리어드 세컨즈", "SIGTERM 뒤 SIGKILL 까지 기다리는 시간"],
+  ["LoadBalancer", "로드밸런서", "k8s Service 형식 — 클라우드 LB 생성"],
+  ["targetPort", "타깃 포트", "Service 가 넘길 컨테이너 포트"],
+  ["etcd", "엣시디 / 이티씨디", "k8s 상태 저장 키-값 저장소"],
+  ["nodeSelector", "노드 셀렉터", "라벨로 올라갈 노드 고르기"],
+  ["emptyDir", "엠티 디르", "Pod 수명 동안의 임시 볼륨"],
+  ["ServiceMonitor", "서비스 모니터", "Prometheus Operator 수집 대상 정의"],
+  ["OutOfSync", "아웃 오브 싱크", "Argo CD — Git 과 클러스터 상태가 다름"],
+  ["selfHeal", "셀프 힐", "Argo CD — 손으로 바꾼 것을 Git 기준으로 되돌림"],
+  ["sync-wave", "싱크 웨이브", "Argo CD 적용 순서"],
+  ["relabel_configs", "리레이블 컨피그스", "수집 전 대상 라벨 정리"],
+  ["scrape_interval", "스크레이프 인터벌", "지표 수집 주기"],
+  ["topk", "탑케이", "PromQL — 상위 k 개"],
+  ["http_requests_total", "에이치티티피 리퀘스츠 토털", "요청 수 카운터 — rate() 와 짝"],
+  ["Retry-After", "리트라이 애프터", "다시 시도할 시점 헤더(429·503)"],
+  ["Last-Event-ID", "라스트 이벤트 아이디", "SSE 재연결 때 마지막 받은 ID"],
+  ["grpc_pass", "지알피씨 패스", "nginx gRPC 프록시"],
+  ["mime.types", "마임 타입스", "확장자 → Content-Type 표"],
+  ["autoindex", "오토인덱스", "폴더 목록 자동 표시 — 운영에선 끔"],
+  ["FollowSymLinks", "팔로 심링크스", "Apache — 심볼릭 링크 따라가기 허용"],
+  ["NODE_ENV", "노드 인브이 / 노드 env", "Node 실행 환경 — production"],
+  ["PYTHONUNBUFFERED", "파이썬 언버퍼드", "출력을 버퍼 없이 — 컨테이너 로그 지연 방지"],
+];
 /* ================================================================
    학습 레이어 (2026-10 개편) — java · python · kotlin · js-ts
    ----------------------------------------------------------------

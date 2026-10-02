@@ -116,27 +116,32 @@ Description=My App
 After=network.target
 # 의존 서비스가 있으면
 # Requires=postgresql.service
+# 60초 안에 5회 실패하면 포기(무한 재시작 방지) — ★ [Service] 가 아니라 [Unit] 에 둡니다
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
-User=myapp                          # ★ 전용 계정 — root 로 돌리지 마세요
+# ★ 전용 계정 — root 로 돌리지 마세요
+User=myapp
 Group=myapp
 WorkingDirectory=/opt/myapp
 
 # ── 이 줄만 언어별로 바뀝니다 ─────────────────────
-ExecStart=/usr/bin/java -jar app.jar              # Java
+# Java
+ExecStart=/usr/bin/java -jar app.jar
 # ExecStart=/opt/myapp/venv/bin/gunicorn -c gunicorn.conf.py app:app   # Python
 # ExecStart=/usr/bin/node server.js                # Node
 # ExecStart=/opt/myapp/bin/myapp                   # Go · Rust
 # ────────────────────────────────────────────────
 
 Environment=NODE_ENV=production
-EnvironmentFile=-/etc/myapp/env     # 비밀은 파일로 (권한 600)
+# 비밀은 파일로 (권한 600)
+EnvironmentFile=-/etc/myapp/env
 
-Restart=always                      # 죽으면 되살림
+# 죽으면 되살림
+Restart=always
 RestartSec=3
-StartLimitBurst=5                   # 5회 연속 실패하면 포기(무한 재시작 방지)
-StartLimitIntervalSec=60
 
 # 그레이스풀 종료 — 진행 중 요청을 마치게
 KillSignal=SIGTERM
@@ -277,12 +282,16 @@ ssh deploy@server '
 '</code></pre>
 
   <pre class="code rv d2" data-lang="ini"><code># JVM 옵션 — 컨테이너·systemd 어느 쪽이든 이 정도는 챙기세요
+#   MaxRAMPercentage         ★ -Xmx 대신 비율로 (컨테이너 메모리 인식)
+#   HeapDumpOnOutOfMemoryError ★ OOM 시 덤프 — 원인 추적의 유일한 단서
+#   ExitOnOutOfMemoryError   OOM 이면 죽고 재시작 (반쯤 살아있는 상태 방지)
+#   (systemd 는 줄 끝 주석을 지원하지 않아 설명을 위로 모았습니다)
 Environment=JAVA_OPTS=" \
-  -XX:MaxRAMPercentage=75.0 \        # ★ -Xmx 대신 비율로 (컨테이너 메모리 인식)
+  -XX:MaxRAMPercentage=75.0 \
   -XX:+UseG1GC \
-  -XX:+HeapDumpOnOutOfMemoryError \  # ★ OOM 시 덤프 — 원인 추적의 유일한 단서
+  -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath=/var/log/myapp/ \
-  -XX:+ExitOnOutOfMemoryError \      # OOM 이면 죽고 재시작 (반쯤 살아있는 상태 방지)
+  -XX:+ExitOnOutOfMemoryError \
   -Djava.security.egd=file:/dev/./urandom \
   -Duser.timezone=Asia/Seoul \
   -Dfile.encoding=UTF-8"</code></pre>
@@ -337,11 +346,13 @@ WorkingDirectory=/opt/myapp
 
 # 비밀은 파일로 (권한 600) — 명령줄 인자에 넣으면 ps 로 다 보입니다
 EnvironmentFile=/etc/myapp/env
-Environment="JAVA_OPTS=-Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxRAMPercentage=75"
+# -Xmx 와 MaxRAMPercentage 를 같이 주면 -Xmx 가 이깁니다 — 둘 중 하나만 (컨테이너면 비율)
+Environment="JAVA_OPTS=-Xms512m -Xmx1g -XX:+UseG1GC"
 
 ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/myapp/myapp.jar
 
-SuccessExitStatus=143            # SIGTERM 종료를 정상으로 취급
+# SIGTERM 종료를 정상으로 취급
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=65535
@@ -585,7 +596,7 @@ preload_app = True                 # 메모리 절약 (fork 전에 앱 로드)
       <tr><td><code>sync</code></td><td class="ok">기본값. 프로세스가 요청 하나씩 처리 — <b>가장 안정적</b></td></tr>
       <tr><td><code>gthread</code></td><td>프로세스 안에서 스레드로 — IO 대기가 많을 때 유리</td></tr>
       <tr><td><code>uvicorn.workers.UvicornWorker</code></td><td class="ok">ASGI 앱을 Gunicorn 으로 관리 (FastAPI)</td></tr>
-      <tr><td><code>gevent</code> · <code>eventlet</code></td><td class="warn">코루틴 기반. монки패치가 필요해 예상 밖 문제가 생길 수 있습니다</td></tr>
+      <tr><td><code>gevent</code> · <code>eventlet</code></td><td class="warn">코루틴 기반. 몽키패치가 필요해 예상 밖 문제가 생길 수 있습니다</td></tr>
     </table>
   </div>
 
@@ -597,14 +608,17 @@ After=network.target
 [Service]
 Type=notify
 User=appuser
-Group=www-data                    # ★ Nginx 가 소켓을 읽을 수 있게
+# ★ Nginx 가 소켓을 읽을 수 있게
+Group=www-data
 WorkingDirectory=/opt/myapp
 Environment="PATH=/opt/myapp/venv/bin"
 EnvironmentFile=/etc/myapp/env
 
-RuntimeDirectory=myapp            # /run/myapp 을 자동 생성·정리
+# /run/myapp 을 자동 생성·정리
+RuntimeDirectory=myapp
 RuntimeDirectoryMode=0755
-UMask=0007                        # 소켓 권한
+# 소켓 권한
+UMask=0007
 
 ExecStart=/opt/myapp/venv/bin/gunicorn -c /opt/myapp/gunicorn.conf.py myapp.wsgi:application
 ExecReload=/bin/kill -s HUP $MAINPID
@@ -1082,7 +1096,7 @@ server {
     조심해야 합니다 — <code>try_files $uri =404;</code> 를 함께 쓰세요.
   </div>
 
-  <pre class="code rv d1" data-lang="conf"><code># /etc/php/8.3/fpm/pool.d/www.conf — 프로세스 풀
+  <pre class="code rv d1" data-lang="conf"><code>; /etc/php/8.3/fpm/pool.d/www.conf — 프로세스 풀  (주석은 ; — PHP 7 부터 # 주석 불가)
 [www]
 user = www-data
 group = www-data
@@ -1091,12 +1105,12 @@ listen.owner = www-data
 listen.group = www-data
 listen.mode = 0660
 
-pm = dynamic                    # dynamic · static · ondemand
-pm.max_children = 50            # ★ 최대 동시 처리 (메모리로 산정)
+pm = dynamic                    ; dynamic · static · ondemand
+pm.max_children = 50            ; ★ 최대 동시 처리 (메모리로 산정)
 pm.start_servers = 10
 pm.min_spare_servers = 5
 pm.max_spare_servers = 20
-pm.max_requests = 500           # 메모리 누수 대비
+pm.max_requests = 500           ; 메모리 누수 대비
 
 ; 느린 요청 로깅
 slowlog = /var/log/php8.3-fpm-slow.log
@@ -1197,7 +1211,8 @@ rsync -avz --delete dist/ deploy@server:/var/www/spa/</code></pre>
     gzip_types text/css application/javascript application/json image/svg+xml;
 
     # ★ 해시가 붙은 빌드 산출물 — 영구 캐시
-    location ~* \.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp)$ {
+    #   정규식에 { } 가 있으면 따옴표로 감싸야 합니다 (안 그러면 nginx -t 실패)
+    location ~* "\.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp)$" {
         expires 1y;
         add_header Cache-Control "public, immutable";
         access_log off;
@@ -1233,7 +1248,8 @@ rsync -avz --delete dist/ deploy@server:/var/www/spa/</code></pre>
 
   <h3 class="sub">Next.js 처럼 서버가 필요한 경우</h3>
   <pre class="code rv d1" data-lang="bash"><code># 완전 정적으로 내보낼 수 있으면 (SSG)
-next build &amp;&amp; next export      # → out/ 폴더를 그대로 서빙
+#   next.config 에 output: 'export' 를 두고 빌드 (next export 명령은 Next 14 에서 제거됨)
+next build                     # → out/ 폴더를 그대로 서빙
 
 # SSR·API 라우트를 쓴다면 Node 프로세스가 필요합니다
 pm2 start npm --name web -- start
@@ -1334,29 +1350,35 @@ After=network-online.target
 Wants=network-online.target
 # DB 가 같은 서버에 있다면
 # After=postgresql.service
+# 60초에 5번 실패하면 포기 (무한 재시작 방지) — ★ [Unit] 에 둬야 적용됩니다
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
-Type=simple                      # simple · forking · notify · oneshot
+# simple · forking · notify · oneshot
+Type=simple
 User=appuser
 Group=appuser
 WorkingDirectory=/opt/myapp
 
 Environment="NODE_ENV=production"
-EnvironmentFile=/etc/myapp/env   # 비밀은 여기에 (권한 600)
+# 비밀은 여기에 (권한 600)
+EnvironmentFile=/etc/myapp/env
 
 ExecStartPre=/usr/bin/test -f /opt/myapp/app.js
 ExecStart=/usr/bin/node /opt/myapp/app.js
+# ※ 앱이 SIGHUP 을 직접 처리하도록 짰을 때만 — Node 는 기본적으로 SIGHUP 을 받으면 종료합니다
 ExecReload=/bin/kill -HUP $MAINPID
 
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=5                # 60초에 5번 실패하면 포기 (무한 재시작 방지)
 
-TimeoutStopSec=30                # 종료 유예
+# 종료 유예
+TimeoutStopSec=30
 KillSignal=SIGTERM
 
-LimitNOFILE=65535                # 파일 디스크립터 한계
+# 파일 디스크립터 한계
+LimitNOFILE=65535
 
 # 보안 강화 (선택이지만 권장)
 NoNewPrivileges=true
@@ -1521,8 +1543,9 @@ ls -l /run/myapp/gunicorn.sock
 # Nginx 실행 계정 확인
 ps aux | grep nginx | head -2
 
-# Nginx 가 소켓을 읽을 수 있는지 직접 테스트
-sudo -u www-data test -r /run/myapp/gunicorn.sock &amp;&amp; echo OK || echo "권한 없음"</code></pre>
+# Nginx 가 소켓에 접속할 수 있는지 직접 테스트
+# (소켓에 접속하려면 읽기가 아니라 쓰기 권한이 필요합니다)
+sudo -u www-data test -w /run/myapp/gunicorn.sock &amp;&amp; echo OK || echo "권한 없음"</code></pre>
 
   <div class="note warn rv d1">
     <b><code>502 Bad Gateway</code> + <code>Permission denied</code></b> 조합은
@@ -1536,10 +1559,13 @@ sudo -u www-data test -r /run/myapp/gunicorn.sock &amp;&amp; echo OK || echo "�
   <pre class="code rv d1" data-lang="ini"><code># systemd 로 소켓 폴더를 안전하게 관리
 [Service]
 User=appuser
-Group=www-data                    # ★ Nginx 그룹
-RuntimeDirectory=myapp            # /run/myapp 을 자동 생성 (서비스 종료 시 정리)
+# ★ Nginx 그룹
+Group=www-data
+# /run/myapp 을 자동 생성 (서비스 종료 시 정리)
+RuntimeDirectory=myapp
 RuntimeDirectoryMode=0750
-UMask=0007                        # 소켓이 660 으로 생성됩니다</code></pre>
+# 소켓이 660 으로 생성됩니다
+UMask=0007</code></pre>
 
   <h3 class="sub">SELinux 환경 (RHEL 계열)</h3>
   <pre class="code rv d2" data-lang="bash"><code># 권한이 다 맞는데도 502 라면 SELinux 를 의심하세요

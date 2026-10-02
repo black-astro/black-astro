@@ -268,7 +268,7 @@ intranet.local {
   <pre class="code rv" data-lang="caddy"><code># 전역 옵션 (파일 맨 위에 한 번)
 {
     email admin@example.com          # 인증서 만료 알림을 받을 주소
-    admin off                        # 관리 API 끄기 (운영 권장)
+    admin off                        # 관리 API 끄기 — 단, caddy reload·systemctl reload 도 안 됩니다(재시작으로 반영)
     servers {
         protocols h1 h2 h3
     }
@@ -321,7 +321,7 @@ http://internal.local {
       <tr><td><code>respond</code></td><td>즉시 응답 (헬스체크 등)</td></tr>
       <tr><td><code>rewrite</code></td><td>내부 경로 재작성</td></tr>
       <tr><td><code>try_files</code></td><td>순서대로 찾기 (SPA)</td></tr>
-      <tr><td><code>basicauth</code></td><td>기본 인증</td></tr>
+      <tr><td><code>basic_auth</code></td><td>기본 인증 (2.8 이전 이름 <code>basicauth</code>)</td></tr>
     </table>
   </div>
 
@@ -416,7 +416,7 @@ example.com {
 # 여러 서버 = 자동 로드 밸런싱
 example.com {
     reverse_proxy 10.0.1.11:3000 10.0.1.12:3000 10.0.1.13:3000 {
-        lb_policy least_conn          # round_robin(기본) · ip_hash · random · first
+        lb_policy least_conn          # random(기본) · round_robin · ip_hash · first
 
         health_uri      /health       # ★ 능동적 헬스체크가 기본 기능입니다
         health_interval 10s
@@ -659,9 +659,11 @@ internal.local {
     tls internal
 }
 
-# 인증서 관리를 아예 끄기
-example.com {
-    tls off
+# 인증서 관리를 아예 끄기 — Caddy 2 에는 tls off 가 없습니다
+# 주소 앞에 http:// 를 붙이면 그 사이트는 HTTP 로만 서비스합니다
+# (전부 끄려면 전역 옵션 { auto_https off })
+http://example.com {
+    respond "HTTP only"
 }</code></pre>
   <div class="diag rv">
     <svg viewBox="0 0 680 278" role="img" aria-label="자동 인증서 발급은 ACME 라는 절차를 따른다. 서버가 인증 기관에 이 도메인의 인증서를 달라고 요청하면 기관이 도전 과제를 주고 서버는 그것을 정해진 위치에 올려 둔다. 기관이 실제로 그 도메인에 접속해 확인하면 도메인 소유가 증명되어 인증서를 발급한다. 그래서 도메인이 이 서버를 가리키고 있어야 하며 사내망처럼 밖에서 접속할 수 없으면 DNS 레코드로 증명하는 방식을 쓴다.">
@@ -730,9 +732,9 @@ caddy file-server --listen :8080 --browse
     }
     header @static Cache-Control "public, max-age=31536000, immutable"
 
-    # index.html 은 캐시 금지
+    # index.html 은 매번 재검증 (no-cache — 아래 SPA 설명 참고)
     @html path /index.html /
-    header @html Cache-Control "no-store, must-revalidate"
+    header @html Cache-Control "no-cache"
 
     # 커스텀 오류 페이지
     handle_errors {
@@ -1236,9 +1238,9 @@ volumes:
 curl -s localhost:2019/config/ | jq          # 현재 설정 전체
 curl -s localhost:2019/reverse_proxy/upstreams | jq   # 업스트림 상태·헬스
 
-# 인증서 만료일 확인 — 자동 갱신이 잘 돌고 있는지 가끔 봐 두세요
+# 인증서 파일의 갱신 시각 — 자동 갱신이 잘 돌고 있는지 가끔 봐 두세요
 docker compose exec caddy sh -c \
-  'ls /data/caddy/certificates/*/*/ *.crt' 2&gt;/dev/null
+  'ls -l /data/caddy/certificates/*/*/*.crt' 2&gt;/dev/null
 
 # 밖에서 실제로 확인하는 것이 가장 확실합니다
 echo | openssl s_client -connect example.com:443 -servername example.com 2&gt;/dev/null \
@@ -1373,6 +1375,7 @@ curl -X POST localhost:2019/load \
     <b>컨테이너 안에서는 다른 컨테이너가 접근할 수 있습니다.</b>
     설정을 통째로 바꿀 수 있으므로 매우 위험합니다.
     <br>Caddyfile 전역 옵션에 <code>admin off</code> 를 넣으세요.
+    (단, 그러면 <code>caddy reload</code> 로 무중단 반영을 할 수 없어 설정 변경은 재시작으로 해야 합니다)
   </div>
 
   <h3 class="sub">플러그인 — xcaddy 로 재빌드</h3>

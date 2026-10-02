@@ -266,6 +266,9 @@ ttfb:%{time_starttransfer} total:%{time_total}\n" -o /dev/null -s https://exampl
     CA 가 느리면 <b>우리 사이트가 느려 보입니다</b>.
     스테이플링은 서버가 그 답변을 미리 받아 <b>인증서와 함께 건네주는</b> 방식입니다.
     Nginx <code>ssl_stapling on;</code>, Apache <code>SSLUseStapling on</code> 한 줄입니다.
+    <br>※ 단, <b>Let's Encrypt 는 2025년에 OCSP 서비스를 종료</b>해 LE 인증서에는 OCSP 주소가 없습니다 —
+    LE 인증서라면 스테이플링이 동작하지 않으며(경고만 남음), 폐기 확인은 CRL 로 넘어갔습니다.
+    유료 CA 인증서처럼 OCSP 주소가 있는 경우에만 의미가 있습니다.
   </div>
 </section>
 
@@ -334,8 +337,9 @@ openssl x509 -in fullchain.pem -noout -subject -issuer -dates
 openssl x509 -in fullchain.pem -noout -ext subjectAltName    # 포함된 도메인 목록
 
 # 개인키와 인증서가 짝이 맞는지 (해시가 같아야 합니다)
-openssl x509 -noout -modulus -in fullchain.pem | openssl md5
-openssl rsa  -noout -modulus -in privkey.pem   | openssl md5</code></pre>
+#   공개키를 비교하므로 RSA·ECDSA 모두 됩니다 (certbot 2.0+ 기본 키는 ECDSA 라 -modulus 는 실패)
+openssl x509 -noout -pubkey -in fullchain.pem | openssl md5
+openssl pkey -pubout        -in privkey.pem   | openssl md5</code></pre>
   <div class="diag rv">
     <svg viewBox="0 0 680 284" role="img" aria-label="인증서는 검증 수준과 적용 범위 두 축으로 나뉜다. 검증 수준은 도메인만 확인하는 것과 조직까지 확인하는 것으로 나뉘는데 브라우저 주소창에서 보이는 차이는 이제 거의 없어서 대부분 도메인 검증으로 충분하다. 적용 범위는 단일 도메인과 여러 도메인을 함께 담는 것과 하위 도메인 전체를 덮는 와일드카드로 나뉜다. 와일드카드는 DNS 방식으로만 발급되며 한 단계 아래만 덮는다는 점을 알아야 한다.">
       <text x="16" y="18" class="lbl">인증서 — 검증 수준과 적용 범위 두 축</text>
@@ -635,7 +639,8 @@ ExecStart=/usr/bin/certbot renew --quiet --deploy-hook "systemctl reload nginx"
 Description=Run certbot twice daily
 [Timer]
 OnCalendar=*-*-* 03,15:00:00
-RandomizedDelaySec=3600        # ★ 서버가 많으면 분산 (CA 부하 방지)
+# ★ 서버가 많으면 분산 (CA 부하 방지)
+RandomizedDelaySec=3600
 Persistent=true
 [Install]
 WantedBy=timers.target</code></pre>
@@ -709,7 +714,7 @@ WantedBy=timers.target</code></pre>
 # sudo apachectl configtest &amp;&amp; sudo systemctl reload apache2</code></pre></div>
     <div class="q-tc"><h5>Tomcat · Spring Boot</h5>
       <pre class="code" data-lang="bash"><code># PEM → PKCS12 변환이 필요합니다
-openssl pkcs13 -export \
+openssl pkcs12 -export \
   -in  /etc/letsencrypt/live/example.com/fullchain.pem \
   -inkey /etc/letsencrypt/live/example.com/privkey.pem \
   -out keystore.p12 -name tomcat \
@@ -873,7 +878,7 @@ openssl s_client -connect example.com:443 -servername example.com &lt; /dev/null
     <table class="cheat">
       <tr><th style="width:20%">버전</th><th>상태</th></tr>
       <tr><td>SSL 2.0 · 3.0</td><td class="no">폐기 — 절대 쓰면 안 됩니다</td></tr>
-      <tr><td>TLS 1.0 · 1.1</td><td class="no"><b>2021년 주요 브라우저에서 지원 종료</b> — 비활성화하세요</td></tr>
+      <tr><td>TLS 1.0 · 1.1</td><td class="no"><b>2020년 주요 브라우저에서 지원 종료</b> — 비활성화하세요</td></tr>
       <tr><td>TLS 1.2</td><td class="ok">현재 표준 — 호환성을 위해 켜 둡니다</td></tr>
       <tr><td>TLS 1.3</td><td class="ok">★ 최신 · 더 빠르고 안전 — 반드시 켜세요</td></tr>
     </table>
@@ -890,6 +895,7 @@ ssl_session_timeout 1d;
 ssl_session_tickets off;               # 티켓 키 관리가 어렵다면 끄는 편이 안전
 
 # OCSP 스테이플링 (인증서 폐기 확인을 서버가 대신)
+# ※ OCSP 주소가 있는 인증서에만 해당 — Let's Encrypt 는 2025년 OCSP 종료 (s02)
 ssl_stapling on;
 ssl_stapling_verify on;
 ssl_trusted_certificate /etc/letsencrypt/live/example.com/chain.pem;
@@ -1168,7 +1174,8 @@ server {
     location /v1/ {
         if ($ssl_client_verify != SUCCESS) { return 403; }
 
-        proxy_set_header X-Client-CN     $ssl_client_s_dn_cn;
+        # Nginx 에는 CN 만 주는 변수가 없습니다 — DN 전체를 넘기고 앱에서 CN 을 꺼내세요
+        proxy_set_header X-Client-DN     $ssl_client_s_dn;
         proxy_set_header X-Client-Serial $ssl_client_serial;
         proxy_set_header X-Client-Verify $ssl_client_verify;
         proxy_pass http://backend;
@@ -1186,8 +1193,8 @@ openssl ca -config ca.cnf -gencrl -out crl.pem        # 목록 재생성
 openssl x509 -in client.crt -noout -subject -dates -serial
 
 # 실제로 되는지 시험
-curl --cert client.crt --key client.key https://api-internal.example.com/v1/ping
-curl https://api-internal.example.com/v1/ping        # ← 403 이 나와야 정상</code></pre>
+curl --cert client.crt --key client.key https://api.example.com/v1/ping
+curl https://api.example.com/v1/ping        # ← 403 이 나와야 정상 (optional 블록)</code></pre>
 
   <div class="note warn rv d2">
     <b>인증서 수명을 짧게 잡고 자동 갱신을 먼저 만드세요.</b>
@@ -1300,7 +1307,7 @@ echo | openssl s_client -connect example.com:443 -servername example.com 2&gt;/d
 openssl x509 -in /etc/letsencrypt/live/example.com/fullchain.pem -noout -enddate
 
 # 30일 이내면 실패로 처리 (모니터링·CI 에 붙이기 좋습니다)
-openssl s_client -connect example.com:443 -servername example.com 2&gt;/dev/null \
+openssl s_client -connect example.com:443 -servername example.com &lt; /dev/null 2&gt;/dev/null \
   | openssl x509 -noout -checkend $((30*86400)) \
   &amp;&amp; echo "OK: 30일 이상 남음" || echo "WARNING: 30일 이내 만료"</code></pre>
 
@@ -1371,7 +1378,7 @@ groups:
 openssl s_client -connect example.com:443 -servername example.com &lt; /dev/null
 
 # 인증서 정보만
-openssl s_client -connect example.com:443 -servername example.com 2&gt;/dev/null \
+openssl s_client -connect example.com:443 -servername example.com &lt; /dev/null 2&gt;/dev/null \
   | openssl x509 -noout -subject -issuer -dates -ext subjectAltName
 
 # 체인 전체

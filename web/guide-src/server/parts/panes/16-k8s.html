@@ -157,7 +157,7 @@
   </div>
 
   <pre class="code rv d1" data-lang="bash"><code># 컨테이너가 "그냥 프로세스"라는 증거 — 호스트에서 그대로 보입니다
-docker run -d --name demo nginx:1.29
+docker run -d --name demo nginx:1.29-alpine   # alpine — ps·free 가 들어 있습니다 (데비안판엔 없음)
 ps -ef | grep nginx        # 호스트의 프로세스 목록에 nginx 가 그대로 있습니다
 
 # 컨테이너 안에서 본 프로세스 — 자기 자신뿐 (pid 네임스페이스)
@@ -165,7 +165,7 @@ docker exec demo ps -ef
 # PID 1 이 nginx 입니다. 호스트의 systemd·sshd 는 존재조차 보이지 않습니다
 
 # cgroup 상한 확인 — 512MB 를 걸면 커널이 그 값을 들고 있습니다
-docker run -d --name lim --memory 512m nginx:1.29
+docker run -d --name lim --memory 512m nginx:1.29-alpine
 docker exec lim cat /sys/fs/cgroup/memory.max      # 536870912
 
 # 주의 — free 는 cgroup 을 모릅니다. 호스트 전체를 보여 줍니다
@@ -662,15 +662,17 @@ RUN python -m venv /opt/venv &amp;&amp; \
     /opt/venv/bin/pip install -r requirements.txt
 
 FROM python:3.13-slim
+# ★ PYTHONUNBUFFERED — 로그가 안 나오는 원인 1위
+#   (Dockerfile 주석은 줄 맨 앞에서만 — 지시어 뒤에 붙이면 값으로 읽혀 빌드가 깨집니다)
 ENV PATH=/opt/venv/bin:$PATH \
-    PYTHONUNBUFFERED=1          # ★ 로그가 안 나오는 원인 1위
+    PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 COPY app ./app
 RUN useradd -u 10001 -m app
 USER 10001
 EXPOSE 8000
-CMD ["gunicorn","-w","4","-k","uvicorn.workers.UvicornWorker",
+CMD ["gunicorn","-w","4","-k","uvicorn.workers.UvicornWorker", \
      "-b","0.0.0.0:8000","app.main:app"]</code></pre>
       <div class="note warn" style="margin-bottom:0"><b><code>PYTHONUNBUFFERED=1</code> 은 필수</b>입니다. 없으면 파이썬이 stdout 을 버퍼링해 <b><code>docker logs</code> 에 아무것도 안 나옵니다</b> — "앱이 죽은 줄 알았는데 로그만 안 나온" 사고가 흔합니다.</div>
     </div>
@@ -1605,6 +1607,8 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
+          volumeMounts:              # 아래 tmp 볼륨을 실제로 /tmp 에 붙입니다
+            - { name: tmp, mountPath: /tmp }
       volumes:
         - name: tmp
           emptyDir: {}               # readOnlyRootFilesystem 을 켜면 /tmp 가 필요합니다</code></pre>
@@ -2595,9 +2599,11 @@ spec:
 [FILTER]
     Name                kubernetes
     Match               kube.*
-    Merge_Log           On        # JSON 로그를 필드로 펼침
+    # JSON 로그를 필드로 펼침 (주석은 줄 끝이 아니라 따로 한 줄로)
+    Merge_Log           On
     Keep_Log            Off
-    Labels              On        # 파드 라벨을 붙여 검색 가능하게
+    # 파드 라벨을 붙여 검색 가능하게
+    Labels              On
 
 [OUTPUT]
     Name   loki
@@ -2700,7 +2706,7 @@ spec:
             - name: OTEL_SERVICE_NAME
               value: api
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: http://otel-collector.observability:4317
+              value: http://otel-collector.observability:4318   # 자바 에이전트 2.x 기본 = http/protobuf(4318)
             - name: OTEL_TRACES_SAMPLER
               value: parentbased_traceidratio
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -2845,7 +2851,7 @@ helm upgrade --install api ./charts/api \
 
 helm history api -n prod
 helm rollback api 3 -n prod        # 3번 리비전으로 되돌리기
-helm diff upgrade api ./charts/api -f values-prod.yaml   # 플러그인</code></pre>
+helm diff upgrade api ./charts/api -n prod -f charts/api/values-prod.yaml   # 플러그인</code></pre>
     </div>
   </div>
 
@@ -3126,6 +3132,8 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'                            # 취약점 있으면 실패
 
+      - uses: sigstore/cosign-installer@v3              # 러너에 cosign 이 기본으로 없습니다
+
       - name: Sign image
         run: |
           cosign sign --yes \
@@ -3140,8 +3148,12 @@ on:
 
 jobs:
   bump-staging:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # PR 빌드는 제외 — main 푸시로 성공한 빌드만
+    if: ${{ github.event.workflow_run.conclusion == 'success' &amp;&amp; github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-latest
+    env:
+      # ★ 빌드된 커밋 — workflow_run 에서 GITHUB_SHA 는 기본 브랜치의 최신 커밋이라 다를 수 있습니다
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -3151,12 +3163,12 @@ jobs:
         run: |
           cd overlays/stg
           kustomize edit set image \
-            ghcr.io/myorg/api=ghcr.io/myorg/api:sha-${GITHUB_SHA::7}
+            ghcr.io/myorg/api=ghcr.io/myorg/api:sha-${HEAD_SHA::7}
       - name: commit
         run: |
           git config user.name  "ci-bot"
           git config user.email "ci-bot@myorg.dev"
-          git commit -am "stg: api sha-${GITHUB_SHA::7}"
+          git commit -am "stg: api sha-${HEAD_SHA::7}"
           git push
       # 이후는 Argo CD 가 알아서 반영합니다(d12)
 
@@ -3164,13 +3176,18 @@ jobs:
     needs: bump-staging
     runs-on: ubuntu-latest
     environment: production        # ★ 여기서 사람 승인을 요구합니다
+    env:
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v4
         with: { repository: myorg/deploy-manifests, token: '${{ secrets.DEPLOY_REPO_TOKEN }}' }
+      # 스테이징에서 검증한 바로 그 이미지를 승격 (workflow_run 이벤트엔 release 정보가 없습니다)
       - run: |
           cd overlays/prod
-          kustomize edit set image ghcr.io/myorg/api=ghcr.io/myorg/api:${{ github.event.release.tag_name }}
-          git commit -am "prod: api ${{ github.event.release.tag_name }}" &amp;&amp; git push</code></pre>
+          kustomize edit set image ghcr.io/myorg/api=ghcr.io/myorg/api:sha-${HEAD_SHA::7}
+          git config user.name  "ci-bot"
+          git config user.email "ci-bot@myorg.dev"
+          git commit -am "prod: api sha-${HEAD_SHA::7}" &amp;&amp; git push</code></pre>
 
   <div class="tw rv d1">
     <table class="cheat">

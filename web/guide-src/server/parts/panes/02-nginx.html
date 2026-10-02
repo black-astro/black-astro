@@ -1044,7 +1044,9 @@ server {
     ssl_session_timeout 1d;
     ssl_session_tickets off;
 
-    ssl_stapling on;                             # OCSP 스테이플링 (인증서 검증 가속)
+    # OCSP 스테이플링 — ※ Let's Encrypt 는 2025년에 OCSP 를 종료해
+    #   LE 인증서에는 OCSP 주소가 없습니다 (켜 두면 경고만 남고 무시됨)
+    ssl_stapling on;
     ssl_stapling_verify on;
     resolver 1.1.1.1 8.8.8.8 valid=300s;
 
@@ -1552,9 +1554,9 @@ server {
         proxy_pass http://app;
     }
 
-    # 헬스체크는 제외
+    # 헬스체크는 제외 — limit_req 에는 off 가 없습니다.
+    # return 은 rewrite 단계에서 끝나므로 limit_req(preaccess 단계)까지 가지 않습니다
     location = /health {
-        limit_req off;
         return 200 "ok\n";
     }
 }</code></pre>
@@ -1663,7 +1665,8 @@ server {
     proxy_read_timeout 3600s;
 
     chunked_transfer_encoding off;
-    add_header X-Accel-Buffering no;      # 앱에서 이 헤더를 보내도 됩니다
+    # add_header X-Accel-Buffering no;  ← 효과 없음: 브라우저에게 보낼 뿐입니다.
+    #   이 헤더는 앱(업스트림)이 응답에 실어 보내야 Nginx 가 읽고 버퍼링을 끕니다
 }</code></pre>
   <div class="note tip rv d1">
     <b><code>X-Accel-Buffering: no</code></b> —
@@ -1822,8 +1825,9 @@ http {
   <pre class="code rv d1" data-lang="bash"><code>#!/usr/bin/env bash
 set -euo pipefail
 
-# 1) 백업
-sudo cp -a /etc/nginx /etc/nginx.bak.$(date +%F-%H%M)
+# 1) 백업 — ★ 설정을 고치기 '전에' 따로 떠 둡니다
+#    (고친 뒤에 백업하면 되돌릴 대상도 새 설정이 됩니다)
+#    sudo cp -a /etc/nginx /etc/nginx.bak.$(date +%F-%H%M)
 
 # 2) 문법 검사
 sudo nginx -t
@@ -1840,8 +1844,8 @@ curl -fsS -o /dev/null -w "%{http_code}\n" https://example.com/health
 
   <div class="note warn rv d2">
     <b><code>nginx -t</code> 가 통과해도 안심할 수는 없습니다.</b>
-    문법 검사는 <b>파일 존재 여부·논리적 오류</b>까지 잡지 못합니다.
-    <br>· 인증서 파일 경로 오타 → reload 시 실패
+    문법 검사는 <b>실제 동작·논리적 오류</b>까지 잡지 못합니다.
+    <br>· 인증서 파일은 읽히지만 만료·도메인 불일치 → 브라우저 경고
     <br>· <code>proxy_pass</code> 주소 오타 → 502
     <br>· location 우선순위 착각 → 엉뚱한 응답
     <br><b>반영 후 실제 요청으로 확인</b>하는 단계를 반드시 넣으세요.

@@ -77,6 +77,7 @@ add_header Content-Security-Policy-Report-Only
   "default-src 'self'; report-uri /csp-report" always;
 
 # ② 수집된 위반을 보고 정책을 다듬은 뒤
+#    (읽기 쉽게 줄을 나눴지만, 값 안의 줄바꿈은 헤더에 그대로 들어가므로 실제로는 한 줄로)
 add_header Content-Security-Policy
   "default-src 'self';
    script-src 'self' https://cdn.example.com;
@@ -219,7 +220,7 @@ location ^~ /admin/ {
     proxy_pass http://backend;
 }
 
-# Basic 인증 추가 (이중 방어)
+# Basic 인증 추가 (이중 방어) — 위 블록 대신 씁니다 (같은 location 두 개는 nginx -t 오류)
 location ^~ /admin/ {
     allow 10.0.0.0/8;
     deny  all;
@@ -299,8 +300,9 @@ server {
         proxy_pass http://backend;
     }
 
-    # 헬스체크·정적은 제외
-    location = /health { limit_req off; return 200 "ok\n"; }
+    # 헬스체크는 제외 — return 은 limit_req 보다 앞 단계에서 끝나 제한을 받지 않습니다
+    # (limit_req 에는 off 값이 없습니다 — 쓰면 nginx -t 오류)
+    location = /health { return 200 "ok\n"; }
 }</code></pre>
 
   <div class="tw rv d1">
@@ -337,7 +339,7 @@ action   = iptables-multiport[name=ReqLimit, port="http,https"]
 
 [nginx-badbots]
 enabled  = true
-filter   = nginx-badbots
+filter   = apache-badbots     # nginx 전용 필터는 없어 이것을 씁니다(jail.conf 기본값과 같음)
 logpath  = /var/log/nginx/access.log
 maxretry = 2
 bantime  = 86400</code></pre>
@@ -412,12 +414,16 @@ server {
 # Include /etc/nginx/modsec-crs/rules/*.conf</code></pre>
 
   <pre class="code rv d1" data-lang="conf"><code># modsecurity.conf 의 핵심 설정
-SecRuleEngine DetectionOnly        # ★ 처음에는 탐지만 (차단하지 않음)
-# SecRuleEngine On                 # 검증 후 차단 모드로
+# (주석은 줄 끝에 붙이지 말고 따로 한 줄로 — 지시어 인자로 읽혀 오류가 납니다)
+# ★ 처음에는 탐지만 (차단하지 않음)
+SecRuleEngine DetectionOnly
+# 검증 후 차단 모드로
+# SecRuleEngine On
 
 SecAuditEngine RelevantOnly
 SecAuditLog /var/log/nginx/modsec_audit.log
-SecRequestBodyLimit 13107200       # 업로드 크기와 맞추세요</code></pre>
+# 업로드 크기와 맞추세요
+SecRequestBodyLimit 13107200</code></pre>
 
   <div class="note warn rv d1">
     <b>WAF 의 가장 큰 문제는 오탐(false positive)입니다.</b>
@@ -510,10 +516,15 @@ location ^~ /uploads/ {
   </div>
 
   <pre class="code rv d2" data-lang="python"><code># 앱 레벨 검증 예 (Python)
-import uuid, pathlib, imghdr
+import uuid, pathlib
 
 ALLOWED = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
 MAX_SIZE = 10 * 1024 * 1024
+# imghdr 는 Python 3.13 에서 제거됐습니다 — 파일 앞부분의 시그니처(매직 바이트)로 직접 확인
+MAGIC = (b'\xff\xd8\xff', b'\x89PNG\r\n\x1a\n', b'GIF87a', b'GIF89a')
+
+def is_image(head):
+    return head.startswith(MAGIC) or (head[:4] == b'RIFF' and head[8:12] == b'WEBP')
 
 def save_upload(file, dest_dir):
     ext = pathlib.Path(file.filename).suffix.lower()
@@ -524,7 +535,7 @@ def save_upload(file, dest_dir):
 
     # ★ 실제 내용이 이미지인지 확인 (확장자만 믿지 않습니다)
     head = file.read(512); file.seek(0)
-    if imghdr.what(None, head) is None:
+    if not is_image(head):
         raise ValueError("이미지 파일이 아닙니다")
 
     # ★ 파일명을 새로 생성 (경로 순회·덮어쓰기 방지)
@@ -546,7 +557,8 @@ def save_upload(file, dest_dir):
   <pre class="code rv" data-lang="conf"><code># /etc/logrotate.d/nginx (보통 패키지에 포함돼 있습니다)
 /var/log/nginx/*.log {
     daily
-    rotate 30                  # 30일 보관
+    # 30일 보관 (주석은 지시어 뒤가 아니라 따로 한 줄로)
+    rotate 30
     missingok
     notifempty
     compress
@@ -750,7 +762,14 @@ scrape_configs:
     metrics_path: /probe
     params: { module: [http_2xx] }
     static_configs:
-      - targets: ['https://example.com']     # 외부에서 본 응답·인증서 만료</code></pre>
+      - targets: ['https://example.com']     # 외부에서 본 응답·인증서 만료
+    relabel_configs:                         # ★ 대상 URL 을 ?target= 으로 넘기고
+      - source_labels: [__address__]         #   실제 수집은 blackbox_exporter 에게
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: localhost:9115          # blackbox_exporter 주소</code></pre>
 
   <h3 class="sub">무엇을 감시할까</h3>
   <div class="tw rv d2">
@@ -904,6 +923,8 @@ for s in "${SERVERS[@]}"; do
     curl -fsS "http://$s:8080/health" &gt;/dev/null &amp;&amp; break
     sleep 2
   done
+  # 끝내 준비되지 않으면 LB 에 되돌리지 말고 중단 (다음 서버로 번지지 않게)
+  curl -fsS "http://$s:8080/health" &gt;/dev/null || { echo "==== $s 헬스체크 실패 — 중단"; exit 1; }
 
   # 5) LB 에 복귀
   sudo sed -i "s|server $s:8080 down;|server $s:8080;|" /etc/nginx/conf.d/upstream.conf

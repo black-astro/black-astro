@@ -299,26 +299,33 @@ sudo journalctl -u tomcat -f</code></pre>
       <tbody>
         <tr><td><b>NIO</b> (<code>Http11NioProtocol</code>)</td><td class="ok">기본값. 논블로킹 IO — <b>대부분 이것을 씁니다</b></td></tr>
         <tr><td><b>NIO2</b></td><td>비동기 IO. 특정 워크로드에서 이점이 있으나 차이가 크지 않습니다</td></tr>
-        <tr><td><b>APR/native</b></td><td class="warn">OpenSSL 기반 네이티브. <b>10.1 에서 폐기 예고 → 11 에서 제거</b>됐습니다</td></tr>
+        <tr><td><b>APR/native</b></td><td class="warn">OpenSSL 기반 네이티브. <b>9.0·10.0 에서 폐기 예고 → 10.1 에서 커넥터가 제거</b>됐습니다 (11 에도 없음)</td></tr>
         <tr><td><b>AJP</b></td><td class="warn">Apache 전용 이진 프로토콜 — 보안 이슈로 <b>기본 비활성화</b></td></tr>
       </tbody>
     </table>
   </div>
 
-  <pre class="code rv d1" data-lang="xml"><code>&lt;!-- 프록시 뒤에 있을 때의 권장 설정 --&gt;
+  <pre class="code rv d1" data-lang="xml"><code>&lt;!-- 프록시 뒤에 있을 때의 권장 설정
+     (XML 은 태그 안에 주석을 넣을 수 없으므로 설명은 여기에 모읍니다)
+     · address="127.0.0.1"   ★ 외부에서 직접 접근 차단
+     · keepAliveTimeout      ★ Nginx 업스트림 keepalive_timeout(기본 60s) 보다 길게
+     · compression="off"     압축은 Nginx 가 담당
+     · enableLookups="false" ★ DNS 역조회 끄기 (성능)
+     · server="server"       서버 정보 숨김
+     · proxyName·proxyPort   앞단 도메인 --&gt;
 &lt;Connector port="8080"
            protocol="org.apache.coyote.http11.Http11NioProtocol"
-           address="127.0.0.1"                &lt;!-- ★ 외부에서 직접 접근 차단 --&gt;
+           address="127.0.0.1"
            maxThreads="200"
            acceptCount="200"
            connectionTimeout="20000"
-           keepAliveTimeout="20000"
+           keepAliveTimeout="65000"
            maxHttpHeaderSize="16384"
            URIEncoding="UTF-8"
-           compression="off"                   &lt;!-- 압축은 Nginx 가 담당 --&gt;
-           enableLookups="false"               &lt;!-- ★ DNS 역조회 끄기 (성능) --&gt;
-           server="server"                     &lt;!-- 서버 정보 숨김 --&gt;
-           proxyName="example.com"             &lt;!-- 앞단 도메인 --&gt;
+           compression="off"
+           enableLookups="false"
+           server="server"
+           proxyName="example.com"
            proxyPort="443"
            scheme="https"
            secure="true" /&gt;</code></pre>
@@ -401,7 +408,8 @@ server.tomcat.threads.max=200
 server.tomcat.accept-count=200
 server.tomcat.max-connections=8192
 server.tomcat.connection-timeout=20s
-server.tomcat.keep-alive-timeout=65s      # ★ Nginx keepalive_timeout(60s) 보다 길게
+# ★ Nginx keepalive_timeout(60s) 보다 길게
+server.tomcat.keep-alive-timeout=65s
 server.tomcat.max-http-form-post-size=10MB
 server.max-http-request-header-size=16KB
 
@@ -412,7 +420,7 @@ server.tomcat.remoteip.internal-proxies=127\\.0\\.0\\.1|10\\.\\d+\\.\\d+\\.\\d+
 # 접근 로그 (기본 꺼져 있습니다 — 켜 두세요)
 server.tomcat.accesslog.enabled=true
 server.tomcat.accesslog.pattern=%h %l %u %t "%r" %s %b %D
-#   %D = 처리 시간(ms) ★ 이게 없으면 "어느 요청이 느린가"를 못 봅니다</code></pre>
+#   %D = 처리 시간(Tomcat 10+ 는 마이크로초 · 9 이하는 ms) ★ 이게 없으면 "어느 요청이 느린가"를 못 봅니다</code></pre>
 
   <div class="note warn rv d2">
     <b><code>keepAliveTimeout</code> 을 Nginx 보다 짧게 두면 간헐적 502 가 납니다.</b>
@@ -579,7 +587,8 @@ sudo rm /opt/tomcat/webapps/myapp.war</code></pre>
 
   <pre class="code rv" data-lang="properties"><code># application.properties — 내장 톰캣 설정
 server.port=8080
-server.address=127.0.0.1                       # ★ 프록시 뒤라면 로컬만
+# ★ 프록시 뒤라면 로컬만
+server.address=127.0.0.1
 
 # 스레드 풀
 server.tomcat.threads.max=200
@@ -589,7 +598,8 @@ server.tomcat.max-connections=8192
 
 # 타임아웃
 server.tomcat.connection-timeout=20s
-server.tomcat.keep-alive-timeout=20s
+# Nginx 업스트림 keepalive_timeout(기본 60s) 보다 길게 — 짧으면 간헐적 502 (t04)
+server.tomcat.keep-alive-timeout=65s
 
 # 프록시 뒤에서 실제 IP·프로토콜 인식 (★ 매우 중요)
 server.forward-headers-strategy=native
@@ -619,9 +629,9 @@ server.error.include-message=never</code></pre>
 java -jar myapp.jar
 
 # JVM 옵션과 함께 (운영 권장)
+#   -Xmx 와 -XX:MaxRAMPercentage 를 같이 주면 -Xmx 가 이깁니다 — 컨테이너라면 비율 하나만 (t10)
 java -Xms512m -Xmx1g \
      -XX:+UseG1GC \
-     -XX:MaxRAMPercentage=75 \
      -Dspring.profiles.active=prod \
      -Dfile.encoding=UTF-8 \
      -jar myapp.jar
@@ -639,9 +649,11 @@ After=network.target
 User=appuser
 WorkingDirectory=/opt/myapp
 Environment="JAVA_OPTS=-Xms512m -Xmx1g -XX:+UseG1GC"
-EnvironmentFile=/etc/myapp/env               # 비밀은 이 파일에 (권한 600)
+# 비밀은 이 파일에 (권한 600)
+EnvironmentFile=/etc/myapp/env
 ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/myapp/myapp.jar
-SuccessExitStatus=143                        # SIGTERM 종료를 정상으로 취급
+# SIGTERM 종료를 정상으로 취급
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=65535
@@ -840,8 +852,8 @@ spring.web.resources.add-mappings=false
      세션에 담는 객체가 전부 Serializable 이어야 합니다 --&gt;</code></pre>
 
   <h3 class="sub">권장 — Spring Session + Redis</h3>
-  <pre class="code rv d1" data-lang="properties"><code># 의존성: spring-session-data-redis
-spring.session.store-type=redis
+  <pre class="code rv d1" data-lang="properties"><code># 의존성: spring-session-data-redis — 의존성만 있으면 자동 구성됩니다
+# (spring.session.store-type 속성은 Spring Boot 3.0 에서 삭제됐습니다)
 spring.session.timeout=30m
 spring.session.redis.namespace=myapp:session
 
@@ -901,7 +913,8 @@ upstream tomcat {
   <pre class="code rv d1" data-lang="properties"><code># Spring Boot
 server.tomcat.threads.max=200
 server.tomcat.threads.min-spare=20
-server.tomcat.accept-count=200          # 스레드가 다 차면 여기에 대기
+# 스레드가 다 차면 여기에 대기
+server.tomcat.accept-count=200
 server.tomcat.max-connections=8192
 
 # DB 커넥션 풀과 균형을 맞추세요
@@ -1035,10 +1048,14 @@ grep -A3 '"http-nio-8080-exec' dump.txt | grep -o 'at [a-z.]*' | sort | uniq -c 
   </div>
 
   <pre class="code rv" data-lang="bash"><code># 기본 옵션
-java -Xms1g -Xmx1g \                    # 초기·최대 힙 (같게 잡으면 리사이징 비용 없음)
-     -XX:+UseG1GC \                     # Java 9+ 기본
+#   -Xms1g -Xmx1g                  초기·최대 힙 (같게 잡으면 리사이징 비용 없음)
+#   -XX:+UseG1GC                   Java 9+ 기본
+#   -XX:+HeapDumpOnOutOfMemoryError ★ OOM 시 힙 덤프 저장
+#   (줄 끝 \ 뒤에는 주석을 붙일 수 없어 설명을 위로 모았습니다)
+java -Xms1g -Xmx1g \
+     -XX:+UseG1GC \
      -XX:MaxGCPauseMillis=200 \
-     -XX:+HeapDumpOnOutOfMemoryError \  # ★ OOM 시 힙 덤프 저장
+     -XX:+HeapDumpOnOutOfMemoryError \
      -XX:HeapDumpPath=/var/log/myapp/ \
      -Xlog:gc*:file=/var/log/myapp/gc.log:time,uptime:filecount=5,filesize=10M \
      -jar myapp.jar</code></pre>
@@ -1202,7 +1219,8 @@ java -XX:+PrintFlagsFinal -version | grep -E 'MaxHeapSize|ActiveProcessorCount'<
     delaycompress
     missingok
     notifempty
-    copytruncate           # ★ 톰캣을 재시작하지 않고 잘라냅니다
+    # ★ 톰캣을 재시작하지 않고 잘라냅니다
+    copytruncate
     su tomcat tomcat
 }</code></pre>
   <div class="note warn rv d1">
@@ -1220,7 +1238,7 @@ java -XX:+PrintFlagsFinal -version | grep -E 'MaxHeapSize|ActiveProcessorCount'<
        pattern="%h %l %u %t &amp;quot;%r&amp;quot; %s %b %D &amp;quot;%{User-Agent}i&amp;quot; %{X-Request-Id}i"
        rotatable="true"
        maxDays="30" /&gt;
-&lt;!-- %D = 처리 시간(ms) · %{헤더}i = 요청 헤더 --&gt;</code></pre>
+&lt;!-- %D = 처리 시간(Tomcat 10+ 는 마이크로초) · %{헤더}i = 요청 헤더 --&gt;</code></pre>
 
   <h3 class="sub">Spring Boot 라면 로그백으로</h3>
   <pre class="code rv d2" data-lang="xml"><code>&lt;!-- logback-spring.xml --&gt;
@@ -1330,6 +1348,8 @@ server.port=8080
 server.forward-headers-strategy=native
 
 # Actuator 는 별도 포트로 빼는 것도 좋은 방법입니다
+# ※ 이렇게 빼면 위 Nginx 의 /actuator/ location 은 http://127.0.0.1:8081 로 보내야 합니다
+#   (8080 의 tomcat 업스트림으로 보내면 404)
 management.server.port=8081
 management.server.address=127.0.0.1
 management.endpoints.web.exposure.include=health,info,metrics,prometheus</code></pre>
@@ -1558,8 +1578,9 @@ sudo rm -rf docs examples manager host-manager ROOT
 &lt;!-- 또는 추측 불가능한 문자열 + 방화벽 차단 --&gt;</code></pre>
 
   <h3 class="sub">③ 서버 정보 숨기기</h3>
-  <pre class="code rv d1" data-lang="xml"><code>&lt;Connector port="8080" ...
-           server="server"                  &lt;!-- Server 헤더 값 변경 --&gt;
+  <pre class="code rv d1" data-lang="xml"><code>&lt;!-- server = Server 헤더 값 변경 (태그 안에는 주석을 넣을 수 없습니다) --&gt;
+&lt;Connector port="8080" ...
+           server="server"
            xpoweredBy="false" /&gt;</code></pre>
   <pre class="code rv d1" data-lang="bash"><code># 오류 페이지의 버전 표기까지 없애려면 ServerInfo.properties 를 덮어씁니다
 cd /opt/tomcat/lib

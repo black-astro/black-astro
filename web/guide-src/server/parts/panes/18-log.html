@@ -772,7 +772,8 @@ CustomLog ${APACHE_LOG_DIR}/access.log ext
 # 에러 로그 — 포맷도 바꿀 수 있습니다(2.4부터)
 ErrorLogFormat "[%{u}t] [%-m:%l] [pid %P:tid %T] %7F: %E: [client %a] %M, referer %{Referer}i"
 LogLevel warn
-LogLevel info ssl:warn rewrite:trace3     # ★ 모듈별로 따로 줄 수 있습니다</code></pre>
+# ★ 모듈별로 따로 줄 수 있습니다 (Apache 는 줄 끝 주석 불가 — 주석은 따로 한 줄로)
+LogLevel info ssl:warn rewrite:trace3</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b><code>%L</code> 하나가 Apache 의 숨은 무기입니다.</b>
         액세스 로그와 에러 로그에 <b>같은 로그 ID</b>가 찍혀서,
@@ -836,7 +837,7 @@ apachectl configtest &amp;&amp; apachectl graceful</code></pre>
       <pre class="code" data-lang="text"><code># 패턴 기호 (Apache 와 비슷하지만 다른 것들이 있습니다)
 #  %a 클라이언트 IP   %h 호스트   %l 항상 -   %u 인증 사용자
 #  %t 시각  %{포맷}t  ·  %r 요청 줄  %s 상태코드  %b 본문 바이트
-#  %D 처리 시간(밀리초) ★  %T 초  %F 첫 바이트까지의 시간
+#  %D 처리 시간 ★ (Tomcat 10+ 는 마이크로초 · 9 이하는 밀리초)  %T 초  %F 첫 바이트까지의 시간
 #  %S 세션 ID   %I 스레드 이름 ★ 스레드 고갈 추적에 유용
 #  %{헤더}i 요청 헤더  %{헤더}o 응답 헤더  %{속성}r 요청 속성
 #  common · combined 는 미리 정의된 이름입니다
@@ -853,8 +854,11 @@ apachectl configtest &amp;&amp; apachectl graceful</code></pre>
 
 # 해법 A — 애초에 안 만들기 (systemd 로 띄우고 journald 에 맡기기) ★ 권장
 #   /etc/systemd/system/tomcat.service
+#   start 가 아니라 run — 포그라운드로 돌아 catalina.out 리다이렉트가 없고 stdout 이 그대로 journald 로
+#   (start + CATALINA_OUT=/dev/null 이면 stdout 이 /dev/null 로 사라져 journald 에도 안 남습니다)
 [Service]
-Environment=CATALINA_OUT=/dev/null
+Type=simple
+ExecStart=/opt/tomcat/bin/catalina.sh run
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=tomcat
@@ -902,6 +906,7 @@ handlers = 1catalina.org.apache.juli.AsyncFileHandler, java.util.logging.Console
 log { format console }
 
 # 전역(런타임) 로그는 따로입니다 — 액세스 로그가 아닙니다
+# (이름 없는 전역 옵션 블록은 Caddyfile 의 맨 처음에 와야 합니다)
 {
     log {
         output file /var/log/caddy/caddy.log
@@ -937,7 +942,7 @@ log { format console }
 #  replace  — 값을 고정 문자열로 치환
 #  ip_mask  — IPv4 상위 16비트만 남김 / IPv6 상위 32비트
 #  hash     — 값 대신 해시(같은 값인지 비교는 되고 원본은 모름) ★
-#  query / cookie — 쿼리스트링·쿼키 안의 특정 키만 골라 처리
+#  query / cookie — 쿼리스트링·쿠키 안의 특정 키만 골라 처리
 #  regexp   — 정규식으로 부분 치환</code></pre>
       <div class="note info" style="margin-bottom:0">
         <b>이 <code>filter</code> 가 다른 서버에는 없습니다.</b>
@@ -1090,21 +1095,30 @@ sudo journalctl --verify                  # 손상 검사</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">journald.conf — 실제로 손대는 항목</h4>
       <pre class="code" data-lang="ini"><code># /etc/systemd/journald.conf.d/00-limits.conf  (원본을 고치지 말고 드롭인으로)
+# (systemd 설정 파일은 줄 끝 주석을 값으로 읽습니다 — 주석은 항상 따로 한 줄로)
 [Journal]
-Storage=persistent          # auto=디렉터리가 있을 때만 영구. persistent 로 못 박습니다
+# auto=디렉터리가 있을 때만 영구. persistent 로 못 박습니다
+Storage=persistent
 Compress=yes
-SystemMaxUse=1G             # ★ 기본은 "파일시스템의 10%, 최대 4G" — 관대합니다
-SystemKeepFree=2G           # 이만큼은 항상 비워 둡니다
-SystemMaxFileSize=128M      # 한 조각 파일의 크기
+# ★ 기본은 "파일시스템의 10%, 최대 4G" — 관대합니다
+SystemMaxUse=1G
+# 이만큼은 항상 비워 둡니다
+SystemKeepFree=2G
+# 한 조각 파일의 크기
+SystemMaxFileSize=128M
 SystemMaxFiles=100
-MaxRetentionSec=14day       # 기간 상한 (용량 상한과 함께 걸립니다)
-MaxFileSec=1day             # 하루마다 새 조각 파일
+# 기간 상한 (용량 상한과 함께 걸립니다)
+MaxRetentionSec=14day
+# 하루마다 새 조각 파일
+MaxFileSec=1day
 
 # 폭주 방지 — 이걸 모르면 "로그가 없어졌다"고 착각합니다 ★
+# 30초에 10,000줄 넘으면 그 뒤는 버립니다
 RateLimitIntervalSec=30s
-RateLimitBurst=10000        # 30초에 10,000줄 넘으면 그 뒤는 버립니다
+RateLimitBurst=10000
 
-ForwardToSyslog=no          # rsyslog 를 안 쓰면 꺼서 중복 저장을 막습니다
+# rsyslog 를 안 쓰면 꺼서 중복 저장을 막습니다
+ForwardToSyslog=no
 ForwardToWall=no</code></pre>
       <pre class="code" data-lang="bash"><code>sudo systemctl restart systemd-journald
 journalctl --disk-usage
@@ -1227,11 +1241,12 @@ action(type="omrelp" target="10.0.0.9" port="20514")</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">설정 문법 — 실제로 쓰는 지시어 전부</h4>
       <pre class="code" data-lang="text"><code># /etc/logrotate.d/nginx
+# (줄 끝 설명은 학습용입니다 — 실제 파일에서는 주석을 지시어 뒤가 아니라 따로 한 줄로 두세요)
 /var/log/nginx/*.log /var/log/nginx/*.json {
     daily                 # hourly · daily · weekly · monthly · yearly
     rotate 14             # 몇 개를 보관할지 (14일치)
-    size 100M             # 이 크기 넘으면 주기와 무관하게 회전
-    maxsize 500M          # 주기 전이라도 이 크기면 회전 (size 와 조합)
+    # size 100M           # 주기를 무시하고 크기만으로 회전 — daily 와 함께 쓰면 뒤에 쓴 쪽이 이겨서 보통은 maxsize 를 씁니다
+    maxsize 500M          # 주기 전이라도 이 크기면 회전 (daily 와 조합)
     minsize 1M            # 이보다 작으면 주기가 와도 회전 안 함
 
     missingok             # 파일이 없어도 오류 내지 않음
@@ -1278,7 +1293,7 @@ systemctl list-timers logrotate.timer       # systemd 계열
 ls -l /etc/cron.daily/logrotate             # 옛 방식
 
 # ★ cron.daily 는 보통 새벽에 "한꺼번에" 돕니다.
-#   size 100M 을 걸어도 하루에 한 번만 검사하므로
+#   size·maxsize 를 걸어도 하루에 한 번만 검사하므로
 #   폭주하는 날엔 디스크가 먼저 찹니다 → 타이머를 시간마다로 바꾸세요.
 sudo systemctl edit logrotate.timer         # OnCalendar=hourly</code></pre>
     </div>
@@ -1437,12 +1452,14 @@ sudo systemctl edit logrotate.timer         # OnCalendar=hourly</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">Fluent Bit — 파일을 읽어 Loki 로</h4>
       <pre class="code" data-lang="ini"><code># /etc/fluent-bit/fluent-bit.conf
+# (클래식 형식은 줄 끝 주석을 값으로 읽습니다 — 주석은 따로 한 줄로)
 [SERVICE]
     Flush            5
     Daemon           Off
     Log_Level        info
     Parsers_File     parsers.conf
-    storage.path     /var/lib/fluent-bit/storage   # ★ 디스크 버퍼
+    # ★ 디스크 버퍼
+    storage.path     /var/lib/fluent-bit/storage
     storage.sync     normal
     storage.max_chunks_up 128
 
@@ -1451,10 +1468,12 @@ sudo systemctl edit logrotate.timer         # OnCalendar=hourly</code></pre>
     Path             /var/log/nginx/access.json
     Tag              nginx.access
     Parser           json
-    DB               /var/lib/fluent-bit/tail.db   # ★ 어디까지 읽었는지
+    # ★ 어디까지 읽었는지
+    DB               /var/lib/fluent-bit/tail.db
     DB.locking       true
     Mem_Buf_Limit    32MB
-    storage.type     filesystem                    # 메모리 넘치면 디스크로
+    # 메모리 넘치면 디스크로
+    storage.type     filesystem
     Skip_Long_Lines  On
     Refresh_Interval 10
 
@@ -1478,7 +1497,8 @@ sudo systemctl edit logrotate.timer         # OnCalendar=hourly</code></pre>
     labels           job=nginx, env=$env, host=$host
     label_keys       $status
     line_format      json
-    Retry_Limit      False                          # 무한 재시도</code></pre>
+    # 무한 재시도
+    Retry_Limit      False</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b><code>storage.type filesystem</code> 을 안 켜면 메모리 버퍼가 전부입니다.</b>
         저장소가 10분만 죽어도 <code>Mem_Buf_Limit</code> 를 넘긴 순간부터
@@ -1515,7 +1535,7 @@ source = '''
             to_float(split(.urt, ", ")[0]) ?? null
           } else { null }
   # 토큰·인증 헤더 마스킹 — 저장되기 전에 지웁니다
-  .uri = replace(.uri, r'token=[^&amp;]+', "token=[REDACTED]")
+  .uri = replace(string!(.uri), r'token=[^&amp;]+', "token=[REDACTED]")   # string! — JSON 필드는 타입 미정
   del(.agent)                            # User-Agent 는 아예 버림
 '''
 
@@ -1529,6 +1549,7 @@ exclude = '''.status &gt;= 400'''           # ★ 오류는 전부 통과
 type = "loki"
 inputs = ["sample", "journal"]
 endpoint = "http://loki.internal:3100"
+encoding.codec = "json"                  # loki 싱크의 필수 항목
 compression = "snappy"
 labels = { job = "nginx", env = "prod", host = "{{ host }}" }
   [sinks.loki.buffer]
@@ -1545,8 +1566,9 @@ labels = { job = "nginx", env = "prod", host = "{{ host }}" }
 vector validate --config /etc/vector/vector.toml
 
 # ② VRL 한 줄을 즉석에서 시험 ★ 이게 정말 편합니다
-echo '{"uri":"/a?token=abc123","status":"500"}' \
-  | vector vrl 'parse_json!(.) | .status = to_int!(.status)'
+#    (입력 파일의 JSON 한 줄이 이벤트 하나 = 프로그램 안의 . 입니다)
+echo '{"uri":"/a?token=abc123","status":"500"}' &gt; /tmp/ev.json
+vector vrl --input /tmp/ev.json '.status = to_int!(.status); .'
 
 # ③ 지금 흐르는 이벤트를 실시간으로 들여다보기
 vector tap --outputs-of parse
@@ -1670,10 +1692,14 @@ schema_config:
       object_store: s3
       schema: v13
       index: { prefix: index_, period: 24h }
+runtime_config:
+  file: /etc/loki/overrides.yaml    # 테넌트별 값은 메인 설정이 아니라 이 파일에
+
+# /etc/loki/overrides.yaml
 overrides:
   audit:
     retention_period: 8760h         # 감사 로그 테넌트만 1년</code></pre>
-      <pre class="code" data-lang="json"><code>// Elasticsearch / OpenSearch — ILM 으로 단계 강등
+      <pre class="code" data-lang="json"><code>// Elasticsearch — ILM 으로 단계 강등 (OpenSearch 는 ISM 이라 형식이 다릅니다)
 {
   "policy": { "phases": {
     "hot":   { "actions": { "rollover": { "max_primary_shard_size": "50gb",
@@ -1681,7 +1707,8 @@ overrides:
     "warm":  { "min_age": "3d",  "actions": {
                  "forcemerge": { "max_num_segments": 1 },
                  "shrink": { "number_of_shards": 1 } } },
-    "cold":  { "min_age": "14d", "actions": { "freeze": {} } },
+    "cold":  { "min_age": "14d", "actions": {           // freeze 는 8.0 에서 제거됨
+                 "allocate": { "number_of_replicas": 0 } } },
     "delete":{ "min_age": "90d", "actions": { "delete": {} } }
   } }
 }</code></pre>
@@ -1909,8 +1936,9 @@ WHERE req_id = '3f8a9c...' AND ts &gt;= now() - INTERVAL 2 HOUR
 ORDER BY ts;
 
 # 원본 파일밖에 없을 때 (여러 서버를 한 번에)
-pssh -h hosts.txt -i "grep -h 3f8a9c /var/log/nginx/access.json" \
-  | jq -s 'sort_by(.ts)'</code></pre>
+#   (-i 는 "[1] 15:00:01 [SUCCESS] host" 머리줄이 섞여 jq 가 깨지므로 -o 로 호스트별 파일에 받습니다)
+pssh -h hosts.txt -o /tmp/hit "grep -h 3f8a9c /var/log/nginx/access.json"
+cat /tmp/hit/* | jq -s 'sort_by(.ts)'</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">실무에서 진짜 효과가 큰 두 가지</h4>
@@ -2308,7 +2336,7 @@ log_format json escape=json
 
 # 조회
 ausearch -k log-tamper -i --start today
-ausearch -k nginx-conf -i | aureport -f -i        # 파일 기준 요약
+ausearch -k nginx-conf --raw | aureport -f -i     # 파일 기준 요약 (aureport 에는 --raw 로 넘깁니다)
 aureport --auth --failed --start this-week        # 인증 실패 요약</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>액세스 로그 파일 자체에 <code>-p w</code> 를 걸지 마세요.</b>
@@ -2326,7 +2354,8 @@ lsattr /var/log/audit/audit.log                    # ----a------
 
 # ② 오브젝트 스토리지 — 버킷 단위 잠금 (S3 Object Lock · COMPLIANCE 모드)
 aws s3api create-bucket --bucket corp-audit-logs \
-    --object-lock-enabled-for-bucket --region ap-northeast-2
+    --object-lock-enabled-for-bucket --region ap-northeast-2 \
+    --create-bucket-configuration LocationConstraint=ap-northeast-2   # us-east-1 외 리전은 필수
 aws s3api put-object-lock-configuration --bucket corp-audit-logs \
     --object-lock-configuration \
     '{"ObjectLockEnabled":"Enabled","Rule":{"DefaultRetention":{"Mode":"COMPLIANCE","Days":400}}}'
@@ -2455,27 +2484,34 @@ ls -l /var/log/pods/shop_api-7d9f_*/api/     # 0.log 0.log.20260831-060000 ...</
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">Fluent Bit DaemonSet — 실제로 손대는 설정</h4>
-      <pre class="code" data-lang="ini"><code>[INPUT]
+      <pre class="code" data-lang="ini"><code># (클래식 형식은 줄 끝 주석을 값으로 읽습니다 — 주석은 따로 한 줄로)
+[INPUT]
     Name              tail
     Path              /var/log/containers/*.log
     Exclude_Path      /var/log/containers/*_kube-system_*.log
-    multiline.parser  cri                 # ★ CRI 형식 + 잘린 줄(P) 이어 붙이기
+    # ★ CRI 형식 + 잘린 줄(P) 이어 붙이기
+    multiline.parser  cri
     Tag               kube.*
-    DB                /var/lib/fluent-bit/kube.db   # hostPath 볼륨에 두세요
+    # hostPath 볼륨에 두세요
+    DB                /var/lib/fluent-bit/kube.db
     Mem_Buf_Limit     50MB
     Skip_Long_Lines   On
     Refresh_Interval  10
 
 [FILTER]
-    Name                kubernetes         # 파일명에서 파드를 찾아 API 로 메타데이터 조회
+    # 파일명에서 파드를 찾아 API 로 메타데이터 조회
+    Name                kubernetes
     Match               kube.*
-    Merge_Log           On                 # 본문이 JSON 이면 필드로 펼침
+    # 본문이 JSON 이면 필드로 펼침
+    Merge_Log           On
     Merge_Log_Key       app
     Keep_Log            Off
-    K8S-Logging.Parser  On                 # 파드 애너테이션으로 파서 지정 가능
-    K8S-Logging.Exclude On                 # fluentbit.io/exclude: "true" 인 파드는 제외
+    # 파드 애너테이션으로 파서 지정 가능 · fluentbit.io/exclude: "true" 인 파드는 제외
+    K8S-Logging.Parser  On
+    K8S-Logging.Exclude On
     Labels              On
-    Annotations         Off                # 애너테이션은 크고 카디널리티가 높습니다
+    # 애너테이션은 크고 카디널리티가 높습니다
+    Annotations         Off
 
 [OUTPUT]
     Name   loki

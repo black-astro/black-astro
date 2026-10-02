@@ -628,12 +628,16 @@ metric_relabel_configs:     # ★ 긁은 "후" — 저장 전에 메트릭을 �
     <div class="card">
       <h4 class="mini" style="margin-top:0">로컬 저장소의 성질</h4>
       <pre class="code" data-lang="bash"><code># 실행 플래그 (도커라면 command 로)
+#   retention.time  기간 기준 보존
+#   retention.size  용량 기준 (둘 중 먼저 걸리는 쪽)
+#   enable-lifecycle  POST /-/reload 로 무중단 설정 갱신
+#   (줄 끝 \ 뒤에 주석을 붙이면 줄 잇기가 끊깁니다 — 주석은 위로)
 prometheus \
   --config.file=/etc/prometheus/prometheus.yml \
   --storage.tsdb.path=/prometheus \
-  --storage.tsdb.retention.time=15d \    # 기간 기준 보존
-  --storage.tsdb.retention.size=50GB \   # 용량 기준(둘 중 먼저 걸리는 쪽)
-  --web.enable-lifecycle                 # POST /-/reload 로 무중단 설정 갱신
+  --storage.tsdb.retention.time=15d \
+  --storage.tsdb.retention.size=50GB \
+  --web.enable-lifecycle
 
 # 설정을 고친 뒤 — 재시작하지 않고 반영
 promtool check config /etc/prometheus/prometheus.yml
@@ -856,9 +860,11 @@ sum by (pod) (kube_pod_container_info)
 
 # 일대다 — 왼쪽 여러 개에 오른쪽 하나를 붙일 때 group_left ★
 sum by (pod, route) (rate(http_requests_total[5m]))
-  * on (pod) group_left(version, team)
+  * on (pod) group_left(label_version, label_team)
     kube_pod_labels{job="kube-state-metrics"}
-#   → 결과에 version·team 라벨이 얹힙니다 (팀별로 묶어 볼 수 있게)
+#   → 결과에 label_version·label_team 라벨이 얹힙니다 (팀별로 묶어 볼 수 있게)
+#   (kube_pod_labels 는 파드 라벨을 label_ 접두사로 붙이고,
+#    kube-state-metrics 의 --metric-labels-allowlist 에 넣은 라벨만 내보냅니다)
 
 # 무시할 라벨을 지정하는 방식
 a / ignoring (instance) b</code></pre>
@@ -1078,6 +1084,7 @@ sum by (route) (
     <div class="card">
       <h4 class="mini" style="margin-top:0">배포 표시선 — 인과를 눈으로 잇습니다</h4>
       <pre class="code" data-lang="json"><code>// 패널 annotations — 배포 이벤트를 세로선으로
+// "5분 전엔 없던 version 이 나타났다" = 배포 (값이 늘 1 이라 changes() 로는 안 잡힙니다)
 {
   "annotations": {
     "list": [{
@@ -1085,7 +1092,7 @@ sum by (route) (
       "datasource": { "uid": "prom" },
       "enable": true,
       "iconColor": "rgba(255, 96, 96, 1)",
-      "expr": "changes(app_build_info[5m]) &gt; 0",
+      "expr": "count by (service, version) (app_build_info) unless count by (service, version) (app_build_info offset 5m)",
       "titleFormat": "deploy {{version}}",
       "textFormat": "{{service}} → {{version}}"
     }]
@@ -1104,7 +1111,7 @@ sum by (route) (
 apiVersion: 1
 providers:
   - name: repo
-    folder: 'Services'
+    # folder 는 비워 둡니다 — foldersFromFilesStructure 를 쓰면 하위 디렉터리 이름이 폴더가 됩니다
     type: file
     disableDeletion: true
     allowUiUpdates: false        # ★ UI 수정 금지 — 소스가 진실
@@ -1310,9 +1317,12 @@ rlog.error({ order_id, duration_ms: 1842, err: e.message }, 'order create failed
 @Component
 public class TraceIdFilter extends OncePerRequestFilter {
   protected void doFilterInternal(HttpServletRequest req,
-      HttpServletResponse res, FilterChain chain) throws Exception {
+      HttpServletResponse res, FilterChain chain)
+      throws ServletException, IOException {   // throws Exception 은 오버라이드 불가
     // ① 앞단(LB·게이트웨이)이 이미 만들었으면 그것을 씁니다
-    String tid = req.getHeader("traceparent");           // W3C 표준 (y07)
+    String tp  = req.getHeader("traceparent");           // W3C 표준 (y07)
+    String tid = (tp != null &amp;&amp; tp.length() &gt;= 55)
+        ? tp.substring(3, 35) : null;                     // 00-[trace-id 32자]-… 에서 trace-id 만
     if (tid == null) tid = req.getHeader("X-Request-Id");
     if (tid == null) tid = UUID.randomUUID().toString().replace("-", "");
 
@@ -1387,7 +1397,7 @@ source = '''
   . = parse_json!(.message)
   .ts = parse_timestamp!(.ts, "%+")
   # ★ 개인정보 마스킹 — 저장되기 "전"에 지웁니다
-  .msg = replace(.msg, r'\d{6}-\d{7}', "[RRN]")            # 주민번호
+  .msg = replace(string!(.msg), r'\d{6}-\d{7}', "[RRN]")   # 주민번호 (string! — JSON 필드는 타입이 미정이라)
   .msg = replace(.msg, r'\d{4}-\d{4}-\d{4}-\d{4}', "[CARD]")
   .msg = replace(.msg, r'Bearer\s+[A-Za-z0-9._-]+', "[TOKEN]")
   del(.password); del(.authorization)
@@ -1403,6 +1413,7 @@ exclude = '''.level == "error" || .level == "warn"'''   # ★ 에러는 전부 �
 type = "loki"
 inputs = ["sample"]
 endpoint = "http://loki:3100"
+encoding.codec = "json"                     # loki 싱크의 필수 항목
 # 라벨은 값 가짓수가 작은 것만! (Loki 도 카디널리티가 비용)
 labels = { service = "{{ service }}", env = "{{ env }}", level = "{{ level }}" }</code></pre>
       <div class="note warn" style="margin-bottom:0">
@@ -1416,12 +1427,17 @@ labels = { service = "{{ service }}", env = "{{ env }}", level = "{{ level }}" }
       <h4 class="mini" style="margin-top:0">보존 정책 · 줄이기 체크리스트</h4>
       <pre class="code" data-lang="yaml"><code># Loki — 테넌트별 보존 기간
 limits_config:
-  retention_period: 336h            # 기본 14일
+  retention_period: 336h            # 전체 기본값 14일
   max_query_length: 721h
   ingestion_rate_mb: 20
   max_streams_per_user: 10000       # ★ 카디널리티 안전벨트
 compactor:
   retention_enabled: true
+  delete_request_store: filesystem  # retention 을 켜면 필요 (Loki 3.x)
+runtime_config:
+  file: /etc/loki/overrides.yaml    # 테넌트별 값은 이 별도 파일에
+
+# /etc/loki/overrides.yaml
 overrides:
   audit:
     retention_period: 8760h         # 감사 로그만 1년</code></pre>
@@ -1643,7 +1659,7 @@ processors:
       <pre class="code" data-lang="text"><code># TraceQL — 스팬 조건으로 트레이스 찾기
 { resource.service.name = "api" &amp;&amp; duration &gt; 1s }
 { span.http.status_code = 500 &amp;&amp; span.http.route = "/orders" }
-{ span.db.system = "postgresql" &amp;&amp; span.duration &gt; 500ms }
+{ span.db.system = "postgresql" &amp;&amp; duration &gt; 500ms }   # duration 은 고유 필드 — span. 을 붙이면 "duration" 속성을 찾습니다
 
 # 구조 조건 — "api 를 거쳐서 inventory 로 간 것"
 { resource.service.name="api" } &gt;&gt; { resource.service.name="inventory" }</code></pre>
@@ -1893,7 +1909,8 @@ service:
     traces:  { receivers: [otlp], exporters: [spanmetrics, otlp/tempo] }
     metrics: { receivers: [spanmetrics], exporters: [prometheusremotewrite] }
 #   → 계측을 한 번만 했는데 RED 메트릭이 공짜로 나옵니다
-#     traces_span_metrics_duration_seconds_bucket{service_name,route,status_code}
+#     traces_span_metrics_duration_milliseconds_bucket{service_name,span_name,http_route,status_code}
+#     (히스토그램 기본 단위가 ms — 초로 받으려면 histogram: { unit: s })
 
 # ③ 예시(exemplar) — 메트릭 점 하나에 trace_id 를 붙임 ★★
 #   Grafana 의 지연 그래프에서 튀는 점을 클릭 → 그 순간의 실제 트레이스로 이동
@@ -2066,6 +2083,11 @@ route:
   repeat_interval: 4h    # 안 풀리면 4시간마다 다시
 
   routes:
+    # ⓪ 개발 환경은 버림 — 위에서부터 첫 일치로 정해지므로 맨 앞에 둡니다
+    #    (뒤에 두면 dev 알림도 위의 page·팀 라우트에 먼저 걸립니다)
+    - matchers: ['env="dev"']
+      receiver: null-receiver
+
     # ① 심각도 page 는 호출로 — 밤에도 울립니다
     - matchers: ['severity="page"']
       receiver: pagerduty
@@ -2077,10 +2099,6 @@ route:
       receiver: slack-order
     - matchers: ['team="payment"']
       receiver: slack-payment
-
-    # ③ 개발 환경은 티켓만
-    - matchers: ['env="dev"']
-      receiver: null-receiver
 
 # 억제 — 상위 장애가 켜져 있으면 하위 알림을 숨깁니다 ★
 inhibit_rules:
@@ -2106,7 +2124,12 @@ receivers:
           런북: {{ .Annotations.runbook_url }}
           대시보드: {{ .Annotations.dashboard_url }}
           {{ end }}
-  - name: null-receiver</code></pre>
+  # 위에서 이름을 쓴 receiver 는 전부 정의돼 있어야 설정이 로드됩니다
+  - name: slack-payment
+    slack_configs: [{ api_url: '&lt;웹훅&gt;' }]
+  - name: default-slack
+    slack_configs: [{ api_url: '&lt;웹훅&gt;' }]
+  - name: null-receiver                  # 아무 데도 보내지 않음</code></pre>
 
   <div class="grid2 rv d1">
     <div class="card">
@@ -2299,6 +2322,10 @@ groups:
         expr: |
           sum(rate(http_requests_total{job="api",status=~"5.."}[5m]))
           / sum(rate(http_requests_total{job="api"}[5m]))
+      - record: slo:api_error_ratio:rate30m      # 아래 Medium 알림이 씁니다
+        expr: |
+          sum(rate(http_requests_total{job="api",status=~"5.."}[30m]))
+          / sum(rate(http_requests_total{job="api"}[30m]))
       - record: slo:api_error_ratio:rate1h
         expr: |
           sum(rate(http_requests_total{job="api",status=~"5.."}[1h]))
@@ -2481,8 +2508,9 @@ groups:
 go tool pprof -http=:8081 http://localhost:6060/debug/pprof/profile?seconds=30
 go tool pprof -http=:8081 http://localhost:6060/debug/pprof/heap   # 메모리</code></pre>
       <pre class="code" data-lang="bash"><code># JVM — async-profiler (운영 중인 PID 에 붙습니다)
-./profiler.sh -d 30 -e cpu   -f cpu.html   &lt;PID&gt;
-./profiler.sh -d 30 -e alloc -f alloc.html &lt;PID&gt;   # 할당 프로파일
+# (3.0 부터 실행 파일이 bin/asprof — 예전 profiler.sh 는 사라졌습니다)
+asprof -d 30 -e cpu   -f cpu.html   &lt;PID&gt;
+asprof -d 30 -e alloc -f alloc.html &lt;PID&gt;   # 할당 프로파일
 #   -e wall 은 "대기까지 포함" — 느린데 CPU 는 안 쓰는 경우에 씁니다 ★
 
 # Python — 돌고 있는 프로세스에 붙어 실시간
@@ -2529,9 +2557,9 @@ services:
         <tr><td><b>bcc · bpftrace</b></td><td>일회성 조사 — 느린 디스크 I/O, TCP 재전송, 파일 열기 추적</td></tr>
       </table></div>
       <pre class="code" data-lang="bash"><code># bpftrace 한 줄짜리들 (조사할 때만 잠깐)
-# 프로세스별 디스크 I/O 지연 분포
+# 디스크 I/O 요청 크기 분포 (섹터 단위 — 지연 분포는 bcc 의 biolatency 로)
 sudo bpftrace -e 'tracepoint:block:block_rq_complete
-  { @us = hist(args-&gt;nr_sector); }'
+  { @sectors = hist(args-&gt;nr_sector); }'
 
 # 어떤 프로세스가 파일을 여는가
 sudo bpftrace -e 'tracepoint:syscalls:sys_enter_openat
@@ -2683,6 +2711,7 @@ services:
       - --storage.tsdb.retention.time=15d
       - --web.enable-lifecycle
       - --web.enable-otlp-receiver          # ★ OTLP 메트릭 직접 수신 (Prometheus 3.x)
+      - --web.enable-remote-write-receiver  # Tempo 메트릭 생성기의 remote_write 를 받으려면
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./rules:/etc/prometheus/rules:ro
@@ -2849,23 +2878,26 @@ docker compose ps            # 전부 running 인지
 docker run -d --name app --network obs_default \
   -e OTEL_SERVICE_NAME=order-api \
   -e OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 \
+  -e OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
   -e OTEL_RESOURCE_ATTRIBUTES='service.version=1.4.2,deployment.environment=prod' \
   -e OTEL_TRACES_SAMPLER=parentbased_traceidratio \
   -e OTEL_TRACES_SAMPLER_ARG=1.0 \
   myapp:1.4.2
 
 # ③ 순서대로 확인 — 하나씩 끊어서 봐야 원인이 보입니다 ★
-curl -s localhost:8080/metrics | head             # 앱이 메트릭을 내나
-curl -s localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job,health}'   # 긁히나
-curl -s 'localhost:9090/api/v1/query?query=up'    # 저장됐나
+#    (앱·Prometheus·Loki 포트는 밖에 열지 않았으니 같은 네트워크의 임시 컨테이너로 묻습니다)
+C="docker run --rm --network obs_default curlimages/curl -s"
+$C http://app:8080/metrics | head                 # 앱이 메트릭을 내나
+$C http://prometheus:9090/api/v1/targets | jq '.data.activeTargets[] | {job,health}'   # 긁히나
+$C 'http://prometheus:9090/api/v1/query?query=up' # 저장됐나
 docker compose logs otel-collector | tail -30     # 콜렉터가 에러 없이 도나
-curl -s 'localhost:3100/loki/api/v1/labels'       # 로키가 로그를 받았나
+$C http://loki:3100/loki/api/v1/labels            # 로키가 로그를 받았나
 
 # ④ Grafana 접속 → Explore 에서 세 소스를 각각 한 번씩 질의해 봅니다
 open http://localhost:3000
 
 # ⑤ 설정을 고쳤을 때 (재시작 없이)
-curl -X POST localhost:9090/-/reload
+$C -X POST http://prometheus:9090/-/reload
 docker compose restart otel-collector</code></pre>
 
   <div class="grid2 rv d1">
@@ -3150,8 +3182,10 @@ py-spy dump --pid 12345
 deriv(process_resident_memory_bytes[6h]) &gt; 0
   and
 predict_linear(process_resident_memory_bytes[6h], 12*3600)
-  &gt; on(instance) container_spec_memory_limit_bytes
-# → "12시간 뒤 한계를 넘을 추세" 일 때만 티켓</code></pre>
+  &gt; on(pod) max by (pod) (container_spec_memory_limit_bytes{container!=""})
+# → "12시간 뒤 한계를 넘을 추세" 일 때만 티켓
+#   (앱 메트릭의 instance 는 앱 주소, cAdvisor 의 instance 는 노드라 instance 로는 안 맞습니다 —
+#    pod 라벨로 짝짓고, 오른쪽은 파드당 하나가 되게 max by (pod))</code></pre>
     </div>
   </div>
 
