@@ -348,7 +348,7 @@ pattern = r'\((?:[^()]|(?R))*\)'
 regex.match(pattern, "((a)(b))")    # 매치됨 — 중첩을 센다
 
 # 역참조도 정규 언어를 벗어난다
-re.match(r'(\w+) \1', "hello hello")   # 같은 단어 반복
+regex.match(r'(\w+) \1', "hello hello")   # 같은 단어 반복 (표준 re 도 지원)
 
 # ★ 그래서 이름이 헷갈린다
 #   이론의 '정규 표현식' ≠ 프로그래밍 언어의 '정규식'
@@ -699,7 +699,7 @@ value: on          # → true
 a: &amp;a ["x","x","x","x","x","x","x","x","x"]
 b: &amp;b [*a,*a,*a,*a,*a,*a,*a,*a,*a]
 c: &amp;c [*b,*b,*b,*b,*b,*b,*b,*b,*b]
-# ... 9단계면 10억 개 노드
+# ... 9단계면 9⁹ ≈ 3.9억 개 노드
 
 # ✓ 방어: safe_load 사용 + 크기 제한
 yaml.safe_load(text)      # 파이썬 — load() 는 임의 객체 생성 가능</code></pre>
@@ -879,13 +879,18 @@ paradox(paradox)
       <tr><td><b>제한</b></td><td>분석 가능한 코드만 허용</td><td>eBPF 검증기 · Coq · 종료 검사기</td></tr>
     </table></div>
     <pre class="code" data-lang="rust"><code>// 러스트 borrow checker 는 '건전' 쪽이다 — 안전한 코드도 거부한다
-fn example(v: &amp;mut Vec&lt;i32&gt;) {
-    let first = &amp;v[0];        // 불변 빌림
-    v.push(1);                // ✗ 컴파일 에러 — 가변 빌림 충돌
-    println!("{}", first);
+use std::collections::HashMap;
+fn get_or_insert(map: &amp;mut HashMap&lt;u32, String&gt;) -&gt; &amp;String {
+    if let Some(v) = map.get(&amp;1) {   // 불변 빌림
+        return v;                    // 빌림을 그대로 반환
+    }
+    map.insert(1, String::new());    // ✗ 컴파일 에러 E0502 — 위 빌림이 아직 살아 있다고 본다
+    map.get(&amp;1).unwrap()
 }
-// 이 코드는 실제로는 안전할 수도 있지만 컴파일러가 증명하지 못하므로 거부한다.
-// "거부되는 안전한 코드"가 존재하는 것이 건전한 분석의 필연적 대가.</code></pre>
+// None 경로에서는 빌림이 이미 끝났으므로 실제로는 안전하지만, 컴파일러가 증명하지 못해 거부한다
+// (차세대 검사기 Polonius 는 통과시킨다).
+// "거부되는 안전한 코드"가 존재하는 것이 건전한 분석의 필연적 대가.
+// ※ let first = &amp;v[0]; v.push(1); 은 다르다 — push 가 재할당하면 first 가 해제된 메모리를 가리키는 진짜 버그다.</code></pre>
     <pre class="code" data-lang="python"><code># 타입 검사기도 마찬가지 — 실행하면 되는 코드를 거부할 수 있다
 def f(x: int | str) -&gt; int:
     if isinstance(x, int):
@@ -1206,7 +1211,7 @@ def find_new(incoming, existing):
     seen = set(existing)                                  # ✓ O(n+m)
     return [x for x in incoming if x not in seen]
 
-# 1만 × 1만 = 1억 번 → 수십 초
+# 1만 × 1만 = 1억 번 → 수 초
 # set 으로 바꾸면 → 0.01초</code></pre>
     <div class="note warn" style="margin-bottom:0">
       <b>N+1 쿼리는 특별히 위험합니다</b> — 로컬에서는 데이터가 적어
@@ -1219,7 +1224,7 @@ def find_new(incoming, existing):
   <h3 class="sub" data-lv="a">실무에선 이렇게 — <span class="t">복잡도가 같아도 다른 것</span> <span class="lvl h">🔴 실무</span></h3>
   <div class="card rv">
     <h4 class="mini" style="margin-top:0">상수가 지배하는 자리</h4>
-    <pre class="code" data-lang="python"><code># 둘 다 O(n) 인데 속도가 20배 차이 난다
+    <pre class="code" data-lang="python"><code># 둘 다 O(n) 인데 속도가 10배 넘게 차이 난다
 import numpy as np, time
 
 data = list(range(10_000_000))
@@ -1227,7 +1232,7 @@ arr = np.arange(10_000_000)
 
 t = time.perf_counter(); s1 = sum(data);  py = time.perf_counter() - t
 t = time.perf_counter(); s2 = arr.sum();  np_ = time.perf_counter() - t
-print(round(py / np_, 1), "배")      # 약 40배
+print(round(py / np_, 1), "배")      # 약 10~40배 (환경마다 다름)
 
 # 차이의 원인 (전부 빅오 밖의 것들)
 #  · 파이썬 객체 포인터 추적 vs 연속 메모리
@@ -1448,7 +1453,7 @@ sys.getsizeof([1,2,3])          # 88   ← 리스트 껍데기만
 sys.getsizeof(1)                # 28   ← 정수 하나가 28바이트!
 
 # 파이썬 객체는 생각보다 크다
-#  int 28B · float 24B · str(1글자) 50B · 빈 dict 64B
+#  int 28B · float 24B · str(1글자) 42B(3.12+, 이전 50B) · 빈 dict 64B
 #  1000만 개 정수 리스트 = 약 400MB (numpy 는 80MB)
 
 # ② 실제 증가분 추적
@@ -1566,7 +1571,7 @@ items = [None] * expected_size          # 파이썬
 
 # ② 해시맵도 마찬가지
 d = dict()                              # 파이썬은 지정 불가
-# Java: new HashMap&lt;&gt;(expected / 0.75f + 1)
+# Java: new HashMap&lt;&gt;((int) (expected / 0.75f) + 1)
 # Go:   make(map[string]int, n)
 
 # ③ 점진적 리해싱 — 한 번에 다 옮기지 않는다
@@ -1576,8 +1581,9 @@ d = dict()                              # 파이썬은 지정 불가
 # ④ 오브젝트 풀 — 할당 자체를 피한다 (GC 압력 감소)
 class BufferPool:
     def __init__(self, size, count):
+        self.size = size
         self.free = [bytearray(size) for _ in range(count)]
-    def get(self):  return self.free.pop() if self.free else bytearray(size)
+    def get(self):  return self.free.pop() if self.free else bytearray(self.size)
     def put(self, b): b[:] = b'\0' * len(b); self.free.append(b)</code></pre>
     <div class="tw"><table class="cheat" style="margin:16px 0 0">
       <tr><th style="width:32%">기법</th><th>효과</th><th>주의</th></tr>
@@ -2052,7 +2058,7 @@ def local_search(solution, cost, neighbors, max_iter=10_000):
       <tr><td>벨만-포드</td><td><span class="bo a">O(V·E)</span></td><td>음수 간선 · 음수 사이클 검출</td></tr>
       <tr><td>플로이드-워셜</td><td><span class="bo a">O(V³)</span></td><td>모든 쌍 최단 경로</td></tr>
       <tr><td>크루스칼</td><td><span class="bo b">O(E log E)</span></td><td>MST</td></tr>
-      <tr><td>프림 (힙)</td><td><span class="bo b">O(E log V)</span></td><td>MST (조밀 그래프)</td></tr>
+      <tr><td>프림 (힙)</td><td><span class="bo b">O(E log V)</span></td><td>MST (조밀하면 배열판 O(V²) 이 낫다)</td></tr>
       <tr><td>SCC (타잔)</td><td><span class="bo b">O(V+E)</span></td><td>강한 연결 요소</td></tr>
       <tr><td>최대 유량 (Dinic)</td><td>O(V²E)</td><td>매칭 · 용량 배분</td></tr>
       <tr><td>이분 매칭</td><td>O(V·E)</td><td>배정 문제</td></tr>

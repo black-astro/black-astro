@@ -62,11 +62,14 @@ async def compute(n):
 await asyncio.gather(*[compute(10**7) for _ in range(4)])
 # 순차 실행과 같은 시간 + 다른 요청도 전부 대기
 
-# ✓ CPU 작업은 프로세스로
+# ✓ CPU 작업은 프로세스로 — 넘기는 함수는 async 가 아닌 일반 함수여야 한다
+def compute_sync(n):                       # async def 를 넘기면 코루틴이 pickle 되지 않아 실패
+    return sum(i * i for i in range(n))
+
 loop = asyncio.get_running_loop()
 with ProcessPoolExecutor() as pool:
     results = await asyncio.gather(
-        *[loop.run_in_executor(pool, compute, 10**7) for _ in range(4)])
+        *[loop.run_in_executor(pool, compute_sync, 10**7) for _ in range(4)])
 
 # I/O 작업에 프로세스를 쓰면 — 낭비다
 # 프로세스 100개보다 코루틴 10000개가 훨씬 가볍다</code></pre>
@@ -201,7 +204,10 @@ def worker():
 
 ts = [threading.Thread(target=worker) for _ in range(4)]
 [t.start() for t in ts]; [t.join() for t in ts]
-print(counter)                # 400000 이 아니다 (실행마다 다름)
+print(counter)                # 400000 이 보장되지 않는다
+# ※ CPython 3.10+ 는 GIL 전환 지점이 드물어 이 코드로는 400000 이 자주 나온다 — 그래도 안전한 게 아니다.
+#   읽기와 쓰기 사이에 함수 호출을 끼우고(v = counter; v = int(v) + 1; counter = v)
+#   반복을 100만 번으로 늘리면 바로 깨지고, free-threaded 빌드(3.13t+)에서는 그냥도 깨진다.
 
 # ✓ 락으로
 lock = threading.Lock()
@@ -453,12 +459,13 @@ enum Singleton { INSTANCE; }</code></pre>
       </div>
     </div>
     <pre class="code" data-lang="python"><code># 파이썬 · Go 에서도 같은 문제가 있다
-# 파이썬: functools.cache 나 모듈 레벨 초기화를 쓰면 안전
+# 파이썬: 모듈 레벨 초기화가 가장 확실 (임포트는 락으로 보호된다)
 from functools import cache
 
 @cache
 def get_client():
-    return ExpensiveClient()        # 첫 호출 시 한 번만 · GIL 이 보호
+    return ExpensiveClient()        # 캐시는 스레드 안전하지만, 첫 호출이 동시에 겹치면
+                                    # 생성자가 두 번 돌 수 있다 — 엄격히 한 번이면 락을 함께
 
 # Go: sync.Once 를 쓴다
 var once sync.Once
@@ -765,7 +772,7 @@ func noLeak(ctx context.Context) {
 }
 
 // 누수 확인
-// go test -race
+// 테스트에서 go.uber.org/goleak (go test -race 는 경쟁 탐지용이라 누수는 못 잡는다)
 // runtime.NumGoroutine() 을 메트릭으로 노출
 // pprof goroutine 프로파일</code></pre>
     <div class="note warn" style="margin-bottom:0">
@@ -2212,7 +2219,7 @@ headers = {"X-Request-Id": request_id.get()}
         <tr><th style="width:34%">증상</th><th>원인과 조치</th></tr>
         <tr><td class="warn">리더 선거가 계속 반복</td><td>선거 타임아웃 &lt; 네트워크 지연 · <b>디스크 fsync 가 느림</b></td></tr>
         <tr><td>쓰기 지연이 큼</td><td>과반이 다른 지역 — 리전 배치 재검토</td></tr>
-        <tr><td>노드 추가 후 불안정</td><td>멤버십 변경을 <b>한 번에 한 대씩</b>(joint consensus)</td></tr>
+        <tr><td>노드 추가 후 불안정</td><td>멤버십 변경을 <b>한 번에 한 대씩</b>(여러 대를 함께 바꾸려면 joint consensus)</td></tr>
         <tr><td class="warn">과반 상실 → 쓰기 불가</td><td>정상 동작입니다. <b>틀린 답 대신 멈추는 것</b>이 설계</td></tr>
         <tr><td>디스크가 계속 참</td><td>스냅샷·로그 압축 미설정</td></tr>
         <tr><td>팔로워에서 읽으니 과거 값</td><td>정상 — 최신이 필요하면 리더 읽기 · ReadIndex</td></tr>

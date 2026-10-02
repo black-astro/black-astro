@@ -106,7 +106,7 @@ JIT
   <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">직접 단계별로 보기</span> <span class="lvl m">🟡 중급</span></h3>
   <div class="card rv">
     <pre class="code" data-lang="bash"><code># C — 각 단계를 따로 실행
-gcc -E main.c -o main.i        # ① 전처리 결과 (수만 줄이 된다)
+gcc -E main.c -o main.i        # ① 전처리 결과 (헤더 몇 개로 수천~수만 줄이 된다)
 gcc -S main.i -o main.s        # ② 어셈블리
 gcc -c main.s -o main.o        # ③ 오브젝트
 gcc main.o -o app              # ④ 링크
@@ -131,7 +131,7 @@ cargo expand                   # 매크로 전개 결과 (전처리에 해당)
 cargo rustc -- --emit=llvm-ir  # 중간 표현</code></pre>
     <div class="note info" style="margin-bottom:0">
       <b>전처리 결과를 한 번 열어 보면 놀랍습니다</b> —
-      <code>#include &lt;stdio.h&gt;</code> 한 줄이 <b>수만 줄</b>로 펼쳐집니다.
+      C 의 <code>#include &lt;stdio.h&gt;</code> 한 줄이 수백 줄, C++ 의 <code>#include &lt;iostream&gt;</code> 한 줄은 <b>수만 줄</b>로 펼쳐집니다.
       C++ 빌드가 느린 이유의 큰 부분이 여기 있고,
       그래서 <b>모듈</b>과 <b>전방 선언</b>이 중요합니다.
     </div>
@@ -227,9 +227,9 @@ npx webpack --profile --json &gt; stats.json
   <div class="grid2 rv">
     <div class="card">
       <h4 class="mini" style="margin-top:0">각 단계의 결과물을 눈으로</h4>
-      <pre class="code" data-lang="bash"><code># ① 전처리만 — #include 가 펼쳐진 결과 (수만 줄이 됩니다)
+      <pre class="code" data-lang="bash"><code># ① 전처리만 — #include 가 펼쳐진 결과 (수백~수만 줄이 됩니다)
 gcc -E main.c -o main.i
-wc -l main.i          # &lt;stdio.h&gt; 하나로 700줄 → 3만 줄
+wc -l main.i          # &lt;stdio.h&gt; 하나로도 수백 줄 (C++ &lt;iostream&gt; 이면 3만 줄 안팎)
 
 # ② 어셈블리까지만 — 컴파일러가 만든 기계어를 사람이 읽는 형태로
 gcc -S -O2 main.c -o main.s
@@ -480,6 +480,7 @@ def lex_string(src, i):
       <pre class="code" data-lang="python"><code>import ast
 tree = ast.parse("x = 1 + 2 * 3")
 print(ast.dump(tree, indent=2))
+# 출력을 한 줄로 간추리면 (ctx=Store() · value= · 줄바꿈 생략)
 # Module(body=[Assign(targets=[Name(id='x')],
 #   value=BinOp(left=Constant(1),
 #               op=Add(),
@@ -894,10 +895,11 @@ int sum(int n) {
     return s;
 }
 
-// GCC -O2 결과 (요약)
+// Clang -O2 결과 (요약)
 //   반복문이 사라지고 수식 하나가 된다
 //   s = n * (n + 1) / 2
-//   → 컴파일러가 등차수열 합 공식을 찾아냈다 (귀납 변수 분석)
+//   → 컴파일러가 등차수열 합 공식을 찾아냈다 (귀납 변수 분석 · SCEV)
+//   ※ GCC 는 같은 -O2 에서도 반복문을 남기는 경우가 많다 — 컴파일러마다 다르다
 
 // 확인
 //   godbolt.org 에서 -O0 과 -O2 를 나란히 비교</code></pre>
@@ -1228,7 +1230,7 @@ gcc main.c -Wl,-Bstatic -lfoo -Wl,-Bdynamic -lm   # 선택적</code></pre>
     </table></div>
     <pre class="code" data-lang="bash"><code># 파이썬 — C 확장이 안 불러와질 때
 python -c "import numpy"        # ImportError 의 실제 원인 확인
-ldd $(python -c "import numpy, os; print(os.path.dirname(numpy.__file__))")/core/_multiarray_umath*.so
+ldd $(python -c "import numpy, os; print(os.path.dirname(numpy.__file__))")/_core/_multiarray_umath*.so   # numpy 1.x 는 core/
 
 # manylinux 휠이 중요한 이유
 #  · 오래된 glibc 로 빌드해야 최신·구형 리눅스 모두에서 동작
@@ -1370,19 +1372,19 @@ def f1(items):
 def f2(items):
     return [x * 2 for x in items]
 
-dis.dis(f1)   # LOAD_METHOD append / CALL_METHOD 가 매 반복마다
+dis.dis(f1)   # append 조회(3.12+ LOAD_ATTR · 3.11 이하 LOAD_METHOD) + CALL 이 매 반복마다
 dis.dis(f2)   # LIST_APPEND — 메서드 조회 없이 바로
 
 # ★ 리스트 컴프리헨션이 빠른 이유가 여기 있다
-#   메서드 조회(LOAD_METHOD)와 호출 오버헤드가 없다
+#   메서드 조회(LOAD_ATTR/LOAD_METHOD)와 호출 오버헤드가 없다
 
 # 전역 vs 지역 변수
 def g1():
-    for i in range(1000): len(i)     # LOAD_GLOBAL len — 매번 딕셔너리 조회
+    for i in range(1000): abs(i)     # LOAD_GLOBAL abs — 매번 딕셔너리 조회
 
 def g2():
-    _len = len                        # 지역으로 캐시
-    for i in range(1000): _len(i)     # LOAD_FAST — 배열 인덱스
+    _abs = abs                        # 지역으로 캐시
+    for i in range(1000): _abs(i)     # LOAD_FAST — 배열 인덱스
 # 3.11+ 에서는 LOAD_GLOBAL 도 캐시되어 차이가 줄었다</code></pre>
     <div class="tw"><table class="cheat" style="margin:16px 0 0">
       <tr><th style="width:34%">파이썬 성능 요령</th><th>이유</th></tr>
@@ -1425,7 +1427,8 @@ import msgpack               # 바이너리 · 데이터만
 #  · 필요하면 필터 사용: ObjectInputFilter</code></pre>
     <div class="note warn" style="margin-bottom:0">
       <b>역직렬화 취약점은 가장 심각한 원격 코드 실행 경로</b> 중 하나입니다 —
-      Log4Shell · 다수의 자바 RCE 가 이 계열입니다.
+      Commons Collections 가젯 체인 같은 다수의 자바 RCE 가 이 계열이고,
+      Log4Shell(JNDI 주입) 도 원격에서 객체를 불러와 실행하는 이웃 경로입니다.
       <b>“객체를 그대로 복원한다”는 기능 자체가 위험</b>하다는 것을 기억하세요 →
       <b>🔐 보안 · 암호 09</b>.
     </div>
@@ -1716,7 +1719,7 @@ java -XX:+UseParallelGC ...
 java -XX:MaxRAMPercentage=70 ...
 
 # Go
-GOGC=200 ./app          # 힙이 2배가 되면 수집 (기본 100)
+GOGC=200 ./app          # 힙이 살아 있는 양의 3배가 되면 수집 (기본 100 = 2배)
 GOMEMLIMIT=6GiB ./app   # 소프트 메모리 상한 (1.19+) ★ 권장
 GODEBUG=gctrace=1 ./app # GC 로그</code></pre>
     <div class="note tip" style="margin-bottom:0">

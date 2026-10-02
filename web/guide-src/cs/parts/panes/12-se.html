@@ -123,10 +123,10 @@ def send_mail(email, name): ...   # ✓ 필요한 것만
       <tr><td>새 사람이 이해하려면?</td><td>몇 개 파일을 읽어야 하나</td></tr>
     </table></div>
     <pre class="code" data-lang="bash"><code># 실제로 측정할 수 있다
-# 함께 바뀌는 파일 (변경 결합도)
-git log --format="%H" --since="6 months ago" | while read c; do
-  git show --name-only --format="" $c
-done | sort | uniq -c | sort -rn | head -20
+# 함께 바뀌는 파일 쌍 (변경 결합도) — 커밋마다 같이 들어간 파일 쌍을 센다
+git log --format="@%H" --name-only --since="6 months ago" \
+  | awk '/^@/ {n=0; next} NF {for (i=0; i&lt;n; i++) print f[i] "  +  " $0; f[n++]=$0}' \
+  | sort | uniq -c | sort -rn | head -20
 
 # 두 파일이 항상 함께 바뀐다면
 #  → 같은 모듈에 있어야 하거나, 결합이 과한 것
@@ -240,13 +240,14 @@ def notify(email: str): send(email)</code></pre>
       <pre class="code" data-lang="text"><code>실측하는 법 — git 이 데이터를 갖고 있습니다
 
 # 같이 자주 바뀌는 파일 쌍 = 숨은 결합
-git log --name-only --pretty=format: --since=1.year |
-  awk 'NF' | sort | uniq -c | sort -rn | head -20
+git log --format=@%h --name-only --since=1.year |
+  awk '/^@/ {n=0; next} NF {for (i=0; i&lt;n; i++) print f[i] "  +  " $0; f[n++]=$0}' |
+  sort | uniq -c | sort -rn | head -20
 
 # 한 커밋에 들어간 파일 수의 분포
 #   평균 10개 이상이면 결합도가 높다는 신호
 
-# 자주 바뀌면서 큰 파일 = 리팩터링 1순위
+# 자주 바뀌는 파일 — 여기에 크기·복잡도를 곱하면 리팩터링 1순위
 git log --format= --name-only --since=6.months |
   sort | uniq -c | sort -rn | head</code></pre>
       <div class="note warn" style="margin-bottom:0">
@@ -351,7 +352,7 @@ svc = OrderService(InMemoryRepo(), FakeMailer())
       <tr><td><b>데메테르 법칙</b></td><td><code>a.b().c().d()</code> 를 피하라 (친구의 친구)</td></tr>
       <tr><td><b>합성 &gt; 상속</b></td><td>상속은 가장 강한 결합</td></tr>
       <tr><td><b>실패는 빨리</b></td><td>잘못된 상태로 진행하지 말 것</td></tr>
-      <tr><td>포아송 원칙</td><td>입력에는 관대하게, 출력에는 엄격하게 (지금은 논쟁적)</td></tr>
+      <tr><td>포스텔 원칙 (견고성 원칙)</td><td>입력에는 관대하게, 출력에는 엄격하게 (지금은 논쟁적)</td></tr>
     </table></div>
     <pre class="code" data-lang="python"><code># DRY 의 오해 — 우연히 같아 보이는 코드를 합치면 나중에 아프다
 # ✗ 지금 모양이 같다고 합침
@@ -532,14 +533,14 @@ def get_client(): return _client</code></pre>
   <h3 class="sub" data-lv="i">이렇게도 쓸 수 있다 — <span class="t">빌더와 불변 객체</span> <span class="lvl m">🟡 중급</span></h3>
   <div class="card rv">
     <pre class="code" data-lang="python"><code># 파이썬 — dataclass 로 충분한 경우가 많다
-from dataclasses import dataclass, replace, field
+from dataclasses import dataclass, replace
 
 @dataclass(frozen=True, slots=True)      # 불변 + 메모리 절약
 class HttpConfig:
     url: str
     timeout: float = 5.0
     retries: int = 3
-    headers: dict = field(default_factory=dict)
+    headers: tuple[tuple[str, str], ...] = ()   # ★ dict 를 두면 frozen 이어도 속이 바뀌고 hash() 가 실패한다
 
 cfg = HttpConfig(url="https://api.example.com")
 cfg2 = replace(cfg, timeout=10.0)        # 일부만 바꾼 새 객체
@@ -1529,6 +1530,7 @@ def get_price(order, feature_flags):
     old = legacy_price(order)
     if not feature_flags.get("new_pricing_shadow"): return old
 
+    new = old                               # 새 구현이 실패하면 옛 값으로 (아래 return 이 안전하도록)
     try:
         new = new_price(order)
         if abs(new - old) &gt; 0.01:
@@ -2059,7 +2061,7 @@ log.info("order_created", order_id=order.id, total=order.total,
 
 # 컨텍스트를 한 번 묶어 두면 이후 모든 로그에 포함된다
 structlog.contextvars.bind_contextvars(
-    trace_id=trace_id, user_id=user.id, request_path=path)
+    trace_id=trace_id.get(), user_id=user.id, request_path=path)
 
 # 로그 레벨 기준
 #  DEBUG   개발 중 상세 (운영에서는 끔)
@@ -2124,8 +2126,8 @@ SLO — 목표
     dashboard: "https://grafana/d/orders"
 
 # 다중 윈도우 · 다중 번율 (Google SRE 권장)
-#  빠른 소진: 1시간 동안 버짓의 2% 소진 → page
-#  느린 소진: 6시간 동안 버짓의 5% 소진 → ticket
+#  빠른 소진: 1시간에 버짓의 2% (또는 6시간에 5%) 소진 → page
+#  느린 소진: 3일에 버짓의 10% 소진 → ticket
 # → 오탐을 줄이면서 큰 문제는 빨리 잡는다</code></pre>
     <div class="note info" style="margin-bottom:0">
       <b>알림 피로가 가장 큰 위험</b>입니다 —
