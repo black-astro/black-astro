@@ -188,16 +188,17 @@
       <h4 class="mini" style="margin-top:0">되돌릴 수 있게 만들기</h4>
       <pre class="code" data-lang="javascript"><code>// JS 폴백을 함께 두면 배포 사고에 강해집니다 ★
 let impl
-try {
-  impl = require('node-gyp-build')(__dirname)      // 네이티브
-} catch (err) {
-  console.warn('[mylib] 네이티브 로드 실패, JS 구현 사용:', err.message)
-  impl = require('./fallback.js')                  // 순수 JS
+if (process.env.MYLIB_PURE_JS === '1') {           // 환경변수로 강제 전환 (먼저 확인)
+  impl = require('./fallback.js')
+} else {
+  try {
+    impl = require('node-gyp-build')(__dirname)    // 네이티브
+  } catch (err) {
+    console.warn('[mylib] 네이티브 로드 실패, JS 구현 사용:', err.message)
+    impl = require('./fallback.js')                // 순수 JS
+  }
 }
-export const smooth = impl.smooth
-
-// 환경변수로 강제 전환
-if (process.env.MYLIB_PURE_JS === '1') impl = require('./fallback.js')
+exports.smooth = impl.smooth      // ★ 선택이 끝난 뒤에 내보내야 전환이 반영됩니다
 
 // 두 구현이 같은 결과를 내는지 테스트로 대조
 test('parity', () =&gt; {
@@ -411,13 +412,14 @@ export class Engine {
       <pre class="code" data-lang="javascript"><code>// index.js — 얇은 JS 래퍼로 검증·기본값을 처리 ★
 const native = require('node-gyp-build')(__dirname)
 
-export function smooth(data, { window = 3, mode = 'nearest' } = {}) {
+function smooth(data, { window = 3, mode = 'nearest' } = {}) {
   if (!(data instanceof Float64Array))
     data = Float64Array.from(data)          // 정규화
   if (!Number.isInteger(window) || window &lt; 1)
     throw new RangeError(`window 는 1 이상 정수여야 합니다 (받음: ${window})`)
   return native.smooth(data, window, mode === 'reflect' ? 1 : 0)
-}</code></pre>
+}
+module.exports = { smooth }                 // require·__dirname 을 쓰므로 CommonJS 로</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>파이썬 탭과 같은 원칙</b> — <b>C++ 쪽은 단순하게, JS 래퍼에서 파이썬답게</b>.
         옵션 객체·기본값·에러 메시지는 JS 에서 처리하는 편이
@@ -460,7 +462,7 @@ npx node-gyp build              # 증분 (빠름)
 npx node-gyp build --debug      # 디버그 심볼
 
 # 병렬 빌드
-npx node-gyp build -- -j8
+npx node-gyp build -j max      # 또는 -j 8
 
 # ccache 붙이기 (재빌드가 크게 빨라집니다) ★
 export CC="ccache gcc" CXX="ccache g++"
@@ -497,7 +499,7 @@ nm -D build/Release/addon.node | grep napi_register</code></pre>
 // 확인
 nm -D addon.node | grep napi_register_module_v1
 
-// ⚠ 모듈은 프로세스당 한 번만 초기화됩니다
+// ⚠ 공유 라이브러리는 프로세스당 한 번만 로드됩니다 (Init 은 환경마다 불리지만 static 은 하나)
 //   전역 상태를 두면 여러 worker_threads 가 공유합니다 ★
 static std::vector&lt;double&gt; g_cache;     // ❌ 스레드 간 경쟁
 
@@ -527,6 +529,8 @@ struct PerEnv {
     std::mt19937 rng;                 // 스레드마다 별도
     std::vector&lt;double&gt; scratch;
 };
+
+Napi::Value Run(const Napi::CallbackInfo&amp; info);   // Init 에서 쓰므로 먼저 선언
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
     env.SetInstanceData&lt;PerEnv&gt;(new PerEnv{});
@@ -1198,7 +1202,8 @@ v8.getHeapStatistics()</code></pre>
       <pre class="code" data-lang="cpp"><code>Napi::Value Smooth(const Napi::CallbackInfo&amp; info) {
     Napi::Env env = info.Env();
 
-    if (!info[0].IsTypedArray()) {
+    if (!info[0].IsTypedArray() ||        // ★ 종류까지 확인 (Float32Array 등이면 엉뚱한 메모리를 읽음)
+        info[0].As&lt;Napi::TypedArray&gt;().TypedArrayType() != napi_float64_array) {
         Napi::TypeError::New(env, "Float64Array 가 필요합니다")
             .ThrowAsJavaScriptException();
         return env.Null();
@@ -1950,7 +1955,8 @@ const w = new Watcher('/data')
 w.on('change', f =&gt; console.log('변경', f))
 w.on('error', e =&gt; console.error(e))
 
-// 또는 async iterator 로 (역압이 자연스럽게 처리됩니다) ★
+// 또는 async iterator 로 (소비하는 쪽 속도로 꺼내 씁니다) ★
+//   ⚠ 아래 queue 는 무제한 — 생산이 더 빠르면 쌓이니 진짜 역압은 TSFN 큐 크기로
 async function* events(path) {
   const queue = []
   let resolve
@@ -1979,8 +1985,8 @@ tsfn.Release();                // 스레드 종료 시 반드시
 // 원인 2 — detach 한 스레드가 살아 있음
 //   → jthread 나 명시적 join 을 쓰고, 종료 신호를 주세요
 class Watcher {
-    std::jthread th_;
-    std::atomic&lt;bool&gt; stop_{false};
+    std::atomic&lt;bool&gt; stop_{false};  // ★ th_ 보다 먼저 선언 — 멤버는 역순 소멸이라
+    std::jthread th_;                //   join 하는 동안 stop_ 이 아직 살아 있어야 합니다
 public:
     ~Watcher() { stop_ = true; }    // jthread 소멸자가 join
 };
@@ -2245,7 +2251,7 @@ private:
       <pre class="code" data-lang="javascript"><code>// 얇은 JS 래퍼로 감싸면 훨씬 자연스러워집니다 ★
 const native = require('node-gyp-build')(__dirname)
 
-export class Engine {
+class Engine {
   #impl
   #closed = false
 
@@ -2276,8 +2282,9 @@ export class Engine {
     return `Engine(size=${this.size})`
   }
 }
+module.exports = { Engine }          // require·__dirname 을 쓰므로 CommonJS 로
 
-// 사용
+// 사용 (using 은 블록·함수 안에서)
 using engine = new Engine({ window: 5 })   // 스코프를 벗어나면 자동 close
 engine.feed(a).feed(b)</code></pre>
     </div>
@@ -2536,7 +2543,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  arch: x64 }
-          - { os: ubuntu-latest,  arch: arm64, cross: true }
+          - { os: ubuntu-24.04-arm, arch: arm64 }    # arm 러너에서 네이티브 빌드
           - { os: macos-14,       arch: arm64 }
           - { os: macos-13,       arch: x64 }
           - { os: windows-latest, arch: x64 }
@@ -2623,7 +2630,7 @@ process.exit(0)      // ★ 0 으로 끝내야 npm install 이 성공합니다</
 let impl
 try { impl = require('node-gyp-build')(__dirname) }
 catch { impl = require('./fallback.js') }
-export const isNative = impl !== require('./fallback.js')</code></pre>
+exports.isNative = impl !== require('./fallback.js')</code></pre>
     </div>
   </div>
 
@@ -2972,7 +2979,7 @@ console.log(`왕복 ${(performance.now()-t).toFixed(1)}ms`)</code></pre>
 
 // 상위 버전 기능을 조건부로 쓰기
 #if NAPI_VERSION &gt;= 9
-    napi_add_async_cleanup_hook(...);
+    node_api_symbol_for(...);          // napi_version 9 에서 추가된 API
 #endif
 
 // 런타임에 지원 여부 확인
@@ -2995,6 +3002,7 @@ if (ver &gt;= 9) { /* 새 기능 */ } else { /* 대체 경로 */ }
 jobs:
   compat:
     needs: prebuild
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         runtime:

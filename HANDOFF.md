@@ -1,6 +1,70 @@
-# 핸드오프 — 언어 가이드 확장 (2026-10-01 12차 갱신 · C 가이드 · 스택/큐 · 프로젝트 구조)
+# 핸드오프 — 언어 가이드 확장 (2026-10-02 13차 갱신 · 구조 탭 완성 · 읽는 법 · 예제 코드 전수 검토)
 
-> 새 세션은 **이 12차 절만 읽고 바로 "🔜 이어서 할 일" 1번부터** 하면 됩니다. 11차 이전 기록은 아래 `---` 뒤에 있습니다.
+> 새 세션은 **13차 절만 읽고 바로 "🔜 이어서 할 일" 1번부터** 하면 됩니다. 12차 · 11차 이전 기록은 아래에 그대로 있습니다.
+
+## 🆕 13차에 한 일 (전부 커밋 · 푸시 완료)
+
+| 작업 | 결과 |
+|---|---|
+| **📁 프로젝트 구조 탭 10개 완성** | 12차 4개(java · kotlin · python · js-ts)에 이어 **cpp · server · csharp · rust · db · cs** — 탭 id `struct`, `ps01~ps10`, `panes/30-struct.html`. cs 는 아키텍처 패턴 총론 + 다른 가이드 구조 탭 링크 허브(53개) |
+| **읽는 법(*) 사전 7개 추가** → 열한 가이드 전부 | c 205 · cpp 196 · rust 211 · csharp 225 · db 223 · server 241 · cs 161 (`js/85-say.js`). 등록 도구 `tools/regsay.mjs` 신설 |
+| **예제 코드 전수 검토** (`CODE-AUDIT.md`) | 아래 표. 가이드마다 브라우저로 전 탭 switchTab · 섹션 수 대조 · JS 오류 0 확인 후 커밋 |
+| C 가이드 마무리 | 검토 + 사전 + 집필 때 "확신 없음" 사실 확인(FreeRTOS V11 API · UART 허용 오차 · CRA 일정 · IRQ 개수 등 대부분 맞음) |
+| 그 밖 | java 람다 섹션에 함수형 인터페이스 한 장 요약(모양 · 호출 메서드 · 코틀린 함수 타입), 가이드 이동 시 깜빡임 수정(아래 🩹), FNV-1a 상수 오타(c · cpp) |
+
+### 예제 코드 전수 검토 현황
+| 가이드 | 상태 | 블록 · 수정 | 대표적으로 잡은 것 |
+|---|---|---|---|
+| c | ✅ | 767 · 47 | 링크 오류(`_sidata`) · project VERSION · FreeRTOSConfig 필수 항목 · bsearch 정렬 기준 · 마운트 실패 후 진행 |
+| server | ✅ | 628 · 106 | **줄 끝 `#` 주석을 못 받는 설정**(Apache · systemd · .properties · sysctl · journald · Fluent Bit) 수십 곳, 없는 nginx 지시어 · Alertmanager receiver |
+| db | ✅ | 582 · 68 | PostgreSQL 18 이미지 데이터 경로, DISTINCT ON + LIMIT, HNSW 못 타는 RRF, 결과표 행 수 |
+| cs | ✅ | 840 · 84 | 실행하면 죽던 예제, 주장과 반대 결과, 출력 주석 실측화, SSRF CGNAT |
+| csharp | ✅ (00-setup 제외) | 811 · 155 | SKIP LOCKED 트랜잭션 누락, 동시성 · 수신 버퍼, MapInboundClaims, GCHeapHardLimitPercent 16진수 |
+| cpp | 🟡 7/16 탭 | 727 · 102 | 09-clang(C 가이드 수정 14건 이식) · 01-lang · 02-mod · 03-py · 04-node · 05-ffi · 06-build 완료 |
+| rust | ⬜ | — | 미착수(중단분은 패치로 보관) |
+
+## 🔜 이어서 할 일 (순서대로)
+
+### 1. 예제 코드 전수 검토 마무리 — cpp 나머지 9탭 · rust 전부 · csharp 00-setup
+**중단된 작업의 수정분을 패치로 보관했습니다** — `web/guide-src/_wip/audit-partial/`
+| 패치 | 범위 | 상태 |
+|---|---|---|
+| `cpp-group3-perf-deep-setup-srv.patch` | cpp 07-perf · 08-deep · 10-setup · 12-srv | 검토 도중 중단(어디까지 봤는지 불명) |
+| `cpp-group4-app-game-hpc.patch` | cpp 11-app · 13-game · 14-hpc (16-cs · 15-jvm 는 미착수) | 검토 도중 중단 |
+| `rust-group1-lang-own-py-node.patch` | rust 01-lang · 02-own · 03-py · 04-node | 검토 도중 중단 |
+| `rust-group2-ffi-build.patch` | rust 05-ffi · 06-build (07~09 미착수) | 검토 도중 중단 |
+- 저장소 파일은 **되돌린 상태**(반쯤 적용된 수정이 섞이지 않게). 쓰는 법: 에이전트에게 패치를 먼저 읽게 하고(`git apply --check` 후 적용하거나 diff 를 참고), 그 파일을 처음부터 검토해 완성.
+- 남은 분할(블록 수 기준, 31-sq · 30-struct 제외):
+  - cpp ③ 07-perf · 08-deep · 10-setup · 12-srv (374) · ④ 13-game · 14-hpc · 11-app · 16-cs · 15-jvm (489 — 둘로 나눠도 됨)
+  - rust ① 01-lang · 02-own · 03-py · 04-node (437) · ② 05-ffi · 06-build · 07-perf · 08-deep · 09-tool (418) · ③ 10-setup · 11-web · 12-svc (325) · ④ 13-tauri · 14-jvm · 15-cs · 16-log (464)
+  - csharp `00-setup.html` (64블록) — 앞/뒤 분할 경계에서 빠졌음
+- 프롬프트는 이 회차에 쓴 형태 그대로: `CODE-AUDIT.md` 를 읽게 + 담당 파일만 수정 · 빌드/커밋 금지 + 언어 특화 점검 포인트(11차 §3-a) + 작업 폴더 `SP/audit-<가이드><n>/`.
+  cpp ④ 의 15-jvm 은 이 PC 의 JDK 25(`C:/Program Files/Java/jdk-25.0.1+8`)로 javac 확인 가능.
+- **분할할 때 파일 목록을 명시**하세요(“앞쪽 절반” 같은 지시는 경계 파일이 빠집니다 — csharp 00-setup 이 그렇게 빠짐).
+- 가이드 하나의 모든 묶음이 끝난 뒤 한 번에: `build.mjs <g>` → verify · smoke · integrity → 브라우저 전 탭 switchTab → 커밋.
+
+### 2. 그림 정리 (11차 §1~§3 + 이번 검토에서 나온 것)
+- **svgcheck 넘침** — 원래부터 있던 것: db 12건(02-sql q10 · 03-pro e04 e07 · 04-oracle o09 · 08-tune t01 · 11-redis r10 · 12-mongo n03), server 8건(05-caddy c07 · 07-lang l12 · 08-perf p06 p10 · 15-win v06 v10). 문구를 줄여서 해결.
+- **같은 그림이 두 번** — db: 10-app a09 · a07, 08-tune t01 · t11, 09-deep z07 · z10, 11-redis r08 · r10, 12-mongo n03 · n08 (+ `dupdiag.mjs server db cs csharp cpp`). cpp 는 dupdiag 11건(08-deep d08 등).
+- diagaudit 결함 · 박스형 70% 넘는 탭 다시 그리기(11차 §2 · §3 표 그대로).
+
+### 3. 라이트 테마 · 모바일 점검 — 12 · 13차 새 탭 전부
+c-web 12탭 + 각 가이드 `#pane-sq` · `#pane-struct`. 11차 §검증 순서의 라이트 대비(본문 3.2 미만 · `window.lxInkFix(svg)` 후 3 미만) + 390/768 폭.
+
+### 4. 검토 에이전트들이 "확신 없음"으로 남긴 것 (선택)
+각 커밋 메시지 본문과 아래 정도: cpp 02-mod `variant` 재귀 Json(표준 비보장) · db Oracle 인터벌 파티션 DROP · server ingress-nginx 은퇴 후 설치 방법 · Helm 4 `--atomic` 이름 · csharp BenchmarkDotNet `RuntimeMoniker.Net100` 이름 · cs DORA 변경 실패율 기준.
+
+## 🧰 13차에 만든 것 · 알게 된 것
+- `web/guide-src/tools/regsay.mjs <가이드> <사전 파일>` — 읽는 법 사전 형태 검사(배열 · 2~3칸 · 중복) + `parts/js/85-say.js` 로 두고 parts.json 에서 `shared/js/07-study.js` 앞에 등록
+- 원격에 3D 기여 그래프 자동 커밋이 수시로 올라옵니다 — 에이전트가 작업 중이라 rebase 를 못 할 때는 `git merge --no-edit origin/main` 후 push(원격 변경은 `profile-3d-contrib/` 뿐이라 충돌 없음)
+- 검토 에이전트는 가이드당 블록 300~450개 단위가 적당(10~20분 · 20~50만 토큰). 동시에 5개.
+- 사전 매칭 규칙: `_` 는 단어 문자라 `HAL_` 같은 접두사는 안 걸림, 점 뒤 표기는 `.unwrap()` 처럼 점을 붙여야 함, 기호만인 표기는 경계 검사 없이 어디서나 걸림
+
+---
+
+# (12차) C 가이드 · 스택/큐 · 프로젝트 구조 기록
+
+> ⚠ 이 12차 절의 "이어서 할 일" 1 · 2번은 **13차에서 끝났습니다** — 남은 일은 맨 위 13차 절을 보세요.
 
 ## 🆕 12차에 한 일 (전부 커밋 · 푸시 완료)
 

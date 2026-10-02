@@ -205,6 +205,7 @@ fastmod.transform(arr, out)         # 결과를 미리 만든 버퍼에 씁니�
       <pre class="code" data-lang="cpp"><code>// noop.cpp — 아무것도 안 하는 함수들
 #include &lt;pybind11/pybind11.h&gt;
 #include &lt;pybind11/numpy.h&gt;
+#include &lt;pybind11/stl.h&gt;          // ★ 없으면 take_list 호출이 TypeError
 namespace py = pybind11;
 
 void noop() {}
@@ -244,7 +245,7 @@ for n in (100, 1_000, 10_000, 100_000, 1_000_000):
     a = np.random.rand(n)
     tp = timeit.timeit(lambda: pure_python(a), number=10) / 10
     tc = timeit.timeit(lambda: fastmod.run(a),  number=10) / 10
-    print(f"{n:>9}  py {tp*1e3:8.3f}ms  cpp {tc*1e3:8.3f}ms  {tp/tc:6.1f}×")
+    print(f"{n:&gt;9}  py {tp*1e3:8.3f}ms  cpp {tc*1e3:8.3f}ms  {tp/tc:6.1f}×")
 
 #  전형적인 결과 — 작은 n 에서는 배수가 1 근처이거나 오히려 손해,
 #  n 이 커질수록 배수가 올라가다 어느 지점에서 평평해집니다(메모리 대역폭 한계).
@@ -332,7 +333,7 @@ pybind11_add_module(fastmod src/fastmod.cpp)
 install(TARGETS fastmod DESTINATION .)</code></pre>
       <pre class="code" data-lang="bash"><code># ③ 설치하고 바로 쓰기
 pip install .
-#   또는 개발 중이라면 (고칠 때마다 자동 재빌드)
+#   또는 개발 중이라면 (editable 설치 — 자동 재빌드 설정은 아래 ①)
 pip install -e . --no-build-isolation</code></pre>
       <pre class="code" data-lang="python"><code>&gt;&gt;&gt; import fastmod
 &gt;&gt;&gt; fastmod.add(1, 2)
@@ -380,8 +381,10 @@ m.attr("MAX_WINDOW") = 1024;</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">개발 중에 편한 것들</h4>
       <pre class="code" data-lang="bash"><code># ① 고칠 때마다 자동 재빌드 (editable + 재빌드 훅)
-pip install -e . --no-build-isolation
-#   scikit-build-core 는 import 시점에 변경을 감지해 다시 빌드해 줍니다
+pip install -e . --no-build-isolation \
+    -C editable.rebuild=true -C build-dir=build/{wheel_tag}
+#   이 두 설정(또는 pyproject 의 [tool.scikit-build])이 있어야
+#   scikit-build-core 가 import 시점에 변경을 감지해 다시 빌드해 줍니다
 
 # ② 빌드 로그 자세히 보기 (에러 원인 찾을 때)
 pip install . -v --no-build-isolation
@@ -587,7 +590,9 @@ find_package(pybind11 CONFIG REQUIRED)
 
 pybind11_add_module(_core src/core.cpp src/algo.cpp)
 target_include_directories(_core PRIVATE src)
-target_compile_definitions(_core PRIVATE VERSION_INFO=${PROJECT_VERSION})
+target_compile_definitions(_core PRIVATE VERSION_INFO=${SKBUILD_PROJECT_VERSION})
+#   ↑ scikit-build-core 가 pyproject 의 version 을 넘겨 줍니다
+#     (project() 에 VERSION 이 없어 ${PROJECT_VERSION} 은 비어 있습니다)
 
 # 최적화 — 릴리즈에서만
 target_compile_options(_core PRIVATE
@@ -686,7 +691,7 @@ jobs:
           CIBW_TEST_REQUIRES: pytest numpy
           CIBW_TEST_COMMAND: "pytest {project}/tests"
       - uses: actions/upload-artifact@v4
-        with: {path: wheelhouse/*.whl}</code></pre>
+        with: {name: "wheels-${{ matrix.os }}", path: wheelhouse/*.whl}   # v4 는 이름이 겹치면 실패</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>cibuildwheel 이 해 주는 일</b> — 리눅스는 <b>manylinux 컨테이너</b>에서 빌드해
         오래된 배포판에서도 돌게 하고, <code>auditwheel</code>·<code>delocate</code> 로
@@ -696,24 +701,23 @@ jobs:
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">파이썬 버전마다 빌드하지 않는 법 — abi3</h4>
-      <pre class="code" data-lang="cmake"><code># 안정 ABI(abi3)로 빌드하면 wheel 하나가 3.9 이상 전부에서 동작합니다
-pybind11_add_module(_core src/core.cpp)
-
-# pybind11 2.12+ 에서
-target_compile_definitions(_core PRIVATE Py_LIMITED_API=0x03090000)
-set_target_properties(_core PROPERTIES SUFFIX ".abi3.so")   # 리눅스/맥
-# 윈도우는 .pyd</code></pre>
+      <pre class="code" data-lang="cmake"><code># 안정 ABI(abi3)로 빌드하면 wheel 하나가 여러 파이썬 버전에서 동작합니다
+# ⚠ pybind11 은 Py_LIMITED_API(안정 ABI)를 지원하지 않습니다
+#   → abi3 가 필요하면 nanobind 로 (파이썬 3.12+, y11)
+nanobind_add_module(_core STABLE_ABI src/core.cpp)
+#   3.12 미만 파이썬으로 빌드하면 STABLE_ABI 는 무시되고 일반 빌드가 됩니다
+#   파일 이름: _core.abi3.so (리눅스/맥) · _core.pyd (윈도우)</code></pre>
       <pre class="code" data-lang="toml"><code># pyproject.toml
 [tool.scikit-build]
-wheel.py-api = "cp39"        # cp39-abi3 태그로 빌드</code></pre>
-      <pre class="code" data-lang="text"><code>비교 — 파이썬 5개 버전 × 3 OS × 2 아키텍처
+wheel.py-api = "cp312"       # cp312-abi3 태그로 빌드 (3.12 이상 전부)</code></pre>
+      <pre class="code" data-lang="text"><code>비교 — 파이썬 5개 버전(모두 3.12 이상) × 3 OS × 2 아키텍처
 
   일반 빌드 : 30개 wheel · CI 시간 30분 · 새 파이썬 나오면 다시 빌드
   abi3      :  6개 wheel · CI 시간  6분 · 새 버전에서도 그대로 동작 ★
 
 대가
   · CPython 안정 API 만 쓸 수 있어 일부 최적화가 제한됩니다
-  · nanobind 는 3.12+ 에서 abi3 를 더 잘 지원합니다
+  · abi3 는 nanobind + 3.12 이상에서만 — 3.9~3.11 도 지원하려면 그 버전은 따로 빌드합니다
   · 성능 차이는 대개 미미하지만, 극단적으로 호출이 잦으면 재 보세요</code></pre>
     </div>
   </div>
@@ -986,6 +990,8 @@ public:
 c.def("buffer", &amp;Engine::buffer);
 
 // ✅ 참조로 노출 + Engine 이 살아 있는 동안만 유효하게 묶기
+//   ⚠ 단, stl.h 로 자동 변환되는 vector 는 정책과 무관하게 항상 list 로 복사됩니다
+//     → PYBIND11_MAKE_OPAQUE(std::vector&lt;double&gt;) + py::bind_vector 로 등록해야 참조가 됩니다
 c.def("buffer", &amp;Engine::buffer,
       py::return_value_policy::reference_internal);
 //   파이썬에서 engine 이 GC 되면 그 참조도 함께 무효가 되는데,
@@ -1008,7 +1014,7 @@ sys.getrefcount(buf)       # 참조 카운트
 gc.get_referrers(buf)      # 누가 붙잡고 있나
 
 # 재현 스크립트를 만든 뒤 sanitizer 빌드로 돌리면 정확한 위치가 나옵니다
-CFLAGS="-fsanitize=address -g" pip install -e . --no-build-isolation
+CXXFLAGS="-fsanitize=address -g" pip install -e . --no-build-isolation   # C++ 라 CXXFLAGS
 PYTHONMALLOC=malloc LD_PRELOAD=$(gcc -print-file-name=libasan.so) \
     python repro.py
 #   ★ PYTHONMALLOC=malloc 을 줘야 ASan 이 파이썬 힙도 감시합니다</code></pre>
@@ -1459,7 +1465,7 @@ double mean(Arr a) {
     return n ? s / n : 0.0;
 }
 
-// 더 간단한 접근자 (경계 검사 포함 — 개발 중에 유용)
+// 더 간단한 접근자 (차원은 한 번 확인, 원소 접근은 경계 검사 없음)
 double mean2(Arr a) {
     auto r = a.unchecked&lt;1&gt;();      // 1차원, 검사 없음(빠름)
     double s = 0;
@@ -1626,7 +1632,8 @@ def py_smooth(a, w=3):
 t1 = timeit.timeit(lambda: py_smooth(a),        number=20) / 20
 t2 = timeit.timeit(lambda: fastmod.smooth(a,3), number=20) / 20
 print(f"numpy {t1*1e3:.2f}ms · cpp {t2*1e3:.2f}ms · {t1/t2:.1f}×")
-np.testing.assert_allclose(py_smooth(a), fastmod.smooth(a,3), rtol=1e-9)</code></pre>
+# 양 끝 1칸은 나누는 수가 다릅니다(convolve 는 항상 w, C++ 는 실제 개수) → 안쪽만 비교
+np.testing.assert_allclose(py_smooth(a)[1:-1], fastmod.smooth(a,3)[1:-1], rtol=1e-9)</code></pre>
     </div>
   </div>
 
@@ -1769,8 +1776,10 @@ fastmod.process(big32)                   # double 을 요구하면 여기서 400
 }
 
 // pybind11 에는 더 짧은 방법도 있습니다
-m.def("heavy", &amp;heavy, py::call_guard&lt;py::gil_scoped_release&gt;());
-//   함수 전체에서 GIL 을 놓습니다 (인자 변환은 GIL 을 잡은 상태로 끝난 뒤)</code></pre>
+m.def("heavy_vec", &amp;heavy_vec, py::call_guard&lt;py::gil_scoped_release&gt;());
+//   함수 전체에서 GIL 을 놓습니다 (인자 변환은 GIL 을 잡은 상태로 끝난 뒤)
+//   ⚠ 위 heavy 처럼 안에서 이미 놓는 함수나, py::array_t 같은 파이썬 객체를
+//     인자로 받아 만지는 함수에는 쓰면 안 됩니다 — 인자가 순수 C++ 타입일 때만</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>절대 규칙</b> — GIL 을 놓은 구간에서 <b><code>py::</code> 로 시작하는 것</b>이나
         파이썬 객체를 건드리면 <b>인터프리터가 깨집니다</b>(즉시 죽지 않고 나중에 이상하게 죽습니다).
@@ -1855,9 +1864,10 @@ for (unsigned k = 0; k &lt; t; ++k)
 }
 
 // ⚠ 워커 스레드에서 파이썬을 부르려면 반드시 획득해야 합니다
-std::thread([cb]{
+std::thread([cb]() mutable {
     py::gil_scoped_acquire acq;              // 이 줄이 없으면 크래시
     cb(42);
+    cb = py::function();                     // ★ GIL 을 쥔 채로 참조 해제 (람다 소멸 땐 GIL 없음)
 }).detach();
 
 // ⚠ 콜백을 자주 부르면 GIL 경합으로 병렬 효과가 사라집니다
@@ -2034,7 +2044,8 @@ private:
 
 PYBIND11_MODULE(_core, m) {
     // ① 간단히 — 파이썬에 같은 이름의 예외 클래스를 만듭니다
-    py::register_exception&lt;ParseError&gt;(m, "ParseError");
+    //    py::register_exception&lt;ParseError&gt;(m, "ParseError");
+    //    ⚠ ①·② 는 둘 중 하나만 — 같은 이름을 두 번 등록하면 import 가 실패합니다
 
     // ② 정보를 담아 넘기려면 직접 변환합니다 ★
     static py::exception&lt;ParseError&gt; exc(m, "ParseError", PyExc_ValueError);
@@ -2434,7 +2445,8 @@ void run_async(py::function cb) {
 
         py::gil_scoped_acquire acq;            // 부를 때만 획득
         cb(result);
-    }).detach();
+        cb = py::function();                   // ★ GIL 을 쥔 채로 참조 해제
+    }).detach();                               //   (람다가 소멸할 때는 GIL 이 없습니다)
 }
 
 // ⚠ detach 된 스레드는 인터프리터 종료 시 문제가 됩니다.
@@ -2444,11 +2456,14 @@ void run_async(py::function cb) {
 py::object run_future(py::array_t&lt;double&gt; a) {
     py::object fut = py::module_::import("concurrent.futures")
                         .attr("Future")();
-    std::thread([a, fut]() mutable {
-        double r;
-        { py::gil_scoped_release rel; r = compute(a); }
+    auto buf = a.request();                    // GIL 을 쥔 지금 포인터를 얻어 둡니다
+    py::object keep = a;                       // 스레드가 끝날 때까지 배열을 살려 둠
+    std::thread([keep, fut, p = static_cast&lt;const double*&gt;(buf.ptr),
+                 n = static_cast&lt;std::size_t&gt;(buf.size)]() mutable {
+        double r = compute(p, n);              // 새 스레드는 처음부터 GIL 이 없습니다
         py::gil_scoped_acquire acq;
         fut.attr("set_result")(r);
+        keep = py::none(); fut = py::none();   // ★ GIL 을 쥔 채로 참조 해제
     }).detach();
     return fut;
 }
@@ -2618,13 +2633,14 @@ m.def("run", &amp;run, "mode"_a = "default");   // "sum" · "max" · "custom"
       <h4 class="mini" style="margin-top:0">시그니처를 바인딩에 심기</h4>
       <pre class="code" data-lang="cpp"><code>// pybind11 은 docstring 에 시그니처를 자동으로 넣어 줍니다
 m.def("smooth", &amp;smooth, "data"_a, "window"_a = 3);
-//   help(smooth) → smooth(data: numpy.ndarray[float64], window: int = 3)
+//   help(smooth) → smooth(data: numpy.ndarray[numpy.float64], window: int = 3) -&gt; numpy.ndarray[numpy.float64]
 
-// 타입 이름을 직접 지정하고 싶으면
+// 타입 이름을 직접 지정하고 싶으면 — nanobind 는 nb::sig 로 시그니처를 통째로 덮어씁니다 ★
 m.def("load", &amp;load,
-      py::arg("path"),
-      py::sig("def load(path: str | os.PathLike) -&gt; dict[str, float]"));
-//   pybind11 2.12+ 에서 시그니처를 그대로 덮어씁니다 ★
+      nb::arg("path"),
+      nb::sig("def load(path: str | os.PathLike) -&gt; dict[str, float]"));
+//   pybind11 에는 nb::sig 같은 것이 없습니다 — 2.12+ 의 py::typing 타입
+//   (예: 반환형을 py::typing::Dict&lt;py::str, py::float_&gt; 로)으로 표기를 바꿉니다
 
 // 모듈 수준 문서
 m.doc() = R"doc(
@@ -2936,7 +2952,8 @@ m.def("heavy", &amp;heavy, nb::call_guard&lt;nb::gil_scoped_release&gt;());
 project(fastmod LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
+find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED
+             OPTIONAL_COMPONENTS Development.SABIModule)   # STABLE_ABI 용
 
 # nanobind 를 찾아 옵니다
 execute_process(
@@ -3002,7 +3019,7 @@ cmake -B build -DUSE_NANOBIND=ON</code></pre>
     pybind11 : .so 4.2MB · 빌드 95초
     nanobind : .so 0.9MB · 빌드 24초
 
-  wheel 개수 (3 OS × 5 버전)
+  wheel 개수 (3 OS × 5 버전, 모두 3.12 이상일 때)
     pybind11 : 15개
     nanobind + STABLE_ABI : 3개 ★</code></pre>
     </div>
@@ -3126,7 +3143,8 @@ memray run --native bench.py &amp;&amp; memray flamegraph memray-*.bin</code></p
     <div class="card">
       <h4 class="mini" style="margin-top:0">디버거로 붙기</h4>
       <pre class="code" data-lang="bash"><code># 디버그 정보를 포함해 빌드
-CMAKE_BUILD_TYPE=RelWithDebInfo pip install -e . --no-build-isolation
+pip install -e . --no-build-isolation -C cmake.build-type=RelWithDebInfo
+#   (환경 변수 CMAKE_BUILD_TYPE 은 scikit-build-core 가 넘기는 값에 덮여 무시됩니다)
 
 # gdb 로 파이썬째 실행
 gdb --args python repro.py
@@ -3245,7 +3263,9 @@ FASTMOD_PURE=1 python app.py       # 즉시 순수 파이썬으로 되돌리기
 # ④ 크래시 시 최소 정보 남기기 (프로세스가 죽기 직전)
 import faulthandler, sys
 faulthandler.enable(file=open("/var/log/app/fault.log", "a"))
-faulthandler.dump_traceback_later(300, exit=True)   # 5분 멈추면 덤프
+faulthandler.dump_traceback_later(300, exit=True)   # 5분 뒤 덤프하고 종료
+#   ↑ 한 번 거는 타이머입니다 — 작업 루프마다 다시 불러 타이머를 미뤄야
+#     '5분 멈추면 덤프' 워치독이 됩니다 (안 그러면 멀쩡해도 5분 뒤 종료)
 
 # ⑤ 카나리 배포 — 일부 트래픽에만 C++ 경로를 켜고 지표 비교
 if random.random() &lt; float(os.environ.get("FASTMOD_RATIO", "1.0")):

@@ -85,7 +85,7 @@ g++ -S main.i -o main.s
 g++ -c main.cpp -o main.o
 nm -C main.o
 #   T main            ← 내가 제공 (Text = 코드)
-#   U std::printf     ← 내가 필요로 함 (Undefined) ★
+#   U printf          ← 내가 필요로 함 (Undefined) ★
 
 # ④ 링크 — 여러 .o 와 라이브러리를 이어 붙여 실행 파일로
 g++ main.o util.o -lpthread -o app
@@ -327,7 +327,8 @@ target_link_libraries(app PRIVATE core)  # ★ include 경로가 자동으로 �
 # 경고 켜기 (컴파일러별로)
 target_compile_options(core PRIVATE
     $&lt;$&lt;CXX_COMPILER_ID:MSVC&gt;:/W4&gt;
-    $&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall -Wextra -Wpedantic&gt;)
+    "$&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall;-Wextra;-Wpedantic&gt;")
+#   ↑ 여러 플래그는 따옴표 + ';' 로 — 공백으로 쓰면 표현식이 쪼개져 오류
 
 # 테스트
 enable_testing()
@@ -403,7 +404,7 @@ target_include_directories(core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})</code></pre
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">CMakePresets — 명령을 짧게 ★</h4>
-      <pre class="code" data-lang="json"><code>// CMakePresets.json  (CMake 3.19+)
+      <pre class="code" data-lang="json"><code>// CMakePresets.json  ("version": 3 은 CMake 3.21+ · 프리셋 자체는 3.19+)
 {
   "version": 3,
   "configurePresets": [
@@ -434,7 +435,12 @@ target_include_directories(core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})</code></pre
   ],
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev" },
-    { "name": "release", "configurePreset": "release" }
+    { "name": "release", "configurePreset": "release" },
+    { "name": "asan", "configurePreset": "asan" }
+  ],
+  "testPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "asan", "configurePreset": "asan" }
   ]
 }</code></pre>
       <pre class="code" data-lang="bash"><code>cmake --preset dev &amp;&amp; cmake --build --preset dev
@@ -981,7 +987,8 @@ assert(v == 3);
 // 표준 라이브러리의 디버그 검사
 //   MSVC : Debug 빌드에서 반복자 검사가 기본으로 켜집니다 (느립니다)
 //   libstdc++ : -D_GLIBCXX_DEBUG 로 켜기 ★ 개발 중에 유용
-//   libc++    : -D_LIBCPP_ENABLE_ASSERTIONS=1
+//   libc++    : -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG
+//               (LLVM 18+ · 옛 -D_LIBCPP_ENABLE_ASSERTIONS=1 은 폐기)
 //   → v[100] 같은 범위 초과를 UB 대신 명확한 에러로 잡아 줍니다</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>파이썬 모듈에서 특히 중요합니다</b> — <code>assert</code> 로만 막아 둔
@@ -1025,13 +1032,13 @@ add_library(project_options INTERFACE)
 target_compile_features(project_options INTERFACE cxx_std_20)
 
 target_compile_options(project_options INTERFACE
-    $&lt;$&lt;CXX_COMPILER_ID:MSVC&gt;:/W4 /permissive- /utf-8&gt;
-    $&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall -Wextra -Wshadow -Wnon-virtual-dtor&gt;)
+    "$&lt;$&lt;CXX_COMPILER_ID:MSVC&gt;:/W4;/permissive-;/utf-8&gt;"
+    "$&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall;-Wextra;-Wshadow;-Wnon-virtual-dtor&gt;")
+#   ★ 플래그 여러 개는 따옴표로 감싸고 ';' 로 구분 (공백·줄바꿈이면 표현식이 깨집니다)
 
 # 릴리즈에만 보호 옵션
 target_compile_options(project_options INTERFACE
-    $&lt;$&lt;AND:$&lt;CONFIG:Release&gt;,$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;&gt;:
-        -D_FORTIFY_SOURCE=3 -fstack-protector-strong&gt;)
+    "$&lt;$&lt;AND:$&lt;CONFIG:Release&gt;,$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;&gt;:-D_FORTIFY_SOURCE=3;-fstack-protector-strong&gt;")
 
 # 모든 타깃에 붙이기
 target_link_libraries(core PRIVATE project_options)
@@ -1082,7 +1089,7 @@ perf record -g ./build/release/bench
 int n;                    // Release 에서는 쓰레기 값
 
 // ② 부호 있는 오버플로
-if (n + 1 < n) { }        // Release 에서 이 검사가 삭제됩니다
+if (n + 1 &lt; n) { }        // Release 에서 이 검사가 삭제됩니다
 
 // ③ 널 체크 순서
 int x = *p; if (!p) return;   // Release 에서 널 검사가 사라집니다
@@ -1274,6 +1281,7 @@ elseif(APPLE)
     target_sources(core PRIVATE src/platform_mac.cpp)
     target_link_libraries(core PRIVATE "-framework CoreFoundation")
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0")     # ★ 지원할 최소 버전
+    #   ⚠ 원래는 첫 project() 보다 먼저(또는 -D·프리셋으로) 정해야 확실히 적용됩니다
 else()
     target_sources(core PRIVATE src/platform_posix.cpp)
     target_link_libraries(core PRIVATE pthread dl)
@@ -1338,6 +1346,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: lukka/get-cmake@latest
+      - uses: ilammy/msvc-dev-cmd@v1          # ★ Ninja + cl 은 MSVC 환경이 먼저 잡혀야 합니다
+        if: runner.os == 'Windows'
       - name: 설정 · 빌드 · 테스트
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -1690,6 +1700,10 @@ twine check dist/*</code></pre>
 [build-system]
 requires = ["scikit-build-core", "pybind11", "setuptools-scm"]
 
+[project]
+name = "fastmod"
+dynamic = ["version"]          # ★ version 을 적지 않고 '동적'이라고 선언
+
 [tool.scikit-build]
 metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
 
@@ -1840,6 +1854,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: lukka/get-cmake@latest
+      - uses: ilammy/msvc-dev-cmd@v1          # 윈도우: cl 을 PATH 에
+        if: runner.os == 'Windows'
       - run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
         env: { CXX: '${{ matrix.cxx }}' }
       - run: cmake --build build
@@ -1868,7 +1884,7 @@ jobs:
           run-clang-tidy -p build -quiet src/
 
       # 헤더 정리
-      - run: include-what-you-use -p build src/core.cpp</code></pre>
+      - run: iwyu_tool.py -p build src/core.cpp   # compile_commands.json 을 읽는 래퍼</code></pre>
       <pre class="code" data-lang="yaml"><code># .clang-format — 팀 규칙을 파일 하나로
 BasedOnStyle: Google
 IndentWidth: 4
@@ -1913,6 +1929,7 @@ repos:
         name: cmake-format
         entry: cmake-format -i
         language: python
+        additional_dependencies: [cmakelang]   # cmake-format 이 든 패키지
         files: CMakeLists.txt|\.cmake$</code></pre>
       <pre class="code" data-lang="bash"><code>pip install pre-commit &amp;&amp; pre-commit install
 pre-commit run --all-files          # 처음 도입할 때 전체 적용
@@ -1951,9 +1968,12 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs</code></pre>
           cmake --build build --target install
           tar czf mylib-${{ matrix.os }}.tar.gz -C install .
       - uses: actions/upload-artifact@v4
-        with: { path: 'wheelhouse/*.whl
-                      prebuilds/**
-                      mylib-*.tar.gz' }
+        with:
+          name: release-${{ matrix.os }}       # v4 는 이름이 겹치면 실패
+          path: |                              # ★ 여러 경로는 블록(|)으로 — 따옴표 안 줄바꿈은 공백이 됨
+            wheelhouse/*.whl
+            prebuilds/**
+            mylib-*.tar.gz
 
   publish:
     needs: [release]
@@ -1963,6 +1983,7 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs</code></pre>
       - uses: actions/download-artifact@v4
         with: { path: dist, merge-multiple: true }
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with: { packages-dir: dist/wheelhouse/ }   # PyPI 에는 wheel 만
       - uses: softprops/action-gh-release@v2
         with: { files: 'dist/*' }</code></pre>
     </div>
@@ -2186,7 +2207,8 @@ if(APPLE)
         INSTALL_RPATH "@loader_path;@loader_path/../lib")
 endif()
 
-install(TARGETS app RUNTIME DESTINATION bin)
+install(TARGETS app RUNTIME_DEPENDENCY_SET deps   # ★ 아래 deps 집합에 등록
+        RUNTIME DESTINATION bin)
 install(TARGETS core LIBRARY DESTINATION lib)
 
 # 의존 라이브러리까지 함께 설치 (CMake 3.21+)
@@ -2534,8 +2556,9 @@ end</code></pre>
       </ul>
       <pre class="code" data-lang="cpp"><code>// 임시 진단 매크로 — 릴리즈에서 사라지게
 #ifndef NDEBUG
-  #define TRACE(...) std::fprintf(stderr, "[%s:%d] " __VA_ARGS__, \
-                                  __FILE__, __LINE__)
+  #define TRACE(fmt, ...) std::fprintf(stderr, "[%s:%d] " fmt, \
+                                  __FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__)
+  //   ★ 파일·줄 번호가 형식 문자열의 %s:%d 와 순서가 맞게 먼저 옵니다 (C++20 __VA_OPT__)
 #else
   #define TRACE(...) ((void)0)
 #endif
@@ -2604,7 +2627,7 @@ readelf -n app | grep "Build ID"
       <h4 class="mini" style="margin-top:0">스크립트로 자동화</h4>
       <pre class="code" data-lang="python"><code># gdb 는 파이썬으로 확장할 수 있습니다
 # mypretty.py
-import gdb
+import gdb.printing          # ★ 하위 모듈은 따로 import 해야 합니다
 
 class EnginePrinter:
     def __init__(self, val): self.val = val
@@ -2802,10 +2825,12 @@ export TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1"
 export ASAN_SYMBOLIZER_PATH=$(which llvm-symbolizer)
 
 # 특정 함수·파일을 검사에서 제외 (서드파티 코드 등)
-# suppressions.txt
+# lsan.supp
 #   leak:libthirdparty.so
-#   race:known_benign_function
 export LSAN_OPTIONS="suppressions=$PWD/lsan.supp"
+# tsan.supp (데이터 경쟁은 TSan 쪽 파일에)
+#   race:known_benign_function
+export TSAN_OPTIONS="suppressions=$PWD/tsan.supp"
 
 # 소스 수준에서 제외
 __attribute__((no_sanitize("address"))) void raw_access() { ... }</code></pre>
@@ -2840,7 +2865,7 @@ __attribute__((no_sanitize("address"))) void raw_access() { ... }</code></pre>
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
           TSAN_OPTIONS: halt_on_error=1</code></pre>
       <pre class="code" data-lang="bash"><code># 파이썬 확장 검사 (🐍 y12)
-CFLAGS="-fsanitize=address -g" pip install -e . --no-build-isolation
+CXXFLAGS="-fsanitize=address -g" pip install -e . --no-build-isolation   # C++ 확장이라 CXXFLAGS
 PYTHONMALLOC=malloc \
   LD_PRELOAD=$(gcc -print-file-name=libasan.so) \
   ASAN_OPTIONS=detect_leaks=0 \
@@ -2902,7 +2927,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       <pre class="code" data-lang="bash"><code># Sanitizer 는 운영에 쓰기엔 무겁습니다. 대안:
 
 # ① 하드웨어 지원 (ARM64)
--fsanitize=hwaddress          # HWASan — 메모리 2배 정도로 훨씬 가벼움
+-fsanitize=hwaddress          # HWASan — 메모리 부담 수십 % 수준으로 ASan 보다 훨씬 가벼움
 # ARM MTE(Memory Tagging) 지원 기기에서는 거의 무비용 ★
 
 # ② GWP-ASan — 확률적 샘플링 방식

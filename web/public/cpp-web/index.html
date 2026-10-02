@@ -4136,7 +4136,7 @@ unsigned u = UINT_MAX; u++;   // 정의된 동작: 0 이 됩니다</code></pre>
 
 sizeof(a);      // 40  — 여기서는 배열 그대로
 &amp;a;             // int(*)[10] — 배열 전체의 주소 (타입이 다릅니다!)
-_Alignof(a);    // 정렬도 배열 기준
+_Alignof(a);    // 정렬도 배열 기준 (식에 쓰는 건 GCC 확장 — 표준은 _Alignof(int[10]))
 
 // 나머지는 전부 첫 원소의 주소로 변합니다
 int* p = a;     // == &amp;a[0]
@@ -4151,7 +4151,7 @@ a + 1;          // 4바이트 앞
       <pre class="code" data-lang="c"><code>int  a[5] = {10,20,30,40,50};
 int* p = a;
 
-*(p + 2);       // 30 — 2 는 '8바이트'가 아니라 '원소 2개'
+*(p + 2);       // 30 — 2 는 '2바이트'가 아니라 '원소 2개'(= 8바이트)
 p[2];           // 정확히 같은 뜻 (a[i] == *(a+i))
 2[a];           // 놀랍게도 이것도 합법입니다 (쓰지 마세요)
 
@@ -4611,7 +4611,7 @@ switch (x.tag) {
     unsigned enabled  : 1;
     unsigned mode     : 3;   // 0~7
     unsigned reserved : 4;
-};   // 1바이트 안에 들어갑니다</code></pre>
+};   // 쓰는 비트는 8개 — 단 sizeof 는 보통 4 (unsigned 단위로 잡힘)</code></pre>
       <p class="tx" style="font-size:13.4px;margin-bottom:0">
         읽기 쉽지만 <b>비트 배치 순서가 구현 정의</b>입니다.
         하드웨어 레지스터나 통신 프로토콜에는
@@ -4793,9 +4793,11 @@ if (!f) return -1;
 
 fseek(f, 0, SEEK_END);
 long size = ftell(f);                // 2GB 넘으면 부족합니다
+if (size &lt; 0) { fclose(f); return -1; }   // ftell 실패는 -1
 fseek(f, 0, SEEK_SET);
 
 unsigned char* buf = malloc((size_t)size);
+if (!buf) { fclose(f); return -1; }
 size_t got = fread(buf, 1, (size_t)size, f);
 if (got != (size_t)size) { /* 짧게 읽힘 */ }
 
@@ -5495,9 +5497,10 @@ static_assert(sizeof(int) == 4, "이 코드는 32비트 int 를 가정합니다"
 
 FILE *f = fopen("없는파일", "r");
 if (!f) {
-    // errno 는 '마지막 실패'를 담습니다. 성공 시에는 건드리지 않습니다
-    fprintf(stderr, "열기 실패: %s (errno=%d)\n", strerror(errno), errno);
-    perror("fopen");        // 같은 내용을 한 줄로
+    // errno 는 '마지막 실패'를 담습니다. 성공한 호출도 값을 바꿀 수 있으니 실패 직후에만 봅니다
+    int e = errno;          // 바로 저장 — 다음 호출(fprintf 포함)이 덮어쓸 수 있음
+    fprintf(stderr, "열기 실패: %s (errno=%d)\n", strerror(e), e);
+    // 또는 perror("fopen"); 한 줄로 — 단 다른 호출보다 먼저 불러야 합니다
 }</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>errno 를 읽는 규칙</b> — ① 호출 <b>직후</b>에 읽습니다(다음 호출이 덮어씁니다).
@@ -5987,7 +5990,7 @@ l.head = prev;</code></pre>
 
 // FNV-1a — 짧고 빠르고 분포가 괜찮습니다
 static uint64_t fnv1a(const char *s) {
-    uint64_t h = 1469598103934665603ULL;   // offset basis
+    uint64_t h = 14695981039346656037ULL;  // offset basis
     while (*s) {
         h ^= (unsigned char)*s++;
         h *= 1099511628211ULL;             // FNV prime
@@ -6130,6 +6133,8 @@ qsort(ps, n, sizeof ps[0], by_age);       // 나이 오름차순
 qsort(ps, n, sizeof ps[0], by_name);      // 이름 사전순
 
 // 반드시 '같은 기준으로 정렬된' 배열에서만 동작합니다
+// 지금 ps 는 이름순이므로 나이로 찾기 전에 다시 나이순으로 정렬
+qsort(ps, n, sizeof ps[0], by_age);
 Person key = { .age = 31 };
 Person *hit = bsearch(&amp;key, ps, n, sizeof ps[0], by_age);
 printf("%s\n", hit ? hit-&gt;name : "없음");</code></pre>
@@ -6181,7 +6186,7 @@ size_t j = lower_bound(a, 5, 4);      // → 3 (없지만 자리는 3)
 static uint64_t g_seed;   // 시작할 때 난수로 채움
 
 static uint64_t fnv1a_seeded(const char *s) {
-    uint64_t h = 1469598103934665603ULL ^ g_seed;
+    uint64_t h = 14695981039346656037ULL ^ g_seed;
     while (*s) { h ^= (unsigned char)*s++; h *= 1099511628211ULL; }
     return h;
 }
@@ -6300,6 +6305,7 @@ shfree(dict);</code></pre>
       <pre class="code" data-lang="c"><code>#include &lt;stdio.h&gt;
 #include &lt;string.h&gt;
 #include &lt;stdlib.h&gt;
+#include &lt;errno.h&gt;      // errno · ERANGE
 
 // "kim,31,seoul\n" 같은 줄을 필드로 자릅니다
 void parse_line(char *line) {
@@ -6452,6 +6458,7 @@ str_free(&amp;out);</code></pre>
       <h4 class="mini" style="margin-top:0">글자 수 세기 · 안전하게 자르기</h4>
       <pre class="code" data-lang="c"><code>#include &lt;stddef.h&gt;
 #include &lt;stdbool.h&gt;
+#include &lt;string.h&gt;     // strlen
 
 // 뒤따르는 바이트는 상위 두 비트가 10 입니다 (0x80~0xBF)
 static bool is_cont(unsigned char c) { return (c &amp; 0xC0) == 0x80; }
@@ -6635,6 +6642,7 @@ int copy_file(const char *src, const char *dst) {
       <pre class="code" data-lang="c"><code>#include &lt;sys/stat.h&gt;
 #include &lt;dirent.h&gt;
 #include &lt;stdio.h&gt;
+#include &lt;string.h&gt;     // strcmp
 #include &lt;time.h&gt;
 
 void list_dir(const char *path) {
@@ -7568,6 +7576,7 @@ waitpid(pid, NULL, 0);</code></pre>
       <h4 class="mini" style="margin-top:0">sigaction — signal() 보다 이쪽을 쓰세요</h4>
       <pre class="code" data-lang="c"><code>#include &lt;signal.h&gt;
 #include &lt;stdio.h&gt;
+#include &lt;string.h&gt;     // memset
 #include &lt;unistd.h&gt;
 
 // ★ 핸들러에서 건드릴 수 있는 유일한 전역 타입
@@ -7775,7 +7784,7 @@ unsigned flags = 0b0000'0001;
 
 // ④ auto — 타입 추론 (C++ 의 그것과 같습니다)
 auto n = 42;                       // int
-auto s = "hi";                     // const char*
+auto s = "hi";                     // char* (C 의 문자열 리터럴은 const 가 아님)
 // 매크로 안에서 임시 변수를 만들 때 특히 유용합니다
 
 // ⑤ typeof / typeof_unqual — GCC 확장이 표준이 됐습니다
@@ -8177,6 +8186,7 @@ SECTIONS {
     *(.data*)
     _edata = .;
   } &gt; RAM AT &gt; FLASH
+  _sidata = LOADADDR(.data);   /* 플래시에 있는 .data 원본의 주소 — startup 이 씀 */
 
   .bss : {            /* 0으로 시작하는 전역 — RAM 만 차지 */
     _sbss = .;
@@ -8684,8 +8694,8 @@ int main(void) {
       <pre class="code" data-lang="bash"><code>gcc -std=c17 -g -fsanitize=address \
     test_vec.c vec.c unity.c -o test_vec
 ./test_vec
-# test_vec.c:12:test_push_increases_len:PASS
-# test_vec.c:20:test_grows_past_initial_cap:PASS
+# test_vec.c:27:test_push_increases_len:PASS
+# test_vec.c:28:test_grows_past_initial_cap:PASS
 # 2 Tests 0 Failures 0 Ignored  OK</code></pre>
     </div>
     <div class="card">
@@ -8901,7 +8911,8 @@ $(BUILDDIR):
 run: $(TARGET)
 	./$(TARGET)
 
-test: DEBUG=1
+# ※ 'test: DEBUG=1' 은 소용없음 — ifdef 는 파일을 읽을 때 한 번만 평가됩니다
+#   새니타이저로 돌리려면: make clean &amp;&amp; make DEBUG=1 test
 test: $(TARGET)
 	./$(TARGET) --self-test
 
@@ -10129,8 +10140,8 @@ void f() noexcept;
 // ③ 반환값 최적화(RVO) — C++17 부터 일부는 의무 사항입니다
 std::vector&lt;int&gt; make() {
     std::vector&lt;int&gt; v(1000);
-    return v;                 // 복사도 이동도 일어나지 않습니다
-}
+    return v;                 // NRVO — 의무는 아니지만 주요 컴파일러가 대개 생략 (안 되면 이동)
+}                             //   의무(C++17)는 return std::vector&lt;int&gt;(1000); 처럼 임시를 반환할 때
 auto v = make();              // 호출한 쪽 자리에 바로 만들어집니다
 
 // ⚠ return std::move(v); 라고 쓰면 오히려 RVO 를 막습니다 — 그냥 return v;</code></pre>
@@ -10642,7 +10653,7 @@ std::memcpy(&amp;j, &amp;f, 4);         // ✅ 예전부터 쓰던 합법적 방
 Header h;
 std::memcpy(&amp;h, buf, sizeof h);   // ✅ 이식성 있고 UB 아님
 
-// ⑤ 널 포인터에 0을 더하는 것도 예전에는 UB 였습니다 (C++20 에서 허용)</code></pre>
+// ⑤ 널 포인터에 0을 더하는 것은 C++ 에서는 합법(결과도 널)이지만 C 에서는 UB 입니다</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>실무 결론</b> — 이 규칙들을 다 외울 필요는 없습니다.
         <b><code>-fsanitize=address,undefined</code> 를 개발·CI 빌드에 켜 두면</b>
@@ -10928,7 +10939,8 @@ for (int i = 0; i &lt; 20; ++i) {
 
 // 재할당 시 이동이냐 복사냐 — noexcept 가 가릅니다 ★
 struct A { A(A&amp;&amp;) noexcept; };      // 이동 (빠름)
-struct B { B(B&amp;&amp;); };               // 예외를 던질 수 있음 → 복사로 후퇴
+struct B { B(const B&amp;); B(B&amp;&amp;); };  // 이동이 던질 수 있음 → 복사로 후퇴
+//   (복사 생성자가 없으면 noexcept 가 아니어도 이동을 씁니다)
 static_assert(std::is_nothrow_move_constructible_v&lt;A&gt;);
 
 // 원소가 100만 개인 vector&lt;string&gt; 을 재할당하면
@@ -11186,7 +11198,7 @@ class Good {
 // 5 의 법칙 — 하나라도 직접 쓰면 나머지도 정의해야 합니다
 //   소멸자 / 복사 생성 / 복사 대입 / 이동 생성 / 이동 대입
 class Raw {
-    int* p_;
+    int* p_ = new int(0);
 public:
     ~Raw() { delete p_; }        // 소멸자만 썼더니
 };
@@ -11231,18 +11243,18 @@ auto a = f();             // 생성 하나뿐 (RVO — 복사도 이동도 없�
     <div class="card">
       <h4 class="mini" style="margin-top:0">객체 레이아웃과 특수 멤버 자동 생성 규칙</h4>
       <pre class="code" data-lang="cpp"><code>// ① 이동 생성자는 '복사 생성자나 소멸자를 직접 쓰면' 자동 생성이 막힙니다
-class A { ~A() {} };            // 소멸자를 썼더니
+struct A { ~A() {} };           // 소멸자를 썼더니
 A a; A b = std::move(a);        // → 이동이 아니라 '복사'가 불립니다 (조용히)
 //   대형 컨테이너에서 성능이 몇 배 나빠지는 흔한 원인 ★
 //   해결: 필요한 것을 = default 로 명시
-class B { ~B() = default; B(B&amp;&amp;) = default; B&amp; operator=(B&amp;&amp;) = default; };
+struct B { ~B() = default; B(B&amp;&amp;) = default; B&amp; operator=(B&amp;&amp;) = default; };
 
 // ② 클래스 크기 — 빈 클래스도 1바이트입니다 (주소가 있어야 하므로)
 struct Empty {};                 sizeof(Empty);        // 1
 struct Derived : Empty { int x; }; sizeof(Derived);    // 4 (빈 기반 최적화)
 struct HasMember { Empty e; int x; }; sizeof(HasMember); // 8 (패딩 발생)
 //   → C++20 [[no_unique_address]] 로 멤버에도 같은 최적화를 적용할 수 있습니다
-struct Better { [[no_unique_address]] Empty e; int x; };  // 4
+struct Better { [[no_unique_address]] Empty e; int x; };  // 4 (GCC·Clang — MSVC 는 무시, [[msvc::no_unique_address]])
 
 // ③ 컴파일 시점에 성질 확인 — 라이브러리 인터페이스에 못 박아 두기
 static_assert(std::is_trivially_copyable_v&lt;Point&gt;);   // memcpy 해도 되는 타입인가
@@ -11323,6 +11335,7 @@ b.f();          // "Base" ★ 파이썬이라면 "Derived" 였을 자리
 // virtual 을 붙이면 기대대로 동작합니다
 struct Base2    { virtual void f() { std::puts("Base"); } };
 struct Derived2 : Base2 { void f() override { std::puts("Derived"); } };
+Derived2 d2;
 Base2&amp; b2 = d2;
 b2.f();         // "Derived"
 
@@ -11394,8 +11407,9 @@ struct File : Readable, Writable { ... };   // ✅ 이 정도는 안전합니다
       <pre class="code" data-lang="cpp"><code>// 바깥 세계(파일·네트워크·시각)와 닿는 곳만 인터페이스로 뽑습니다
 class Clock {
 public:
+    using time_point = std::chrono::system_clock::time_point;
     virtual ~Clock() = default;
-    virtual std::chrono::system_clock::time_point now() const = 0;
+    virtual time_point now() const = 0;
 };
 class SystemClock : public Clock { ... };
 class FakeClock   : public Clock {           // 테스트용
@@ -11676,6 +11690,7 @@ namespace std { class string; }   // ❌ 절대 금지 — &lt;string&gt; 을 �
       <pre class="code" data-lang="cpp"><code>// ── session.h — 사용자에게 보이는 전부
 #pragma once
 #include &lt;memory&gt;
+#include &lt;string_view&gt;
 
 class Session {
 public:
@@ -11780,7 +11795,7 @@ struct Cfg { int a; };
 
 // 진단 방법
 //   ① -flto 를 켜면 링커가 타입 불일치를 잡아 주는 경우가 있습니다
-//   ② gold/lld 링커의 --detect-odr-violations
+//   ② gold 링커의 --detect-odr-violations (lld 에는 없음)
 //   ③ AddressSanitizer 는 전역 변수 ODR 위반을 잡아 줍니다
 //   ④ 근본 대책: 플래그로 구조체 내용을 바꾸지 않기 ★
 
@@ -12546,7 +12561,8 @@ class A { };        // ← 이 세미콜론. 없으면 엉뚱한 에러가 쏟�
 1 / 2;              // 0   (파이썬 3 는 0.5 였습니다)
 1.0 / 2;            // 0.5
 
-// ★ 이 열 개 중 ①②④⑦⑧ 은 AddressSanitizer 로 대부분 잡힙니다
+// ★ 이 열 개 중 ④⑥⑦⑧ 은 AddressSanitizer 로 대부분 잡힙니다
+//   (① 초기화 누락은 ASan 이 못 잡음 — -Wall 경고 · MemorySanitizer · Valgrind 로)
 g++ -fsanitize=address,undefined -g main.cpp &amp;&amp; ./a.out</code></pre>
     </div>
   </div>
@@ -12799,7 +12815,7 @@ void insert(Db&amp; db, const Row&amp; r) {
     rollback.dismiss();        // ★ 여기까지 왔으면 롤백하지 않음
 }</code></pre>
       <div class="note tip" style="margin-bottom:0">
-        <b>표준에도 곧 들어옵니다</b> — <code>std::experimental::scope_exit</code>,
+        <b>표준에는 아직 없습니다</b> — Library Fundamentals TS v3 의 <code>std::experimental::scope_exit</code>,
         그리고 <code>absl::Cleanup</code>·<code>gsl::finally</code> 같은 구현이 널리 쓰입니다.
         <b>20줄짜리 이 클래스 하나가 정리 누락을 통째로 없앱니다</b>.
       </div>
@@ -13084,7 +13100,9 @@ auto del = [](void* p){ std::free(p); };
 std::unique_ptr&lt;void, decltype(del)&gt; buf(std::malloc(1024), del);
 
 // ④ shared_ptr 은 삭제자가 타입에 안 들어갑니다 (제어 블록에 저장)
-std::shared_ptr&lt;FILE&gt; sf(std::fopen("a.txt","r"), &amp;std::fclose);
+std::shared_ptr&lt;FILE&gt; sf(std::fopen("a.txt","r"),
+                         [](FILE* f){ if (f) std::fclose(f); });
+//   ⚠ unique_ptr 와 달리 포인터가 nullptr 이어도 삭제자를 부릅니다 → 널 검사 필수
 //   타입이 단순해 컨테이너에 담기 편하지만 그만큼 비용이 있습니다
 
 // C API 에 넘기고 되받기
@@ -13399,7 +13417,8 @@ public:
 // 이때 '이동'을 쓸지 '복사'를 쓸지는 noexcept 여부로 정해집니다.
 
 struct A { A(A&amp;&amp;) noexcept; };     // ✅ 이동으로 옮김 (빠름)
-struct B { B(B&amp;&amp;); };              // ❌ 던질 수 있음 → 복사로 후퇴
+struct B { B(const B&amp;); B(B&amp;&amp;); }; // ❌ 이동이 던질 수 있음 → 복사로 후퇴
+//   (복사 생성자가 없으면 noexcept 가 아니어도 이동을 씁니다)
 //   왜? 이동 중에 예외가 나면 '원본도 새 버퍼도 망가진' 상태가 됩니다.
 //   복사는 실패해도 원본이 무사하므로 강한 예외 보장을 지킬 수 있습니다.
 
@@ -13533,9 +13552,12 @@ v.emplace_back(std::string("x"), 42);   // 임시 없이 그 자리에서 생성
 
 // ⚠ 전달 참조는 오버로드를 다 잡아먹습니다
 template&lt;class T&gt; void f(T&amp;&amp;);          // 거의 모든 타입에 매칭
-void f(int);                            // 잘 안 불립니다
+void f(int);                            // 정확히 int 일 때만 이깁니다
+short s = 1;  f(s);                     //   short·long·char 는 템플릿으로 갑니다
 //   → 컨셉으로 제약을 걸어야 합니다 (m09)
-template&lt;std::integral T&gt; void f(T&amp;&amp;);</code></pre>
+template&lt;class T&gt; requires (!std::integral&lt;std::remove_cvref_t&lt;T&gt;&gt;)
+void f(T&amp;&amp;);                            // 정수는 전부 f(int) 로
+//   (T&amp;&amp; 에 lvalue 가 오면 T = int&amp; 라 remove_cvref_t 로 벗겨서 검사)</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>실무에서 실제로 쓰는 규칙</b> — <code>std::forward</code> 는
         <b>템플릿 안에서 전달 참조를 그대로 넘길 때만</b> 씁니다.
@@ -13676,8 +13698,8 @@ constexpr auto kLut = make_lut();     // ★ 바이너리에 데이터로 박힙
 //   → 시작 시간 0, 스레드 안전, 캐시에 미리 올라감
 
 // 컴파일 시점 문자열 처리 (C++20)
-consteval std::size_t hash(std::string_view s) {
-    std::size_t h = 1469598103934665603ULL;
+constexpr std::size_t hash(std::string_view s) {   // consteval 이면 런타임 값 cmd 로 못 부름
+    std::size_t h = 14695981039346656037ULL;          // FNV-1a (64비트)
     for (char c : s) { h ^= static_cast&lt;std::uint8_t&gt;(c); h *= 1099511628211ULL; }
     return h;
 }
@@ -13706,7 +13728,7 @@ static_assert(sizeof(Packet) == 16, "패킷 크기가 바뀌었습니다");</cod
         <tr><td>값 인자</td><td>선언에는 불필요(정의에만)</td></tr>
       </table></div>
       <pre class="code" data-lang="cpp"><code>// ❌ 반환값에 const 를 붙이면 이동이 막힙니다
-const std::string get();      // 호출 쪽에서 항상 복사됩니다
+const std::string get();      // s = get(); 처럼 대입하면 이동 대신 복사됩니다
 std::string get();            // ✅
 
 // ⚠ const 는 스레드 안전을 '의미'합니다 (C++11 이후 표준 관례)
@@ -14168,8 +14190,9 @@ vw::chunk(v, 3) · vw::slide(v, 3)  // C++23
 
 // 결과를 컨테이너로 (C++23)
 auto vec = result | rg::to&lt;std::vector&gt;();
-// C++20 이라면
-std::vector&lt;int&gt; vec(result.begin(), result.end());</code></pre>
+// C++20 이라면 — filter 뒤 take 는 begin/end 타입이 달라 views::common 으로 맞춥니다
+auto c = result | vw::common;
+std::vector&lt;int&gt; vec(c.begin(), c.end());</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>지연 평가의 이점</b> — 중간 결과를 담을 벡터를 만들지 않습니다.
         <code>take(5)</code> 가 있으면 <b>5개만 계산하고 멈춥니다</b>.
@@ -14198,12 +14221,13 @@ std::vector&lt;int&gt; vec(result.begin(), result.end());</code></pre>
         <tr><td><code>collections.Counter</code></td><td>직접(<code>unordered_map</code> + 루프)</td></tr>
       </table></div>
       <pre class="code" data-lang="cpp"><code>// 실전 예 — CSV 한 줄을 파싱해 합계
-double total = line
+auto vals = line
     | vw::split(',')
     | vw::transform([](auto&amp;&amp; s){ return std::stod(std::string(s.begin(), s.end())); })
     | vw::filter([](double d){ return d &gt; 0; })
-    | rg::to&lt;std::vector&gt;()
-    | [](auto&amp;&amp; v){ return std::accumulate(v.begin(), v.end(), 0.0); };</code></pre>
+    | rg::to&lt;std::vector&gt;();
+double total = std::accumulate(vals.begin(), vals.end(), 0.0);
+//   ⚠ 람다에 | 로 이어 붙일 수는 없습니다 (| 는 range 어댑터 전용)</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">알고리즘으로 대체하면 좋은 패턴</h4>
@@ -14398,7 +14422,7 @@ void schedule() {
 pool.submit([msg]{ log(msg); });           // 복사
 pool.submit([msg = std::move(msg)]{ log(msg); });   // 이동 ★
 
-// ⚠ [=] 는 this 를 '포인터로' 캡처합니다 (C++17 이전)
+// ⚠ [=] 는 this 를 '포인터로' 캡처합니다 (C++20 에서 deprecated — 동작은 그대로)
 class Widget {
     int n_ = 0;
 public:
@@ -15056,8 +15080,9 @@ f(int{});            // ② — B 가 A 를 포함하므로 더 구체적
 // ⚠ 포함 관계는 '컨셉의 원자적 구성'으로 판단합니다.
 //   같은 뜻이어도 다른 식으로 쓰면 포함 관계가 성립하지 않습니다
 template&lt;class T&gt; concept C1 = sizeof(T) &gt; 2;
-template&lt;class T&gt; concept C2 = sizeof(T) &gt; 2 &amp;&amp; sizeof(T) &lt; 8;
-//   → C2 가 C1 을 포함합니다 (같은 원자식을 공유하므로) ✅
+template&lt;class T&gt; concept C2 = C1&lt;T&gt; &amp;&amp; sizeof(T) &lt; 8;
+//   → C2 가 C1 을 포함합니다 (C1 을 이름으로 재사용하므로) ✅
+//     sizeof(T) &gt; 2 를 글자 그대로 다시 적으면 '다른 원자식'이라 포함 안 됩니다
 template&lt;class T&gt; concept D1 = (sizeof(T) &gt; 2);
 template&lt;class T&gt; concept D2 = (sizeof(T) &gt;= 3);
 //   → 수학적으로 같지만 포함 관계가 아닙니다 → ambiguous 에러 ★
@@ -15086,8 +15111,8 @@ static_assert(std::ranges::range&lt;MyType&gt;);       // 어디서 실패하는
 static_assert(requires(MyType m){ m.begin(); }); // 단계별로 나눠서
 
 // 컴파일러가 알려 주는 정도가 다릅니다
-//   GCC   : note 로 실패한 절을 짚어 줍니다
-//   Clang : 더 자세한 편 (-fconcepts-diagnostics-depth=3)
+//   GCC   : note 로 실패한 절을 짚어 줍니다 (-fconcepts-diagnostics-depth=3 로 더 깊게)
+//   Clang : 더 자세한 편
 //   MSVC  : /diagnostics:caret</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>실무 결론</b> — 컨셉의 진짜 가치는 <b>“제약을 강제하는 것”</b>보다
@@ -15118,6 +15143,7 @@ static_assert(requires(MyType m){ m.begin(); }); // 단계별로 나눠서
     <div class="card">
       <h4 class="mini" style="margin-top:0"><code>optional</code> — 있거나 없거나</h4>
       <pre class="code" data-lang="cpp"><code>#include &lt;optional&gt;
+#include &lt;charconv&gt;     // from_chars
 
 std::optional&lt;int&gt; to_int(std::string_view s) {
     int v{};
@@ -15194,7 +15220,7 @@ std::expected&lt;int, ParseError&gt; parse(std::string_view s) {
     auto [p, ec] = std::from_chars(s.data(), s.data()+s.size(), v);
     if (ec == std::errc::result_out_of_range)
         return std::unexpected(ParseError::Overflow);
-    if (ec != std::errc{})
+    if (ec != std::errc{} || p != s.data() + s.size())   // "12abc" 처럼 뒤에 남아도 실패
         return std::unexpected(ParseError::BadChar);
     return v;
 }
@@ -15669,8 +15695,8 @@ std::string b(100, 'x');             // 할당 1
 //   키 길이가 15바이트를 넘는 순간 map 삽입 비용이 갑자기 뜁니다
 //   → 로그 태그·enum 이름처럼 짧은 문자열은 생각보다 쌉니다
 
-// 한글은 3바이트라 5글자면 SSO 를 넘습니다 ★
-std::string k = "안녕하세요";        // 15바이트 — 경계선
+// 한글은 3바이트라 6글자부터 SSO 를 넘습니다 (libstdc++·MSVC) ★
+std::string k = "안녕하세요";        // 15바이트 — 경계선 (아직 SSO, 한 글자 더하면 할당)
 
 // 대안 — 고정 크기 문자열
 template&lt;std::size_t N&gt; struct FixedString {
@@ -15685,7 +15711,6 @@ template&lt;std::size_t N&gt; struct FixedString {
 std::map&lt;std::string, int, std::less&lt;&gt;&gt; m;     // ★ std::less&lt;&gt; (투명 비교자)
 m.find(std::string_view{"key"});                // 할당 없이 조회
 
-std::unordered_map&lt;std::string, int, StringHash, std::equal_to&lt;&gt;&gt; um;
 struct StringHash {
     using is_transparent = void;                // ★ 이 표시가 필요합니다
     std::size_t operator()(std::string_view sv) const {
@@ -15695,6 +15720,7 @@ struct StringHash {
         return std::hash&lt;std::string&gt;{}(s);
     }
 };
+std::unordered_map&lt;std::string, int, StringHash, std::equal_to&lt;&gt;&gt; um;
 um.find(std::string_view{"key"});               // C++20 — 할당 없음
 
 // 문자열 인터닝 — 같은 문자열을 한 번만 저장하고 포인터로 비교
@@ -16307,6 +16333,7 @@ fastmod.transform(arr, out)         # 결과를 미리 만든 버퍼에 씁니�
       <pre class="code" data-lang="cpp"><code>// noop.cpp — 아무것도 안 하는 함수들
 #include &lt;pybind11/pybind11.h&gt;
 #include &lt;pybind11/numpy.h&gt;
+#include &lt;pybind11/stl.h&gt;          // ★ 없으면 take_list 호출이 TypeError
 namespace py = pybind11;
 
 void noop() {}
@@ -16346,7 +16373,7 @@ for n in (100, 1_000, 10_000, 100_000, 1_000_000):
     a = np.random.rand(n)
     tp = timeit.timeit(lambda: pure_python(a), number=10) / 10
     tc = timeit.timeit(lambda: fastmod.run(a),  number=10) / 10
-    print(f"{n:>9}  py {tp*1e3:8.3f}ms  cpp {tc*1e3:8.3f}ms  {tp/tc:6.1f}×")
+    print(f"{n:&gt;9}  py {tp*1e3:8.3f}ms  cpp {tc*1e3:8.3f}ms  {tp/tc:6.1f}×")
 
 #  전형적인 결과 — 작은 n 에서는 배수가 1 근처이거나 오히려 손해,
 #  n 이 커질수록 배수가 올라가다 어느 지점에서 평평해집니다(메모리 대역폭 한계).
@@ -16434,7 +16461,7 @@ pybind11_add_module(fastmod src/fastmod.cpp)
 install(TARGETS fastmod DESTINATION .)</code></pre>
       <pre class="code" data-lang="bash"><code># ③ 설치하고 바로 쓰기
 pip install .
-#   또는 개발 중이라면 (고칠 때마다 자동 재빌드)
+#   또는 개발 중이라면 (editable 설치 — 자동 재빌드 설정은 아래 ①)
 pip install -e . --no-build-isolation</code></pre>
       <pre class="code" data-lang="python"><code>&gt;&gt;&gt; import fastmod
 &gt;&gt;&gt; fastmod.add(1, 2)
@@ -16482,8 +16509,10 @@ m.attr("MAX_WINDOW") = 1024;</code></pre>
     <div class="card">
       <h4 class="mini" style="margin-top:0">개발 중에 편한 것들</h4>
       <pre class="code" data-lang="bash"><code># ① 고칠 때마다 자동 재빌드 (editable + 재빌드 훅)
-pip install -e . --no-build-isolation
-#   scikit-build-core 는 import 시점에 변경을 감지해 다시 빌드해 줍니다
+pip install -e . --no-build-isolation \
+    -C editable.rebuild=true -C build-dir=build/{wheel_tag}
+#   이 두 설정(또는 pyproject 의 [tool.scikit-build])이 있어야
+#   scikit-build-core 가 import 시점에 변경을 감지해 다시 빌드해 줍니다
 
 # ② 빌드 로그 자세히 보기 (에러 원인 찾을 때)
 pip install . -v --no-build-isolation
@@ -16689,7 +16718,9 @@ find_package(pybind11 CONFIG REQUIRED)
 
 pybind11_add_module(_core src/core.cpp src/algo.cpp)
 target_include_directories(_core PRIVATE src)
-target_compile_definitions(_core PRIVATE VERSION_INFO=${PROJECT_VERSION})
+target_compile_definitions(_core PRIVATE VERSION_INFO=${SKBUILD_PROJECT_VERSION})
+#   ↑ scikit-build-core 가 pyproject 의 version 을 넘겨 줍니다
+#     (project() 에 VERSION 이 없어 ${PROJECT_VERSION} 은 비어 있습니다)
 
 # 최적화 — 릴리즈에서만
 target_compile_options(_core PRIVATE
@@ -16788,7 +16819,7 @@ jobs:
           CIBW_TEST_REQUIRES: pytest numpy
           CIBW_TEST_COMMAND: "pytest {project}/tests"
       - uses: actions/upload-artifact@v4
-        with: {path: wheelhouse/*.whl}</code></pre>
+        with: {name: "wheels-${{ matrix.os }}", path: wheelhouse/*.whl}   # v4 는 이름이 겹치면 실패</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>cibuildwheel 이 해 주는 일</b> — 리눅스는 <b>manylinux 컨테이너</b>에서 빌드해
         오래된 배포판에서도 돌게 하고, <code>auditwheel</code>·<code>delocate</code> 로
@@ -16798,24 +16829,23 @@ jobs:
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">파이썬 버전마다 빌드하지 않는 법 — abi3</h4>
-      <pre class="code" data-lang="cmake"><code># 안정 ABI(abi3)로 빌드하면 wheel 하나가 3.9 이상 전부에서 동작합니다
-pybind11_add_module(_core src/core.cpp)
-
-# pybind11 2.12+ 에서
-target_compile_definitions(_core PRIVATE Py_LIMITED_API=0x03090000)
-set_target_properties(_core PROPERTIES SUFFIX ".abi3.so")   # 리눅스/맥
-# 윈도우는 .pyd</code></pre>
+      <pre class="code" data-lang="cmake"><code># 안정 ABI(abi3)로 빌드하면 wheel 하나가 여러 파이썬 버전에서 동작합니다
+# ⚠ pybind11 은 Py_LIMITED_API(안정 ABI)를 지원하지 않습니다
+#   → abi3 가 필요하면 nanobind 로 (파이썬 3.12+, y11)
+nanobind_add_module(_core STABLE_ABI src/core.cpp)
+#   3.12 미만 파이썬으로 빌드하면 STABLE_ABI 는 무시되고 일반 빌드가 됩니다
+#   파일 이름: _core.abi3.so (리눅스/맥) · _core.pyd (윈도우)</code></pre>
       <pre class="code" data-lang="toml"><code># pyproject.toml
 [tool.scikit-build]
-wheel.py-api = "cp39"        # cp39-abi3 태그로 빌드</code></pre>
-      <pre class="code" data-lang="text"><code>비교 — 파이썬 5개 버전 × 3 OS × 2 아키텍처
+wheel.py-api = "cp312"       # cp312-abi3 태그로 빌드 (3.12 이상 전부)</code></pre>
+      <pre class="code" data-lang="text"><code>비교 — 파이썬 5개 버전(모두 3.12 이상) × 3 OS × 2 아키텍처
 
   일반 빌드 : 30개 wheel · CI 시간 30분 · 새 파이썬 나오면 다시 빌드
   abi3      :  6개 wheel · CI 시간  6분 · 새 버전에서도 그대로 동작 ★
 
 대가
   · CPython 안정 API 만 쓸 수 있어 일부 최적화가 제한됩니다
-  · nanobind 는 3.12+ 에서 abi3 를 더 잘 지원합니다
+  · abi3 는 nanobind + 3.12 이상에서만 — 3.9~3.11 도 지원하려면 그 버전은 따로 빌드합니다
   · 성능 차이는 대개 미미하지만, 극단적으로 호출이 잦으면 재 보세요</code></pre>
     </div>
   </div>
@@ -17088,6 +17118,8 @@ public:
 c.def("buffer", &amp;Engine::buffer);
 
 // ✅ 참조로 노출 + Engine 이 살아 있는 동안만 유효하게 묶기
+//   ⚠ 단, stl.h 로 자동 변환되는 vector 는 정책과 무관하게 항상 list 로 복사됩니다
+//     → PYBIND11_MAKE_OPAQUE(std::vector&lt;double&gt;) + py::bind_vector 로 등록해야 참조가 됩니다
 c.def("buffer", &amp;Engine::buffer,
       py::return_value_policy::reference_internal);
 //   파이썬에서 engine 이 GC 되면 그 참조도 함께 무효가 되는데,
@@ -17110,7 +17142,7 @@ sys.getrefcount(buf)       # 참조 카운트
 gc.get_referrers(buf)      # 누가 붙잡고 있나
 
 # 재현 스크립트를 만든 뒤 sanitizer 빌드로 돌리면 정확한 위치가 나옵니다
-CFLAGS="-fsanitize=address -g" pip install -e . --no-build-isolation
+CXXFLAGS="-fsanitize=address -g" pip install -e . --no-build-isolation   # C++ 라 CXXFLAGS
 PYTHONMALLOC=malloc LD_PRELOAD=$(gcc -print-file-name=libasan.so) \
     python repro.py
 #   ★ PYTHONMALLOC=malloc 을 줘야 ASan 이 파이썬 힙도 감시합니다</code></pre>
@@ -17561,7 +17593,7 @@ double mean(Arr a) {
     return n ? s / n : 0.0;
 }
 
-// 더 간단한 접근자 (경계 검사 포함 — 개발 중에 유용)
+// 더 간단한 접근자 (차원은 한 번 확인, 원소 접근은 경계 검사 없음)
 double mean2(Arr a) {
     auto r = a.unchecked&lt;1&gt;();      // 1차원, 검사 없음(빠름)
     double s = 0;
@@ -17728,7 +17760,8 @@ def py_smooth(a, w=3):
 t1 = timeit.timeit(lambda: py_smooth(a),        number=20) / 20
 t2 = timeit.timeit(lambda: fastmod.smooth(a,3), number=20) / 20
 print(f"numpy {t1*1e3:.2f}ms · cpp {t2*1e3:.2f}ms · {t1/t2:.1f}×")
-np.testing.assert_allclose(py_smooth(a), fastmod.smooth(a,3), rtol=1e-9)</code></pre>
+# 양 끝 1칸은 나누는 수가 다릅니다(convolve 는 항상 w, C++ 는 실제 개수) → 안쪽만 비교
+np.testing.assert_allclose(py_smooth(a)[1:-1], fastmod.smooth(a,3)[1:-1], rtol=1e-9)</code></pre>
     </div>
   </div>
 
@@ -17871,8 +17904,10 @@ fastmod.process(big32)                   # double 을 요구하면 여기서 400
 }
 
 // pybind11 에는 더 짧은 방법도 있습니다
-m.def("heavy", &amp;heavy, py::call_guard&lt;py::gil_scoped_release&gt;());
-//   함수 전체에서 GIL 을 놓습니다 (인자 변환은 GIL 을 잡은 상태로 끝난 뒤)</code></pre>
+m.def("heavy_vec", &amp;heavy_vec, py::call_guard&lt;py::gil_scoped_release&gt;());
+//   함수 전체에서 GIL 을 놓습니다 (인자 변환은 GIL 을 잡은 상태로 끝난 뒤)
+//   ⚠ 위 heavy 처럼 안에서 이미 놓는 함수나, py::array_t 같은 파이썬 객체를
+//     인자로 받아 만지는 함수에는 쓰면 안 됩니다 — 인자가 순수 C++ 타입일 때만</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>절대 규칙</b> — GIL 을 놓은 구간에서 <b><code>py::</code> 로 시작하는 것</b>이나
         파이썬 객체를 건드리면 <b>인터프리터가 깨집니다</b>(즉시 죽지 않고 나중에 이상하게 죽습니다).
@@ -17957,9 +17992,10 @@ for (unsigned k = 0; k &lt; t; ++k)
 }
 
 // ⚠ 워커 스레드에서 파이썬을 부르려면 반드시 획득해야 합니다
-std::thread([cb]{
+std::thread([cb]() mutable {
     py::gil_scoped_acquire acq;              // 이 줄이 없으면 크래시
     cb(42);
+    cb = py::function();                     // ★ GIL 을 쥔 채로 참조 해제 (람다 소멸 땐 GIL 없음)
 }).detach();
 
 // ⚠ 콜백을 자주 부르면 GIL 경합으로 병렬 효과가 사라집니다
@@ -18136,7 +18172,8 @@ private:
 
 PYBIND11_MODULE(_core, m) {
     // ① 간단히 — 파이썬에 같은 이름의 예외 클래스를 만듭니다
-    py::register_exception&lt;ParseError&gt;(m, "ParseError");
+    //    py::register_exception&lt;ParseError&gt;(m, "ParseError");
+    //    ⚠ ①·② 는 둘 중 하나만 — 같은 이름을 두 번 등록하면 import 가 실패합니다
 
     // ② 정보를 담아 넘기려면 직접 변환합니다 ★
     static py::exception&lt;ParseError&gt; exc(m, "ParseError", PyExc_ValueError);
@@ -18536,7 +18573,8 @@ void run_async(py::function cb) {
 
         py::gil_scoped_acquire acq;            // 부를 때만 획득
         cb(result);
-    }).detach();
+        cb = py::function();                   // ★ GIL 을 쥔 채로 참조 해제
+    }).detach();                               //   (람다가 소멸할 때는 GIL 이 없습니다)
 }
 
 // ⚠ detach 된 스레드는 인터프리터 종료 시 문제가 됩니다.
@@ -18546,11 +18584,14 @@ void run_async(py::function cb) {
 py::object run_future(py::array_t&lt;double&gt; a) {
     py::object fut = py::module_::import("concurrent.futures")
                         .attr("Future")();
-    std::thread([a, fut]() mutable {
-        double r;
-        { py::gil_scoped_release rel; r = compute(a); }
+    auto buf = a.request();                    // GIL 을 쥔 지금 포인터를 얻어 둡니다
+    py::object keep = a;                       // 스레드가 끝날 때까지 배열을 살려 둠
+    std::thread([keep, fut, p = static_cast&lt;const double*&gt;(buf.ptr),
+                 n = static_cast&lt;std::size_t&gt;(buf.size)]() mutable {
+        double r = compute(p, n);              // 새 스레드는 처음부터 GIL 이 없습니다
         py::gil_scoped_acquire acq;
         fut.attr("set_result")(r);
+        keep = py::none(); fut = py::none();   // ★ GIL 을 쥔 채로 참조 해제
     }).detach();
     return fut;
 }
@@ -18720,13 +18761,14 @@ m.def("run", &amp;run, "mode"_a = "default");   // "sum" · "max" · "custom"
       <h4 class="mini" style="margin-top:0">시그니처를 바인딩에 심기</h4>
       <pre class="code" data-lang="cpp"><code>// pybind11 은 docstring 에 시그니처를 자동으로 넣어 줍니다
 m.def("smooth", &amp;smooth, "data"_a, "window"_a = 3);
-//   help(smooth) → smooth(data: numpy.ndarray[float64], window: int = 3)
+//   help(smooth) → smooth(data: numpy.ndarray[numpy.float64], window: int = 3) -&gt; numpy.ndarray[numpy.float64]
 
-// 타입 이름을 직접 지정하고 싶으면
+// 타입 이름을 직접 지정하고 싶으면 — nanobind 는 nb::sig 로 시그니처를 통째로 덮어씁니다 ★
 m.def("load", &amp;load,
-      py::arg("path"),
-      py::sig("def load(path: str | os.PathLike) -&gt; dict[str, float]"));
-//   pybind11 2.12+ 에서 시그니처를 그대로 덮어씁니다 ★
+      nb::arg("path"),
+      nb::sig("def load(path: str | os.PathLike) -&gt; dict[str, float]"));
+//   pybind11 에는 nb::sig 같은 것이 없습니다 — 2.12+ 의 py::typing 타입
+//   (예: 반환형을 py::typing::Dict&lt;py::str, py::float_&gt; 로)으로 표기를 바꿉니다
 
 // 모듈 수준 문서
 m.doc() = R"doc(
@@ -19038,7 +19080,8 @@ m.def("heavy", &amp;heavy, nb::call_guard&lt;nb::gil_scoped_release&gt;());
 project(fastmod LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
+find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED
+             OPTIONAL_COMPONENTS Development.SABIModule)   # STABLE_ABI 용
 
 # nanobind 를 찾아 옵니다
 execute_process(
@@ -19104,7 +19147,7 @@ cmake -B build -DUSE_NANOBIND=ON</code></pre>
     pybind11 : .so 4.2MB · 빌드 95초
     nanobind : .so 0.9MB · 빌드 24초
 
-  wheel 개수 (3 OS × 5 버전)
+  wheel 개수 (3 OS × 5 버전, 모두 3.12 이상일 때)
     pybind11 : 15개
     nanobind + STABLE_ABI : 3개 ★</code></pre>
     </div>
@@ -19228,7 +19271,8 @@ memray run --native bench.py &amp;&amp; memray flamegraph memray-*.bin</code></p
     <div class="card">
       <h4 class="mini" style="margin-top:0">디버거로 붙기</h4>
       <pre class="code" data-lang="bash"><code># 디버그 정보를 포함해 빌드
-CMAKE_BUILD_TYPE=RelWithDebInfo pip install -e . --no-build-isolation
+pip install -e . --no-build-isolation -C cmake.build-type=RelWithDebInfo
+#   (환경 변수 CMAKE_BUILD_TYPE 은 scikit-build-core 가 넘기는 값에 덮여 무시됩니다)
 
 # gdb 로 파이썬째 실행
 gdb --args python repro.py
@@ -19347,7 +19391,9 @@ FASTMOD_PURE=1 python app.py       # 즉시 순수 파이썬으로 되돌리기
 # ④ 크래시 시 최소 정보 남기기 (프로세스가 죽기 직전)
 import faulthandler, sys
 faulthandler.enable(file=open("/var/log/app/fault.log", "a"))
-faulthandler.dump_traceback_later(300, exit=True)   # 5분 멈추면 덤프
+faulthandler.dump_traceback_later(300, exit=True)   # 5분 뒤 덤프하고 종료
+#   ↑ 한 번 거는 타이머입니다 — 작업 루프마다 다시 불러 타이머를 미뤄야
+#     '5분 멈추면 덤프' 워치독이 됩니다 (안 그러면 멀쩡해도 5분 뒤 종료)
 
 # ⑤ 카나리 배포 — 일부 트래픽에만 C++ 경로를 켜고 지표 비교
 if random.random() &lt; float(os.environ.get("FASTMOD_RATIO", "1.0")):
@@ -19560,16 +19606,17 @@ else:
       <h4 class="mini" style="margin-top:0">되돌릴 수 있게 만들기</h4>
       <pre class="code" data-lang="javascript"><code>// JS 폴백을 함께 두면 배포 사고에 강해집니다 ★
 let impl
-try {
-  impl = require('node-gyp-build')(__dirname)      // 네이티브
-} catch (err) {
-  console.warn('[mylib] 네이티브 로드 실패, JS 구현 사용:', err.message)
-  impl = require('./fallback.js')                  // 순수 JS
+if (process.env.MYLIB_PURE_JS === '1') {           // 환경변수로 강제 전환 (먼저 확인)
+  impl = require('./fallback.js')
+} else {
+  try {
+    impl = require('node-gyp-build')(__dirname)    // 네이티브
+  } catch (err) {
+    console.warn('[mylib] 네이티브 로드 실패, JS 구현 사용:', err.message)
+    impl = require('./fallback.js')                // 순수 JS
+  }
 }
-export const smooth = impl.smooth
-
-// 환경변수로 강제 전환
-if (process.env.MYLIB_PURE_JS === '1') impl = require('./fallback.js')
+exports.smooth = impl.smooth      // ★ 선택이 끝난 뒤에 내보내야 전환이 반영됩니다
 
 // 두 구현이 같은 결과를 내는지 테스트로 대조
 test('parity', () =&gt; {
@@ -19783,13 +19830,14 @@ export class Engine {
       <pre class="code" data-lang="javascript"><code>// index.js — 얇은 JS 래퍼로 검증·기본값을 처리 ★
 const native = require('node-gyp-build')(__dirname)
 
-export function smooth(data, { window = 3, mode = 'nearest' } = {}) {
+function smooth(data, { window = 3, mode = 'nearest' } = {}) {
   if (!(data instanceof Float64Array))
     data = Float64Array.from(data)          // 정규화
   if (!Number.isInteger(window) || window &lt; 1)
     throw new RangeError(`window 는 1 이상 정수여야 합니다 (받음: ${window})`)
   return native.smooth(data, window, mode === 'reflect' ? 1 : 0)
-}</code></pre>
+}
+module.exports = { smooth }                 // require·__dirname 을 쓰므로 CommonJS 로</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>파이썬 탭과 같은 원칙</b> — <b>C++ 쪽은 단순하게, JS 래퍼에서 파이썬답게</b>.
         옵션 객체·기본값·에러 메시지는 JS 에서 처리하는 편이
@@ -19832,7 +19880,7 @@ npx node-gyp build              # 증분 (빠름)
 npx node-gyp build --debug      # 디버그 심볼
 
 # 병렬 빌드
-npx node-gyp build -- -j8
+npx node-gyp build -j max      # 또는 -j 8
 
 # ccache 붙이기 (재빌드가 크게 빨라집니다) ★
 export CC="ccache gcc" CXX="ccache g++"
@@ -19869,7 +19917,7 @@ nm -D build/Release/addon.node | grep napi_register</code></pre>
 // 확인
 nm -D addon.node | grep napi_register_module_v1
 
-// ⚠ 모듈은 프로세스당 한 번만 초기화됩니다
+// ⚠ 공유 라이브러리는 프로세스당 한 번만 로드됩니다 (Init 은 환경마다 불리지만 static 은 하나)
 //   전역 상태를 두면 여러 worker_threads 가 공유합니다 ★
 static std::vector&lt;double&gt; g_cache;     // ❌ 스레드 간 경쟁
 
@@ -19899,6 +19947,8 @@ struct PerEnv {
     std::mt19937 rng;                 // 스레드마다 별도
     std::vector&lt;double&gt; scratch;
 };
+
+Napi::Value Run(const Napi::CallbackInfo&amp; info);   // Init 에서 쓰므로 먼저 선언
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
     env.SetInstanceData&lt;PerEnv&gt;(new PerEnv{});
@@ -20570,7 +20620,8 @@ v8.getHeapStatistics()</code></pre>
       <pre class="code" data-lang="cpp"><code>Napi::Value Smooth(const Napi::CallbackInfo&amp; info) {
     Napi::Env env = info.Env();
 
-    if (!info[0].IsTypedArray()) {
+    if (!info[0].IsTypedArray() ||        // ★ 종류까지 확인 (Float32Array 등이면 엉뚱한 메모리를 읽음)
+        info[0].As&lt;Napi::TypedArray&gt;().TypedArrayType() != napi_float64_array) {
         Napi::TypeError::New(env, "Float64Array 가 필요합니다")
             .ThrowAsJavaScriptException();
         return env.Null();
@@ -21322,7 +21373,8 @@ const w = new Watcher('/data')
 w.on('change', f =&gt; console.log('변경', f))
 w.on('error', e =&gt; console.error(e))
 
-// 또는 async iterator 로 (역압이 자연스럽게 처리됩니다) ★
+// 또는 async iterator 로 (소비하는 쪽 속도로 꺼내 씁니다) ★
+//   ⚠ 아래 queue 는 무제한 — 생산이 더 빠르면 쌓이니 진짜 역압은 TSFN 큐 크기로
 async function* events(path) {
   const queue = []
   let resolve
@@ -21351,8 +21403,8 @@ tsfn.Release();                // 스레드 종료 시 반드시
 // 원인 2 — detach 한 스레드가 살아 있음
 //   → jthread 나 명시적 join 을 쓰고, 종료 신호를 주세요
 class Watcher {
-    std::jthread th_;
-    std::atomic&lt;bool&gt; stop_{false};
+    std::atomic&lt;bool&gt; stop_{false};  // ★ th_ 보다 먼저 선언 — 멤버는 역순 소멸이라
+    std::jthread th_;                //   join 하는 동안 stop_ 이 아직 살아 있어야 합니다
 public:
     ~Watcher() { stop_ = true; }    // jthread 소멸자가 join
 };
@@ -21617,7 +21669,7 @@ private:
       <pre class="code" data-lang="javascript"><code>// 얇은 JS 래퍼로 감싸면 훨씬 자연스러워집니다 ★
 const native = require('node-gyp-build')(__dirname)
 
-export class Engine {
+class Engine {
   #impl
   #closed = false
 
@@ -21648,8 +21700,9 @@ export class Engine {
     return `Engine(size=${this.size})`
   }
 }
+module.exports = { Engine }          // require·__dirname 을 쓰므로 CommonJS 로
 
-// 사용
+// 사용 (using 은 블록·함수 안에서)
 using engine = new Engine({ window: 5 })   // 스코프를 벗어나면 자동 close
 engine.feed(a).feed(b)</code></pre>
     </div>
@@ -21908,7 +21961,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  arch: x64 }
-          - { os: ubuntu-latest,  arch: arm64, cross: true }
+          - { os: ubuntu-24.04-arm, arch: arm64 }    # arm 러너에서 네이티브 빌드
           - { os: macos-14,       arch: arm64 }
           - { os: macos-13,       arch: x64 }
           - { os: windows-latest, arch: x64 }
@@ -21995,7 +22048,7 @@ process.exit(0)      // ★ 0 으로 끝내야 npm install 이 성공합니다</
 let impl
 try { impl = require('node-gyp-build')(__dirname) }
 catch { impl = require('./fallback.js') }
-export const isNative = impl !== require('./fallback.js')</code></pre>
+exports.isNative = impl !== require('./fallback.js')</code></pre>
     </div>
   </div>
 
@@ -22344,7 +22397,7 @@ console.log(`왕복 ${(performance.now()-t).toFixed(1)}ms`)</code></pre>
 
 // 상위 버전 기능을 조건부로 쓰기
 #if NAPI_VERSION &gt;= 9
-    napi_add_async_cleanup_hook(...);
+    node_api_symbol_for(...);          // napi_version 9 에서 추가된 API
 #endif
 
 // 런타임에 지원 여부 확인
@@ -22367,6 +22420,7 @@ if (ver &gt;= 9) { /* 새 기능 */ } else { /* 대체 경로 */ }
 jobs:
   compat:
     needs: prebuild
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         runtime:
@@ -22823,7 +22877,7 @@ MYLIB_1.0 {
   ① 심볼이 적을수록 로딩이 빠릅니다 (동적 링커의 재배치 작업 감소)
   ② 내부 심볼이 다른 라이브러리와 충돌하지 않습니다 ★
      — 같은 프로세스에 두 확장 모듈이 같은 이름을 내보내면
-       나중에 로드된 쪽이 앞의 것을 가릴 수 있습니다
+       먼저 로드된 쪽이 나중 것을 가릴 수 있습니다 (아래 인터포지션)
   ③ 컴파일러가 더 공격적으로 최적화할 수 있습니다
      (밖에서 부를 수 없다면 인라인·제거가 자유로워집니다)
   ④ API 표면이 문서와 일치하게 유지됩니다</code></pre>
@@ -23144,6 +23198,7 @@ mylib_run(&amp;cfg, ...);
       <h4 class="mini" style="margin-top:0">테스트를 C 로도 작성하기</h4>
       <pre class="code" data-lang="c"><code>/* tests/test_c_api.c — 헤더가 정말 C 에서 컴파일되는지 검증 ★ */
 #include "mylib.h"
+#undef NDEBUG                  /* ★ Release(NDEBUG) 빌드에서도 assert 안의 호출이 사라지지 않게 */
 #include &lt;assert.h&gt;
 #include &lt;stdio.h&gt;
 
@@ -23198,9 +23253,9 @@ extern "C" int32_t mylib_engine_feed(mylib_engine* h,
 }
 
 extern "C" void mylib_engine_destroy(mylib_engine* h) {
-    if (!h) return;
-    h-&gt;magic = 0;                // ★ 해제 표시 → 이중 해제를 잡아냅니다
-    delete h;
+    if (!check(h)) return;       // ★ 이미 해제됐거나 엉뚱한 핸들이면 무시
+    h-&gt;magic = 0;                // ★ 해제 표시 → 이중 해제를 (대개) 잡아냅니다
+    delete h;                    //   해제된 메모리를 읽는 것 자체는 UB 라 보장은 아닙니다
 }
 
 // 더 강한 방법 — 핸들을 '정수 ID' 로 주고 내부 테이블에서 조회
@@ -23617,7 +23672,7 @@ typedef struct {
     double  b;      /* 오프셋 8  (8의 배수여야 함) */
     int32_t c;      /* 오프셋 16 */
                     /* 패딩 4바이트 (전체가 8의 배수가 되도록) */
-} Rec;              /* sizeof == 24 */</code></pre>
+} Rec;              /* sizeof == 24  (x86-64 · arm64 기준) */</code></pre>
       <pre class="code" data-lang="python"><code># ❌ 패딩을 모르고 선언하면 오프셋이 어긋납니다
 class Rec(ctypes.Structure):
     _pack_ = 1                       # ← C 는 pack 을 안 했는데 여기서 1로
@@ -24205,7 +24260,7 @@ extern "C" const char* mylib_version_string(void) {
     <div class="card">
       <h4 class="mini" style="margin-top:0">한글이 깨지지 않게</h4>
       <pre class="code" data-lang="python"><code>import ctypes
-from ctypes import c_char_p, c_int32, create_string_buffer, byref
+from ctypes import c_char_p, c_int32, c_void_p, POINTER, create_string_buffer, byref
 
 # C 문자열은 '바이트'입니다. 인코딩을 반드시 명시하세요 ★
 lib.mylib_set_name.argtypes = [c_void_p, c_char_p]
@@ -24216,6 +24271,7 @@ lib.mylib_version_string.restype = c_char_p
 ver = lib.mylib_version_string().decode("utf-8")      # bytes → str
 
 # ① 호출자 버퍼 패턴
+lib.mylib_name.argtypes = [c_void_p, c_char_p, POINTER(c_int32)]
 size = c_int32(0)
 lib.mylib_name(h, None, byref(size))                  # 크기 조회
 buf = create_string_buffer(size.value)                # 버퍼 할당
@@ -24223,7 +24279,9 @@ lib.mylib_name(h, buf, byref(size))
 name = buf.value.decode("utf-8")                      # ★ .value 는 널까지
 
 # ② 라이브러리 할당 패턴 — 반드시 해제해야 합니다
+lib.mylib_name_alloc.argtypes = [c_void_p]
 lib.mylib_name_alloc.restype = c_void_p               # ★ c_char_p 아님!
+lib.mylib_string_free.argtypes = [c_void_p]           # ★ 없으면 포인터가 int(32비트)로 잘립니다
 p = lib.mylib_name_alloc(h)
 try:
     name = ctypes.cast(p, c_char_p).value.decode("utf-8")
@@ -24827,6 +24885,8 @@ _MAP = {
     -5: KeyboardInterrupt,
 }
 
+lib.mylib_last_error.restype = ctypes.c_char_p       # ★ 없으면 int 가 와서 .decode 에서 실패
+
 def _check(rc: int) -&gt; None:
     if rc == 0:
         return
@@ -24876,7 +24936,8 @@ MYLIB_EXPORT int32_t mylib_run(const mylib_config* c);
     ...
 }
 //  → 옛 프로그램이 새 .so 를 써도 안전하고,
-//    새 프로그램이 옛 .so 를 쓰면 구조체가 커서 에러로 걸립니다</code></pre>
+//    새 프로그램이 옛 .so 를 쓰면, 옛 구현이 '모르는 큰 크기'를 거부하게
+//    짜여 있을 때만 에러로 걸립니다 (아니면 mode 가 조용히 무시됩니다)</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">버전 조회와 기능 탐지</h4>
@@ -24981,7 +25042,7 @@ git checkout v1.0 -- tests/
       <pre class="code" data-lang="c"><code>/* ① 새 이름으로 함수를 추가하고 옛 것은 유지 (가장 흔한 방법) ★ */
 MYLIB_EXPORT int32_t mylib_run(const mylib_config*);        /* v1 */
 MYLIB_EXPORT int32_t mylib_run_ex(const mylib_config*, int32_t flags); /* v2 */
-/*   Win32 API 가 CreateFileEx · GetVersionEx 로 해 온 방식입니다   */
+/*   Win32 API 가 CreateWindowEx · GetVersionEx 로 해 온 방식입니다   */
 
 /* ② 옛 함수는 새 것을 부르게 구현 — 코드 중복 없음 */
 int32_t mylib_run(const mylib_config* c) {
@@ -24997,7 +25058,8 @@ int32_t mylib_run(const mylib_config* c) {
   #define MYLIB_DEPRECATED
 #endif
 
-MYLIB_DEPRECATED MYLIB_EXPORT int32_t mylib_run(const mylib_config*);
+MYLIB_EXPORT MYLIB_DEPRECATED int32_t mylib_run(const mylib_config*);
+/*   ↑ extern "C" 앞에는 속성을 둘 수 없어 MYLIB_EXPORT 뒤에 붙입니다 */
 
 /* ④ 폐기 일정을 문서에 명시
       "mylib_run 은 2.0 에서 폐기 예고, 3.0 에서 제거 예정" */</code></pre>
@@ -25069,7 +25131,8 @@ import java.lang.invoke.MethodHandle;
 
 // ★ JNI 는 이제 마지막 수단입니다. FFM(Panama)이 표준이 됐습니다.
 try (Arena arena = Arena.ofConfined()) {
-    SymbolLookup lib = SymbolLookup.libraryLookup("mylib", arena);
+    SymbolLookup lib = SymbolLookup.libraryLookup(
+        System.mapLibraryName("mylib"), arena);   // → libmylib.so · mylib.dll
     Linker linker = Linker.nativeLinker();
 
     MethodHandle smooth = linker.downcallHandle(
@@ -25078,7 +25141,7 @@ try (Arena arena = Arena.ofConfined()) {
             ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
             ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
 
-    MemorySegment in  = arena.allocateArray(ValueLayout.JAVA_DOUBLE, data);
+    MemorySegment in  = arena.allocateFrom(ValueLayout.JAVA_DOUBLE, data);   // Java 22+
     MemorySegment out = arena.allocate(ValueLayout.JAVA_DOUBLE, data.length);
 
     int rc = (int) smooth.invokeExact(in, (long) data.length, out, 3);
@@ -25109,6 +25172,9 @@ import (
 )
 
 func Smooth(in []float64, window int) ([]float64, error) {
+    if len(in) == 0 {
+        return []float64{}, nil   // &amp;in[0] 은 빈 슬라이스에서 패닉
+    }
     out := make([]float64, len(in))
     rc := C.mylib_smooth(
         (*C.double)(unsafe.Pointer(&amp;in[0])),
@@ -25411,7 +25477,7 @@ g++ -S main.i -o main.s
 g++ -c main.cpp -o main.o
 nm -C main.o
 #   T main            ← 내가 제공 (Text = 코드)
-#   U std::printf     ← 내가 필요로 함 (Undefined) ★
+#   U printf          ← 내가 필요로 함 (Undefined) ★
 
 # ④ 링크 — 여러 .o 와 라이브러리를 이어 붙여 실행 파일로
 g++ main.o util.o -lpthread -o app
@@ -25653,7 +25719,8 @@ target_link_libraries(app PRIVATE core)  # ★ include 경로가 자동으로 �
 # 경고 켜기 (컴파일러별로)
 target_compile_options(core PRIVATE
     $&lt;$&lt;CXX_COMPILER_ID:MSVC&gt;:/W4&gt;
-    $&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall -Wextra -Wpedantic&gt;)
+    "$&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall;-Wextra;-Wpedantic&gt;")
+#   ↑ 여러 플래그는 따옴표 + ';' 로 — 공백으로 쓰면 표현식이 쪼개져 오류
 
 # 테스트
 enable_testing()
@@ -25729,7 +25796,7 @@ target_include_directories(core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})</code></pre
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">CMakePresets — 명령을 짧게 ★</h4>
-      <pre class="code" data-lang="json"><code>// CMakePresets.json  (CMake 3.19+)
+      <pre class="code" data-lang="json"><code>// CMakePresets.json  ("version": 3 은 CMake 3.21+ · 프리셋 자체는 3.19+)
 {
   "version": 3,
   "configurePresets": [
@@ -25760,7 +25827,12 @@ target_include_directories(core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})</code></pre
   ],
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev" },
-    { "name": "release", "configurePreset": "release" }
+    { "name": "release", "configurePreset": "release" },
+    { "name": "asan", "configurePreset": "asan" }
+  ],
+  "testPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "asan", "configurePreset": "asan" }
   ]
 }</code></pre>
       <pre class="code" data-lang="bash"><code>cmake --preset dev &amp;&amp; cmake --build --preset dev
@@ -26307,7 +26379,8 @@ assert(v == 3);
 // 표준 라이브러리의 디버그 검사
 //   MSVC : Debug 빌드에서 반복자 검사가 기본으로 켜집니다 (느립니다)
 //   libstdc++ : -D_GLIBCXX_DEBUG 로 켜기 ★ 개발 중에 유용
-//   libc++    : -D_LIBCPP_ENABLE_ASSERTIONS=1
+//   libc++    : -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG
+//               (LLVM 18+ · 옛 -D_LIBCPP_ENABLE_ASSERTIONS=1 은 폐기)
 //   → v[100] 같은 범위 초과를 UB 대신 명확한 에러로 잡아 줍니다</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>파이썬 모듈에서 특히 중요합니다</b> — <code>assert</code> 로만 막아 둔
@@ -26351,13 +26424,13 @@ add_library(project_options INTERFACE)
 target_compile_features(project_options INTERFACE cxx_std_20)
 
 target_compile_options(project_options INTERFACE
-    $&lt;$&lt;CXX_COMPILER_ID:MSVC&gt;:/W4 /permissive- /utf-8&gt;
-    $&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall -Wextra -Wshadow -Wnon-virtual-dtor&gt;)
+    "$&lt;$&lt;CXX_COMPILER_ID:MSVC&gt;:/W4;/permissive-;/utf-8&gt;"
+    "$&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall;-Wextra;-Wshadow;-Wnon-virtual-dtor&gt;")
+#   ★ 플래그 여러 개는 따옴표로 감싸고 ';' 로 구분 (공백·줄바꿈이면 표현식이 깨집니다)
 
 # 릴리즈에만 보호 옵션
 target_compile_options(project_options INTERFACE
-    $&lt;$&lt;AND:$&lt;CONFIG:Release&gt;,$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;&gt;:
-        -D_FORTIFY_SOURCE=3 -fstack-protector-strong&gt;)
+    "$&lt;$&lt;AND:$&lt;CONFIG:Release&gt;,$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;&gt;:-D_FORTIFY_SOURCE=3;-fstack-protector-strong&gt;")
 
 # 모든 타깃에 붙이기
 target_link_libraries(core PRIVATE project_options)
@@ -26408,7 +26481,7 @@ perf record -g ./build/release/bench
 int n;                    // Release 에서는 쓰레기 값
 
 // ② 부호 있는 오버플로
-if (n + 1 < n) { }        // Release 에서 이 검사가 삭제됩니다
+if (n + 1 &lt; n) { }        // Release 에서 이 검사가 삭제됩니다
 
 // ③ 널 체크 순서
 int x = *p; if (!p) return;   // Release 에서 널 검사가 사라집니다
@@ -26600,6 +26673,7 @@ elseif(APPLE)
     target_sources(core PRIVATE src/platform_mac.cpp)
     target_link_libraries(core PRIVATE "-framework CoreFoundation")
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0")     # ★ 지원할 최소 버전
+    #   ⚠ 원래는 첫 project() 보다 먼저(또는 -D·프리셋으로) 정해야 확실히 적용됩니다
 else()
     target_sources(core PRIVATE src/platform_posix.cpp)
     target_link_libraries(core PRIVATE pthread dl)
@@ -26664,6 +26738,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: lukka/get-cmake@latest
+      - uses: ilammy/msvc-dev-cmd@v1          # ★ Ninja + cl 은 MSVC 환경이 먼저 잡혀야 합니다
+        if: runner.os == 'Windows'
       - name: 설정 · 빌드 · 테스트
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -27016,6 +27092,10 @@ twine check dist/*</code></pre>
 [build-system]
 requires = ["scikit-build-core", "pybind11", "setuptools-scm"]
 
+[project]
+name = "fastmod"
+dynamic = ["version"]          # ★ version 을 적지 않고 '동적'이라고 선언
+
 [tool.scikit-build]
 metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
 
@@ -27166,6 +27246,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: lukka/get-cmake@latest
+      - uses: ilammy/msvc-dev-cmd@v1          # 윈도우: cl 을 PATH 에
+        if: runner.os == 'Windows'
       - run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
         env: { CXX: '${{ matrix.cxx }}' }
       - run: cmake --build build
@@ -27194,7 +27276,7 @@ jobs:
           run-clang-tidy -p build -quiet src/
 
       # 헤더 정리
-      - run: include-what-you-use -p build src/core.cpp</code></pre>
+      - run: iwyu_tool.py -p build src/core.cpp   # compile_commands.json 을 읽는 래퍼</code></pre>
       <pre class="code" data-lang="yaml"><code># .clang-format — 팀 규칙을 파일 하나로
 BasedOnStyle: Google
 IndentWidth: 4
@@ -27239,6 +27321,7 @@ repos:
         name: cmake-format
         entry: cmake-format -i
         language: python
+        additional_dependencies: [cmakelang]   # cmake-format 이 든 패키지
         files: CMakeLists.txt|\.cmake$</code></pre>
       <pre class="code" data-lang="bash"><code>pip install pre-commit &amp;&amp; pre-commit install
 pre-commit run --all-files          # 처음 도입할 때 전체 적용
@@ -27277,9 +27360,12 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs</code></pre>
           cmake --build build --target install
           tar czf mylib-${{ matrix.os }}.tar.gz -C install .
       - uses: actions/upload-artifact@v4
-        with: { path: 'wheelhouse/*.whl
-                      prebuilds/**
-                      mylib-*.tar.gz' }
+        with:
+          name: release-${{ matrix.os }}       # v4 는 이름이 겹치면 실패
+          path: |                              # ★ 여러 경로는 블록(|)으로 — 따옴표 안 줄바꿈은 공백이 됨
+            wheelhouse/*.whl
+            prebuilds/**
+            mylib-*.tar.gz
 
   publish:
     needs: [release]
@@ -27289,6 +27375,7 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs</code></pre>
       - uses: actions/download-artifact@v4
         with: { path: dist, merge-multiple: true }
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with: { packages-dir: dist/wheelhouse/ }   # PyPI 에는 wheel 만
       - uses: softprops/action-gh-release@v2
         with: { files: 'dist/*' }</code></pre>
     </div>
@@ -27512,7 +27599,8 @@ if(APPLE)
         INSTALL_RPATH "@loader_path;@loader_path/../lib")
 endif()
 
-install(TARGETS app RUNTIME DESTINATION bin)
+install(TARGETS app RUNTIME_DEPENDENCY_SET deps   # ★ 아래 deps 집합에 등록
+        RUNTIME DESTINATION bin)
 install(TARGETS core LIBRARY DESTINATION lib)
 
 # 의존 라이브러리까지 함께 설치 (CMake 3.21+)
@@ -27860,8 +27948,9 @@ end</code></pre>
       </ul>
       <pre class="code" data-lang="cpp"><code>// 임시 진단 매크로 — 릴리즈에서 사라지게
 #ifndef NDEBUG
-  #define TRACE(...) std::fprintf(stderr, "[%s:%d] " __VA_ARGS__, \
-                                  __FILE__, __LINE__)
+  #define TRACE(fmt, ...) std::fprintf(stderr, "[%s:%d] " fmt, \
+                                  __FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__)
+  //   ★ 파일·줄 번호가 형식 문자열의 %s:%d 와 순서가 맞게 먼저 옵니다 (C++20 __VA_OPT__)
 #else
   #define TRACE(...) ((void)0)
 #endif
@@ -27930,7 +28019,7 @@ readelf -n app | grep "Build ID"
       <h4 class="mini" style="margin-top:0">스크립트로 자동화</h4>
       <pre class="code" data-lang="python"><code># gdb 는 파이썬으로 확장할 수 있습니다
 # mypretty.py
-import gdb
+import gdb.printing          # ★ 하위 모듈은 따로 import 해야 합니다
 
 class EnginePrinter:
     def __init__(self, val): self.val = val
@@ -28128,10 +28217,12 @@ export TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1"
 export ASAN_SYMBOLIZER_PATH=$(which llvm-symbolizer)
 
 # 특정 함수·파일을 검사에서 제외 (서드파티 코드 등)
-# suppressions.txt
+# lsan.supp
 #   leak:libthirdparty.so
-#   race:known_benign_function
 export LSAN_OPTIONS="suppressions=$PWD/lsan.supp"
+# tsan.supp (데이터 경쟁은 TSan 쪽 파일에)
+#   race:known_benign_function
+export TSAN_OPTIONS="suppressions=$PWD/tsan.supp"
 
 # 소스 수준에서 제외
 __attribute__((no_sanitize("address"))) void raw_access() { ... }</code></pre>
@@ -28166,7 +28257,7 @@ __attribute__((no_sanitize("address"))) void raw_access() { ... }</code></pre>
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
           TSAN_OPTIONS: halt_on_error=1</code></pre>
       <pre class="code" data-lang="bash"><code># 파이썬 확장 검사 (🐍 y12)
-CFLAGS="-fsanitize=address -g" pip install -e . --no-build-isolation
+CXXFLAGS="-fsanitize=address -g" pip install -e . --no-build-isolation   # C++ 확장이라 CXXFLAGS
 PYTHONMALLOC=malloc \
   LD_PRELOAD=$(gcc -print-file-name=libasan.so) \
   ASAN_OPTIONS=detect_leaks=0 \
@@ -28228,7 +28319,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       <pre class="code" data-lang="bash"><code># Sanitizer 는 운영에 쓰기엔 무겁습니다. 대안:
 
 # ① 하드웨어 지원 (ARM64)
--fsanitize=hwaddress          # HWASan — 메모리 2배 정도로 훨씬 가벼움
+-fsanitize=hwaddress          # HWASan — 메모리 부담 수십 % 수준으로 ASan 보다 훨씬 가벼움
 # ARM MTE(Memory Tagging) 지원 기기에서는 거의 무비용 ★
 
 # ② GWP-ASan — 확률적 샘플링 방식

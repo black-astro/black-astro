@@ -1,0 +1,656 @@
+diff --git a/web/guide-src/cpp/parts/panes/11-app.html b/web/guide-src/cpp/parts/panes/11-app.html
+index bdb7083..6f56ac8 100644
+--- a/web/guide-src/cpp/parts/panes/11-app.html
++++ b/web/guide-src/cpp/parts/panes/11-app.html
+@@ -221,7 +221,7 @@ g10  Win32 · WinUI 3  트레이 · 자동 시작 · C++/WinRT
+ g11  성능·아키텍처    MVVM · 스레드 분리 · 수백만 행
+ g12  실전 프로젝트  ★ 로그 뷰어를 배포까지</code></pre>
+       <div class="note info" style="margin-bottom:0">
+-        <b>시간이 없다면</b> — ★ 다섯 개(g01·g02·g03·g06·g07·g12)만 읽어도
++        <b>시간이 없다면</b> — ★ 여섯 개(g01·g02·g03·g06·g07·g12)만 읽어도
+         “앱을 만들어 설치 파일로 건네준다”는 한 바퀴가 돕니다.
+         나머지는 필요해질 때 돌아와 읽는 참고서로 쓰세요.
+       </div>
+@@ -608,6 +608,7 @@ cmake --build --preset win-msvc
+       <pre class="code" data-lang="cpp"><code>// main.cpp
+ #include &lt;QApplication&gt;
+ #include &lt;QPushButton&gt;
++#include &lt;QDebug&gt;
+ 
+ int main(int argc, char *argv[]) {
+     QApplication app(argc, argv);   // ① 반드시 첫 줄. 스타일·폰트·이벤트 큐를 세웁니다
+@@ -646,12 +647,14 @@ sys.exit(app.exec())                # ④ 같습니다</code></pre>
+       <pre class="code" data-lang="cpp"><code>// ① 부모가 있으면 → 부모가 죽을 때 자식도 delete 됩니다
+ auto *win  = new QMainWindow;            // 부모 없음 → 내가 책임
+ auto *btn  = new QPushButton("확인", win);  // 부모 = win → win 이 지움
+-// delete btn;  ← 쓰면 안 됩니다. 이중 해제로 크래시
++// delete btn;  ← 해도 안전합니다(지워지면서 부모 목록에서 빠짐). 다만 보통은 부모에게 맡깁니다
+ 
+ // ② 레이아웃에 넣어도 부모가 자동으로 잡힙니다 ★ 실무에서 이게 대부분
+ auto *layout = new QVBoxLayout;
+ layout-&gt;addWidget(new QPushButton("A"));   // 부모가 여기서 정해집니다
+-win-&gt;centralWidget()-&gt;setLayout(layout);
++auto *central = new QWidget;               // ★ 새 QMainWindow 는 centralWidget() 이 nullptr
++win-&gt;setCentralWidget(central);            //   먼저 만들어 붙여야 합니다
++central-&gt;setLayout(layout);
+ 
+ // ③ 스택에 두는 것도 완전히 정상입니다 (작은 창 · 다이얼로그)
+ void openDialog(QWidget *parent) {
+@@ -670,7 +673,7 @@ if (weak) weak-&gt;show();                 // 죽은 포인터 접근을 막습
+         <b>가장 흔한 초보 사고 두 가지</b> —
+         ① <b>스택에 만든 위젯을 함수 끝에서 잃어버림</b>: <code>QPushButton b; b.show();</code> 를
+         함수 안에 쓰면 함수가 끝나는 순간 창이 사라집니다.
+-        ② <b>부모 있는 자식을 <code>delete</code></b>: 부모가 다시 지우면서 크래시합니다.
++        ② <b>스택에 만든 위젯에 부모를 줌</b>: <code>QPushButton b(win);</code> 처럼 두면 부모가 먼저 죽을 때 스택 객체를 <code>delete</code> 하려다 크래시합니다.
+         규칙은 <b>“<code>new</code> 할 때 부모를 주면 신경 끄고, 안 주면 내가 책임진다”</b> 하나뿐입니다.
+       </div>
+     </div>
+@@ -715,7 +718,7 @@ class QListWidget;
+ 
+ class MainWindow : public QMainWindow {
+     Q_OBJECT          // ★ 이 매크로가 있어야 시그널/슬롯이 생깁니다
+-                      //   빠뜨리면 "undefined reference to vtable" 링크 에러
++                      //   붙였는데 moc 가 안 돌면 "undefined reference to vtable" 링크 에러
+ public:
+     explicit MainWindow(QWidget *parent = nullptr);
+ 
+@@ -842,6 +845,7 @@ public:
+         static const char *h[] = {"이름", "크기", "수정 시각"};
+         return QString::fromUtf8(h[s]);
+     }
++    const Row &amp;rowAt(int i) const { return m_rows[i]; }   // 원본 행 꺼내기
+ private:
+     std::vector&lt;Row&gt; m_rows;
+ };</code></pre>
+@@ -1233,7 +1237,7 @@ engine.rootContext()-&gt;setContextProperty("backend", &amp;backend);
+ #include &lt;QQuickWidget&gt;
+ auto *qw = new QQuickWidget(this);
+ qw-&gt;setResizeMode(QQuickWidget::SizeRootObjectToView);
+-qw-&gt;setSource(QUrl("qrc:/App/Chart.qml"));
++qw-&gt;setSource(QUrl("qrc:/qt/qml/App/Chart.qml"));   // Qt 6.5+ 정책: /qt/qml/&lt;URI&gt;/
+ dockLayout-&gt;addWidget(qw);            // 그냥 위젯처럼 다룹니다
+ 
+ // 반대로 QML 안에 위젯은 못 넣습니다 (씬 그래프가 달라서)</code></pre>
+@@ -1350,6 +1354,8 @@ void MainWindow::loadFile(const QString &amp;path) {
+ auto future = QtConcurrent::mapped(paths, &amp;makeThumbnail);
+ 
+ auto *watcher = new QFutureWatcher&lt;QImage&gt;(this);
++connect(watcher, &amp;QFutureWatcherBase::progressRangeChanged,     // 범위(0~항목 수)부터
++        ui-&gt;progressBar, &amp;QProgressBar::setRange);
+ connect(watcher, &amp;QFutureWatcherBase::progressValueChanged,
+         ui-&gt;progressBar, &amp;QProgressBar::setValue);
+ connect(watcher, &amp;QFutureWatcherBase::finished, this, [=]{
+@@ -1485,7 +1491,7 @@ QCoreApplication::setApplicationName("LogViewer");
+ 
+ // 저장 위치는 OS 관례를 알아서 따릅니다
+ //   윈도우 : HKEY_CURRENT_USER\Software\Acme\LogViewer  (레지스트리)
+-//   macOS  : ~/Library/Preferences/com.acme.LogViewer.plist
++//   macOS  : ~/Library/Preferences/example.acme.LogViewer.plist  (도메인을 뒤집은 이름)
+ //   Linux  : ~/.config/Acme/LogViewer.conf
+ 
+ void MainWindow::closeEvent(QCloseEvent *e) {
+@@ -1690,11 +1696,14 @@ mkdir dist
+ copy build\Release\app.exe dist\
+ 
+ # ③ windeployqt 실행 — 필요한 걸 알아서 채웁니다
++#    --no-translations : 다국어를 안 쓰면 크기를 줄입니다
++#    --no-opengl-sw    : 소프트웨어 OpenGL 제외 (20MB 절약)
++#    (cmd 의 줄 잇기 ^ 는 반드시 줄 끝 — 뒤에 주석을 붙이면 깨집니다)
+ C:\Qt\6.8.3\msvc2022_64\bin\windeployqt.exe ^
+     --release ^
+-    --no-translations ^          # 다국어를 안 쓰면 크기를 줄입니다
++    --no-translations ^
+     --no-system-d3d-compiler ^
+-    --no-opengl-sw ^             # 소프트웨어 OpenGL 제외 (20MB 절약)
++    --no-opengl-sw ^
+     dist\app.exe
+ 
+ # QML 앱이면 QML 파일 위치를 알려 줘야 합니다 ★
+@@ -1713,6 +1722,7 @@ if(WIN32)
+ endif()
+ 
+ # Qt 6.5+ 에는 표준 설치 스크립트 생성기도 있습니다
++install(TARGETS app RUNTIME DESTINATION . BUNDLE DESTINATION .)   # ★ 앱 자체도 설치 대상으로
+ qt_generate_deploy_app_script(TARGET app OUTPUT_SCRIPT deploy_script
+                               NO_UNSUPPORTED_PLATFORM_ERROR)
+ install(SCRIPT ${deploy_script})
+@@ -1843,10 +1853,11 @@ codesign --deep --force --options runtime \
+ git clone --branch v6.8.3 https://code.qt.io/qt/qt5.git qt6
+ cd qt6 &amp;&amp; perl init-repository --module-subset=qtbase,qtsvg,qttools
+ 
+-..\qt6\configure -static -release -prefix C:\Qt-static \
+-    -nomake examples -nomake tests \
+-    -skip qtwebengine -no-opengl-sw \
+-    -static-runtime            # MSVC /MT — VC 런타임까지 안으로
++# -static-runtime : MSVC /MT — VC 런타임까지 안으로  (cmd 는 줄 잇기가 ^)
++..\qt6\configure -static -release -prefix C:\Qt-static ^
++    -nomake examples -nomake tests ^
++    -skip qtwebengine -no-opengl-sw ^
++    -static-runtime
+ 
+ cmake --build . --parallel     # ★ 30분 ~ 2시간 걸립니다
+ 
+@@ -1995,7 +2006,7 @@ target_link_libraries(imgui_tool PRIVATE
+     imgui::imgui glfw glad::glad)</code></pre>
+       <pre class="code" data-lang="bash"><code># vcpkg 툴체인만 알려 주면 의존성을 알아서 받아 빌드합니다
+ cmake -B build -S . \
+-  -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake
++  -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+ cmake --build build
+ 
+ # vcpkg 를 안 쓰고 소스를 직접 넣어도 됩니다 — 이게 원래 방식입니다
+@@ -2377,7 +2388,7 @@ int main(int, char**) {
+         SDL_RenderFillRect(ren, &amp;player);
+ 
+         SDL_SetRenderDrawColor(ren, 200, 200, 210, 255);
+-        SDL_RenderDebugText(ren, 12, 12, "화살표로 이동 / ESC 종료");  // 디버그용
++        SDL_RenderDebugText(ren, 12, 12, "Arrows: move / ESC: quit");  // 디버그용 (내장 폰트는 ASCII 만)
+ 
+         SDL_RenderPresent(ren);               // 화면에 내보내기
+     }
+@@ -2453,6 +2464,7 @@ void SDL_AppQuit(void *state, SDL_AppResult) { delete static_cast&lt;App*&gt;(st
+       <h4 class="mini" style="margin-top:0">완성된 미니 게임 — 그대로 도는 코드 ★</h4>
+       <pre class="code" data-lang="cpp"><code>// vcpkg install raylib  /  find_package(raylib CONFIG REQUIRED)
+ #include "raylib.h"
++#include "raymath.h"                        // Clamp
+ #include &lt;vector&gt;
+ #include &lt;cstdlib&gt;
+ 
+@@ -3228,6 +3240,7 @@ server-&gt;listen("MyTool");</code></pre>
+ #include &lt;winrt/Windows.Foundation.h&gt;
+ #include &lt;winrt/Windows.Storage.h&gt;
+ #include &lt;winrt/Windows.UI.Notifications.h&gt;
++#include &lt;winrt/Windows.Data.Xml.Dom.h&gt;     // XmlDocument
+ 
+ using namespace winrt;
+ using namespace Windows::Storage;
+@@ -3393,6 +3406,8 @@ struct LogStore {
+ class LogModel : public QAbstractTableModel {
+     Q_OBJECT
+ public:
++    explicit LogModel(const LogStore &amp;s, QObject *parent = nullptr)
++        : QAbstractTableModel(parent), m_s(s) {}
+     int rowCount(const QModelIndex&amp; = {}) const override
+         { return int(m_visible.size()); }        // 필터 결과 인덱스만 보관
+     int columnCount(const QModelIndex&amp; = {}) const override { return 3; }
+@@ -3772,6 +3787,10 @@ set_target_properties(logviewer PROPERTIES
+     WIN32_EXECUTABLE $&lt;NOT:$&lt;CONFIG:Debug&gt;&gt;   # Debug 는 콘솔 유지 ★
+     MACOSX_BUNDLE ON)
+ 
++# main.cpp 의 APP_VERSION — release.sh 가 -DAPP_VERSION=… 으로 덮어씁니다
++set(APP_VERSION "${PROJECT_VERSION}" CACHE STRING "앱 버전")
++target_compile_definitions(logviewer PRIVATE APP_VERSION="${APP_VERSION}")
++
+ # ── 테스트 (core 만 테스트합니다)
+ enable_testing()
+ find_package(Qt6 COMPONENTS Test)
+@@ -3796,6 +3815,8 @@ install(SCRIPT ${deploy})</code></pre>
+ #pragma once
+ #include &lt;QFile&gt;
+ #include &lt;QString&gt;
++#include &lt;atomic&gt;
++#include &lt;functional&gt;
+ #include &lt;vector&gt;
+ 
+ struct LineRef { quint64 offset; quint32 len; quint8 level; qint64 ts; };
+@@ -3814,8 +3835,8 @@ public:
+     const LineRef&amp; ref(size_t i) const { return m_lines[i]; }
+ 
+     // 워커에서 호출 — 진행률 콜백과 취소 플래그를 받습니다
+-    template &lt;class Fn&gt;
+-    bool index(Fn onProgress, const std::atomic_bool &amp;cancel);
++    //   (템플릿으로 두면 정의를 헤더에 둬야 하므로 std::function 으로 받습니다)
++    bool index(const std::function&lt;void(int)&gt; &amp;onProgress, const std::atomic_bool &amp;cancel);
+ 
+ private:
+     QFile                 m_file;
+@@ -3833,8 +3854,7 @@ bool LogStore::open(const QString &amp;path, QString *err) {
+     return true;
+ }
+ 
+-template &lt;class Fn&gt;
+-bool LogStore::index(Fn onProgress, const std::atomic_bool &amp;cancel) {
++bool LogStore::index(const std::function&lt;void(int)&gt; &amp;onProgress, const std::atomic_bool &amp;cancel) {
+     m_lines.clear();
+     m_lines.reserve(size_t(m_size / 120));   // 평균 줄 길이로 미리 확보 ★
+     const char *p = reinterpret_cast&lt;const char*&gt;(m_map);
+@@ -3855,6 +3875,7 @@ bool LogStore::index(Fn onProgress, const std::atomic_bool &amp;cancel) {
+             onProgress(int(i * 100 / m_size));
+         }
+     }
++    // (파일이 \n 으로 끝나지 않으면 마지막 줄 [start, m_size) 도 한 번 더 push 해야 합니다)
+     return true;
+ }</code></pre>
+       <div class="note info" style="margin-bottom:0">
+@@ -4018,7 +4039,7 @@ VERSION="${1:?사용법: release.sh 1.0.0}"
+ 
+ cmake --preset win-release -DAPP_VERSION="$VERSION"
+ cmake --build --preset win-release
+-ctest --preset win-release --output-on-failure      # ★ 테스트가 실패하면 여기서 멈춤
++ctest --test-dir build/rel --output-on-failure      # ★ 테스트가 실패하면 여기서 멈춤
+ 
+ rm -rf dist &amp;&amp; mkdir dist
+ cmake --install build/rel --prefix dist             # windeployqt 가 여기서 돕니다
+@@ -4048,16 +4069,18 @@ jobs:
+           version: '6.8.3'
+           arch: 'win64_msvc2022_64'
+           modules: ''
++      - uses: ilammy/msvc-dev-cmd@v1             # Ninja 생성기는 cl.exe 환경이 필요합니다
+       - name: Configure
++        env: { QTDIR: '${{ env.QT_ROOT_DIR }}' }   # 프리셋이 $env{QTDIR} 를 읽습니다
+         run: cmake --preset win-release -DAPP_VERSION=${{ github.ref_name }}
+       - name: Build
+         run: cmake --build --preset win-release
+       - name: Test
+-        run: ctest --preset win-release --output-on-failure
++        run: ctest --test-dir build/rel --output-on-failure
+       - name: Deploy
+         run: cmake --install build/rel --prefix dist
+       - name: Installer
+-        run: '&amp; "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" setup.iss'
++        run: '&amp; "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" setup.iss'
+       - uses: softprops/action-gh-release@v2
+         with:
+           files: Output/*.exe</code></pre>
+diff --git a/web/guide-src/cpp/parts/panes/13-game.html b/web/guide-src/cpp/parts/panes/13-game.html
+index 1a90a76..4178001 100644
+--- a/web/guide-src/cpp/parts/panes/13-game.html
++++ b/web/guide-src/cpp/parts/panes/13-game.html
+@@ -608,7 +608,7 @@ void on_recv(std::uint16_t s) {
+         recv_ack_  = s;
+     } else {                                   // 늦게 도착한 옛 패킷
+         std::uint16_t diff = recv_ack_ - s;
+-        if (diff &lt;= 32) recv_bits_ |= (1u &lt;&lt; (diff-1));
++        if (diff &gt;= 1 &amp;&amp; diff &lt;= 32) recv_bits_ |= (1u &lt;&lt; (diff-1));   // diff 0 = 중복 — 시프트 -1 은 UB
+     }
+ }
+ 
+@@ -928,7 +928,7 @@ if (env-&gt;body_type() == pk::Body::Snapshot) {
+         world.apply(e-&gt;id(), {e-&gt;pos()-&gt;x(), e-&gt;pos()-&gt;y()}, e-&gt;hp());
+ }
+ 
+-// ★ 단, 신뢰할 수 없는 입력에는 검증기를 반드시 돌립니다
++// ★ 단, 신뢰할 수 없는 입력에는 검증기를 반드시 돌립니다 — 위의 GetEnvelope 보다 '먼저'
+ flatbuffers::Verifier v(body.data(), body.size());
+ if (!pk::VerifyEnvelopeBuffer(v)) { kick(sess, "malformed"); return; }</code></pre>
+       <div class="note warn" style="margin-bottom:0">
+@@ -1211,7 +1211,7 @@ private:
+ // ── 서버 구동 ────────────────────────────────────────────────
+ int main() {
+     asio::io_context io;                        // 윈도우면 내부적으로 IOCP,
+-    tcp::acceptor acc(io, {tcp::v4(), 7777});   // 리눅스면 epoll/io_uring 을 씁니다
++    tcp::acceptor acc(io, {tcp::v4(), 7777});   // 리눅스면 epoll(옵션으로 io_uring) 을 씁니다
+ 
+     std::function&lt;void()&gt; accept_one = [&amp;] {
+         acc.async_accept([&amp;](auto ec, tcp::socket s) {
+@@ -1276,7 +1276,7 @@ std::unordered_map&lt;PlayerId, std::weak_ptr&lt;Session&gt;&gt; members_;</code
+       <pre class="code" data-lang="cpp"><code>// 틱마다 도는 타임아웃 검사 — 게임 서버의 필수 장치
+ void Room::check_timeouts(std::uint64_t now_ms) {
+     for (auto&amp; [id, p] : players_) {
+-        if (now_ms - p.last_packet_ms &gt; 15'000) {
++        if (p.state == PlayerState::Connected &amp;&amp; now_ms - p.last_packet_ms &gt; 15'000) {   // ★ 이미 끊긴 사람은 건너뜀
+             log_info("player {} timed out", id);
+             p.state = PlayerState::Disconnected;   // ★ 바로 지우지 않습니다
+             p.grace_until_ms = now_ms + 60'000;    // 60초 재접속 유예
+@@ -1417,9 +1417,9 @@ void Session::enqueue_to_room(std::uint16_t id, std::span&lt;const std::byte&gt;
+       <pre class="code" data-lang="cpp"><code>// 교착은 "A→B 로 잡는 스레드"와 "B→A 로 잡는 스레드"가 만나면 생깁니다
+ // 해결책은 단 하나 : 전역 순서를 정하고 예외 없이 지키기
+ 
+-// ① 주소 순서로 잡기 — std::scoped_lock 이 알아서 해 줍니다 (C++17)
++// ① 한 번에 잡기 — std::scoped_lock 이 알아서 해 줍니다 (C++17, 내부는 std::lock)
+ void trade(Player&amp; a, Player&amp; b) {
+-    std::scoped_lock lk(a.mx, b.mx);      // ★ 교착 회피 알고리즘 내장
++    std::scoped_lock lk(a.mx, b.mx);      // ★ 교착 회피 알고리즘 내장 (단, a 와 b 가 같은 객체면 UB)
+     // a.mx 먼저인지 b.mx 먼저인지 신경 쓸 필요가 없습니다
+ }
+ 
+@@ -1782,6 +1782,7 @@ void build_delta(const World&amp; w, ClientView&amp; cv, Writer&amp; out) {
+ }
+ 
+ // ③ 양자화 — float 4바이트를 2바이트로. 1cm 단위면 충분합니다
++//    단, int16 이라 ±327.67m 까지만 — 더 큰 맵은 셀(구역) 기준 상대 좌표를 양자화합니다
+ inline std::int16_t quantize(float m) { return std::int16_t(std::lround(m * 100)); }</code></pre>
+       <div class="note tip" style="margin-bottom:0">
+         <b>양자화 + 델타 + AoI 세 가지를 다 적용하면</b> 실측으로 대역폭이 <b>1/8~1/15</b> 로 떨어집니다.
+@@ -1933,7 +1934,7 @@ void Matcher::tick() {                     // 0.5초마다 돕니다
+         const int band = band_for(now - anchor.since_ms);
+ 
+         std::vector&lt;PlayerId&gt; team;
+-        for (auto&amp; c : pool) {                        // 정렬돼 있어 근처만 보면 됩니다
++        for (auto&amp; c : pool) {                        // since 순으로 다시 정렬했으므로 전체를 훑습니다
+             if (taken_.contains(c.id)) continue;
+             if (std::abs(c.mmr - anchor.mmr) &gt; band) continue;
+             team.push_back(c.id);
+@@ -2021,7 +2022,8 @@ void GameServer::on_join(Session&amp; s, const JoinReq&amp; req) {
+ 
+     auto info = parse(*j);
+     if (info.room != /* 이 서버가 가진 방 */ ) { s.close("wrong server"); return; }
+-    rooms_.at(info.room)-&gt;post([&amp;, pid = info.player] { room-&gt;join(pid, s.shared()); });
++    auto room = rooms_.at(info.room);
++    room-&gt;post([room, pid = info.player, sp = s.shared()] { room-&gt;join(pid, sp); });   // ★ s&amp; 가 아니라 shared_ptr 를 캡처
+ }
+ 
+ // ③ 재접속 : 방이 살아 있는 동안은 같은 플레이어로 다시 붙습니다
+@@ -2164,8 +2166,8 @@ void Room::flush_dirty(std::uint64_t now_ms) {
+ 
+ class DbPool {
+     struct Worker { std::jthread th; MYSQL* conn; };
+-    std::vector&lt;Worker&gt;                 workers_;
+-    moodycamel::BlockingConcurrentQueue&lt;std::vector&lt;SaveJob&gt;&gt; q_;
++    moodycamel::BlockingConcurrentQueue&lt;std::vector&lt;SaveJob&gt;&gt; q_;   // ★ workers_ 보다 먼저 선언
++    std::vector&lt;Worker&gt;                 workers_;   // (멤버는 역순 파괴 — 스레드 join 이 큐 파괴보다 먼저)
+ 
+ public:
+     explicit DbPool(int n, const DbCfg&amp; cfg) {
+@@ -2628,10 +2630,14 @@ bool Session::allow(std::uint16_t id, double now) {
+ // ── 재생 공격(replay) 방어 ──────────────────────────────
+ // 공격자가 예전에 캡처한 '스킬 사용' 패킷을 그대로 다시 보내는 공격입니다
+ bool Session::check_nonce(std::uint32_t seq) {
+-    if (seq &lt;= last_seq_ - 64) return false;         // 너무 오래된 것
++    if (last_seq_ &gt;= 64 &amp;&amp; seq &lt;= last_seq_ - 64) return false;   // 너무 오래된 것 (unsigned 언더플로 방지)
+     if (seq &lt;= last_seq_ &amp;&amp; (seen_bits_ &gt;&gt; (last_seq_ - seq)) &amp; 1)
+         return false;                                 // ★ 이미 본 번호
+-    if (seq &gt; last_seq_) { seen_bits_ &lt;&lt;= (seq - last_seq_); last_seq_ = seq; }
++    if (seq &gt; last_seq_) {
++        const auto d = seq - last_seq_;
++        seen_bits_ = d &gt;= 64 ? 0 : seen_bits_ &lt;&lt; d;   // 64 이상 시프트는 UB
++        last_seq_ = seq;
++    }
+     seen_bits_ |= 1ull &lt;&lt; (last_seq_ - seq);
+     return true;
+ }</code></pre>
+@@ -2926,6 +2932,7 @@ void GameServer::begin_drain() {
+ 
+ void GameServer::tick() {
+     ...
++    if (g_drain_requested &amp;&amp; state_ == ServerState::Ready) begin_drain();
+     if (state_ == ServerState::Draining &amp;&amp; rooms_.empty()) {
+         save_all_and_wait();          // 남은 데이터 저장
+         state_ = ServerState::Empty;
+@@ -2934,7 +2941,9 @@ void GameServer::tick() {
+ }
+ 
+ // SIGTERM 을 받으면 드레인을 시작합니다 (K8s 가 보내는 신호)
+-std::signal(SIGTERM, [](int){ g_server-&gt;begin_drain(); });
++// ★ 핸들러 안에서는 플래그만 세웁니다 — 로그·할당·락은 시그널 안전하지 않습니다 (n13 은 asio::signal_set)
++volatile std::sig_atomic_t g_drain_requested = 0;
++std::signal(SIGTERM, [](int){ g_drain_requested = 1; });
+ // terminationGracePeriodSeconds 를 매치 최대 길이보다 길게 두세요 ★</code></pre>
+       <pre class="code" data-lang="yaml"><code># Agones — 게임 서버 전용 K8s 오케스트레이터
+ apiVersion: "agones.dev/v1"
+@@ -2970,6 +2979,7 @@ struct BalanceTable { /* 무기·스킬·드랍 수치 전부 */ };
+ 
+ class Config {
+     std::shared_ptr&lt;const BalanceTable&gt; cur_;      // ★ 읽기는 락 없이
++    // (자유 함수 std::atomic_load/store 는 C++20 부터 deprecated — 후계는 std::atomic&lt;std::shared_ptr&lt;T&gt;&gt;)
+ public:
+     std::shared_ptr&lt;const BalanceTable&gt; get() const {
+         return std::atomic_load(&amp;cur_);            // 스냅샷을 잡습니다
+@@ -3204,6 +3214,7 @@ struct PlayerSlot {
+     std::uint16_t            hp = 100;
+     std::uint32_t            last_input_seq = 0;   // ★ ack_input 으로 돌려줄 값
+     std::uint64_t            last_packet_ms = 0;
++    std::uint64_t            last_fire_ms = 0;     // 쿨다운 (on_fire)
+     ClientView               view;                 // 델타 기준 (n07)
+     BehaviorProfile          prof;                 // 이상 탐지 (n11)
+     std::uint32_t            dirty = 0;            // 저장 대상 (n09)
+@@ -3325,7 +3336,7 @@ private:
+             while (!st.stop_requested()) {
+                 auto t0 = std::chrono::steady_clock::now();
+                 rooms.tick_shard(i, nw);                   // 이 워커가 맡은 방만
+-                metrics.tick.record(elapsed_us(t0));
++                metrics.record_tick(i, elapsed_us(t0));    // ★ 워커별 히스토그램 — 공유 하나에 여럿이 쓰면 데이터 레이스
+                 next += dt;
+                 sleep_until_precise(next);                 // n02
+             }
+diff --git a/web/guide-src/cpp/parts/panes/14-hpc.html b/web/guide-src/cpp/parts/panes/14-hpc.html
+index fcdfeb8..5206c1b 100644
+--- a/web/guide-src/cpp/parts/panes/14-hpc.html
++++ b/web/guide-src/cpp/parts/panes/14-hpc.html
+@@ -508,7 +508,7 @@ struct Warmer {
+ // 'pretend' 는 send 직전까지 — 직렬화 · 체크섬 · 버퍼 복사까지 —
+ // 똑같이 수행해야 의미가 있습니다.</code></pre>
+       <div class="note tip" style="margin-bottom:0">
+-        <b>실측</b> — 워밍 없는 첫 주문 <b>18µs</b> → 초당 수백 번 워밍한 뒤 <b>1.2µs</b>.
++        <b>실측 예</b> — 워밍 없는 첫 주문 <b>18µs</b> → 초당 수백 번 워밍한 뒤 <b>1.2µs</b>.
+         코드는 한 줄도 안 바뀌었고 <b>캐시 상태만 달라졌습니다</b>.
+       </div>
+     </div>
+@@ -751,7 +751,7 @@ std::atomic&lt;TaggedPtr&gt; head;      // -mcx16 필요 (cmpxchg16b)
+ // 해법 ② hazard pointer — "지금 이 포인터를 보고 있다"고 게시
+ //   각 스레드가 자기 슬롯에 주소를 적어 두고,
+ //   해제하려는 쪽은 모든 슬롯을 훑어 아무도 안 보면 그때 delete
+-//   C++26 에 std::hazard_pointer 로 표준화 진행 중이며,
++//   C++26 에 std::hazard_pointer 로 채택됐지만 구현이 아직 드물어,
+ //   지금은 folly::hazptr 나 libcds 를 씁니다.
+ 
+ // 해법 ③ epoch 기반 회수 — 세대 번호로 묶어서 나중에 한꺼번에 해제
+@@ -938,8 +938,8 @@ class Arena {
+     size_t     cur_ = 0;
+ public:
+     explicit Arena(size_t bytes)
+-        : base_(static_cast&lt;std::byte*&gt;(::operator new(bytes))), cap_(bytes) {}
+-    ~Arena() { ::operator delete(base_); }
++        : base_(static_cast&lt;std::byte*&gt;(::operator new(bytes, std::align_val_t{64}))), cap_(bytes) {}
++    ~Arena() { ::operator delete(base_, std::align_val_t{64}); }   // ★ 시작 주소도 64 정렬 — 오프셋 정렬이 곧 주소 정렬
+     Arena(const Arena&amp;) = delete;
+     Arena&amp; operator=(const Arena&amp;) = delete;
+ 
+@@ -982,7 +982,7 @@ void handle(const Request&amp; r) {
+ #include &lt;string&gt;
+ 
+ void handle(const Request&amp; r) {
+-    // ① 스택에 1MB 를 잡고
++    // ① 스택에 1MB 를 잡고 (리눅스 기본 스택 8MB 기준 — Windows 는 기본 1MB 라 더 작게)
+     std::byte buf[1 &lt;&lt; 20];
+     // ② 그 안에서만 할당하는 리소스를 만듭니다 (다 쓰면 upstream 으로)
+     std::pmr::monotonic_buffer_resource pool{buf, sizeof(buf),
+@@ -1010,7 +1010,7 @@ std::pmr::synchronized_pool_resource   sp;   // 멀티 스레드용</code></pre>
+         <tr><td><code>null_memory_resource()</code></td><td><b>할당 금지 강제</b></td></tr>
+       </table></div>
+       <div class="note tip" style="margin-bottom:0">
+-        <b>실측</b> — 요청당 <code>vector</code> 를 3개 만드는 서버 핸들러에서
++        <b>실측 예</b> — 요청당 <code>vector</code> 를 3개 만드는 서버 핸들러에서
+         pmr 로 바꾸자 <b>p99 지연 340µs → 91µs</b>. 코드는 타입 이름만 바뀌었습니다.
+         <b>핫패스에 <code>null_memory_resource()</code> 를 물려 두면</b> 할당이 일어나는 순간 <code>bad_alloc</code> 이라
+         <b>“몰래 할당”을 테스트로 잡을 수 있습니다</b>.
+@@ -1044,7 +1044,7 @@ void* alloc_huge(size_t bytes) {
+ // 저지연이라면 여기에 두 줄 더
+ #include &lt;sys/resource.h&gt;
+ mlockall(MCL_CURRENT | MCL_FUTURE);   // 스왑 아웃 금지 ★
+-madvise(p, bytes, MADV_WILLNEED);     // 미리 페이지 폴트 일으켜 두기
++madvise(p, bytes, MADV_POPULATE_WRITE); // 미리 페이지 폴트 일으켜 두기 (리눅스 5.14+)
+ std::memset(p, 0, bytes);             // 실제로 만져야 물리 페이지가 붙습니다</code></pre>
+       <div class="note tip" style="margin-bottom:0">
+         <b>왜 memset 까지 하나</b> — 리눅스는 <code>mmap</code> 시점에 <b>주소만 주고</b>
+@@ -1150,7 +1150,7 @@ LD_PRELOAD=$PWD/out/libmimalloc.so ./app
+ 
+ #include &lt;malloc.h&gt;
+ void dump_glibc() {
+-    mallinfo2 mi = mallinfo2();
++    struct mallinfo2 mi = mallinfo2();   // struct 필요 — 같은 이름의 함수가 타입 이름을 가립니다
+     printf("사용 중 %zu MB / 힙 전체 %zu MB\n",
+            mi.uordblks &gt;&gt; 20, mi.arena &gt;&gt; 20);
+     malloc_info(0, stdout);          // XML 로 상세 (arena · bin 별)
+@@ -1351,7 +1351,7 @@ g++ -std=c++23 -O2 par.cpp -ltbb -o par
+ #include &lt;tbb/parallel_reduce.h&gt;
+ #include &lt;tbb/blocked_range.h&gt;
+ 
+-// 범위를 트리처럼 쪼개고, 논 스레드가 남의 작업을 훔쳐 갑니다(work stealing)
++// 범위를 트리처럼 쪼개고, 노는 스레드가 남의 작업을 훔쳐 갑니다(work stealing)
+ tbb::parallel_for(tbb::blocked_range&lt;size_t&gt;(0, n, /*grain=*/1024),
+     [&amp;](const tbb::blocked_range&lt;size_t&gt;&amp; r) {
+         for (size_t i = r.begin(); i != r.end(); ++i) out[i] = f(in[i]);
+@@ -1461,7 +1461,7 @@ perf stat -e task-clock,context-switches,cpu-migrations ./app
+ #   task-clock 이 (실행시간 × 스레드수) 에 못 미치면 놀고 있는 것입니다</code></pre>
+       <div class="note tip" style="margin-bottom:0">
+         <b>OMP_NUM_THREADS 는 std::execution 에도 안 먹습니다</b> — TBB 기반이라
+-        <code>TBB_NUM_THREADS</code> 나 <code>tbb::global_control</code> 로 조절합니다.
++        <code>tbb::global_control</code> 로 조절합니다(oneTBB 는 스레드 수 환경 변수가 없어 <code>taskset</code> 으로 CPU 를 묶는 방법도 씁니다).
+         벤치마크 스크립트를 짤 때 자주 놓치는 부분입니다.
+       </div>
+     </div>
+@@ -1684,7 +1684,7 @@ thrust::sort(d.begin(), d.end());
+ 
+ // 변환 + 리듀스
+ float s = thrust::transform_reduce(d.begin(), d.end(),
+-             [] __device__ (float x) { return x * x; },   // 람다에 __device__
++             [] __device__ (float x) { return x * x; },   // 람다에 __device__ (nvcc --extended-lambda 필요)
+              0.0f, thrust::plus&lt;float&gt;{});
+ 
+ h = d;                                   // 되돌리기 (D2H)
+@@ -1777,7 +1777,7 @@ cudaDeviceSynchronize();            // 전송과 계산이 겹쳐 총 시간이
+ // ③ 통합 메모리 — 코드가 간단해집니다 (성능은 상황에 따라)
+ float* u;
+ cudaMallocManaged(&amp;u, bytes);       // CPU·GPU 가 같은 포인터를 씁니다
+-cudaMemPrefetchAsync(u, bytes, 0);  // 미리 GPU 로 옮겨 두기</code></pre>
++cudaMemPrefetchAsync(u, bytes, 0);  // 미리 GPU 로 옮겨 두기 (CUDA 12 형식 — 13 은 cudaMemLocation 을 받습니다)</code></pre>
+       <div class="note tip" style="margin-bottom:0">
+         <b>스트림의 효과</b> — 위 예제에서 청크 4개로 나누자
+         <b>8.1ms → 4.6ms</b>. 커널을 한 줄도 안 고치고
+@@ -2094,7 +2094,7 @@ AVFrame* sw = av_frame_alloc();
+ av_hwframe_transfer_data(sw, frm, 0);
+ // ★ 후처리도 GPU 에서 한다면 내리지 말고 그대로 두는 것이 정답입니다</code></pre>
+       <div class="note tip" style="margin-bottom:0">
+-        <b>실측</b> — 4K HEVC 를 8스레드 CPU 디코딩하면 <b>CPU 780%</b> 를 쓰며 24fps.
++        <b>실측 예</b> — 4K HEVC 를 8스레드 CPU 디코딩하면 <b>CPU 780%</b> 를 쓰며 24fps.
+         NVDEC 로 바꾸면 <b>CPU 45%</b> 에 210fps.
+         영상 서버에서 <b>장비 대수를 몇 배로 줄이는</b> 변화입니다.
+       </div>
+@@ -2126,13 +2126,13 @@ av_hwframe_transfer_data(sw, frm, 0);
+       <h4 class="mini" style="margin-top:0">다중 스트림 파이프라인 뼈대</h4>
+       <pre class="code" data-lang="cpp"><code>// 카메라 8대를 동시에 처리하는 구조 — 단계마다 스레드를 분리합니다
+ struct Pipeline {
+-    SpscQueue&lt;AVFrame*, 8&gt;  decoded_;    // h03 의 큐
++    std::array&lt;SpscQueue&lt;AVFrame*, 8&gt;, 8&gt; decoded_;   // h03 의 큐 — ★ 카메라마다 하나 (SPSC 는 생산자가 하나여야)
+     SpscQueue&lt;Result,   64&gt; results_;
+ 
+     void decode_thread(int cam) {        // 카메라당 하나
+         while (running_) {
+             AVFrame* f = decode_next(cam);
+-            if (!decoded_.try_push(f)) { av_frame_free(&amp;f); drops_++; }
++            if (!decoded_[cam].try_push(f)) { av_frame_free(&amp;f); drops_++; }
+             // ★ 큐가 차면 '기다리지 않고 버립니다' —
+             //   실시간 영상에서는 늦은 프레임이 없는 프레임보다 나쁩니다
+         }
+@@ -2141,7 +2141,8 @@ struct Pipeline {
+         std::vector&lt;AVFrame*&gt; batch;
+         while (running_) {
+             AVFrame* f;
+-            while (batch.size() &lt; 8 &amp;&amp; decoded_.try_pop(f)) batch.push_back(f);
++            for (auto&amp; q : decoded_)
++                while (batch.size() &lt; 8 &amp;&amp; q.try_pop(f)) batch.push_back(f);
+             if (!batch.empty()) { results_.try_push(infer(batch)); batch.clear(); }
+         }
+     }
+@@ -2331,6 +2332,7 @@ int main() {
+ class GainProcessor : public juce::AudioProcessor {
+     juce::AudioBuffer&lt;float&gt; scratch_;      // 미리 잡아 둘 버퍼
+     std::atomic&lt;float&gt; gain_{1.0f};
++    juce::SmoothedValue&lt;float&gt; smoothed_;    // 급변 방지용 램프
+ public:
+     // ① 여기서 전부 할당합니다 (실시간 스레드가 아님)
+     void prepareToPlay(double sr, int maxBlock) override {
+@@ -2375,6 +2377,7 @@ static_assert(std::atomic&lt;float&gt;::is_always_lock_free);
+ struct Params { float a, b, c; };
+ Params params_[2];
+ std::atomic&lt;int&gt; active_{0};
++// ★ 한계: UI 가 연달아 두 번 바꾸면 오디오가 아직 읽는 쪽을 덮어쓸 수 있습니다 — 엄밀히는 트리플 버퍼나 SPSC 큐
+ void ui_update(const Params&amp; p) {          // UI 스레드
+     int next = 1 - active_.load(std::memory_order_relaxed);
+     params_[next] = p;                     // 안 쓰는 쪽에 씁니다
+@@ -2664,7 +2667,7 @@ int main() {
+         while (submitted - done &lt; QD &amp;&amp; submitted &lt; total) {
+             io_uring_sqe* sqe = io_uring_get_sqe(&amp;ring);
+             if (!sqe) break;
+-            size_t i = submitted % QD;
++            size_t i = submitted % QD;   // (완료 순서가 뒤섞이면 진행 중인 슬롯과 겹칠 수 있음 — 데이터를 쓴다면 user_data 로 빈 슬롯 관리)
+             off_t off = (off_t)(rand() % 100000) * 4096;
+             io_uring_prep_read(sqe, fd, bufs[i].data(), 4096, off);
+             io_uring_sqe_set_data64(sqe, submitted);   // 나중에 누구 결과인지
+@@ -2817,7 +2820,9 @@ ssize_t n = ::pread(fd, buf, BS * 256, off);   // ② ③ 배수여야 함
+ // $ blockdev --getpbsz /dev/nvme0n1    (물리)
+ 
+ // C++ 에서 정렬 할당은 이쪽이 더 깔끔합니다
+-std::unique_ptr&lt;std::byte[]&gt; b{
++// ★ 해제도 같은 정렬 버전으로 — 기본 delete[] 로 지우면 UB
++struct AlignedDelete { void operator()(std::byte* p) const { ::operator delete(p, std::align_val_t{BS}); } };
++std::unique_ptr&lt;std::byte, AlignedDelete&gt; b{
+     static_cast&lt;std::byte*&gt;(::operator new(BS * 256, std::align_val_t{BS}))};</code></pre>
+       <div class="note warn" style="margin-bottom:0">
+         <b>O_DIRECT 를 쓰면 안 되는 경우</b> — <b>같은 데이터를 여러 번 읽는</b> 워크로드입니다.
+@@ -3287,7 +3292,7 @@ double portable_sum(const double* p, size_t n) {
+   <div class="grid2 rv">
+     <div class="card">
+       <h4 class="mini" style="margin-top:0">같은 질의를 네 가지로</h4>
+-      <pre class="code" data-lang="text"><code>질의: 1억 행 Parquet 에서 지역별 매출 합계 Top 10
++      <pre class="code" data-lang="text"><code>질의: 1억 행 Parquet 에서 지역별 매출 합계 Top 10   (예시 수치 — 장비·데이터에 따라 다릅니다)
+ 장비: 16코어 · 64GB · NVMe
+ 
+   ① 판다스 (read_parquet + groupby)     31.2초 · 메모리 18GB
+@@ -3313,12 +3318,11 @@ double portable_sum(const double* p, size_t n) {
+ #include &lt;pybind11/pybind11.h&gt;
+ 
+ // C++ → 파이썬: Arrow 배열을 C 구조체로 내보내기
+-py::object export_array(std::shared_ptr&lt;arrow::Array&gt; arr) {
+-    ArrowArray  c_arr{};
+-    ArrowSchema c_sch{};
+-    arrow::ExportArray(*arr, &amp;c_arr, &amp;c_sch);   // 소유권이 넘어갑니다
+-    // 파이썬 쪽에서 pyarrow.Array._import_from_c(...) 로 받습니다
+-    return py::make_tuple((uintptr_t)&amp;c_arr, (uintptr_t)&amp;c_sch);
++// ★ C 구조체는 받는 쪽(파이썬)이 잡아 주소를 넘깁니다 — 지역 변수 주소를 돌려주면 댕글링
++void export_array(std::shared_ptr&lt;arrow::Array&gt; arr, uintptr_t out_arr, uintptr_t out_sch) {
++    (void)arrow::ExportArray(*arr, reinterpret_cast&lt;ArrowArray*&gt;(out_arr),
++                             reinterpret_cast&lt;ArrowSchema*&gt;(out_sch));   // 소유권이 넘어갑니다
++    // 파이썬: pyarrow.cffi 로 두 구조체를 만들고 주소를 넘긴 뒤 pa.Array._import_from_c(주소들) 로 받습니다
+ }
+ 
+ // 파이썬 → C++: 판다스/polars 데이터프레임을 그대로
+@@ -3427,9 +3431,9 @@ out = pl.from_arrow(res)               # 결과도 뷰</code></pre>
+ #                     dynamic_axes={"input": {0: "batch"}})
+ 
+ # ② C++ 쪽 설치
+-wget https://github.com/microsoft/onnxruntime/releases/latest/download/\
++wget https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/\
+ onnxruntime-linux-x64-gpu-1.22.0.tgz
+-tar xf onnxruntime-*.tgz
++tar xf onnxruntime-*.tgz &amp;&amp; mv onnxruntime-linux-x64-gpu-1.22.0 onnxruntime
+ g++ -std=c++23 -O2 infer.cpp -I onnxruntime/include \
+     -L onnxruntime/lib -lonnxruntime -o infer</code></pre>
+       <pre class="code" data-lang="cpp"><code>#include &lt;onnxruntime_cxx_api.h&gt;
+@@ -3522,7 +3526,7 @@ cmake -B build -DGGML_CUDA=ON
+ # 애플 실리콘 (Metal 이 기본으로 켜집니다)
+ cmake -B build
+ # AMD
+-cmake -B build -DGGML_HIPBLAS=ON
++cmake -B build -DGGML_HIP=ON
+ 
+ cmake --build build -j
+ 
+@@ -3537,7 +3541,7 @@ llama_backend_init();
+ 
+ llama_model_params mp = llama_model_default_params();
+ mp.n_gpu_layers = 99;                                   // GPU 오프로드
+-llama_model* model = llama_model_load_from_file("m.gguf", &amp;mp);
++llama_model* model = llama_model_load_from_file("m.gguf", mp);   // params 는 값으로
+ const llama_vocab* vocab = llama_model_get_vocab(model);
+ 
+ llama_context_params cp = llama_context_default_params();
+@@ -3696,7 +3700,7 @@ class BatchServer {
+       <pre class="code" data-lang="cpp"><code>// 추론 엔진의 핵심은 결국 행렬 곱 하나입니다.
+ // 양자화된 가중치(4비트)를 풀면서 곱하는 것이 GGML 이 하는 일입니다.
+ 
+-// Q4 블록 — 32개 값을 16바이트 + 스케일 하나로 저장 (2.5배 압축)
++// Q4 블록 — 32개 값을 16바이트 + 스케일 하나로 저장 (18바이트 · FP16 대비 약 3.5배 압축)
+ struct BlockQ4 {
+     uint16_t d;         // FP16 스케일
+     uint8_t  qs[16];    // 4비트 × 32개
+@@ -3716,7 +3720,7 @@ inline void dequant_q4(const BlockQ4&amp; b, float* out) {
+ // 메모리를 한 번만 읽는 것이 전부이기 때문입니다(위 대역폭 계산 참고).</code></pre>
+       <div class="note warn" style="margin-bottom:0">
+         <b>직접 짜는 것을 권하지는 않습니다</b> — 다만 <b>이 구조를 알면</b>
+-        “왜 Q4 가 2.5배 작은데 품질은 별로 안 떨어지나”,
++        “왜 Q4 가 FP16 보다 3.5배 작은데 품질은 별로 안 떨어지나”,
+         “왜 대역폭이 속도를 정하나”, “왜 배치가 이득인가”가 전부 설명됩니다.
+         <b>수치를 해석할 수 있게 되는 것</b>이 목적입니다.
+       </div>

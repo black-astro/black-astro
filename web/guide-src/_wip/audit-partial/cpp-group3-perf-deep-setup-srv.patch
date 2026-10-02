@@ -1,0 +1,692 @@
+diff --git a/web/guide-src/cpp/parts/panes/07-perf.html b/web/guide-src/cpp/parts/panes/07-perf.html
+index 60add47..433f0dd 100644
+--- a/web/guide-src/cpp/parts/panes/07-perf.html
++++ b/web/guide-src/cpp/parts/panes/07-perf.html
+@@ -110,7 +110,7 @@ static void BM_Smooth(benchmark::State&amp; state) {
+     state.SetItemsProcessed(state.iterations() * n);
+     state.SetBytesProcessed(state.iterations() * n * sizeof(double));
+ }
+-BENCHMARK(BM_Smooth)-&gt;Range(1&lt;&lt;10, 1&lt;&lt;22);    // 1K ~ 4M 까지 자동으로
++BENCHMARK(BM_Smooth)-&gt;RangeMultiplier(4)-&gt;Range(1&lt;&lt;10, 1&lt;&lt;22);   // 1K ~ 4M, 4배씩 (기본 배수는 8)
+ 
+ BENCHMARK_MAIN();</code></pre>
+       <pre class="code" data-lang="text"><code>--------------------------------------------------------------------
+@@ -233,7 +233,9 @@ public:
+         metrics::record(name_, us);        // 히스토그램에 누적
+     }
+ };
+-#define SCOPED_TIMER(n) Timer _t##__LINE__{n}
++#define CAT_(a, b) a##b
++#define CAT(a, b)  CAT_(a, b)      // 한 단계 거쳐야 __LINE__ 이 숫자로 펼쳐집니다
++#define SCOPED_TIMER(n) Timer CAT(_t, __LINE__){n}
+ 
+ void process() {
+     SCOPED_TIMER("process");
+@@ -518,7 +520,8 @@ getconf -a | grep CACHE</code></pre>
+ 
+ // 소프트웨어 프리페치 — 정말 필요할 때만
+ for (std::size_t i = 0; i &lt; n; ++i) {
+-    __builtin_prefetch(&amp;data[indices[i + 16]], 0, 1);   // 16개 앞을 미리
++    if (i + 16 &lt; n)                                      // 끝을 넘어 읽지 않게
++        __builtin_prefetch(&amp;data[indices[i + 16]], 0, 1); // 16개 앞을 미리
+     sum += data[indices[i]];
+ }
+ //   무작위 접근인데 인덱스를 미리 알 때 효과가 있습니다
+@@ -551,8 +554,8 @@ madvise(p, size, MADV_HUGEPAGE);        // ★ 큰 배열에 효과적
+ 
+ // 정렬된 할당 (SIMD 에도 필요 — e06)
+ alignas(64) double buf[1024];           // 캐시 라인 정렬
+-auto* p = static_cast&lt;double*&gt;(std::aligned_alloc(64, n * sizeof(double)));
+-std::free(p);                            // ★ aligned_alloc 은 free 로 해제
++auto* d = static_cast&lt;double*&gt;(std::aligned_alloc(64, n * sizeof(double)));
++std::free(d);                            // ★ aligned_alloc 은 free 로 해제
+ 
+ // C++17 표준 방법
+ auto* q = new (std::align_val_t{64}) double[n];
+@@ -609,7 +612,8 @@ static std::atomic&lt;std::size_t&gt; g_allocs{0}, g_bytes{0};
+ void* operator new(std::size_t n) {
+     g_allocs.fetch_add(1, std::memory_order_relaxed);
+     g_bytes.fetch_add(n, std::memory_order_relaxed);
+-    return std::malloc(n);
++    if (void* p = std::malloc(n ? n : 1)) return p;
++    throw std::bad_alloc{};          // operator new 는 nullptr 를 돌려주면 안 됩니다
+ }
+ void operator delete(void* p) noexcept { std::free(p); }
+ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+@@ -845,6 +849,8 @@ jeprof --show_bytes ./app jeprof.*.heap</code></pre>
+ template&lt;class T&gt;
+ struct CountingAlloc {
+     using value_type = T;
++    CountingAlloc() = default;
++    template&lt;class U&gt; CountingAlloc(const CountingAlloc&lt;U&gt;&amp;) noexcept {}  // rebind 용 (MSVC 디버그 vector 등)
+     T* allocate(std::size_t n) {
+         counter += n * sizeof(T);
+         return static_cast&lt;T*&gt;(::operator new(n * sizeof(T)));
+@@ -1111,7 +1117,8 @@ std::vector&lt;int&gt; make2() {
+ // NRVO 가 안 되는 경우
+ std::vector&lt;int&gt; f(bool c) {
+     std::vector&lt;int&gt; a, b;
+-    return c ? a : b;      // ❌ 어느 것을 생략할지 정할 수 없음 → 이동
++    return c ? a : b;      // ❌ 생략 불가 + 이름이 아닌 식이라 암시적 이동도 없음 → 복사!
++    //   이동을 원하면: if (c) return a; else return b;
+ }
+ std::vector&lt;int&gt; g(std::vector&lt;int&gt; param) {
+     return param;          // ❌ 매개변수는 NRVO 대상이 아님 → 이동
+@@ -1575,7 +1582,8 @@ void add(double* __restrict out,
+ 
+ // 확인
+ // g++ -O3 -fopt-info-vec-optimized add.cpp
+-//   add.cpp:5:24: optimized: loop vectorized using 32 byte vectors ★
++//   add.cpp:5:24: optimized: loop vectorized using 16 byte vectors ★
++//   (기본 x86-64 는 SSE2 라 16바이트 — -march=x86-64-v3 를 주면 32 byte vectors)
+ // clang++ -O3 -Rpass=loop-vectorize add.cpp</code></pre>
+       <div class="note tip" style="margin-bottom:0">
+         <b>순서를 지키세요</b> — ① 자동 벡터화가 되게 코드를 정리,
+@@ -1827,7 +1835,7 @@ for (std::ptrdiff_t i = 0; i &lt; n; ++i)
+ #pragma omp parallel for schedule(dynamic, 64)
+ 
+ // ③ 직접 청크 나누기 — 의존성이 없을 때 가장 단순합니다
+-const unsigned T = std::thread::hardware_concurrency();
++const unsigned T = std::max(1u, std::thread::hardware_concurrency());  // 0 을 돌려줄 수 있음
+ std::vector&lt;std::jthread&gt; ths;
+ for (unsigned k = 0; k &lt; T; ++k)
+     ths.emplace_back([&amp;, k] {
+diff --git a/web/guide-src/cpp/parts/panes/08-deep.html b/web/guide-src/cpp/parts/panes/08-deep.html
+index 45d308c..186e36f 100644
+--- a/web/guide-src/cpp/parts/panes/08-deep.html
++++ b/web/guide-src/cpp/parts/panes/08-deep.html
+@@ -162,7 +162,7 @@ g++ -fsanitize=address ...
+ #   ERROR: AddressSanitizer: odr-violation
+ 
+ # ④ 심볼 크기 비교 — 같은 심볼인데 크기가 다르면 의심
+-nm -S --defined-only a.o b.o | sort -k3 | awk '{print $2, $3}' | uniq -d
++nm -S --defined-only a.o b.o | awk 'NF==4 {print $4, $2}' | sort -u   | awk '{print $1}' | uniq -d          # 크기가 둘 이상인 심볼 이름
+ 
+ # ⑤ 근본 대책 ★
+ #   · 빌드 플래그로 구조체 내용을 바꾸지 않기
+@@ -334,7 +334,9 @@ if (n + 1 &lt; n) { /* 오버플로 처리 */ }
+ //   부호 있는 오버플로는 UB → "일어날 리 없다" → 조건이 거짓 → 삭제
+ 
+ // ③ 무한 루프가 제거됩니다
+-while (true) { }             // 부수효과 없는 무한 루프는 UB
++while (true) { }             // 부수효과 없는 무한 루프는 UB (C++23 까지)
++//   C++26(P2809)부터 while(true){} 같은 '자명한' 무한 루프는 UB 가 아닙니다
++//   조건이 변수인 루프(while (x) {})는 여전히 해당
+ //   → 컴파일러가 통째로 없애고 다음 코드로 흘러갈 수 있습니다
+ 
+ // ④ 시간 여행 — UB 이후가 아니라 '이전' 코드도 영향받습니다 ★
+@@ -378,8 +380,8 @@ printf("시작\n");            // 이 출력이 안 나올 수 있습니다
+     <div class="card">
+       <h4 class="mini" style="margin-top:0">안전한 대안</h4>
+       <pre class="code" data-lang="cpp"><code>// ① 정수 오버플로 — 미리 검사하거나 안전한 함수
+-#include &lt;numeric&gt;
+-if (a &gt; INT_MAX - b) { /* 넘칠 상황 */ }
++#include &lt;climits&gt;
++if (b &gt; 0 &amp;&amp; a &gt; INT_MAX - b) { /* 넘칠 상황 */ }   // b &lt; 0 이면 INT_MIN 쪽도 따로 검사
+ int r;
+ if (__builtin_add_overflow(a, b, &amp;r)) { /* 오버플로 */ }   // GCC·Clang
+ //   C++26 에는 표준 함수가 들어옵니다
+@@ -509,7 +511,7 @@ bool ok(unsigned n) { return n + 1 &lt; n; }   // 랩어라운드가 정의됨 
+ 
+ // 무한 루프
+ int g() { while (true) { } }
+-//   부수효과가 없으면 UB → 컴파일러가 제거할 수 있습니다
++//   부수효과가 없으면 UB → 컴파일러가 제거할 수 있습니다 (C++23 까지 · C++26 은 예외)
+ //   (실제로 clang 은 함수를 비우기도 합니다)</code></pre>
+     </div>
+     <div class="card">
+@@ -519,7 +521,7 @@ int g() { while (true) { } }
+   C++20  · 부호 있는 정수를 2의 보수로 확정
+          · std::bit_cast 로 안전한 재해석
+          · constinit 로 초기화 순서 문제 완화
+-  C++23  · 일부 UB 를 erroneous behavior 로 재분류
++  C++23  · 범위 for 초기화식의 임시 객체 수명 연장 (댕글링 UB 제거)
+          · std::start_lifetime_as (버퍼를 객체로 안전하게)
+   C++26  · 초기화되지 않은 읽기를 erroneous 로 (진단 가능) ★
+          · 계약(contracts) — 사전·사후 조건을 언어로
+@@ -597,12 +599,12 @@ erroneous behavior 란
+ 
+ // ② 생성 전 접근 — 기반 클래스 생성자에서 가상 함수
+ struct Base {
+-    Base() { init(); }               // ⚠ 파생 클래스 부분이 아직 없습니다
++    Base() { init(); }               // ⚠ Derived::init 이 아니라 Base::init 이 불립니다
+     virtual void init() { }
+ };
+ struct Derived : Base {
+     std::vector&lt;int&gt; v;
+-    void init() override { v.push_back(1); }   // ★ v 가 아직 생성 전 → UB
++    void init() override { v.push_back(1); }   // ★ Base() 에선 안 불림 — 불렸다면 v 가 생성 전이라 UB
+ };
+ //   생성자·소멸자 안에서 가상 함수는 '그 클래스의 버전'이 불립니다
+ 
+@@ -630,7 +632,7 @@ static_assert(std::is_trivially_copyable_v&lt;PacketHeader&gt;);
+ static_assert(sizeof(PacketHeader) == 8);
+ 
+ // ❌ 캐스팅 — aliasing 위반 + 정렬 문제 + 객체 수명
+-auto* h = reinterpret_cast&lt;const PacketHeader*&gt;(buffer);
++auto* h = reinterpret_cast&lt;const PacketHeader*&gt;(buffer.data());
+ 
+ // ✅ memcpy — 안전하고, 컴파일러가 최적화로 없애 줍니다
+ PacketHeader h;
+@@ -738,8 +740,8 @@ void f(int* i, float* f);      // 서로 다른 타입 → 겹칠 수 없다고
+ //   bugprone-use-after-move
+ //   cppcoreguidelines-owning-memory
+ 
+-// clang 의 수명 분석 (실험적이지만 유용)
+-clang++ -Wlifetime -Wdangling-gsl main.cpp
++// clang 의 수명 분석 (-Wlifetime 은 실험 브랜치 전용 — 정식 clang 은 -Wdangling 계열)
++clang++ -Wdangling -Wdangling-gsl main.cpp
+ 
+ // GCC
+ g++ -Wdangling-pointer -Wdangling-reference -Wuse-after-free</code></pre>
+@@ -902,15 +904,17 @@ std::uintptr_t tagged = addr | 1;      // 정렬 덕에 하위 비트가 비어
+ struct D : B { void f() override; int y; };
+ 
+ sizeof(B);      // 16 = vptr(8) + int(4) + 패딩(4)
+-sizeof(D);      // 24 = vptr(8) + x(4) + y(4) + 패딩(8)
++sizeof(D);      // 16 = vptr(8) + x(4) + y(4) — y 가 B 의 꼬리 패딩에 들어갑니다
++                //   (Itanium ABI: x86-64 리눅스·맥 GCC/Clang · MSVC 는 패딩을 재사용하지 않아 24)
+ 
+ // 객체 배치
+ //   [vptr][x][패딩]          ← B
+-//   [vptr][x][y][패딩]       ← D (같은 vptr 자리, 다른 테이블을 가리킴)
++//   [vptr][x][y]             ← D (같은 vptr 자리, 다른 테이블을 가리킴)
+ //
+ // vtable (클래스마다 하나, 읽기 전용 섹션에)
+-//   B 의 vtable: [&amp;B::f, &amp;B::g, RTTI 정보, ...]
+-//   D 의 vtable: [&amp;D::f, &amp;B::g, RTTI 정보, ...]
++//   B 의 vtable: [offset-to-top, RTTI 정보 | &amp;B::f, &amp;B::g]
++//   D 의 vtable: [offset-to-top, RTTI 정보 | &amp;D::f, &amp;B::g]
++//     (Itanium ABI · vptr 은 | 자리, 즉 첫 함수 포인터를 가리킵니다)
+ 
+ // b.f() 가 하는 일
+ //   ① 객체에서 vptr 을 읽는다        (메모리 접근 1)
+@@ -962,7 +966,7 @@ D d; d.f();                  // 직접 호출 · 인라인 가능
+ struct B2 { virtual void f() final; };   // 함수 단위로도
+ 
+ // ② 정적 타입이 확실한 경로
+-void use(D&amp; d) { d.f(); }    // B&amp; 가 아니라 D&amp; 로 받으면 직접 호출
++void use(D&amp; d) { d.f(); }    // D 가 final 이므로 D&amp; 로 받으면 직접 호출
+ 
+ // ③ LTO — 전체 프로그램을 보고 파생 클래스가 하나뿐이면 확정 ★
+ //    (speculative devirtualization)
+@@ -2151,7 +2155,7 @@ target_precompile_headers(app PRIVATE
+ #include &lt;iostream&gt;      // 3만 줄 · 전역 객체 초기화까지
+ #include &lt;cstdio&gt;        // 훨씬 가볍습니다
+ #include &lt;regex&gt;         // 매우 무겁습니다 (성능도 나쁩니다)
+-#include &lt;format&gt;        // &lt;iostream&gt; 보다 가볍고 빠릅니다 ★
++#include &lt;format&gt;        // 실행은 iostream 보다 빠르지만 헤더 자체는 무거운 편입니다
+ 
+ // ⑤ include-what-you-use
+ include-what-you-use -p build src/core.cpp
+@@ -2227,7 +2231,7 @@ ls -lh build/app</code></pre>
+       <pre class="code" data-lang="cpp"><code>// ❌ 재귀 템플릿 — 인스턴스가 N개 생깁니다
+ template&lt;int N&gt; struct Sum { static constexpr int v = N + Sum&lt;N-1&gt;::v; };
+ template&lt;&gt; struct Sum&lt;0&gt; { static constexpr int v = 0; };
+-Sum&lt;1000&gt;::v;                    // 1001개의 인스턴스 ★
++Sum&lt;1000&gt;::v;                    // 1001개의 인스턴스 ★ (GCC 기본 깊이 900 을 넘어 에러)
+ 
+ // ✅ constexpr 함수 — 인스턴스가 하나
+ constexpr int sum(int n) { int s = 0; for (int i = 1; i &lt;= n; ++i) s += i; return s; }
+@@ -2468,7 +2472,7 @@ public:
+       <pre class="code" data-lang="cpp"><code>// 같은 크기 객체를 아주 많이 만들고 버릴 때 (게임 엔티티·패킷)
+ template&lt;std::size_t Size, std::size_t Align&gt;
+ class FixedPool {
+-    union Slot { std::byte data[Size]; Slot* next; };
++    union alignas(Align) alignas(void*) Slot { std::byte data[Size]; Slot* next; };   // ★ Align 반영
+     static_assert(Size &gt;= sizeof(Slot*));
+ 
+     std::vector&lt;std::unique_ptr&lt;Slot[]&gt;&gt; blocks_;
+@@ -2519,10 +2523,10 @@ public:
+       <pre class="code" data-lang="cpp"><code>// ⚠ 아레나에서 소멸자가 있는 객체를 쓸 때
+ std::pmr::vector&lt;std::pmr::string&gt; v{&amp;arena};
+ v.push_back("긴 문자열...");
+-arena.release();                 // ★ string 의 소멸자가 안 불립니다
+-//   → monotonic_buffer_resource 는 이것을 허용합니다
+-//     (trivially destructible 이 아니면 주의)
+-//   → 안전하게 하려면 v 를 먼저 파괴하세요</code></pre>
++arena.release();                 // ★ 메모리만 회수 — string 의 소멸자는 안 불립니다
++//   → 그런데 v 는 아직 살아 있어, 이후 v 를 쓰거나 v 의 소멸자가 돌면 UB
++//     (소멸자 없이 버려도 되는 것은 trivially destructible 타입뿐)
++//   → 안전하게 하려면 v 를 먼저 파괴한 뒤 release 하세요</code></pre>
+     </div>
+     <div class="card">
+       <h4 class="mini" style="margin-top:0">측정으로 정당화하기</h4>
+@@ -2584,9 +2588,9 @@ struct MyAlloc {
+ // 상태가 있는 할당자의 함정
+ //   · 두 컨테이너가 다른 할당자를 가지면 swap · 이동이 복잡해집니다
+ //   · propagate_on_container_* 특성으로 동작을 정합니다
+-using POCCA = std::true_type;   // copy assignment 시 전파
+-using POCMA = std::true_type;   // move assignment 시 전파
+-using POCS  = std::true_type;   // swap 시 전파
++using propagate_on_container_copy_assignment = std::true_type;   // POCCA
++using propagate_on_container_move_assignment = std::true_type;   // POCMA
++using propagate_on_container_swap            = std::true_type;   // POCS
+ //   ★ 이것이 PMR 이 나온 이유입니다 — 타입이 아니라 값으로 다룹니다</code></pre>
+     </div>
+     <div class="card">
+@@ -2612,7 +2616,11 @@ target_link_libraries(app PRIVATE mimalloc)
+ 
+ // 계측만 하려면 (⚡ e03)
+ static std::atomic&lt;std::size_t&gt; g_allocs{0};
+-void* operator new(std::size_t n) { ++g_allocs; return std::malloc(n); }</code></pre>
++void* operator new(std::size_t n) {
++    ++g_allocs;
++    if (void* p = std::malloc(n ? n : 1)) return p;
++    throw std::bad_alloc{};      // nullptr 를 돌려주면 안 됩니다
++}</code></pre>
+       <div class="note warn" style="margin-bottom:0">
+         <b>확장 모듈에서 전역 <code>operator new</code> 를 교체하지 마세요</b> —
+         같은 프로세스의 <b>다른 모듈과 호스트 런타임</b>까지 영향을 받습니다.
+@@ -3266,7 +3274,7 @@ pybind11 로 `aggregate()` 만 C++ 로. 인터페이스는 numpy 배열 in/out.
+ |---------|-------:|------:|------:|
+ | 10,000  | 4.2s   | 0.31s | 13.5× |
+ | 100,000 | 41s    | 2.8s  | 14.6× |
+-전체 배치: 6분 → 1.4분
++전체 배치: 6분 → 약 2.2분 (집계 68% 만 14배 · 나머지 32% 는 그대로)
+ 
+ ### 비용
+ - 개발 2주 · CI 에 wheel 빌드 추가(3 OS × 5 버전 → abi3 로 6개)
+diff --git a/web/guide-src/cpp/parts/panes/10-setup.html b/web/guide-src/cpp/parts/panes/10-setup.html
+index 9e78223..caa0dd3 100644
+--- a/web/guide-src/cpp/parts/panes/10-setup.html
++++ b/web/guide-src/cpp/parts/panes/10-setup.html
+@@ -135,7 +135,7 @@ clang-cl /std:c++20 /EHsc /O2 hello.cpp</code></pre>
+       </p>
+       <div class="tw"><table class="cheat" style="margin:0">
+         <tr><th style="width:30%"></th><th>표준 라이브러리</th><th>C 런타임</th></tr>
+-        <tr><td>MSVC</td><td>MS STL</td><td><b>UCRT</b> (msvcp140.dll)</td></tr>
++        <tr><td>MSVC</td><td>MS STL (msvcp140.dll)</td><td><b>UCRT</b> (ucrtbase.dll)</td></tr>
+         <tr><td>MinGW UCRT64</td><td>libstdc++</td><td><b>UCRT</b></td></tr>
+         <tr><td>MinGW MINGW64</td><td>libstdc++</td><td>msvcrt.dll <span class="sm">(옛것)</span></td></tr>
+         <tr><td>리눅스 GCC</td><td>libstdc++</td><td>glibc</td></tr>
+@@ -305,14 +305,12 @@ which -a g++ clang++
+       <pre class="code" data-lang="bash"><code># 윈도우 10/11 에는 winget 이 기본 탑재입니다.
+ # 관리자 PowerShell 을 열고 (시작 → PowerShell 우클릭 → 관리자 권한)
+ 
+-winget install --id Microsoft.VisualStudio.2022.BuildTools ^
+-  --override "--quiet --wait --norestart --nocache ^
+-    --add Microsoft.VisualStudio.Workload.VCTools ^
+-    --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
+-    --includeRecommended"
++winget install --id Microsoft.VisualStudio.2022.BuildTools `
++  --override "--quiet --wait --norestart --nocache --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.CMake.Project --includeRecommended"
+ 
+-# PowerShell 에서는 줄바꿈 문자가 ` (백틱)입니다.
+-# 헷갈리면 그냥 한 줄로 이어서 치세요 —
++# PowerShell 에서는 줄바꿈 문자가 ` (백틱)입니다 (cmd 는 ^).
++# 따옴표 안의 --override 문자열은 나누지 말고 한 줄로 두세요.
++# 헷갈리면 그냥 전부 한 줄로 이어서 치세요 —
+ 
+ winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+ 
+@@ -456,7 +454,7 @@ cl /EHsc /std:c++20 t.cpp
+ # 공식 해법은 Microsoft.VisualStudio.DevShell.dll 모듈입니다.
+ 
+ $vs = &amp; "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+-        -latest -property installationPath
++        -latest -products * -property installationPath   # -products * 가 없으면 Build Tools 를 못 찾습니다
+ Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+ Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation `
+                  -DevCmdArguments "-arch=x64 -host_arch=x64"
+@@ -600,7 +598,8 @@ where.exe cl
+ 
+ pacman -Syu
+ #   패키지 DB 를 갱신하고 전부 올립니다.
+-#   ★ 중간에 "terminate batch job (Y/N)" 이 뜨며 창이 닫힐 수 있습니다.
++#   ★ 중간에 "To complete this update all MSYS2 processes including this terminal
++#     will be closed. Confirm to proceed [Y/n]" 이 뜨고, Y 를 누르면 창이 닫힙니다.
+ #     이것은 정상입니다 — pacman 자신을 업데이트하느라 셸을 재시작하는 것입니다.
+ 
+ # 창이 닫혔으면 다시 열고 한 번 더 (이번엔 끝까지 돕니다)
+@@ -1163,7 +1162,7 @@ sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 130
+ sudo update-alternatives --config g++      # 대화형으로 선택</code></pre>
+       <div class="note tip" style="margin-bottom:0">
+         <b>최신 Clang 을 통째로</b> — <code>apt.llvm.org</code> 의 스크립트가 가장 편합니다:
+-        <code>bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)" -- 20 all</code>.
++        <code>sudo bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)" -- 20 all</code>.
+         <code>clang-20</code>, <code>clang-tidy-20</code> 처럼 버전이 붙은 이름으로 깔립니다.
+       </div>
+     </div>
+@@ -1418,7 +1417,7 @@ add_executable(hello src/main.cpp)
+ # 경고를 컴파일러별로 켜기
+ target_compile_options(hello PRIVATE
+   $&lt;$&lt;CXX_COMPILER_ID:MSVC&gt;:/W4&gt;
+-  $&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall;-Wextra;-Wpedantic&gt;)</code></pre>
++  "$&lt;$&lt;NOT:$&lt;CXX_COMPILER_ID:MSVC&gt;&gt;:-Wall;-Wextra;-Wpedantic&gt;")   # ; 가 들어가면 따옴표 필수</code></pre>
+       <div class="note info" style="margin-bottom:0">
+         <b><code>$&lt;...&gt;</code> 는 뭔가요</b> — 제너레이터 표현식입니다.
+         “MSVC 일 때만 <code>/W4</code>” 처럼 <b>구성 시점이 아니라 빌드 시점에 결정</b>되는 값을 씁니다.
+@@ -1471,7 +1470,7 @@ rm -rf build               # 완전 초기화 (윈도우: Remove-Item -Recurse b
+         <tr><td><code>cmake -L build</code></td><td>설정된 옵션 보기</td></tr>
+         <tr><td><code>cmake --fresh -S . -B build</code></td><td>캐시 버리고 재구성 ★</td></tr>
+         <tr><td><code>cmake --help-module FindZLIB</code></td><td>내장 문서</td></tr>
+-        <tr><td><code>cmake -G</code></td><td>쓸 수 있는 생성기 목록</td></tr>
++        <tr><td><code>cmake --help</code></td><td>쓸 수 있는 생성기 목록 (맨 아래 Generators)</td></tr>
+       </table></div>
+       <div class="note tip" style="margin-bottom:0">
+         <b><code>--fresh</code> 를 기억하세요</b>(CMake 3.24+) —
+@@ -1830,7 +1829,7 @@ cmake --build --preset conan-release
+ 
+ # 또는 툴체인 파일을 직접 지정
+ cmake -S . -B build -G Ninja \
+-  -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \
++  -DCMAKE_TOOLCHAIN_FILE=build/build/Release/generators/conan_toolchain.cmake \
+   -DCMAKE_BUILD_TYPE=Release</code></pre>
+       <div class="note info" style="margin-bottom:0">
+         CMakeLists.txt 는 <b>vcpkg 예제와 완전히 같습니다</b> —
+@@ -2003,8 +2002,8 @@ code --list-extensions | Select-String -Pattern "cpp|clangd|cmake|lldb"</code></
+ }</code></pre>
+       <div class="note warn" style="margin-bottom:0">
+         <b><code>cmake.copyCompileCommands</code> 가 중요합니다</b> —
+-        clangd 는 기본적으로 <b>프로젝트 루트</b>에서 이 파일을 찾습니다.
+-        빌드 폴더 안에만 있으면 못 찾아서 <b>모든 include 에 빨간 줄</b>이 뜹니다.
++        clangd 는 소스의 상위 폴더들과 그 바로 아래 <b>build/</b> 폴더에서만 이 파일을 찾습니다.
++        빌드 폴더 이름이 다르면(build-gcc 등) 못 찾아서 <b>모든 include 에 빨간 줄</b>이 뜹니다.
+         루트로 복사하거나 <code>--compile-commands-dir</code> 로 알려 주세요.
+       </div>
+     </div>
+@@ -2294,7 +2293,7 @@ Checks: &gt;
+   -readability-identifier-length
+ 
+ WarningsAsErrors: 'bugprone-*'
+-HeaderFilterRegex: '^(src|include)/.*'
++HeaderFilterRegex: '.*/(src|include)/.*'   # 헤더 경로는 보통 절대 경로라 ^ 로 시작하면 안 맞습니다
+ FormatStyle:   file</code></pre>
+       <pre class="code" data-lang="bash"><code># 한 파일만
+ clang-tidy src/main.cpp -p build
+@@ -2709,9 +2708,10 @@ npm install -g node-gyp
+ node-gyp --version
+ 
+ # ★ 윈도우 — 어떤 MSVC 를 쓸지 못 박기
+-npm config set msvs_version 2022
+-npm config set python "C:\Users\me\AppData\Local\Programs\Python\Python313\python.exe"
+-npm config list
++#   (npm 9 이상은 npm config set msvs_version / python 을 "알 수 없는 옵션"으로 거부합니다)
++$env:npm_config_msvs_version = "2022"
++$env:npm_config_python = "C:\Users\me\AppData\Local\Programs\Python\Python313\python.exe"
++Get-ChildItem env:npm_config_*        # 확인 (계속 쓰려면 s11 처럼 사용자 환경 변수로 등록)
+ 
+ # 확인 — 실제로 한 번 구성해 봅니다
+ node-gyp configure
+@@ -2750,7 +2750,7 @@ node-gyp configure
+     "msvs_settings": {
+       "VCCLCompilerTool": { "ExceptionHandling": 1, "AdditionalOptions": [ "/std:c++20" ] }
+     },
+-    "xcode_settings": { "CLANG_CXX_LIBRARY": "libc++" }
++    "xcode_settings": { "GCC_ENABLE_CPP_EXCEPTIONS": "YES", "CLANG_CXX_LIBRARY": "libc++" }
+   }]
+ }</code></pre>
+       <pre class="code" data-lang="bash"><code>npm install                 # 의존성 + 자동 빌드
+@@ -2776,7 +2776,7 @@ cmake-js compile</code></pre>
+     <tr><td><code>ImportError: DLL load failed</code></td><td>의존 DLL 누락 · 비트 불일치</td><td>같은 트리플릿으로 재빌드(s07)</td></tr>
+     <tr><td><code>ModuleNotFoundError</code> <span class="sm">(빌드는 성공)</span></td><td><code>sys.path</code> 에 없음</td><td>빌드 폴더를 경로에 추가</td></tr>
+     <tr><td><code>gyp ERR! find VS</code></td><td>MSVC 워크로드 없음</td><td>s02 재설치</td></tr>
+-    <tr><td><code>gyp ERR! find Python</code></td><td>파이썬을 못 찾음</td><td><code>npm config set python ...</code></td></tr>
++    <tr><td><code>gyp ERR! find Python</code></td><td>파이썬을 못 찾음</td><td><code>npm_config_python</code> 환경 변수 (s10)</td></tr>
+     <tr><td><code>NODE_MODULE_VERSION 불일치</code></td><td>다른 Node 로 빌드</td><td>N-API 로 전환 · 재빌드</td></tr>
+   </table></div>
+ 
+@@ -2935,7 +2935,7 @@ function ucrt64 { $env:Path = "C:\msys64\ucrt64\bin;$env:Path" }
+ function llvm   { $env:Path = "C:\Program Files\LLVM\bin;$env:Path" }
+ function vs64 {
+   $vs = &amp; "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+-          -latest -property installationPath
++          -latest -products * -property installationPath
+   Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+   Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64"
+ }
+@@ -3286,7 +3286,7 @@ cat build/CMakeFiles/CMakeConfigureLog.yaml | head -60</code></pre>
+ #   → ★ 새 창을 열고 한 번만 켜세요
+ 
+ # 원인 D — 경로에 공백/한글이 있어 따옴표가 필요합니다
+-cmd /k "\"C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat\""
++cmd /k "`"C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat`""   # PowerShell 은 \" 가 아니라 `" 로 이스케이프
+ 
+ # 진단 — 지금 환경이 켜져 있나
+ echo $env:VSCMD_VER          # 17.x 가 나오면 켜진 상태
+diff --git a/web/guide-src/cpp/parts/panes/12-srv.html b/web/guide-src/cpp/parts/panes/12-srv.html
+index c4b1c8f..e057cd6 100644
+--- a/web/guide-src/cpp/parts/panes/12-srv.html
++++ b/web/guide-src/cpp/parts/panes/12-srv.html
+@@ -269,6 +269,7 @@ CPU 만으로 필요한 코어 =  RPS × CPU시간
+       <pre class="code" data-lang="cpp"><code>// main.cpp
+ #include &lt;httplib.h&gt;
+ #include &lt;nlohmann/json.hpp&gt;
++#include &lt;iostream&gt;
+ using json = nlohmann::json;
+ 
+ int main() {
+@@ -728,9 +729,8 @@ public:
+ // 컨트롤러에서 이름으로 붙입니다
+ //   ADD_METHOD_TO(C::m, "/api/v1/me", Get, "AuthFilter");
+ // 경로 전체에 걸려면 main 에서
+-//   drogon::app().registerFilter&lt;AuthFilter&gt;();   // 는 없고
+-//   config.json 의 "static_files_router" 대신 아래를 씁니다
+-//   drogon::app().registerHttpRequestAdvice(...)</code></pre>
++//   필터를 전역으로 등록하는 API 는 없으므로 어드바이스를 씁니다
++//   drogon::app().registerPreHandlingAdvice(...)   // 또는 registerPreRoutingAdvice</code></pre>
+     </div>
+     <div class="card">
+       <h4 class="mini" style="margin-top:0">어드바이스 — 전역 훅 다섯 자리</h4>
+@@ -753,12 +753,12 @@ public:
+   // ③ 처리되지 않은 예외 → 500 JSON 으로 통일
+   .setExceptionHandler([](const std::exception&amp; e,
+                           const HttpRequestPtr&amp; req,
+-                          std::function&lt;void(HttpResponsePtr&amp;&amp;)&gt;&amp;&amp; cb) {
++                          std::function&lt;void(const HttpResponsePtr&amp;)&gt;&amp;&amp; cb) {
+       LOG_ERROR &lt;&lt; "unhandled: " &lt;&lt; e.what();
+       Json::Value j; j["error"] = "internal";
+       auto r = HttpResponse::newHttpJsonResponse(j);
+       r-&gt;setStatusCode(k500InternalServerError);
+-      cb(std::move(r));
++      cb(r);
+   })
+   // ④ 404 를 JSON 으로
+   .setCustom404Page(HttpResponse::newHttpJsonResponse(
+@@ -819,13 +819,13 @@ Task&lt;&gt; UserController::one(HttpRequestPtr req,
+ drogon_ctl create model models
+ #    → models/Users.h / Users.cc 가 만들어집니다</code></pre>
+       <pre class="code" data-lang="cpp"><code>#include "models/Users.h"
+-using namespace drogon_model::app;      // 스키마 이름
++using namespace drogon_model::app;      // DB 이름 (config 의 dbname)
+ 
+ Task&lt;&gt; listUsers(HttpRequestPtr req,
+                  std::function&lt;void(const HttpResponsePtr&amp;)&gt; cb)
+ {
+     auto db = app().getDbClient();
+-    Mapper&lt;Users&gt; mapper(db);
++    CoroMapper&lt;Users&gt; mapper(db);           // co_await 하려면 CoroMapper ★
+ 
+     // where + order + limit — JPA 의 Criteria 자리
+     auto users = co_await mapper
+@@ -1044,6 +1044,7 @@ class Room {
+     std::vector&lt;std::shared_ptr&lt;Session&gt;&gt; members_;   // 락 필요 없음
+ public:
+     explicit Room(asio::io_context&amp; io) : strand_(asio::make_strand(io)) {}
++    auto strand() const { return strand_; }
+ 
+     void join(std::shared_ptr&lt;Session&gt; s) {
+         asio::post(strand_, [this, s = std::move(s)] {
+@@ -1329,6 +1330,7 @@ public:
+     <div class="card">
+       <h4 class="mini" style="margin-top:0">TLS(wss) 를 직접 붙이려면</h4>
+       <pre class="code" data-lang="cpp"><code>#include &lt;boost/asio/ssl.hpp&gt;
++#include &lt;boost/beast/websocket/ssl.hpp&gt;   // ws::stream&lt;ssl::stream&lt;...&gt;&gt; 에 필요 (teardown)
+ namespace ssl = asio::ssl;
+ 
+ ssl::context make_ssl_ctx() {
+@@ -1522,8 +1524,7 @@ struct glz::meta&lt;User&gt; {
+ };
+ 
+ // 부분 읽기 — 큰 문서에서 필요한 필드만
+-std::string token;
+-glz::get_as&lt;std::string&gt;(raw, "/auth/token");   // JSON 포인터
++auto token = glz::get_as_json&lt;std::string, "/auth/token"&gt;(raw);   // JSON 포인터 · expected 를 돌려줍니다
+ 
+ // 같은 구조체를 다른 형식으로도 — 매크로 없이
+ // glz::write_beve(u, bin);   // 바이너리 — 내부 통신용</code></pre>
+@@ -1556,7 +1557,8 @@ for (const auto&amp; e : j["events"])
+       <pre class="code" data-lang="cpp"><code>#include &lt;simdjson.h&gt;
+ simdjson::ondemand::parser parser;
+ // 입력은 패딩된 버퍼여야 합니다 ★ (SIMD 가 뒤를 넘겨 읽습니다)
+-auto doc = parser.iterate(simdjson::padded_string(big));
++simdjson::padded_string json(big);          // ★ 이름 있는 변수로 — 임시 객체는 iterate 가 거부합니다(댕글링 방지)
++auto doc = parser.iterate(json);
+ 
+ int n = 0;
+ for (auto e : doc["events"]) {
+@@ -1606,8 +1608,8 @@ for (auto e : doc["events"]) {
+ #include &lt;rfl.hpp&gt;
+ 
+ struct CreateUser {
+-    rfl::Validator&lt;std::string, rfl::Size&lt;rfl::Minimum&lt;1&gt;,
+-                                          rfl::Maximum&lt;40&gt;&gt;&gt; name;
++    rfl::Validator&lt;std::string, rfl::Size&lt;rfl::Minimum&lt;1&gt;&gt;,
++                                rfl::Size&lt;rfl::Maximum&lt;40&gt;&gt;&gt; name;
+     rfl::Validator&lt;int, rfl::Minimum&lt;0&gt;, rfl::Maximum&lt;150&gt;&gt;   age;
+     std::optional&lt;std::string&gt; nickname;      // 없어도 되는 필드
+ };
+@@ -1645,6 +1647,14 @@ std::optional&lt;std::string&gt; pick&lt;std::string&gt;(const Json::Value&amp;
+     return j[k].asString();
+ }
+ 
++template &lt;&gt;
++std::optional&lt;int&gt; pick&lt;int&gt;(const Json::Value&amp; j, const char* k,
++                             std::vector&lt;Err&gt;&amp; errs) {
++    if (!j.isMember(k))      { errs.push_back({k, "required"});       return {}; }
++    if (!j[k].isInt())       { errs.push_back({k, "must be integer"}); return {}; }
++    return j[k].asInt();
++}
++
+ // 사용
+ std::vector&lt;Err&gt; errs;
+ auto name = pick&lt;std::string&gt;(body, "name", errs);
+@@ -1749,7 +1759,7 @@ if (!errs.empty()) {
+ using namespace drogon::orm;
+ 
+ // config.json 의 db_clients 를 그대로 씁니다 (풀도 거기서 정합니다)
+-auto db = app().getDbClient();          // 이름을 주면 여러 개 구분: getDbClient("read")
++auto db = app().getDbClient();          // run() 이 시작된 뒤(핸들러 안)에서 부르세요 · 이름으로 구분: getDbClient("read")
+ 
+ Task&lt;&gt; handler(HttpRequestPtr req,
+                std::function&lt;void(const HttpResponsePtr&amp;)&gt; cb,
+@@ -1772,7 +1782,8 @@ Task&lt;&gt; handler(HttpRequestPtr req,
+         code, url, id);
+     int64_t newId = r2[0]["id"].as&lt;int64_t&gt;();
+ 
+-    // ④ 트랜잭션 — 소멸할 때 커밋됩니다. 중간에 예외가 나면 롤백 ★
++    // ④ 트랜잭션 — 소멸할 때 커밋됩니다. SQL 이 실패하면 자동 롤백 ★
++    //    (SQL 이 아닌 C++ 예외로 빠져나갈 때는 catch 에서 tx-&gt;rollback() 을 직접 부르세요)
+     {
+         auto tx = co_await db-&gt;newTransactionCoro();
+         co_await tx-&gt;execSqlCoro(
+@@ -2177,10 +2188,11 @@ public:
+     void OnWriteDone(bool ok) override {       // 한 건 전송 완료
+         std::lock_guard lk(m_);
+         writing_ = false;
++        queue_.pop_front();                    // ★ 보낸 것은 빼야 다음 것으로 넘어갑니다
+         if (!ok) { Finish(grpc::Status::OK); return; }
+         if (!queue_.empty()) next();
+     }
+-    void OnDone() override { delete this; }    // 정리 ★
++    void OnDone() override { delete this; }    // 정리 ★ (그 전에 registry 구독을 해제해야 합니다)
+ private:
+     void next() {                              // m_ 을 잡은 상태에서 부릅니다
+         writing_ = true;
+@@ -2928,7 +2940,7 @@ TEST(Base62, RoundTrip) {
+ 
+ TEST(Base62, KnownValues) {
+     EXPECT_EQ(base62_encode(0),  "0");
+-    EXPECT_EQ(base62_encode(61), "z");
++    EXPECT_EQ(base62_encode(61), "Z");   // w13 의 알파벳: 0-9 · a-z · A-Z
+     EXPECT_EQ(base62_encode(62), "10");
+ }
+ 
+@@ -2994,13 +3006,17 @@ DROGON_TEST(CreateLinkReturns201) {
+ }
+ 
+ int main(int argc, char** argv) {
+-    std::thread server([] {
++    std::promise&lt;void&gt; ready;
++    auto started = ready.get_future();
++    std::thread server([&amp;ready] {
++        // 루프가 돌기 시작하면 신호를 보냅니다
++        app().getLoop()-&gt;queueInLoop([&amp;ready] { ready.set_value(); });
+         app().addListener("127.0.0.1", 8848)
+              .setThreadNum(1)
+              .loadConfigFile("./config.test.json")
+              .run();
+     });
+-    // 뜰 때까지 잠깐 기다린 뒤 테스트를 돌립니다
++    started.get();                    // 뜰 때까지 기다린 뒤 테스트를 돌립니다
+     int status = test::run(argc, argv);
+     app().getLoop()-&gt;queueInLoop([] { app().quit(); });
+     server.join();
+@@ -3216,7 +3232,9 @@ clang++ -std=c++20 -fsanitize=fuzzer,address fuzz_parse.cc -o fuzz &amp;&amp; ./
+       <h4 class="mini" style="margin-top:0">Dockerfile — 레이어 캐시까지 고려한 형태</h4>
+       <pre class="code" data-lang="bash"><code># syntax=docker/dockerfile:1
+ # ───────── 1단계: 빌드 ─────────
+-FROM ubuntu:24.04 AS builder
++# ★ 실행 이미지(cc-debian12)와 glibc·libstdc++ 버전을 맞춥니다
++#   (ubuntu:24.04 에서 빌드하면 GLIBC_2.38 · GLIBCXX_3.4.32 not found 로 안 뜹니다)
++FROM debian:12 AS builder
+ 
+ RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends \
+       build-essential cmake ninja-build git curl zip unzip tar \
+@@ -3224,12 +3242,13 @@ RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends \
+  &amp;&amp; rm -rf /var/lib/apt/lists/*
+ 
+ ENV VCPKG_ROOT=/opt/vcpkg
+-RUN git clone --depth 1 https://github.com/microsoft/vcpkg $VCPKG_ROOT \
++RUN git clone https://github.com/microsoft/vcpkg $VCPKG_ROOT \
+  &amp;&amp; $VCPKG_ROOT/bootstrap-vcpkg.sh -disableMetrics
+ 
+ WORKDIR /src
+ # ★ 의존성 목록만 먼저 복사 → 소스가 바뀌어도 이 레이어는 캐시됩니다
+-COPY vcpkg.json vcpkg-configuration.json ./
++#   vcpkg.json (+ 있으면 vcpkg-configuration.json) · baseline 을 쓰므로 clone 은 --depth 1 금지
++COPY vcpkg*.json ./
+ RUN $VCPKG_ROOT/vcpkg install --triplet x64-linux
+ 
+ COPY CMakeLists.txt ./
+@@ -3243,7 +3262,7 @@ RUN cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+ FROM gcr.io/distroless/cc-debian12:nonroot
+ WORKDIR /app
+ COPY --from=builder /src/build/api    /app/api
+-COPY --from=builder /src/config.toml  /app/config.toml
++COPY config.toml                      /app/config.toml
+ USER nonroot
+ EXPOSE 8080
+ ENTRYPOINT ["/app/api"]</code></pre>
+@@ -3379,17 +3398,18 @@ jobs:
+ int main() {
+     auto&amp; app = drogon::app();
+ 
+-    // 종료 직전에 부를 정리 작업
++    // 시작 직후 한 번 부를 작업
+     app.registerBeginningAdvice([] { SPDLOG_INFO("server started"); });
+ 
+-    asio_free_signal_handler([&amp;](int sig) {          // 또는 std::signal
++    // Drogon 은 기본으로 SIGTERM 에 quit() 합니다 — 로그 등을 끼우려면 핸들러를 교체
++    app.setTermSignalHandler([&amp;] {
+         SPDLOG_INFO("SIGTERM — draining");
+         app.getLoop()-&gt;queueInLoop([&amp;] {
+             app.quit();          // 리스너를 닫고 진행 중 요청을 마칩니다
+         });
+     });
+ 
+-    app.loadConfigFile("./config.toml").run();
++    app.loadConfigFile("./config.json").run();   // Drogon 설정은 JSON(또는 YAML)
+     SPDLOG_INFO("bye");          // run() 이 돌아온 뒤
+ }</code></pre>
+       <pre class="code" data-lang="yaml"><code># 쿠버네티스 쪽 짝꿍 설정 — 이게 없으면 배포마다 502 가 납니다
+@@ -3702,6 +3722,8 @@ public:
+       <pre class="code" data-lang="cpp"><code>// src/controllers/LinkController.cc
+ using namespace drogon;
+ 
++static HttpResponsePtr redirect(const std::string&amp; url);   // 아래에 정의 (쓰기 전에 선언)
++
+ Task&lt;&gt; LinkController::resolve(HttpRequestPtr req, Cb cb, std::string code) {
+     // ① 캐시 — 실패해도 서비스는 계속돼야 합니다
+     if (auto hit = co_await cache().get(code)) {

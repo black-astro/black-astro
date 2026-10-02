@@ -709,8 +709,8 @@ void f() noexcept;
 // ③ 반환값 최적화(RVO) — C++17 부터 일부는 의무 사항입니다
 std::vector&lt;int&gt; make() {
     std::vector&lt;int&gt; v(1000);
-    return v;                 // 복사도 이동도 일어나지 않습니다
-}
+    return v;                 // NRVO — 의무는 아니지만 주요 컴파일러가 대개 생략 (안 되면 이동)
+}                             //   의무(C++17)는 return std::vector&lt;int&gt;(1000); 처럼 임시를 반환할 때
 auto v = make();              // 호출한 쪽 자리에 바로 만들어집니다
 
 // ⚠ return std::move(v); 라고 쓰면 오히려 RVO 를 막습니다 — 그냥 return v;</code></pre>
@@ -1222,7 +1222,7 @@ std::memcpy(&amp;j, &amp;f, 4);         // ✅ 예전부터 쓰던 합법적 방
 Header h;
 std::memcpy(&amp;h, buf, sizeof h);   // ✅ 이식성 있고 UB 아님
 
-// ⑤ 널 포인터에 0을 더하는 것도 예전에는 UB 였습니다 (C++20 에서 허용)</code></pre>
+// ⑤ 널 포인터에 0을 더하는 것은 C++ 에서는 합법(결과도 널)이지만 C 에서는 UB 입니다</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>실무 결론</b> — 이 규칙들을 다 외울 필요는 없습니다.
         <b><code>-fsanitize=address,undefined</code> 를 개발·CI 빌드에 켜 두면</b>
@@ -1508,7 +1508,8 @@ for (int i = 0; i &lt; 20; ++i) {
 
 // 재할당 시 이동이냐 복사냐 — noexcept 가 가릅니다 ★
 struct A { A(A&amp;&amp;) noexcept; };      // 이동 (빠름)
-struct B { B(B&amp;&amp;); };               // 예외를 던질 수 있음 → 복사로 후퇴
+struct B { B(const B&amp;); B(B&amp;&amp;); };  // 이동이 던질 수 있음 → 복사로 후퇴
+//   (복사 생성자가 없으면 noexcept 가 아니어도 이동을 씁니다)
 static_assert(std::is_nothrow_move_constructible_v&lt;A&gt;);
 
 // 원소가 100만 개인 vector&lt;string&gt; 을 재할당하면
@@ -1766,7 +1767,7 @@ class Good {
 // 5 의 법칙 — 하나라도 직접 쓰면 나머지도 정의해야 합니다
 //   소멸자 / 복사 생성 / 복사 대입 / 이동 생성 / 이동 대입
 class Raw {
-    int* p_;
+    int* p_ = new int(0);
 public:
     ~Raw() { delete p_; }        // 소멸자만 썼더니
 };
@@ -1811,18 +1812,18 @@ auto a = f();             // 생성 하나뿐 (RVO — 복사도 이동도 없�
     <div class="card">
       <h4 class="mini" style="margin-top:0">객체 레이아웃과 특수 멤버 자동 생성 규칙</h4>
       <pre class="code" data-lang="cpp"><code>// ① 이동 생성자는 '복사 생성자나 소멸자를 직접 쓰면' 자동 생성이 막힙니다
-class A { ~A() {} };            // 소멸자를 썼더니
+struct A { ~A() {} };           // 소멸자를 썼더니
 A a; A b = std::move(a);        // → 이동이 아니라 '복사'가 불립니다 (조용히)
 //   대형 컨테이너에서 성능이 몇 배 나빠지는 흔한 원인 ★
 //   해결: 필요한 것을 = default 로 명시
-class B { ~B() = default; B(B&amp;&amp;) = default; B&amp; operator=(B&amp;&amp;) = default; };
+struct B { ~B() = default; B(B&amp;&amp;) = default; B&amp; operator=(B&amp;&amp;) = default; };
 
 // ② 클래스 크기 — 빈 클래스도 1바이트입니다 (주소가 있어야 하므로)
 struct Empty {};                 sizeof(Empty);        // 1
 struct Derived : Empty { int x; }; sizeof(Derived);    // 4 (빈 기반 최적화)
 struct HasMember { Empty e; int x; }; sizeof(HasMember); // 8 (패딩 발생)
 //   → C++20 [[no_unique_address]] 로 멤버에도 같은 최적화를 적용할 수 있습니다
-struct Better { [[no_unique_address]] Empty e; int x; };  // 4
+struct Better { [[no_unique_address]] Empty e; int x; };  // 4 (GCC·Clang — MSVC 는 무시, [[msvc::no_unique_address]])
 
 // ③ 컴파일 시점에 성질 확인 — 라이브러리 인터페이스에 못 박아 두기
 static_assert(std::is_trivially_copyable_v&lt;Point&gt;);   // memcpy 해도 되는 타입인가
@@ -1903,6 +1904,7 @@ b.f();          // "Base" ★ 파이썬이라면 "Derived" 였을 자리
 // virtual 을 붙이면 기대대로 동작합니다
 struct Base2    { virtual void f() { std::puts("Base"); } };
 struct Derived2 : Base2 { void f() override { std::puts("Derived"); } };
+Derived2 d2;
 Base2&amp; b2 = d2;
 b2.f();         // "Derived"
 
@@ -1974,8 +1976,9 @@ struct File : Readable, Writable { ... };   // ✅ 이 정도는 안전합니다
       <pre class="code" data-lang="cpp"><code>// 바깥 세계(파일·네트워크·시각)와 닿는 곳만 인터페이스로 뽑습니다
 class Clock {
 public:
+    using time_point = std::chrono::system_clock::time_point;
     virtual ~Clock() = default;
-    virtual std::chrono::system_clock::time_point now() const = 0;
+    virtual time_point now() const = 0;
 };
 class SystemClock : public Clock { ... };
 class FakeClock   : public Clock {           // 테스트용
@@ -2256,6 +2259,7 @@ namespace std { class string; }   // ❌ 절대 금지 — &lt;string&gt; 을 �
       <pre class="code" data-lang="cpp"><code>// ── session.h — 사용자에게 보이는 전부
 #pragma once
 #include &lt;memory&gt;
+#include &lt;string_view&gt;
 
 class Session {
 public:
@@ -2360,7 +2364,7 @@ struct Cfg { int a; };
 
 // 진단 방법
 //   ① -flto 를 켜면 링커가 타입 불일치를 잡아 주는 경우가 있습니다
-//   ② gold/lld 링커의 --detect-odr-violations
+//   ② gold 링커의 --detect-odr-violations (lld 에는 없음)
 //   ③ AddressSanitizer 는 전역 변수 ODR 위반을 잡아 줍니다
 //   ④ 근본 대책: 플래그로 구조체 내용을 바꾸지 않기 ★
 
@@ -3126,7 +3130,8 @@ class A { };        // ← 이 세미콜론. 없으면 엉뚱한 에러가 쏟�
 1 / 2;              // 0   (파이썬 3 는 0.5 였습니다)
 1.0 / 2;            // 0.5
 
-// ★ 이 열 개 중 ①②④⑦⑧ 은 AddressSanitizer 로 대부분 잡힙니다
+// ★ 이 열 개 중 ④⑥⑦⑧ 은 AddressSanitizer 로 대부분 잡힙니다
+//   (① 초기화 누락은 ASan 이 못 잡음 — -Wall 경고 · MemorySanitizer · Valgrind 로)
 g++ -fsanitize=address,undefined -g main.cpp &amp;&amp; ./a.out</code></pre>
     </div>
   </div>

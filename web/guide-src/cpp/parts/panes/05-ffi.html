@@ -391,7 +391,7 @@ MYLIB_1.0 {
   ① 심볼이 적을수록 로딩이 빠릅니다 (동적 링커의 재배치 작업 감소)
   ② 내부 심볼이 다른 라이브러리와 충돌하지 않습니다 ★
      — 같은 프로세스에 두 확장 모듈이 같은 이름을 내보내면
-       나중에 로드된 쪽이 앞의 것을 가릴 수 있습니다
+       먼저 로드된 쪽이 나중 것을 가릴 수 있습니다 (아래 인터포지션)
   ③ 컴파일러가 더 공격적으로 최적화할 수 있습니다
      (밖에서 부를 수 없다면 인라인·제거가 자유로워집니다)
   ④ API 표면이 문서와 일치하게 유지됩니다</code></pre>
@@ -712,6 +712,7 @@ mylib_run(&amp;cfg, ...);
       <h4 class="mini" style="margin-top:0">테스트를 C 로도 작성하기</h4>
       <pre class="code" data-lang="c"><code>/* tests/test_c_api.c — 헤더가 정말 C 에서 컴파일되는지 검증 ★ */
 #include "mylib.h"
+#undef NDEBUG                  /* ★ Release(NDEBUG) 빌드에서도 assert 안의 호출이 사라지지 않게 */
 #include &lt;assert.h&gt;
 #include &lt;stdio.h&gt;
 
@@ -766,9 +767,9 @@ extern "C" int32_t mylib_engine_feed(mylib_engine* h,
 }
 
 extern "C" void mylib_engine_destroy(mylib_engine* h) {
-    if (!h) return;
-    h-&gt;magic = 0;                // ★ 해제 표시 → 이중 해제를 잡아냅니다
-    delete h;
+    if (!check(h)) return;       // ★ 이미 해제됐거나 엉뚱한 핸들이면 무시
+    h-&gt;magic = 0;                // ★ 해제 표시 → 이중 해제를 (대개) 잡아냅니다
+    delete h;                    //   해제된 메모리를 읽는 것 자체는 UB 라 보장은 아닙니다
 }
 
 // 더 강한 방법 — 핸들을 '정수 ID' 로 주고 내부 테이블에서 조회
@@ -1185,7 +1186,7 @@ typedef struct {
     double  b;      /* 오프셋 8  (8의 배수여야 함) */
     int32_t c;      /* 오프셋 16 */
                     /* 패딩 4바이트 (전체가 8의 배수가 되도록) */
-} Rec;              /* sizeof == 24 */</code></pre>
+} Rec;              /* sizeof == 24  (x86-64 · arm64 기준) */</code></pre>
       <pre class="code" data-lang="python"><code># ❌ 패딩을 모르고 선언하면 오프셋이 어긋납니다
 class Rec(ctypes.Structure):
     _pack_ = 1                       # ← C 는 pack 을 안 했는데 여기서 1로
@@ -1773,7 +1774,7 @@ extern "C" const char* mylib_version_string(void) {
     <div class="card">
       <h4 class="mini" style="margin-top:0">한글이 깨지지 않게</h4>
       <pre class="code" data-lang="python"><code>import ctypes
-from ctypes import c_char_p, c_int32, create_string_buffer, byref
+from ctypes import c_char_p, c_int32, c_void_p, POINTER, create_string_buffer, byref
 
 # C 문자열은 '바이트'입니다. 인코딩을 반드시 명시하세요 ★
 lib.mylib_set_name.argtypes = [c_void_p, c_char_p]
@@ -1784,6 +1785,7 @@ lib.mylib_version_string.restype = c_char_p
 ver = lib.mylib_version_string().decode("utf-8")      # bytes → str
 
 # ① 호출자 버퍼 패턴
+lib.mylib_name.argtypes = [c_void_p, c_char_p, POINTER(c_int32)]
 size = c_int32(0)
 lib.mylib_name(h, None, byref(size))                  # 크기 조회
 buf = create_string_buffer(size.value)                # 버퍼 할당
@@ -1791,7 +1793,9 @@ lib.mylib_name(h, buf, byref(size))
 name = buf.value.decode("utf-8")                      # ★ .value 는 널까지
 
 # ② 라이브러리 할당 패턴 — 반드시 해제해야 합니다
+lib.mylib_name_alloc.argtypes = [c_void_p]
 lib.mylib_name_alloc.restype = c_void_p               # ★ c_char_p 아님!
+lib.mylib_string_free.argtypes = [c_void_p]           # ★ 없으면 포인터가 int(32비트)로 잘립니다
 p = lib.mylib_name_alloc(h)
 try:
     name = ctypes.cast(p, c_char_p).value.decode("utf-8")
@@ -2395,6 +2399,8 @@ _MAP = {
     -5: KeyboardInterrupt,
 }
 
+lib.mylib_last_error.restype = ctypes.c_char_p       # ★ 없으면 int 가 와서 .decode 에서 실패
+
 def _check(rc: int) -&gt; None:
     if rc == 0:
         return
@@ -2444,7 +2450,8 @@ MYLIB_EXPORT int32_t mylib_run(const mylib_config* c);
     ...
 }
 //  → 옛 프로그램이 새 .so 를 써도 안전하고,
-//    새 프로그램이 옛 .so 를 쓰면 구조체가 커서 에러로 걸립니다</code></pre>
+//    새 프로그램이 옛 .so 를 쓰면, 옛 구현이 '모르는 큰 크기'를 거부하게
+//    짜여 있을 때만 에러로 걸립니다 (아니면 mode 가 조용히 무시됩니다)</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">버전 조회와 기능 탐지</h4>
@@ -2549,7 +2556,7 @@ git checkout v1.0 -- tests/
       <pre class="code" data-lang="c"><code>/* ① 새 이름으로 함수를 추가하고 옛 것은 유지 (가장 흔한 방법) ★ */
 MYLIB_EXPORT int32_t mylib_run(const mylib_config*);        /* v1 */
 MYLIB_EXPORT int32_t mylib_run_ex(const mylib_config*, int32_t flags); /* v2 */
-/*   Win32 API 가 CreateFileEx · GetVersionEx 로 해 온 방식입니다   */
+/*   Win32 API 가 CreateWindowEx · GetVersionEx 로 해 온 방식입니다   */
 
 /* ② 옛 함수는 새 것을 부르게 구현 — 코드 중복 없음 */
 int32_t mylib_run(const mylib_config* c) {
@@ -2565,7 +2572,8 @@ int32_t mylib_run(const mylib_config* c) {
   #define MYLIB_DEPRECATED
 #endif
 
-MYLIB_DEPRECATED MYLIB_EXPORT int32_t mylib_run(const mylib_config*);
+MYLIB_EXPORT MYLIB_DEPRECATED int32_t mylib_run(const mylib_config*);
+/*   ↑ extern "C" 앞에는 속성을 둘 수 없어 MYLIB_EXPORT 뒤에 붙입니다 */
 
 /* ④ 폐기 일정을 문서에 명시
       "mylib_run 은 2.0 에서 폐기 예고, 3.0 에서 제거 예정" */</code></pre>
@@ -2637,7 +2645,8 @@ import java.lang.invoke.MethodHandle;
 
 // ★ JNI 는 이제 마지막 수단입니다. FFM(Panama)이 표준이 됐습니다.
 try (Arena arena = Arena.ofConfined()) {
-    SymbolLookup lib = SymbolLookup.libraryLookup("mylib", arena);
+    SymbolLookup lib = SymbolLookup.libraryLookup(
+        System.mapLibraryName("mylib"), arena);   // → libmylib.so · mylib.dll
     Linker linker = Linker.nativeLinker();
 
     MethodHandle smooth = linker.downcallHandle(
@@ -2646,7 +2655,7 @@ try (Arena arena = Arena.ofConfined()) {
             ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
             ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
 
-    MemorySegment in  = arena.allocateArray(ValueLayout.JAVA_DOUBLE, data);
+    MemorySegment in  = arena.allocateFrom(ValueLayout.JAVA_DOUBLE, data);   // Java 22+
     MemorySegment out = arena.allocate(ValueLayout.JAVA_DOUBLE, data.length);
 
     int rc = (int) smooth.invokeExact(in, (long) data.length, out, 3);
@@ -2677,6 +2686,9 @@ import (
 )
 
 func Smooth(in []float64, window int) ([]float64, error) {
+    if len(in) == 0 {
+        return []float64{}, nil   // &amp;in[0] 은 빈 슬라이스에서 패닉
+    }
     out := make([]float64, len(in))
     rc := C.mylib_smooth(
         (*C.double)(unsafe.Pointer(&amp;in[0])),
