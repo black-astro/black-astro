@@ -96,14 +96,19 @@ using UnityEngine;
 public class Roller : MonoBehaviour
 {
     [SerializeField] private float power = 10f;
+    private Rigidbody _rb;
+    private Vector3 _input;
 
-    void Update()
+    void Awake() =&gt; _rb = GetComponent&lt;Rigidbody&gt;();   // 한 번만 찾아 둔다
+
+    void Update()                                // 입력은 Update 에서 읽고
     {
         float h = Input.GetAxis("Horizontal");   // A·D / ←→
         float v = Input.GetAxis("Vertical");     // W·S / ↑↓
-        GetComponent&lt;Rigidbody&gt;()
-            .AddForce(new Vector3(h, 0, v) * power);
+        _input = new Vector3(h, 0, v);
     }
+
+    void FixedUpdate() =&gt; _rb.AddForce(_input * power);   // 힘은 물리 주기에
 }</code></pre>
     </div>
     <div class="card">
@@ -1113,13 +1118,13 @@ private AudioSource _src;
 void Awake() =&gt; _src = GetComponent&lt;AudioSource&gt;();
 
 // 겹쳐 재생 (총소리처럼 빠르게 반복)
-_src.PlayOneShot(shootClip, volume: 0.7f);
+_src.PlayOneShot(shootClip, volumeScale: 0.7f);
 
 // 한 지점에서 잠깐 나는 소리 — 오브젝트 없이
 AudioSource.PlayClipAtPoint(explodeClip, pos);
 
 // 음량 조절은 AudioMixer 로 (설정 화면과 연결)
-mixer.SetFloat("BgmVolume", Mathf.Log10(v) * 20);   // dB 변환</code></pre>
+mixer.SetFloat("BgmVolume", Mathf.Log10(Mathf.Max(v, 0.0001f)) * 20);   // dB 변환 (0 이면 -∞ 라 하한 -80dB)</code></pre>
       <div class="note warn">
         <b>오디오 임포트 설정이 메모리를 좌우합니다.</b>
         짧은 효과음은 <b>Decompress On Load</b>,
@@ -1148,7 +1153,7 @@ mixer.SetFloat("BgmVolume", Mathf.Log10(v) * 20);   // dB 변환</code></pre>
       </div>
       <pre class="code" data-lang="csharp"><code>// Cinemachine — 카메라 추적은 코드가 아니라 세팅입니다
 // 1. Package Manager → Cinemachine 설치
-// 2. Hierarchy 우클릭 → Cinemachine → Virtual Camera
+// 2. Hierarchy 우클릭 → Cinemachine → Cinemachine Camera (2.x 는 Virtual Camera)
 // 3. Follow 슬롯에 Player 드래그 — 끝
 
 // 피격 시 화면 흔들기
@@ -1515,8 +1520,8 @@ public static void Save(SaveData d)
     var json = JsonUtility.ToJson(d, prettyPrint: true);
     var tmp  = Path + ".tmp";
     File.WriteAllText(tmp, json);
-    File.Copy(tmp, Path, overwrite: true);          // 쓰다 꺼져도 원본 보존
-    File.Delete(tmp);
+    if (File.Exists(Path)) File.Replace(tmp, Path, null);   // 쓰다 꺼져도 원본 보존
+    else                   File.Move(tmp, Path);            // (Copy 는 덮어쓰는 도중 꺼지면 깨집니다)
 }
 
 public static SaveData Load() =&gt;
@@ -1558,6 +1563,8 @@ public static SaveData Load() =&gt;
 public class SaveData
 {
     public int version = 2;      // ★ 처음부터 넣어 두세요
+                                 //   (이 필드가 없던 옛 세이브는 초기값 2 로 읽혀
+                                 //    아래 마이그레이션을 건너뜁니다)
     public int level;
     public int gold;
     public List&lt;string&gt; unlocked = new();
@@ -1815,9 +1822,10 @@ if (IsInvoking(nameof(Explode))) { }    // 예약돼 있나?
     <div class="card">
       <h4 class="mini">Awaitable (Unity 6 내장)</h4>
       <pre class="code" data-lang="csharp"><code>// destroyCancellationToken — 오브젝트가 파괴되면 자동 취소 ★
-async void Die()
+async Awaitable Die()                   // async void 대신 Awaitable
 {
-    await Awaitable.WaitForSecondsAsync(3f, destroyCancellationToken);
+    try { await Awaitable.WaitForSecondsAsync(3f, destroyCancellationToken); }
+    catch (OperationCanceledException) { return; }   // 파괴되면 조용히 끝
     Respawn();
 }
 

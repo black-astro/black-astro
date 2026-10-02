@@ -156,10 +156,14 @@ app.Run();</code></pre>
 app.Use(async (ctx, next) =&gt;
 {
     var sw = Stopwatch.StartNew();
+    ctx.Response.OnStarting(() =&gt;          // 헤더는 본문이 나가기 직전까지만 바꿀 수 있다
+    {
+        ctx.Response.Headers["X-Elapsed-ms"] = sw.ElapsedMilliseconds.ToString();
+        return Task.CompletedTask;
+    });
     await next(ctx);                       // ★ 여기서 안쪽 전부가 실행된다
-    sw.Stop();
-    // next() 가 돌아온 뒤 = 응답이 나가는 길
-    ctx.Response.Headers["X-Elapsed-ms"] = sw.ElapsedMilliseconds.ToString();
+    // next() 가 돌아온 뒤 = 응답이 나가는 길 — 이미 본문이 나갔다면
+    // 여기서 헤더를 고치면 예외입니다 (그래서 위의 OnStarting)
 });
 
 // next() 를 부르지 않으면 거기서 요청이 끝난다 — 이것이 "단락(short-circuit)"
@@ -327,7 +331,7 @@ public class PartyService(IOptions&lt;GameOptions&gt; opt)
 public class ShopService(IOptionsSnapshot&lt;GameOptions&gt; opt) { ... }
 
 // ③ IOptionsMonitor — 싱글턴에서 변경을 감지할 때
-public class RewardScheduler(IOptionsMonitor&lt;GameOptions&gt; m)
+public class RewardScheduler
 {
     public RewardScheduler(IOptionsMonitor&lt;GameOptions&gt; m)
         =&gt; m.OnChange(o =&gt; Reschedule(o.DailyRewardHourUtc));
@@ -397,7 +401,8 @@ dotnet ef database update</code></pre>
           <pre class="code" data-lang="csharp"><code>var players = await db.Players.ToListAsync();
 foreach (var p in players)
     Console.WriteLine(p.Items.Count);
-// 플레이어 수만큼 쿼리가 더 나간다</code></pre>
+// 지연 로딩을 켰다면 플레이어 수만큼 쿼리가 더 나간다
+// (안 켰다면 Items 가 비어 조용히 0 이 찍힌다)</code></pre>
         </div>
         <div class="good">
           <h5>Include 로 한 번에</h5>
@@ -682,7 +687,7 @@ app.MapPost("/shop/buy", async (BuyItemDto d, IValidator&lt;BuyItemDto&gt; v, IS
         _                      =&gt; (500, "INTERNAL"),
     };
 
-    log.Error(ex, "요청 실패 {Path}", ctx.Request.Path);
+    log.LogError(ex, "요청 실패 {Path}", ctx.Request.Path);
     ctx.Response.StatusCode = status;
     await ctx.Response.WriteAsJsonAsync(new
     {
@@ -952,7 +957,7 @@ await cache.RemoveAsync("shop:daily", ct);</code></pre>
             using var scope = scopes.CreateScope();          // ★ Scoped 를 쓰려면 필수
             var db = scope.ServiceProvider.GetRequiredService&lt;GameDb&gt;();
             try { await ResetDailyAsync(db, ct); }
-            catch (Exception e) { log.Error(e, "일일 초기화 실패"); }
+            catch (Exception e) { log.LogError(e, "일일 초기화 실패"); }
         }
     }
 }
@@ -1229,6 +1234,7 @@ app.MapPrometheusScrapingEndpoint();</code></pre>
         new PostgreSqlBuilder().WithImage("postgres:17-alpine").Build();
 
     public async Task InitializeAsync() =&gt; await _db.StartAsync();
+    async Task IAsyncLifetime.DisposeAsync() =&gt; await _db.DisposeAsync();   // (xUnit v2 기준)
 
     protected override void ConfigureWebHost(IWebHostBuilder b) =&gt;
         b.UseSetting("ConnectionStrings:Db", _db.GetConnectionString());
@@ -1376,7 +1382,8 @@ public void 뽑기_확률이_표와_맞는다()
 WORKDIR /src
 COPY *.sln .
 COPY src/GameApi/*.csproj src/GameApi/
-RUN dotnet restore                      # ★ 의존성 레이어를 먼저 (캐시)
+# ★ 의존성 레이어를 먼저 (캐시) — 복사한 프로젝트만 복원
+RUN dotnet restore src/GameApi/GameApi.csproj
 COPY . .
 RUN dotnet publish src/GameApi -c Release -o /app --no-restore
 
@@ -1385,14 +1392,16 @@ WORKDIR /app
 COPY --from=build /app .
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
-USER $APP_UID                           # 루트로 돌리지 않는다
+# 루트로 돌리지 않는다 (Dockerfile 은 줄 끝 주석이 안 됩니다)
+USER $APP_UID
 ENTRYPOINT ["dotnet", "GameApi.dll"]</code></pre>
       <pre class="code" data-lang="csharp"><code>// 헬스체크 — 로드밸런서가 이걸 보고 트래픽을 넣습니다
 builder.Services.AddHealthChecks()
     .AddDbContextCheck&lt;GameDb&gt;()
     .AddRedis(cfg.GetConnectionString("Redis")!);
 
-app.MapHealthChecks("/health/live");    // 살아 있나 (프로세스)
+app.MapHealthChecks("/health/live",     // 살아 있나 (프로세스만 — 검사 0개)
+    new() { Predicate = _ =&gt; false });
 app.MapHealthChecks("/health/ready");   // 받을 준비가 됐나 (DB·캐시 포함)</code></pre>
     </div>
 

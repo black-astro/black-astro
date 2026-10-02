@@ -213,7 +213,7 @@ while (!ct.IsCancellationRequested)
 
 static async Task HandleAsync(TcpClient c, CancellationToken ct)
 {
-    var buf = ArrayPool&lt;byte&gt;.Shared.Rent(16 * 1024);
+    var buf = ArrayPool&lt;byte&gt;.Shared.Rent(4 + 64 * 1024);   // ★ 헤더 + 최대 메시지가 들어가야 함
     try
     {
         var stream = c.GetStream();
@@ -860,16 +860,19 @@ public class PlayerNet : NetworkBehaviour
       <pre class="code" data-lang="csharp"><code>// 점수 갱신 (O(log n))
 await db.SortedSetAddAsync("rank:season3", playerId, score);
 
-// 내 순위 (0부터)
+// 내 순위 (0부터, 랭킹에 없으면 null)
 var rank = await db.SortedSetRankAsync("rank:season3", playerId, Order.Descending);
 
 // 상위 100명
 var top = await db.SortedSetRangeByRankWithScoresAsync(
               "rank:season3", 0, 99, Order.Descending);
 
-// 내 주변 순위 (앞뒤 5명)
-var around = await db.SortedSetRangeByRankAsync(
-              "rank:season3", rank - 5, rank + 5, Order.Descending);</code></pre>
+// 내 주변 순위 (앞뒤 5명) — 음수 인덱스는 "끝에서부터"라 0 에서 자릅니다
+if (rank is long r)
+{
+    var around = await db.SortedSetRangeByRankAsync(
+                  "rank:season3", Math.Max(0, r - 5), r + 5, Order.Descending);
+}</code></pre>
       <div class="note tip">
         <b>동점 처리를 정하세요.</b>
         점수가 같으면 <b>먼저 달성한 사람</b>이 위여야 공정합니다.
@@ -936,9 +939,9 @@ static async Task RunBotAsync(int id, CancellationToken ct)
 }
 
 // 동시에 띄우기 — 한 프로세스에서 수천 개도 가능합니다
-await Parallel.ForEachAsync(Enumerable.Range(0, 5000),
-    new ParallelOptions { MaxDegreeOfParallelism = 200 },
-    async (i, t) =&gt; await RunBotAsync(i, t));</code></pre>
+// ★ 봇은 끝나지 않는 루프라 Parallel.ForEachAsync(동시 200 제한)로 돌리면
+//   앞의 200개만 영원히 돌고 나머지는 시작도 못 합니다 — 전부 한꺼번에 띄웁니다
+await Task.WhenAll(Enumerable.Range(0, 5000).Select(i =&gt; RunBotAsync(i, ct)));</code></pre>
     </div>
 
     <div class="card">
@@ -1108,7 +1111,9 @@ app.Lifetime.ApplicationStopping.Register(() =&gt;
     _matchMaker.StopAccepting();                  // 새 매칭 중단
     foreach (var room in _rooms) room.NotifyShutdown(seconds: 60);
     _drainCompleted.Wait(TimeSpan.FromSeconds(90));
-});</code></pre>
+});
+// ★ 컨테이너라면 종료 유예(k8s terminationGracePeriodSeconds 기본 30초)를
+//   90초보다 길게 — 아니면 드레인 도중 강제 종료됩니다</code></pre>
     </div>
 
     <div class="card">
@@ -1192,16 +1197,23 @@ app.Map("/ws", async (HttpContext ctx) =&gt;
     using var ws = await ctx.WebSockets.AcceptWebSocketAsync();
     var buf = new byte[16 * 1024];
 
-    while (ws.State == WebSocketState.Open)
+    try
     {
-        var r = await ws.ReceiveAsync(buf.AsMemory(), ctx.RequestAborted);
-        if (r.MessageType == WebSocketMessageType.Close) break;
-        if (!r.EndOfMessage)                 // ★ 큰 메시지는 조각나서 온다
-            throw new InvalidDataException("메시지 상한 초과");
+        while (ws.State == WebSocketState.Open)
+        {
+            var r = await ws.ReceiveAsync(buf.AsMemory(), ctx.RequestAborted);
+            if (r.MessageType == WebSocketMessageType.Close) break;
+            if (!r.EndOfMessage)                 // ★ 큰 메시지는 조각나서 온다
+                throw new InvalidDataException("메시지 상한 초과");
 
-        await _room.PushAsync(player, buf.AsMemory(0, r.Count));
+            // ★ 복사해서 넘깁니다 — buf 는 다음 수신에 덮어씌워집니다
+            await _room.PushAsync(player, buf.AsSpan(0, r.Count).ToArray());
+        }
     }
-    await _room.LeaveAsync(player);          // 어떻게 끊겨도 반드시 정리
+    finally
+    {
+        await _room.LeaveAsync(player);      // 예외로 끊겨도 반드시 정리
+    }
 });
 
 app.Run();</code></pre>

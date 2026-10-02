@@ -69,7 +69,7 @@
 }
 
 // 서로 관계없는 작업은 동시에
-var (profile, items) = (LoadProfileAsync(id), LoadItemsAsync(id));
+var (profile, items) = (LoadProfileAsync(id, ct), LoadItemsAsync(id, ct));
 await Task.WhenAll(profile, items);
 return new View(profile.Result, items.Result);
 
@@ -103,9 +103,9 @@ async void Save() { await ...; }          // ✗
 async Task SaveAsync() { await ...; }     // ✓
 
 // ③ 루프 안에서 await — N번 왕복합니다
-foreach (var id in ids) await LoadAsync(id);            // ✗ 느림
+foreach (var id in ids) await LoadAsync(id, ct);        // ✗ 느림
 
-var tasks = ids.Select(LoadAsync);                       // ✓ 동시에
+var tasks = ids.Select(id =&gt; LoadAsync(id, ct));         // ✓ 동시에
 var all   = await Task.WhenAll(tasks);
 
 // 단, 동시 수를 제한해야 상대 서버가 죽지 않습니다
@@ -180,7 +180,7 @@ public ValueTask&lt;Item&gt; GetItemAsync(int id)
         <b>애매하면 Task</b> 를 쓰는 것이 안전하고, ValueTask 는
         <b>측정해서 병목으로 확인된 뒤</b> 도입하세요.
       </div>
-      <pre class="code" data-lang="csharp"><code>// 오래 걸리는 CPU 작업은 스레드풀로 (서버에서만)
+      <pre class="code" data-lang="csharp"><code>// 오래 걸리는 CPU 작업은 스레드풀로 (UI·클라이언트 앱에서 — ASP.NET Core 요청 안에서는 이득이 없습니다)
 var result = await Task.Run(() =&gt; HeavyCompute(data), ct);
 
 // 진행률 보고
@@ -553,12 +553,12 @@ foreach (var range in line.AsSpan().Split(','))  // ✓ .NET 9+ — 할당 0
     var part = line.AsSpan()[range];
 }
 
-// 문자열 조립도 할당 없이 (길이를 아는 경우)
+// 문자열 조립도 할당 없이 (길이를 아는 경우 — 8자리:7자리 = 16자)
 var key = string.Create(16, (roomId, slot), static (dst, s) =&gt;
 {
-    s.roomId.TryFormat(dst, out var w);
+    s.roomId.TryFormat(dst, out var w, "D8");     // 00001234
     dst[w] = ':';
-    s.slot.TryFormat(dst[(w + 1)..], out _);
+    s.slot.TryFormat(dst[(w + 1)..], out _, "D7"); // 길이가 모자라면 남은 칸이 '\0' 으로 남습니다
 });</code></pre>
       <div class="note tip">
         <b><code>int.TryParse</code>·<code>decimal.TryParse</code>·<code>DateTime.TryParse</code> 는
@@ -665,9 +665,8 @@ void Update()
 }
 
 // ② 재사용 버퍼
-private readonly List&lt;Collider&gt; _hits = new(32);
-_hits.Clear();
-Physics.OverlapSphereNonAlloc(pos, r, _buffer);   // NonAlloc 계열
+private readonly Collider[] _buffer = new Collider[32];
+int n = Physics.OverlapSphereNonAlloc(pos, r, _buffer);   // NonAlloc 계열 — 앞 n 개만 유효
 
 // ③ 구조체 + 정적 람다
 list.ForEach(static x =&gt; x.Reset());   // 캡처 없음을 컴파일러가 보장
@@ -1070,7 +1069,7 @@ public static class CommandRegistry
 
 internal static partial class Native
 {
-    // C# 12+ — 소스 제너레이터 방식(빠르고 AOT 안전)
+    // .NET 7+ — 소스 제너레이터 방식(빠르고 AOT 안전)
     [LibraryImport("user32.dll", StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool MessageBeep(uint type);
@@ -1388,9 +1387,9 @@ public class StringJoinBench
 BenchmarkRunner.Run&lt;StringJoinBench&gt;();   // ★ Release 로 실행!</code></pre>
     <pre class="code" data-lang="text"><code>| Method  |        Mean |   Ratio |  Allocated |
 |---------|------------:|--------:|-----------:|
-| Concat  | 1,213.42 us |    1.00 | 11,265 KB  |  ← 기준
+| Concat  | 1,213.42 us |    1.00 |  3,785 KB  |  ← 기준
 | Builder |    12.87 us |    0.01 |     33 KB  |  94배 빠르고
-| Join    |     9.21 us |    0.008|     15 KB  |  할당은 1/750</code></pre>
+| Join    |     9.21 us |    0.008|     15 KB  |  할당은 약 1/250</code></pre>
     <div class="note warn">
       <b>Stopwatch 로 한 번 돌려 보는 것은 측정이 아닙니다.</b>
       JIT 워밍업·GC 타이밍·CPU 부스트에 따라 <b>결과가 매번 다릅니다.</b>

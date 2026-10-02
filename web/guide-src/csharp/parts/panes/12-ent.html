@@ -370,6 +370,7 @@ builder.Services.AddOptions&lt;ApprovalOptions&gt;()
     .ValidateOnStart();                 // 설정이 틀리면 기동 자체를 막습니다
 
 builder.Services.AddControllers();
+builder.Services.AddProblemDetails();   // 인자 없는 UseExceptionHandler() 는 이게 있어야 뜹니다
 builder.Services.AddAuthentication().AddJwtBearer();
 builder.Services.AddAuthorization();
 builder.Services.AddHealthChecks()
@@ -567,9 +568,9 @@ public sealed class WarmupService(
 
 builder.Services.AddHostedService&lt;WarmupService&gt;();
 
-// 종료 유예 시간 — 기본 5초는 배치가 도는 서버엔 너무 짧습니다
+// 종료 유예 시간 — 기본 30초(.NET 8+, 그 전엔 5초). 긴 배치가 도는 서버라면 더 늘립니다
 builder.Services.Configure&lt;HostOptions&gt;(o =&gt;
-    o.ShutdownTimeout = TimeSpan.FromSeconds(30));</code></pre>
+    o.ShutdownTimeout = TimeSpan.FromSeconds(90));</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">수명주기 대응표</h4>
@@ -784,6 +785,7 @@ public sealed class Dispatcher(IServiceProvider sp)
 }
 
 // 전부 다 받고 싶다면 — Spring 의 List&lt;INotifier&gt; 주입과 같습니다
+// 단, 키 없이 등록(AddScoped&lt;INotifier, …&gt;)한 것만 들어옵니다 — 위의 키드 등록은 안 잡힙니다
 public sealed class Broadcaster(IEnumerable&lt;INotifier&gt; all) { }</code></pre>
       <div class="note info" style="margin-bottom:0">
         <b><code>IEnumerable&lt;T&gt;</code> 주입은 그냥 됩니다.</b>
@@ -1080,8 +1082,9 @@ public sealed class ValidationBehavior&lt;TReq, TRes&gt;(
         RequestHandlerDelegate&lt;TRes&gt; next, CancellationToken ct)
     {
         var ctx = new ValidationContext&lt;TReq&gt;(req);
-        var failures = validators
-            .Select(v =&gt; v.Validate(ctx))
+        // ★ ValidateAsync — MustAsync 규칙(e08)이 있으면 동기 Validate 는 예외를 던집니다
+        var results = await Task.WhenAll(validators.Select(v =&gt; v.ValidateAsync(ctx, ct)));
+        var failures = results
             .SelectMany(r =&gt; r.Errors)
             .Where(f =&gt; f is not null).ToList();
 
@@ -1101,7 +1104,7 @@ builder.Services.AddMediatR(c =&gt; {
         서비스 클래스가 메서드 20개로 부풀고 생성자 인자가 8개가 될 때 도입하면 효과가 큽니다.
         작은 시스템이라면 <code>ApprovalService</code> 하나로 충분합니다 —
         <b>"레이어를 위한 레이어" 는 유지보수 비용만 늘립니다.</b>
-        (라이선스: 3.x 부터 상용 조건이 있으니 도입 전 확인하세요. 대안으로 얇은 자체 디스패처를 두는 팀도 많습니다.)
+        (라이선스: 13.x 부터 상용 조건이 있으니 도입 전 확인하세요. 대안으로 얇은 자체 디스패처를 두는 팀도 많습니다.)
       </div>
     </div>
   </div>
@@ -1325,7 +1328,8 @@ var byDept = await db.ApprovalDocuments
 var docs = await db.ApprovalDocuments.Where(...).ToListAsync(ct);
 foreach (var d in docs)
     total += d.Steps.Count;      // 지연 로딩이 켜져 있으면 매번 SELECT
-                                 // 꺼져 있으면 여기서 NullReferenceException
+                                 // 꺼져 있으면 null 이라 NullReferenceException,
+                                 // 컬렉션을 [] 로 초기화해 뒀다면 조용히 0 (더 위험)
 
 // ✅ 한 번에 가져오기
 var docs = await db.ApprovalDocuments
@@ -1383,6 +1387,12 @@ public sealed class QueryCountInterceptor(IHttpContextAccessor acc)
             Log.Warning("한 요청에서 쿼리 30개 — {Path}", ctx.Request.Path);
         return r;
     }
+
+    // ★ ToListAsync 같은 비동기 쿼리는 이쪽으로 옵니다 — 이걸 빼면 하나도 안 셉니다
+    public override ValueTask&lt;InterceptionResult&lt;DbDataReader&gt;&gt; ReaderExecutingAsync(
+        DbCommand cmd, CommandEventData e, InterceptionResult&lt;DbDataReader&gt; r,
+        CancellationToken ct = default)
+        =&gt; ValueTask.FromResult(ReaderExecuting(cmd, e, r));
 }
 
 o.AddInterceptors(new QueryCountInterceptor(acc));</code></pre>
@@ -1402,14 +1412,14 @@ o.AddInterceptors(new QueryCountInterceptor(acc));</code></pre>
       <h4 class="mini" style="margin-top:0">@Version 에 해당하는 것</h4>
       <pre class="code" data-lang="csharp"><code>public sealed class ApprovalDocument
 {
-    // SQL Server: rowversion 타입 / PostgreSQL: xmin 시스템 컬럼
+    // PostgreSQL: xmin 시스템 컬럼(uint) / SQL Server: rowversion — 이때는 byte[] 로
     public uint Version { get; private set; }
 }
 
-// 매핑 — SQL Server
+// 매핑 — 두 DB 모두 IsRowVersion()
+//   Npgsql 7+ 는 uint 속성을 xmin 에 매핑합니다
+//   (옛 UseXminAsConcurrencyToken() 은 더 이상 권장되지 않습니다)
 builder.Property(d =&gt; d.Version).IsRowVersion();
-// 매핑 — PostgreSQL (xmin 을 그대로 씁니다)
-builder.UseXminAsConcurrencyToken();
 
 // 충돌 처리
 try
@@ -1588,7 +1598,7 @@ await using var tx3 = await db.Database
     <thead><tr><th style="width:22%">Spring 전파</th><th style="width:38%">뜻</th><th style="width:40%">.NET 대응</th></tr></thead>
     <tbody>
       <tr><td><code>REQUIRED</code> (기본)</td><td>있으면 참여, 없으면 시작</td><td>기본값 — 같은 <code>DbContext</code> 를 쓰면 자동으로 참여</td></tr>
-      <tr><td><code>REQUIRES_NEW</code></td><td>기존 것을 멈추고 새로 시작</td><td><code>TransactionScope(Required New)</code> 또는 <b>별도 <code>DbContext</code></b> (권장)</td></tr>
+      <tr><td><code>REQUIRES_NEW</code></td><td>기존 것을 멈추고 새로 시작</td><td><code>TransactionScope(RequiresNew)</code> 또는 <b>별도 <code>DbContext</code></b> (권장)</td></tr>
       <tr><td><code>SUPPORTS</code></td><td>있으면 참여, 없으면 그냥</td><td>기본 동작과 같음 (신경 쓸 것 없음)</td></tr>
       <tr><td><code>NOT_SUPPORTED</code></td><td>트랜잭션 없이 실행</td><td><code>TransactionScope(Suppress)</code> · 새 커넥션</td></tr>
       <tr><td><code>MANDATORY</code></td><td>없으면 예외</td><td><code>db.Database.CurrentTransaction is null</code> 검사</td></tr>
@@ -1744,14 +1754,13 @@ public override async Task&lt;int&gt; SaveChangesAsync(CancellationToken ct = de
         while (!ct.IsCancellationRequested)
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            // ★ 행 잠금은 트랜잭션이 끝날 때까지만 유지됩니다 — 발행·저장까지 한 트랜잭션으로
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
 
-            // 여러 인스턴스가 같은 행을 집지 않도록 잠급니다
+            // 여러 인스턴스가 같은 행을 집지 않도록 잠급니다 (FromSql 은 DbSet 에서 바로 시작)
             var batch = await db.OutboxMessages
-                .Where(m =&gt; m.PublishedAt == null &amp;&amp; m.Attempts &lt; 10)
-                .OrderBy(m =&gt; m.OccurredAt)
-                .Take(100)
                 .FromSql($@"SELECT * FROM outbox_messages
-                            WHERE published_at IS NULL
+                            WHERE published_at IS NULL AND attempts &lt; 10
                             ORDER BY occurred_at LIMIT 100
                             FOR UPDATE SKIP LOCKED")
                 .ToListAsync(ct);
@@ -1770,6 +1779,7 @@ public override async Task&lt;int&gt; SaveChangesAsync(CancellationToken ct = de
                 }
             }
             await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);                // 여기서 잠금이 풀립니다
             await Task.Delay(TimeSpan.FromSeconds(5), ct);
         }
     }
@@ -1901,9 +1911,10 @@ dotnet add package Npgsql        # 또는 Microsoft.Data.SqlClient</code></pre>
     }
 }
 
-// record 하나면 매핑 끝 — 이름만 맞으면 됩니다
+// record 하나면 매핑 끝 — 이름과 타입이 맞아야 합니다
+// (생성자 매핑은 타입까지 봅니다 — COUNT(*) · RANK() 는 bigint 라 long)
 public sealed record DeptSettlement(
-    string DeptCode, string DeptName, int DocCount, decimal TotalAmount, int Rank);</code></pre>
+    string DeptCode, string DeptName, long DocCount, decimal TotalAmount, long Rank);</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>C# 11 원시 문자열(<code>"""</code>)이 SQL 을 살렸습니다.</b>
         이스케이프도 문자열 이어붙이기도 없이 <b>SQL 을 그대로</b> 붙여 넣습니다.
@@ -2184,7 +2195,7 @@ public static partial class DocumentMapper
     // 구현은 빌드 때 생성됩니다. 리플렉션이 없습니다.
     public static partial DocumentDto ToDto(ApprovalDocument src);
 
-    [MapProperty(nameof(ApprovalDocument.Drafter.Name), nameof(DocumentDto.DrafterName))]
+    [MapProperty("Drafter.Name", nameof(DocumentDetailDto.DrafterName))]   // nameof(a.b.c) 는 "c" 만 남습니다
     public static partial DocumentDetailDto ToDetail(ApprovalDocument src);
 
     // 이름이 다르거나 계산이 필요한 것만 손으로
@@ -2386,7 +2397,7 @@ public sealed class ApprovalService(IOptions&lt;ApprovalOptions&gt; opt)
     private readonly ApprovalOptions _o = opt.Value;   // 타입도 이름도 컴파일러가 지킴
 }
 
-// ❌ 이렇게 쓰면 "Aproval:MaxDepth" 오타가 조용히 null 이 됩니다
+// ❌ 이렇게 쓰면 "Aproval:MaxDepth" 오타가 조용히 기본값(0)이 됩니다
 public sealed class Bad(IConfiguration cfg)
 {
     private readonly int _max = cfg.GetValue&lt;int&gt;("Aproval:MaxDepth");  // 0 이 됩니다
@@ -2432,10 +2443,13 @@ log.LogInformation(
   <div class="grid2 rv">
     <div class="card">
       <h4 class="mini" style="margin-top:0">파일이 바뀌면 즉시 반영</h4>
-      <pre class="code" data-lang="csharp"><code>public sealed class RateLimitGate(IOptionsMonitor&lt;GateOptions&gt; opt)
+      <pre class="code" data-lang="csharp"><code>public sealed class RateLimitGate
 {
-    public RateLimitGate()
+    private readonly IOptionsMonitor&lt;GateOptions&gt; opt;
+
+    public RateLimitGate(IOptionsMonitor&lt;GateOptions&gt; opt)
     {
+        this.opt = opt;
         // 값이 바뀔 때마다 콜백 — 로그를 남겨 두면 추적이 쉽습니다
         opt.OnChange(o =&gt; Log.Information(
             "설정 변경 감지 — 분당 한도 {Limit}", o.PerMinute));
@@ -2551,6 +2565,7 @@ app.MapHealthChecks("/health/ready", new() { Predicate = c =&gt; c.Tags.Contains
             NameClaimType = "preferred_username",
             RoleClaimType = "roles"               // ★ 이것을 안 맞추면 역할이 안 붙습니다
         };
+        o.MapInboundClaims = false;   // ★ 클레임 이름을 토큰 그대로 둡니다 (켜 두면 roles 가 긴 URI 로 바뀌어 위 설정과 어긋남)
         o.Events = new JwtBearerEvents
         {
             OnAuthenticationFailed = c =&gt;
@@ -2582,7 +2597,7 @@ app.MapHealthChecks("/health/ready", new() { Predicate = c =&gt; c.Tags.Contains
         </tbody>
       </table></div>
       <h4 class="mini">Windows 인증 — 사내에서 가장 편한 방법</h4>
-      <pre class="code" data-lang="csharp"><code>// IIS 또는 HTTP.sys 호스팅에서 AD 계정을 그대로 씁니다
+      <pre class="code" data-lang="csharp"><code>// Kestrel 에서 AD 계정을 그대로 씁니다 (IIS·HTTP.sys 라면 서버의 Windows 인증에 맡겨집니다)
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
                 .AddNegotiate();
 builder.Services.AddAuthorization(o =&gt;
@@ -2618,7 +2633,7 @@ public sealed class ApprovalLimitHandler(IUserGradeReader grades)
         var userId = ctx.User.GetUserId();
         var grade  = await grades.GetAsync(userId);
 
-        var limit = grade switch
+        var limit = grade.Level switch           // grade = { Level, DeptId }
         {
             Grade.TeamLead   =&gt; 10_000_000m,
             Grade.Director   =&gt; 100_000_000m,
@@ -3132,9 +3147,10 @@ public sealed class DocumentBuilder
 
     public ApprovalDocument Build()
     {
-        var doc = ApprovalDocument.Draft("테스트 문서", _amount, TestIds.Dept);
-        foreach (var a in _approvers) doc.AddStep(a);
-        if (_status is DocumentStatus.InProgress) doc.Submit(TestClock.Now);
+        // e13 의 도메인 모델 그대로: Draft(제목, 금액, 기안자, 부서, 시각) → Submit(결재선, 시각)
+        var doc = ApprovalDocument.Draft("테스트 문서", _amount,
+                                         TestIds.Drafter, TestIds.Dept, TestClock.Now);
+        if (_status is DocumentStatus.InProgress) doc.Submit(_approvers, TestClock.Now);
         return doc;
     }
 }
@@ -3371,6 +3387,8 @@ public sealed class ApprovalDocument : IHasDomainEvents
 
     public Result Reject(Guid approverId, string reason, DateTimeOffset now)
     {
+        if (Status is not DocumentStatus.InProgress)
+            return Result.Fail("진행 중인 문서만 반려할 수 있습니다");   // 이미 반려된 문서를 다음 결재자가 또 반려하지 못하게
         if (string.IsNullOrWhiteSpace(reason)) return Result.Fail("반려 사유는 필수입니다");
         var current = _steps.Where(s =&gt; s.State == StepState.Waiting).MinBy(s =&gt; s.Order);
         if (current?.ApproverId != approverId) return Result.Fail("결재 차례가 아닙니다");
@@ -3435,7 +3453,7 @@ public class ApprovalDocument {
           <tr><td><code>@Enumerated(STRING)</code></td><td><code>HasConversion&lt;string&gt;()</code></td></tr>
           <tr><td><code>@OneToMany(mappedBy)</code></td><td><code>HasMany().WithOne()</code></td></tr>
           <tr><td><code>orphanRemoval = true</code></td><td><code>OnDelete(DeleteBehavior.Cascade)</code></td></tr>
-          <tr><td><code>@Version</code></td><td><code>IsRowVersion()</code> · <code>UseXminAsConcurrencyToken()</code></td></tr>
+          <tr><td><code>@Version</code></td><td><code>IsRowVersion()</code> (PostgreSQL 은 <code>uint</code> → <code>xmin</code>)</td></tr>
           <tr><td><code>@Embedded</code></td><td><code>ComplexProperty</code> · <code>OwnsOne</code></td></tr>
         </tbody>
       </table></div>
@@ -3465,7 +3483,7 @@ public sealed class ApprovalDocumentConfig
         b.Property(d =&gt; d.Title).HasMaxLength(200).IsRequired();
         b.Property(d =&gt; d.Amount).HasPrecision(18, 2);
         b.Property(d =&gt; d.Status).HasConversion&lt;string&gt;().HasMaxLength(20);
-        b.UseXminAsConcurrencyToken();
+        b.Property(d =&gt; d.Version).IsRowVersion();   // uint → PostgreSQL xmin (Npgsql 7+)
 
         // 백킹 필드로 매핑 — private List 에 직접 채웁니다
         b.HasMany(d =&gt; d.Steps)
@@ -3507,15 +3525,16 @@ public class PayrollDbContext(DbContextOptions&lt;PayrollDbContext&gt; o) : DbCo
         var now = clock.Now;
 
         // ① 도메인 이벤트 → 아웃박스 행 (🔷 e06)
+        //    ★ ToList() — 순회 중에 ctx.Add 를 하면 "Collection was modified" 예외가 납니다
         foreach (var ev in ctx.ChangeTracker.Entries&lt;IHasDomainEvents&gt;()
-                              .SelectMany(x =&gt; x.Entity.PopEvents()))
+                              .SelectMany(x =&gt; x.Entity.PopEvents()).ToList())
             ctx.Add(OutboxMessage.From(ev, now));
 
         // ② 변경된 엔티티 → 감사 로그
         foreach (var entry in ctx.ChangeTracker.Entries()
                      .Where(x =&gt; x.State is EntityState.Added
                                           or EntityState.Modified
-                                          or EntityState.Deleted))
+                                          or EntityState.Deleted).ToList())
         {
             if (entry.Entity is OutboxMessage or AuditLog) continue;   // 무한 루프 방지
             ctx.Add(new AuditLog(

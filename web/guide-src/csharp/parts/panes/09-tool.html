@@ -100,7 +100,8 @@
     .WriteTo.File("logs/log-.txt",
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 14,          // ★ 오래된 것은 지운다
-        fileSizeLimitBytes: 100L * 1024 * 1024));</code></pre>
+        fileSizeLimitBytes: 100L * 1024 * 1024,
+        rollOnFileSizeLimit: true));         // ★ 없으면 한도에 닿은 뒤 그날 로그가 끊깁니다</code></pre>
       <pre class="code" data-lang="csharp"><code>// 값을 넘기면 검색·집계가 됩니다
 log.LogInformation("구매 완료 {PlayerId} {ItemId} {Cost}", pid, iid, cost);
 
@@ -855,17 +856,24 @@ jobs:
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore
       - run: dotnet format --verify-no-changes        # 포맷 검사
-      - run: dotnet test -c Release --no-build \
-               --filter "Category!=Slow" \
-               --collect:"XPlat Code Coverage"
+      - run: |                                       # 여러 줄 명령은 | 블록으로
+          dotnet test -c Release --no-build \
+            --filter "Category!=Slow" \
+            --collect:"XPlat Code Coverage"
       - run: dotnet list package --vulnerable --include-transitive
 
   docker:
     needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
     steps:
       - uses: actions/checkout@v5
+      - uses: docker/login-action@v3              # 로그인 없이 push 하면 거부됩니다
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
           push: true
@@ -1168,6 +1176,7 @@ var env = AnsiConsole.Prompt(
 dotnet run app.cs</code></pre>
       <pre class="code" data-lang="csharp"><code>#!/usr/bin/env dotnet
 #:package Spectre.Console@0.49.*
+using Spectre.Console;
 
 var files = Directory.GetFiles(args[0], "*.log");
 AnsiConsole.MarkupLine($"[yellow]{files.Length}[/]개 파일 정리");
@@ -1389,7 +1398,8 @@ dotnet nuget push bin/Release/*.nupkg \
   &lt;ContinuousIntegrationBuild
       Condition="'$(GITHUB_ACTIONS)' == 'true'"&gt;true&lt;/ContinuousIntegrationBuild&gt;
 
-  &lt;!-- 공개 API 를 실수로 깨뜨리면 빌드에서 잡습니다 --&gt;
+  &lt;!-- XML 문서를 함께 넣어 IntelliSense 에 설명이 보입니다
+       (공개 API 를 실수로 깨뜨리는 것은 EnablePackageValidation 이 잡습니다) --&gt;
   &lt;GenerateDocumentationFile&gt;true&lt;/GenerateDocumentationFile&gt;
 &lt;/PropertyGroup&gt;
 
@@ -1566,8 +1576,9 @@ WORKDIR /src
 COPY *.sln Directory.Packages.props Directory.Build.props ./
 COPY src/GameApi/*.csproj      src/GameApi/
 COPY src/GameApi.Core/*.csproj src/GameApi.Core/
+#   (sln 째로 restore 하면 복사 안 한 테스트 프로젝트 때문에 실패 — 진입 프로젝트만)
 RUN --mount=type=cache,target=/root/.nuget/packages \
-    dotnet restore
+    dotnet restore src/GameApi/GameApi.csproj
 
 # ② 그 다음에 소스 전체
 COPY . .

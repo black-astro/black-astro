@@ -417,6 +417,7 @@ ASPNETCORE_ENVIRONMENT=Production  # 웹 앱
 
 # 환경 변수로 한 항목만 덮어쓰기 (컨테이너에서 자주 씁니다)
 Logging__LogLevel__MyApp.Orders=Trace
+#   (이름에 점이 있어 셸의 export 로는 못 넣습니다 — docker -e · k8s env 로 넣습니다)
 #   __ 두 개가 JSON 의 : 한 개에 해당합니다</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>가장 흔한 사고</b> — 운영에 <code>Development</code> 설정이 뜨는 것.
@@ -970,7 +971,7 @@ OrderLog.Failed(_log, ex, orderId, "재고 부족");</code></pre>
       <pre class="code" data-lang="csharp"><code>// 로거를 필드로 들고 있으면 첫 인자를 생략할 수 있습니다
 public sealed partial class OrderService(ILogger&lt;OrderService&gt; logger)
 {
-    private readonly ILogger _logger = logger;   // ★ 이름이 _logger 여야 자동 인식
+    private readonly ILogger _logger = logger;   // ★ ILogger 형식 필드가 하나 있으면 자동 인식 (이름 무관)
 
     [LoggerMessage(Level = LogLevel.Warning,
                    Message = "재고 부족 {Sku} — 남은 수량 {Left}")]
@@ -988,9 +989,9 @@ public static partial void Called(
 
 Called(_log, status &gt;= 500 ? LogLevel.Error : LogLevel.Debug, url, status);</code></pre>
       <div class="note warn" style="margin-bottom:0">
-        <b>필드 이름 규칙이 있습니다</b> — <code>_logger</code> · <code>logger</code> ·
-        <code>_log</code> 같은 이름의 <code>ILogger</code> 필드를 찾습니다.
-        못 찾으면 <b>컴파일 에러</b>가 납니다(런타임 실패가 아니라서 다행입니다).
+        <b>필드를 찾는 규칙이 있습니다</b> — 이름은 상관없이 <code>ILogger</code> 형식의 필드를 <b>하나</b> 찾습니다
+        (.NET 8+ 는 기본 생성자 매개변수도 봅니다).
+        없거나 둘 이상이면 <b>컴파일 에러</b>가 납니다(런타임 실패가 아니라서 다행입니다).
         찾지 못하면 첫 인자로 <code>ILogger</code> 를 명시하세요.
       </div>
     </div>
@@ -1037,8 +1038,8 @@ public class LogBench
 }</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>보간 문자열은 레벨이 꺼져 있어도 문자열을 만듭니다.</b>
-        C# 10 부터 <code>ILogger</code> 에 보간 문자열 핸들러가 붙어 일부는 지연 평가되지만,
-        <b>구조적 필드는 여전히 사라집니다</b>.
+        C# 10 에 보간 문자열 핸들러라는 기능이 생겼지만 <code>ILogger</code> 의 <code>LogInformation</code> 에는
+        그런 오버로드가 없어 지연 평가도 안 되고, <b>구조적 필드도 사라집니다</b>.
         성능 이전에 <b>검색 가능성</b> 때문에 템플릿을 써야 합니다.
       </div>
     </div>
@@ -1251,7 +1252,8 @@ using (LogContext.PushProperty("FileName", file.Name))
       <div class="note warn" style="margin-bottom:0">
         <b>헬스체크를 안 거르면 로그의 대부분이 헬스체크가 됩니다.</b>
         쿠버네티스는 보통 <b>몇 초마다</b> <code>/health</code> 를 찌릅니다.
-        하루 8만 6천 번이 넘고, 그게 수집기 요금이 됩니다.
+        1초 간격이면 파드 하나에 하루 8만 6,400 번(기본 10초 간격이어도 프로브 둘이면 1만 7천 번 남짓)이고,
+        파드 수만큼 곱해져 그게 수집기 요금이 됩니다.
         <b>필터는 성능이 아니라 비용과 가독성의 문제</b>입니다.
       </div>
     </div>
@@ -1335,7 +1337,9 @@ using (LogContext.PushProperty("FileName", file.Name))
       <h4 class="mini" style="margin-top:0"><code>nlog.config</code> — 이 파일이 전부입니다</h4>
       <pre class="code" data-lang="xml"><code>&lt;?xml version="1.0" encoding="utf-8" ?&gt;
 &lt;nlog xmlns="http://www.nlog-project.org/schemas/NLog.xsd"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
       autoReload="true" throwConfigExceptions="true"&gt;
+  &lt;!-- ↑ xsi 선언이 없으면 아래 xsi:type 이 XML 오류가 됩니다 --&gt;
 
   &lt;targets&gt;
     &lt;!-- 파일 — 날짜별 롤링 + 보관 30일 --&gt;
@@ -1577,7 +1581,7 @@ app.MapPost("/orders", Handler)
       <div class="note info" style="margin-bottom:0">
         <b>스코프 값을 실제로 출력하려면 provider 설정이 필요합니다</b> —
         <code>Console</code> 은 <code>IncludeScopes</code>(기본 <code>false</code>),
-        JSON 포매터는 자동, Serilog 는 <code>Enrich.FromLogContext()</code>.
+        JSON 포매터도 <code>FormatterOptions.IncludeScopes</code>(역시 기본 <code>false</code>), Serilog 는 <code>Enrich.FromLogContext()</code>.
         "스코프를 넣었는데 안 보인다"의 원인은 대부분 여기입니다.
       </div>
     </div>
@@ -1587,9 +1591,9 @@ app.MapPost("/orders", Handler)
   "Logging": {
     "Console": {
       "FormatterName": "json",
-      "IncludeScopes": true,
-      "JsonWriterOptions": { "Indented": false },
       "FormatterOptions": {
+        "IncludeScopes": true,
+        "JsonWriterOptions": { "Indented": false },
         "TimestampFormat": "yyyy-MM-ddTHH:mm:ss.fffZ",
         "UseUtcTimestamp": true
       }
@@ -1744,11 +1748,10 @@ activity?.SetStatus(ActivityStatusCode.Error, "재고 부족");</code></pre>
     </div>
     <div class="card">
       <h4 class="mini" style="margin-top:0">로그에 TraceId 를 자동으로 넣기</h4>
-      <pre class="code" data-lang="csharp"><code>// ① 내장 Console — 그냥 켜면 됩니다
-builder.Logging.AddJsonConsole();
-builder.Services.Configure&lt;LoggerFilterOptions&gt;(_ =&gt; { });
-// JSON 포매터는 TraceId·SpanId 를 이벤트에 넣어 줍니다.
-// (ActivityTrackingOptions 기본값이 TraceId|SpanId|ParentId)
+      <pre class="code" data-lang="csharp"><code>// ① 내장 Console — 스코프만 켜면 됩니다
+builder.Logging.AddJsonConsole(o =&gt; o.IncludeScopes = true);
+// 호스트 기본값이 ActivityTrackingOptions = TraceId|SpanId|ParentId 라
+// 이 값들이 "스코프"로 들어갑니다 — IncludeScopes 를 안 켜면 출력에 안 보입니다.
 
 // ② 스코프에 명시적으로 넣기
 builder.Logging.Configure(o =&gt; o.ActivityTrackingOptions =
@@ -1955,13 +1958,14 @@ Log.Logger = new LoggerConfiguration()
 //
 //  ※ 어느 쪽이든 프로세스가 강제 종료되면 큐에 남은 것은 사라집니다.
 //     Log.CloseAndFlush() 를 반드시 호출하세요.</code></pre>
-      <pre class="code" data-lang="csharp"><code>// 종료 시 확실히 비우기 — 호스트 종료 훅에 연결
-var app = builder.Build();
-app.Lifetime.ApplicationStopped.Register(Log.CloseAndFlush);
-
-// 컨테이너라면 종료 유예 시간도 늘려 둡니다
+      <pre class="code" data-lang="csharp"><code>// 종료 유예 시간 — 컨테이너의 유예(쿠버네티스 기본 30초)보다 짧게 맞춥니다
+// ★ 서비스 등록은 Build() 전에 — 뒤에서 하면 읽기 전용 컬렉션이라 예외가 납니다
 builder.Services.Configure&lt;HostOptions&gt;(o =&gt;
-    o.ShutdownTimeout = TimeSpan.FromSeconds(15));</code></pre>
+    o.ShutdownTimeout = TimeSpan.FromSeconds(15));
+
+// 종료 시 확실히 비우기 — 호스트 종료 훅에 연결
+var app = builder.Build();
+app.Lifetime.ApplicationStopped.Register(Log.CloseAndFlush);</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>가장 아픈 유실</b> — 앱이 죽는 순간의 로그가 <b>바로 그 이유</b>인데,
         비동기 큐에 있다가 함께 사라지는 경우입니다.
@@ -2125,6 +2129,9 @@ static string Mask(string s) =&gt;
     s.Length &lt;= 8 ? "****" : s[..4] + new string('*', s.Length - 8) + s[^4..];</code></pre>
       <pre class="code" data-lang="csharp"><code>// ③ .NET 8+ 표준 — [LogProperties] + 데이터 분류 리댁션
 //    dotnet add package Microsoft.Extensions.Compliance.Redaction
+//    dotnet add package Microsoft.Extensions.Telemetry      (EnableRedaction)
+// ★ PersonalData · SensitiveData 는 기본 제공이 아니라 우리 팀이 정의하는 분류 특성입니다
+//   (DataClassificationAttribute 를 상속하고, DataClassifications 도 직접 만든 정적 클래스)
 public sealed class Customer
 {
     public int Id { get; init; }
@@ -2134,7 +2141,8 @@ public sealed class Customer
 
 builder.Services.AddRedaction(r =&gt;
     r.SetRedactor&lt;ErasingRedactor&gt;(new DataClassificationSet(
-        DataClassifications.SensitiveData)));</code></pre>
+        DataClassifications.SensitiveData)));
+builder.Logging.EnableRedaction();   // ★ 이게 있어야 로그 파이프라인에 리댁터가 걸립니다</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>①번이 가장 강합니다.</b> 설정은 빠뜨릴 수 있지만 <b>타입은 못 빠뜨립니다</b>.
         비밀번호·토큰·카드번호를 <code>string</code> 으로 들고 다니지 말고
@@ -2181,8 +2189,9 @@ public void 로그에_비밀이_없어야_한다()
     Assert.DoesNotContain(sink.Lines, l =&gt; l.Contains("4111111111111111"));
 }</code></pre>
       <pre class="code" data-lang="bash"><code># CI 에서 소스 자체를 검사 — 위험한 호출을 금지 목록으로
-grep -rn "EnableSensitiveDataLogging" --include=*.cs src/ \
-  | grep -v "#if DEBUG" &amp;&amp; exit 1
+#   (#if DEBUG 는 보통 윗줄에 있어 줄 단위 grep -v 로는 못 거릅니다 — 허용할 파일만 --exclude 로)
+grep -rn "EnableSensitiveDataLogging" --include=*.cs \
+  --exclude=DevDbOptions.cs src/ &amp;&amp; exit 1
 
 # 로그 샘플을 정규식으로 훑기 (주민번호 · 카드번호 형태)
 grep -Ern "[0-9]{6}-[1-4][0-9]{6}|[0-9]{16}" logs/ &amp;&amp; exit 1</code></pre>
@@ -2331,8 +2340,10 @@ else if (OperatingSystem.IsWindows() &amp;&amp; !Environment.UserInteractive)
         LogName    = "Application",
         Filter     = (_, lv) =&gt; lv &gt;= LogLevel.Error
     });
+    // ★ writeToProviders: true — 기본(false)이면 Serilog 가 로거 팩토리를 차지해
+    //   위 EventLog provider 로는 아무것도 안 갑니다
     builder.Services.AddSerilog((_, cfg) =&gt; cfg
-        .ReadFrom.Configuration(builder.Configuration));
+        .ReadFrom.Configuration(builder.Configuration), writeToProviders: true);
 }
 else
 {

@@ -631,7 +631,7 @@ var inv = await db.Inventories.AsNoTracking()
     <div class="card">
       <h4 class="mini">샤딩을 정말 한다면 — 미리 알아야 할 것</h4>
       <pre class="code" data-lang="csharp"><code>// ✗ 나머지 연산 샤딩 — 샤드를 늘릴 때 거의 전부가 이사해야 합니다
-int ShardOf(long pid) =&gt; (int)(pid % 4);        // 4 → 8 로 늘리면 75% 이동
+int ShardOf(long pid) =&gt; (int)(pid % 4);        // 4 → 5 로 늘리면 80% 가 이동
 
 // ✓ 논리 샤드를 넉넉히 만들고 물리 DB 에 매핑
 //   논리 샤드 1024 개를 만들어 두고, 물리 DB 4개에 256개씩 배정
@@ -639,7 +639,7 @@ const int Logical = 1024;
 int LogicalOf(long pid) =&gt; (int)(pid % Logical);
 
 // 매핑 테이블(설정·Redis)만 바꾸면 물리 DB 를 늘릴 수 있습니다
-string PhysicalOf(long pid) =&gt; _map[LogicalOf(pid)];   // 4 → 8: 절반만 이동
+string PhysicalOf(long pid) =&gt; _map[LogicalOf(pid)];   // 4 → 5: 논리 샤드 약 20% 만 통째로 이동
 
 // 샤드 키는 "거의 모든 쿼리에 들어가는 것"으로 — 게임은 보통 playerId
 // 길드처럼 여러 명이 함께 보는 데이터는 guildId 로 샤딩하거나 별도 저장소로</code></pre>
@@ -882,6 +882,9 @@ public class OutboxPublisher(IServiceScopeFactory f, ILogger&lt;OutboxPublisher&
             {
                 using var scope = f.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService&lt;GameDb&gt;();
+                // ★ 트랜잭션 필수 — 없으면 SELECT 가 끝나는 순간 행 잠금이 풀려
+                //   다른 워커가 같은 행을 또 집어 갑니다
+                await using var tx = await db.Database.BeginTransactionAsync(ct);
 
                 var batch = await db.Database.SqlQuery&lt;OutboxRow&gt;($"""
                     SELECT * FROM outbox
@@ -913,6 +916,7 @@ public class OutboxPublisher(IServiceScopeFactory f, ILogger&lt;OutboxPublisher&
                             log.LogError(ex, "outbox 배달 실패 {Id} {Type}", m.Id, m.Type);
                     }
                 }
+                await tx.CommitAsync(ct);                // 여기서 잠금이 풀립니다
             }
             catch (Exception ex) { log.LogError(ex, "outbox 루프 오류"); }
         }
@@ -1396,7 +1400,7 @@ groups:
   rules:
   - alert: HighErrorRate
     expr: |
-      sum(rate(http_server_request_duration_seconds_count{status=~"5.."}[5m]))
+      sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
       / sum(rate(http_server_request_duration_seconds_count[5m])) &gt; 0.01
     for: 5m                      # ★ 5분 지속돼야 울림 (순간 스파이크 무시)
     labels: { severity: page }   # page = 새벽에도 깨움

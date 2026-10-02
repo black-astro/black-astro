@@ -129,7 +129,7 @@
       <tbody>
         <tr><td><b>Worker Service</b><br>(BackgroundService)</td><td>@Scheduled 상주 빈 · 무한 루프 스레드</td><td>직접 <code>Task.Delay</code> · <code>PeriodicTimer</code></td><td>직접 구현</td><td>없음</td><td>큐 · 폴더를 <b>계속 지켜보는</b> 일. 상시 대기형</td></tr>
         <tr><td><b>Hangfire</b></td><td>Spring Batch Admin + Quartz JDBC 잡스토어</td><td>크론 · 지연 · 연속(continuation)</td><td><b>내장</b> — 자동 재시도 · 실행 이력 DB</td><td><b>내장 대시보드</b></td><td>사내 배치의 <b>기본값</b>. DB 하나만 더 주면 됨</td></tr>
-        <tr><td><b>Quartz.NET</b></td><td>Quartz (그대로)</td><td>크론 · <b>미스파이어 정책</b> · 캘린더</td><td>잡스토어(ADO.NET) 필요</td><td>없음(유료 CrystalQuartz)</td><td>영업일 · 공휴일 · 밀린 실행 처리 규칙이 중요할 때</td></tr>
+        <tr><td><b>Quartz.NET</b></td><td>Quartz (그대로)</td><td>크론 · <b>미스파이어 정책</b> · 캘린더</td><td>잡스토어(ADO.NET) 필요</td><td>없음(오픈소스 CrystalQuartz 를 붙임)</td><td>영업일 · 공휴일 · 밀린 실행 처리 규칙이 중요할 때</td></tr>
         <tr><td><b>작업 스케줄러</b><br>(Windows) / cron</td><td>OS crontab</td><td>OS 가 담당</td><td>없음 — 종료 코드만</td><td>OS 도구</td><td>하루 한 번 · 실패해도 다음날 다시 돌면 되는 일</td></tr>
         <tr><td><b>클라우드 함수</b></td><td>AWS Lambda + EventBridge</td><td>서비스가 담당</td><td>서비스가 담당</td><td>콘솔</td><td>서버를 켜 두기 아까운 <b>드문 실행</b>. 실행 시간 제한 주의</td></tr>
       </tbody>
@@ -209,7 +209,8 @@ builder.Services.AddQuartzHostedService(o =&gt;
         <b>한 번만 실행하고 정상 궤도로</b>(<code>FireAndProceed</code>) ·
         <b>그냥 건너뛰기</b>(<code>DoNothing</code>) 세 가지.
         정산 배치는 대개 <b>FireAndProceed</b> 입니다 — 3일치가 한꺼번에 돌면 안 되니까요.
-        Hangfire 에는 이 개념이 없고, 놓친 실행은 서버가 뜨면 <b>즉시 한 번</b> 돕니다.
+        Hangfire 는 기본값이 "서버가 뜨면 <b>즉시 한 번</b>"이고,
+        1.8 부터는 <code>RecurringJobOptions.MisfireHandling</code>(Relaxed · Strict · Ignorable)으로 고를 수 있습니다.
       </div>
     </div>
   </div>
@@ -680,18 +681,19 @@ foreach (var chunk in chunks)
   </div>
 
   <div class="note warn">
-    <b><code>L</code> · <code>W</code> · <code>#</code> 는 Quartz.NET 에서만 됩니다.</b>
-    Hangfire 는 <a href="#f03">Cronos</a> 라이브러리를 쓰는데 <code>L</code> 을 지원하지만
-    <code>W</code>(가장 가까운 평일) · <code>#</code>(n번째 요일)은 지원하지 않습니다.
-    <b>"말일 정산" · "셋째 금요일 마감"</b> 같은 사내 규칙이 있으면
-    Hangfire 로는 <b>매일 돌리고 코드에서 날짜를 판단</b>하는 편이 안전합니다 —
+    <b><code>L</code> · <code>W</code> · <code>#</code> 는 표준 crontab 에 없는 확장 문법입니다.</b>
+    Quartz.NET 도, Hangfire 가 쓰는 <a href="#f03">Cronos</a> 라이브러리도 받아 주지만
+    요일 번호가 다릅니다 — Quartz 는 1=일요일이라 <code>6#3</code> 이 셋째 <b>금요일</b>,
+    Cronos 는 0=일요일이라 같은 식이 셋째 <b>토요일</b>입니다. 다음 실행 시각을 꼭 찍어 보세요.
+    <b>"말일 정산" · "셋째 금요일 마감"</b> 같은 사내 규칙은
+    <b>매일 돌리고 코드에서 날짜를 판단</b>하는 편이 안전합니다 —
     공휴일 테이블을 봐야 하는 순간 어차피 크론으로는 못 적습니다.
   </div>
 
   <div class="grid2 rv">
     <div class="card">
       <h4 class="mini" style="margin-top:0">시간대 — 한국은 서머타임이 없지만</h4>
-      <pre class="code" data-lang="csharp"><code>// ★ .NET 8+ 부터 Windows/Linux 양쪽에서 이 ID 가 다 통합니다
+      <pre class="code" data-lang="csharp"><code>// ★ .NET 6+ 부터 Windows/Linux 양쪽에서 이 ID 가 다 통합니다
 static readonly TimeZoneInfo Kst =
     TimeZoneInfo.FindSystemTimeZoneById("Asia/Seoul");
 
@@ -758,9 +760,9 @@ BackgroundJob.ContinueJobWith&lt;SendJob&gt;(
     <table class="cheat">
       <thead><tr><th>정책</th><th>Quartz.NET</th><th>Hangfire</th><th>결과</th><th>이럴 때</th></tr></thead>
       <tbody>
-        <tr><td>밀린 것 전부 실행</td><td><code>WithMisfireHandlingInstructionIgnoreMisfires()</code></td><td>불가</td><td>3번 연속 실행</td><td>날짜별로 <b>독립</b>인 집계 (일별 통계)</td></tr>
+        <tr><td>밀린 것 전부 실행</td><td><code>WithMisfireHandlingInstructionIgnoreMisfires()</code></td><td><code>MisfireHandling = Strict</code> (1.8+)</td><td>3번 연속 실행</td><td>날짜별로 <b>독립</b>인 집계 (일별 통계)</td></tr>
         <tr><td>한 번만 실행하고 정상 궤도</td><td><code>...FireAndProceed()</code></td><td><b>기본 동작</b></td><td>1번 실행</td><td><b>대부분의 정산 배치.</b> 안전한 기본값</td></tr>
-        <tr><td>건너뛰기</td><td><code>...DoNothing()</code></td><td>불가</td><td>0번, 다음 정시부터</td><td>실시간성이 전부인 알림 발송</td></tr>
+        <tr><td>건너뛰기</td><td><code>...DoNothing()</code></td><td><code>MisfireHandling = Ignorable</code> (1.8+)</td><td>0번, 다음 정시부터</td><td>실시간성이 전부인 알림 발송</td></tr>
         <tr><td><b>날짜를 인자로 받아 직접 루프</b></td><td colspan="2">두 엔진 모두 이 방식이 가능</td><td>내가 정한 만큼</td><td><b>실무 권장.</b> 아래 코드</td></tr>
       </tbody>
     </table>
@@ -872,12 +874,13 @@ CREATE TABLE BatchRun (
     WriteCount   INT          NOT NULL DEFAULT 0,
     SkipCount    INT          NOT NULL DEFAULT 0,
     LastError    NVARCHAR(2000) NULL,
-    MachineName  VARCHAR(60)  NOT NULL,
-    -- ★ 같은 잡 + 같은 영업일은 성공 1건만 — 중복 정산을 DB 가 막습니다
-    CONSTRAINT UX_BatchRun UNIQUE (JobName, BizDate, Status)
-        -- SQL Server 라면 필터 인덱스가 더 정확합니다:
-        -- CREATE UNIQUE INDEX ... WHERE Status = 'Success'
+    MachineName  VARCHAR(60)  NOT NULL
 );
+-- ★ 같은 잡 + 같은 영업일은 성공 1건만 — 중복 정산을 DB 가 막습니다
+--   UNIQUE (JobName, BizDate, Status) 로 걸면 실패 이력도 하루 1건밖에 못 남기므로
+--   성공 행에만 거는 필터 인덱스를 씁니다
+CREATE UNIQUE INDEX UX_BatchRun_Success ON BatchRun (JobName, BizDate)
+    WHERE Status = 'Success';
 
 -- 재시작 지점. Spring Batch 의 ExecutionContext 에 해당
 CREATE TABLE BatchCheckpoint (
@@ -944,7 +947,7 @@ public static async IAsyncEnumerable&lt;TradeRow&gt; ReadAsync(
       <div class="note info" style="margin-bottom:0">
         <b><code>[EnumeratorCancellation]</code> 를 빠뜨리면</b>
         호출부의 <code>.WithCancellation(ct)</code> 가 <b>조용히 무시</b>됩니다.
-        컴파일 경고도 안 납니다(분석기를 켜면 CA2016 이 잡아 줍니다).
+        컴파일러가 CS8425 경고를 내 주지만, 경고 목록에 묻혀 흘려보내기 쉽습니다.
         <code>IAsyncEnumerable</code> 을 쓸 때 <b>가장 흔한 실수</b>입니다.
       </div>
     </div>
@@ -972,7 +975,8 @@ public static async IAsyncEnumerable&lt;TradeRow&gt; ReadAsync(
         이 한 줄에서 납니다. GC 압박이 걱정되면
         <code>ArrayPool&lt;T&gt;</code> 로 명시적으로 빌리고 반납하세요 (f06).
       </div>
-      <pre class="code" data-lang="csharp"><code>// .NET 10 표준 LINQ 에도 Chunk 가 있습니다 (동기 IEnumerable 전용)
+      <pre class="code" data-lang="csharp"><code>// 동기 IEnumerable 은 .NET 6 부터 표준 Chunk 가 있습니다
+// (.NET 10 은 IAsyncEnumerable 용 LINQ — System.Linq.AsyncEnumerable — 도 기본 제공합니다)
 foreach (var page in list.Chunk(1000)) { ... }</code></pre>
     </div>
   </div>
@@ -1153,7 +1157,7 @@ foreach (var page in list.Chunk(1000)) { ... }</code></pre>
 
   <div class="grid2 rv">
     <div class="card">
-      <h4 class="mini" style="margin-top:0">IAsyncEnumerable 을 그대로 붓기</h4>
+      <h4 class="mini" style="margin-top:0">객체 목록(IEnumerable)을 그대로 붓기</h4>
       <pre class="code" data-lang="csharp"><code>public static async Task BulkCopyAsync(
     string cs, IEnumerable&lt;Trade&gt; rows, CancellationToken ct)
 {
@@ -1216,9 +1220,9 @@ WHEN NOT MATCHED BY TARGET THEN
   </div>
 
   <div class="note warn">
-    <b><code>SqlBulkCopy</code> 는 기본적으로 트리거·CHECK 제약·기본값을 건너뜁니다.</b>
+    <b><code>SqlBulkCopy</code> 는 기본적으로 트리거와 CHECK 제약을 건너뜁니다.</b>
     빠른 이유가 그것입니다. 필요하면 옵션으로 켜야 하는데
-    (<code>SqlBulkCopyOptions.FireTriggers | CheckConstraints | KeepNulls</code>)
+    (<code>SqlBulkCopyOptions.FireTriggers | CheckConstraints</code>)
     <b>켜는 만큼 느려집니다</b>.
     본 테이블에 직접 부으면서 트리거를 끄면 <b>감사 로그가 통째로 빕니다</b> —
     사내 시스템에서 실제로 자주 나는 사고입니다.
@@ -1336,8 +1340,9 @@ var page = await db.Trades.AsNoTracking()
     .ToListAsync(ct);
 
 // EF Core 9+ 에서는 튜플 비교가 그대로 번역됩니다
-// .Where(t =&gt; ValueTuple.Create(t.TradedAt, t.Id)
-//           &gt; ValueTuple.Create(lastAt, lastId))</code></pre>
+// C# 튜플에는 &gt; 연산자가 없어서 위처럼 풀어 씁니다.
+// (PostgreSQL 이라면 Npgsql 의 EF.Functions.GreaterThan(ValueTuple.Create(...), ValueTuple.Create(...))
+//  로 행 값 비교를 쓸 수 있습니다 — SQL Server 에는 이 문법이 없습니다)</code></pre>
       <div class="note tip" style="margin-bottom:0">
         <b>정렬 키가 유일하지 않으면 행이 빠지거나 겹칩니다.</b>
         <code>TradedAt</code> 만으로 자르면 같은 시각의 행 3개가
@@ -1463,7 +1468,7 @@ Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
 // 이제 이게 됩니다
 var cp949 = Encoding.GetEncoding(949);      // = EUC-KR 확장
-var euckr = Encoding.GetEncoding("euc-kr"); // 같은 객체
+var euckr = Encoding.GetEncoding("euc-kr"); // ★ 이건 51949(순수 EUC-KR) — 949 와 다릅니다
 
 using var sr = new StreamReader(path, cp949);</code></pre>
       <div class="note info">
@@ -1561,7 +1566,7 @@ await foreach (var row in csv.GetRecordsAsync&lt;TradeRow&gt;(ct))
         Map(m =&gt; m.TradedAt).Name("거래일시")
            .TypeConverterOption.Format("yyyyMMddHHmmss");
         Map(m =&gt; m.Amount).Name("금액")
-           .TypeConverterOption.NumberStyles(NumberStyles.AllowThousands);
+           .TypeConverterOption.NumberStyles(NumberStyles.Number);   // 천 단위 쉼표 + 소수점 + 부호
     }
 }</code></pre>
     </div>
@@ -1849,8 +1854,9 @@ app.MapPut("/uploads/{id}/chunks/{index:int}", async (
     // 체크섬으로 무결성 확인 (클라이언트가 헤더로 보냅니다)
     if (req.Headers.TryGetValue("X-Chunk-SHA256", out var want))
     {
-        var got = Convert.ToHexString(
-            await SHA256.HashDataAsync(File.OpenRead(path), ct));
+        string got;
+        await using (var check = File.OpenRead(path))     // ★ 닫고 나서 지워야 합니다 (Windows 는 열린 파일 삭제 불가)
+            got = Convert.ToHexString(await SHA256.HashDataAsync(check, ct));
         if (!got.Equals(want!, StringComparison.OrdinalIgnoreCase))
         { File.Delete(path); return Results.StatusCode(422); }
     }
@@ -1949,7 +1955,7 @@ public sealed class ClamAvScanner(IOptions&lt;ScanOptions&gt; opt) : IFileScanne
 {
     public async Task ScanAsync(string path, CancellationToken ct)
     {
-        using var clam = new ClamClient(opt.Value.Host, opt.Value.Port);
+        var clam = new ClamClient(opt.Value.Host, opt.Value.Port);   // IDisposable 아님 — 요청마다 소켓을 엽니다
         await using var fs = File.OpenRead(path);
         var r = await clam.SendAndScanFileAsync(fs, ct);
 
@@ -1958,7 +1964,7 @@ public sealed class ClamAvScanner(IOptions&lt;ScanOptions&gt; opt) : IFileScanne
             File.Delete(path);
             throw new SecurityException($"악성코드 탐지: {r.InfectedFiles![0].VirusName}");
         }
-        if (r.Result == ClamScanResults.Error)
+        if (r.Result != ClamScanResults.Clean)          // Error · Unknown 모두
             throw new IOException($"검사 실패 — 파일을 통과시키지 않습니다: {r.RawResult}");
         // ★ "검사 실패"를 통과로 처리하지 마세요. 열려 있는 문이 됩니다
     }
@@ -2398,7 +2404,8 @@ builder.Services
                 HttpStatusCode.TooManyRequests or         // 429
                 HttpStatusCode.ServiceUnavailable or      // 503
                 HttpStatusCode.GatewayTimeout             // 504
-            || args.Outcome.Exception is HttpRequestException)
+            || args.Outcome.Exception is HttpRequestException
+                                       or TimeoutRejectedException)   // ④ 1회 타임아웃도 재시도
     });
 
     // ③ 서킷 브레이커 — 상대가 죽었는데 4만 번 두드리지 않게
@@ -2450,7 +2457,7 @@ await s.CopyToAsync(fs, 1024 * 1024, ct);
 
 // ② 또는 JSON 배열을 한 건씩
 await foreach (var dto in JsonSerializer
-    .DeserializeAsyncEnumerable&lt;TradeDto&gt;(s, ct))
+    .DeserializeAsyncEnumerable&lt;TradeDto&gt;(s, cancellationToken: ct))   // 두 번째 인자는 옵션이라 이름을 붙입니다
 { ... }</code></pre>
     </div>
   </div>
@@ -2655,6 +2662,9 @@ await db.SaveChangesAsync(ct);                // ★ 하나의 트랜잭션</cod
     var db  = scope.ServiceProvider.GetRequiredService&lt;AppDbContext&gt;();
     var bus = scope.ServiceProvider.GetRequiredService&lt;IPublishEndpoint&gt;();
 
+    // ★ UPDLOCK 은 트랜잭션이 끝날 때까지만 유지됩니다 — 트랜잭션 없이 돌리면 SELECT 직후 풀립니다
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
+
     // ★ 여러 릴레이가 같은 행을 집지 않도록 잠급니다 (SQL Server 힌트)
     var batch = await db.OutboxMessages
         .FromSqlRaw("""
@@ -2682,6 +2692,7 @@ await db.SaveChangesAsync(ct);                // ★ 하나의 트랜잭션</cod
         }
     }
     await db.SaveChangesAsync(ct);
+    await tx.CommitAsync(ct);                     // 여기서 잠금이 풀립니다
 }</code></pre>
       <div class="note info" style="margin-bottom:0">
         <b><code>READPAST</code></b> 가 핵심입니다 —
@@ -2970,7 +2981,12 @@ await Task.WhenAll(consumers);</code></pre>
     }, ct)).ToArray();
 
     // 변환기가 전부 끝나야 done 을 닫을 수 있습니다
-    _ = Task.Run(async () =&gt; { await Task.WhenAll(xform); done.Writer.Complete(); }, ct);
+    //    ★ 변환기가 예외로 죽어도 done 을 닫아야 ③ 이 영원히 기다리지 않습니다
+    var closeDone = Task.Run(async () =&gt;
+    {
+        try   { await Task.WhenAll(xform); done.Writer.Complete(); }
+        catch (Exception ex) { done.Writer.Complete(ex); throw; }
+    });
 
     // ── ③ 쓰기 (IO 바운드) — DB 커넥션 수에 맞춥니다
     var write = Task.Run(async () =&gt;
@@ -2986,7 +3002,7 @@ await Task.WhenAll(consumers);</code></pre>
         if (buf.Count &gt; 0) await bulk.CopyAsync(buf, ct);
     }, ct);
 
-    await Task.WhenAll(read, write);           // xform 은 위에서 대기 중
+    await Task.WhenAll(read, closeDone, write);   // 변환기 예외도 여기서 올라옵니다
 }</code></pre>
 
   <div class="tw">
@@ -3422,7 +3438,9 @@ builder.Services.AddWindowsService(o =&gt; o.ServiceName = "SettleBatch");
 
 var host = builder.Build();
 
-RecurringJob.AddOrUpdate&lt;SettleJob&gt;("daily-settle",
+// ★ 대시보드가 없는 워커에서는 정적 RecurringJob 대신 DI 의 매니저를 씁니다
+//   (정적 API 는 JobStorage.Current 가 아직 비어 있어 예외가 날 수 있습니다)
+host.Services.GetRequiredService&lt;IRecurringJobManager&gt;().AddOrUpdate&lt;SettleJob&gt;("daily-settle",
     "settle", j =&gt; j.RunAsync(null, CancellationToken.None),
     "0 10 2 * * *", new RecurringJobOptions { TimeZone = Kst });
 
@@ -3463,12 +3481,16 @@ public sealed class SettleJob(
 
             // ── ③④ 청크 처리 + 벌크 적재 (f04 · f05)
             var r = await chunks.RunAsync(
-                job: "daily-settle", bizDate, step: "load",
+                job: "daily-settle.load", bizDate, step: "load",   // ★ 바깥 잡과 다른 이름 — ChunkRunner 도 BatchRun 행을 따로 만들므로 성공 행이 겹치지 않게
                 readFrom: key =&gt; TradeFileReader.ReadAsync(local, key, Cp949),
                 chunkSize: 5_000, skipLimit: 10_000, ct);
 
             if (r.Kind == ResultKind.Stopped)      // 종료 신호로 중단
-            { log.LogWarning("중단됨 — 다음 실행이 이어받습니다"); return; }
+            {
+                // 바깥 실행 이력도 Stopped 로 닫아 둡니다 — 안 그러면 Running 으로 남아 재실행이 막힙니다
+                await journal.StopAsync(run.RunId, r.Read, r.Wrote, r.Skipped, CancellationToken.None);
+                log.LogWarning("중단됨 — 다음 실행이 이어받습니다"); return;
+            }
 
             // ── ⑤ 집계 : 스테이징 → 본 테이블 MERGE + 수수료 계산
             var summary = await agg.AggregateAsync(bizDate, ct);
@@ -3530,7 +3552,7 @@ public sealed class SettleJob(
   <div class="grid2 rv">
     <div class="card">
       <h4 class="mini" style="margin-top:0">집계 — 한 문장으로 끝냅니다</h4>
-      <pre class="code" data-lang="sql"><code>-- 가맹점별 일 정산. 400만 행 → 8,200행. 인덱스가 있으면 12분
+      <pre class="code" data-lang="sql"><code>-- 가맹점별 일 정산. 400만 행 → 8,200행. 인덱스가 없으면 12분 (있으면 아래 표의 5분 40초)
 INSERT INTO dbo.SettleDaily
       (BizDate, MerchantId, TxCount, GrossAmt, FeeAmt, NetAmt, CreatedAt)
 SELECT  @BizDate,
