@@ -337,8 +337,8 @@ export const guides: Guide[] = [
       '분산 · 동시성',
     ],
     stats: [
-      { value: '14', label: '주제 탭' },
-      { value: '198', label: '섹션' },
+      { value: '15', label: '주제 탭' },
+      { value: '208', label: '섹션' },
       { value: '0', label: '언어 종속' },
     ],
   },
