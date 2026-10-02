@@ -168,6 +168,7 @@ CREATE USER 'app'@'%'          IDENTIFIED BY 'strong-pass';   -- 어디서나 (�
 
 -- 권한
 GRANT SELECT, INSERT, UPDATE, DELETE ON shop.* TO 'app'@'10.0.1.%';
+CREATE USER 'admin'@'localhost' IDENTIFIED BY 'admin-pass';   -- 8.0+ 는 GRANT 가 계정을 만들어 주지 않습니다
 GRANT ALL PRIVILEGES ON shop.* TO 'admin'@'localhost';
 FLUSH PRIVILEGES;
 
@@ -542,8 +543,8 @@ SELECT GROUP_CONCAT(name ORDER BY id SEPARATOR ', ') FROM member;</code></pre>
 
 -- 권장 설정 (MySQL 8 기본값에 가깝습니다)
 SET GLOBAL sql_mode =
- 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,
-  ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';</code></pre>
+ 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+-- ※ 따옴표 안에 줄바꿈·공백을 넣지 마세요 — 모드 이름의 일부로 읽혀 ERROR 1231 이 날 수 있습니다</code></pre>
   <div class="note info rv d2">
     <b>엄격 모드가 꺼져 있으면 MySQL이 조용히 데이터를 바꿉니다.</b>
     <code>VARCHAR(10)</code> 에 20글자를 넣으면 <b>경고만 내고 잘라서 저장</b>하고,
@@ -861,9 +862,10 @@ SET GLOBAL long_query_time = 1;                        -- 1초 이상
 SET GLOBAL log_queries_not_using_indexes = 'ON';       -- 인덱스 미사용도 기록
 
 -- performance_schema 로 상위 쿼리 뽑기 (sys 스키마가 편합니다)
-SELECT query, exec_count, ROUND(avg_latency/1e9, 3) AS 평균초,
-       ROUND(total_latency/1e9, 1) AS 총초, rows_examined_avg
-FROM   sys.statement_analysis
+-- x$ 뷰는 피코초 원본 숫자 (statement_analysis 는 '1.23 ms' 같은 문자열이라 계산 불가)
+SELECT query, exec_count, ROUND(avg_latency/1e12, 3) AS 평균초,
+       ROUND(total_latency/1e12, 1) AS 총초, rows_examined_avg
+FROM   sys.x$statement_analysis
 ORDER  BY total_latency DESC LIMIT 20;
 
 -- 인덱스를 못 쓴 쿼리
@@ -1078,7 +1080,7 @@ SHOW TRIGGERS;
 DROP TRIGGER trg_member_audit;</code></pre>
 
   <h3 class="sub">이벤트 스케줄러 — DB 안의 크론</h3>
-  <pre class="code rv d1" data-lang="sql"><code>SET GLOBAL event_scheduler = ON;    -- 기본은 꺼져 있습니다
+  <pre class="code rv d1" data-lang="sql"><code>SET GLOBAL event_scheduler = ON;    -- MySQL 8.0+ 는 기본 ON · 5.7 · MariaDB 는 기본 OFF
 
 DELIMITER $$
 CREATE EVENT ev_purge_log
@@ -1287,7 +1289,8 @@ GRANT REPLICATION SLAVE ON *.* TO 'repl'@'10.0.1.%';
 -- 레플리카에서 (8.0.23+ 용어)
 CHANGE REPLICATION SOURCE TO
   SOURCE_HOST='10.0.1.10', SOURCE_USER='repl', SOURCE_PASSWORD='repl-pass',
-  SOURCE_AUTO_POSITION=1;
+  SOURCE_AUTO_POSITION=1,
+  GET_SOURCE_PUBLIC_KEY=1;   -- caching_sha2_password 계정을 SSL 없이 쓸 때 필요
 START REPLICA;
 
 -- 상태 확인 ★ 가장 중요한 명령
@@ -1334,7 +1337,8 @@ SHOW REPLICA STATUS\G
   <h3 class="sub">지연 모니터링</h3>
   <pre class="code rv d1" data-lang="sql"><code>-- Seconds_Behind_Source 는 부정확할 때가 있습니다
 -- 하트비트 테이블을 두고 실제 지연을 재는 방식이 정확합니다 (pt-heartbeat)
-SELECT NOW() - ts AS 실제지연 FROM heartbeat ORDER BY ts DESC LIMIT 1;
+SELECT TIMESTAMPDIFF(SECOND, ts, NOW()) AS 실제지연초 FROM heartbeat ORDER BY ts DESC LIMIT 1;
+-- (NOW() - ts 는 MySQL 에서 초가 아니라 YYYYMMDDhhmmss 숫자끼리의 뺄셈이 됩니다)
 
 -- 병렬 복제로 지연 줄이기 (8.0+)
 SET GLOBAL replica_parallel_type = 'LOGICAL_CLOCK';
@@ -1372,8 +1376,10 @@ SET GLOBAL replica_preserve_commit_order = ON;</code></pre>
   <pre class="code rv" data-lang="bash"><code># 논리 백업 — 반드시 --single-transaction 을 붙이세요 (InnoDB 일관성 스냅숏)
 mysqldump -u root -p \
   --single-transaction --routines --triggers --events \
-  --source-data=2 \                 # binlog 위치를 주석으로 기록 (시점 복구에 필요)
+  --source-data=2 \
   shop &gt; shop_$(date +%F).sql
+# --source-data=2 : binlog 위치를 주석으로 기록 (시점 복구에 필요)
+# ※ 줄 끝 \ 뒤에 주석을 달면 줄 잇기가 끊겨 명령이 둘로 갈라집니다
 
 # 여러 DB · 전체
 mysqldump --all-databases --single-transaction &gt; all.sql

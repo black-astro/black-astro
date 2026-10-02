@@ -81,7 +81,7 @@ brew install postgresql@18 &amp;&amp; brew services start postgresql@18
 # Docker
 docker run -d --name pg -p 5432:5432 \
   -e POSTGRES_PASSWORD=devpass -e POSTGRES_DB=shop -e TZ=Asia/Seoul \
-  -v pgdata:/var/lib/postgresql/data postgres:18</code></pre>
+  -v pgdata:/var/lib/postgresql postgres:18   # 18+ 는 …/data 가 아니라 여기</code></pre>
 
   <h3 class="sub">중요한 파일 세 개</h3>
   <div class="tw rv d1">
@@ -359,7 +359,8 @@ CREATE INDEX idx_post_tags ON post USING GIN (tags);   -- 배열 검색 인덱�
   </div>
 
   <h3 class="sub">범위 타입 — 구간을 값으로</h3>
-  <pre class="code rv d1" data-lang="sql"><code>CREATE TABLE reservation (
+  <pre class="code rv d1" data-lang="sql"><code>CREATE EXTENSION IF NOT EXISTS btree_gist;   -- room_id WITH = 를 GiST 에서 쓰려면 필요
+CREATE TABLE reservation (
   id      SERIAL PRIMARY KEY,
   room_id INT NOT NULL,
   period  TSRANGE NOT NULL,          -- 시각 구간
@@ -611,7 +612,7 @@ SELECT relname,
 FROM   pg_catalog.pg_statio_user_tables
 ORDER  BY pg_total_relation_size(relid) DESC LIMIT 20;
 
--- 중복 인덱스 후보 (앞부분이 같은 인덱스)
+-- 중복 인덱스 후보 (컬럼 구성이 똑같은 인덱스 · 앞부분만 겹치는 것은 따로 확인)
 SELECT indrelid::regclass AS tbl, array_agg(indexrelid::regclass) AS idxs
 FROM   pg_index GROUP BY indrelid, indkey HAVING count(*) &gt; 1;</code></pre>
 
@@ -745,7 +746,7 @@ BEGIN
 EXCEPTION
     WHEN OTHERS THEN
         RAISE NOTICE '오류: %', SQLERRM;
-        RETURN 0;
+        RAISE;      -- RETURN 0 으로 삼키면 오류가 '구매액 0' 으로 둔갑합니다
 END;
 $$ LANGUAGE plpgsql;
 
@@ -761,7 +762,7 @@ SELECT name, total_amount(id) FROM member;</code></pre>
 RETURNS TABLE (id INT, name TEXT, total NUMERIC) AS $$
 BEGIN
     RETURN QUERY
-    SELECT m.id, m.name, total_amount(m.id)
+    SELECT m.id, m.name::text, total_amount(m.id)   -- 반환 타입과 정확히 맞춰야 합니다 (varchar → text)
     FROM   member m
     ORDER  BY total_amount(m.id) DESC
     LIMIT  p_limit;
@@ -952,7 +953,7 @@ SELECT m.name, count(*)
 FROM   member m JOIN orders o ON o.member_id = m.id
 GROUP  BY m.name;</code></pre>
   <div class="out rv">HashAggregate  (cost=45.20..47.20 rows=200 width=40)
-                (actual time=0.412..0.418 rows=4 loops=1)
+                (actual time=0.412..0.418 rows=3 loops=1)
   Buffers: shared hit=12
   -&gt;  Hash Join  (cost=15.30..40.10 rows=1020 width=32)
                  (actual time=0.201..0.380 rows=6 loops=1)
@@ -1122,6 +1123,7 @@ CREATE INDEX idx_orders_member ON orders (member_id);</code></pre>
 
   <h3 class="sub">운영</h3>
   <pre class="code rv d1" data-lang="sql"><code>-- 오래된 파티션 분리 (즉시 · 락 최소)
+-- ※ DEFAULT 파티션이 있으면 CONCURRENTLY 를 못 씁니다 → 그때는 CONCURRENTLY 를 빼고
 ALTER TABLE orders DETACH PARTITION orders_2025_01 CONCURRENTLY;
 DROP TABLE orders_2025_01;
 

@@ -216,7 +216,8 @@ with engine.connect() as conn:
 
 # pandas 와 함께
 import pandas as pd
-df = pd.read_sql("SELECT * FROM orders WHERE ordered_at &gt;= :d",
+# ★ 문자열 그대로 넘기면 드라이버 문법(%s)으로 실행되므로 :d 를 쓰려면 text() 로 감쌉니다
+df = pd.read_sql(text("SELECT * FROM orders WHERE ordered_at &gt;= :d"),
                  engine, params={"d": "2026-01-01"})</code></pre>
 </section>
 
@@ -250,7 +251,8 @@ spring.datasource.hikari.maximum-pool-size=20
 spring.datasource.hikari.minimum-idle=20
 spring.datasource.hikari.connection-timeout=3000
 spring.datasource.hikari.validation-timeout=2000
-spring.datasource.hikari.max-lifetime=1740000        # 29분 (DB 타임아웃보다 짧게)
+# 29분 (DB 타임아웃보다 짧게) — .properties 는 줄 끝 주석이 안 되니 윗줄에 씁니다
+spring.datasource.hikari.max-lifetime=1740000
 spring.datasource.hikari.leak-detection-threshold=20000
 spring.datasource.hikari.pool-name=shop-pool</code></pre>
 
@@ -315,7 +317,8 @@ console.log(rows);
 const client = await pool.connect();
 try {
   await client.query('BEGIN');
-  await client.query('UPDATE stock SET qty = qty - 1 WHERE id = $1 AND qty &gt;= 1', [10]);
+  const r = await client.query('UPDATE stock SET qty = qty - 1 WHERE id = $1 AND qty &gt;= 1', [10]);
+  if (r.rowCount === 0) throw new Error('재고 부족');   // 0행이면 차감 실패 → 롤백
   await client.query('INSERT INTO orders (member_id) VALUES ($1)', [1]);
   await client.query('COMMIT');
 } catch (e) {
@@ -453,7 +456,7 @@ cur.execute(f"SELECT * FROM member WHERE id = {uid}")
 
   <h3 class="sub">바인딩할 수 없는 것 — 테이블·컬럼 이름</h3>
   <pre class="code rv d1" data-lang="python"><code># ✗ 이건 바인딩이 안 됩니다 (구조는 파라미터가 될 수 없음)
-cur.execute("SELECT * FROM member ORDER BY %s", (sort_col,))    # 동작 안 함
+cur.execute("SELECT * FROM member ORDER BY %s", (sort_col,))    # 에러는 없지만 '문자열 상수'로 정렬 → 정렬 안 됨
 
 # ✓ 화이트리스트로 검증
 ALLOWED = {"id", "name", "joined_at"}
@@ -546,8 +549,10 @@ create_engine(url, echo=True)
 # Prisma
 new PrismaClient({ log: ['query'] })
 
-# Django
-LOGGING = {'loggers': {'django.db.backends': {'level': 'DEBUG'}}}</code></pre>
+# Django (settings.py · DEBUG = True 일 때만 SQL 이 찍힙니다)
+LOGGING = {'version': 1,
+           'handlers': {'console': {'class': 'logging.StreamHandler'}},
+           'loggers': {'django.db.backends': {'handlers': ['console'], 'level': 'DEBUG'}}}</code></pre>
 
   <div class="note tip rv d2">
     <b>실무의 현실적 조합</b> —
@@ -609,8 +614,8 @@ def transaction(conn):
         raise                      # ★ 반드시 다시 던지세요 — 삼키면 호출자가 성공으로 오해합니다
 
 with transaction(conn) as tx:
-    tx.execute("UPDATE stock SET qty = qty - 1 WHERE id = %s AND qty &gt;= 1", (10,))
-    if tx.rowcount == 0:
+    cur = tx.execute("UPDATE stock SET qty = qty - 1 WHERE id = %s AND qty &gt;= 1", (10,))
+    if cur.rowcount == 0:                    # rowcount 는 커서에 있습니다 (psycopg 3 의 conn.execute 가 커서를 돌려줌)
         raise ValueError("재고 부족")        # 예외 → 자동 롤백
     tx.execute("INSERT INTO orders (member_id) VALUES (%s)", (1,))</code></pre>
 
@@ -664,7 +669,8 @@ async function withTransaction(pool, fn) {
 }
 
 await withTransaction(pool, async (c) =&gt; {
-  await c.query('UPDATE stock SET qty = qty - 1 WHERE id = $1 AND qty &gt;= 1', [10]);
+  const r = await c.query('UPDATE stock SET qty = qty - 1 WHERE id = $1 AND qty &gt;= 1', [10]);
+  if (r.rowCount === 0) throw new Error('재고 부족');   // throw → 헬퍼가 ROLLBACK
   await c.query('INSERT INTO orders (member_id) VALUES ($1)', [1]);
 });</code></pre>
   <div class="diag rv">
@@ -1105,7 +1111,7 @@ with conn:
   <ul class="tx rv d1">
     <li><b>인덱스를 잠시 제거</b> — 적재 후 다시 만드는 편이 빠른 경우가 많습니다
       (다만 그동안 조회 성능이 떨어집니다)</li>
-    <li><b>외래키·제약 검사 지연</b> — PostgreSQL <code>SET CONSTRAINTS ALL DEFERRED</code>,
+    <li><b>외래키·제약 검사 지연</b> — PostgreSQL <code>SET CONSTRAINTS ALL DEFERRED</code>(<code>DEFERRABLE</code> 로 선언된 제약에만 적용),
       MySQL <code>SET FOREIGN_KEY_CHECKS=0</code> (적재 후 반드시 되돌리고 <b>정합성 검증</b>)</li>
     <li><b>적재 후 통계 갱신</b> — <code>ANALYZE</code> 를 빠뜨리면 이후 쿼리 계획이 엉망이 됩니다</li>
     <li><b>스테이징 테이블 활용</b> — 임시 테이블에 적재 후 검증하고 본 테이블로 옮깁니다</li>

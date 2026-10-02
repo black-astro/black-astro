@@ -164,7 +164,9 @@
   </div>
 
   <pre class="code rv" data-lang="bash"><code># Docker — 가장 빠른 길
-docker run -d --name redis -p 6379:6379 redis:7
+#   공식 이미지는 protected-mode 가 꺼져 있어 -p 6379:6379 는 모든 인터페이스에 비밀번호 없이 열립니다
+#   → 로컬 학습은 127.0.0.1 에만 묶으세요
+docker run -d --name redis -p 127.0.0.1:6379:6379 redis:7
 docker exec -it redis redis-cli     # 바로 CLI 접속
 
 # Ubuntu · Debian
@@ -496,7 +498,7 @@ ZREVRANK rank:2026-08 "u:1001"           # 내 등수 — 수백만 명이어도
   <h3 class="sub">③ 처리량 제한 (rate limit)</h3>
   <pre class="code rv d1" data-lang="bash"><code># 유저당 1분에 60회 — 고정 창(fixed window) 방식
 INCR ratelimit:u1001:202608111024        # 분 단위 키
-EXPIRE ratelimit:u1001:202608111024 60   # 처음 만들 때만 유효
+EXPIRE ratelimit:u1001:202608111024 60   # INCR 결과가 1(새 키)일 때만 실행 (7.0+ 는 EXPIRE … 60 NX)
 # 결과가 60 을 넘으면 429 Too Many Requests 로 거절</code></pre>
 
   <h3 class="sub">④ 분산 락 — "동시에 한 명만"</h3>
@@ -538,10 +540,14 @@ EVAL "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]
   </div>
 
   <pre class="code rv d1" data-lang="conf"><code># redis.conf — 실무 기본형: 둘 다 켠다
-save 900 1              # 900초 동안 1개 이상 바뀌면 RDB 스냅샷
+# (redis.conf 는 줄 끝 주석을 허용하지 않습니다 — 넣으면 서버가 안 뜹니다)
+# 900초 동안 1개 이상 바뀌면 RDB 스냅샷
+save 900 1
 save 300 10
-appendonly yes          # AOF 켜기
-appendfsync everysec    # 1초마다 디스크 동기화 (성능·안전의 균형점)</code></pre>
+# AOF 켜기
+appendonly yes
+# 1초마다 디스크 동기화 (성능·안전의 균형점)
+appendfsync everysec</code></pre>
 
   <div class="note tip rv d1">
     <b>용도별 선택</b> — 순수 캐시라면 <b>영속성을 아예 꺼도</b> 됩니다 (죽어도 DB에서 다시 채워지니까).
@@ -643,9 +649,11 @@ appendfsync everysec    # 1초마다 디스크 동기화 (성능·안전의 균�
     </p>
   </div>
 
-  <pre class="code rv" data-lang="conf"><code># redis.conf
-maxmemory 2gb                    # 한도를 반드시 명시하세요
-maxmemory-policy allkeys-lru     # 차면 "가장 오래 안 쓴 키"부터 지운다</code></pre>
+  <pre class="code rv" data-lang="conf"><code># redis.conf (주석은 반드시 별도 줄에)
+# 한도를 반드시 명시하세요
+maxmemory 2gb
+# 차면 "가장 오래 안 쓴 키"부터 지운다
+maxmemory-policy allkeys-lru</code></pre>
 
   <div class="tw rv d1">
     <table class="cheat">
@@ -894,9 +902,9 @@ XACK orders:events workers 1691740800000-0</code></pre>
       <tr><td><b>Lua 스크립트</b></td><td>읽고-판단하고-쓰는 <b>복합 로직이 통째로 원자적</b>. 분산 락 해제(r07)·재고 차감 같은 "확인 후 변경"의 정답</td></tr>
     </table>
   </div>
-  <pre class="code rv d1" data-lang="bash"><code># Lua 예 — "재고가 있으면 1 차감" 을 경쟁 없이
-EVAL "local s = tonumber(redis.call('GET', KEYS[1]))
-      if s and s > 0 then return redis.call('DECR', KEYS[1]) end
+  <pre class="code rv d1" data-lang="bash"><code># Lua 예 — "재고가 있으면 1 차감" 을 경쟁 없이 (셸에서 실행 — 여러 줄 문자열은 redis-cli 프롬프트에선 안 됩니다)
+redis-cli EVAL "local s = tonumber(redis.call('GET', KEYS[1]))
+      if s and s &gt; 0 then return redis.call('DECR', KEYS[1]) end
       return -1" 1 stock:p15
 # GET 과 DECR 사이에 다른 요청이 못 끼어든다 — 앱에서 하면 반드시 낀다</code></pre>
 
@@ -942,7 +950,7 @@ with r.pipeline() as p:
 
   <h3 class="sub">Java — Lettuce (Spring Boot 기본)</h3>
   <pre class="code rv d1" data-lang="java"><code>// build.gradle: implementation "org.springframework.boot:spring-boot-starter-data-redis"
-// application.yml: spring.data.redis.host=localhost
+// application.properties: spring.data.redis.host=localhost
 
 @Service
 public class ProductCache {

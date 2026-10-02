@@ -503,7 +503,7 @@ SELECT member_id, ordered_at FROM orders WHERE member_id = 1;
 CREATE INDEX idx_cover ON orders (member_id, ordered_at);
 
 -- 조회 컬럼이 더 있다면 INCLUDE 로 (PostgreSQL 11+ · SQL Server)
-CREATE INDEX idx_cover ON orders (member_id) INCLUDE (ordered_at, status);
+CREATE INDEX idx_cover2 ON orders (member_id) INCLUDE (ordered_at, status);
 -- MySQL·SQLite 는 INCLUDE 가 없으므로 인덱스 컬럼에 직접 넣습니다</code></pre>
   <div class="note info rv d1">
     <b>실행계획에서 확인하는 법</b> —
@@ -593,8 +593,8 @@ JOIN t2 ON t1.code = t2.code_int</code></pre>
       <h5>✓ 타입을 맞춤</h5>
       <pre class="code" data-lang="sql"><code>WHERE phone = '01012345678'
 
--- 근본 해결은 스키마 수정
-ALTER TABLE t2 MODIFY code VARCHAR(20);</code></pre>
+-- 근본 해결은 스키마 수정 (MySQL 문법 — 조인 상대와 타입 통일)
+ALTER TABLE t2 MODIFY code_int VARCHAR(20);</code></pre>
     </div>
   </div>
   <div class="vs rv d2">
@@ -609,7 +609,7 @@ WHERE  email = 'a@b.com'
       <pre class="code" data-lang="sql"><code>SELECT * FROM member WHERE email = 'a@b.com'
 UNION ALL
 SELECT * FROM member WHERE phone = '01012345678'
-  AND email &lt;&gt; 'a@b.com';   -- 중복 제거</code></pre>
+  AND (email &lt;&gt; 'a@b.com' OR email IS NULL);   -- 중복 제거 (NULL 행도 살림)</code></pre>
     </div>
   </div>
 </section>
@@ -1015,8 +1015,9 @@ queue.publish('send_email', order.id)  # 비동기로</code></pre>
 SELECT @@transaction_isolation;                          -- MySQL
 SHOW transaction_isolation;                              -- PostgreSQL
 
-SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;            -- 다음 트랜잭션만
-SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ; -- 세션 전체
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;            -- MySQL: 다음 트랜잭션만 · PostgreSQL: BEGIN 직후 현재 트랜잭션
+SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ; -- MySQL: 세션 전체
+-- PostgreSQL 세션 전체: SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 
 -- 특정 조회만 잠그기 (격리 수준을 올리지 않고 정합성 확보)
 SELECT * FROM stock WHERE id = 1 FOR UPDATE;         -- 배타 락 (쓰기 예정)
@@ -1293,11 +1294,16 @@ BEGIN IMMEDIATE;    -- 쓰기 트랜잭션은 처음부터
   </div>
 
   <pre class="code rv d1" data-lang="properties"><code># HikariCP (Java · Spring Boot)
+# (.properties 는 줄 끝 주석을 지원하지 않습니다 — 주석은 항상 윗줄에)
 spring.datasource.hikari.maximum-pool-size=20
-spring.datasource.hikari.minimum-idle=20          # max 와 같게 두는 것이 권장됩니다
-spring.datasource.hikari.connection-timeout=3000  # 풀에서 못 받으면 3초 후 실패
-spring.datasource.hikari.max-lifetime=1800000     # 30분 (DB 타임아웃보다 짧게)
-spring.datasource.hikari.leak-detection-threshold=20000   # 누수 감지</code></pre>
+# max 와 같게 두는 것이 권장됩니다 (지정하지 않으면 기본값이 max 와 같음)
+spring.datasource.hikari.minimum-idle=20
+# 풀에서 못 받으면 3초 후 실패
+spring.datasource.hikari.connection-timeout=3000
+# 30분 (DB 타임아웃보다 짧게)
+spring.datasource.hikari.max-lifetime=1800000
+# 누수 감지 (20초 넘게 반납 안 되면 경고 로그)
+spring.datasource.hikari.leak-detection-threshold=20000</code></pre>
   <pre class="code rv d1" data-lang="python"><code># SQLAlchemy (Python)
 engine = create_engine(
     "postgresql+psycopg://app:pw@db/shop",
