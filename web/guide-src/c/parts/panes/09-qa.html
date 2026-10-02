@@ -886,7 +886,7 @@ int _write(int fd, char *ptr, int len)
 
   <div class="grid2 rv">
     <div class="card">
-      <h4 class="mini" style="margin-top:0">펌웨어 쪽 — 파일 세 개 추가</h4>
+      <h4 class="mini" style="margin-top:0">펌웨어 쪽 — 파일 네 개 추가</h4>
       <pre class="code" data-lang="c"><code>/* SEGGER 의 "RTT" 소스 묶음에서
    SEGGER_RTT.c · SEGGER_RTT_printf.c · SEGGER_RTT.h · SEGGER_RTT_Conf.h 복사
    (J-Link 소프트웨어 설치 폴더 Samples/RTT, 또는 SEGGER 공개 저장소) */
@@ -1522,7 +1522,7 @@ target_compile_options(fw PRIVATE
     -fstack-usage            # 소스마다 .su 파일 생성
     -Wstack-usage=256        # 256 B 넘는 함수는 경고
     -fcallgraph-info=su)     # GCC 10+: 호출 그래프 + 스택(.ci)</code></pre>
-      <pre class="code" data-lang="bash"><code>$ cat build/App/proto.c.su
+      <pre class="code" data-lang="bash"><code>$ cat build/App/proto.c.su build/App/log.c.su
 proto.c:40:5:parse_frame       288   static
 proto.c:95:13:crc16_update      16   static
 log.c:12:6:log_write           312   dynamic,bounded
@@ -1554,9 +1554,9 @@ $ arm-none-eabi-size build/fw.elf
 # 큰 심볼 20개 — 크기 순
 $ arm-none-eabi-nm -S --size-sort -t d build/fw.elf | tail -20
 #  주소(10진)  크기  종류  이름
-536871936 00003072 B g_rx_ring
-536875008 00004096 b s_log_buf     ← 소문자 = static
 134239580 00002260 T _svfprintf_r  ← printf 엔진 (nano 기준)
+536871936 00003072 B g_rx_ring
+536875008 00004096 b s_log_buf     ← 소문자 = static (오름차순 → 맨 아래가 가장 큼)
 
 # .map 에서 "어느 .o 가 끌려왔나": -Wl,-Map=fw.map,--cref
 #   Archive member included to satisfy reference by file (symbol)
@@ -2064,7 +2064,7 @@ void test_bus_error_is_propagated(void)
 
 void test_probe_rejects_wrong_chip(void)
 {
-    s_reply[0] = 0x01; s_reply[1] = 0x19;           /* 0x0119 = TMP119 */
+    s_reply[0] = 0x01; s_reply[1] = 0x19;           /* 0x0119 — 엉뚱한 칩 ID */
     i2c_read_reg_fake.custom_fake = reply_fake;
     TEST_ASSERT_EQUAL_INT(-ENODEV, tmp117_probe());
 }
@@ -2778,6 +2778,7 @@ cmake --build build-cov -j &amp;&amp; ctest --test-dir build-cov
 
 # gcovr — HTML + Cobertura XML(CI 업로드용) + 기준 미달이면 실패
 pip install gcovr
+mkdir -p cov
 gcovr -r . --filter app/ \
       --html-details cov/index.html \
       --cobertura cov/coverage.xml \
@@ -3096,7 +3097,9 @@ jobs:
              build-fw/fw.elf build-fw/fw.map build-fw/fw.hex build-fw/fw.bin \
              --title "${GITHUB_REF_NAME}" --generate-notes
 # 이 단계만은 쓰기 권한이 필요 — 작업에
-#   permissions: { contents: write }</code></pre>
+#   permissions: { contents: write }
+# 그리고 on.push 에 tags: ['v*'] 를 추가 — branches 만 적혀 있으면
+#   태그 push 로는 워크플로가 아예 실행되지 않습니다</code></pre>
       <div class="note warn" style="margin-bottom:0">
         <b>서명 키는 CI 비밀 값에 그대로 두지 마세요</b> — 펌웨어 서명 · 보안 부트 이미지 생성은 별도 보호 환경(environment 승인, HSM)에서 합니다.
         서명과 OTA 배포 파이프라인은 <b>양산 · 펌웨어 운영 탭</b>에서 다룹니다.
@@ -3200,6 +3203,8 @@ static void shell_line(const char *s)
     else if (!strcmp(s, "STACK?"))
         printf_line("MSP %lu/%lu", (unsigned long)stack_high_water(),
                     (unsigned long)STACK_SIZE);           /* t06 */
+    else if (!strcmp(s, "SENSOR?"))
+        printf_line("T=%ld", (long)sensor_read_mc());     /* 밀리 °C */
 #ifdef HIL_TEST
     else if (!strcmp(s, "HANG"))  for (;;) { }            /* 워치독 시험용 */
 #endif
@@ -3508,8 +3513,10 @@ const char *reset_cause_str(void)
     <div class="card">
       <h4 class="mini" style="margin-top:0">%f 가 안 나올 때 — 두 가지 해결</h4>
       <pre class="code" data-lang="cmake"><code># ① float 포맷을 다시 넣기 — Flash 가 수 KB 늘어남 (t11 크기 비교에 보임)
-target_link_options(fw.elf PRIVATE --specs=nano.specs -u _printf_float)
-#   scanf 도 필요하면  -u _scanf_float</code></pre>
+target_link_options(fw.elf PRIVATE --specs=nano.specs "SHELL:-u _printf_float")
+#   scanf 도 필요하면  "SHELL:-u _scanf_float"
+#   ★ SHELL: 이 없으면 CMake 가 중복 옵션을 지우면서 두 번째 -u 를 떼어 내
+#     _scanf_float 이 입력 파일로 넘어갑니다</code></pre>
       <pre class="code" data-lang="c"><code>/* ② 정수로 출력 — float 포맷 코드가 아예 필요 없음 */
 int32_t mc = 23456;                         /* 밀리 °C (t08 TMP117) */
 int32_t a  = mc &lt; 0 ? -mc : mc;

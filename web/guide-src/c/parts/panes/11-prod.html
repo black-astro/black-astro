@@ -401,7 +401,7 @@ void jump_to_app(uint32_t base)
     SCB-&gt;VTOR = base;                                 /* ⑤ 0x200 정렬 필수 */
     __DSB(); __ISB();
 
-    __set_CONTROL(0u);                                /* ⑥ PSP · FPU 문맥 흔적 제거 */
+    __set_CONTROL(0u);                                /*   ⑥ 앞정리: PSP · FPU 문맥 흔적 제거 */
     __ISB();
     __enable_irq();                                   /*   NVIC 를 다 껐으니 안전 */
     start_app(sp, pc);                                /* ⑥ MSP ⑦ 분기 */
@@ -907,9 +907,10 @@ imgtool keygen -k root-ec-p256.pem -t ecdsa-p256
 imgtool getpub -k root-ec-p256.pem &gt; keys.c   # 부트로더에 넣을 공개키 C 배열
 
 # 서명 — 헤더 자리 0x200 을 0 으로 채워 앞에 붙이고, TLV 를 뒤에
+# --slot-size 는 슬롯 A 192 KB(0x30000) — PROD 02 의 Flash 배치와 같아야 한다
 imgtool sign -k root-ec-p256.pem \
   --header-size 0x200 --pad-header \
-  --align 4 --slot-size 0x20000 \
+  --align 4 --slot-size 0x30000 \
   --version 1.5.0+42 --security-counter 7 \
   app.bin app-signed.bin
 
@@ -1248,7 +1249,7 @@ __HAL_DBGMCU_FREEZE_WWDG();
       <div class="tw"><table class="cheat" style="margin:0">
         <tr><th style="width:34%">상황</th><th>처방</th></tr>
         <tr><td>디버거로 멈춤</td><td>DBGMCU freeze — <b>개발 빌드만</b> (PROD 01 의 부팅 점검이 해제)</td></tr>
-        <tr><td>Stop 모드로 60 s 잠</td><td>F4 는 Stop 중에도 IWDG 가 돕니다 (멈추는 옵션 없음 · L4 · G4 엔 있음). <b>RTC 웨이크업으로 깨어 킥</b>하거나 타임아웃을 최대(32.8 s)보다 짧은 주기로 깨우기</td></tr>
+        <tr><td>Stop 모드로 60 s 잠</td><td>F4 는 Stop 중에도 IWDG 가 돕니다 (멈추는 옵션 없음 · L4 · G4 엔 있음). <b>RTC 웨이크업으로 깨어 킥</b> — 깨우는 주기는 최대 설정(전형 32.8 s)이 LSI 가 빠를 때(47 kHz) 줄어드는 약 22 s 보다 짧게</td></tr>
         <tr><td>Flash 섹터 지우기</td><td>128 KB 지우기는 최대 2 s 안팎 — 타임아웃을 그보다 길게, 지우기 직전에 킥</td></tr>
         <tr><td>긴 서명 검증</td><td>해시 계산 루프 중간에 킥 (부트로더)</td></tr>
       </table></div>
@@ -1711,6 +1712,7 @@ uint32_t boots = 0;
 
 if (lfs_mount(&amp;lfs, &amp;g_lfs_cfg) != 0) {
     fs_mount_failed();          /* ⚠ 여기서 자동 format 하지 말 것 */
+    return;                     /* 마운트 안 된 lfs 로 아래 파일 함수를 부르면 안 됨 */
 }
 lfs_file_open(&amp;lfs, &amp;f, "boot_count", LFS_O_RDWR | LFS_O_CREAT);
 lfs_file_read(&amp;lfs, &amp;f, &amp;boots, sizeof boots);
@@ -1905,8 +1907,8 @@ for name, mah in [("CR2032", 220), ("2xAA", 2500)]:
     __HAL_RCC_GPIOB_CLK_ENABLE();
     g.Pin = GPIO_PIN_All &amp; ~USED_PB_PINS;
     HAL_GPIO_Init(GPIOB, &amp;g);
-    /* … C · D · H 도 같은 방식, 끝나면 안 쓰는 포트의 클럭은 끈다 */
-    __HAL_RCC_GPIOB_CLK_DISABLE();
+    /* … C · D · H 도 같은 방식. 쓰는 핀이 하나라도 있는 포트(A · B)의 클럭은 켜 둔다 */
+    __HAL_RCC_GPIOH_CLK_DISABLE();       /* 핀을 하나도 안 쓰는 포트만 클럭을 끈다 (예: H) */
 }</code></pre>
       <div class="note info" style="margin-bottom:0">
         양산 빌드에서 SWD 핀까지 아날로그로 돌리면 몇 µA 를 더 아낄 수 있지만, 현장 불량품을 회수했을 때 디버거가 붙지 않습니다.
@@ -2072,7 +2074,7 @@ int log_append(const log_hdr_t *h, const void *args)
     if (g_wr % LOG_SECT == 0u)
         w25q_erase_4k(LOG_BASE + g_wr);       /* 가장 오래된 4 KB 를 버림 */
 
-    /* w25q_program 은 256 B 페이지 경계에서 나눠 써야 함 (넘으면 같은 페이지 앞을 덮음) */
+    /* w25q_program 이 안에서 256 B 페이지 경계마다 나눠 쓴다고 가정 (안 나누면 넘친 부분이 같은 페이지 앞을 덮음) */
     w25q_program(LOG_BASE + g_wr, h, sizeof *h);
     w25q_program(LOG_BASE + g_wr + sizeof *h, args, h-&gt;len);
     g_wr += n;
