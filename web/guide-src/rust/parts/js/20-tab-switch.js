@@ -53,6 +53,7 @@ const TAB_LABEL = {
   cs:"🟣 C# · .NET 모듈",
   log:"📝 로깅 · 로그",
   sq:"🥞 스택 · 큐 · 덱",
+  struct:"📁 프로젝트 구조",
 };
 
 function tabDrop(force){
@@ -93,6 +94,7 @@ const SEC_LV = {
   /* cs */ k01:"b", k02:"b", k03:"b", k04:"b", k05:"i", k06:"i", k07:"a", k08:"a", k09:"a", k10:"i", k11:"a", k12:"a",
   /* log */ lg01:"b", lg02:"b", lg03:"i", lg04:"i", lg05:"b", lg06:"b", lg07:"i", lg08:"i", lg09:"a", lg10:"a", lg11:"i", lg12:"a",
   /* sq */ sq01:"b", sq02:"b", sq03:"b", sq04:"i", sq05:"i", sq06:"i", sq07:"i", sq08:"i", sq09:"a", sq10:"i", sq11:"b", sq12:"a",
+  /* struct */ ps01:"b", ps02:"b", ps03:"i", ps04:"i", ps05:"b", ps06:"i", ps07:"i", ps08:"b", ps09:"a", ps10:"i",
 };
 
 
@@ -312,6 +314,17 @@ const EZ = {
   sq10:"O(n) 큐 · 힙 방향 · unbounded · <b>while let 에서 잡은 락</b>은 컴파일러가 모릅니다. 꺼내기는 let 문으로 먼저.",
   sq11:"Rust 는 꺼내기가 <b>Option</b>, 힙이 <b>최대 힙</b>, 스레드 큐가 <b>채널</b>이라는 세 가지만 다른 언어와 다릅니다.",
   sq12:"레이트 리미터·최근 N개는 <b>VecDeque 앞에서 버리고 뒤에 넣기</b>, 재시도는 <b>시각 키 최소 힙</b>, 배치는 <b>recv_many</b>, 동시 실행 제한은 <b>세마포어</b>.",
+  /* ── struct ── */
+  ps01:"Cargo.toml 하나가 <b>패키지</b>, <code>lib.rs</code> 와 <code>main.rs</code> 가 각각 크레이트의 뿌리입니다. 모듈 파일은 <b>foo.rs + foo/</b> 로 통일하고, 테스트 · 진입점 · 빌드 시간이 늘 때 한 단계씩 나눕니다.",
+  ps02:"모듈은 <b>비공개로 선언</b>하고, 공개할 이름만 <code>lib.rs</code> 에서 <code>pub use</code> 로 평평하게 올립니다. 기능 사이는 <code>pub(crate)</code>, 폴더 안 도우미는 <code>pub(super)</code>.",
+  ps03:"<code>crates/*</code> 한 층에 폴더 이름 = 패키지 이름. 버전 · 메타데이터 · 린트는 <b>루트에서 물려주고</b>, 크레이트 화살표는 전부 domain 쪽으로 흐르게 합니다.",
+  ps04:"<code>lib.rs</code> 의 <code>app(state)</code> 가 입구, <code>routes.rs</code> 가 지도, 핸들러는 얇게. 규칙은 <b>domain</b>, SQL 은 <b>repo</b>, AppState 는 <code>state.rs</code> 에서 한 번 주입합니다.",
+  ps05:"clap 구조체는 <code>cli.rs</code>, 명령마다 <code>commands/</code> 에 파일 하나, <code>main.rs</code> 는 <b>파싱 · 위임 · 종료 코드</b>만. 로직이 라이브러리에 있어야 바로 테스트됩니다.",
+  ps06:"프런트는 <code>src/</code>, Rust 는 <code>src-tauri/</code>. 커맨드는 <code>commands/</code> 모듈에 <code>pub fn</code> 으로 두고, 로직이 커지면 <b>UI 없는 core 크레이트</b>로 내립니다.",
+  ps07:"구현 모듈은 비공개, 공개 이름은 <code>lib.rs</code> 목차로. feature 는 <b>켜면 생기기만</b> 하게 만들고, 게시 전엔 <code>cargo semver-checks</code> 로 약속이 깨졌는지 확인합니다.",
+  ps08:"같은 파일의 <code>mod tests</code> 는 비공개까지, <code>tests/</code> 는 <b>남처럼 공개 API 만</b> 봅니다. 공용 헬퍼는 <code>tests/common/mod.rs</code>.",
+  ps09:"<code>build.rs</code> 는 패키지 루트에, 생성물은 <b>OUT_DIR</b> 에만. 네이티브 라이브러리는 <b>foo-sys(원시) + foo(안전)</b> 두 크레이트로 나눕니다.",
+  ps10:"시작은 대부분 <b>lib.rs + 얇은 main.rs</b>, 실행 파일이 둘이 되면 워크스페이스. 정한 규칙은 <code>[workspace.lints]</code> · cargo-deny · cargo-machete 를 CI 에 걸어 <b>빌드가 지키게</b> 합니다.",
 };
 
 
@@ -532,6 +545,17 @@ const CAP = {
   sq10:["p","리뷰에서 큐·스택 관련 성능 버그와 동시성 실수를 찾아내고 고칠 수 있다"],
   sq11:["p","자바·파이썬·C#·C++·JS·Go 의 스택·큐 코드를 Rust 로 정확히 옮길 수 있다"],
   sq12:["p","레이트 리미터·최근 N개 버퍼·재시도 큐·배치 저장·동시성 제한·예약 실행을 서비스 코드로 바로 쓸 수 있다"],
+  /* ── struct ── */
+  ps01:["p","새 Rust 프로젝트의 폴더를 Cargo 자동 탐색 규칙에 맞게 잡고, 지금 규모에서 다음 단계로 넘어갈 신호를 판단할 수 있다"],
+  ps02:["p","pub · pub(crate) · pub(super) · pub use 로 크레이트 안팎의 경계를 긋고, 내부 파일을 쪼개도 사용자 코드가 깨지지 않게 설계할 수 있다"],
+  ps03:["e","여러 크레이트를 가진 워크스페이스를 workspace.dependencies · workspace.package · workspace.lints 로 운영하고 쪼갤 기준을 설명할 수 있다"],
+  ps04:["p","크레이트 하나짜리 Axum 서비스를 routes · handlers · domain · repo 로 나누고 기능별 Router 를 nest · merge 로 합칠 수 있다"],
+  ps05:["s","서브커맨드가 있는 CLI 를 lib 중심으로 배치해 단위 테스트와 재사용이 쉬운 구조로 만들 수 있다"],
+  ps06:["p","Tauri 앱의 Rust 쪽 파일을 commands 모듈로 나누고, 필요할 때 core 크레이트를 떼어 워크스페이스로 옮길 수 있다"],
+  ps07:["e","공개 라이브러리의 API · feature flags · examples · benches · 문서 테스트를 설계하고 semver 를 도구로 지킬 수 있다"],
+  ps08:["p","테스트 종류마다 알맞은 위치를 골라 비공개 로직과 공개 API 시나리오를 각각 검증할 수 있다"],
+  ps09:["e","build.rs 와 OUT_DIR 로 코드를 생성하고, *-sys 관례에 맞춰 C 라이브러리 바인딩 크레이트를 배치할 수 있다"],
+  ps10:["e","프로젝트 유형과 규모에 맞는 구조를 고르고, 의존 방향과 린트 규칙을 cargo-deny · clippy · CI 로 강제할 수 있다"],
 };
 
 
