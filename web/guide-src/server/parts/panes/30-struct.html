@@ -1,0 +1,1568 @@
+<!-- ============================================================
+     프로젝트 구조 PANE (server)
+     ============================================================ -->
+<div class="pane" id="pane-struct">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> NGINX · DOCKER COMPOSE · KUBERNETES · KUSTOMIZE · HELM · TERRAFORM · ARGO CD · GITHUB ACTIONS · 2026 기준</div>
+  <h1>인프라 저장소도<br>규모를 따라<br>한 칸씩 자란다</h1>
+  <p class="tx">
+    서버 한 대일 때는 <code>/etc/nginx</code> 를 직접 고쳐도 됩니다. 그런데 서버가 셋, 환경이 셋, 서비스가 열을 넘으면
+    "운영 서버 설정은 누가 언제 바꿨지?"에 아무도 답하지 못합니다. 이 탭은 <b>서버 설정 · Compose · 쿠버네티스 매니페스트 · Terraform · GitOps · CI 파일</b>을
+    저장소 안에 <b>어떤 디렉터리로 나눠 두는지</b>, 그리고 <b>언제 다음 구조로 넘어가는지</b>를 한 장씩 봅니다.
+    각 도구의 문법과 명령은 해당 탭(☸️ 도커 · 쿠버네티스, 🟩 Nginx 등)으로 링크하고, 여기서는 <b>배치와 경계</b>만 다룹니다.
+  </p>
+  <div class="stats">
+    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>10</b><span>시각화</span></div>
+    <div><b>6</b><span>저장소 유형</span></div>
+    <div><b>1</b><span>장짜리 요약표</span></div>
+  </div>
+</header>
+
+<!-- ==================== ps01 ==================== -->
+<section class="sec" id="ps01">
+  <div class="sec-head rv">
+    <span class="no">STR 01</span>
+    <h2>인프라도 코드다 — <span class="t">저장소에 둘 것 · 두지 않을 것 · 규모별 진화</span></h2>
+    <p class="lead">
+      인프라를 저장소에 두는 이유는 하나입니다. <b>서버가 지금 왜 이렇게 생겼는지를 git log 로 답하려고</b>입니다.
+      그러려면 "무엇을 넣고 무엇을 빼는지"가 먼저 정해져야 합니다. 설정과 절차는 넣고, <b>비밀과 상태는 뺍니다</b>.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">작은 팀의 인프라 저장소 한 벌</h4>
+      <pre class="code" data-lang="text"><code>infra/
+├─ README.md            # 저장소 지도 · 처음 온 사람이 읽을 순서
+├─ nginx/               # 서버 설정 (STR 02)
+├─ compose/             # 서버 1~3대 단계의 배포 단위 (STR 03)
+├─ k8s/                 # 매니페스트 · Kustomize (STR 04)
+├─ terraform/           # 클라우드 자원 (STR 05)
+├─ runbooks/            # 장애 대응 절차 — 알림마다 한 장 (STR 10)
+├─ docs/adr/            # 왜 이렇게 정했나 — 결정 기록
+├─ .github/workflows/   # 검사 · 배포 파이프라인 (STR 09)
+├─ .pre-commit-config.yaml
+└─ .gitignore           # 비밀 · 상태 파일 차단 — 첫 커밋 전에</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        처음부터 이 폴더가 다 필요하지는 않습니다. <b>서버 한 대면 nginx/ 와 runbooks/ 만</b>으로 시작하고, 아래 진화 단계를 따라 늘립니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">넣는 것 · 빼는 것</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">종류</th><th style="width:16%">저장소</th><th>이유 · 대신 어디에</th></tr>
+          <tr><td>서버 설정 · compose · 매니페스트</td><td>✅ 넣음</td><td>변경 이력과 리뷰가 곧 운영 기록</td></tr>
+          <tr><td>Terraform 코드 · <code>.terraform.lock.hcl</code></td><td>✅ 넣음</td><td>잠금 파일은 프로바이더 버전 고정용 — 커밋합니다</td></tr>
+          <tr><td>런북 · ADR · 온콜 문서</td><td>✅ 넣음</td><td>코드와 같이 리뷰해야 낡지 않습니다</td></tr>
+          <tr><td><code>.env</code> · 키 · kubeconfig</td><td>❌ 뺌</td><td>비밀 저장소 · 암호화 파일 (STR 08)</td></tr>
+          <tr><td><code>*.tfstate</code> · <code>.terraform/</code></td><td>❌ 뺌</td><td>원격 백엔드(S3 등) — 상태에는 비밀이 평문으로 들어 있습니다</td></tr>
+          <tr><td>렌더 결과 · DB 덤프 · 로그</td><td>❌ 뺌</td><td>다시 만들 수 있는 것은 넣지 않습니다</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 232" role="img" aria-label="인프라 저장소가 자라는 네 단계 타임라인. 1단계는 서버 한 대로 nginx 와 systemd 설정 파일을 저장소에 백업하는 수준이다. 2단계는 Docker Compose 로 서버 한 대에서 세 대, 서비스 다섯 개 안팎을 compose 파일로 배포하며, 서버마다 설치 상태가 달라져 재현이 안 될 때 넘어간다. 3단계는 쿠버네티스 단일 클러스터로 매니페스트와 Kustomize 를 쓰며, 서버가 세 대를 넘고 무중단 배포와 자동 복구가 필요할 때 넘어간다. 4단계는 여러 클러스터로 Terraform 과 GitOps 설정 저장소를 쓰며, 환경이나 리전마다 클러스터가 생기고 손으로 만들 수 없게 될 때 넘어간다. 대부분의 팀은 2단계와 3단계에서 오래 머문다.">
+      <text x="16" y="18" class="lbl">인프라 저장소가 자라는 길 — 위는 구조, 아래는 넘어갈 때의 신호</text>
+
+      <path class="ax ar" d="M40 120 L648 120"/>
+      <path class="ln" d="M100 114 L100 126"/>
+      <path class="ln" d="M250 114 L250 126"/>
+      <path class="ln" d="M400 114 L400 126"/>
+      <path class="ln" d="M550 114 L550 126"/>
+
+      <circle class="dot" cx="100" cy="120" r="5"/>
+      <circle class="dot" cx="250" cy="120" r="5" style="fill:#34d399"/>
+      <circle class="dot" cx="400" cy="120" r="5" style="fill:#34d399"/>
+      <circle class="dot" cx="550" cy="120" r="5" style="fill:#fbbf24"/>
+
+      <path class="lead-ln" d="M100 112 L100 94"/>
+      <path class="lead-ln" d="M250 112 L250 94"/>
+      <path class="lead-ln" d="M400 112 L400 94"/>
+      <path class="lead-ln" d="M550 112 L550 94"/>
+
+      <text x="100" y="86" class="val" text-anchor="middle">서버 한 대</text>
+      <text x="100" y="70" class="ann" text-anchor="middle">nginx · systemd 설정</text>
+      <text x="100" y="56" class="ann" text-anchor="middle">nginx/ · runbooks/</text>
+
+      <text x="250" y="86" class="val" text-anchor="middle">Compose</text>
+      <text x="250" y="70" class="ann" text-anchor="middle">서버 1~3대 · 서비스 5개</text>
+      <text x="250" y="56" class="ann" text-anchor="middle">compose.yaml + override</text>
+
+      <text x="400" y="86" class="val" text-anchor="middle">쿠버네티스</text>
+      <text x="400" y="70" class="ann" text-anchor="middle">클러스터 하나</text>
+      <text x="400" y="56" class="ann" text-anchor="middle">base/ + overlays/</text>
+
+      <text x="550" y="86" class="val" text-anchor="middle">여러 클러스터</text>
+      <text x="550" y="70" class="ann" text-anchor="middle">환경 · 리전별 클러스터</text>
+      <text x="550" y="56" class="ann" text-anchor="middle">terraform/ + 설정 저장소</text>
+
+      <text x="100" y="142" class="tk" text-anchor="middle">1단계</text>
+      <text x="250" y="142" class="tk" text-anchor="middle">2단계</text>
+      <text x="400" y="142" class="tk" text-anchor="middle">3단계</text>
+      <text x="550" y="142" class="tk" text-anchor="middle">4단계</text>
+
+      <text x="100" y="162" class="ann" text-anchor="middle">SSH 로 직접 수정</text>
+      <text x="250" y="162" class="ann am-t" text-anchor="middle">서버마다 설치가 다름</text>
+      <text x="250" y="176" class="ann" text-anchor="middle">새 서버를 재현 못 함</text>
+      <text x="400" y="162" class="ann am-t" text-anchor="middle">서버 3대+ · 무중단</text>
+      <text x="400" y="176" class="ann" text-anchor="middle">죽으면 사람이 살림</text>
+      <text x="550" y="162" class="ann am-t" text-anchor="middle">클러스터를 손으로 못 만듦</text>
+      <text x="550" y="176" class="ann" text-anchor="middle">팀마다 권한을 나눠야 함</text>
+
+      <path class="dim-ln" d="M254 202 L396 202"/>
+      <text x="325" y="196" class="ann" text-anchor="middle">대부분의 팀은 여기서 오래 머뭅니다</text>
+
+      <text x="16" y="224" class="lbl">단계를 건너뛰면 도구 비용만 먼저 냅니다 — 신호가 보일 때 한 칸씩</text>
+    </svg>
+    <div class="cap">인프라 구조도 <b>신호가 올 때 한 칸씩</b> — 서비스 세 개에 쿠버네티스 여러 클러스터는 비용만 큽니다.</div>
+  </div>
+
+  <h3 class="sub">첫 커밋 전에 — <span class="t">.gitignore 가 먼저</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="text"><code># .gitignore — 인프라 저장소 공통
+.env
+.env.*
+!.env.example          # 이름만 적은 견본은 커밋
+*.pem
+*.key
+kubeconfig*
+# Terraform — 상태와 캐시는 원격 · 로컬 전용
+*.tfstate
+*.tfstate.*
+.terraform/
+crash.log
+# 렌더 결과 · 임시
+rendered/
+*.dump</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규칙 네 가지</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:36%">규칙</th><th>이유</th></tr>
+          <tr><td><b>손으로 고친 것은 없다</b></td><td>서버에서 직접 바꿨다면 같은 날 저장소에도 반영 — 안 하면 다음 배포가 되돌립니다</td></tr>
+          <tr><td><b>환경은 디렉터리로</b></td><td>dev · stg · prod 를 브랜치로 나누지 않습니다 (STR 08)</td></tr>
+          <tr><td><b>비밀은 참조만</b></td><td>저장소에는 "어디서 가져오나"만 (STR 08)</td></tr>
+          <tr><td><b>한 번 새면 회전</b></td><td>커밋한 비밀은 지워도 이력에 남습니다 — 키를 바꾸는 것만이 해결입니다</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 서버가 진실</h5>
+      <pre class="code" data-lang="text"><code>운영 서버 /etc/nginx/conf.d/
+├─ api.conf
+├─ api.conf.bak          # 누가 언제?
+├─ api.conf.20260311     # 어느 쪽이 지금 것?
+└─ test.conf             # 아직 켜져 있음</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 저장소가 진실</h5>
+      <pre class="code" data-lang="text"><code>infra/nginx/conf.d/
+└─ api.conf              # 변경 = PR · 리뷰 · 배포
+# 되돌리기  git revert &lt;커밋&gt;
+# 누가 바꿨나  git log -p nginx/conf.d/api.conf</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 설정 · 매니페스트 · IaC · 런북은 저장소에, <b>비밀과 상태 파일은 밖에</b>. 구조는 서버 한 대 → Compose → 쿠버네티스 → 여러 클러스터 순으로, 신호가 올 때만 넘어갑니다.</div>
+</section>
+
+<!-- ==================== ps02 ==================== -->
+<section class="sec" id="ps02">
+  <div class="sec-head rv">
+    <span class="no">STR 02</span>
+    <h2>Nginx 설정 구조 — <span class="t">nginx.conf · conf.d · snippets · 템플릿</span></h2>
+    <p class="lead">
+      블록 중첩과 파일 위치는 🧭 시작 탭 w07 "설정 파일 구조 읽는 법"에, 공통 프록시 조각은 🟩 Nginx 탭 n04 에 있습니다.
+      여기서는 <b>사이트가 열 개를 넘을 때 저장소 안에서 어떻게 나누는지</b>만 봅니다. 핵심은 <b>사이트당 파일 하나, 공통은 snippets/, 환경 차이는 템플릿</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">저장소 안의 nginx/</h4>
+      <pre class="code" data-lang="text"><code>nginx/
+├─ nginx.conf             # 전역 · events · http — 거의 안 바뀜
+├─ conf.d/                # ★ 사이트(server 블록) 하나 = 파일 하나
+│  ├─ 00-default.conf     # 모르는 Host 는 444 로 끊기
+│  ├─ api.conf
+│  └─ admin.conf
+├─ snippets/              # 여러 사이트가 include 하는 조각
+│  ├─ tls.conf            # 프로토콜 · 세션 캐시
+│  ├─ headers.conf        # 보안 헤더
+│  └─ proxy-common.conf   # 프록시 헤더 · 타임아웃 (🟩 n04)
+├─ templates/             # 환경마다 다른 값 — envsubst 로 렌더
+│  └─ upstream.conf.template
+└─ certs/                 # .gitignore — 인증서는 밖에서 주입</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">sites-available 냐 conf.d 냐</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:28%">방식</th><th>어디서</th><th>저장소에 둘 때</th></tr>
+          <tr><td><code>sites-available/</code> + <code>sites-enabled/</code></td><td>Debian · Ubuntu 패키지</td><td>켜기 = 심볼릭 링크 — git 과 컨테이너에서 다루기 번거롭습니다</td></tr>
+          <tr><td><code>conf.d/*.conf</code></td><td>nginx.org 패키지 · 공식 Docker 이미지</td><td><b>권장</b> — 파일이 있으면 켜짐, 지우면 꺼짐</td></tr>
+        </table>
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        Ubuntu 기본 <code>nginx.conf</code> 는 <b>둘 다</b> include 합니다. 한 서버에서 두 방식을 섞으면 같은 server_name 이 두 번 잡혀
+        <code>conflicting server name</code> 경고가 나옵니다 — 하나로 통일하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 252" role="img" aria-label="Nginx 설정 파일이 include 로 엮이는 트리. 맨 위 nginx.conf 가 http 블록에서 conf.d 폴더의 모든 conf 파일을 불러온다. conf.d 의 사이트 파일은 server 블록 안에서 snippets 폴더의 tls, headers, proxy-common 조각을 다시 include 한다. templates 폴더의 템플릿은 컨테이너가 시작할 때 envsubst 로 값이 채워져 conf.d 로 렌더된다.">
+      <text x="16" y="18" class="lbl">include 가 파일을 엮는 방식 — 위가 아래를 불러 들입니다</text>
+
+      <rect class="bx" x="250" y="32" width="180" height="40"/>
+      <text x="340" y="50" class="val" text-anchor="middle">nginx.conf</text>
+      <text x="340" y="65" class="ann" text-anchor="middle">http { include conf.d/*.conf; }</text>
+
+      <path class="ln" d="M340 74 L340 86"/>
+      <path class="ln" d="M120 86 L560 86"/>
+      <path class="ln" d="M120 86 L120 98"/>
+      <path class="ln" d="M340 86 L340 98"/>
+      <path class="ln" d="M560 86 L560 98"/>
+
+      <rect class="bx" x="30" y="100" width="180" height="40"/>
+      <text x="120" y="118" class="val" text-anchor="middle">conf.d/</text>
+      <text x="120" y="133" class="ann" text-anchor="middle">api.conf · admin.conf</text>
+
+      <rect class="bx bx-fw" x="250" y="100" width="180" height="40"/>
+      <text x="340" y="118" class="val" text-anchor="middle">snippets/</text>
+      <text x="340" y="133" class="ann" text-anchor="middle">tls · headers · proxy-common</text>
+
+      <rect class="bx" x="470" y="100" width="180" height="40"/>
+      <text x="560" y="118" class="val" text-anchor="middle">templates/</text>
+      <text x="560" y="133" class="ann" text-anchor="middle">*.conf.template</text>
+
+      <path class="ln ar" d="M150 144 L150 164 L340 164 L340 144"/>
+      <text x="245" y="178" class="ann" text-anchor="middle">server 안에서 include snippets/…</text>
+
+      <path class="ln ar" d="M560 144 L560 196 L90 196 L90 144"/>
+      <text x="325" y="210" class="ann" text-anchor="middle">컨테이너 시작 때 envsubst → conf.d/ 로 렌더</text>
+
+      <text x="16" y="244" class="lbl">사이트 파일은 "무엇이 다른가"만, 공통은 snippets/ 한 곳 — 고칠 곳이 하나가 됩니다</text>
+    </svg>
+    <div class="cap">nginx.conf → conf.d → snippets 의 세 겹 — <b>사이트 파일이 짧을수록</b> 리뷰가 쉽습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">사이트 파일 — 다른 점만 남긴다</h4>
+      <pre class="code" data-lang="conf"><code># conf.d/api.conf
+server {
+    listen 443 ssl;
+    http2 on;                       # nginx 1.25.1+ 문법
+    server_name api.example.com;
+
+    ssl_certificate     /etc/nginx/certs/api.crt;
+    ssl_certificate_key /etc/nginx/certs/api.key;
+    include snippets/tls.conf;      # 상대 경로 = /etc/nginx 기준
+    include snippets/headers.conf;
+
+    location / {
+        proxy_pass http://api_upstream;   # templates/ 에서 렌더
+        include snippets/proxy-common.conf;
+    }
+}</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>add_header 는 상속되지 않을 때가 있습니다.</b> location 안에 <code>add_header</code> 가 하나라도 있으면
+        server 레벨의 headers.conf 헤더가 그 location 에서는 <b>통째로 사라집니다</b>. 그런 location 에는 headers.conf 를 다시 include 하세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">환경마다 다른 값 — 공식 이미지의 템플릿</h4>
+      <pre class="code" data-lang="conf"><code># templates/upstream.conf.template
+#  → 시작 때 /etc/nginx/conf.d/upstream.conf 로 렌더
+upstream api_upstream {
+    server ${API_HOST}:${API_PORT};
+    keepalive 32;
+}</code></pre>
+      <pre class="code" data-lang="yaml"><code># compose.yaml 일부
+services:
+  nginx:
+    image: nginx:stable-alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/conf.d/api.conf:/etc/nginx/conf.d/api.conf:ro
+    environment:
+      API_HOST: api
+      API_PORT: "8080"</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        공식 이미지의 시작 스크립트는 <b>정의된 환경 변수만</b> 치환하므로 <code>$host</code> 같은 nginx 변수는 그대로 남습니다.
+        conf.d 폴더 전체를 마운트하면 렌더 결과를 쓸 수 없으니 <b>파일 단위로</b> 마운트합니다. 검사는 <code>docker compose run --rm nginx nginx -t</code>.
+      </div>
+    </div>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 사이트마다 복사</h5>
+      <pre class="code" data-lang="text"><code>conf.d/api.conf     # ssl_protocols 6줄 + 헤더 8줄
+conf.d/admin.conf   # 같은 14줄 (한 곳만 TLSv1 남음)
+conf.d/shop.conf    # 같은 14줄 (헤더 하나 빠짐)</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 조각은 한 곳</h5>
+      <pre class="code" data-lang="text"><code>snippets/tls.conf       # 여기만 고치면
+snippets/headers.conf   # 모든 사이트에 반영
+conf.d/*.conf           # include 두 줄 + 자기 location</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 저장소에서는 <b>conf.d/ 에 사이트당 파일 하나</b>, 공통은 <b>snippets/</b>, 환경 차이는 <b>templates/ + envsubst</b>. 배포 전에 항상 <code>nginx -t</code>.</div>
+</section>
+
+<!-- ==================== ps03 ==================== -->
+<section class="sec" id="ps03">
+  <div class="sec-head rv">
+    <span class="no">STR 03</span>
+    <h2>Docker Compose 프로젝트 — <span class="t">공통 파일 + override + profiles</span></h2>
+    <p class="lead">
+      Compose 문법과 완본 예제는 ☸️ 도커 · 쿠버네티스 탭 d04 에, 관측 스택 한 벌은 🔭 관측 탭 y12 에 있습니다.
+      여기서는 서비스가 늘어날 때 <b>파일을 어떻게 쪼개고 Dockerfile 을 어디에 두는지</b>를 봅니다.
+      원칙은 <b>공통은 compose.yaml 하나, 환경 차이는 덧씌우는 파일, 가끔 쓰는 도구는 profile</b>입니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">서비스 서너 개짜리 Compose 저장소</h4>
+      <pre class="code" data-lang="text"><code>shop/
+├─ compose.yaml            # 공통 — 서비스 · 이미지 · 볼륨 · 네트워크
+├─ compose.override.yaml   # 개발 — 소스 마운트 · 디버그 포트 (자동 적용)
+├─ compose.prod.yaml       # 운영 — restart · 리소스 · 로그 (-f 로 명시)
+├─ .env.example            # 변수 이름만 — 커밋
+├─ .env                    # 실제 값 — .gitignore
+├─ services/
+│  ├─ api/
+│  │  ├─ Dockerfile        # ★ 서비스 코드 옆에 — 빌드 컨텍스트가 작아짐
+│  │  ├─ .dockerignore
+│  │  └─ src/
+│  └─ worker/
+│     └─ Dockerfile
+├─ nginx/                  # STR 02 의 구조 그대로
+└─ ops/
+   ├─ backup.sh            # 볼륨 백업 (☸️ d04)
+   └─ deploy.sh            # pull → up -d → 헬스 확인</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">파일마다 무엇을 쓰나</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:34%">파일</th><th>넣는 것</th><th style="width:22%">읽히는 때</th></tr>
+          <tr><td><code>compose.yaml</code></td><td>이미지 · 의존 · 헬스체크 · 볼륨</td><td>항상</td></tr>
+          <tr><td><code>compose.override.yaml</code></td><td>소스 마운트 · 포트 공개 · 디버거</td><td><code>-f</code> 없이 실행할 때만</td></tr>
+          <tr><td><code>compose.prod.yaml</code></td><td>restart · 자원 한도 · 로그 회전</td><td><code>-f</code> 로 지정할 때</td></tr>
+          <tr><td><code>.env</code></td><td>compose 파일 안 <code>${변수}</code> 값</td><td>항상 (셸 변수가 이김)</td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <code>.env</code> 는 <b>compose 파일을 치환하는 용도</b>이고 컨테이너 안으로 자동으로 들어가지 않습니다.
+        컨테이너에 넣으려면 <code>environment:</code> 에 적거나 <code>env_file:</code> 로 지정합니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="Compose 파일이 겹쳐 읽히는 순서. 맨 아래 .env 가 compose 파일 안의 변수를 채우고, 그 위에 공통 compose.yaml 이 놓인다. 개발할 때는 compose.override.yaml 이 자동으로 얹히지만 -f 로 파일을 지정하면 읽히지 않는다. 운영에서는 compose.prod.yaml 을 -f 로 얹는다. 나중에 얹힌 파일의 값이 이기고, 맨 위의 docker compose config 결과가 실제로 뜨는 설정이다. ports 같은 목록 값은 덮어쓰지 않고 합쳐진다.">
+      <text x="16" y="18" class="lbl">파일을 겹쳐 읽습니다 — 나중에 얹힌 파일이 이깁니다</text>
+
+      <rect class="bx bx-ok" x="72" y="34" width="286" height="38"/>
+      <text x="215" y="58" class="val" text-anchor="middle">docker compose config</text>
+      <text x="376" y="51" class="ann">실제로 뜨는 최종 설정</text>
+      <text x="376" y="64" class="ann">— 운영 배포 전에 반드시 출력해 봅니다</text>
+
+      <rect class="bx bx-fw" x="72" y="76" width="286" height="38"/>
+      <text x="215" y="100" class="val" text-anchor="middle">compose.prod.yaml (-f)</text>
+      <text x="376" y="94" class="ann">운영 — restart · 자원 한도 · 로그 회전</text>
+
+      <rect class="bx bx-mut" x="72" y="118" width="286" height="38"/>
+      <text x="215" y="142" class="val" text-anchor="middle">compose.override.yaml</text>
+      <text x="376" y="136" class="ann">개발 때만 자동 — -f 를 쓰면 빠집니다</text>
+
+      <rect class="bx" x="72" y="160" width="286" height="38"/>
+      <text x="215" y="184" class="val" text-anchor="middle">compose.yaml (공통)</text>
+      <text x="376" y="178" class="ann">서비스 · 이미지 · 볼륨 · 헬스체크</text>
+
+      <rect class="bx bx-mut" x="72" y="202" width="286" height="34"/>
+      <text x="215" y="223" class="val" text-anchor="middle">.env → ${변수} 치환</text>
+      <text x="376" y="218" class="ann">셸에 같은 이름이 있으면 셸 값이 이김</text>
+
+      <path class="ln ar" d="M52 232 L52 38"/>
+      <text x="16" y="130" class="ann">나중</text>
+      <text x="16" y="142" class="ann">이김</text>
+
+      <text x="16" y="254" class="lbl">단, ports · expose 같은 목록은 덮어쓰지 않고 합쳐집니다 — 개발 포트는 override 에만</text>
+    </svg>
+    <div class="cap">덧씌우기 구조 — <b>공통 파일에는 모든 환경에서 같은 것만</b>. 환경 하나에만 필요한 값이 공통에 있으면 뺄 방법이 없습니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">compose.yaml — 공통</h4>
+      <pre class="code" data-lang="yaml"><code>name: shop
+services:
+  api:
+    build: ./services/api        # Dockerfile 은 서비스 폴더 안
+    image: registry.example.com/shop/api:${API_TAG:-dev}
+    environment:
+      DB_HOST: db
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD 가 .env 에 필요}
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_DB: shop
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD 가 .env 에 필요}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 5s
+      retries: 10
+  adminer:                       # 가끔 쓰는 도구
+    image: adminer
+    profiles: [debug]            # --profile debug 일 때만 뜸
+    ports: ["8081:8080"]
+volumes:
+  db-data:</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">덧씌우는 두 파일과 실행 명령</h4>
+      <pre class="code" data-lang="yaml"><code># compose.override.yaml — 개발 (자동)
+services:
+  api:
+    build:
+      target: dev                # Dockerfile 의 dev 단계
+    volumes:
+      - ./services/api/src:/app/src
+    ports:
+      - "8080:8080"
+
+# compose.prod.yaml — 운영 (-f 로 명시)
+services:
+  api:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+  db:
+    restart: unless-stopped</code></pre>
+      <pre class="code" data-lang="bash"><code>docker compose up -d                          # 공통 + override
+docker compose -f compose.yaml -f compose.prod.yaml config   # 합친 결과 확인
+docker compose -f compose.yaml -f compose.prod.yaml up -d    # 운영
+docker compose --profile debug up -d          # adminer 까지</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        운영 서버의 <code>.env</code> 에 <code>COMPOSE_FILE=compose.yaml:compose.prod.yaml</code> 를 적어 두면
+        <code>-f</code> 두 개를 매번 치지 않아도 됩니다 (Windows 는 구분자가 <code>;</code>).
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">서비스가 열을 넘으면 — <span class="t">include 로 쪼개기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="yaml"><code># compose.yaml — 팀별 파일을 불러 붙임 (Compose 2.20+)
+include:
+  - path: ./services/order/compose.yaml
+  - path: ./services/payment/compose.yaml
+  - path: ./observability/compose.yaml
+services:
+  nginx:
+    image: nginx:stable-alpine</code></pre>
+    </div>
+    <div class="card">
+      <div class="note info" style="margin:0">
+        <code>include</code> 된 파일 안의 상대 경로는 <b>그 파일이 있는 폴더 기준</b>이라, 각 팀이 자기 폴더에서 독립적으로 작성할 수 있습니다.
+        이름이 겹치는 서비스는 오류가 납니다. 이 단계에서 서버가 셋을 넘고 무중단이 필요하다면 Compose 를 더 키우기보다
+        <b>쿠버네티스로 넘어갈 신호</b>입니다 (STR 01).
+      </div>
+    </div>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 환경마다 통째 복사</h5>
+      <pre class="code" data-lang="text"><code>docker-compose.dev.yml    # 140줄
+docker-compose.stg.yml    # 138줄 — 어디가 다른지 diff 로만 앎
+docker-compose.prod.yml   # 141줄 — 헬스체크가 하나 빠짐</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 공통 하나 + 차이만</h5>
+      <pre class="code" data-lang="text"><code>compose.yaml              # 120줄 — 모든 환경 공통
+compose.override.yaml     # 12줄 — 개발 차이
+compose.prod.yaml         # 15줄 — 운영 차이</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>compose.yaml 은 공통, override 는 개발, prod 파일은 <code>-f</code></b>. Dockerfile 은 서비스 폴더 안에, 가끔 쓰는 도구는 profiles, 커지면 include — 그다음은 쿠버네티스입니다.</div>
+</section>
+
+<!-- ==================== ps04 ==================== -->
+<section class="sec" id="ps04">
+  <div class="sec-head rv">
+    <span class="no">STR 04</span>
+    <h2>쿠버네티스 매니페스트 — <span class="t">Kustomize base/overlays vs Helm 차트</span></h2>
+    <p class="lead">
+      Helm 차트 구조와 Kustomize 기본형, 둘 중 고르는 표는 ☸️ 도커 · 쿠버네티스 탭 d12 에 있습니다.
+      여기서는 한 걸음 더 — <b>서비스가 여럿일 때 폴더를 어떻게 반복하고, 환경 사이의 공통 조각을 어디에 두는지</b>를 봅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Kustomize — 서비스마다 같은 모양을 반복</h4>
+      <pre class="code" data-lang="text"><code>k8s/
+├─ components/               # 일부 환경에만 켜는 조각
+│  ├─ hpa/                   # 오토스케일 (stg · prod)
+│  └─ pdb/                   # PodDisruptionBudget (prod)
+└─ services/
+   ├─ api/
+   │  ├─ base/               # 순수 YAML — 환경 공통
+   │  │  ├─ kustomization.yaml
+   │  │  ├─ deployment.yaml
+   │  │  └─ service.yaml
+   │  └─ overlays/
+   │     ├─ dev/             # replicas 1 · 로그 debug
+   │     ├─ stg/
+   │     └─ prod/            # replicas 4 · hpa · pdb
+   │        ├─ kustomization.yaml
+   │        └─ replicas.yaml
+   └─ worker/                # 같은 모양 반복 — 찾기 쉬움
+      ├─ base/
+      └─ overlays/{dev,stg,prod}/</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Helm — 차트는 하나, 값 파일이 환경</h4>
+      <pre class="code" data-lang="text"><code>charts/
+├─ common/                   # type: library — 라벨 · 프로브 공통 템플릿
+└─ api/
+   ├─ Chart.yaml             # dependencies: common
+   ├─ values.yaml            # 기본값 — 모든 환경 공통
+   ├─ values-dev.yaml        # ★ 환경 차이만
+   ├─ values-stg.yaml
+   ├─ values-prod.yaml
+   └─ templates/
+      ├─ deployment.yaml
+      ├─ service.yaml
+      └─ _helpers.tpl</code></pre>
+      <pre class="code" data-lang="bash"><code># values.yaml 은 자동, 환경 파일만 -f 로 덧씌움
+helm upgrade --install api ./charts/api \
+  -n shop-prod -f charts/api/values-prod.yaml
+helm template api ./charts/api -f charts/api/values-prod.yaml  # 렌더만</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        서비스마다 템플릿을 복사하지 말고 <b>library 차트</b>(<code>type: library</code>)로 공통 템플릿을 묶습니다. 라이브러리 차트는 단독 설치가 안 되고 다른 차트가 가져다 씁니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 284" role="img" aria-label="Kustomize 와 Helm 의 대조. 원본 형태는 Kustomize 가 순수 YAML 이고 Helm 은 템플릿과 values 파일이다. 환경 차이는 Kustomize 가 overlay 패치로 덮어쓰고 Helm 은 values-prod 같은 값 파일로 바꾼다. 로직은 Kustomize 에 조건과 반복이 없고 Helm 은 Go 템플릿의 if 와 range 를 쓴다. 결과 확인은 kubectl kustomize 와 helm template 이다. 잘 맞는 곳은 Kustomize 가 우리 앱의 환경 분기, Helm 이 남에게 배포하는 패키지와 서드파티 설치다. 둘 다 결과는 평범한 매니페스트이므로 리뷰는 렌더 결과로 한다.">
+      <text x="16" y="18" class="lbl">같은 줄에 같은 질문 — 차이는 "원본이 YAML 이냐 템플릿이냐" 하나에서 나옵니다</text>
+
+      <text x="170" y="44" class="ttl" text-anchor="middle">Kustomize</text>
+      <text x="510" y="44" class="ttl" text-anchor="middle">Helm</text>
+      <path class="ln" d="M340 32 L340 240"/>
+
+      <rect class="bx bx-fw" x="40" y="54" width="260" height="32"/>
+      <text x="170" y="74" class="ann" text-anchor="middle">원본 — 순수 YAML (base/)</text>
+      <rect class="bx bx-fw" x="380" y="54" width="260" height="32"/>
+      <text x="510" y="74" class="ann" text-anchor="middle">원본 — 템플릿 + values.yaml</text>
+
+      <rect class="bx" x="40" y="92" width="260" height="32"/>
+      <text x="170" y="112" class="ann" text-anchor="middle">환경 차이 — overlay 패치로 덮어씀</text>
+      <rect class="bx" x="380" y="92" width="260" height="32"/>
+      <text x="510" y="112" class="ann" text-anchor="middle">환경 차이 — values-prod.yaml 로 교체</text>
+
+      <rect class="bx" x="40" y="130" width="260" height="32"/>
+      <text x="170" y="150" class="ann" text-anchor="middle">로직 — 조건 · 반복 없음 (의도된 제약)</text>
+      <rect class="bx" x="380" y="130" width="260" height="32"/>
+      <text x="510" y="150" class="ann" text-anchor="middle">로직 — if · range · 함수 (Go 템플릿)</text>
+
+      <rect class="bx" x="40" y="168" width="260" height="32"/>
+      <text x="170" y="188" class="ann" text-anchor="middle">kubectl kustomize overlays/prod</text>
+      <rect class="bx" x="380" y="168" width="260" height="32"/>
+      <text x="510" y="188" class="ann" text-anchor="middle">helm template -f values-prod.yaml</text>
+
+      <rect class="bx bx-ok" x="40" y="206" width="260" height="32"/>
+      <text x="170" y="226" class="ann ok-t" text-anchor="middle">우리 앱의 환경 분기</text>
+      <rect class="bx bx-ok" x="380" y="206" width="260" height="32"/>
+      <text x="510" y="226" class="ann ok-t" text-anchor="middle">남에게 배포하는 패키지 · 서드파티</text>
+
+      <text x="340" y="258" class="ann am-t" text-anchor="middle">둘 다 마지막에는 평범한 매니페스트가 됩니다</text>
+      <text x="340" y="274" class="ann" text-anchor="middle">— 그래서 PR 리뷰는 원본이 아니라 렌더 결과의 diff 로 봅니다</text>
+    </svg>
+    <div class="cap">우리 앱은 Kustomize, 남의 것은 Helm — <b>섞어 쓰는 것이 가장 흔한 실무 조합</b>입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">overlay 하나 — 다른 점만</h4>
+      <pre class="code" data-lang="yaml"><code># services/api/overlays/prod/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: shop-prod
+resources:
+  - ../../base
+components:
+  - ../../../../components/hpa
+  - ../../../../components/pdb
+patches:
+  - path: replicas.yaml
+images:
+  - name: shop-api                    # base 의 image 이름
+    newName: registry.example.com/shop/api
+    newTag: "1.8.2"                   # CI 가 바꾸는 유일한 줄
+labels:
+  - pairs:
+      env: prod</code></pre>
+      <pre class="code" data-lang="yaml"><code># services/api/overlays/prod/replicas.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-api
+spec:
+  replicas: 4</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">component — 환경 몇 개에만 켜는 조각</h4>
+      <pre class="code" data-lang="yaml"><code># components/hpa/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - hpa.yaml</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:34%">어디에 두나</th><th>기준</th></tr>
+          <tr><td><code>base/</code></td><td>모든 환경에서 같은 것 — 이미지 이름 · 포트 · 프로브</td></tr>
+          <tr><td><code>overlays/&lt;env&gt;/</code></td><td>그 환경만 다른 것 — replicas · 자원 · 태그</td></tr>
+          <tr><td><code>components/</code></td><td>환경 <b>둘 이상</b>이 공유하는 선택 기능 — hpa · pdb</td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <code>components</code> 경로는 overlay 폴더 기준 상대 경로입니다. 위 예는 <code>k8s/services/api/overlays/prod</code> 에서 네 칸 올라가
+        <code>k8s/components</code> 를 가리킵니다. 깊이가 다르면 <code>kubectl kustomize</code> 가 바로 오류를 냅니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 서비스마다 <b>base/ + overlays/&lt;env&gt;/</b> 를 같은 모양으로 반복하고, 몇 환경에만 켜는 조각은 <b>components/</b>. 남에게 줄 패키지·서드파티는 Helm, 공통 템플릿은 library 차트로.</div>
+</section>
+
+<!-- ==================== ps05 ==================== -->
+<section class="sec" id="ps05">
+  <div class="sec-head rv">
+    <span class="no">STR 05</span>
+    <h2>Terraform / IaC — <span class="t">modules/ 와 live/ · 상태를 어디서 자르나</span></h2>
+    <p class="lead">
+      Terraform 저장소의 구조는 결국 <b>상태(state) 파일을 몇 개로, 어디서 자르느냐</b>의 문제입니다.
+      상태 하나가 클수록 <code>plan</code> 이 느려지고, 실수 한 번이 건드릴 수 있는 범위(blast radius)가 커집니다.
+      그래서 <b>재사용할 코드(modules/)와 실제로 적용하는 곳(live/ 또는 environments/)</b>을 나누고, 적용하는 곳을 <b>환경 × 층</b>으로 쪼갭니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">modules/ + live/ — 가장 흔한 배치</h4>
+      <pre class="code" data-lang="text"><code>terraform/
+├─ modules/                  # 재사용 코드 — 여기서는 apply 하지 않음
+│  ├─ network/
+│  │  ├─ main.tf
+│  │  ├─ variables.tf        # 입력 — 타입 · 설명 · 검증
+│  │  ├─ outputs.tf          # 출력 — 다른 층이 쓰는 값만
+│  │  ├─ versions.tf         # required_providers
+│  │  └─ README.md
+│  ├─ k8s-cluster/
+│  └─ postgres/
+└─ live/                     # ★ 상태 하나 = 폴더 하나
+   ├─ prod/
+   │  ├─ network/            # backend.tf · main.tf · terraform.tfvars
+   │  ├─ cluster/
+   │  └─ data/
+   └─ stg/
+      ├─ network/
+      ├─ cluster/
+      └─ data/</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규칙 다섯 가지</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:34%">규칙</th><th>이유</th></tr>
+          <tr><td><b>apply 는 live/ 에서만</b></td><td>modules/ 는 함수 정의, live/ 는 호출 — 상태는 호출하는 쪽에 생깁니다</td></tr>
+          <tr><td><b>상태 = 환경 × 층</b></td><td>prod 네트워크와 stg 앱이 같은 상태에 있으면 stg 작업이 prod 를 잠급니다</td></tr>
+          <tr><td><b>층끼리는 출력으로만</b></td><td><code>terraform_remote_state</code> 나 data 소스로 읽고, 리소스를 직접 참조하지 않습니다</td></tr>
+          <tr><td><b>변수는 타입 · 설명 · 검증</b></td><td>잘못된 값이 plan 단계에서 걸러집니다</td></tr>
+          <tr><td><b>모듈 버전 고정</b></td><td>저장소가 갈라지면 <code>?ref=v1.4.0</code> 태그로 — 모듈 수정이 모든 환경에 동시에 번지지 않게</td></tr>
+        </table>
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        <code>environments/</code> · <code>live/</code> · <code>envs/</code> 는 이름만 다른 같은 개념입니다. <code>live/</code> 는 Terragrunt 문서에서 퍼진 이름이고, 어느 쪽이든 <b>팀 안에서 하나로</b> 통일하면 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 262" role="img" aria-label="상태 파일을 층으로 자르는 동심원. 가장 안쪽은 네트워크와 IAM 으로 1년에 몇 번 바뀌지만 잘못되면 모든 것이 멈춘다. 그 바깥은 쿠버네티스 클러스터와 노드 그룹으로 분기마다 바뀐다. 그 바깥은 데이터베이스와 버킷 같은 데이터 층으로 삭제 보호가 필요하다. 가장 바깥은 DNS 레코드, 큐, 대시보드 같은 앱 인프라로 주 단위로 바뀌고 잘못되어도 서비스 하나에 그친다. 층마다 상태를 따로 두면 자주 바꾸는 바깥 층 작업이 안쪽 층을 건드릴 수 없다.">
+      <text x="16" y="18" class="lbl">상태를 층으로 자릅니다 — 안쪽일수록 드물게 바뀌고, 터지면 크게 터집니다</text>
+
+      <circle class="nd nd-mut" cx="196" cy="140" r="104" style="fill:rgba(20,36,61,.22)"/>
+      <circle class="nd" cx="196" cy="140" r="78" style="fill:rgba(20,36,61,.42)"/>
+      <circle class="nd" cx="196" cy="140" r="52" style="fill:rgba(34,211,238,.10)"/>
+      <circle class="nd nd-fw" cx="196" cy="140" r="26"/>
+
+      <text x="196" y="144" class="ann" text-anchor="middle">네트워크</text>
+      <text x="196" y="106" class="ann" text-anchor="middle">클러스터</text>
+      <text x="196" y="80" class="ann" text-anchor="middle">데이터</text>
+      <text x="196" y="54" class="ann" text-anchor="middle">앱 인프라</text>
+
+      <path class="lead-ln" d="M222 140 L392 140"/>
+      <path class="lead-ln" d="M246 114 L392 114"/>
+      <path class="lead-ln" d="M272 88 L392 88"/>
+      <path class="lead-ln" d="M298 62 L392 62"/>
+
+      <text x="400" y="60" class="ann">DNS 레코드 · 큐 · 대시보드</text>
+      <text x="400" y="72" class="ann">— 주 단위 · 틀려도 서비스 하나</text>
+      <text x="400" y="86" class="ann">DB · 버킷 · 백업 정책</text>
+      <text x="400" y="98" class="ann">— 삭제 보호(prevent_destroy) 필수</text>
+      <text x="400" y="112" class="ann">클러스터 · 노드 그룹</text>
+      <text x="400" y="124" class="ann">— 분기마다 · 업그레이드 단위</text>
+      <text x="400" y="138" class="ann rs-t">VPC · 서브넷 · IAM</text>
+      <text x="400" y="150" class="ann rs-t">— 1년에 몇 번 · 틀리면 전부 멈춤</text>
+
+      <text x="400" y="184" class="ann am-t">상태 하나에 전부 넣으면</text>
+      <text x="400" y="198" class="ann">대시보드 수정 plan 이</text>
+      <text x="400" y="212" class="ann">VPC 까지 다시 계산합니다</text>
+
+      <text x="16" y="254" class="lbl">자주 바꾸는 바깥 층과 드물게 바꾸는 안쪽 층을 같은 상태에 두지 않습니다</text>
+    </svg>
+    <div class="cap">상태 분리의 기준은 <b>변경 주기와 피해 범위</b> — 같이 바뀌는 것끼리만 한 상태에 둡니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">live/prod/network — 백엔드 · 모듈 호출</h4>
+      <pre class="code" data-lang="hcl"><code># live/prod/network/backend.tf
+terraform {
+  required_version = "&gt;= 1.10"
+  backend "s3" {
+    bucket       = "myorg-tfstate"
+    key          = "prod/network/terraform.tfstate"  # 폴더 경로와 같게
+    region       = "ap-northeast-2"
+    encrypt      = true
+    use_lockfile = true    # 1.10+ S3 자체 잠금 — DynamoDB 표 불필요
+  }
+}
+
+# live/prod/network/main.tf
+module "network" {
+  source = "../../../modules/network"
+  name   = "shop-prod"
+  cidr   = "10.20.0.0/16"
+  azs    = ["ap-northeast-2a", "ap-northeast-2c"]
+}
+
+output "private_subnet_ids" {
+  value = module.network.private_subnet_ids
+}</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">모듈 입력 검증 · 다른 층에서 읽기</h4>
+      <pre class="code" data-lang="hcl"><code># modules/network/variables.tf
+variable "cidr" {
+  type        = string
+  description = "VPC CIDR 블록"
+  validation {
+    condition     = can(cidrnetmask(var.cidr))
+    error_message = "cidr 는 10.20.0.0/16 같은 IPv4 CIDR 이어야 합니다."
+  }
+}
+
+# live/prod/cluster/main.tf — 네트워크 층의 출력만 읽음
+data "terraform_remote_state" "network" {
+  backend = "s3"
+  config = {
+    bucket = "myorg-tfstate"
+    key    = "prod/network/terraform.tfstate"
+    region = "ap-northeast-2"
+  }
+}
+
+module "cluster" {
+  source     = "../../../modules/k8s-cluster"
+  subnet_ids = data.terraform_remote_state.network.outputs.private_subnet_ids
+}</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <code>terraform_remote_state</code> 는 상대 상태 전체를 읽을 권한이 필요합니다. 권한을 더 좁히고 싶으면
+        태그로 찾는 data 소스(예: <code>aws_subnets</code>)나 SSM 파라미터에 출력을 써 두고 읽는 방식을 씁니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad">
+      <h5>❌ 상태 하나에 전부</h5>
+      <pre class="code" data-lang="text"><code>terraform/main.tf          # 3,000줄 · 리소스 600개
+# plan 한 번 8분 · 누가 apply 중이면 전원 대기
+# 대시보드 고치다 count 바꿔 서브넷 재생성 위험
+# workspace 로 환경 구분 → 지금 어느 workspace 인지 실수</code></pre>
+    </div>
+    <div class="good">
+      <h5>✅ 환경 × 층으로 쪼갬</h5>
+      <pre class="code" data-lang="text"><code>live/prod/network/   # 리소스 40개 · 1년에 몇 번
+live/prod/cluster/   # 리소스 60개
+live/prod/apps/      # 리소스 120개 · 매주
+# 폴더 = 상태 = 권한 단위 — 경로만 봐도 무엇을 건드리는지 앎</code></pre>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <b>modules/ 는 정의, live/ 는 적용</b>. 상태는 <b>환경 × 층</b>으로 잘라 폴더 하나에 하나, 층끼리는 출력으로만 연결합니다. 상태 파일은 원격 백엔드에 두고 잠금을 켭니다.</div>
+</section>
+
+<!-- ==================== ps06 ==================== -->
+<section class="sec" id="ps06">
+  <div class="sec-head rv">
+    <span class="no">STR 06</span>
+    <h2>GitOps 저장소 — <span class="t">앱 저장소와 설정 저장소 · app-of-apps · ApplicationSet</span></h2>
+    <p class="lead">
+      Argo CD 의 Application · sync · prune 개념과 "매니페스트 저장소를 분리하라"는 결론은 ☸️ 도커 · 쿠버네티스 탭 d12 에 있습니다.
+      여기서는 그 <b>설정 저장소 안을 어떻게 배치하는지</b>, 서비스가 수십 개일 때 Application 을 <b>손으로 만들지 않는 법</b>,
+      그리고 <b>이미지 태그가 바뀌는 흐름</b>을 봅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">설정(config) 저장소 한 벌</h4>
+      <pre class="code" data-lang="text"><code>deploy-config/
+├─ bootstrap/
+│  └─ root.yaml              # 사람이 딱 한 번 kubectl apply
+├─ argocd/                   # root 가 가리키는 곳 = Argo CD 자기 설정
+│  ├─ projects/              # AppProject — 팀별 권한 · 대상 네임스페이스
+│  ├─ platform.yaml          # 플랫폼 Application 들 (app-of-apps)
+│  └─ services-appset.yaml   # 서비스는 ApplicationSet 이 자동 생성
+├─ platform/                 # 클러스터 공통 — 플랫폼 팀 소유
+│  ├─ cert-manager/          # Helm 값 파일
+│  ├─ ingress/
+│  └─ monitoring/
+└─ services/                 # 앱 팀 소유 — STR 04 의 모양 그대로
+   ├─ api/
+   │  ├─ base/
+   │  └─ overlays/{dev,stg,prod}/
+   └─ worker/</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">왜 앱 저장소와 나누나</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">이유</th><th>한 저장소였다면</th></tr>
+          <tr><td><b>배포 이력</b></td><td>코드 커밋 사이에 태그 변경이 섞여 "prod 에 지금 뭐가 떠 있나"를 찾기 어렵습니다</td></tr>
+          <tr><td><b>권한</b></td><td>앱 개발자 전원이 prod 매니페스트를 바꿀 수 있게 됩니다</td></tr>
+          <tr><td><b>CI 루프</b></td><td>CI 가 태그를 커밋 → 그 커밋이 다시 CI 를 깨움</td></tr>
+          <tr><td><b>여러 앱 한 번에</b></td><td>"api 1.8 과 worker 2.3 을 같이" 를 커밋 하나로 못 묶습니다</td></tr>
+        </table>
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        서비스 하나 · 팀 하나라면 앱 저장소의 <code>deploy/</code> 폴더로 시작해도 됩니다. <b>두 번째 서비스나 두 번째 팀</b>이 생기면 나눌 신호입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 292" role="img" aria-label="이미지 태그 갱신 시퀀스. 개발자가 앱 저장소에 코드를 머지하면 CI 가 이미지를 빌드해 레지스트리에 sha 태그로 푸시한다. CI 는 설정 저장소의 해당 환경 overlay 에서 이미지 태그를 바꾸는 커밋이나 PR 을 만든다. prod 는 사람이 리뷰해 머지한다. Argo CD 는 폴링이나 웹훅으로 설정 저장소의 변경을 감지해 클러스터에 적용하고, 클러스터는 레지스트리에서 새 이미지를 받는다. 마지막으로 Synced 와 Healthy 상태가 알림으로 돌아온다. 앱 저장소의 CI 는 클러스터에 직접 접근하지 않는다.">
+      <text x="16" y="18" class="lbl">태그 한 줄이 배포가 됩니다 — CI 는 클러스터에 손대지 않습니다</text>
+
+      <rect class="actr" x="16" y="30" width="112" height="28"/>
+      <text x="72" y="49" class="ann" text-anchor="middle">개발자</text>
+      <rect class="actr" x="148" y="30" width="112" height="28"/>
+      <text x="204" y="49" class="ann" text-anchor="middle">앱 저장소 CI</text>
+      <rect class="actr" x="280" y="30" width="112" height="28"/>
+      <text x="336" y="49" class="ann" text-anchor="middle">레지스트리</text>
+      <rect class="actr" x="412" y="30" width="112" height="28"/>
+      <text x="468" y="49" class="ann" text-anchor="middle">설정 저장소</text>
+      <rect class="actr" x="544" y="30" width="112" height="28"/>
+      <text x="600" y="49" class="ann" text-anchor="middle">Argo CD · 클러스터</text>
+
+      <path class="life" d="M72 60 L72 256"/>
+      <path class="life" d="M204 60 L204 256"/>
+      <path class="life" d="M336 60 L336 256"/>
+      <path class="life" d="M468 60 L468 256"/>
+      <path class="life" d="M600 60 L600 256"/>
+
+      <rect class="actv" x="199" y="80" width="10" height="64"/>
+      <rect class="actv" x="595" y="186" width="10" height="58"/>
+
+      <path class="msg" d="M72 84 L196 84"/>
+      <text x="80" y="79" class="ann">1. main 머지</text>
+
+      <path class="msg" d="M204 110 L328 110"/>
+      <text x="212" y="105" class="ann">2. 빌드 · 푸시 sha-3f2a9c1</text>
+
+      <path class="msg" d="M204 136 L460 136"/>
+      <text x="212" y="131" class="ann">3. overlays/prod 태그 변경 PR (kustomize edit set image)</text>
+
+      <path class="msg" d="M72 162 L460 162"/>
+      <text x="80" y="157" class="ann">4. 리뷰 · 머지 — dev · stg 는 자동, prod 는 사람</text>
+
+      <path class="msg" d="M600 190 L476 190"/>
+      <text x="592" y="185" class="ann" text-anchor="end">5. 변경 감지</text>
+
+      <path class="msg" d="M600 216 L344 216"/>
+      <text x="592" y="211" class="ann" text-anchor="end">6. 새 이미지 pull</text>
+
+      <path class="msg-a" d="M600 240 L80 240"/>
+      <text x="592" y="235" class="ann" text-anchor="end">7. Synced · Healthy 알림</text>
+
+      <text x="16" y="276" class="lbl">클러스터 자격 증명은 Argo CD 에만 — CI 가 털려도 클러스터는 안전합니다</text>
+    </svg>
+    <div class="cap">GitOps 의 배포 흐름 — <b>CI 는 저장소까지, 클러스터는 Argo CD 가 끌어옵니다</b>.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">ApplicationSet — 폴더가 생기면 앱이 생긴다</h4>
+      <pre class="code" data-lang="yaml"><code># argocd/services-appset.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: services-prod
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/myorg/deploy-config
+        revision: main
+        directories:
+          - path: services/*/overlays/prod
+  template:
+    metadata:
+      name: '{{index .path.segments 1}}-prod'   # api-prod
+    spec:
+      project: services
+      source:
+        repoURL: https://github.com/myorg/deploy-config
+        targetRevision: main
+        path: '{{.path.path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{index .path.segments 1}}-prod'
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }   # 승인은 머지 전에 (STR 09)
+        syncOptions:
+          - CreateNamespace=true</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">root 하나 — 나머지는 저장소가 만든다</h4>
+      <pre class="code" data-lang="yaml"><code># bootstrap/root.yaml — 이것만 손으로 apply
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/myorg/deploy-config
+    targetRevision: main
+    path: argocd            # 이 폴더의 Application · ApplicationSet 을 적용
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">방식</th><th>맞는 곳</th></tr>
+          <tr><td><b>app-of-apps</b></td><td>플랫폼처럼 앱마다 설정이 제각각 — Application 파일을 하나씩</td></tr>
+          <tr><td><b>ApplicationSet</b></td><td>서비스처럼 모양이 같은 것 수십 개 · 클러스터 여러 개(cluster 생성기)</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 앱 저장소는 코드와 이미지, <b>설정 저장소는 "무엇이 어디에 떠 있어야 하나"</b>. root 하나만 손으로 적용하고, 플랫폼은 app-of-apps, 같은 모양의 서비스는 ApplicationSet 으로 폴더에서 자동 생성합니다.</div>
+</section>
+
+<!-- ==================== ps07 ==================== -->
+<section class="sec" id="ps07">
+  <div class="sec-head rv">
+    <span class="no">STR 07</span>
+    <h2>MSA 저장소 전략 — <span class="t">모노레포 vs 폴리레포 · 서비스 템플릿 · 공유 라이브러리</span></h2>
+    <p class="lead">
+      서비스를 무엇으로 쪼갤지는 🧱 백엔드 · MSA 탭 m03 에, 도입하지 말아야 할 때는 m11 에 있습니다.
+      여기서는 쪼갠 서비스들의 <b>코드를 저장소 몇 개에 담을지</b>, 그리고 서비스가 늘어도 <b>헬스체크 · 로그 · Dockerfile 이 제각각이 되지 않게</b> 하는 법을 봅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">모노레포 — 서비스 전부 한 저장소</h4>
+      <pre class="code" data-lang="text"><code>shop/
+├─ services/
+│  ├─ order/            # 서비스마다 Dockerfile · deploy/ 동일한 모양
+│  ├─ payment/
+│  └─ catalog/
+├─ libs/                # 공유 라이브러리 — 버전 없이 소스로 참조
+│  ├─ observability/    # 로그 형식 · 트레이스 · 메트릭 이름
+│  └─ api-contracts/    # OpenAPI · proto — 계약은 한 곳
+├─ templates/service/   # 새 서비스 견본 (아래)
+├─ .github/
+│  ├─ CODEOWNERS        # 경로별 리뷰 책임
+│  └─ workflows/        # 바뀐 서비스만 빌드 (STR 09)
+└─ README.md</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">폴리레포 — 서비스마다 저장소</h4>
+      <pre class="code" data-lang="text"><code>github.com/myorg/
+├─ order-service        # 코드 · Dockerfile · CI
+├─ payment-service
+├─ catalog-service
+├─ lib-observability    # 공유 라이브러리 — semver 로 배포
+├─ api-contracts        # 계약 저장소 — 생성 코드를 패키지로
+├─ service-template     # 새 저장소의 출발점
+└─ deploy-config        # 설정 저장소 (STR 06) — 어느 쪽이든 따로</code></pre>
+      <pre class="code" data-lang="text"><code># .github/CODEOWNERS — 모노레포에서 권한을 경로로 나눔
+/services/payment/   @myorg/payments-team
+/libs/               @myorg/platform-team
+/.github/workflows/  @myorg/platform-team</code></pre>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 268" role="img" aria-label="모노레포와 폴리레포를 다섯 가지 기준으로 비교한 매트릭스. 색이 진할수록 부담이 크다. 빌드와 CI 는 모노레포가 바뀐 범위만 빌드하는 도구가 필요해 부담이 크고, 폴리레포는 저장소마다 단순하지만 파이프라인이 여러 벌이다. 버전은 모노레포가 한 커밋으로 일관되고, 폴리레포는 서비스별 버전과 호환 관리가 필요하다. 권한은 모노레포가 CODEOWNERS 로 경로별로 나누고 폴리레포는 저장소 단위로 깔끔하다. 공유 코드 리팩터링은 모노레포가 PR 하나로 끝나고 폴리레포는 저장소마다 PR 을 순서대로 내야 해 부담이 가장 크다. 규모 한계는 모노레포가 수백 서비스에서 clone 과 CI 도구 투자가 필요하고 폴리레포는 템플릿이 서비스마다 표류한다.">
+      <text x="16" y="18" class="lbl">무엇이 어디서 아픈가 — 색이 진할수록 부담이 큽니다</text>
+
+      <text x="285" y="42" class="ttl" text-anchor="middle">모노레포</text>
+      <text x="535" y="42" class="ttl" text-anchor="middle">폴리레포</text>
+
+      <text x="16" y="69" class="ann">빌드 · CI</text>
+      <rect class="cel h3" x="164" y="50" width="242" height="30"/><text x="285" y="69" class="ann" text-anchor="middle">바뀐 범위만 빌드할 도구가 필요</text>
+      <rect class="cel h1" x="414" y="50" width="242" height="30"/><text x="535" y="69" class="ann" text-anchor="middle">저장소마다 단순 · 대신 N벌</text>
+
+      <text x="16" y="103" class="ann">버전</text>
+      <rect class="cel h1" x="164" y="84" width="242" height="30"/><text x="285" y="103" class="ann" text-anchor="middle">한 커밋 = 전체가 일관</text>
+      <rect class="cel h3" x="414" y="84" width="242" height="30"/><text x="535" y="103" class="ann" text-anchor="middle">서비스별 semver · 호환 관리</text>
+
+      <text x="16" y="137" class="ann">권한</text>
+      <rect class="cel h2" x="164" y="118" width="242" height="30"/><text x="285" y="137" class="ann" text-anchor="middle">CODEOWNERS 로 경로별</text>
+      <rect class="cel h0" x="414" y="118" width="242" height="30"/><text x="535" y="137" class="ann" text-anchor="middle">저장소 단위로 깔끔</text>
+
+      <text x="16" y="171" class="ann">공유 코드 리팩터링</text>
+      <rect class="cel h0" x="164" y="152" width="242" height="30"/><text x="285" y="171" class="ann" text-anchor="middle">PR 하나로 전부 수정</text>
+      <rect class="cel h5" x="414" y="152" width="242" height="30"/><text x="535" y="171" class="ann" text-anchor="middle">저장소 N개 · PR N개 · 순서 조율</text>
+
+      <text x="16" y="205" class="ann">규모 한계</text>
+      <rect class="cel h3" x="164" y="186" width="242" height="30"/><text x="285" y="205" class="ann" text-anchor="middle">수백 서비스면 clone · CI 투자</text>
+      <rect class="cel h3" x="414" y="186" width="242" height="30"/><text x="535" y="205" class="ann" text-anchor="middle">템플릿이 서비스마다 표류</text>
+
+      <rect class="cel h0" x="164" y="226" width="14" height="12"/>
+      <rect class="cel h2" x="180" y="226" width="14" height="12"/>
+      <rect class="cel h5" x="196" y="226" width="14" height="12"/>
+      <text x="216" y="236" class="ann">부담 적음 → 큼</text>
+
+      <text x="16" y="260" class="lbl">공짜인 쪽은 없습니다 — 아픈 곳을 도구로 메울 수 있는 쪽을 고릅니다</text>
+    </svg>
+    <div class="cap">모노레포는 <b>빌드 도구</b>로, 폴리레포는 <b>템플릿과 버전 규율</b>로 비용을 냅니다.</div>
+  </div>
+
+  <h3 class="sub">서비스 템플릿 — <span class="t">새 서비스가 첫날부터 같은 모양</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="text"><code>templates/service/
+├─ Dockerfile            # 멀티스테이지 · 비루트 사용자 · 고정 베이스 이미지
+├─ .dockerignore
+├─ src/
+│  ├─ health.*           # /healthz (살아 있나) · /readyz (받을 수 있나)
+│  └─ logging.*          # JSON 로그 · trace_id 필드 · 레벨은 환경 변수
+├─ deploy/
+│  ├─ base/              # 프로브 · 자원 요청 · 라벨 규칙이 이미 들어 있음
+│  └─ overlays/{dev,stg,prod}/
+├─ .github/workflows/ci.yml   # 공용 재사용 워크플로를 부르는 10줄
+└─ README.md             # 온콜 · 대시보드 · 런북 링크 칸</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">공유 라이브러리 버전 규칙</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">상황</th><th>규칙</th></tr>
+          <tr><td>모노레포</td><td>소스로 참조 · 바꾸면 쓰는 서비스를 <b>같은 PR 에서</b> 같이 고침</td></tr>
+          <tr><td>폴리레포</td><td>semver 로 배포 · 깨는 변경은 메이저 올림 · Renovate 같은 봇으로 갱신 PR</td></tr>
+          <tr><td>무엇을 넣나</td><td>로그 · 트레이스 · 인증 검증처럼 <b>모두가 똑같아야 하는 것</b>만</td></tr>
+          <tr><td>넣지 말 것</td><td>도메인 모델 — 공유하면 서비스가 다시 한 덩어리로 묶입니다</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        템플릿은 <b>복사하는 순간부터 표류</b>합니다. 템플릿 도구(cookiecutter · copier · Backstage 소프트웨어 템플릿 등)로 찍어 내고,
+        공통 부분은 재사용 워크플로 · library 차트처럼 <b>참조</b>로 두어야 고칠 곳이 하나로 유지됩니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 팀이 몇 개 안 되고 공유 코드가 많으면 <b>모노레포 + CODEOWNERS</b>, 팀과 배포 주기가 확실히 갈라지면 <b>폴리레포 + 템플릿 + semver</b>. 어느 쪽이든 설정 저장소는 따로, 공유 라이브러리에는 도메인 모델을 넣지 않습니다.</div>
+</section>
+
+<!-- ==================== ps08 ==================== -->
+<section class="sec" id="ps08">
+  <div class="sec-head rv">
+    <span class="no">STR 08</span>
+    <h2>환경 · 비밀 분리 — <span class="t">디렉터리 vs 브랜치 · 시크릿 도구의 자리 · 값 우선순위</span></h2>
+    <p class="lead">
+      Sealed Secrets · SOPS · External Secrets 의 동작과 비교표는 ☸️ 도커 · 쿠버네티스 탭 d08 에 있습니다.
+      여기서는 <b>저장소 안 어디에 무엇이 놓이는지</b>와, 환경을 <b>브랜치가 아니라 디렉터리</b>로 나눠야 하는 이유를 봅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 216" role="img" aria-label="한 번 빌드한 이미지가 환경을 거쳐 승격되는 파이프라인. 빌드는 한 번만 하고 sha 태그와 digest 가 정해진다. 같은 이미지가 dev 에서 자동 sync, stg 에서 자동 sync 와 E2E 통과, prod 에서 PR 승인 후 반영된다. 각 환경 아래에는 overlays 디렉터리와 그 환경만 다른 값이 적혀 있다. 브랜치 방식은 환경마다 다시 빌드하고 체리픽하므로 prod 에 올라간 것이 stg 에서 검증한 것과 같다는 보장이 없다.">
+      <text x="16" y="18" class="lbl">같은 이미지를 승격합니다 — 환경마다 다른 것은 overlay 의 값뿐입니다</text>
+
+      <polygon class="chev" points="16,40 152,40 168,64 152,88 16,88 32,64"/>
+      <text x="92" y="61" class="val" text-anchor="middle">빌드 1회</text>
+      <text x="92" y="76" class="ann" text-anchor="middle">sha-3f2a9c1</text>
+
+      <polygon class="chev" points="178,40 314,40 330,64 314,88 178,88 194,64"/>
+      <text x="254" y="61" class="val" text-anchor="middle">dev</text>
+      <text x="254" y="76" class="ann" text-anchor="middle">자동 sync</text>
+
+      <polygon class="chev" points="340,40 476,40 492,64 476,88 340,88 356,64"/>
+      <text x="416" y="61" class="val" text-anchor="middle">stg</text>
+      <text x="416" y="76" class="ann" text-anchor="middle">자동 · E2E 통과</text>
+
+      <polygon class="chev s4" points="502,40 638,40 654,64 638,88 502,88 518,64"/>
+      <text x="578" y="61" class="val" text-anchor="middle">prod</text>
+      <text x="578" y="76" class="ann" text-anchor="middle">PR 승인 후</text>
+
+      <text x="254" y="108" class="ann" text-anchor="middle">overlays/dev</text>
+      <text x="254" y="121" class="ann" text-anchor="middle">replicas 1 · 로그 debug</text>
+      <text x="416" y="108" class="ann" text-anchor="middle">overlays/stg</text>
+      <text x="416" y="121" class="ann" text-anchor="middle">replicas 2 · 운영과 같은 구성</text>
+      <text x="578" y="108" class="ann" text-anchor="middle">overlays/prod</text>
+      <text x="578" y="121" class="ann" text-anchor="middle">replicas 4 · hpa · pdb</text>
+
+      <path class="brk" d="M178 134 L178 140 L654 140 L654 134"/>
+      <text x="416" y="156" class="ann" text-anchor="middle">같은 digest 가 그대로 올라갑니다 — 다시 빌드하지 않습니다</text>
+
+      <text x="16" y="184" class="ann rs-t">❌ 브랜치 방식 (dev · stg · prod 브랜치)</text>
+      <text x="16" y="198" class="ann">— 환경마다 다시 빌드 · 체리픽 · 머지 충돌 → prod 것이 stg 에서 검증한 것과 같다는 보장이 없음</text>
+    </svg>
+    <div class="cap">환경은 <b>디렉터리</b>, 승격은 <b>같은 digest 를 다음 overlay 에 적는 커밋</b> — 차이가 diff 한 화면에 보입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">비밀이 놓이는 자리 — 도구별</h4>
+      <pre class="code" data-lang="text"><code>services/api/
+├─ base/
+│  └─ external-secret.yaml     # ① External Secrets — "어디서 가져오나"만
+└─ overlays/
+   ├─ dev/
+   │  └─ secrets.enc.yaml      # ② SOPS — 값은 암호화, 키 이름은 평문
+   └─ prod/
+      └─ sealed-secret.yaml    # ③ Sealed Secrets — 그 클러스터 공개키로 봉인
+
+.sops.yaml                     # SOPS 규칙 — 저장소 루트
+# 평문 Secret · .env · 키 파일은 어디에도 없음 (STR 01 .gitignore)</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        한 저장소에서 셋을 섞어 쓰라는 뜻이 아니라 <b>도구마다 놓이는 자리</b>를 보인 것입니다. 하나를 골라 통일하세요 —
+        규모가 커지면 External Secrets 쪽으로 모이는 경우가 많습니다 (☸️ d08).
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">SOPS — 경로마다 다른 키</h4>
+      <pre class="code" data-lang="yaml"><code># .sops.yaml — 위에서부터 처음 맞는 규칙 하나가 적용
+creation_rules:
+  - path_regex: overlays/prod/.*\.enc\.yaml$
+    encrypted_regex: ^(data|stringData)$   # 값만 암호화
+    age: age1...prod-공개키...             # prod 키는 운영자만
+  - path_regex: overlays/(dev|stg)/.*\.enc\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    age: age1...dev-공개키...</code></pre>
+      <pre class="code" data-lang="bash"><code>sops -e -i services/api/overlays/prod/secrets.enc.yaml   # 제자리 암호화
+sops services/api/overlays/prod/secrets.enc.yaml          # 편집기로 열기</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">설정 값 <span class="t">우선순위</span> — 아래가 위를 이깁니다</h3>
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:6%">순</th><th style="width:30%">출처</th><th style="width:30%">저장소 위치</th><th>넣는 값</th></tr>
+      <tr><td>1</td><td>코드 기본값</td><td>앱 저장소</td><td>어디서나 안전한 값 — 타임아웃 · 페이지 크기</td></tr>
+      <tr><td>2</td><td>공통 설정 (ConfigMap · values.yaml)</td><td><code>base/</code></td><td>환경과 무관한 운영 값</td></tr>
+      <tr><td>3</td><td>환경별 덮어쓰기</td><td><code>overlays/&lt;env&gt;/</code></td><td>replicas · 로그 레벨 · 외부 주소</td></tr>
+      <tr><td>4</td><td>비밀 (Secret 으로 주입)</td><td>참조 · 암호화 파일만</td><td>DB 비밀번호 · API 키</td></tr>
+      <tr><td>5</td><td>실행 시 인자 · 긴급 플래그</td><td>없음 — 기록을 남기고 곧 저장소로</td><td>장애 중 임시 조치</td></tr>
+    </table>
+  </div>
+  <div class="note warn rv">
+    <b>5번이 오래 남으면 drift 입니다.</b> 장애 때 <code>kubectl set env</code> 로 바꾼 값은 Argo CD selfHeal 이 켜져 있으면 곧 되돌려지고,
+    꺼져 있으면 저장소와 클러스터가 영영 달라집니다. 어느 쪽이든 <b>같은 날 저장소에 반영</b>하는 것이 규칙입니다.
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 환경은 <b>브랜치가 아니라 디렉터리</b>, 승격은 <b>같은 digest</b>. 저장소에는 비밀의 <b>참조나 암호문만</b> 두고, 값은 코드 기본값 → base → overlay → Secret 순으로 덮어씁니다.</div>
+</section>
+
+<!-- ==================== ps09 ==================== -->
+<section class="sec" id="ps09">
+  <div class="sec-head rv">
+    <span class="no">STR 09</span>
+    <h2>CI/CD 파이프라인 파일 — <span class="t">재사용 워크플로 · 환경 승인 · 아티팩트 흐름</span></h2>
+    <p class="lead">
+      빌드 · 스캔 · 푸시 워크플로 한 벌과 배포 체크리스트는 ☸️ 도커 · 쿠버네티스 탭 d13 에 있습니다.
+      서비스가 늘면 같은 YAML 이 저장소마다 복사되고 조금씩 달라집니다. 여기서는 <b>.github/workflows 를 공용 조각과 호출부로 나누고</b>,
+      <b>빌드는 한 번, 승격은 digest 로</b> 흐르게 하는 배치를 봅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">.github/ 정리 — 공용 조각과 호출부</h4>
+      <pre class="code" data-lang="text"><code>.github/
+├─ workflows/                # 하위 폴더 불가 — 이 폴더에 평평하게
+│  ├─ _build-image.yml       # 재사용 (workflow_call) — 밑줄은 팀 관례
+│  ├─ _bump-tag.yml          # 설정 저장소의 태그 갱신
+│  ├─ api.yml                # 호출부 — 서비스당 20줄 안팎
+│  ├─ worker.yml
+│  └─ infra-checks.yml       # kubeconform · conftest · tflint (STR 10)
+├─ actions/
+│  └─ setup-tools/action.yml # 여러 단계 묶음 = composite action
+└─ CODEOWNERS                # workflows/ 는 플랫폼 팀 리뷰</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        재사용 워크플로는 <b>job 전체</b>를, composite action 은 <b>step 몇 개</b>를 묶습니다. 여러 저장소가 쓰면
+        <code>myorg/ci-templates</code> 같은 저장소로 옮기고 <code>@v1</code> 태그로 고정해 부릅니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">호출부 — 서비스는 무엇만 다른가</h4>
+      <pre class="code" data-lang="yaml"><code># .github/workflows/api.yml
+name: api
+on:
+  push:
+    branches: [main]
+    paths: ["services/api/**"]      # 모노레포 — 바뀐 서비스만
+jobs:
+  build:
+    uses: ./.github/workflows/_build-image.yml
+    with:
+      service: api
+    permissions:
+      contents: read
+      packages: write
+  stg:
+    needs: build
+    uses: ./.github/workflows/_bump-tag.yml
+    with:
+      service: api
+      stage: stg
+      digest: ${{ needs.build.outputs.digest }}
+    secrets: inherit
+  prod:
+    needs: [build, stg]
+    uses: ./.github/workflows/_bump-tag.yml
+    with:
+      service: api
+      stage: prod
+      digest: ${{ needs.build.outputs.digest }}
+    secrets: inherit</code></pre>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 300" role="img" aria-label="CI/CD 를 네 역할로 나눈 스윔레인. 개발자가 main 에 머지하면 CI 가 테스트와 스캔을 하고 이미지를 한 번만 빌드한다. 그 digest 로 Argo CD 레인의 stg 가 자동 반영된다. prod 작업은 승인자 레인에서 GitHub environment 의 필수 리뷰어 승인을 기다리고, 승인되면 같은 digest 가 prod 에 반영된다. 사람이 끼는 곳은 prod 승인 한 군데다.">
+      <text x="16" y="18" class="lbl">가로줄 하나가 역할 하나 — 사람이 끼는 곳은 prod 승인 한 군데</text>
+
+      <rect class="lane" x="106" y="30" width="558" height="56"/>
+      <rect class="lane-alt" x="106" y="90" width="558" height="56"/>
+      <rect class="lane" x="106" y="150" width="558" height="56"/>
+      <rect class="lane-alt" x="106" y="210" width="558" height="56"/>
+
+      <rect class="lane-hd" x="16" y="30" width="84" height="56"/>
+      <text x="58" y="63" class="val" text-anchor="middle">개발자</text>
+      <rect class="lane-hd" x="16" y="90" width="84" height="56"/>
+      <text x="58" y="123" class="val" text-anchor="middle">CI</text>
+      <rect class="lane-hd" x="16" y="150" width="84" height="56"/>
+      <text x="58" y="183" class="val" text-anchor="middle">승인자</text>
+      <rect class="lane-hd" x="16" y="210" width="84" height="56"/>
+      <text x="58" y="243" class="val" text-anchor="middle">Argo CD</text>
+
+      <rect class="bx" x="120" y="42" width="96" height="32"/>
+      <text x="168" y="63" class="ann" text-anchor="middle">main 머지</text>
+      <text x="236" y="62" class="ann">prod 승인 = GitHub environment 의 필수 리뷰어</text>
+
+      <path class="fl ar" d="M168 78 L168 98"/>
+      <rect class="bx" x="120" y="102" width="96" height="32"/>
+      <text x="168" y="123" class="ann" text-anchor="middle">테스트 · 스캔</text>
+
+      <path class="fl ar" d="M220 118 L228 118"/>
+      <rect class="bx" x="232" y="102" width="96" height="32"/>
+      <text x="280" y="123" class="ann" text-anchor="middle">이미지 1회 빌드</text>
+      <text x="344" y="123" class="ann">digest 하나를 끝까지 들고 갑니다</text>
+
+      <path class="fl ar" d="M280 138 L280 238 L340 238"/>
+      <rect class="bx" x="344" y="222" width="96" height="32"/>
+      <text x="392" y="243" class="ann" text-anchor="middle">stg 자동 반영</text>
+
+      <path class="fl ar" d="M444 238 L504 238 L504 198"/>
+      <rect class="bx bx-fw" x="456" y="162" width="96" height="32"/>
+      <text x="504" y="183" class="ann" text-anchor="middle">prod 승인 대기</text>
+
+      <path class="fl ar" d="M556 178 L616 178 L616 218"/>
+      <rect class="bx bx-ok" x="568" y="222" width="96" height="32"/>
+      <text x="616" y="243" class="ann" text-anchor="middle">prod 반영</text>
+
+      <text x="16" y="290" class="lbl">레인을 넘는 화살표가 인수인계 — 그 수가 적을수록 배포가 빠르고 조용합니다</text>
+    </svg>
+    <div class="cap">빌드는 한 번, <b>승인은 prod 앞 한 번</b> — 나머지는 전부 자동으로 흐릅니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">재사용 워크플로 — 승인 게이트는 여기에</h4>
+      <pre class="code" data-lang="yaml"><code># .github/workflows/_bump-tag.yml
+name: bump-tag
+on:
+  workflow_call:
+    inputs:
+      service: { type: string, required: true }
+      stage:   { type: string, required: true }
+      digest:  { type: string, required: true }
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.stage }}   # prod 환경에 필수 리뷰어 → 여기서 대기
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: myorg/deploy-config
+          token: ${{ secrets.DEPLOY_CONFIG_TOKEN }}
+      - name: digest 고정 커밋
+        working-directory: services/${{ inputs.service }}/overlays/${{ inputs.stage }}
+        run: |
+          kustomize edit set image shop-${{ inputs.service }}=ghcr.io/myorg/shop-${{ inputs.service }}@${{ inputs.digest }}
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git diff --quiet || git commit -am "deploy(${{ inputs.stage }}): ${{ inputs.service }}"
+          git push</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">규칙 네 가지</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:34%">규칙</th><th>이유</th></tr>
+          <tr><td><b>빌드는 한 번</b></td><td>stg 와 prod 가 같은 바이너리 — 환경마다 빌드하면 검증이 무의미해집니다</td></tr>
+          <tr><td><b>태그보다 digest</b></td><td>태그는 다시 밀어 넣을 수 있고 digest 는 내용의 해시입니다</td></tr>
+          <tr><td><b>environment 는 재사용 쪽에</b></td><td>재사용 워크플로를 <b>부르는 job</b> 에는 <code>environment:</code> 를 쓸 수 없습니다</td></tr>
+          <tr><td><b>권한은 최소로</b></td><td>job 마다 <code>permissions:</code> · 설정 저장소 토큰은 그 저장소에만</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <code>_build-image.yml</code> 은 <code>on: workflow_call</code> 아래 <code>outputs.digest</code> 를 선언하고
+        <code>docker/build-push-action</code> 의 <code>digest</code> 출력을 그대로 넘깁니다. 빌드 · 푸시 단계 자체는 ☸️ d13 의 것을 그대로 옮기면 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>.github/workflows</code> 는 <b>밑줄 붙은 재사용 조각 + 서비스별 짧은 호출부</b>. 이미지는 한 번 빌드해 <b>digest 로 승격</b>하고, 사람의 승인은 재사용 워크플로의 <b>environment</b> 에 겁니다.</div>
+</section>
+
+<!-- ==================== ps10 ==================== -->
+<section class="sec" id="ps10">
+  <div class="sec-head rv">
+    <span class="no">STR 10</span>
+    <h2>한 장 요약 — <span class="t">유형 · 규모별 권장 구조 · 운영 문서 · 규칙을 도구로 강제하기</span></h2>
+    <p class="lead">
+      구조는 문서로 정하면 석 달 안에 무너집니다. 마지막 섹션은 앞의 아홉 섹션을 <b>표 한 장</b>으로 줄이고,
+      운영 문서를 <b>어디에 두는지</b>, 그리고 정한 규칙을 <b>pre-commit 과 CI 가 지키게</b> 하는 법으로 끝냅니다.
+      전체 아키텍처 그림은 🧬 전문가 탭 z14, 트래픽 규모별 견본은 📈 대규모 탭 x09 를 보세요.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:18%">유형 · 규모</th><th style="width:34%">권장 구조</th><th style="width:22%">지키는 도구</th><th>다음 단계 신호</th></tr>
+      <tr><td>서버 1대</td><td><b>nginx/conf.d + snippets/</b> · runbooks/ (STR 02)</td><td><code>nginx -t</code> 를 CI 에서</td><td>서버 2대째 · 설치가 달라짐</td></tr>
+      <tr><td>서버 1~3대 · 서비스 5개</td><td><b>compose.yaml + override + prod</b> (STR 03)</td><td><code>docker compose config</code></td><td>무중단 · 자동 복구 필요</td></tr>
+      <tr><td>클러스터 1 · 팀 1</td><td>앱 저장소 <b>deploy/ base + overlays</b> (STR 04)</td><td>kubeconform · conftest</td><td>서비스 2개째 · 팀 2개째</td></tr>
+      <tr><td>서비스 · 팀 여럿</td><td><b>설정 저장소</b> + app-of-apps · ApplicationSet · AppProject (STR 06)</td><td>CODEOWNERS · 렌더 diff</td><td>클러스터 · 리전이 늘어남</td></tr>
+      <tr><td>클러스터 · 리전 여럿</td><td><b>terraform modules/ + live/ (환경 × 층)</b> (STR 05)</td><td>tflint · PR 에 plan</td><td>플랫폼 팀 분리</td></tr>
+      <tr><td>MSA 코드</td><td>모노레포 + CODEOWNERS 또는 폴리레포 + 템플릿 (STR 07)</td><td>재사용 워크플로 (STR 09)</td><td>팀 · 배포 주기가 갈라짐</td></tr>
+    </table>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 364" role="img" aria-label="인프라 저장소 구조를 고르는 결정 흐름도. 먼저 서버가 한두 대이고 서비스가 몇 개뿐인지 묻고, 그렇다면 nginx 설정과 Compose 를 한 저장소에 둔다. 아니면 서비스와 팀이 하나뿐인지 묻고, 그렇다면 앱 저장소의 deploy 폴더에 Kustomize 를 둔다. 아니면 클러스터나 환경이 여럿인지 묻고, 그렇다면 Terraform live 층 분리와 ApplicationSet 을 쓴다. 아니면 설정 저장소와 app-of-apps 로 충분하다.">
+      <text x="16" y="18" class="lbl">무엇으로 시작할 것인가 — 마름모가 질문, 초록 상자가 답입니다</text>
+
+      <polygon class="dia" points="120,34 216,62 120,90 24,62"/>
+      <text x="120" y="59" class="ann" text-anchor="middle">서버 1~3대 ·</text>
+      <text x="120" y="71" class="ann" text-anchor="middle">서비스 몇 개뿐?</text>
+
+      <path class="ln ar" d="M120 94 L120 118"/>
+      <text x="128" y="110" class="ann">아니오</text>
+      <path class="ln ar" d="M220 62 L282 62"/>
+      <text x="238" y="56" class="ann">예</text>
+
+      <rect class="bx bx-ok" x="286" y="42" width="150" height="40"/>
+      <text x="361" y="60" class="ann ok-t" text-anchor="middle">nginx/ + Compose</text>
+      <text x="361" y="74" class="ann" text-anchor="middle">한 저장소 · STR 02 · 03</text>
+
+      <polygon class="dia" points="120,122 224,152 120,182 16,152"/>
+      <text x="120" y="148" class="ann" text-anchor="middle">서비스 · 팀이</text>
+      <text x="120" y="160" class="ann" text-anchor="middle">하나뿐인가?</text>
+
+      <path class="ln ar" d="M228 152 L282 152"/>
+      <text x="238" y="146" class="ann">예</text>
+      <rect class="bx bx-ok" x="286" y="132" width="150" height="40"/>
+      <text x="361" y="150" class="ann ok-t" text-anchor="middle">deploy/ + Kustomize</text>
+      <text x="361" y="164" class="ann" text-anchor="middle">앱 저장소 안 · STR 04</text>
+
+      <path class="ln ar" d="M120 186 L120 210"/>
+      <text x="128" y="202" class="ann">아니오</text>
+
+      <polygon class="dia" points="120,214 216,240 120,266 24,240"/>
+      <text x="120" y="237" class="ann" text-anchor="middle">클러스터 · 환경이</text>
+      <text x="120" y="249" class="ann" text-anchor="middle">여럿인가?</text>
+
+      <path class="ln ar" d="M220 240 L282 240"/>
+      <text x="238" y="234" class="ann">예</text>
+      <rect class="bx bx-ok" x="286" y="220" width="150" height="40"/>
+      <text x="361" y="238" class="ann ok-t" text-anchor="middle">live/ 분리 + AppSet</text>
+      <text x="361" y="252" class="ann" text-anchor="middle">Terraform · STR 05 · 06</text>
+
+      <path class="ln ar" d="M120 270 L120 290"/>
+      <text x="128" y="284" class="ann">아니오</text>
+      <rect class="bx bx-ok" x="45" y="294" width="150" height="40"/>
+      <text x="120" y="312" class="ann ok-t" text-anchor="middle">설정 저장소</text>
+      <text x="120" y="326" class="ann" text-anchor="middle">app-of-apps · STR 06</text>
+
+      <text x="466" y="106" class="ann">어느 갈래든</text>
+      <text x="466" y="120" class="ann">비밀 · 상태는 저장소 밖 (STR 01)</text>
+      <text x="466" y="196" class="ann am-t">규칙을 정했다면</text>
+      <text x="466" y="210" class="ann am-t">→ 아래 pre-commit · CI 로 고정</text>
+
+      <text x="16" y="356" class="lbl">구조는 한 번 고르는 게 아니라 신호가 올 때 다시 이 그림을 타는 것입니다</text>
+    </svg>
+    <div class="cap">질문 셋이면 시작 구조가 정해집니다 — <b>대부분은 Compose 나 deploy/ + Kustomize</b> 에서 출발합니다.</div>
+  </div>
+
+  <h3 class="sub">운영 문서는 <span class="t">코드 옆에</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="text"><code>runbooks/
+├─ api-5xx.md               # 알림 이름 = 파일 이름 → 알림의 runbook_url
+└─ db-replication-lag.md    # 뜻 · 먼저 볼 대시보드 · 즉시 완화 · 연락처
+docs/
+├─ adr/
+│  ├─ 0001-gitops-with-argo-cd.md      # 맥락 · 결정 · 결과
+│  └─ 0002-split-tf-state-by-layer.md  # 번호는 재사용하지 않음
+├─ oncall.md                # 당번표 위치 · 에스컬레이션 순서
+└─ architecture.md          # 한 장 그림 (🧬 z14 형식)</code></pre>
+    </div>
+    <div class="card">
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:26%">문서</th><th>규칙</th></tr>
+          <tr><td><b>런북</b></td><td>알림 하나에 한 장 · 알림 규칙에 링크 필수 (🔭 관측 탭 알림 섹션)</td></tr>
+          <tr><td><b>ADR</b></td><td>되돌리기 어려운 결정만 · 바뀌면 새 ADR 이 옛 것을 "대체됨"으로</td></tr>
+          <tr><td><b>온콜</b></td><td>사람 이름이 아니라 역할과 연락 경로 — 퇴사자가 남지 않게</td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">위키가 아니라 저장소에 두는 이유는 하나입니다 — <b>구조를 바꾸는 PR 에 문서 수정이 같이 들어오게</b> 하려는 것입니다.</div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">규칙을 <span class="t">도구로 강제하기</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">① 커밋 전 — pre-commit</h4>
+      <pre class="code" data-lang="yaml"><code># .pre-commit-config.yaml (rev 는 예시 — pre-commit autoupdate 로 고정)
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+        exclude: ^charts/.*/templates/    # Helm 템플릿은 YAML 이 아님
+      - id: detect-private-key
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks                      # 토큰 · 키 패턴 차단
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.1
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+      - id: terraform_tflint</code></pre>
+      <h4 class="mini">② CI — 렌더 결과를 검사</h4>
+      <pre class="code" data-lang="bash"><code># .github/workflows/infra-checks.yml 의 run 부분
+for d in k8s/services/*/overlays/*/; do
+  kubectl kustomize "$d" &gt; rendered.yaml
+  kubeconform -strict -summary -ignore-missing-schemas rendered.yaml
+  conftest test -p policy rendered.yaml
+done
+tflint --recursive</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">③ 조직 규칙 — conftest (Rego)</h4>
+      <pre class="code" data-lang="text"><code># policy/deployment.rego — conftest 는 기본으로 package main 을 읽음
+package main
+
+deny contains msg if {
+  input.kind == "Deployment"
+  some c in input.spec.template.spec.containers
+  not c.resources.limits.memory
+  msg := sprintf("%s/%s: memory limit 이 없습니다", [input.metadata.name, c.name])
+}
+
+deny contains msg if {
+  input.kind == "Deployment"
+  some c in input.spec.template.spec.containers
+  endswith(c.image, ":latest")
+  msg := sprintf("%s/%s: latest 태그 금지", [input.metadata.name, c.name])
+}</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">도구</th><th>잡는 것</th></tr>
+          <tr><td><b>kubeconform</b></td><td>스키마 위반 · 오타 필드 (<code>-strict</code>) — CRD 는 스키마 위치를 따로 지정</td></tr>
+          <tr><td><b>conftest / OPA</b></td><td>"limit 필수 · latest 금지" 같은 우리 규칙</td></tr>
+          <tr><td><b>tflint</b></td><td>잘못된 인스턴스 타입 · 안 쓰는 변수 · 명명 규칙</td></tr>
+          <tr><td><b>gitleaks</b></td><td>커밋에 섞인 토큰 · 키</td></tr>
+        </table>
+      </div>
+      <div class="note info" style="margin-bottom:0">
+        이 도구들은 이 PC 에 설치하지 않아 <b>실행하지 않았고</b>, 설정은 각 공식 문서 기준입니다. Rego 는 OPA 1.0 문법(<code>contains</code> · <code>if</code>)이라
+        예전 conftest 에서는 맨 위에 <code>import rego.v1</code> 이 필요할 수 있습니다. 위반이 이미 많은 저장소는 <b>새 위반만 막는 것</b>부터 시작하세요.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 시작은 대부분 <b>Compose</b> 나 <b>deploy/ + Kustomize</b>, 서비스와 팀이 늘면 <b>설정 저장소</b>, 클러스터가 늘면 <b>Terraform 층 분리</b>. 정한 규칙은 pre-commit · kubeconform · conftest · tflint 로 사람 대신 도구가 지키게 합니다.</div>
+</section>
+
+</div><!-- /pane-struct -->

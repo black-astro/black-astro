@@ -54,6 +54,7 @@ const TAB_LABEL = {
   k8s:"☸️ 도커 · 쿠버네티스",
   obs:"🔭 관측 · 모니터링",
   log:"📝 로그 운영",
+  struct:"📁 프로젝트 구조",
 };
 function tabDrop(force){
   const tb = $("#tabbar");
@@ -101,6 +102,7 @@ const SEC_LV = {
   /* k8s */ d01:"b", d02:"b", d03:"i", d04:"b", d05:"i", d06:"b", d07:"b", d08:"i", d09:"i", d10:"a", d11:"i", d12:"a", d13:"i", d14:"i",
   /* obs */ y01:"b", y02:"b", y03:"i", y04:"i", y05:"b", y06:"b", y07:"i", y08:"i", y09:"i", y10:"a", y11:"a", y12:"i", y13:"a",
   /* log */ lg01:"b", lg02:"b", lg03:"i", lg04:"i", lg05:"i", lg06:"i", lg07:"i", lg08:"a", lg09:"i", lg10:"a", lg11:"a", lg12:"a",
+  /* struct */ ps01:"b", ps02:"b", ps03:"b", ps04:"i", ps05:"i", ps06:"i", ps07:"i", ps08:"i", ps09:"i", ps10:"i",
 };
 
 /* 🐣 '쉽게 말하면' — 섹션마다 붙는 기초 한 줄 번역 (항상 표시) */
@@ -359,6 +361,17 @@ const EZ = {
   lg10:"비용은 <b>초당 요청 × 줄 크기 × 86,400</b> 으로 미리 계산됩니다. 가장 큰 절감은 <b>압축</b>, 그다음이 잃는 것 없는 절감입니다.",
   lg11:"마스킹은 <b>웹서버가 애초에 안 적는 것</b>이 유일하게 복제본 0이고, 감사 로그는 반대로 <b>즉시 밖으로 보내고 불변 저장</b>해야 합니다.",
   lg12:"컨테이너 로그는 <b>런타임이 쓰고 kubelet 이 회전</b>합니다. 장애 조사는 <b>시간 → 상태 → 경로 → 업스트림 → 요청 ID</b> 다섯 번 좁히기입니다.",
+  /* ── struct ── */
+  ps01:"설정 · 매니페스트 · IaC · 런북은 저장소에, <b>비밀과 상태 파일은 밖에</b>. 구조는 서버 한 대 → Compose → 쿠버네티스 → 여러 클러스터 순으로 <b>신호가 올 때만</b> 넘어갑니다.",
+  ps02:"사이트(server 블록) 하나 = <b>conf.d/ 파일 하나</b>, 공통은 <b>snippets/</b>, 환경마다 다른 값은 공식 이미지의 <b>templates/ + envsubst</b>.",
+  ps03:"<b>compose.yaml 은 공통</b>, compose.override.yaml 은 개발(자동), compose.prod.yaml 은 <b>-f 로 명시</b>. 나중 파일이 이기지만 <b>ports 같은 목록은 합쳐집니다</b>.",
+  ps04:"서비스마다 <b>base/ + overlays/&lt;env&gt;/</b> 를 같은 모양으로 반복하고, 몇 환경에만 켜는 조각은 <b>components/</b>. 남에게 줄 패키지·서드파티는 <b>Helm</b>.",
+  ps05:"<b>modules/ 는 정의, live/ 는 적용</b>. 상태 파일은 <b>환경 × 층</b>으로 잘라 폴더 하나에 하나 — 대시보드 수정이 VPC 를 건드릴 수 없게 합니다.",
+  ps06:"앱 저장소는 코드와 이미지, <b>설정 저장소는 \"무엇이 어디에 떠 있어야 하나\"</b>. root 하나만 손으로 적용하고 나머지는 app-of-apps · <b>ApplicationSet</b> 이 만듭니다.",
+  ps07:"모노레포는 <b>빌드 도구</b>로, 폴리레포는 <b>템플릿과 버전 규율</b>로 비용을 냅니다. 공유 라이브러리에는 <b>도메인 모델을 넣지 않습니다</b>.",
+  ps08:"환경은 <b>브랜치가 아니라 디렉터리</b>, 승격은 <b>같은 digest</b> 를 다음 overlay 에 적는 커밋. 저장소에는 비밀의 <b>참조나 암호문만</b> 둡니다.",
+  ps09:"<b>밑줄 붙은 재사용 워크플로 + 서비스별 짧은 호출부</b>. 이미지는 한 번 빌드해 digest 로 승격하고, prod 승인은 재사용 워크플로의 <b>environment</b> 에 겁니다.",
+  ps10:"시작은 대부분 <b>Compose</b> 나 <b>deploy/ + Kustomize</b>, 서비스·팀이 늘면 설정 저장소, 클러스터가 늘면 Terraform 층 분리. 규칙은 <b>pre-commit · kubeconform · conftest · tflint</b> 가 지킵니다.",
 };
 
 /* 🎯 실전 도달점 — 이 섹션 내용으로 어디까지 할 수 있나
@@ -633,6 +646,17 @@ const CAP = {
   lg10:["e","로그 비용을 산수로 예측하고 공짜 절감과 대가 있는 절감을 구분해 팀과 합의할 수 있습니다"],
   lg11:["p","개인정보가 로그로 새는 일곱 경로를 막고 root 도 못 지우는 감사 로그 체계를 세울 수 있습니다"],
   lg12:["e","DaemonSet 수집기로 클러스터 로그를 잃지 않게 하고, 300만 줄에서 원인 한 줄까지 5분 안에 내려갈 수 있습니다"],
+  /* ── struct ── */
+  ps01:["p","인프라 저장소의 첫 골격과 .gitignore 를 만들고, 지금 운영 규모가 다음 구조로 넘어갈 신호인지 판단할 수 있다"],
+  ps02:["p","사이트가 열 개를 넘는 Nginx 설정을 저장소에서 conf.d · snippets · templates 로 나눠 관리하고 배포 전 nginx -t 로 검사할 수 있다"],
+  ps03:["p","Compose 저장소를 공통 파일과 환경별 덧씌우기 파일로 나누고, docker compose config 로 최종 설정을 확인한 뒤 운영에 배포할 수 있다"],
+  ps04:["p","여러 서비스의 매니페스트를 Kustomize base/overlays/components 로 배치하고, Helm 차트와 언제 무엇을 쓸지 고를 수 있다"],
+  ps05:["e","Terraform 저장소를 modules 와 live 로 나누고 상태를 환경과 층 단위로 분리해 plan 시간과 사고 범위를 줄일 수 있다"],
+  ps06:["e","GitOps 설정 저장소를 bootstrap · argocd · platform · services 로 배치하고, ApplicationSet 으로 서비스 Application 을 자동 생성할 수 있다"],
+  ps07:["e","서비스 수와 팀 구성에 맞춰 모노레포와 폴리레포를 고르고, 서비스 템플릿과 공유 라이브러리 버전 규칙을 정할 수 있다"],
+  ps08:["p","dev · stg · prod 를 디렉터리로 나누고 같은 이미지를 승격하며, Sealed Secrets · SOPS · External Secrets 파일의 자리와 값 우선순위를 정할 수 있다"],
+  ps09:["p","GitHub Actions 워크플로를 재사용 조각과 호출부로 나누고, 환경 승인과 digest 승격 흐름을 구성할 수 있다"],
+  ps10:["p","운영 규모에 맞는 인프라 저장소 구조를 고르고, 런북 · ADR 을 저장소에 두며, 구조 규칙을 pre-commit 과 CI 로 강제할 수 있다"],
 };
 
 /* 난이도 배지 + 🐣 쉬운 요약 주입 */
