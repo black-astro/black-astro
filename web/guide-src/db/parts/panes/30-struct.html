@@ -1,0 +1,1240 @@
+<!-- ============================================================
+     프로젝트 구조 PANE (db) — DB 를 코드처럼 관리하는 저장소 구조
+     ============================================================ -->
+<div class="pane" id="pane-struct">
+
+<header class="hero">
+  <div class="eyebrow"><i></i> 스키마 · 마이그레이션 · SQL 파일 · 시드 · 명명 규칙 · dbt · 샤드 · CI · Flyway · Liquibase · Alembic · sqlfluff</div>
+  <h1>DB 도<br>저장소에서<br>자랍니다</h1>
+  <p class="tx">
+    애플리케이션 코드는 폴더 구조를 고민하면서, DB 는 누군가의 GUI 에서 손으로 고치는 팀이 아직 많습니다.
+    그러면 <b>"운영에만 있는 컬럼"</b>, <b>"아무도 출처를 모르는 뷰"</b>, <b>"개발 DB 를 새로 못 만드는 저장소"</b>가 생깁니다.
+    이 탭은 DB 를 코드처럼 다룰 때의 저장소 모양 — <b>마이그레이션 폴더 · 반복 실행 SQL · 시드 · 명명 규칙 · dbt 프로젝트 · 샤드와 환경 · CI</b> — 을
+    한 장씩 보여 주고, 각 구조에서 <b>무엇을 어디에 두는지, 무엇을 커밋하지 않는지, 언제 다음 단계로 넘어가는지</b>를 짧게 정리합니다.
+    도구별 설치와 첫 명령은 🧰 설치 총정리 탭 SETUP 11, 마이그레이션 도구 비교 · 확장-축소 5단계는 🔌 앱 연동 탭 SECTION 09 에 있으니 여기서는 <b>폴더 지도</b>에 집중합니다.
+  </p>
+  <div class="stats">
+    <div><b>10</b><span>SECTIONS</span></div>
+    <div><b>6</b><span>마이그레이션 도구 비교</span></div>
+    <div><b>3</b><span>역할 계정 (migrator · rw · ro)</span></div>
+    <div><b>sqlite3</b><span>로 돌려 본 예제</span></div>
+  </div>
+</header>
+
+<!-- ==================== ps01 ==================== -->
+<section class="sec" id="ps01">
+  <div class="sec-head rv">
+    <span class="no">STR 01</span>
+    <h2>DB 도 <span class="t">코드다</span> — 무엇을 커밋하고 무엇을 빼나</h2>
+    <p class="lead">
+      스키마를 저장소에 두는 이유는 하나입니다. <b>빈 DB 에서 명령 한 번으로 지금의 운영 스키마를 똑같이 다시 만들 수 있어야</b> 합니다.
+      그게 되면 신입의 개발 DB · CI 의 테스트 DB · 재해 복구용 새 서버가 모두 같은 파일에서 나옵니다.
+      그게 안 되면 "운영 DB 가 곧 원본"이 되고, 원본은 아무도 리뷰하지 않습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">앱 저장소 안의 db/ — 이 모양이 출발점</h4>
+      <pre class="code" data-lang="text"><code>shop-api/
+├─ db/
+│  ├─ migration/        V__ 스키마 변경 이력 · 순서 있음 ★ (STR 02)
+│  ├─ repeatable/       R__ 뷰 · 함수 · 프로시저 · 매번 최신으로 (STR 05)
+│  ├─ seed/
+│  │  └─ dev/           개발용 샘플 — 운영에는 안 감 (STR 06)
+│  ├─ grants/           역할 · 권한 — 비밀번호는 빼고 (STR 04)
+│  └─ README.md         적용 명령 · 명명 규칙 · 담당자
+├─ compose.yml          로컬 DB 띄우기 (🧰 SETUP 03)
+├─ .env.example         키 이름만 — 값은 비밀 저장소 (🧰 SETUP 08)
+├─ .sqlfluff            SQL 린트 설정 (STR 09)
+└─ src/</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">커밋하는 것 vs 빼는 것</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:50%">✅ 커밋</th><th>❌ 커밋 금지</th></tr>
+          <tr><td>DDL 마이그레이션 (<code>V__</code>)</td><td>운영 데이터 덤프 — 개인정보 · 용량</td></tr>
+          <tr><td>뷰 · 함수 · 프로시저 정의 (<code>R__</code>)</td><td>비밀번호 · 접속 문자열 · 키</td></tr>
+          <tr><td>참조 데이터 (코드표 · 국가)</td><td>로컬 DB 파일 (<code>*.db</code> · 볼륨)</td></tr>
+          <tr><td>역할 구조와 GRANT</td><td>생성물 (<code>target/</code> · 생성 ERD)</td></tr>
+          <tr><td>린트 설정 · ERD 원본 · 데이터 사전</td><td>개인 접속 설정 (<code>profiles.yml</code>)</td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>"일단 schema.sql 을 덤프해서 커밋"은 시작으로는 괜찮지만 끝이 아닙니다.</b>
+        덤프는 <b>결과</b>만 있고 <b>순서</b>가 없어서, 이미 데이터가 든 운영 DB 를 그 상태로 <b>옮겨 가는</b> 방법을 알려 주지 못합니다.
+        운영 DB 가 생기는 날 마이그레이션 폴더로 바꿉니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="e">규모별 진화 — <span class="t">언제 다음 단계로 넘어가나</span> <span class="lvl e">🟢 기초</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 214" role="img" aria-label="DB 코드를 관리하는 방식이 커지는 다섯 단계를 시간 축에 놓은 타임라인. 첫 단계는 GUI 로 손수 ALTER 하는 방식으로 혼자 하는 프로토타입에만 맞다. 두 번째 사람이 생겨 새 PC 에 재현해야 하면 schema.sql 덤프 한 파일을 커밋한다. 운영 DB 가 생기고 환경이 둘 이상이 되면 마이그레이션 도구와 순서 있는 V 파일로 옮기며 이것이 권장 출발점이다. 뷰와 프로시저가 열 개를 넘고 DBA 리뷰가 시작되면 반복 실행 파일, 시드, 권한을 폴더로 나눈다. DB 를 쓰는 앱이 둘 이상이거나 배포 주기가 다르면 별도 저장소로 뺀다.">
+      <text x="16" y="18" class="lbl">규모별 진화 — 위는 구조, 아래는 그 단계로 넘어가는 신호</text>
+
+      <path class="ax ar" d="M30 112 L652 112"/>
+
+      <circle class="dot" cx="84" cy="112" r="5"/>
+      <circle class="dot" cx="212" cy="112" r="5"/>
+      <circle class="dot" cx="340" cy="112" r="5" style="fill:#34d399"/>
+      <circle class="dot" cx="468" cy="112" r="5"/>
+      <circle class="dot" cx="596" cy="112" r="5"/>
+
+      <path class="lead-ln" d="M84 106 L84 86"/>
+      <text x="84" y="62" class="val" text-anchor="middle">GUI 로 직접</text>
+      <text x="84" y="78" class="ann" text-anchor="middle">손 ALTER · 기록 없음</text>
+      <path class="lead-ln" d="M212 106 L212 86"/>
+      <text x="212" y="62" class="val" text-anchor="middle">schema.sql</text>
+      <text x="212" y="78" class="ann" text-anchor="middle">덤프 한 파일 커밋</text>
+      <path class="lead-ln" d="M340 106 L340 86"/>
+      <text x="340" y="62" class="val ok-t" text-anchor="middle">마이그레이션</text>
+      <text x="340" y="78" class="ann" text-anchor="middle">migration/V__ 순서</text>
+      <path class="lead-ln" d="M468 106 L468 86"/>
+      <text x="468" y="62" class="val" text-anchor="middle">폴더 나누기</text>
+      <text x="468" y="78" class="ann" text-anchor="middle">R__ · seed · grants</text>
+      <path class="lead-ln" d="M596 106 L596 86"/>
+      <text x="596" y="62" class="val" text-anchor="middle">별도 저장소</text>
+      <text x="596" y="78" class="ann" text-anchor="middle">여러 앱 · 샤드 · dbt</text>
+
+      <path class="lead-ln" d="M84 118 L84 138"/>
+      <text x="84" y="152" class="ann" text-anchor="middle">혼자 · 프로토타입</text>
+      <text x="84" y="166" class="ann" text-anchor="middle">운영 DB 없음</text>
+      <path class="lead-ln" d="M212 118 L212 138"/>
+      <text x="212" y="152" class="ann" text-anchor="middle">두 번째 사람</text>
+      <text x="212" y="166" class="ann" text-anchor="middle">새 PC 에 재현 필요</text>
+      <path class="lead-ln" d="M340 118 L340 138"/>
+      <text x="340" y="152" class="ann ok-t" text-anchor="middle">운영 DB · 환경 2개+</text>
+      <text x="340" y="166" class="ann" text-anchor="middle">Flyway · Alembic</text>
+      <path class="lead-ln" d="M468 118 L468 138"/>
+      <text x="468" y="152" class="ann" text-anchor="middle">뷰 · 프로시저 10개+</text>
+      <text x="468" y="166" class="ann" text-anchor="middle">DBA 리뷰 시작</text>
+      <path class="lead-ln" d="M596 118 L596 138"/>
+      <text x="596" y="152" class="ann" text-anchor="middle">DB 를 쓰는 앱 2개+</text>
+      <text x="596" y="166" class="ann" text-anchor="middle">배포 주기가 다름</text>
+
+      <text x="16" y="198" class="lbl">넘어가는 신호는 테이블 수가 아니라 환경 수 · 사람 수 · DB 를 쓰는 앱 수입니다</text>
+    </svg>
+    <div class="cap">초록 점이 <b>권장 출발점</b> — 운영 DB 가 생기는 날 마이그레이션 폴더로 옮깁니다.</div>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:22%">전환</th><th>신호 (하나라도 해당하면)</th><th style="width:34%">하는 일</th></tr>
+      <tr><td>GUI → schema.sql</td><td>두 번째 개발자 · "내 PC 에선 테이블이 없어요"</td><td>현재 스키마를 덤프해 커밋, README 에 적용 명령</td></tr>
+      <tr><td>schema.sql → 마이그레이션</td><td>운영 DB 가 생김 · dev/stg/prod 중 둘 이상</td><td>덤프를 <code>V1__baseline.sql</code> 로 두고 이후 변경은 새 파일로</td></tr>
+      <tr><td>마이그레이션 → 폴더 나누기</td><td>뷰 · 함수 10개+ · 시드가 마이그레이션에 섞임</td><td><code>repeatable/</code> · <code>seed/</code> · <code>grants/</code> 분리</td></tr>
+      <tr><td>앱 저장소 → 별도 저장소</td><td>DB 를 쓰는 앱 2개+ · DBA 가 배포를 승인 · dbt</td><td>STR 03 의 기준으로 판단 — 대부분은 앱 저장소에 남습니다</td></tr>
+    </table>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 기준은 <b>"빈 DB 에서 명령 한 번으로 운영과 같은 스키마가 나오는가"</b>. 스키마 · 뷰 · 권한 구조는 커밋하고, 데이터 덤프와 비밀번호는 절대 커밋하지 않습니다.</div>
+</section>
+
+<!-- ==================== ps02 ==================== -->
+<section class="sec" id="ps02">
+  <div class="sec-head rv">
+    <span class="no">STR 02</span>
+    <h2>마이그레이션 <span class="t">디렉터리</span> — 파일 이름이 곧 순서입니다</h2>
+    <p class="lead">
+      도구는 달라도 원리는 같습니다. 변경 하나 = 파일 하나, 도구가 DB 안의 이력 표를 보고 <b>아직 안 한 파일만 정해진 순서로</b> 실행합니다.
+      그래서 구조에서 중요한 것은 <b>"순서를 무엇이 정하나"</b>와 <b>"한 번 나간 파일은 고치지 않는다"</b> 두 가지입니다.
+      도구 비교 · 체크섬 원리 · 기본 명령은 🔌 앱 연동 탭 SECTION 09 에 있으니 여기서는 폴더 모양만 봅니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Flyway — 파일 이름 규칙</h4>
+      <pre class="code" data-lang="text"><code>src/main/resources/db/migration/   Spring Boot 기본 위치
+├─ V1__baseline.sql                  V + 버전 + 밑줄 두 개 + 설명
+├─ V2__create_orders.sql
+├─ V2_1__add_orders_memo.sql         V2_1 = 버전 2.1 (사이에 끼우기)
+├─ V3__ix_orders_member_id.sql
+└─ R__v_sales_daily.sql              R = 반복 실행 · 버전 없음
+                                     → 내용(체크섬)이 바뀔 때마다 다시 실행
+                                     → 모든 V 가 끝난 뒤 설명 이름순</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>밑줄은 두 개</b>(<code>__</code>)입니다. 하나만 쓰면 Flyway 가 마이그레이션으로 인식하지 못하고 <b>조용히 건너뜁니다</b>(<code>validateMigrationNaming</code> 을 켜면 오류로 멈춤).
+        버전은 <b>숫자로</b> 비교하므로 V10 이 V9 뒤에 옵니다 — 사람이 파일 탐색기에서 이름순으로 보면 V10 이 V1 바로 뒤에 보이니 헷갈리지 마세요.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">Liquibase — 목차(master) + include</h4>
+      <pre class="code" data-lang="text"><code>src/main/resources/db/changelog/
+├─ db.changelog-master.yaml   목차 — include 만, 내용 없음
+└─ changes/
+   ├─ 2026-09/
+   │  ├─ 001-create-member.sql
+   │  └─ 002-add-member-phone.sql
+   └─ 2026-10/
+      └─ 003-create-orders.sql</code></pre>
+      <pre class="code" data-lang="yaml"><code># db.changelog-master.yaml — 순서는 이 목록이 정합니다
+databaseChangeLog:
+  - include:
+      file: changes/2026-09/001-create-member.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/2026-09/002-add-member-phone.sql
+      relativeToChangelogFile: true</code></pre>
+      <pre class="code" data-lang="sql"><code>--liquibase formatted sql
+--changeset hw:002
+ALTER TABLE member ADD COLUMN phone VARCHAR(20);
+--rollback ALTER TABLE member DROP COLUMN phone;</code></pre>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 282" role="img" aria-label="여섯 마이그레이션 도구의 기본 위치, 순서를 정하는 것, 파일 형식, 되돌리기 방식을 비교한 매트릭스. Flyway 는 db/migration 에 두고 파일명 버전 숫자가 순서를 정한다. Liquibase 는 db/changelog 에 두고 master 파일의 include 목록이 순서를 정한다. Alembic 은 alembic/versions 에 두고 down_revision 사슬이 순서를 정한다. Prisma 는 prisma/migrations 의 폴더 이름 타임스탬프, EF Core 는 Migrations 폴더의 타임스탬프와 스냅숏, Django 는 앱별 migrations 의 dependencies 그래프가 순서를 정한다. 가운데 열이 강조되어 있다.">
+      <text x="16" y="18" class="lbl">여섯 도구 — 가운데 진한 열이 "순서를 무엇이 정하나"</text>
+      <text x="172" y="42" class="tk" text-anchor="middle">기본 위치</text>
+      <text x="312" y="42" class="tk" text-anchor="middle">순서를 정하는 것</text>
+      <text x="452" y="42" class="tk" text-anchor="middle">파일 형식</text>
+      <text x="592" y="42" class="tk" text-anchor="middle">되돌리기</text>
+
+      <text x="16" y="69" class="val">Flyway</text>
+      <rect class="cel h0" x="104" y="50" width="136" height="30"/><text x="172" y="69" class="tk" text-anchor="middle">db/migration</text>
+      <rect class="cel h3" x="244" y="50" width="136" height="30"/><text x="312" y="69" class="tk" text-anchor="middle">파일명 버전 숫자</text>
+      <rect class="cel h0" x="384" y="50" width="136" height="30"/><text x="452" y="69" class="tk" text-anchor="middle">SQL · Java</text>
+      <rect class="cel h0" x="524" y="50" width="136" height="30"/><text x="592" y="69" class="tk" text-anchor="middle">undo 는 유료 판</text>
+
+      <text x="16" y="103" class="val">Liquibase</text>
+      <rect class="cel h0" x="104" y="84" width="136" height="30"/><text x="172" y="103" class="tk" text-anchor="middle">db/changelog</text>
+      <rect class="cel h3" x="244" y="84" width="136" height="30"/><text x="312" y="103" class="tk" text-anchor="middle">master 의 include</text>
+      <rect class="cel h0" x="384" y="84" width="136" height="30"/><text x="452" y="103" class="tk" text-anchor="middle">SQL · YAML · XML</text>
+      <rect class="cel h0" x="524" y="84" width="136" height="30"/><text x="592" y="103" class="tk" text-anchor="middle">--rollback 직접</text>
+
+      <text x="16" y="137" class="val">Alembic</text>
+      <rect class="cel h0" x="104" y="118" width="136" height="30"/><text x="172" y="137" class="tk" text-anchor="middle">alembic/versions</text>
+      <rect class="cel h3" x="244" y="118" width="136" height="30"/><text x="312" y="137" class="tk" text-anchor="middle">down_revision 사슬</text>
+      <rect class="cel h0" x="384" y="118" width="136" height="30"/><text x="452" y="137" class="tk" text-anchor="middle">Python</text>
+      <rect class="cel h0" x="524" y="118" width="136" height="30"/><text x="592" y="137" class="tk" text-anchor="middle">downgrade()</text>
+
+      <text x="16" y="171" class="val">Prisma</text>
+      <rect class="cel h0" x="104" y="152" width="136" height="30"/><text x="172" y="171" class="tk" text-anchor="middle">prisma/migrations</text>
+      <rect class="cel h3" x="244" y="152" width="136" height="30"/><text x="312" y="171" class="tk" text-anchor="middle">폴더명 타임스탬프</text>
+      <rect class="cel h0" x="384" y="152" width="136" height="30"/><text x="452" y="171" class="tk" text-anchor="middle">SQL (생성)</text>
+      <rect class="cel h0" x="524" y="152" width="136" height="30"/><text x="592" y="171" class="tk" text-anchor="middle">없음 · 새 파일로</text>
+
+      <text x="16" y="205" class="val">EF Core</text>
+      <rect class="cel h0" x="104" y="186" width="136" height="30"/><text x="172" y="205" class="tk" text-anchor="middle">Migrations/</text>
+      <rect class="cel h3" x="244" y="186" width="136" height="30"/><text x="312" y="205" class="tk" text-anchor="middle">타임스탬프 + 스냅숏</text>
+      <rect class="cel h0" x="384" y="186" width="136" height="30"/><text x="452" y="205" class="tk" text-anchor="middle">C# (생성)</text>
+      <rect class="cel h0" x="524" y="186" width="136" height="30"/><text x="592" y="205" class="tk" text-anchor="middle">Down() 메서드</text>
+
+      <text x="16" y="239" class="val">Django</text>
+      <rect class="cel h0" x="104" y="220" width="136" height="30"/><text x="172" y="239" class="tk" text-anchor="middle">앱/migrations</text>
+      <rect class="cel h3" x="244" y="220" width="136" height="30"/><text x="312" y="239" class="tk" text-anchor="middle">dependencies 그래프</text>
+      <rect class="cel h0" x="384" y="220" width="136" height="30"/><text x="452" y="239" class="tk" text-anchor="middle">Python (생성)</text>
+      <rect class="cel h0" x="524" y="220" width="136" height="30"/><text x="592" y="239" class="tk" text-anchor="middle">자동 역방향</text>
+
+      <text x="16" y="272" class="lbl">어느 도구든 순서는 파일이 정합니다 — 그래서 이미 나간 파일은 고치지 않습니다</text>
+    </svg>
+    <div class="cap">위치와 형식은 달라도 <b>"순서는 파일에 박혀 있다"</b>는 점이 같습니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="m">이미 적용된 마이그레이션은 <span class="t">고치지 않는다</span> — 직접 돌려 보기 <span class="lvl m">🟡 중급</span></h3>
+  <p class="tx">
+    Flyway 의 규칙(V 는 버전 숫자순 · R 은 체크섬이 바뀌면 다시 · 적용된 V 가 바뀌면 실패)을 파이썬 표준 라이브러리 <code>sqlite3</code> 로 30줄에 흉내 내 이 PC 에서 돌렸습니다.
+    파일은 위 트리와 같은 V1 · V2 · V10 · R__ 네 개입니다.
+  </p>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="python"><code># mini_migrate.py 핵심부 (Python 3.14 · 표준 라이브러리만)
+def ver_key(p):          # V2_1 → (2, 1) · V10 이 V9 뒤에 오게
+    return tuple(int(x) for x in
+                 re.match(r"V([\d_]+)__", p.name)[1].split("_"))
+
+versioned  = sorted(DIR.glob("V*__*.sql"), key=ver_key)
+repeatable = sorted(DIR.glob("R__*.sql"))
+for p in versioned + repeatable:          # V 전부 → R
+    cs = sha256(p.read_bytes()).hexdigest()[:8]
+    if p.name in done:
+        if done[p.name] == cs: continue      # 그대로 · 건너뜀
+        if p.name.startswith("V"):
+            sys.exit(f"FAIL {p.name}: 적용된 파일이 바뀜 {done[p.name]} → {cs}")
+    with db:                                 # 적용 + 이력을 한 트랜잭션
+        db.executescript(p.read_text(encoding="utf-8"))
+        db.execute("INSERT OR REPLACE INTO schema_history VALUES(?,?,?)",
+                   (p.name, p.name.split("__")[0], cs))</code></pre>
+    </div>
+    <div class="card">
+      <pre class="code" data-lang="text"><code>$ python mini_migrate.py          # 1회차 — 빈 DB
+applied V1__create_member.sql 1a52f23a
+applied V2__add_member_phone.sql c9021886
+applied V10__ix_member_phone.sql 16cefc6a   ← 숫자순이라 V2 뒤
+applied R__v_member_contact.sql 73d7c944    ← V 가 다 끝난 뒤
+
+$ python mini_migrate.py          # 2회차 — applied 줄이 하나도 없음
+
+# R__ 뷰 정의를 고치고 다시 (STR 05)
+applied R__v_member_contact.sql e89685b0    ← R 만 다시 실행
+
+# 이미 적용된 V1 끝에 주석 한 줄을 붙이고 다시
+FAIL V1__create_member.sql: 적용된 파일이 바뀜 1a52f23a → b5b96a7d</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>주석 한 줄도 체크섬을 바꿉니다.</b> 운영에 나간 V 파일은 오타라도 그대로 두고, 고칠 것은 <b>새 V 파일</b>로 추가합니다.
+        아직 아무 환경에도 적용되지 않은(머지 전) 파일만 자유롭게 고칩니다.
+        참고로 이름순 정렬은 <code>['V10__…', 'V1__…', 'V2__…']</code> 를 돌려줍니다 — 도구가 숫자 비교를 하는 이유입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:20%">도구</th><th>폴더 · 파일 모양</th><th style="width:34%">구조상 주의</th></tr>
+      <tr><td>Alembic</td><td><code>alembic.ini</code> · <code>alembic/env.py</code> · <code>alembic/versions/&lt;rev&gt;_&lt;설명&gt;.py</code></td><td>순서는 파일 안의 <code>down_revision</code> — 두 브랜치가 같은 부모를 가리키면 <code>alembic merge</code></td></tr>
+      <tr><td>Prisma</td><td><code>prisma/schema.prisma</code> · <code>prisma/migrations/&lt;타임스탬프&gt;_&lt;이름&gt;/migration.sql</code></td><td><code>migration_lock.toml</code> 도 커밋 · 운영은 <code>migrate deploy</code> 만</td></tr>
+      <tr><td>EF Core</td><td><code>Migrations/&lt;타임스탬프&gt;_&lt;이름&gt;.cs</code> + <code>.Designer.cs</code> + <code>ModelSnapshot.cs</code></td><td>스냅숏 파일이 병합 충돌의 단골 — 한 번에 한 사람이 추가</td></tr>
+      <tr><td>Django</td><td><code>&lt;앱&gt;/migrations/0001_initial.py</code></td><td>앱마다 폴더 · 앱 사이 의존은 <code>dependencies</code> 로</td></tr>
+    </table>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 변경 하나 = 파일 하나, 순서는 파일 이름(또는 목차 · 사슬)이 정합니다. <b>한 번이라도 다른 환경에 적용된 파일은 고치지 않고</b> 새 파일을 더합니다.</div>
+</section>
+
+<!-- ==================== ps03 ==================== -->
+<section class="sec" id="ps03">
+  <div class="sec-head rv">
+    <span class="no">STR 03</span>
+    <h2>앱 저장소 안 vs <span class="t">별도 DB 저장소</span> — 주인이 누구인가</h2>
+    <p class="lead">
+      DB 코드를 어디에 둘지는 "편한 곳"이 아니라 <b>"이 스키마를 바꿀 권한과 책임이 누구에게 있나"</b>로 정합니다.
+      서비스 하나가 DB 하나를 가지면 답은 거의 항상 <b>앱 저장소 안</b>입니다. 여러 앱이 같은 테이블에 쓰기 시작하면 그때 고민이 생깁니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">A. 앱 저장소 안 — 서비스 1 : DB 1</h4>
+      <pre class="code" data-lang="text"><code>order-service/
+├─ db/migration/          이 서비스의 sales 스키마만
+├─ src/                   같은 PR 에서 스키마 + 코드
+└─ .github/workflows/     배포 = 마이그레이션 → 앱 기동
+
+장점  스키마와 코드가 한 번에 리뷰 · 한 번에 롤백
+조건  다른 앱은 이 DB 에 직접 붙지 않음 (API 로)</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">B. 별도 DB 저장소 — 여러 앱이 공유할 때</h4>
+      <pre class="code" data-lang="text"><code>legacy-erp-db/            여러 앱이 쓰는 DB 전용 저장소
+├─ migration/
+├─ repeatable/
+├─ grants/
+├─ CODEOWNERS             DBA + 소비 팀 리뷰 필수
+├─ CHANGELOG.md           "V42 에서 orders.memo 삭제 예정"
+└─ .github/workflows/     태그 v1.8.0 → 마이그레이션 배포
+
+앱 쪽  "DB v1.8 이상 필요"를 README · 기동 검사로 명시</code></pre>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 292" role="img" aria-label="공유 DB 안티패턴과 서비스별 DB 를 좌우로 비교한 의존 그래프. 왼쪽에서는 주문, 회원, 정산 세 서비스가 같은 DB 의 orders, member, payment 테이블에 직접 선을 긋고 있고, 남의 테이블을 읽고 쓰는 선 세 개가 붉게 교차한다. 오른쪽에서는 세 서비스가 각자 자기 스키마 하나에만 연결되고, 정산은 주문 데이터를 DB 가 아니라 API 나 이벤트로 받는다. 왼쪽 구조에서는 컬럼 하나를 바꾸려면 붉은 선 끝의 모든 팀과 배포를 맞춰야 한다.">
+      <text x="16" y="18" class="lbl">같은 세 서비스, 두 가지 배선 — 붉은 선이 "남의 테이블"입니다</text>
+      <text x="170" y="42" class="ttl rs-t" text-anchor="middle">공유 DB — 주인이 없음</text>
+      <text x="510" y="42" class="ttl ok-t" text-anchor="middle">서비스마다 DB — 주인이 하나</text>
+      <path class="ln" d="M340 30 L340 240"/>
+
+      <circle class="nd" cx="60" cy="80" r="24"/>
+      <text x="60" y="84" class="ann" text-anchor="middle">주문</text>
+      <circle class="nd" cx="60" cy="150" r="24"/>
+      <text x="60" y="154" class="ann" text-anchor="middle">회원</text>
+      <circle class="nd" cx="60" cy="220" r="24"/>
+      <text x="60" y="224" class="ann" text-anchor="middle">정산</text>
+
+      <rect class="bx" x="196" y="70" width="104" height="34"/>
+      <text x="248" y="91" class="ann" text-anchor="middle">orders</text>
+      <rect class="bx" x="196" y="130" width="104" height="34"/>
+      <text x="248" y="151" class="ann" text-anchor="middle">member</text>
+      <rect class="bx" x="196" y="190" width="104" height="34"/>
+      <text x="248" y="211" class="ann" text-anchor="middle">payment</text>
+
+      <path class="ln ar" d="M88 80 Q 140 80 192 86"/>
+      <path class="ln ar" d="M88 150 Q 140 150 192 147"/>
+      <path class="ln ar" d="M88 220 Q 140 216 192 208"/>
+      <path class="ar-rs" d="M86 92 Q 140 118 192 140" style="stroke:#fb7185;stroke-width:1.4;fill:none"/>
+      <path class="ar-rs" d="M85 205 Q 150 140 192 98" style="stroke:#fb7185;stroke-width:1.4;fill:none"/>
+      <path class="ar-rs" d="M87 211 Q 150 172 192 156" style="stroke:#fb7185;stroke-width:1.4;fill:none"/>
+      <text x="248" y="244" class="ann" text-anchor="middle">모두 같은 DB 한 곳</text>
+
+      <circle class="nd nd-ok" cx="400" cy="80" r="24"/>
+      <text x="400" y="84" class="ann" text-anchor="middle">주문</text>
+      <circle class="nd nd-ok" cx="400" cy="150" r="24"/>
+      <text x="400" y="154" class="ann" text-anchor="middle">회원</text>
+      <circle class="nd nd-ok" cx="400" cy="220" r="24"/>
+      <text x="400" y="224" class="ann" text-anchor="middle">정산</text>
+
+      <rect class="bx bx-ok" x="470" y="70" width="120" height="34"/>
+      <text x="530" y="91" class="ann" text-anchor="middle">sales 스키마</text>
+      <rect class="bx bx-ok" x="470" y="130" width="120" height="34"/>
+      <text x="530" y="151" class="ann" text-anchor="middle">member 스키마</text>
+      <rect class="bx bx-ok" x="470" y="190" width="120" height="34"/>
+      <text x="530" y="211" class="ann" text-anchor="middle">billing 스키마</text>
+
+      <path class="fl ar" d="M428 80 L466 80"/>
+      <path class="fl ar" d="M428 150 L466 150"/>
+      <path class="fl ar" d="M428 220 L466 220"/>
+      <path class="fl ar" d="M376 205 Q 345 150 376 95"/>
+
+      <text x="170" y="264" class="ann rs-t" text-anchor="middle">붉은 선 = 남의 테이블을 직접 읽고 씀</text>
+      <text x="510" y="264" class="ann" text-anchor="middle">정산은 주문 데이터를 API · 이벤트로 받음</text>
+      <text x="16" y="284" class="lbl">왼쪽에서 컬럼 하나를 바꾸려면 붉은 선 끝의 팀 전부와 배포 날짜를 맞춰야 합니다</text>
+    </svg>
+    <div class="cap">공유 DB 의 비용은 <b>"스키마 변경 = 여러 팀 동시 배포"</b>가 되는 것입니다.</div>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:28%">상황</th><th style="width:28%">DB 코드를 둘 곳</th><th>이유</th></tr>
+      <tr><td>서비스 1 : DB 1</td><td><b>앱 저장소</b> <code>db/</code></td><td>스키마와 코드가 한 PR — 같이 리뷰 · 같이 롤백</td></tr>
+      <tr><td>남의 앱은 <b>읽기만</b> (리포트)</td><td>소유 앱 저장소 + 읽기 전용 뷰</td><td>계약은 뷰 · 테이블은 소유 팀이 자유롭게 바꿈</td></tr>
+      <tr><td>여러 앱이 같은 테이블에 <b>씀</b></td><td><b>별도 DB 저장소</b> + 버전 태그</td><td>어느 한 앱 저장소에 두면 다른 팀이 변경을 모름</td></tr>
+      <tr><td>분석 웨어하우스</td><td>dbt 별도 저장소 (STR 07)</td><td>쓰는 사람(분석가)과 배포 주기가 다름</td></tr>
+      <tr><td>DBA 가 운영 DDL 을 승인</td><td>어느 쪽이든 + <code>CODEOWNERS</code></td><td>폴더 단위로 리뷰어를 강제 — 저장소를 나눌 필요는 없음</td></tr>
+    </table>
+  </div>
+
+  <div class="vs rv">
+    <div class="bad"><h5>❌ 공유 DB 를 "편해서" 고름</h5>
+      <p class="tx" style="margin:0">새 서비스가 기존 서비스의 테이블에 바로 SELECT · UPDATE 를 붙입니다. 처음 한 달은 빠르지만,
+      그 테이블은 이제 <b>두 팀의 공용 API</b>가 되어 컬럼 이름 하나 못 바꿉니다. 누가 쓰는지 아는 방법은 쿼리 로그뿐입니다.</p></div>
+    <div class="good"><h5>✅ 이미 공유 중이라면 — 경계를 그어 갑니다</h5>
+      <p class="tx" style="margin:0">① 별도 DB 저장소로 모아 변경을 한 곳에서 보이게 → ② 앱마다 전용 역할 계정(STR 04)으로 누가 무엇을 쓰는지 드러냄 →
+      ③ 남의 테이블 접근을 뷰나 API 로 하나씩 바꿈. 한 번에 쪼개려 하지 않습니다.</p></div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 서비스 하나가 DB 를 소유하면 <b>앱 저장소 안</b>이 정답입니다. 여러 앱이 같은 테이블에 쓰는 경우에만 별도 저장소로 빼고, 그건 목표가 아니라 <b>경계를 긋기 위한 중간 단계</b>입니다.</div>
+</section>
+
+<!-- ==================== ps04 ==================== -->
+<section class="sec" id="ps04">
+  <div class="sec-head rv">
+    <span class="no">STR 04</span>
+    <h2>명명 규칙 · <span class="t">스키마 나누기</span> — 이름과 권한도 구조입니다</h2>
+    <p class="lead">
+      DB 의 "폴더"는 스키마(namespace)이고, "파일 이름"은 테이블 · 제약 · 인덱스 이름입니다.
+      이름 규칙이 있으면 에러 메시지 한 줄만 보고 어느 테이블의 어떤 제약인지 알고, 마이그레이션에서 <code>DROP INDEX</code> 할 대상을 바로 씁니다.
+      규칙은 <b>무엇이 정답이냐보다 한 저장소 안에서 하나로 통일하는 것</b>이 중요합니다(아래 접두사 체계는 흔한 관례이지 표준은 아닙니다).
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 288" role="img" aria-label="인덱스와 외래키 이름을 부분별로 나눠 설명한 해부도. ix_order_item_order_id_created_at 은 종류 접두사 ix, 테이블 이름 order_item, 인덱스 컬럼 순서 order_id_created_at 세 부분으로 되어 있다. fk_order_item_orders 는 종류 fk, 테이블 order_item, 참조 대상 orders 로 되어 있다. 아래에 PostgreSQL 의 외래키 위반 에러 메시지가 있고 그 안에 제약 이름이 그대로 찍혀 있어 이름만으로 원인을 알 수 있다. 자동 이름은 DB 마다 달라 나중에 지울 때 찾아야 한다.">
+      <text x="16" y="18" class="lbl">이름만 보고 종류 · 테이블 · 컬럼이 읽혀야 합니다</text>
+
+      <text x="16" y="63" class="val">인덱스</text>
+      <rect class="bx bx-fw" x="100" y="40" width="60" height="36"/>
+      <text x="130" y="63" class="val" text-anchor="middle">ix</text>
+      <rect class="bx" x="164" y="40" width="150" height="36"/>
+      <text x="239" y="63" class="val" text-anchor="middle">order_item</text>
+      <rect class="bx" x="318" y="40" width="220" height="36"/>
+      <text x="428" y="63" class="val" text-anchor="middle">order_id_created_at</text>
+      <path class="lead-ln" d="M130 80 L130 96"/>
+      <path class="lead-ln" d="M239 80 L239 96"/>
+      <path class="lead-ln" d="M428 80 L428 96"/>
+      <text x="130" y="110" class="ann" text-anchor="middle">종류</text>
+      <text x="130" y="124" class="ann" text-anchor="middle">pk fk uq ix ck</text>
+      <text x="239" y="110" class="ann" text-anchor="middle">테이블 이름 그대로</text>
+      <text x="239" y="124" class="ann" text-anchor="middle">스키마는 빼도 됨</text>
+      <text x="428" y="110" class="ann" text-anchor="middle">컬럼 순서 = 인덱스 컬럼 순서</text>
+      <text x="428" y="124" class="ann" text-anchor="middle">길면 줄임 — PG 는 63바이트에서 잘림</text>
+
+      <text x="16" y="163" class="val">외래키</text>
+      <rect class="bx bx-fw" x="100" y="140" width="60" height="36"/>
+      <text x="130" y="163" class="val" text-anchor="middle">fk</text>
+      <rect class="bx" x="164" y="140" width="150" height="36"/>
+      <text x="239" y="163" class="val" text-anchor="middle">order_item</text>
+      <rect class="bx bx-ok" x="318" y="140" width="120" height="36"/>
+      <text x="378" y="163" class="val" text-anchor="middle">orders</text>
+      <path class="lead-ln" d="M442 158 L466 158"/>
+      <text x="472" y="155" class="ann">참조 대상 테이블 — 아래 에러에</text>
+      <text x="472" y="168" class="ann">이름이 그대로 찍힙니다</text>
+
+      <rect class="bx bx-mut" x="16" y="196" width="648" height="46"/>
+      <text x="28" y="214" class="tk">ERROR: insert or update on table "order_item" violates foreign key constraint "fk_order_item_orders"</text>
+      <text x="28" y="232" class="tk">DETAIL: Key (order_id)=(999) is not present in table "orders".</text>
+
+      <text x="16" y="264" class="lbl">자동 이름(Oracle SYS_C0012345 · PG order_item_order_id_fkey)은 DB 마다 다릅니다</text>
+      <text x="16" y="280" class="lbl">— 이름을 직접 붙여 두면 어느 DB 에서든 같은 DROP 문이 됩니다</text>
+    </svg>
+    <div class="cap">접두사 + 테이블 + 컬럼 — <b>에러 메시지가 곧 문서</b>가 되게 이름을 붙입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">이름 규칙 한 장 (README 에 그대로)</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">대상</th><th>규칙</th><th style="width:34%">예</th></tr>
+          <tr><td>테이블</td><td>snake_case · 단수/복수 중 하나로 통일</td><td><code>order_item</code></td></tr>
+          <tr><td>PK · FK</td><td><code>pk_&lt;테이블&gt;</code> · <code>fk_&lt;테이블&gt;_&lt;참조&gt;</code></td><td><code>fk_order_item_orders</code></td></tr>
+          <tr><td>유니크 · 인덱스</td><td><code>uq_</code> · <code>ix_&lt;테이블&gt;_&lt;컬럼들&gt;</code></td><td><code>uq_member_email</code></td></tr>
+          <tr><td>체크</td><td><code>ck_&lt;테이블&gt;_&lt;규칙&gt;</code></td><td><code>ck_orders_amount_pos</code></td></tr>
+          <tr><td>컬럼</td><td>FK 는 <code>&lt;대상&gt;_id</code> · 시각 <code>_at</code> · 불리언 <code>is_</code></td><td><code>member_id</code> · <code>paid_at</code></td></tr>
+          <tr><td>뷰 · 함수</td><td><code>v_</code> · <code>fn_</code> · <code>sp_</code></td><td><code>v_sales_daily</code></td></tr>
+        </table>
+      </div>
+      <div class="note tip" style="margin-bottom:0">
+        <b>단수냐 복수냐는 취향</b>이지만 하나만 알아 두세요. <code>order</code> · <code>user</code> 는 SQL 예약어라서 단수형을 고르면 따옴표를 달거나 피해 가야 합니다.
+        이 탭의 예제가 <code>orders</code> 만 복수인 이유입니다. 길이 한계는 PG 63바이트 · MySQL 64자 · Oracle 128바이트(12.2 이후)입니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">스키마로 도메인 나누기 (PostgreSQL)</h4>
+      <pre class="code" data-lang="text"><code>appdb                  데이터베이스 하나
+├─ core                회원 · 코드표 — 여럿이 읽음
+├─ sales               주문 · 결제   — 주문 팀 소유
+├─ stock               재고          — 재고 팀 소유
+├─ audit               변경 이력     — 앱은 INSERT 만
+└─ public              비워 둠</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>"스키마"의 뜻이 DB 마다 다릅니다.</b> PostgreSQL · SQL Server 는 DB 안의 이름공간, MySQL 은 <b>스키마 = 데이터베이스</b>,
+        Oracle 은 <b>스키마 = 사용자</b>입니다. 그래서 MySQL 에서는 같은 구조를 데이터베이스 여러 개로, Oracle 에서는 소유 계정 여러 개로 만듭니다.
+        <code>search_path</code> 와 스키마 기본은 🐘 PostgreSQL 탭 SECTION 04 참고.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">권한 역할 구조 — <span class="t">DDL 하는 계정과 앱 계정을 나눈다</span> <span class="lvl m">🟡 중급</span></h3>
+  <p class="tx">
+    앱 계정과 읽기 전용 계정을 만드는 첫 단계는 🧰 SETUP 09 에 있습니다. 저장소 구조 관점에서 한 걸음 더 가면 <b>역할을 세 층</b>으로 나누고 이 정의 자체를 <code>db/grants/</code> 에 커밋합니다.
+    그러면 "운영에서 누가 테이블을 만들 수 있나"가 코드 리뷰 대상이 됩니다.
+  </p>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="sql"><code>-- db/grants/R__roles.sql — 여러 번 실행해도 같은 결과가 되게 작성
+-- migrator : 스키마 소유자 · DDL 전용 · 마이그레이션 도구만 이 계정 사용
+-- app_rw   : 앱 런타임 · DML 만 (CREATE · DROP 불가)
+-- app_ro   : 리포트 · 분석 · 운영 조회
+GRANT USAGE ON SCHEMA sales TO app_rw, app_ro;
+
+-- migrator 가 앞으로 만들 테이블에도 자동 적용
+ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA sales
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_rw;
+ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA sales
+  GRANT USAGE, SELECT ON SEQUENCES TO app_rw;
+ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA sales
+  GRANT SELECT ON TABLES TO app_ro;</code></pre>
+    </div>
+    <div class="card">
+      <pre class="code" data-lang="sql"><code>-- 역할 자체는 한 번만 (DBA · 인프라 코드에서)
+CREATE ROLE migrator LOGIN;
+CREATE ROLE app_rw NOLOGIN;     -- 묶음 역할 · 직접 로그인 안 함
+CREATE ROLE app_ro NOLOGIN;
+CREATE SCHEMA sales AUTHORIZATION migrator;
+
+-- 실제 로그인 계정은 앱마다 하나씩 → 누가 쓰는지 드러남
+CREATE ROLE order_api  LOGIN IN ROLE app_rw;
+CREATE ROLE report_bot LOGIN IN ROLE app_ro;
+-- 비밀번호는 여기 쓰지 않음 → 비밀 저장소에서 ALTER ROLE 로</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>앱이 migrator 계정으로 돌면 안 됩니다.</b> SQL 인젝션 한 번이 <code>DROP TABLE</code> 이 됩니다.
+        그리고 <code>ALTER DEFAULT PRIVILEGES</code> 는 <b>FOR ROLE 로 지정한 계정이 만든 객체</b>에만 적용되므로, 테이블을 다른 계정으로 만들면 권한이 안 붙습니다 — DDL 계정을 하나로 정하는 이유입니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 이름은 <b>접두사 + 테이블 + 컬럼</b>으로 직접 붙이고, 스키마로 도메인을, 역할로 <b>DDL(migrator) · 앱(app_rw) · 조회(app_ro)</b>를 나눕니다. 역할 정의도 <code>db/grants/</code> 에 커밋합니다.</div>
+</section>
+
+<!-- ==================== ps05 ==================== -->
+<section class="sec" id="ps05">
+  <div class="sec-head rv">
+    <span class="no">STR 05</span>
+    <h2>SQL 파일 <span class="t">정리</span> — 뷰 · 함수 · 프로시저 · 쿼리는 어디에</h2>
+    <p class="lead">
+      테이블은 "변경 이력"이 중요하고, 뷰 · 함수 · 프로시저는 <b>"지금의 정의"</b>가 중요합니다.
+      뷰 하나 고칠 때마다 V 파일을 새로 만들면 정의 전체가 여러 파일에 흩어져 지금 모양을 아무도 모르게 됩니다.
+      그래서 이 둘은 폴더를 나누고, 뒤쪽은 <b>여러 번 실행해도 같은 결과(멱등)</b>가 되게 씁니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="text"><code>db/
+├─ migration/                 V__ 테이블 · 컬럼 · 인덱스 · 제약 — 이력이 중요
+├─ repeatable/                R__ 지금의 정의가 중요 — 고치면 그 파일을 고침
+│  ├─ R__10_fn_order_total.sql      함수 먼저 (번호로 순서 고정)
+│  ├─ R__20_v_sales_daily.sql       뷰는 함수 뒤
+│  └─ R__30_sp_close_month.sql      프로시저
+└─ queries/                   자동 적용하지 않는 SQL — 리포트 · 운영 점검
+   ├─ reports/monthly_sales.sql
+   └─ ops/blocking_locks.sql        락 확인 (⚙️ 설계 · 튜닝 탭)</code></pre>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">멱등하게 쓰는 법 — DB 별</h4>
+      <pre class="code" data-lang="sql"><code>-- PostgreSQL · Oracle · MySQL : 뷰는 OR REPLACE
+CREATE OR REPLACE VIEW sales.v_sales_daily AS
+SELECT order_date, count(*) AS orders, sum(amount) AS revenue
+FROM   sales.orders
+GROUP  BY order_date;
+
+-- PG : CREATE OR REPLACE VIEW 는 컬럼을 "뒤에 추가"만 됨
+--      컬럼 삭제 · 이름 변경 · 순서 변경은 DROP 후 다시
+DROP VIEW IF EXISTS sales.v_sales_daily;   -- CASCADE 는 쓰지 말 것
+CREATE VIEW sales.v_sales_daily AS ...;
+
+-- SQLite : OR REPLACE 가 없어서 언제나 DROP IF EXISTS + CREATE</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>R__ 은 설명 이름순으로 실행됩니다.</b> 뷰가 함수를 쓰면 함수 파일이 먼저 와야 하므로 <code>R__10_</code> · <code>R__20_</code> 처럼 번호를 이름 앞에 둡니다.
+        <code>DROP … CASCADE</code> 는 의존하는 다른 뷰까지 지우고 그 뷰는 다시 만들어지지 않으니 피합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">sqlite3 로 확인 — 정의만 바꾸면 R 만 다시</h4>
+      <pre class="code" data-lang="sql"><code>-- R__v_member_contact.sql (STR 02 의 예제 저장소)
+DROP VIEW IF EXISTS v_member_contact;
+CREATE VIEW v_member_contact AS
+  SELECT id, email, coalesce(phone, '(없음)') AS phone
+  FROM member;</code></pre>
+      <pre class="code" data-lang="text"><code>$ python mini_migrate.py      # '-' → '(없음)' 으로만 고친 뒤
+applied R__v_member_contact.sql e89685b0
+tables: ['member', 'schema_history', 'v_member_contact']</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>queries/ 는 도구가 실행하지 않는 폴더</b>입니다. "이 SQL 은 어디서 돌던 거지?"를 없애려고 둡니다.
+        여기에도 린트(STR 09)는 걸어 두면 문법이 깨진 채로 쌓이지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">SQL 을 앱 코드에 둘 때 — <span class="t">어디에 두고 무엇이 생성되나</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 276" role="img" aria-label="앱 코드에서 SQL 을 다루는 다섯 방식을 SQL 을 손으로 쓰는 정도와 빌드 때 오류를 잡는 정도 두 축으로 놓은 사분면. 오른쪽 위, 즉 SQL 을 그대로 쓰면서 빌드 때 스키마와 대조해 주는 칸에 sqlc 와 jOOQ 가 있다. 오른쪽 아래에는 실행해 봐야 오류를 아는 MyBatis XML 과 문자열 SQL 이 있다. 왼쪽 가운데 아래에 SQL 을 거의 쓰지 않는 JPA 엔티티가 있다.">
+      <text x="16" y="18" class="lbl">가로는 SQL 을 직접 쓰는 정도, 세로는 빌드 때 잡아 주는 정도</text>
+      <rect class="lane-alt" x="352" y="34" width="272" height="98"/>
+      <path class="ax" d="M80 34 L80 236"/>
+      <path class="ax" d="M80 236 L624 236"/>
+      <path class="gr" d="M352 34 L352 236"/>
+      <path class="gr" d="M80 135 L624 135"/>
+      <text x="352" y="252" class="tk" text-anchor="middle">SQL 을 손으로 쓰는 정도 →</text>
+      <text x="16" y="46" class="tk">빌드 때</text>
+      <text x="16" y="58" class="tk">잡음</text>
+      <text x="16" y="220" class="tk">실행해야</text>
+      <text x="16" y="232" class="tk">앎</text>
+      <text x="360" y="126" class="ann ok-t">SQL 그대로 + 스키마와 대조</text>
+
+      <circle class="dot" cx="190" cy="176" r="6"/>
+      <text x="190" y="195" class="ann" text-anchor="middle">JPA 엔티티</text>
+      <circle class="dot" cx="440" cy="84" r="6"/>
+      <text x="440" y="70" class="ann" text-anchor="middle">jOOQ</text>
+      <circle class="dot" cx="566" cy="66" r="7" style="fill:#34d399"/>
+      <text x="566" y="52" class="ann ok-t" text-anchor="middle">sqlc</text>
+      <circle class="dot" cx="470" cy="186" r="6"/>
+      <text x="470" y="205" class="ann" text-anchor="middle">MyBatis XML</text>
+      <circle class="dot" cx="590" cy="212" r="6"/>
+      <text x="590" y="228" class="ann" text-anchor="middle">문자열 SQL</text>
+      <text x="16" y="268" class="lbl">오른쪽 아래는 나쁘다는 뜻이 아니라 "테스트가 그 몫을 대신해야 한다"는 뜻입니다</text>
+    </svg>
+    <div class="cap">SQL 을 직접 쓸수록 <b>생성 코드나 테스트로 스키마와 맞춰 보는 장치</b>가 필요합니다.</div>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:16%">방식</th><th>SQL 이 사는 곳</th><th style="width:38%">생성물 · 주의</th></tr>
+      <tr><td>MyBatis</td><td><code>src/main/resources/mapper/&lt;도메인&gt;/OrderMapper.xml</code> + 같은 이름의 자바 인터페이스</td><td><code>mybatis.mapper-locations=classpath:mapper/**/*.xml</code> · 생성물 없음 → 매퍼 테스트 필수</td></tr>
+      <tr><td>sqlc (Go 등)</td><td><code>db/queries/*.sql</code> · 스키마는 <code>db/migration</code> 을 그대로 읽음</td><td><code>sqlc.yaml</code> 의 <code>out</code> 폴더에 코드 생성 · 커밋한다면 CI 에서 <code>sqlc diff</code></td></tr>
+      <tr><td>jOOQ</td><td>자바 DSL — SQL 문자열 대신 생성된 테이블 클래스</td><td>빌드 때 마이그레이션을 적용한 DB 에서 생성 → 보통 <code>build/</code> 아래 · 커밋 안 함</td></tr>
+      <tr><td>ORM (JPA 등)</td><td>엔티티 클래스 · 복잡한 쿼리만 <code>@Query</code></td><td>스키마는 <b>마이그레이션이 원본</b> — Hibernate 의 <code>ddl-auto=update</code> 는 운영 금지 · ORM 선택은 🔌 SECTION 06</td></tr>
+    </table>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 테이블은 <code>migration/</code>(이력), 뷰 · 함수 · 프로시저는 <code>repeatable/</code>(지금 정의, 멱등), 손으로 돌리는 SQL 은 <code>queries/</code>. 앱 안의 SQL 은 <b>스키마와 맞춰 보는 장치</b>(생성 코드 · 테스트)와 함께 둡니다.</div>
+</section>
+
+<!-- ==================== ps06 ==================== -->
+<section class="sec" id="ps06">
+  <div class="sec-head rv">
+    <span class="no">STR 06</span>
+    <h2>시드 · <span class="t">테스트 데이터</span> — 세 종류를 섞지 않는다</h2>
+    <p class="lead">
+      "초기 데이터"라는 말 하나에 성격이 전혀 다른 세 가지가 섞여 있습니다. <b>운영에도 있어야 하는 참조 데이터</b>, <b>개발자 화면을 채우는 샘플</b>, <b>테스트 하나가 쓰고 버리는 픽스처</b>.
+      이 셋을 한 파일에 두면 언젠가 샘플 회원 "홍길동"이 운영 DB 에 들어갑니다.
+    </p>
+  </div>
+
+  <pre class="code rv" data-lang="text"><code>db/
+├─ migration/
+│  └─ V5__seed_order_status.sql     참조 데이터 — 운영에도 필요하니 마이그레이션으로
+├─ seed/
+│  └─ dev/                          개발용 샘플 — dev 프로필에서만 적용
+│     ├─ R__dev_members.sql
+│     └─ R__dev_orders.sql
+└─ mask/
+   └─ mask_members.sql              운영 사본을 스테이징에 넣기 전에 실행
+src/test/resources/fixtures/        테스트 픽스처 — 테스트마다 만들고 지움 (🔌 SECTION 12)</code></pre>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 236" role="img" aria-label="데이터 종류별로 어느 환경에 적용하는지 보여 주는 매트릭스. 참조 데이터는 개발, CI 테스트, 스테이징, 운영 네 환경 모두에 적용한다. 개발 샘플은 개발 환경에만 적용하고 운영에는 금지한다. 테스트 픽스처는 CI 테스트에서 테스트마다 만들고 지우며 운영에는 금지한다. 마스킹한 운영 사본은 스테이징에 적용하고 개발에는 선택이며 운영은 그 원본이다.">
+      <text x="16" y="18" class="lbl">데이터 종류 × 환경 — 진한 칸만 적용합니다</text>
+      <text x="228" y="42" class="tk" text-anchor="middle">개발 (dev)</text>
+      <text x="348" y="42" class="tk" text-anchor="middle">CI 테스트</text>
+      <text x="468" y="42" class="tk" text-anchor="middle">스테이징</text>
+      <text x="588" y="42" class="tk" text-anchor="middle">운영</text>
+
+      <text x="16" y="72" class="val">참조 데이터</text>
+      <rect class="cel h4" x="170" y="50" width="116" height="34"/><text x="228" y="71" class="tk" text-anchor="middle">적용</text>
+      <rect class="cel h4" x="290" y="50" width="116" height="34"/><text x="348" y="71" class="tk" text-anchor="middle">적용</text>
+      <rect class="cel h4" x="410" y="50" width="116" height="34"/><text x="468" y="71" class="tk" text-anchor="middle">적용</text>
+      <rect class="cel h4" x="530" y="50" width="116" height="34"/><text x="588" y="71" class="tk" text-anchor="middle">적용</text>
+
+      <text x="16" y="110" class="val">개발 샘플</text>
+      <rect class="cel h4" x="170" y="88" width="116" height="34"/><text x="228" y="109" class="tk" text-anchor="middle">적용</text>
+      <rect class="cel h0" x="290" y="88" width="116" height="34"/><text x="348" y="109" class="tk" text-anchor="middle">–</text>
+      <rect class="cel h0" x="410" y="88" width="116" height="34"/><text x="468" y="109" class="tk" text-anchor="middle">–</text>
+      <rect class="cel h0" x="530" y="88" width="116" height="34"/><text x="588" y="109" class="tk rs-t" text-anchor="middle">금지</text>
+
+      <text x="16" y="148" class="val">테스트 픽스처</text>
+      <rect class="cel h0" x="170" y="126" width="116" height="34"/><text x="228" y="147" class="tk" text-anchor="middle">–</text>
+      <rect class="cel h4" x="290" y="126" width="116" height="34"/><text x="348" y="147" class="tk" text-anchor="middle">테스트마다</text>
+      <rect class="cel h0" x="410" y="126" width="116" height="34"/><text x="468" y="147" class="tk" text-anchor="middle">–</text>
+      <rect class="cel h0" x="530" y="126" width="116" height="34"/><text x="588" y="147" class="tk rs-t" text-anchor="middle">금지</text>
+
+      <text x="16" y="186" class="val">마스킹 사본</text>
+      <rect class="cel h1" x="170" y="164" width="116" height="34"/><text x="228" y="185" class="tk" text-anchor="middle">선택</text>
+      <rect class="cel h0" x="290" y="164" width="116" height="34"/><text x="348" y="185" class="tk" text-anchor="middle">–</text>
+      <rect class="cel h4" x="410" y="164" width="116" height="34"/><text x="468" y="185" class="tk" text-anchor="middle">적용</text>
+      <rect class="cel h0" x="530" y="164" width="116" height="34"/><text x="588" y="185" class="tk" text-anchor="middle">원본</text>
+
+      <text x="16" y="226" class="lbl">운영 열에 진한 칸은 참조 데이터 하나뿐 — 그래서 그것만 마이그레이션에 둡니다</text>
+    </svg>
+    <div class="cap">적용 환경이 다르면 <b>폴더도 달라야</b> 합니다 — 운영 열이 진한 것만 <code>migration/</code> 으로.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">참조 데이터는 멱등하게 — sqlite3 로 3번 실행</h4>
+      <pre class="code" data-lang="sql"><code>INSERT INTO order_status(code, label) VALUES
+  ('NEW','접수'), ('PAID','결제완료'), ('SHIPPED','배송중')
+ON CONFLICT(code) DO UPDATE SET label = excluded.label;
+-- 3번 실행 → count(*) = 3 (중복 없음)
+-- 그냥 INSERT 였다면 2번째에
+-- IntegrityError: UNIQUE constraint failed: order_status.code</code></pre>
+      <pre class="code" data-lang="yaml"><code># application-dev.yml — dev 프로필에서만 샘플 폴더를 더함
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed/dev
+# application.yml(운영)은 기본값 db/migration 만</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <code>ON CONFLICT … DO UPDATE</code> 는 PostgreSQL · SQLite 문법입니다. MySQL 은 <code>ON DUPLICATE KEY UPDATE</code>, Oracle 은 <code>MERGE</code>.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">운영 사본은 마스킹한 뒤에만 — mask_members.sql</h4>
+      <pre class="code" data-lang="sql"><code>-- 스테이징으로 복원한 직후, 앱을 붙이기 전에 실행
+UPDATE member SET
+  name  = '회원' || id,
+  email = 'user' || id || '@example.com',     -- UNIQUE 유지
+  phone = CASE WHEN phone IS NULL THEN NULL
+               ELSE '010-0000-' || lpad((id % 10000)::text, 4, '0') END;
+-- grade · 가입일은 그대로 → 분포가 살아 있어 성능 테스트에 쓸모 있음</code></pre>
+      <pre class="code" data-lang="text"><code>(1, '회원1', 'user1@example.com', '010-0000-0001', 'VIP')
+(2, '회원2', 'user2@example.com', None, 'BASIC')
+# sqlite3 확인 결과 (sqlite 는 lpad 대신 substr('0000'||id, -4))</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>NULL 은 NULL 로 둡니다.</b> 빈 값까지 가짜 번호로 채우면 "전화번호 없는 회원" 경로가 테스트에서 사라집니다.
+        마스킹 규칙 자체(무엇이 개인정보인가 · 가명처리)는 🧬 전문가 탭 SECTION 14 참고.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 운영에도 필요한 <b>참조 데이터만 마이그레이션</b>에, 개발 샘플은 <code>seed/dev</code> 로 프로필을 갈라, 픽스처는 테스트 코드 옆에. 운영 사본은 <b>마스킹 전에는 어디에도 복원하지 않습니다</b>.</div>
+</section>
+
+<!-- ==================== ps07 ==================== -->
+<section class="sec" id="ps07">
+  <div class="sec-head rv">
+    <span class="no">STR 07</span>
+    <h2><span class="t">dbt</span> 프로젝트 구조 — staging · intermediate · marts</h2>
+    <p class="lead">
+      분석 쪽 SQL 은 "변경 이력"보다 <b>"어떤 표가 무엇에서 나왔나(계보)"</b>가 중요합니다. dbt 는 SQL 파일과 <code>ref()</code> 로 그 계보를 만들고,
+      폴더 구조가 곧 데이터가 정제되는 단계가 됩니다. 아래는 dbt Labs 의 공식 글 <b>"How we structure our dbt projects"</b> 의 권장 구조를 따릅니다.
+      dbt 가 무엇이고 <code>run</code> · <code>test</code> · 증분 모델이 어떻게 도는지는 📊 분석 · 벡터 DB 탭 OLAP 12 에 있습니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">공식 권장 트리</h4>
+      <pre class="code" data-lang="text"><code>jaffle_shop/
+├─ dbt_project.yml        이름 · 폴더별 기본 materialized
+├─ packages.yml           dbt_utils 같은 패키지
+├─ models/
+│  ├─ staging/            원본 표 1개 = 모델 1개 · 이름 · 형 변환만
+│  │  └─ jaffle_shop/     원본 시스템별 폴더
+│  │     ├─ _jaffle_shop__sources.yml
+│  │     ├─ _jaffle_shop__models.yml
+│  │     ├─ stg_jaffle_shop__customers.sql
+│  │     └─ stg_jaffle_shop__orders.sql
+│  ├─ intermediate/       stg 를 조합하는 중간 단계 · 밖에 노출 안 함
+│  │  └─ finance/
+│  │     └─ int_payments_pivoted_to_orders.sql
+│  └─ marts/              사람이 보는 결과 · 업무 영역별
+│     ├─ finance/orders.sql
+│     └─ marketing/customers.sql
+├─ seeds/                 작은 CSV 참조표 (국가 코드 등)
+├─ snapshots/             천천히 바뀌는 값의 이력 (SCD2)
+├─ macros/  tests/  analyses/
+└─ .gitignore             target/ · dbt_packages/ · logs/</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">폴더별 기본값 — dbt_project.yml</h4>
+      <pre class="code" data-lang="yaml"><code>name: jaffle_shop
+profile: jaffle_shop      # 접속 정보는 profiles.yml (기본 ~/.dbt/) — 커밋 안 함
+
+models:
+  jaffle_shop:
+    staging:
+      +materialized: view        # 가볍게 · 항상 최신
+    intermediate:
+      +materialized: ephemeral   # 표로 안 남김 (CTE 로 끼워 넣음)
+    marts:
+      +materialized: table       # 사람이 조회 → 미리 계산</code></pre>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:28%">층</th><th>이름</th><th style="width:36%">하는 일</th></tr>
+          <tr><td>staging</td><td><code>stg_&lt;원본&gt;__&lt;표&gt;</code> (밑줄 두 개)</td><td>이름 바꾸기 · 형 변환 · 조인 없음</td></tr>
+          <tr><td>intermediate</td><td><code>int_&lt;무엇&gt;_&lt;동사&gt;</code></td><td>조인 · 피벗 · 재사용 계산</td></tr>
+          <tr><td>marts</td><td><code>orders</code> 또는 <code>fct_</code> · <code>dim_</code></td><td>업무 단위 결과</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 186" role="img" aria-label="dbt 모델이 정제되는 다섯 단계를 셰브론으로 이은 파이프라인. 원본 sources 는 손대지 않고 source 함수로만 읽는다. staging 은 stg 접두사를 붙인 뷰로 원본 하나를 깨끗하게 만든다. intermediate 는 int 접두사의 ephemeral 모델로 여러 staging 을 조합한다. marts 는 테이블로 굳힌 업무 결과다. 마지막에 BI 와 대시보드가 marts 만 읽는다. ref 참조는 왼쪽에서 오른쪽으로만 가며 marts 가 원본을 직접 읽지 않는다.">
+      <text x="16" y="18" class="lbl">데이터는 왼쪽에서 오른쪽으로만 — 폴더 순서가 곧 정제 순서</text>
+      <polygon class="chev" points="16,40 116,40 132,64 116,88 16,88 32,64"/>
+      <text x="76" y="61" class="val" text-anchor="middle">sources</text>
+      <text x="76" y="76" class="ann" text-anchor="middle">원본 · 손 안 댐</text>
+      <polygon class="chev" points="142,40 242,40 258,64 242,88 142,88 158,64"/>
+      <text x="202" y="61" class="val" text-anchor="middle">staging</text>
+      <text x="202" y="76" class="ann" text-anchor="middle">stg_ · view</text>
+      <polygon class="chev" points="268,40 368,40 384,64 368,88 268,88 284,64"/>
+      <text x="328" y="61" class="val" text-anchor="middle">intermediate</text>
+      <text x="328" y="76" class="ann" text-anchor="middle">int_ · ephemeral</text>
+      <polygon class="chev s4" points="394,40 494,40 510,64 494,88 394,88 410,64"/>
+      <text x="454" y="61" class="val" text-anchor="middle">marts</text>
+      <text x="454" y="76" class="ann" text-anchor="middle">table</text>
+      <polygon class="chev" points="520,40 620,40 636,64 620,88 520,88 536,64"/>
+      <text x="578" y="61" class="val" text-anchor="middle">BI</text>
+      <text x="578" y="76" class="ann" text-anchor="middle">대시보드</text>
+      <text x="76" y="108" class="ann" text-anchor="middle">source() 로만</text>
+      <text x="202" y="108" class="ann" text-anchor="middle">원본 1 : 모델 1</text>
+      <text x="328" y="108" class="ann" text-anchor="middle">재사용 조합</text>
+      <text x="454" y="108" class="ann" text-anchor="middle">업무 영역별</text>
+      <text x="578" y="108" class="ann" text-anchor="middle">marts 만 읽음</text>
+      <path class="brk" d="M16 120 L16 126 L510 126 L510 120"/>
+      <text x="263" y="142" class="ann" text-anchor="middle">ref() 는 오른쪽으로만 — marts 가 source() 를 직접 부르면 계층이 무너집니다</text>
+      <text x="16" y="172" class="lbl">staging 을 건너뛴 모델이 하나 생기면 원본 컬럼 이름 변경이 그 모델까지 번집니다</text>
+    </svg>
+    <div class="cap">원본 이름이 바뀌어도 <b>고칠 곳은 staging 한 파일</b> — 그게 층을 나누는 이유입니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">staging 모델 — 이름 바꾸기만</h4>
+      <pre class="code" data-lang="sql"><code>-- models/staging/jaffle_shop/stg_jaffle_shop__orders.sql
+with source as (
+    select * from {{ source('jaffle_shop', 'orders') }}
+),
+renamed as (
+    select
+        id          as order_id,
+        user_id     as customer_id,
+        order_date,
+        status
+    from source
+)
+select * from renamed</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">원본 선언 + 테스트 · 문서 (yml)</h4>
+      <pre class="code" data-lang="yaml"><code># _jaffle_shop__sources.yml
+sources:
+  - name: jaffle_shop
+    schema: raw_jaffle_shop
+    tables:
+      - name: orders
+
+# _jaffle_shop__models.yml
+models:
+  - name: stg_jaffle_shop__orders
+    description: "주문 1건 = 1행"
+    columns:
+      - name: order_id
+        data_tests: [unique, not_null]</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <b>버전 차이</b> — dbt 1.8 부터 yml 의 <code>tests:</code> 가 <code>data_tests:</code> 로 바뀌었습니다(옛 이름도 동작). 공식 가이드는 marts 를 <code>orders</code> 처럼 엔티티 이름 그대로 두는 예를 보여 주고,
+        Kimball 식 <code>fct_</code> · <code>dim_</code> 접두사도 널리 씁니다 — 저장소 안에서 하나로 통일하면 됩니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> <code>models/</code> 아래 <b>staging(정리) → intermediate(조합) → marts(결과)</b>, 이름은 <code>stg_</code> · <code>int_</code> 로 층을 드러내고, <code>ref()</code> 는 오른쪽으로만. 접속 정보(<code>profiles.yml</code>)와 <code>target/</code> 은 커밋하지 않습니다.</div>
+</section>
+
+<!-- ==================== ps08 ==================== -->
+<section class="sec" id="ps08">
+  <div class="sec-head rv">
+    <span class="no">STR 08</span>
+    <h2>여러 DB · <span class="t">샤드 · 환경</span> — 파일은 하나, 설정만 여럿</h2>
+    <p class="lead">
+      dev · stg · prod, 샤드 8개, 고객사별 DB 30개 — 대상이 늘어도 <b>마이그레이션 폴더는 하나</b>입니다. 달라지는 것은 접속 설정과 실행 횟수뿐입니다.
+      환경마다 다른 SQL 파일을 두는 순간 "운영에만 있는 컬럼"이 구조적으로 생깁니다.
+    </p>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">환경 · 샤드가 있는 저장소</h4>
+      <pre class="code" data-lang="text"><code>db/
+├─ migration/          모든 환경 · 모든 샤드가 같은 파일 ★
+├─ repeatable/
+├─ env/
+│  ├─ dev.env          FLYWAY_URL · FLYWAY_USER (비밀번호 X)
+│  ├─ stg.env
+│  └─ prod.env
+└─ shards.txt          샤드 접속 URL 목록 (주석 # 허용)
+
+금지  migration-prod/ · if 환경 == prod 같은 SQL 분기</code></pre>
+      <pre class="code" data-lang="bash"><code># 환경은 설정만 다르고 파일은 같습니다
+set -a; . db/env/stg.env; set +a     # FLYWAY_URL · FLYWAY_USER
+export FLYWAY_PASSWORD="$STG_DB_PASSWORD"   # CI 비밀 변수에서
+flyway migrate</code></pre>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">샤드마다 같은 마이그레이션</h4>
+      <pre class="code" data-lang="bash"><code>#!/usr/bin/env bash
+# db/migrate-shards.sh — 하나라도 실패하면 즉시 멈춤
+set -euo pipefail
+for url in $(grep -v '^#' db/shards.txt); do
+  echo "== $url"
+  flyway -url="$url" migrate
+done
+
+# 끝나면 남은(Pending) 마이그레이션이 있는 샤드가 없는지 확인
+for url in $(grep -v '^#' db/shards.txt); do
+  out=$(flyway -url="$url" info)
+  if grep -q Pending &lt;&lt;&lt; "$out"; then echo "남음: $url"; exit 1; fi
+done</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>샤드 1 은 V21, 샤드 7 은 아직 V20 인 시간이 반드시 있습니다.</b> 그 사이에도 앱은 두 스키마 모두에서 돌아야 합니다.
+        그래서 샤드 · 멀티 DB 환경에서는 아래의 <b>확장-축소</b>가 선택이 아니라 필수입니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="h">블루-그린 · 확장-축소 — <span class="t">마이그레이션과 배포의 순서</span> <span class="lvl h">🔴 고급</span></h3>
+  <p class="tx">
+    다섯 단계 각각의 내용(NULL 허용 추가 → 양쪽 쓰기 → 백필 → 읽기 전환 → 정리)은 🔌 앱 연동 탭 SECTION 09 에 있습니다.
+    여기서 볼 것은 <b>배포 축 위에서 앱 버전과 마이그레이션이 어떻게 겹치는지</b>입니다. 블루-그린 배포는 옛 버전과 새 버전이 <b>같은 DB 를 동시에</b> 씁니다.
+  </p>
+  <div class="diag rv">
+    <svg viewBox="0 0 680 248" role="img" aria-label="확장-축소 마이그레이션을 배포 순서 위에 놓은 간트 차트. 첫 배포 직전에 V20 확장 마이그레이션으로 새 컬럼을 NULL 허용으로 추가한다. 앱 v1 은 옛 컬럼만 쓰며 두 번째 배포까지 돌고, 앱 v2 는 두 번째 배포부터 옛 컬럼과 새 컬럼 모두에 쓴다. v1 과 v2 가 함께 도는 구간이 블루-그린 구간이다. 백필 배치가 기존 행을 청크로 채우고, 앱 v3 가 네 번째 배포 무렵부터 새 컬럼만 읽는다. v2 가 모두 내려간 뒤 다섯 번째 배포에서야 V24 축소 마이그레이션으로 옛 컬럼을 지운다.">
+      <text x="16" y="18" class="lbl">확장-축소 — 옛 컬럼을 지우는 것은 맨 마지막, 별도 배포입니다</text>
+      <path class="gr" d="M150 30 L150 200"/>
+      <path class="gr" d="M248 30 L248 200"/>
+      <path class="gr" d="M346 30 L346 200"/>
+      <path class="gr" d="M444 30 L444 200"/>
+      <path class="gr" d="M542 30 L542 200"/>
+      <path class="ax" d="M150 200 L640 200"/>
+      <text x="150" y="216" class="tk" text-anchor="middle">배포 1</text>
+      <text x="248" y="216" class="tk" text-anchor="middle">배포 2</text>
+      <text x="346" y="216" class="tk" text-anchor="middle">배포 3</text>
+      <text x="444" y="216" class="tk" text-anchor="middle">배포 4</text>
+      <text x="542" y="216" class="tk" text-anchor="middle">배포 5</text>
+
+      <text x="16" y="48" class="ann">V20 확장 · 컬럼 추가</text>
+      <rect class="bar" x="140" y="36" width="20" height="16"/>
+      <text x="168" y="48" class="ann ok-t">NULL 허용으로 먼저 추가</text>
+      <text x="16" y="74" class="ann">앱 v1 · 옛 컬럼만</text>
+      <rect class="bar-mut" x="150" y="62" width="148" height="16"/>
+      <text x="306" y="74" class="ann">v1 · v2 가 함께 도는 구간</text>
+      <text x="16" y="100" class="ann">앱 v2 · 양쪽에 씀</text>
+      <rect class="bar" x="248" y="88" width="196" height="16"/>
+      <text x="452" y="100" class="ann">옛 · 새 컬럼 모두 씀</text>
+      <text x="16" y="126" class="ann">백필 배치</text>
+      <rect class="bar-mut" x="300" y="114" width="100" height="16"/>
+      <text x="408" y="126" class="ann">청크로 나눠 채움</text>
+      <text x="16" y="152" class="ann">앱 v3 · 새 컬럼만 읽음</text>
+      <rect class="bar" x="420" y="140" width="220" height="16"/>
+      <text x="412" y="152" class="ann" text-anchor="end">읽기 전환</text>
+      <text x="16" y="178" class="ann">V24 축소 · 옛 컬럼 DROP</text>
+      <rect x="532" y="166" width="20" height="16" style="fill:rgba(251,113,133,.22);stroke:rgba(251,113,133,.55);stroke-width:1;rx:3"/>
+      <text x="524" y="178" class="ann rs-t" text-anchor="end">v2 가 모두 내려간 뒤에만</text>
+      <path class="dim-ln" d="M248 192 L298 192"/>
+
+      <text x="16" y="240" class="lbl">샤드가 여럿이면 V20 · V24 가 샤드마다 다른 시각에 적용됩니다 — 그래도 안전해야 합니다</text>
+    </svg>
+    <div class="cap">v1 · v2 가 겹치는 구간(축 위 치수선) 때문에 <b>한 배포 안에서 "추가 + 삭제"를 같이 하지 않습니다</b>.</div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 환경 · 샤드가 몇 개든 <b>마이그레이션 폴더는 하나</b>, 다른 것은 접속 설정과 실행 횟수. 여러 버전이 같은 DB 를 쓰는 구간이 있으니 <b>확장은 배포 전, 축소는 옛 버전이 사라진 뒤 별도 배포</b>로 합니다.</div>
+</section>
+
+<!-- ==================== ps09 ==================== -->
+<section class="sec" id="ps09">
+  <div class="sec-head rv">
+    <span class="no">STR 09</span>
+    <h2>리뷰 · <span class="t">CI</span> — 사람이 보기 전에 기계가 거른다</h2>
+    <p class="lead">
+      DB 변경 리뷰가 어려운 이유는 <b>문법이 아니라 운영에서의 결과</b>(잠금 시간 · 구버전 앱 호환)를 봐야 하기 때문입니다.
+      그래서 문법 · 형식 · 알려진 위험 패턴 · "빈 DB 에 전부 적용되는가"는 CI 가 먼저 거르고, 사람은 <b>설계와 운영 영향</b>만 봅니다.
+    </p>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 164" role="img" aria-label="DB 변경 PR 이 거치는 다섯 단계 흐름도. 첫째 sqlfluff 로 SQL 린트, 둘째 오래 잠그는 DDL 과 DROP 을 찾는 위험 DDL 검사, 셋째 빈 DB 에 V1 부터 전부 적용, 넷째 되돌린 뒤 다시 적용, 다섯째 체크리스트로 사람이 리뷰한다. 앞의 네 단계는 자동이며 모두 통과해야 리뷰를 요청한다.">
+      <text x="16" y="18" class="lbl">DB 변경 PR — 앞의 넷은 기계, 마지막 하나만 사람</text>
+      <rect class="bx" x="16" y="40" width="112" height="54"/>
+      <text x="72" y="63" class="val" text-anchor="middle">① 린트</text>
+      <text x="72" y="80" class="ann" text-anchor="middle">sqlfluff</text>
+      <path class="fl ar" d="M132 67 L146 67"/>
+      <rect class="bx" x="150" y="40" width="112" height="54"/>
+      <text x="206" y="63" class="val" text-anchor="middle">② 위험 DDL</text>
+      <text x="206" y="80" class="ann" text-anchor="middle">잠금 · DROP 탐지</text>
+      <path class="fl ar" d="M266 67 L280 67"/>
+      <rect class="bx bx-fw" x="284" y="40" width="112" height="54"/>
+      <text x="340" y="63" class="val" text-anchor="middle">③ 빈 DB 적용</text>
+      <text x="340" y="80" class="ann" text-anchor="middle">V1 부터 전부</text>
+      <path class="fl ar" d="M400 67 L414 67"/>
+      <rect class="bx" x="418" y="40" width="112" height="54"/>
+      <text x="474" y="63" class="val" text-anchor="middle">④ 되돌리기</text>
+      <text x="474" y="80" class="ann" text-anchor="middle">down → up 다시</text>
+      <path class="fl ar" d="M534 67 L548 67"/>
+      <rect class="bx bx-ok" x="552" y="40" width="112" height="54"/>
+      <text x="608" y="63" class="val" text-anchor="middle">⑤ 사람 리뷰</text>
+      <text x="608" y="80" class="ann" text-anchor="middle">설계 · 운영 영향</text>
+      <path class="brk" d="M16 104 L16 110 L530 110 L530 104"/>
+      <text x="273" y="126" class="ann" text-anchor="middle">자동 — 하나라도 실패하면 리뷰를 요청하지 않습니다</text>
+      <text x="16" y="154" class="lbl">③ 이 가장 중요합니다 — 깨진 마이그레이션은 새 환경을 만들 때에야 드러나기 때문입니다</text>
+    </svg>
+    <div class="cap">붉은 칸 — <b>"빈 DB 에 처음부터 전부"</b>가 STR 01 의 기준을 매번 검사합니다.</div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">CI — 빈 PostgreSQL 에 전부 적용 (GitHub Actions)</h4>
+      <pre class="code" data-lang="yaml"><code>jobs:
+  db:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_PASSWORD: ci }   # CI 전용 일회용 컨테이너
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx install sqlfluff &amp;&amp; sqlfluff lint db/
+      - run: python db/ci/check_ddl.py $(git diff --name-only --diff-filter=A origin/main -- db/migration)
+      - name: migrate on empty DB (twice = no-op)
+        run: |
+          for i in 1 2; do
+            docker run --rm --network host -v "$PWD/db/migration:/flyway/sql" \
+              flyway/flyway -url=jdbc:postgresql://localhost:5432/postgres \
+              -user=postgres -password=ci migrate
+          done</code></pre>
+      <div class="note info" style="margin-bottom:0">
+        <code>git diff origin/main</code> 을 쓰려면 checkout 에 <code>fetch-depth: 0</code> 이 필요합니다.
+        되돌리기 검사(④)는 down 을 지원하는 도구에서 <code>alembic upgrade head &amp;&amp; alembic downgrade base &amp;&amp; alembic upgrade head</code> 처럼 왕복시킵니다.
+        Flyway 무료 판처럼 down 이 없으면 ④ 대신 <b>"고치는 V 파일을 하나 더 쓰는 법"</b>을 PR 설명에 적게 합니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">위험 DDL 검사 — check_ddl.py (실행 확인)</h4>
+      <pre class="code" data-lang="python"><code>RULES = [  # PostgreSQL 기준 · 주석(--)은 지우고 검사
+  (r"CREATE\s+(UNIQUE\s+)?INDEX\s+(?!CONCURRENTLY)",
+   "CONCURRENTLY 없는 인덱스 생성 — 쓰기 차단"),
+  (r"ALTER\s+COLUMN\s+\w+\s+(SET\s+DATA\s+)?TYPE",
+   "컬럼 타입 변경 — 테이블 재작성 가능"),
+  (r"SET\s+NOT\s+NULL", "SET NOT NULL — 전체 검사 동안 잠금"),
+  (r"ADD\s+(CONSTRAINT\s+\w+\s+)?FOREIGN\s+KEY(?![^;]*NOT\s+VALID)",
+   "FK 를 NOT VALID 없이 추가 — 전체 검증"),
+  (r"DROP\s+(COLUMN|TABLE)", "DROP — 축소 단계인가?"),
+]</code></pre>
+      <pre class="code" data-lang="text"><code>$ python check_ddl.py V7__ix.sql V8__ix_ok.sql V9__fk_ok.sql V10__bad.sql
+V7__ix.sql: CONCURRENTLY 없는 인덱스 생성 — 쓰기 차단
+V10__bad.sql: 컬럼 타입 변경 — 테이블 재작성 가능
+V10__bad.sql: FK 를 NOT VALID 없이 추가 — 전체 검증
+# exit 1 → CI 실패 · V8(CONCURRENTLY) · V9(NOT VALID + VALIDATE) 는 통과</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        직접 만들기 싫다면 PostgreSQL 마이그레이션 전용 린터 <b>squawk</b> 가 같은 종류의 규칙을 갖고 있습니다.
+        <code>CREATE INDEX CONCURRENTLY</code> 는 트랜잭션 안에서 못 돌므로 <b>그 문장 하나만 든 파일</b>로 분리해 두는 것이 안전합니다.
+        잠금이 왜 걸리는지는 ⚙️ 설계 · 튜닝 탭의 락 섹션 참고.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 rv">
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">.sqlfluff — 저장소 루트에 하나</h4>
+      <pre class="code" data-lang="ini"><code>[sqlfluff]
+dialect = postgres
+templater = jinja        # dbt 프로젝트면 dbt
+max_line_length = 120
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = upper</code></pre>
+      <div class="note warn" style="margin-bottom:0">
+        <b>기존 SQL 이 많은 저장소에 처음 걸면 수천 건이 나옵니다.</b> 처음엔 CI 에서 <b>새로 추가된 파일만</b> 검사하고, <code>sqlfluff fix</code> 로 한 번에 고치는 PR 을 따로 냅니다.
+      </div>
+    </div>
+    <div class="card">
+      <h4 class="mini" style="margin-top:0">사람 리뷰 체크리스트</h4>
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:8%">#</th><th>확인할 것</th></tr>
+          <tr><td>1</td><td>이미 나간 V 파일을 고치지 않았나 · 변경 하나 = 파일 하나인가</td></tr>
+          <tr><td>2</td><td>지금 운영 중인 <b>구버전 앱</b>이 이 스키마에서도 도나 (확장 단계인가)</td></tr>
+          <tr><td>3</td><td>큰 테이블이면 스테이징에서 <b>걸린 시간</b>을 PR 에 적었나</td></tr>
+          <tr><td>4</td><td>새 인덱스는 <b>어떤 쿼리</b>를 위한 것인가 (실행 계획 첨부)</td></tr>
+          <tr><td>5</td><td>이름 규칙 · 스키마 지정 (<code>sales.orders</code>) · 권한 자동 부여</td></tr>
+          <tr><td>6</td><td>대량 UPDATE 는 마이그레이션이 아니라 배치로 뺐나</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> CI 가 <b>린트 → 위험 DDL → 빈 DB 에 전부 적용(두 번) → 되돌리기</b>를 먼저 돌리고, 사람은 체크리스트로 <b>구버전 호환 · 잠금 시간 · 인덱스의 이유</b>만 봅니다.</div>
+</section>
+
+<!-- ==================== ps10 ==================== -->
+<section class="sec" id="ps10">
+  <div class="sec-head rv">
+    <span class="no">STR 10</span>
+    <h2>유형 · 규모별 <span class="t">권장 구조 한 장</span> — 그리고 문서화</h2>
+    <p class="lead">
+      지금까지의 구조를 한 표로 모았습니다. 대부분의 팀은 둘째 줄(서비스 하나 · 앱 저장소의 <code>db/</code>)에서 시작해 오래 머뭅니다.
+      마지막으로 ERD · 데이터 사전을 <b>손으로 그리지 않고 스키마에서 생성</b>하는 법과, 규칙을 사람이 아니라 도구가 지키게 하는 법을 정리합니다.
+    </p>
+  </div>
+
+  <div class="tw rv">
+    <table class="cheat">
+      <tr><th style="width:20%">유형 · 규모</th><th>권장 구조</th><th style="width:26%">흔한 도구</th></tr>
+      <tr><td>혼자 · 내장 SQLite 앱</td><td><code>migrations/</code> 한 폴더 · 앱 시작 때 적용</td><td>Alembic · 직접 구현(<code>PRAGMA user_version</code>)</td></tr>
+      <tr><td><b>서비스 1 · 팀 2~8명</b></td><td><b>앱 저장소 <code>db/</code> = migration + repeatable + seed/dev + grants</b></td><td>Flyway · Alembic · Prisma · EF Core</td></tr>
+      <tr><td>서비스 여러 개 (MSA)</td><td>서비스마다 자기 <code>db/</code> · 남의 데이터는 API · 이벤트</td><td>도구를 하나로 통일하면 CI 재사용</td></tr>
+      <tr><td>레거시 공유 DB</td><td>별도 DB 저장소 + 버전 태그 + <code>CODEOWNERS</code> + CHANGELOG</td><td>Liquibase · Flyway</td></tr>
+      <tr><td>샤드 · 테넌트별 DB</td><td>폴더 하나 · 순회 실행 스크립트 · 샤드별 버전 확인</td><td>Flyway · 직접 스크립트</td></tr>
+      <tr><td>프로시저 중심 (Oracle 등)</td><td><code>repeatable/</code> 아래 패키지 · 프로시저를 R__ 로 · DBA 리뷰</td><td>Liquibase · Flyway</td></tr>
+      <tr><td>분석 웨어하우스</td><td>dbt 저장소 staging → intermediate → marts</td><td>dbt · sqlfluff(dbt templater)</td></tr>
+    </table>
+  </div>
+
+  <div class="diag rv">
+    <svg viewBox="0 0 680 364" role="img" aria-label="DB 코드를 어디에 어떤 구조로 둘지 고르는 결정 흐름도. 먼저 분석과 리포트용 웨어하우스인지 묻고 그렇다면 dbt 저장소를 쓴다. 아니면 DB 에 쓰는 앱이 하나뿐인지 묻고 그렇다면 앱 저장소의 db 폴더가 답이다. 여러 앱이 쓴다면 남의 테이블에 쓰는 것을 지금 끊을 수 있는지 묻고, 끊을 수 있으면 서비스별 스키마로 나눠 각 앱 저장소로 옮기고, 끊을 수 없으면 별도 DB 저장소에 CODEOWNERS 와 버전 태그를 둔다. 샤드와 테넌트 수는 이 결정과 무관하며 폴더는 하나로 두고 실행만 순회한다.">
+      <text x="16" y="18" class="lbl">DB 코드는 어디에 — 마름모가 질문, 초록 상자가 가장 흔한 답</text>
+      <polygon class="dia" points="120,34 216,62 120,90 24,62"/>
+      <text x="120" y="59" class="ann" text-anchor="middle">분석 · 리포트용</text>
+      <text x="120" y="71" class="ann" text-anchor="middle">웨어하우스인가?</text>
+      <path class="ln ar" d="M120 94 L120 118"/>
+      <text x="128" y="110" class="ann">아니오</text>
+      <path class="ln ar" d="M220 62 L282 62"/>
+      <text x="238" y="56" class="ann">예</text>
+      <rect class="bx" x="286" y="42" width="150" height="40"/>
+      <text x="361" y="60" class="ann" text-anchor="middle">dbt 프로젝트 저장소</text>
+      <text x="361" y="74" class="ann" text-anchor="middle">STR 07</text>
+
+      <polygon class="dia" points="120,122 224,152 120,182 16,152"/>
+      <text x="120" y="148" class="ann" text-anchor="middle">DB 에 쓰는 앱이</text>
+      <text x="120" y="160" class="ann" text-anchor="middle">하나뿐인가?</text>
+      <path class="ln ar" d="M228 152 L282 152"/>
+      <text x="238" y="146" class="ann">예</text>
+      <rect class="bx bx-ok" x="286" y="132" width="150" height="40"/>
+      <text x="361" y="150" class="ann ok-t" text-anchor="middle">앱 저장소의 db/</text>
+      <text x="361" y="164" class="ann" text-anchor="middle">STR 01 · 가장 흔한 답</text>
+      <path class="ln ar" d="M120 186 L120 210"/>
+      <text x="128" y="202" class="ann">아니오</text>
+
+      <polygon class="dia" points="120,214 216,240 120,266 24,240"/>
+      <text x="120" y="237" class="ann" text-anchor="middle">남의 테이블 쓰기를</text>
+      <text x="120" y="249" class="ann" text-anchor="middle">지금 끊을 수 있나?</text>
+      <path class="ln ar" d="M220 240 L282 240"/>
+      <text x="238" y="234" class="ann">예</text>
+      <rect class="bx bx-ok" x="286" y="220" width="150" height="40"/>
+      <text x="361" y="238" class="ann ok-t" text-anchor="middle">서비스별 스키마로 분리</text>
+      <text x="361" y="252" class="ann" text-anchor="middle">각 앱 저장소로 · STR 03</text>
+      <path class="ln ar" d="M120 270 L120 294"/>
+      <text x="128" y="286" class="ann">아니오</text>
+      <rect class="bx" x="45" y="298" width="150" height="40"/>
+      <text x="120" y="316" class="ann" text-anchor="middle">별도 DB 저장소</text>
+      <text x="120" y="330" class="ann" text-anchor="middle">CODEOWNERS · 버전 태그</text>
+
+      <text x="466" y="106" class="ann">샤드 · 테넌트가 몇 개든 폴더는 하나</text>
+      <text x="466" y="120" class="ann">— 실행만 순회합니다 (STR 08)</text>
+      <text x="236" y="318" class="ann">별도 저장소는 목표가 아니라</text>
+      <text x="236" y="332" class="ann">경계를 긋는 동안의 중간 단계</text>
+      <text x="16" y="356" class="lbl">모든 가지가 답에 닿습니다 — 답이 없는 경우는 "아직 운영 DB 가 없다" 뿐</text>
+    </svg>
+    <div class="cap">세 질문이면 끝납니다 — <b>대부분은 두 번째 마름모에서 "예"</b>로 앱 저장소에 둡니다.</div>
+  </div>
+
+  <h3 class="sub" data-lv="m">문서화 — <span class="t">ERD 와 데이터 사전은 생성한다</span> <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <pre class="code" data-lang="text"><code>docs/
+└─ db/                 CI 가 생성 · 손으로 고치지 않음
+   ├─ README.md        테이블 목록 · 설명 (COMMENT 에서)
+   ├─ schema.svg       ERD
+   └─ sales.orders.md  테이블별 컬럼 · 제약 · 관계</code></pre>
+      <pre class="code" data-lang="sql"><code>-- 데이터 사전의 원본은 DB 의 COMMENT — 마이그레이션에 같이 씀
+COMMENT ON TABLE  sales.orders        IS '주문 1건 = 1행';
+COMMENT ON COLUMN sales.orders.amount IS '부가세 포함 결제 금액(원)';
+COMMENT ON COLUMN sales.orders.status IS 'order_status.code 참조';</code></pre>
+      <pre class="code" data-lang="bash"><code># 빈 DB 에 마이그레이션 적용(STR 09 의 ③) 직후 — tbls 로 문서 생성
+tbls doc "$TBLS_DSN" docs/db --force
+git diff --exit-code docs/db   # 커밋된 문서가 최신이 아니면 실패</code></pre>
+    </div>
+    <div class="card">
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:30%">무엇</th><th>어디서 생성</th></tr>
+          <tr><td>ERD · 테이블 문서</td><td>마이그레이션을 적용한 DB → <b>tbls</b> · <b>SchemaSpy</b> 같은 생성기</td></tr>
+          <tr><td>컬럼 설명 (데이터 사전)</td><td><code>COMMENT ON</code> — 마이그레이션 안에 · DBeaver 같은 도구에도 그대로 보임</td></tr>
+          <tr><td>분석 모델 계보</td><td><code>dbt docs generate</code> — yml 의 description 에서</td></tr>
+          <tr><td>설계 의도 · 결정</td><td>사람이 쓰는 <code>docs/adr/</code> — 생성할 수 없는 유일한 부분</td></tr>
+        </table>
+      </div>
+      <div class="note warn" style="margin-bottom:0">
+        <b>손으로 그린 ERD 는 그린 다음 날부터 틀립니다.</b> 그림 도구의 파일을 저장소에 두더라도 원본은 스키마이고, 생성된 문서가 그 사실을 매 PR 마다 확인하게 둡니다.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub" data-lv="m">규칙을 도구로 강제하기 <span class="lvl m">🟡 중급</span></h3>
+  <div class="grid2 rv">
+    <div class="card">
+      <div class="tw">
+        <table class="cheat">
+          <tr><th style="width:42%">규칙</th><th>지키게 하는 장치</th></tr>
+          <tr><td>나간 V 파일 수정 금지</td><td>도구의 체크섬 검사 (<code>flyway validate</code>) · CI 에서 매번</td></tr>
+          <tr><td>오래 잠그는 DDL 금지</td><td><code>check_ddl.py</code> · squawk (STR 09)</td></tr>
+          <tr><td>명명 규칙</td><td>카탈로그 조회 테스트 — 오른쪽 SQL 이 0행이어야 통과</td></tr>
+          <tr><td>DB 변경은 DBA 리뷰</td><td><code>CODEOWNERS</code> 에 <code>/db/ @org/dba</code> + 브랜치 보호</td></tr>
+          <tr><td>앱은 DDL 불가</td><td>역할 분리 — 앱은 app_rw 로만 접속 (STR 04)</td></tr>
+          <tr><td>문서 최신</td><td>CI 에서 재생성 후 <code>git diff --exit-code</code></td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <pre class="code" data-lang="sql"><code>-- CI 의 ③ 직후 실행 — 규칙을 어긴 인덱스 이름 찾기 (PostgreSQL)
+SELECT schemaname, tablename, indexname
+FROM   pg_indexes
+WHERE  schemaname IN ('core', 'sales', 'stock')
+AND    indexname !~ '^(pk|uq|ix)_';
+-- PK · UNIQUE 제약의 인덱스는 제약 이름을 따라가므로
+-- 제약에 pk_ · uq_ 를 붙였다면 여기서 함께 걸러집니다</code></pre>
+      <div class="note tip" style="margin-bottom:0">
+        <b>도구는 "확신 있는 만큼"만 고르세요.</b> 위의 장치는 모두 DB 카탈로그 · 체크섬 · 정규식처럼 단순한 것들입니다.
+        여기서 시작해 규칙이 늘면 그때 전용 린터를 붙여도 늦지 않습니다.
+      </div>
+    </div>
+  </div>
+
+  <div class="ez mid"><b>정리 —</b> 대부분은 <b>앱 저장소의 <code>db/</code></b>로 충분하고, 여러 앱 · 분석 · 샤드일 때만 표의 아래 줄로 갑니다. ERD · 데이터 사전은 <b>스키마에서 생성</b>하고, 규칙은 체크섬 · 린트 · 카탈로그 테스트 · CODEOWNERS 로 <b>도구가 지키게</b> 합니다.</div>
+</section>
+
+</div><!-- /pane-struct -->
