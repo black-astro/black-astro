@@ -46,7 +46,7 @@ const toggle = (id: string) => (open.value[id] = !open.value[id])
         </div>
 
         <button class="case-toggle" :aria-expanded="!!open[c.id]" @click="toggle(c.id)">
-          <span>{{ open[c.id] ? '접기' : '과정 읽기' }}</span>
+          <span>{{ open[c.id] ? '접기' : '자세히 보기' }}</span>
           <span class="ct-chev" aria-hidden="true">›</span>
         </button>
 
@@ -62,7 +62,7 @@ const toggle = (id: string) => (open.value[id] = !open.value[id])
             </div>
 
             <div class="case-learned">
-              <span class="cl-label">돌아보면</span>
+              <span class="cl-label">정리하면</span>
               <p>{{ c.learned }}</p>
             </div>
           </div>
@@ -72,7 +72,7 @@ const toggle = (id: string) => (open.value[id] = !open.value[id])
 
     <!-- 어디서 무엇을 -->
     <section class="sub">
-      <h3 v-reveal class="sub-title">어떤 경험이 어디에 있는지</h3>
+      <h3 v-reveal class="sub-title">주제별로 찾아보기</h3>
       <div v-reveal class="map card">
         <div v-for="m in capabilityMap" :key="m.capability" class="map-row">
           <div class="map-cap">{{ m.capability }}</div>

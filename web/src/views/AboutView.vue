@@ -15,7 +15,7 @@ const facts = [
 
 <template>
   <div class="page container">
-    <SectionHeader eyebrow="about" title="어떤 개발자인지" :desc="profile.headline" />
+    <SectionHeader eyebrow="about" title="소개" :desc="profile.headline" />
 
     <div class="about-grid">
       <!-- 소개글 -->
@@ -49,7 +49,7 @@ const facts = [
 
     <!-- 핵심 역량 -->
     <section class="sub">
-      <h3 v-reveal class="sub-title"><AppIcon name="award" :size="20" class="sub-ic" />잘하는 것</h3>
+      <h3 v-reveal class="sub-title"><AppIcon name="award" :size="20" class="sub-ic" />주로 하는 일</h3>
       <div class="comp-list">
         <article v-for="(c, i) in competencies" :key="c.title" v-reveal="i % 2" v-tilt="4" class="comp-item card">
           <div class="comp-ic"><AppIcon :name="c.icon" :size="19" /></div>
@@ -63,7 +63,7 @@ const facts = [
 
     <!-- 보유 기술 -->
     <section class="sub">
-      <h3 v-reveal class="sub-title"><AppIcon name="settings" :size="20" class="sub-ic" />쓰는 도구</h3>
+      <h3 v-reveal class="sub-title"><AppIcon name="settings" :size="20" class="sub-ic" />사용하는 기술</h3>
       <div class="skill-groups">
         <div v-for="(g, i) in skillGroups" :key="g.category" v-reveal:scale="i % 2" v-tilt="3" class="skill-group card">
           <div class="sg-cat">{{ g.category }}</div>

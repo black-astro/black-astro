@@ -36,7 +36,7 @@ async function goGuides() {
       </div>
     </div>
     <div class="container ft-copy">
-      © {{ new Date().getFullYear() }} {{ profile.name }} · 직접 만들고 고쳐 가는 페이지
+      © {{ new Date().getFullYear() }} {{ profile.name }} · 직접 만들고 관리하는 블로그
     </div>
   </footer>
 </template>
@@ -72,6 +72,8 @@ async function goGuides() {
 }
 .ft-links {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   align-items: center;
   gap: 16px;
 }

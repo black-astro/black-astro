@@ -8,8 +8,8 @@ import AppIcon from '@/components/AppIcon.vue'
   <div class="page container">
     <SectionHeader
       eyebrow="oss"
-      title="만들어서 공개한 것들"
-      desc="쓰다가 불편해서 직접 만든 도구들입니다. 라이브러리는 Maven Central에, CLI는 npm에 올려 두었습니다."
+      title="직접 만든 것"
+      desc="쓰다가 불편해서 직접 만든 도구들입니다. 라이브러리는 Maven Central에, CLI는 npm에 올려 뒀습니다."
     />
 
     <div class="oss-list">

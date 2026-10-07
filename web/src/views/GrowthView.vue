@@ -10,7 +10,7 @@ import AppIcon from '@/components/AppIcon.vue'
 
     <!-- 학습 프로젝트 -->
     <section>
-      <h3 v-reveal class="sub-title">손으로 만들어 보는 중</h3>
+      <h3 v-reveal class="sub-title">직접 만들어 보는 중</h3>
       <div class="learn-grid">
         <article v-for="(l, i) in learningProjects" :key="l.name" v-reveal:scale="i" v-tilt="4" class="learn card">
           <div class="learn-head">
@@ -48,8 +48,8 @@ import AppIcon from '@/components/AppIcon.vue'
     </section>
 
     <p v-reveal class="growth-note">
-      실무에서 손에 익은 건 대용량 처리, DB, 동시성, 운영입니다. 지금은 그 위에 실시간 트래픽 설계와 관측성을 하나씩
-      얹어 보는 중이고, 진행하면서 여기에 계속 적어 둘 생각입니다.
+      실무에서 많이 다뤄 본 건 대용량 처리, DB, 동시성, 운영입니다. 요즘은 여기에 실시간 트래픽 설계와 관측성을 하나씩
+      더해 보고 있고, 진행하는 대로 이곳에 정리하겠습니다.
     </p>
   </div>
 </template>

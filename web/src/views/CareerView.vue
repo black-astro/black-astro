@@ -17,8 +17,8 @@ function toggle(id: string) {
   <div class="page container">
     <SectionHeader
       eyebrow="career"
-      title="일해 온 기록"
-      desc="회사에서 맡아 온 서버와 배치를 정리했습니다. 제목을 누르면 어떤 문제가 있었고 어떻게 풀었는지 펼쳐집니다."
+      title="회사에서 한 일"
+      desc="회사에서 맡아 온 서버와 배치를 정리했습니다. 제목을 누르면 어떤 문제가 있었고 어떻게 해결했는지 볼 수 있습니다."
     />
 
     <!-- 타임라인 -->
@@ -97,9 +97,9 @@ function toggle(id: string) {
 
     <!-- 인프라 -->
     <section class="sub">
-      <h3 v-reveal class="sub-title">곁들여 해 온 일</h3>
+      <h3 v-reveal class="sub-title">그 밖에 맡은 일</h3>
       <p v-reveal class="sub-lead">
-        개발 업무 사이사이 꾸준히 손대 온 인프라와 도구 작업입니다.
+        개발 업무와 함께 맡아 온 서버 운영과 인프라 작업입니다.
       </p>
 
       <div class="infra-grid">

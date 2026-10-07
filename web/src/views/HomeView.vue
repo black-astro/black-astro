@@ -10,13 +10,18 @@ import TypeCycle from '@/components/TypeCycle.vue'
 import CountUp from '@/components/CountUp.vue'
 import TechMarquee from '@/components/TechMarquee.vue'
 
-const doing = ['발송 서버를 다듬는', '느린 쿼리를 뜯어보는', '대용량 배치를 줄이는', '장애를 끝까지 쫓는']
+const doing = ['PASS 발송 서버 정리', '느린 쿼리 튜닝', 'KT 청구서 배치 개선', 'Kotlin 공부']
 
 // 흐르는 기술 목록 — 그룹 순서대로 펼치고 중복은 뺀다
 const stack = [...new Set(skillGroups.flatMap((g) => g.items))].slice(0, 32)
 
 const opened = ref<Record<number, boolean>>({})
 const toggle = (i: number) => (opened.value[i] = !opened.value[i])
+
+// 해시 라우터라 #numbers 앵커를 쓰면 라우트로 해석된다. 직접 내려 준다
+function scrollToNumbers() {
+  document.getElementById('numbers')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 </script>
 
 <template>
@@ -32,7 +37,7 @@ const toggle = (i: number) => (opened.value[i] = !opened.value[i])
         <ScrambleText :text="profile.name" :delay="150" /><span class="hero-role"> — {{ profile.role }}</span>
       </h1>
       <p class="hero-doing" v-reveal="1">
-        요즘은 <span class="accent"><TypeCycle :words="doing" /></span> 일을 합니다.
+        요즘은 <span class="accent"><TypeCycle :words="doing" /></span> 중입니다.
       </p>
       <p class="hero-line" v-reveal="2">{{ profile.headline }}</p>
       <p class="hero-sub" v-reveal="3">{{ profile.subHeadline }}</p>
@@ -47,7 +52,7 @@ const toggle = (i: number) => (opened.value[i] = !opened.value[i])
         <RouterLink v-magnetic to="/portfolio" class="btn btn-primary">
           문제 해결 노트 <AppIcon name="arrow" :size="17" />
         </RouterLink>
-        <RouterLink v-magnetic to="/career" class="btn btn-ghost">일해 온 기록</RouterLink>
+        <RouterLink v-magnetic to="/career" class="btn btn-ghost">회사에서 한 일</RouterLink>
         <a
           v-for="l in links"
           :key="l.label"
@@ -63,7 +68,7 @@ const toggle = (i: number) => (opened.value[i] = !opened.value[i])
         </a>
       </div>
     </div>
-    <a href="#numbers" class="scroll-hint" aria-label="아래로">
+    <a href="#/" class="scroll-hint" aria-label="아래로" @click.prevent="scrollToNumbers">
       <span class="mouse"><span class="wheel"></span></span>
     </a>
   </section>
@@ -76,8 +81,8 @@ const toggle = (i: number) => (opened.value[i] = !opened.value[i])
   <section id="numbers" class="container block">
     <div class="block-head" v-reveal>
       <span class="eyebrow">numbers</span>
-      <h2 class="section-title">숫자로 남은 것들</h2>
-      <p class="block-lead">측정한 환경은 각 항목 안에 같이 적었습니다. 카드를 누르면 과정을 펼쳐 볼 수 있습니다.</p>
+      <h2 class="section-title">기억에 남는 작업</h2>
+      <p class="block-lead">숫자마다 어떤 환경에서 측정했는지 같이 적었습니다. 카드를 누르면 자세한 내용을 볼 수 있습니다.</p>
     </div>
     <div class="stat-grid">
       <article
@@ -93,7 +98,7 @@ const toggle = (i: number) => (opened.value[i] = !opened.value[i])
             <CountUp :value="a.metric" /><span v-if="a.unit" class="stat-unit">{{ a.unit }}</span>
           </span>
           <span class="stat-label">{{ a.label }}</span>
-          <span class="stat-more">{{ opened[i] ? '접기' : '과정 보기' }} <span class="stat-chev" aria-hidden="true">›</span></span>
+          <span class="stat-more">{{ opened[i] ? '접기' : '자세히 보기' }} <span class="stat-chev" aria-hidden="true">›</span></span>
         </button>
         <div class="fold" :class="{ on: opened[i] }">
           <div class="fold-in">
@@ -104,11 +109,11 @@ const toggle = (i: number) => (opened.value[i] = !opened.value[i])
     </div>
   </section>
 
-  <!-- 붙잡고 있는 것 -->
+  <!-- 자주 고민하는 것 -->
   <section class="container block">
     <div class="block-head" v-reveal>
       <span class="eyebrow">focus</span>
-      <h2 class="section-title">주로 붙잡고 있는 문제들</h2>
+      <h2 class="section-title">자주 고민하는 것</h2>
     </div>
     <div class="comp-grid">
       <article v-for="(c, i) in competencies" :key="c.title" v-reveal:scale="i % 3" v-tilt class="comp card">
@@ -118,7 +123,7 @@ const toggle = (i: number) => (opened.value[i] = !opened.value[i])
       </article>
     </div>
     <div class="home-cta" v-reveal>
-      <RouterLink v-magnetic to="/about" class="btn btn-ghost">쓰는 기술 전체 보기 <AppIcon name="arrow" :size="16" /></RouterLink>
+      <RouterLink v-magnetic to="/about" class="btn btn-ghost">사용하는 기술 전체 보기 <AppIcon name="arrow" :size="16" /></RouterLink>
     </div>
   </section>
 
@@ -126,7 +131,7 @@ const toggle = (i: number) => (opened.value[i] = !opened.value[i])
   <section id="guides" class="container block">
     <div class="block-head" v-reveal>
       <span class="eyebrow">side</span>
-      <h2 class="section-title">만들어 둔 학습 페이지</h2>
+      <h2 class="section-title">직접 만든 학습 페이지</h2>
     </div>
     <div class="guide-grid">
       <a v-for="(g, i) in guides" :key="g.key" v-reveal="i" v-tilt="3" :href="g.href" class="guide card" :title="g.title">
