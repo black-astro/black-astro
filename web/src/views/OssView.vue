@@ -7,13 +7,20 @@ import AppIcon from '@/components/AppIcon.vue'
 <template>
   <div class="page container">
     <SectionHeader
-      eyebrow="Open Source"
-      title="오픈소스 활동"
-      desc="필요한 도구는 직접 만들어 공개합니다. Spring Boot Starter를 Maven Central에 정식 배포하고, CLI·데스크톱 도구를 npm·PyInstaller로 배포했습니다."
+      eyebrow="oss"
+      title="만들어서 공개한 것들"
+      desc="쓰다가 불편해서 직접 만든 도구들입니다. 라이브러리는 Maven Central에, CLI는 npm에 올려 두었습니다."
     />
 
     <div class="oss-list">
-      <article v-for="o in ossProjects" :key="o.name" class="oss card" :class="{ featured: o.featured }">
+      <article
+        v-for="(o, i) in ossProjects"
+        :key="o.name"
+        v-reveal="i % 2"
+        v-tilt="2.5"
+        class="oss card"
+        :class="{ featured: o.featured }"
+      >
         <div class="oss-main">
           <header class="oss-head">
             <div class="oss-titlewrap">
@@ -44,7 +51,7 @@ import AppIcon from '@/components/AppIcon.vue'
       </article>
     </div>
 
-    <p class="oss-note">{{ ossNote }}</p>
+    <p v-reveal class="oss-note">{{ ossNote }}</p>
   </div>
 </template>
 

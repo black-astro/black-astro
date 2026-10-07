@@ -4,8 +4,9 @@ import { timeline, projects, infra } from "@/data/career";
 import SectionHeader from "@/components/SectionHeader.vue";
 import AppIcon from "@/components/AppIcon.vue";
 
+// 처음엔 맨 위 하나만 펼쳐 둔다 — 길어서 한 번에 다 열면 읽기 힘들다
 const open = ref<Record<string, boolean>>(
-  Object.fromEntries(projects.map((p) => [p.id, p.featured])),
+  Object.fromEntries(projects.map((p, i) => [p.id, i === 0])),
 );
 function toggle(id: string) {
   open.value[id] = !open.value[id];
@@ -15,16 +16,17 @@ function toggle(id: string) {
 <template>
   <div class="page container">
     <SectionHeader
-      eyebrow="Career"
-      title="경력 연혁 · 프로젝트"
-      desc="전자고지 도메인에서 KT → 카카오 → PASS 순으로 발송 백엔드 채널을 순차 확장하며 설계·개발·운영했습니다."
+      eyebrow="career"
+      title="일해 온 기록"
+      desc="회사에서 맡아 온 서버와 배치를 정리했습니다. 제목을 누르면 어떤 문제가 있었고 어떻게 풀었는지 펼쳐집니다."
     />
 
     <!-- 타임라인 -->
     <section class="timeline">
       <div
-        v-for="t in timeline"
+        v-for="(t, i) in timeline"
         :key="t.title"
+        v-reveal:left="i"
         class="tl-item"
         :class="{ hot: t.highlight }"
       >
@@ -39,11 +41,12 @@ function toggle(id: string) {
 
     <!-- 프로젝트 상세 -->
     <section class="sub">
-      <h3 class="sub-title">프로젝트 수행 경력</h3>
+      <h3 v-reveal class="sub-title">프로젝트</h3>
       <div class="proj-list">
         <article
-          v-for="p in projects"
+          v-for="(p, i) in projects"
           :key="p.id"
+          v-reveal="i % 3"
           class="proj card"
           :class="{ open: open[p.id] }"
         >
@@ -56,7 +59,7 @@ function toggle(id: string) {
             <span class="proj-headmain">
               <span class="proj-titlerow">
                 <span class="proj-title">{{ p.title }}</span>
-                <span v-if="p.featured" class="proj-badge">대표</span>
+                <span v-if="p.featured" class="proj-badge">main</span>
               </span>
               <span class="proj-sub">{{ p.subtitle }}</span>
               <span class="proj-meta">{{ p.period }} · {{ p.role }}</span>
@@ -64,7 +67,9 @@ function toggle(id: string) {
             <span class="proj-chev"><AppIcon name="arrow" :size="18" /></span>
           </button>
 
-          <div v-show="open[p.id]" class="proj-body">
+          <div class="fold" :class="{ on: open[p.id] }" :inert="!open[p.id]">
+          <div class="fold-in">
+          <div class="proj-body">
             <div class="proj-stack">
               <span v-for="s in p.stack" :key="s" class="chip">{{ s }}</span>
             </div>
@@ -80,9 +85,11 @@ function toggle(id: string) {
               </div>
             </div>
             <div class="proj-outcome">
-              <span class="po-label">성과</span>
+              <span class="po-label">결과</span>
               <p>{{ p.outcome }}</p>
             </div>
+          </div>
+          </div>
           </div>
         </article>
       </div>
@@ -90,14 +97,13 @@ function toggle(id: string) {
 
     <!-- 인프라 -->
     <section class="sub">
-      <h3 class="sub-title">사내 인프라 · 오픈소스 활동</h3>
-      <p class="sub-lead">
-        CI/CD 단독 구축, 리버스 터널 재구현, 폐쇄망 설치 자동화 등 상시 병행
-        인프라 업무.
+      <h3 v-reveal class="sub-title">곁들여 해 온 일</h3>
+      <p v-reveal class="sub-lead">
+        개발 업무 사이사이 꾸준히 손대 온 인프라와 도구 작업입니다.
       </p>
 
       <div class="infra-grid">
-        <article v-for="it in infra" :key="it.title" class="infra card">
+        <article v-for="(it, i) in infra" :key="it.title" v-reveal:scale="i % 2" v-tilt="4" class="infra card">
           <h4 class="infra-title">{{ it.title }}</h4>
           <p class="infra-desc">{{ it.desc }}</p>
         </article>
@@ -256,7 +262,31 @@ function toggle(id: string) {
 }
 .proj-body {
   padding: 0 22px 24px;
-  animation: fadeUp 0.35s ease;
+}
+.proj-head:hover .proj-title {
+  color: var(--accent);
+}
+.proj-title {
+  transition: color 0.2s ease;
+}
+.tl-item.hot .tl-dot::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  animation: ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes ping {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.8;
+  }
+  80%,
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
 }
 .proj-stack {
   display: flex;

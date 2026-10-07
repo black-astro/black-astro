@@ -5,27 +5,27 @@ import SectionHeader from '@/components/SectionHeader.vue'
 import AppIcon from '@/components/AppIcon.vue'
 
 const facts = [
-  { k: '이름', v: profile.name },
-  { k: '직무', v: `${profile.roleKo} (Server / Backend Engineer)` },
-  { k: '경력', v: `${profile.years}년차 · ${profile.company} — ${profile.companyDesc}` },
-  { k: '재직', v: profile.tenure },
-  { k: '도메인', v: profile.domain },
+  { k: 'name', v: profile.name },
+  { k: 'role', v: `${profile.roleKo} · ${profile.years}년차` },
+  { k: 'work', v: `${profile.company} — ${profile.companyDesc}` },
+  { k: 'since', v: profile.tenure },
+  { k: 'domain', v: profile.domain },
 ]
 </script>
 
 <template>
   <div class="page container">
-    <SectionHeader eyebrow="About" title="소개" :desc="profile.headline" />
+    <SectionHeader eyebrow="about" title="어떤 개발자인지" :desc="profile.headline" />
 
     <div class="about-grid">
       <!-- 소개글 -->
-      <div class="about-intro card">
+      <div v-reveal:left class="about-intro card">
         <p v-for="(para, i) in profile.intro" :key="i">
           <template v-for="(line, j) in para" :key="j">{{ line }}<template v-if="j < para.length - 1"> <wbr></template></template>
         </p>
       </div>
       <!-- 인적사항 + 링크 -->
-      <aside class="about-side">
+      <aside v-reveal:right="1" class="about-side">
         <div class="fact card">
           <dl>
             <div v-for="f in facts" :key="f.k" class="fact-row">
@@ -35,7 +35,7 @@ const facts = [
           </dl>
         </div>
         <div class="side-links">
-          <a v-for="l in links" :key="l.label" :href="l.href" class="side-link card" target="_blank" rel="noopener">
+          <a v-for="l in links" :key="l.label" v-tilt="3" :href="l.href" class="side-link card" target="_blank" rel="noopener">
             <AppIcon :name="l.icon" :size="18" />
             <span class="sl-text">
               <span class="sl-label">{{ l.label }}</span>
@@ -49,9 +49,9 @@ const facts = [
 
     <!-- 핵심 역량 -->
     <section class="sub">
-      <h3 class="sub-title"><AppIcon name="award" :size="20" class="sub-ic" />핵심 역량</h3>
+      <h3 v-reveal class="sub-title"><AppIcon name="award" :size="20" class="sub-ic" />잘하는 것</h3>
       <div class="comp-list">
-        <article v-for="c in competencies" :key="c.title" class="comp-item card">
+        <article v-for="(c, i) in competencies" :key="c.title" v-reveal="i % 2" v-tilt="4" class="comp-item card">
           <div class="comp-ic"><AppIcon :name="c.icon" :size="19" /></div>
           <div>
             <h4>{{ c.title }}</h4>
@@ -63,9 +63,9 @@ const facts = [
 
     <!-- 보유 기술 -->
     <section class="sub">
-      <h3 class="sub-title"><AppIcon name="settings" :size="20" class="sub-ic" />보유 기술</h3>
+      <h3 v-reveal class="sub-title"><AppIcon name="settings" :size="20" class="sub-ic" />쓰는 도구</h3>
       <div class="skill-groups">
-        <div v-for="g in skillGroups" :key="g.category" class="skill-group card">
+        <div v-for="(g, i) in skillGroups" :key="g.category" v-reveal:scale="i % 2" v-tilt="3" class="skill-group card">
           <div class="sg-cat">{{ g.category }}</div>
           <div class="sg-items">
             <span v-for="it in g.items" :key="it" class="chip">{{ it }}</span>
@@ -235,6 +235,14 @@ const facts = [
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+}
+.sg-items .chip {
+  transition: border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+.sg-items .chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
 }
 
 @media (max-width: 820px) {

@@ -1,87 +1,135 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { profile, achievements, links } from '@/data/profile'
-import { competencies } from '@/data/skills'
+import { competencies, skillGroups } from '@/data/skills'
 import { guides } from '@/router'
 import AppIcon from '@/components/AppIcon.vue'
+import StarField from '@/components/StarField.vue'
+import ScrambleText from '@/components/ScrambleText.vue'
+import TypeCycle from '@/components/TypeCycle.vue'
+import CountUp from '@/components/CountUp.vue'
+import TechMarquee from '@/components/TechMarquee.vue'
+
+const doing = ['발송 서버를 다듬는', '느린 쿼리를 뜯어보는', '대용량 배치를 줄이는', '장애를 끝까지 쫓는']
+
+// 흐르는 기술 목록 — 그룹 순서대로 펼치고 중복은 뺀다
+const stack = [...new Set(skillGroups.flatMap((g) => g.items))].slice(0, 32)
+
+const opened = ref<Record<number, boolean>>({})
+const toggle = (i: number) => (opened.value[i] = !opened.value[i])
 </script>
 
 <template>
   <!-- HERO -->
   <section class="hero">
+    <StarField />
     <div class="container hero-inner">
-      <div class="term-line">
+      <div class="term-line" v-reveal>
         <span class="term-prompt">black-astro@backend</span><span class="term-sep">:</span><span class="term-path">~</span><span class="term-sep">$</span>
         <span class="term-cmd">whoami</span>
       </div>
       <h1 class="hero-title">
-        김현우<span class="hero-role"> — Backend Engineer</span><span class="cursor" aria-hidden="true">▊</span>
+        <ScrambleText :text="profile.name" :delay="150" /><span class="hero-role"> — {{ profile.role }}</span>
       </h1>
-      <p class="hero-line">
-        전자고지·대용량 발송/배치 도메인을 <span class="accent">5년간 설계·개발·운영</span>했습니다.
+      <p class="hero-doing" v-reveal="1">
+        요즘은 <span class="accent"><TypeCycle :words="doing" /></span> 일을 합니다.
       </p>
-      <p class="hero-sub">{{ profile.subHeadline }}</p>
+      <p class="hero-line" v-reveal="2">{{ profile.headline }}</p>
+      <p class="hero-sub" v-reveal="3">{{ profile.subHeadline }}</p>
 
-      <div class="hero-meta">
+      <div class="hero-meta" v-reveal="4">
         <span class="chip">{{ profile.company }} · {{ profile.companyDesc }}</span>
         <span class="chip">{{ profile.tenure }}</span>
-        <span class="chip">{{ profile.domain }}</span>
+        <span class="chip">{{ profile.years }}년차</span>
       </div>
 
-      <div class="hero-actions">
-        <RouterLink to="/portfolio" class="btn btn-primary">
-          포트폴리오 보기 <AppIcon name="arrow" :size="17" />
+      <div class="hero-actions" v-reveal="5">
+        <RouterLink v-magnetic to="/portfolio" class="btn btn-primary">
+          문제 해결 노트 <AppIcon name="arrow" :size="17" />
         </RouterLink>
-        <RouterLink to="/career" class="btn btn-ghost">경력 상세</RouterLink>
-        <a v-for="l in links" :key="l.label" :href="l.href" class="btn btn-icon" target="_blank" rel="noopener" :title="l.value">
+        <RouterLink v-magnetic to="/career" class="btn btn-ghost">일해 온 기록</RouterLink>
+        <a
+          v-for="l in links"
+          :key="l.label"
+          v-magnetic="4"
+          :href="l.href"
+          class="btn btn-icon"
+          target="_blank"
+          rel="noopener"
+          :title="l.value"
+          :aria-label="l.label"
+        >
           <AppIcon :name="l.icon" :size="18" />
         </a>
       </div>
     </div>
+    <a href="#numbers" class="scroll-hint" aria-label="아래로">
+      <span class="mouse"><span class="wheel"></span></span>
+    </a>
   </section>
 
-  <!-- 핵심 성과 -->
-  <section class="container block">
-    <div class="block-head">
-      <span class="eyebrow">Key Results</span>
-      <h2 class="section-title">여러 도메인에서 증명한 핵심 성과</h2>
+  <div class="container" v-reveal>
+    <TechMarquee :items="stack" />
+  </div>
+
+  <!-- 숫자 -->
+  <section id="numbers" class="container block">
+    <div class="block-head" v-reveal>
+      <span class="eyebrow">numbers</span>
+      <h2 class="section-title">숫자로 남은 것들</h2>
+      <p class="block-lead">측정한 환경은 각 항목 안에 같이 적었습니다. 카드를 누르면 과정을 펼쳐 볼 수 있습니다.</p>
     </div>
     <div class="stat-grid">
-      <article v-for="a in achievements" :key="a.label" class="stat card">
-        <div class="stat-metric">
-          {{ a.metric }}<span v-if="a.unit" class="stat-unit">{{ a.unit }}</span>
+      <article
+        v-for="(a, i) in achievements"
+        :key="a.label"
+        v-reveal="i % 3"
+        v-tilt
+        class="stat card"
+        :class="{ open: opened[i] }"
+      >
+        <button class="stat-btn" :aria-expanded="!!opened[i]" @click="toggle(i)">
+          <span class="stat-metric">
+            <CountUp :value="a.metric" /><span v-if="a.unit" class="stat-unit">{{ a.unit }}</span>
+          </span>
+          <span class="stat-label">{{ a.label }}</span>
+          <span class="stat-more">{{ opened[i] ? '접기' : '과정 보기' }} <span class="stat-chev" aria-hidden="true">›</span></span>
+        </button>
+        <div class="fold" :class="{ on: opened[i] }">
+          <div class="fold-in">
+            <p class="stat-detail">{{ a.detail }}</p>
+          </div>
         </div>
-        <div class="stat-label">{{ a.label }}</div>
-        <p class="stat-detail">{{ a.detail }}</p>
       </article>
     </div>
   </section>
 
-  <!-- 핵심 역량 -->
+  <!-- 붙잡고 있는 것 -->
   <section class="container block">
-    <div class="block-head">
-      <span class="eyebrow">Core Competency</span>
-      <h2 class="section-title">무엇을 잘하는가</h2>
+    <div class="block-head" v-reveal>
+      <span class="eyebrow">focus</span>
+      <h2 class="section-title">주로 붙잡고 있는 문제들</h2>
     </div>
     <div class="comp-grid">
-      <article v-for="c in competencies" :key="c.title" class="comp card">
+      <article v-for="(c, i) in competencies" :key="c.title" v-reveal:scale="i % 3" v-tilt class="comp card">
         <div class="comp-icon"><AppIcon :name="c.icon" :size="20" /></div>
         <h3 class="comp-title">{{ c.title }}</h3>
         <p class="comp-desc">{{ c.desc }}</p>
       </article>
     </div>
-    <div class="home-cta">
-      <RouterLink to="/about" class="btn btn-ghost">전체 역량·기술 스택 <AppIcon name="arrow" :size="16" /></RouterLink>
+    <div class="home-cta" v-reveal>
+      <RouterLink v-magnetic to="/about" class="btn btn-ghost">쓰는 기술 전체 보기 <AppIcon name="arrow" :size="16" /></RouterLink>
     </div>
   </section>
 
   <!-- 학습 가이드 — 푸터의 '학습 가이드' 링크가 여기로 데려온다 -->
   <section id="guides" class="container block">
-    <div class="block-head">
-      <span class="eyebrow">Side Project</span>
-      <h2 class="section-title">직접 만든 학습 자료</h2>
+    <div class="block-head" v-reveal>
+      <span class="eyebrow">side</span>
+      <h2 class="section-title">만들어 둔 학습 페이지</h2>
     </div>
     <div class="guide-grid">
-      <a v-for="g in guides" :key="g.key" :href="g.href" class="guide card" :title="g.title">
+      <a v-for="(g, i) in guides" :key="g.key" v-reveal="i" v-tilt="3" :href="g.href" class="guide card" :title="g.title">
         <div class="guide-main">
           <div class="guide-top">
             <span class="guide-emoji" aria-hidden="true">{{ g.emoji }}</span>
@@ -95,7 +143,7 @@ import AppIcon from '@/components/AppIcon.vue'
         </div>
         <div class="guide-stats">
           <div v-for="st in g.stats" :key="st.label">
-            <b>{{ st.value }}</b><span>{{ st.label }}</span>
+            <b><CountUp :value="st.value" /></b><span>{{ st.label }}</span>
           </div>
         </div>
       </a>
@@ -106,10 +154,16 @@ import AppIcon from '@/components/AppIcon.vue'
 <style scoped>
 .hero {
   position: relative;
-  padding: 72px 0 56px;
+  min-height: min(86vh, 760px);
+  display: flex;
+  align-items: center;
+  padding: 64px 0 80px;
+  overflow: hidden;
 }
 .hero-inner {
   position: relative;
+  width: 100%;
+  min-width: 0;
 }
 .term-line {
   font-family: var(--font-mono);
@@ -132,37 +186,40 @@ import AppIcon from '@/components/AppIcon.vue'
   margin-left: 6px;
 }
 .hero-title {
-  font-size: clamp(2rem, 5.4vw, 3.2rem);
+  font-size: clamp(2.2rem, 6vw, 3.6rem);
   font-weight: 800;
-  line-height: 1.12;
+  line-height: 1.1;
   letter-spacing: -0.035em;
 }
 .hero-role {
   color: var(--text-muted);
   font-weight: 700;
+  font-size: 0.62em;
+  letter-spacing: -0.02em;
 }
-.cursor {
+.hero-doing {
+  margin-top: 18px;
+  font-size: clamp(0.98rem, 2vw, 1.1rem);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.accent {
   color: var(--accent);
-  font-weight: 400;
-  margin-left: 2px;
-  animation: blink 1.1s step-end infinite;
 }
 .hero-line {
-  margin-top: 18px;
-  font-size: clamp(1.15rem, 2.6vw, 1.5rem);
+  margin-top: 14px;
+  font-size: clamp(1.12rem, 2.5vw, 1.45rem);
   font-weight: 700;
   letter-spacing: -0.02em;
-  line-height: 1.4;
-}
-.hero-line .accent {
-  color: var(--accent);
+  line-height: 1.45;
+  max-width: 760px;
 }
 .hero-sub {
-  margin-top: 16px;
-  max-width: 620px;
-  font-size: 1.04rem;
+  margin-top: 14px;
+  max-width: 640px;
+  font-size: 1.02rem;
   color: var(--text-secondary);
-  line-height: 1.66;
+  line-height: 1.7;
 }
 .hero-meta {
   margin-top: 22px;
@@ -186,19 +243,26 @@ import AppIcon from '@/components/AppIcon.vue'
   font-weight: 600;
   font-size: 0.94rem;
   border: 1px solid transparent;
-  transition: all 0.2s ease;
 }
 .btn-primary {
   background: var(--accent);
   color: var(--accent-contrast);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 40%, transparent);
 }
 .btn-primary:hover {
   background: var(--accent-hover);
+  box-shadow: 0 8px 26px -8px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.btn-primary svg {
+  transition: transform 0.25s ease;
+}
+.btn-primary:hover svg {
+  transform: translateX(3px);
 }
 .btn-ghost {
   border-color: var(--border-strong);
   color: var(--text);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
 }
 .btn-ghost:hover {
   border-color: var(--accent);
@@ -208,18 +272,62 @@ import AppIcon from '@/components/AppIcon.vue'
   padding: 11px;
   border-color: var(--border-strong);
   color: var(--text-secondary);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
 }
 .btn-icon:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
 
+.scroll-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+.scroll-hint:hover {
+  opacity: 1;
+}
+.mouse {
+  display: block;
+  width: 22px;
+  height: 34px;
+  border: 2px solid var(--text-muted);
+  border-radius: 12px;
+  position: relative;
+}
+.wheel {
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  width: 3px;
+  height: 7px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: wheel 1.8s ease-in-out infinite;
+}
+@keyframes wheel {
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  70% {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 .block {
-  padding-top: 64px;
+  padding-top: 72px;
 }
 .block:last-of-type {
-  padding-bottom: 84px;
+  padding-bottom: 90px;
 }
 .block-head {
   margin-bottom: 26px;
@@ -228,46 +336,73 @@ import AppIcon from '@/components/AppIcon.vue'
   display: block;
   margin-bottom: 9px;
 }
+.block-lead {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
 
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
-  align-items: stretch;
+  align-items: start;
 }
 .stat {
+  padding: 0;
+  overflow: hidden;
+}
+.stat-btn {
+  width: 100%;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  padding: 22px 22px 24px;
-  transition: border-color 0.2s ease;
-}
-.stat:hover {
-  border-color: var(--accent);
+  align-items: flex-start;
+  gap: 8px;
+  padding: 22px 22px 18px;
+  background: none;
+  border: none;
+  text-align: left;
 }
 .stat-metric {
   font-family: var(--font-mono);
-  font-size: 1.7rem;
+  font-size: 1.65rem;
   font-weight: 700;
   color: var(--accent);
   letter-spacing: -0.02em;
-  line-height: 1.1;
+  line-height: 1.15;
 }
 .stat-unit {
-  font-size: 0.95rem;
-  margin-left: 3px;
+  font-size: 0.9rem;
+  margin-left: 4px;
   color: var(--text-muted);
 }
 .stat-label {
-  margin-top: 8px;
   font-weight: 700;
-  font-size: 0.98rem;
+  font-size: 0.97rem;
+  line-height: 1.45;
+}
+.stat-more {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  transition: color 0.2s ease;
+}
+.stat-chev {
+  display: inline-block;
+  transition: transform 0.3s ease;
+}
+.stat.open .stat-chev {
+  transform: rotate(90deg);
+}
+.stat-btn:hover .stat-more {
+  color: var(--accent);
 }
 .stat-detail {
-  margin-top: 8px;
+  padding: 0 22px 22px;
   color: var(--text-muted);
   font-size: 0.85rem;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
 .comp-grid {
@@ -281,18 +416,19 @@ import AppIcon from '@/components/AppIcon.vue'
   flex-direction: column;
   height: 100%;
   padding: 24px 22px;
-  transition: border-color 0.2s ease;
-}
-.comp:hover {
-  border-color: var(--accent);
 }
 .comp-icon {
   display: inline-flex;
+  align-self: flex-start;
   padding: 10px;
   border-radius: 11px;
   background: var(--accent-soft);
   color: var(--accent);
   margin-bottom: 14px;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.comp:hover .comp-icon {
+  transform: translateY(-3px) rotate(-6deg);
 }
 .comp-title {
   font-size: 1.05rem;
@@ -310,7 +446,6 @@ import AppIcon from '@/components/AppIcon.vue'
   justify-content: center;
 }
 
-/* 학습 가이드 진입 카드 — 가이드 수가 늘어도 폭에 맞춰 알아서 접힙니다 */
 .guide-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -323,11 +458,6 @@ import AppIcon from '@/components/AppIcon.vue'
   gap: 18px;
   padding: 24px 26px;
   min-width: 0;
-  transition: border-color 0.2s ease, transform 0.2s ease;
-}
-.guide:hover {
-  border-color: var(--accent);
-  transform: translateY(-2px);
 }
 .guide-main {
   min-width: 0;
@@ -349,6 +479,10 @@ import AppIcon from '@/components/AppIcon.vue'
 .guide-ext {
   color: var(--text-muted);
   font-size: 0.9rem;
+  transition: transform 0.25s ease, color 0.2s ease;
+}
+.guide:hover .guide-ext {
+  transform: translate(2px, -2px);
 }
 .guide:hover .guide-ext,
 .guide:hover .guide-title {
@@ -359,10 +493,6 @@ import AppIcon from '@/components/AppIcon.vue'
   color: var(--text-muted);
   font-size: 0.9rem;
   line-height: 1.65;
-}
-.guide-desc strong {
-  color: var(--text-secondary);
-  font-weight: 700;
 }
 .guide-tags {
   margin-top: 14px;
@@ -408,7 +538,11 @@ import AppIcon from '@/components/AppIcon.vue'
 }
 @media (max-width: 560px) {
   .hero {
-    padding: 56px 0 40px;
+    min-height: auto;
+    padding: 48px 0 64px;
+  }
+  .scroll-hint {
+    display: none;
   }
   .stat-grid,
   .comp-grid {

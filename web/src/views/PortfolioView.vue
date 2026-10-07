@@ -1,28 +1,34 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { provenFive, caseStudies, capabilityMap } from '@/data/portfolio'
 import SectionHeader from '@/components/SectionHeader.vue'
+import CountUp from '@/components/CountUp.vue'
+
+// 본문은 첫 글만 펼쳐 두고 나머지는 눌러서 연다
+const open = ref<Record<string, boolean>>(Object.fromEntries(caseStudies.map((c, i) => [c.id, i === 0])))
+const toggle = (id: string) => (open.value[id] = !open.value[id])
 </script>
 
 <template>
   <div class="page container">
     <SectionHeader
-      eyebrow="Portfolio"
-      title="케이스 스터디"
-      desc="화면보다 대용량 처리 · DB/SQL 튜닝 · 인증 설계 · 운영 안정성 · 품질 자동화의 기술 검증에 초점을 둔 모음입니다. 성능 수치는 운영 실측, 예시 SQL은 실 구현 기반 재구성이며 식별자는 일반화했습니다."
+      eyebrow="notes"
+      title="문제 해결 노트"
+      desc="실제로 겪은 문제를 하나씩 풀어 쓴 기록입니다. 수치에는 측정한 환경을 같이 적었고, 예시 SQL은 실제 구현을 바탕으로 다시 쓰면서 이름을 일반화했습니다."
     />
 
-    <!-- 증명하는 5가지 -->
+    <!-- 요약 -->
     <div class="proven">
-      <article v-for="p in provenFive" :key="p.no" class="pv card">
+      <article v-for="(p, i) in provenFive" :key="p.no" v-reveal:scale="i" v-tilt="5" class="pv card">
         <div class="pv-no">{{ String(p.no).padStart(2, '0') }}</div>
         <h3 class="pv-title">{{ p.title }}</h3>
         <p class="pv-desc">{{ p.desc }}</p>
       </article>
     </div>
 
-    <!-- 케이스 스터디 -->
+    <!-- 케이스 -->
     <section class="cases">
-      <article v-for="c in caseStudies" :key="c.id" class="case card">
+      <article v-for="c in caseStudies" :key="c.id" v-reveal class="case card" :class="{ open: open[c.id] }">
         <header class="case-head">
           <span class="case-tag">{{ c.tag }}</span>
           <h3 class="case-title">{{ c.title }}</h3>
@@ -34,31 +40,40 @@ import SectionHeader from '@/components/SectionHeader.vue'
 
         <div class="case-metrics">
           <div v-for="m in c.metrics" :key="m.label" class="cm">
-            <div class="cm-val">{{ m.value }}</div>
+            <div class="cm-val"><CountUp :value="m.value" /></div>
             <div class="cm-label">{{ m.label }}</div>
           </div>
         </div>
 
-        <div class="case-blocks">
-          <div v-for="(b, i) in c.blocks" :key="i" class="cb">
-            <h4 v-if="b.heading" class="cb-h">{{ b.heading }}</h4>
-            <p v-if="b.type === 'text'" class="cb-text">{{ b.content }}</p>
-            <pre v-else-if="b.type === 'code'" class="code"><code>{{ b.content }}</code></pre>
-            <pre v-else class="diagram">{{ b.content }}</pre>
-          </div>
-        </div>
+        <button class="case-toggle" :aria-expanded="!!open[c.id]" @click="toggle(c.id)">
+          <span>{{ open[c.id] ? '접기' : '과정 읽기' }}</span>
+          <span class="ct-chev" aria-hidden="true">›</span>
+        </button>
 
-        <div class="case-learned">
-          <span class="cl-label">배운 점</span>
-          <p>{{ c.learned }}</p>
+        <div class="fold" :class="{ on: open[c.id] }" :inert="!open[c.id]">
+          <div class="fold-in">
+            <div class="case-blocks">
+              <div v-for="(b, i) in c.blocks" :key="i" class="cb">
+                <h4 v-if="b.heading" class="cb-h">{{ b.heading }}</h4>
+                <p v-if="b.type === 'text'" class="cb-text">{{ b.content }}</p>
+                <pre v-else-if="b.type === 'code'" class="code"><code>{{ b.content }}</code></pre>
+                <pre v-else class="diagram">{{ b.content }}</pre>
+              </div>
+            </div>
+
+            <div class="case-learned">
+              <span class="cl-label">돌아보면</span>
+              <p>{{ c.learned }}</p>
+            </div>
+          </div>
         </div>
       </article>
     </section>
 
-    <!-- 역량 ↔ 프로젝트 매핑 -->
+    <!-- 어디서 무엇을 -->
     <section class="sub">
-      <h3 class="sub-title">역량 ↔ 프로젝트 매핑</h3>
-      <div class="map card">
+      <h3 v-reveal class="sub-title">어떤 경험이 어디에 있는지</h3>
+      <div v-reveal class="map card">
         <div v-for="m in capabilityMap" :key="m.capability" class="map-row">
           <div class="map-cap">{{ m.capability }}</div>
           <div class="map-proj">{{ m.projects }}</div>
@@ -69,9 +84,40 @@ import SectionHeader from '@/components/SectionHeader.vue'
 </template>
 
 <style scoped>
+.case-toggle {
+  margin-top: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+.case-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ct-chev {
+  display: inline-block;
+  transition: transform 0.3s ease;
+}
+.case.open .ct-chev {
+  transform: rotate(90deg);
+}
+.map-row {
+  transition: background 0.2s ease;
+}
+.map-row:hover {
+  background: var(--surface-2);
+}
 .proven {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 12px;
   margin-bottom: 48px;
   align-items: stretch;
@@ -241,17 +287,12 @@ pre.code code {
   color: var(--text-muted);
 }
 
-@media (max-width: 900px) {
-  .proven {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
 @media (max-width: 640px) {
   .case {
     padding: 22px 18px;
   }
   .proven {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
   .map-row {
     grid-template-columns: 1fr;

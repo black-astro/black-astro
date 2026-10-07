@@ -6,13 +6,13 @@ import AppIcon from '@/components/AppIcon.vue'
 
 <template>
   <div class="page container">
-    <SectionHeader eyebrow="Growth" title="성장 로드맵" :desc="growthIntro" />
+    <SectionHeader eyebrow="growth" title="요즘 공부하는 것" :desc="growthIntro" />
 
     <!-- 학습 프로젝트 -->
     <section>
-      <h3 class="sub-title">진행 중인 학습 프로젝트</h3>
+      <h3 v-reveal class="sub-title">손으로 만들어 보는 중</h3>
       <div class="learn-grid">
-        <article v-for="l in learningProjects" :key="l.name" class="learn card">
+        <article v-for="(l, i) in learningProjects" :key="l.name" v-reveal:scale="i" v-tilt="4" class="learn card">
           <div class="learn-head">
             <span class="learn-name">{{ l.name }}</span>
             <span class="learn-status">{{ l.status }}</span>
@@ -30,9 +30,9 @@ import AppIcon from '@/components/AppIcon.vue'
 
     <!-- 로드맵 -->
     <section class="sub">
-      <h3 class="sub-title">다음 목표</h3>
+      <h3 v-reveal class="sub-title">다음에 할 것</h3>
       <div class="road-grid">
-        <article v-for="r in roadmap" :key="r.title" class="road card">
+        <article v-for="(r, i) in roadmap" :key="r.title" v-reveal="i % 2" v-tilt="3" class="road card">
           <div class="road-head">
             <div class="road-ic"><AppIcon :name="r.icon" :size="19" /></div>
             <h4 class="road-title">{{ r.title }}</h4>
@@ -47,9 +47,9 @@ import AppIcon from '@/components/AppIcon.vue'
       </div>
     </section>
 
-    <p class="growth-note">
-      대용량·DB·동시성·운영·레거시 현대화는 실무 코드로 증명된 강점입니다. 여기에 실시간 트래픽 설계 · 알고리즘 · 관측성을
-      더해 대규모 시스템 설계로 역량을 확장하고 있습니다.
+    <p v-reveal class="growth-note">
+      실무에서 손에 익은 건 대용량 처리, DB, 동시성, 운영입니다. 지금은 그 위에 실시간 트래픽 설계와 관측성을 하나씩
+      얹어 보는 중이고, 진행하면서 여기에 계속 적어 둘 생각입니다.
     </p>
   </div>
 </template>

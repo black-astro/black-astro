@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useTheme } from '@/composables/useTheme'
+import { useRoute } from 'vue-router'
+
+// 홈은 히어로에 별자리가 따로 있어서 비를 옅게 깐다
+const route = useRoute()
 
 const { theme } = useTheme()
 
@@ -94,7 +98,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <canvas ref="el" class="rain" aria-hidden="true"></canvas>
+  <canvas ref="el" class="rain" :class="{ dim: route.path === '/' }" aria-hidden="true"></canvas>
 </template>
 
 <style scoped>
@@ -105,10 +109,14 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  opacity: 0.5;
+  opacity: 0.42;
+  transition: opacity 0.6s ease;
   /* 좌우 가장자리에서만 보이고 중앙은 완전히 비움 */
   -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 13%, transparent 87%, #000 100%);
   mask-image: linear-gradient(90deg, #000 0%, transparent 13%, transparent 87%, #000 100%);
+}
+.rain.dim {
+  opacity: 0.2;
 }
 /* 라이트 테마에서는 숨김 (start/stop으로 렌더도 중단) */
 :root[data-theme='light'] .rain {

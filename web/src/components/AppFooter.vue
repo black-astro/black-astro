@@ -26,17 +26,17 @@ async function goGuides() {
       </div>
       <div class="ft-links">
         <a href="#/" class="ft-link ft-guide" title="직접 만든 학습 가이드 모음" @click.prevent="goGuides">
-          <span aria-hidden="true">📚</span>
-          <span>학습 가이드</span>
+          <AppIcon name="code" :size="15" />
+          <span class="ulink">학습 가이드</span>
         </a>
         <a v-for="l in links" :key="l.label" :href="l.href" class="ft-link" target="_blank" rel="noopener">
           <AppIcon :name="l.icon" :size="15" />
-          <span>{{ l.value }}</span>
+          <span class="ulink">{{ l.value }}</span>
         </a>
       </div>
     </div>
     <div class="container ft-copy">
-      © {{ new Date().getFullYear() }} {{ profile.name }} · Vue 3 · TypeScript · Vite
+      © {{ new Date().getFullYear() }} {{ profile.name }} · 직접 만들고 고쳐 가는 페이지
     </div>
   </footer>
 </template>
