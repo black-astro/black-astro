@@ -12,7 +12,10 @@ import ScrollProgress from './components/ScrollProgress.vue'
   <main>
     <RouterView v-slot="{ Component, route }">
       <Transition name="route" mode="out-in">
-        <component :is="Component" :key="route.path" />
+        <!-- 뷰마다 루트가 여러 개라 Transition이 끝을 못 잡는다. 한 겹 감싸서 넘긴다 -->
+        <div :key="route.path" class="route-view">
+          <component :is="Component" />
+        </div>
       </Transition>
     </RouterView>
   </main>
