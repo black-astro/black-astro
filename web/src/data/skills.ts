@@ -1,4 +1,4 @@
-// 핵심 역량 · 보유 기술 — 이력서 기반
+// 주로 하는 일 · 쓰는 도구
 
 export interface Competency {
   title: string
@@ -8,34 +8,34 @@ export interface Competency {
 
 export const competencies: Competency[] = [
   {
-    title: '대용량 배치 처리',
-    icon: 'layers',
-    desc: '규모별 파싱 전략 분리(텍스트/JAXB/StAX 스트리밍), 파서 풀 + 단일 라이터 파이프라인으로 DB 커밋 경합 제거, MyBatis BATCH·direct-path INSERT 적재.',
-  },
-  {
-    title: 'DB · SQL 튜닝',
-    icon: 'database',
-    desc: 'PL/SQL 프로시저 5종 직접 작성. 커서 루프를 집합 기반(MERGE)으로 재설계하고 DB 세션 제약을 청크 커밋·재개 구조로 우회, 복합인덱스 재설계로 회차 누적 스캔 제거.',
-  },
-  {
-    title: '인증 · 인가 설계',
-    icon: 'shield',
-    desc: '단일 백엔드에서 SecurityFilterChain 3종(OpenAPI/Electron/어드민) 분리 운영, JWT 발급·검증 책임 분리, 수신자 열람용 토큰 검증 커스텀 필터.',
-  },
-  {
-    title: '동시성 · 운영 안정성',
+    title: '동시성과 정합성',
     icon: 'activity',
-    desc: '다중 워커 분산 + 조건부 UPDATE로 락 없는 race 차단, 발송 상태머신·멱등 INSERT·graceful shutdown, 인프라 제약 하 캐시 전략 전환(Redis 검증→Caffeine 선제 갱신).',
+    desc: '여러 워커가 같은 건을 집지 않게 조건부 UPDATE로 상태를 넘기고, 같은 작업이 동시에 들어오면 공정 락으로 줄 세웁니다. 외부 API 호출은 트랜잭션 밖에 둡니다.',
   },
   {
-    title: '빌드 · 품질 · 인프라',
-    icon: 'settings',
-    desc: 'Jenkins + SonarQube Quality Gate + JaCoCo + SBOM 파이프라인, Jasypt 설정 암호화, 폐쇄망 오프라인 설치 자동화.',
+    title: 'DB와 프로시저',
+    icon: 'database',
+    desc: 'Tibero·Oracle 프로시저와 함께 돌아가는 서비스를 매일 만집니다. 커서 루프를 집합 기반으로 바꾸고, 인덱스 컬럼 순서를 다시 잡고, 로그에 원인이 없는 장애도 따라갑니다.',
   },
   {
-    title: '레거시 현대화',
+    title: '운영 중에 고치기',
     icon: 'refresh',
-    desc: '델파이 월 배치를 Java로 재구축, 관리자 콘솔 JSP→Vue2→Vue3 3세대 전환, 전임 보험사 발송 엔진 인수·재구축을 주도.',
+    desc: '멈출 수 없는 서버는 테스트를 먼저 깔고 조금씩 커밋하며 줄입니다. 델파이 배치를 Java로 옮기고, 관리자 화면을 JSP에서 Vue3까지 바꿔 왔습니다.',
+  },
+  {
+    title: '대용량 배치',
+    icon: 'layers',
+    desc: '파일 크기마다 읽는 방법을 나누고(텍스트, JAXB, StAX), 파서 여러 개와 라이터 하나를 큐로 잇습니다. 튜닝이 막히면 처리 위치부터 다시 봅니다.',
+  },
+  {
+    title: '인증과 인가',
+    icon: 'shield',
+    desc: '백엔드 하나에서 SecurityFilterChain을 클라이언트별로 나누고, 토큰 수명과 갱신, 1회용 코드 핸드오프까지 클라이언트 끝단과 맞춥니다.',
+  },
+  {
+    title: '빌드와 서버 운영',
+    icon: 'settings',
+    desc: 'Jenkins와 SonarQube로 품질 기준을 빌드에 걸고, 웹·WAS 서버를 동료들과 같이 운영합니다. 폐쇄망 설치도 스크립트로 만들어 둡니다.',
   },
 ]
 
@@ -47,47 +47,54 @@ export interface SkillGroup {
 export const skillGroups: SkillGroup[] = [
   {
     category: 'Language',
-    items: ['Java 8 / 21 (LTS)', 'TypeScript / JavaScript', 'SQL · PL/SQL'],
+    items: ['Java 8 / 21', 'SQL · PL/SQL', 'Kotlin', 'TypeScript'],
   },
   {
     category: 'Framework',
     items: [
-      'Spring Boot 2.7~3.4',
+      'Spring Boot 2.7~3.5 (Kotlin 서비스는 4.1)',
       'Spring MVC',
       'Spring Security (OAuth2 · JWT)',
       'Spring AOP',
-      'Scheduling',
+      'Scheduling · Async',
       'Integration (SFTP)',
       'WebSocket (STOMP)',
     ],
   },
   {
-    category: 'Persistence · DB',
-    items: ['MyBatis (BATCH)', 'Spring Data JPA + QueryDSL', 'Tibero 6', 'Oracle', 'MariaDB', 'HikariCP', 'Caffeine'],
+    category: 'DB (주로 쓰는 것)',
+    items: ['Tibero 6', 'Oracle', 'PL/SQL 프로시저 · UDF'],
+  },
+  {
+    category: 'DB (써 본 것)',
+    items: ['MariaDB', 'SQLite', 'PostgreSQL', 'Redis (검증 후 Caffeine으로 전환)'],
+  },
+  {
+    category: 'Persistence',
+    items: ['MyBatis (BATCH)', 'Spring Data JPA + QueryDSL', 'HikariCP', 'Caffeine'],
   },
   {
     category: '대용량 · 동시성',
-    items: [
-      'StAX / JAXB',
-      'ThreadPoolTaskScheduler',
-      'producer-consumer (BlockingQueue)',
-      'Netty 4.1',
-    ],
+    items: ['StAX / JAXB', 'ThreadPoolTaskScheduler', 'BlockingQueue 파이프라인', 'ReentrantLock · TransactionTemplate'],
   },
   {
     category: 'Build · CI · 품질',
     items: ['Gradle', 'Jenkins', 'SonarQube', 'JaCoCo', 'CycloneDX SBOM', 'GitHub Actions'],
   },
   {
-    category: 'Infra · DevOps',
-    items: ['Docker', 'Gitea', 'Nginx', 'PostgreSQL', 'CentOS / Ubuntu / Rocky', 'VMware', '폐쇄망 오프라인 설치 자동화'],
+    category: 'Infra',
+    items: ['Docker', 'Gitea', 'Nginx', 'Apache · Tomcat', 'CentOS / Ubuntu / Rocky', 'VMware'],
   },
   {
     category: 'Frontend · Desktop',
-    items: ['Vue 3', 'Vuetify', 'Pinia', 'Electron'],
+    items: ['Vue 3 (TypeScript)', 'Vuetify', 'Pinia', 'Electron (TypeScript)'],
   },
   {
-    category: 'Test · OSS',
-    items: ['JUnit5', 'Mockito', 'AssertJ', 'Playwright (E2E)', 'Maven Central · npm 배포'],
+    category: 'Test',
+    items: ['JUnit5', 'Mockito', 'AssertJ', 'MyBatis 매퍼 바인딩 · SQL 스모크 테스트', 'Playwright'],
+  },
+  {
+    category: '공부 중',
+    items: ['Kafka', 'Redis (분산 캐시 · rate limit)', 'Spring Cloud (Eureka · Gateway)', 'Resilience4j', 'k6'],
   },
 ]

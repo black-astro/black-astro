@@ -1,4 +1,4 @@
-// 포트폴리오 — 케이스 스터디(코드·SQL 포함) · 역량 매핑
+// 케이스 노트 — 코드·SQL과 함께 남겨 둔 기록
 
 export interface ProvenItem {
   no: number
@@ -6,12 +6,13 @@ export interface ProvenItem {
   desc: string
 }
 
+// 자주 붙잡고 있는 주제들
 export const provenFive: ProvenItem[] = [
-  { no: 1, title: '대용량 처리', desc: 'StAX 스트리밍 상태머신, 파서 풀 + 단일 라이터 backpressure 파이프라인, MyBatis BATCH, direct-path INSERT' },
-  { no: 2, title: 'DB / SQL 깊이', desc: 'PL/SQL 프로시저·UDF, MERGE UPSERT, 동적 인덱스 제어, 복합인덱스 재설계로 회차 누적 스캔 제거' },
-  { no: 3, title: '인증 / 인가 설계', desc: '멀티 SecurityFilterChain 3종, JWT 발급/검증 분리, 이중 백엔드 토큰 핸드오프' },
-  { no: 4, title: '운영 안정성 / 트러블슈팅', desc: '발송 상태머신, 조건부 UPDATE race 차단, 멱등성, 사고 재현·복구·문서화(재발 0건)' },
-  { no: 5, title: '품질 자동화 & OSS', desc: 'Jenkins/SonarQube/JaCoCo/SBOM, 사내 CI/CD 단독 구축, Maven Central 배포 라이브러리' },
+  { no: 1, title: '동시성과 정합성', desc: '조건부 UPDATE 상태 전이, 공정 락으로 채번 직렬화, 멱등 INSERT, 외부 호출은 트랜잭션 밖으로' },
+  { no: 2, title: 'DB와 프로시저', desc: 'Tibero·Oracle PL/SQL 프로시저와 UDF, 집합 기반 MERGE, 인덱스 제어와 컬럼 순서, 장애 역추적' },
+  { no: 3, title: '대용량 처리', desc: 'StAX 스트리밍, 파서 여러 개와 라이터 하나를 잇는 큐, MyBatis BATCH, direct-path INSERT' },
+  { no: 4, title: '운영 중에 고치기', desc: '테스트를 먼저 깔고 단계마다 커밋하는 리팩터링, 장애 재현과 복구 SQL, 문서로 남기기' },
+  { no: 5, title: '인증과 도구 만들기', desc: 'SecurityFilterChain 분리, 1회용 코드 핸드오프, 사내 CI/CD, Maven Central·npm 배포' },
 ]
 
 export interface CaseBlock {
@@ -34,202 +35,209 @@ export interface CaseStudy {
 
 export const caseStudies: CaseStudy[] = [
   {
-    id: 'case-batch',
-    title: 'KT_BatchServer — 대용량 청구서 ETL 성능 튜닝',
-    tag: '대용량 · DB 튜닝',
+    id: 'case-pass',
+    title: 'PASS 발송 서버 — 운영 중인 코드를 테스트부터 깔고 줄이기',
+    tag: '리팩터링 · 동시성',
     summary:
-      '델파이 레거시를 Java 21로 재구축. 규모별 파싱 전략 분리와 파서 풀 + 단일 라이터로 기반을 잡고, 프로시저 튜닝이 한계에 닿자 중복 판정을 적재 이전의 로컬 SQLite로 옮기는 구조 재설계로 전 구간을 약 4시간 50분대에서 30분대로 단축.',
-    stack: ['Java 21', 'Spring Boot 3.4.5', 'Tibero 6', 'StAX/JAXB', 'MyBatis(BATCH)', 'SQLite'],
+      '운영/개발, 채널, 발송/결과 조합마다 복제돼 있던 스케줄러를 멈추지 않고 정리한 기록입니다. 같은 구축을 동시에 부르면 번호가 겹치던 문제도 이때 같이 풀었습니다.',
+    stack: ['Java 21', 'Spring Boot 3.4', 'MyBatis', 'Tibero 6', 'JUnit5', 'SonarQube'],
     metrics: [
-      { value: '약 4시간 50분 → 31분', label: '적재~중복제거 전 구간' },
-      { value: '50분 + 4시간', label: '개선 전 (적재 + 프로시저)' },
-      { value: '44초 → 0.8초', label: '적재 (파일당)' },
-      { value: '20초', label: '중복 판정 (로컬 SQLite)' },
-      { value: 'OOM 0건', label: '1GB+ XML' },
-      { value: '~1,000만 row', label: '회차당 INSERT' },
+      { value: '1,042 → 약 260줄', label: '스케줄러 코드' },
+      { value: '8 → 2개', label: '스케줄러 클래스' },
+      { value: '6 → 16개', label: '단위 테스트' },
+      { value: '약 126건', label: 'SonarQube 지적 해소' },
     ],
     blocks: [
       {
         type: 'text',
-        heading: '왜 StAX인가 — DOM → JAXB → StAX 시행착오',
+        heading: '먼저 안전망',
         content:
-          '처음엔 DOM으로 접근했지만 대용량에서 단건 파싱 속도가 나오지 않았고, JAXB로 전체 객체 바인딩하니 이번엔 메모리 점유가 치솟아 OOM이 빈발했다. 최종적으로 StAX 커서/이벤트 스트리밍으로 전환 — 문서를 통째로 올리지 않고 흘려보내며 처리해, 힙 수십 MB로 매월 명세서 약 100만 건을 안정 처리한다. 세 방식을 직접 다 겪으며 트레이드오프(속도 · 메모리 · 편의성)를 확인하고 내린 선택.',
+          '구조를 건드리기 전에 테스트 세 가지를 만들었습니다. DB 없이 매퍼 XML을 파싱해서 DAO 메서드에 맞는 SQL이 없으면 실패하는 바인딩 테스트, 채널과 환경 조합별 SQL을 실 DB에서 롤백 조건으로 돌리는 스모크 테스트, 애플리케이션 기동 테스트. 의존성은 생성자 주입 타입으로 바꿔 배선 오류가 컴파일 단계에서 보이게 했고, 일부러 배선을 망가뜨린 네 가지 경우를 테스트가 다 잡는 걸 확인한 다음에 시작했습니다.',
       },
       {
         type: 'text',
-        heading: '해결 1 — 규모별 파싱 전략 + StAX 상태머신',
+        heading: '그다음 줄이기',
         content:
-          '01001(텍스트, 10만 라인 flush) / 01002(중규모, JAXB) / 01003(대규모, StAX)으로 분기. StAX는 BILLINFO 단위 상태머신으로 섹션을 이벤트로 분해 → DTO 생성 → 즉시 배치 INSERT → 버퍼 해제. 문서를 트리로 올리지 않아 1GB+ 파일도 힙 수십 MB로 처리.',
-      },
-      {
-        type: 'diagram',
-        heading: '해결 2 — 파서 풀 + 단일 라이터 파이프라인',
-        content: `[XML 파일들]                                      (Tibero)
-     │  분배                                          ▲
-     ▼                                                │ 단일 커밋 스트림
-┌────────────┐   DTO   ┌──────────────────┐   batch   │
-│ 파서 스레드 N │ ──────▶ │ ArrayBlockingQueue │ ──────▶ 라이터 스레드 1
-│ (CPU 병렬)   │          │  (backpressure)   │          (BATCH 2,000건 flush)
-└────────────┘          └──────────────────┘
-  · poison pill로 종료 전파   · 실패 시 큐 드레인으로 생산자 데드락 방지`,
-      },
-      {
-        type: 'text',
-        heading: '해결 3 — 먼저 SQL 튜닝으로 시도 (현재는 쓰지 않는 경로)',
-        content:
-          '커서 루프(그룹당 5-SQL) 중복제거를 집합 기반(배치당 MERGE 2문장)으로 재설계. Tibero 2시간 세션 강제종료 정책을 콜당 1만 그룹 분할 + 청크 커밋 + 반복 호출로 우회, 중단 시 재개되는 복구 스크립트 운영. 처리 상태 컬럼을 복합인덱스 선두로 이동해 완료 행을 스캔에서 제외. 시간은 줄었지만 자릿수는 그대로였고, 이 경로는 아래 구조 재설계로 대체돼 현재 운영에서는 호출하지 않는다.',
+          '환경 차이는 이미 파라미터로 표현돼 있었기 때문에 클래스 복제를 걷어내고 스케줄러를 발송과 결과 두 축으로 다시 묶었습니다. 처음에는 조합 전체를 enum 표 한 장으로 만들었는데, 짧긴 해도 사람이 읽기 어려워서 클래스가 조금 늘더라도 한눈에 읽히는 구조로 되돌렸습니다. 동작과 로그 문구, 설정 키는 바꾸지 않았고 단계마다 빌드가 통과하면 커밋했습니다.',
       },
       {
         type: 'code',
-        heading: '인덱스 재설계 (실 DDL 기반 재구성 예시 — 식별자 일반화)',
-        lang: 'sql',
-        content: `-- [BEFORE] 상태 컬럼이 뒤 → 회차마다 처리 완료 행까지 재스캔 (회차² 누적)
-CREATE INDEX IX_DEDUP_BILL
-    ON BILL_BUILD_DATA (SERVER_NO, DEDUP_CI, PROC_STATUS);
+        heading: '같은 구축을 동시에 부를 때 (요지만 옮김)',
+        lang: 'java',
+        content: `// 관리자 화면과 외부 호출이 같은 락을 쓴다
+private final ReentrantLock buildLock = new ReentrantLock(true); // 공정 락
 
--- [AFTER] PROC_STATUS 선두 → 미처리('N') 구간만 레인지 스캔
-CREATE INDEX IX_DEDUP_BILL
-    ON BILL_BUILD_DATA (PROC_STATUS, SERVER_NO, DEDUP_CI);
-
-SELECT SERVER_NO, DEDUP_CI
-  FROM BILL_BUILD_DATA
- WHERE PROC_STATUS = 'N'      -- 선두 등치 조건: 완료 행은 진입 자체 배제
-   AND SERVER_NO   = :serverNo;`,
-      },
-      {
-        type: 'diagram',
-        heading: '해결 4 — 튜닝의 한계에서 구조 변경으로 (전 구간 약 31분)',
-        content: `개선 전에는 적재 50분 + 중복제거 프로시저 4시간이 걸렸다.
-SQL을 더 다듬어도 자릿수는 안 바뀐다고 보고, 병목을 "연산의 위치" 문제로 재정의했다.
-중복 판정에 실제로 필요한 컬럼은 네 개뿐 — 그 관찰 하나로 방향이 정해졌다.
-
-[BEFORE]  XML 전량 파싱 ─▶ 1,000만 행 적재 ─▶ 프로시저 반복 호출(정렬·집계·SEQ 채번)
-                                              └─ 부속행 URL 동기화 UPDATE(1,000만 행 조인)
-
-[AFTER]   XML 1차 파싱 ─▶ 판정 키 4개만 로컬 SQLite 적재
-                          └─▶ 윈도우 함수 1회 : 대표 선정 + 건수/금액 집계 + SEQ 채번  (20초)
-                              └─▶ XML 2차 파싱 ─▶ 확정값을 채워 1회 적재 (사후 UPDATE 없음)
-
-· 트레이드오프 — 확정값은 마지막 파일까지 읽어야 정해지는데 첫 레코드에도 필요.
-  전량을 힙에 들면 OOM, 다시 읽으면 파싱 2회. 파싱 2배가 더 싸다고 보고 재파싱 선택.
-  1차에서 파일별 건수를 기록해 두 패스의 순번이 어긋나면 즉시 중단.`,
-      },
-      {
-        type: 'text',
-        heading: '해결 5 — 목표를 먼저 세우고 측정으로 좁히기 (파일당 44초 → 0.8초)',
-        content:
-          '재설계 후에도 적재가 파일당 44초였다. "느리다"로 두지 않고 파일당 2~3초를 목표로 못 박아 미달을 문제로 규정한 뒤, 추측 대신 관측으로 접근했다. ① 스레드 덤프 6회 샘플링 → 5/6이 executeBatch 소켓 대기, DB 왕복이 원인. ② 구간별 계측 로그를 먼저 심고 재측정 → 같은 2,000행에 MAIN 12.8초 / BASIC 0.1초. ③ 두 SQL의 유일한 차이는 MAIN에만 있던 ${server_no} 치환 — 값이 행마다 1~5로 순환하며 SQL 문자열이 달라져, 직전 문장과 동일할 때만 묶는 MyBatis BATCH가 사실상 매 행 개별 왕복으로 동작하고 있었다.',
-      },
-      {
-        type: 'code',
-        heading: 'BATCH 묶임이 끊긴 지점 (치환 vs 바인딩)',
-        lang: 'xml',
-        content: `<!-- BEFORE : server_no 가 1~5 로 바뀔 때마다 다른 문장 → 배치 묶임이 끊김 -->
-VALUES (..., 'Y', \${server_no}, ...)
-
-<!-- AFTER : 문장은 하나, 값만 바인딩 → 2,000행이 한 번에 전송 -->
-VALUES (..., 'Y', #{server_no}, ...)`,
-      },
-      {
-        type: 'text',
-        heading: '해결 6 — 가설을 벤치마크로 검증 (URL 채번 UPDATE 선형화)',
-        content:
-          'URL 채번 UPDATE가 인덱스 없는 컬럼을 조건으로 써서 건수의 제곱에 비례해 느려진다는 가설을 세우고 실측으로 검증했다. 5,000건 1.3초 / 10,000건 4.8초 / 20,000건 19.9초 — 건수 2배마다 시간 4배로 제곱 증가를 확인하고, 인덱스를 추가해 각각 29ms / 41ms / 81ms로 선형화했다. 생존 92만 건 규모에서는 이 한 줄이 배치 완주 여부를 갈랐다.',
-      },
-      {
-        type: 'text',
-        heading: '해결 7 — 장애 역추적 · 실패 안전성 · 결과 검증',
-        content:
-          '인덱스 리빌드가 3회 모두 실패했는데 로그의 원인 메시지가 비어 있었다. 실패 간격의 비대칭(1회차 39분, 2·3회차 각 3분)에서 공간 부족을 가설로 세우고 예외 원인을 끝까지 따라가 남기도록 로깅을 보강해 ORA-01652를 확인, 인덱스 12개가 회차당 약 7.4GB를 쓰는 구조임을 세그먼트 크기로 검증하고 여유 기준을 문서화했다. 적재 실패 시 인덱스가 UNUSABLE로 방치되지 않도록 리빌드를 finally + 재시도로 옮겼고, 전부-아니면-전무 구조에 맞춰 원본 파일은 회차 전체 성공 후 일괄 삭제·실패 시 격리로 정리했다. 마지막으로 병합 전후 건수와 금액 보존을 DB에 직접 질의해 확인했다 — 원본 101만 건과 적재 행 수 일치, 금액 합계 177억 3,156만 5,208원 완전 일치, SEQ_NO 1~919,114 연속·무중복, 잔여 중복 그룹 0건.',
+public BuildResult buildFromHttp(Request req) throws InterruptedException {
+    // HTTP는 30초만 기다리고 바로 돌려준다 — 오래 붙잡으면 재시도가 중복을 만든다
+    if (!buildLock.tryLock(30, TimeUnit.SECONDS)) {
+        return BuildResult.busy("다른 구축이 진행 중입니다");
+    }
+    try {
+        return tx.execute(status -> {        // 채번부터 쓰기까지 한 트랜잭션
+            long seq = nextSeq();
+            insertMessageAndMaster(seq, req);
+            return BuildResult.ok(seq);
+        });
+    } finally {
+        buildLock.unlock();
+    }
+}`,
       },
     ],
     learned:
-      '대용량의 3원칙 — 메모리에 다 올리지 않는다(StAX), 라운드트립을 줄인다(BATCH), 병렬에는 경계를 만든다(단일 라이터). 인덱스는 존재 여부가 아니라 컬럼 순서가 성능을 좌우한다. 튜닝이 한계에 닿으면 연산의 위치를 의심한다 — 같은 일을 더 빨리 하는 대신 더 작은 데이터에서 하도록 옮기는 편이 자릿수를 바꾼다. 병목은 추측하지 않고 관측 가능하게 만든 뒤 좁히며, 성능 작업은 목표 수치를 먼저 정해야 끝이 있다.',
-  },
-  {
-    id: 'case-auth',
-    title: 'GibisbizCenter — 단일 백엔드, 3종 클라이언트 멀티 인증',
-    tag: '인증 · 인가 설계',
-    summary:
-      'JSP→Vue2→Vue3→Electron으로 진화한 클라이언트와 외부 OpenAPI를 하나의 백엔드가 동시 수용. 필터체인을 3개로 분리해 정책 충돌을 제거.',
-    stack: ['Java 8', 'Spring Security(OAuth2)', 'jjwt', 'MyBatis 멀티 DataSource', 'Caffeine'],
-    metrics: [
-      { value: '3 체인', label: 'SecurityFilterChain' },
-      { value: '4 세트', label: '멀티 DataSource' },
-      { value: '3 세대', label: '콘솔 전환(무중단)' },
-    ],
-    blocks: [
-      {
-        type: 'diagram',
-        heading: '해결 — 체인 자체를 3개로 분리',
-        content: `                    ┌── @Order(1) /api/**      ─ OpenAPI 체인 (토큰 30일)
-클라이언트 요청 ──▶ ├── @Order(2) /electron/** ─ 데스크톱 체인 (Access 5분·Refresh 8h)
-                    └── @Order(3) 그 외        ─ Vue3 어드민 체인 (ROLE_ADMIN)
-   각 체인: STATELESS · 전용 JwtAuthenticationConverter · 독립 인가 정책`,
-      },
-      {
-        type: 'text',
-        content:
-          'prefix 분기의 정책 충돌을 제거하고 변경 영향 범위를 체인 단위로 한정. JwtTokenProvider / OpenApiTokenProvider로 발급 책임 분리, type 클레임 검증으로 토큰 오용 차단, HS256 서명키 부팅 시 1회 캐싱, Clock Skew 10초. Access Token에 권한을 실어 GET /me 왕복 제거. @MapperScan dao.db1~4로 DataSource 4세트 명시 분리.',
-      },
-    ],
-    learned: '"단일 백엔드 + 다중 클라이언트"는 분기가 아니라 분리로 풀어야 운영 변경이 추적 가능해진다.',
+      '운영 중인 코드를 줄일 때 제일 빠른 길은 결국 테스트를 먼저 까는 쪽이었습니다. 그리고 기다리는 시간은 호출하는 쪽마다 달라야 합니다. 오래 붙잡는 게 친절해 보여도 재시도와 겹치면 중복이 됩니다.',
   },
   {
     id: 'case-kakao',
-    title: 'KakaoApiServer — 초당 상한 페이서 + 발송 상태머신',
-    tag: '동시성 · 운영 안정성',
+    title: '카카오 전자문서 — 초당 상한 페이서와 상태 전이',
+    tag: '동시성 · 외부 연동',
     summary:
-      '카카오 API의 초당 200문서 상한을 라이브러리 없이 15줄 페이서로 해결하고, 다중 스케줄러의 중복 처리는 조건부 UPDATE로 락 없이 차단. SRC_KEY 공백 매칭 운영 사고는 재현·복구·문서화.',
-    stack: ['Java 21', 'Spring Boot 3.3', 'Spring 6 RestClient', 'MyBatis 동적 SQL', 'Tibero 6'],
+      '초당 200문서 상한을 라이브러리 없이 작은 페이서로 맞추고, 여러 스케줄러가 같은 건을 집지 않게 조건부 UPDATE로 막은 기록입니다.',
+    stack: ['Java 21', 'Spring Boot 3.3', 'Spring 6 RestClient', 'MyBatis', 'Tibero 6'],
     metrics: [
-      { value: '200문서/초', label: '외부 API 상한 대응' },
-      { value: '2.5~3분', label: '2~3만 건 버스트 드레인' },
-      { value: '재발 0건', label: '운영 사고' },
-      { value: '중복 0건', label: '다중 스케줄러 발송' },
+      { value: '200문서/초', label: '외부 API 상한' },
+      { value: '2.5~3분', label: '2~3만 건을 나눠 보내는 시간' },
+      { value: '0건', label: '여러 워커 환경의 중복 발송' },
     ],
     blocks: [
       {
         type: 'code',
-        heading: '해결 1 — 초당 상한 대응 페이서 (직접 구현)',
+        heading: '예약 방식 페이서',
         lang: 'java',
-        content: `// 카운터도 시간 윈도우도 없다 — 상태는 "다음 발송 가능 시각" 하나뿐
+        content: `// 카운터도 시간 창도 없다. 상태는 "다음에 보내도 되는 시각" 하나뿐
 public void acquire(int documents) throws InterruptedException {
     if (documents <= 0) return;
     long waitNanos;
     synchronized (this) {                            // (1) 예약 계산만 잠금 안에서
         long now     = System.nanoTime();
-        long startAt = Math.max(nextFreeNanos, now); // 과거면 현재로 — 버스트 크레딧 없음
+        long startAt = Math.max(nextFreeNanos, now); // 지난 시각은 지금으로 당긴다
         waitNanos    = startAt - now;
         nextFreeNanos = startAt + (long)(documents * nanosPerPermit);
     }
-    if (waitNanos > 0) Thread.sleep(...);            // (2) 대기는 잠금 밖에서
+    if (waitNanos > 0) Thread.sleep(...);            // (2) 기다리는 건 잠금 밖에서
 }`,
       },
       {
         type: 'text',
         heading: '왜 이렇게 했나',
         content:
-          '(1)과 (2)의 분리가 핵심 — 잠금을 쥔 채 자면 스레드가 직렬화되지만, 예약만 원자적으로 끊어 두면 스케줄러 3개가 순차 슬롯을 나눠 갖고 각자 자기 몫만 잔다. 워커당 63건씩 나누면 노는 워커의 몫이 버려지므로 공유 페이서 단일 지점을 통과시켜 처리량 손실을 없앴다. 차감 단위는 요청이 아니라 문서(상한이 문서 수 기준). 상한값은 설정으로 빼고 200이 아닌 190을 기본값으로 둬 지터 여유를 남겼다. 속도조절을 상태 선점보다 앞에 배치해 대기 중 장애가 나도 중복 발송이 불가능하고, 건당 과금이라 실패는 자동 재시도 대신 보류 + 사유 기록으로 정책화했다. 단일 JVM 기준이라는 한계는 주석에 명시하고 무중단 배포 시 스위치 OFF → 교체 → ON 절차로 덮었다.',
+          '(1)과 (2)를 떼어 놓은 게 전부입니다. 잠금을 쥔 채로 자면 스레드가 줄을 서지만, 예약만 원자적으로 끊어 두면 스케줄러 세 개가 차례를 나눠 갖고 각자 자기 몫만 잡니다. 워커마다 63건씩 나눠 주면 쉬는 워커의 몫이 버려져서 한 지점을 통과시키는 쪽을 골랐습니다. 상한은 문서 수 기준이라 묶음 하나가 N건이면 N칸을 예약합니다. 기본값은 190으로 두고 설정으로 뺐습니다. 속도 조절을 상태 선점보다 앞에 둬서 기다리는 중에 서버가 내려가도 중복이 생기지 않습니다. 한 JVM 기준이라는 한계는 주석에 적고, 병렬 배포 순간은 발송 스위치를 끄고 교체하는 절차로 덮었습니다.',
       },
       {
         type: 'code',
-        heading: '해결 2 — 락 없는 race 차단 (실 구현 기반 재구성 예시)',
+        heading: '상태 전이는 DB에 맡긴다 (식별자는 일반화)',
         lang: 'sql',
-        content: `-- 상태 전이를 조건부 UPDATE(compare-and-set)로: 한 워커만 성공
+        content: `-- 상태가 '신규'인 건만 '선점'으로 바꾼다. 명시적 잠금 없이 한 워커만 성공
 UPDATE SEND_MASTER
-   SET TRANS_GBN = 'B'
+   SET STATUS = 'B'
  WHERE MASTER_KEY = #{key}
-   AND TRANS_GBN  = 'N';   -- N→B→P→S 상태머신, DB 원자성에 위임`,
+   AND STATUS = 'N';   -- N → B → P → S`,
+      },
+    ],
+    learned:
+      '외부 API 호출은 트랜잭션 밖으로, 상태 전이는 DB 원자성에 맡깁니다. 건당 과금인 곳에서는 실패 후 재시도보다 처음부터 넘치지 않게 맞추는 쪽이 안전했습니다.',
+  },
+  {
+    id: 'case-batch',
+    title: 'KT 청구서 배치 — 튜닝이 막혀서 처리 위치를 옮기기',
+    tag: '대용량 · DB',
+    summary:
+      '델파이 레거시를 Java 21로 옮기면서, 프로시저 튜닝으로 자릿수가 안 바뀌자 중복 판정을 적재 이전의 로컬 SQLite로 옮긴 기록입니다.',
+    stack: ['Java 21', 'Spring Boot 3.4', 'Tibero 6', 'StAX/JAXB', 'MyBatis(BATCH)', 'SQLite'],
+    metrics: [
+      { value: '4시간 50분 → 31분', label: '적재~중복제거 (개발 환경 실측)' },
+      { value: '44초 → 0.8초', label: '적재 (파일당)' },
+      { value: '19.9초 → 81ms', label: '2만 건 UPDATE' },
+      { value: '0건', label: '1GB급 XML 메모리 부족 (운영 로그)' },
+    ],
+    blocks: [
+      {
+        type: 'diagram',
+        heading: '파서 여러 개, 라이터 하나',
+        content: `[XML 파일들]                                       (Tibero)
+     │  분배                                           ▲
+     ▼                                                 │ 커밋은 한 줄로
+┌────────────┐   DTO   ┌──────────────────┐   batch   │
+│ 파서 스레드 N │ ──────▶ │ ArrayBlockingQueue │ ──────▶ 라이터 스레드 1
+│ (CPU 병렬)   │          │  (꽉 차면 대기)     │          (2,000건씩 flush)
+└────────────┘          └──────────────────┘
+  · 종료는 poison pill로 전달   · 한쪽이 실패하면 큐를 비워 생산자가 멈추지 않게`,
+      },
+      {
+        type: 'code',
+        heading: '인덱스 컬럼 순서 (식별자는 일반화)',
+        lang: 'sql',
+        content: `-- [BEFORE] 중간 컬럼에 막혀 상태 조건이 필터로만 쓰임
+--          → 중복제거 루프가 돌수록 처리 끝난 행까지 다시 읽는다
+CREATE INDEX IX_DEDUP_BILL
+    ON BILL_BUILD_DATA (SERVER_NO, DEDUP_KEY, STATUS);
+
+-- [AFTER] 등치 조건 두 개를 앞으로 → 미처리 구간만 범위 스캔
+CREATE INDEX IX_DEDUP_BILL
+    ON BILL_BUILD_DATA (STATUS, SERVER_NO, DEDUP_KEY);`,
+      },
+      {
+        type: 'diagram',
+        heading: '처리 위치를 옮긴 그림',
+        content: `[BEFORE]  XML 전량 파싱 ─▶ 1,000만 행 적재 ─▶ 프로시저 반복(정렬·집계·순번)
+                                              └─ URL 동기화 UPDATE(1,000만 행 조인)
+
+[AFTER]   XML 1차 파싱 ─▶ 판정 키 4개만 로컬 SQLite
+                          └─▶ 윈도우 함수 1회: 대표 선정 + 건수/금액 집계 + 순번  (20초)
+                              └─▶ XML 2차 파싱 ─▶ 확정값을 채워 1회 적재
+
+· 확정값은 마지막 파일까지 읽어야 정해지는데 첫 레코드에도 필요하다.
+  다 들고 있으면 메모리가 터지고, 다시 읽으면 파싱이 두 번. 두 번 읽기를 골랐다.
+  1차에서 파일별 건수를 남겨, 두 번의 순번이 어긋나면 바로 멈춘다.`,
+      },
+      {
+        type: 'code',
+        heading: '배치 묶음이 풀리던 한 글자',
+        lang: 'xml',
+        content: `<!-- BEFORE : 값이 바뀔 때마다 다른 SQL 문장 → 배치 묶음이 끊김 -->
+VALUES (..., 'Y', \${server_no}, ...)
+
+<!-- AFTER : 문장은 하나, 값만 바인딩 → 2,000행이 한 번에 -->
+VALUES (..., 'Y', #{server_no}, ...)`,
       },
       {
         type: 'text',
-        heading: '해결 3 — SRC_KEY 공백 매칭 사고 (재현 → 복구 → 재발 방지)',
+        heading: '로그에 원인이 없던 장애',
         content:
-          '증상: 카카오 결과 콜백이 "발송데이터 미존재"로 실패, RESULT 미처리 적재. 원인: SRC_KEY 양끝 공백이 카카오 측 trim과 자사 값 사이에서 비매칭됨을 SQL 분석으로 식별. 조치: 복구 SQL로 재처리 유도 → 조회 SQL에 TRIM(SRC_KEY) 명시 → 재현 절차·영향 범위·복구 SQL을 문서화. 이후 재발 0건.',
+          '인덱스 리빌드가 세 번 다 실패했는데 원인이 비어 있었습니다. 실패 간격(39분, 3분, 3분)의 차이에서 공간 부족을 의심했고, 예외 원인을 끝까지 남기게 로깅을 고쳐 ORA-01652를 확인했습니다. 인덱스 12개가 회차당 약 7.4GB를 쓴다는 걸 세그먼트 크기로 확인하고 기준을 문서로 남겼습니다. 마지막으로 병합 전후 건수와 금액을 DB에 직접 물어봤고, 금액 합계는 원 단위까지 맞았습니다(약 177억 원 규모).',
       },
     ],
-    learned: '외부 API 호출은 트랜잭션 경계 밖으로, 상태 전이는 DB 원자성에 위임한다. 사고는 복구로 끝내지 않고 "증상→원인→복구→재발 방지" 문서로 조직 지식화한다.',
+    learned:
+      '메모리에 다 올리지 않고, 왕복을 줄이고, 병렬에는 경계를 만든다. 인덱스는 있느냐보다 컬럼 순서가 중요했고, 튜닝이 막히면 같은 일을 더 빨리 하기보다 더 작은 데이터에서 하도록 옮기는 편이 자릿수를 바꿨습니다. 성능 작업은 목표 숫자를 먼저 정해야 끝이 났습니다.',
+  },
+  {
+    id: 'case-auth',
+    title: 'GibisbizCenter — 백엔드 하나, 클라이언트 셋',
+    tag: '인증 · 인가',
+    summary:
+      'Vue3 어드민, Electron 데스크톱, 외부 OpenAPI를 백엔드 하나가 받으면서 인증 정책이 부딪히던 문제를 필터체인을 나눠 정리했습니다.',
+    stack: ['Java 8', 'Spring Security(OAuth2)', 'jjwt', 'MyBatis', 'Caffeine'],
+    metrics: [
+      { value: '3개', label: 'SecurityFilterChain' },
+      { value: '4벌', label: 'DataSource · 트랜잭션 매니저' },
+      { value: '60초', label: '데스크톱 1회용 로그인 코드' },
+    ],
+    blocks: [
+      {
+        type: 'diagram',
+        heading: '체인을 아예 나눈다',
+        content: `                    ┌── @Order(1) /api/**      OpenAPI 체인 (토큰 30일)
+클라이언트 요청 ──▶ ├── @Order(2) /electron/** 데스크톱 체인 (Access 5분 · Refresh 8시간)
+                    └── @Order(3) 그 외        어드민 체인
+   체인마다: STATELESS · 전용 JwtAuthenticationConverter · 따로 노는 인가 정책`,
+      },
+      {
+        type: 'text',
+        content:
+          '접두사로 나누던 때의 충돌이 사라지고, 무언가를 바꿀 때 영향이 체인 하나 안에서 끝납니다. 발급과 검증 책임을 나누고 토큰 type 클레임을 검사해 다른 용도의 토큰이 섞여 들어오지 못하게 했습니다. 데스크톱 로그인은 토큰을 URL에 싣지 않고 60초짜리 1회용 코드로 바꿔 받습니다. 꺼내는 순간 사라지고, 앱 식별 키는 상수 시간 비교로 확인합니다.',
+      },
+    ],
+    learned: '백엔드 하나에 클라이언트가 늘어날 때는 분기를 더하는 것보다 나누는 쪽이 나중에 추적하기 쉬웠습니다.',
   },
 ]
 
@@ -239,14 +247,14 @@ export interface CapabilityMap {
 }
 
 export const capabilityMap: CapabilityMap[] = [
-  { capability: '대용량 처리 (스트리밍·파이프라인·BATCH)', projects: 'KT_BatchServer, PassApiServer' },
-  { capability: 'DB / SQL 깊이 (프로시저 재설계·인덱스·PL/SQL)', projects: 'KT_BatchServer, KakaoApiServer' },
-  { capability: '레거시 현대화 (델파이→Java, JSP→Vue3, 인수 재구축)', projects: 'KT_BatchServer, GibisbizCenter, iM라이프' },
-  { capability: '인증 / 인가 설계', projects: 'GibisbizCenter, G-HUB, 전자고지 열람 서버' },
-  { capability: '외부 API 연동·상태머신·멱등성', projects: 'KakaoApiServer, PassApiServer, iM라이프' },
-  { capability: '운영 트러블슈팅·문서화', projects: 'KakaoApiServer, KT_BatchServer' },
-  { capability: '캐시 전략 (제약 하 의사결정)', projects: 'GibisbizCenter (Redis→Caffeine)' },
-  { capability: '품질 자동화 · 인프라 구축', projects: 'PassApiServer, 사내 CI/CD, 폐쇄망 툴킷' },
-  { capability: 'ORM 동적 쿼리 · 테스트', projects: 'GibisMonitoring' },
-  { capability: '프레임워크 내부 / OSS', projects: 'easy-quartz, smart-msg' },
+  { capability: '동시성 · 상태 전이 · 멱등성', projects: 'PASS 발송 서버, 카카오 전자문서, iM라이프' },
+  { capability: '운영 중 리팩터링 · 테스트', projects: 'PASS 발송 서버, KT 청구서 배치' },
+  { capability: 'DB · 프로시저 · 인덱스', projects: 'KT 청구서 배치, KT 서버 운영' },
+  { capability: '대용량 처리 (스트리밍 · 파이프라인 · BATCH)', projects: 'KT 청구서 배치' },
+  { capability: '외부 API 연동 · 속도 제한', projects: '카카오 전자문서, PASS 발송 서버, iM라이프' },
+  { capability: '장애 추적 · 문서화', projects: '카카오 전자문서, KT 청구서 배치' },
+  { capability: '인증 · 인가', projects: 'GibisbizCenter, 수신자 열람 서버' },
+  { capability: '캐시 (제약 아래에서의 선택)', projects: 'GibisbizCenter (Redis 검증 후 Caffeine)' },
+  { capability: 'Kotlin', projects: 'nts_status, GibisbizCenter 이전 준비' },
+  { capability: '도구 만들기 · 인프라', projects: 'easy-quartz, smart-msg, claude-statusline-astro, 사내 CI/CD' },
 ]

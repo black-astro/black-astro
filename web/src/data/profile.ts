@@ -1,4 +1,4 @@
-// 인적사항 · 소개 · 핵심 성과 — 이력서/경력기술서 기반
+// 소개 · 요즘 하는 일 · 기억에 남는 숫자
 
 export interface ProfileLink {
   label: string
@@ -11,29 +11,29 @@ export const profile = {
   name: '김현우',
   role: 'Backend Engineer',
   roleKo: '백엔드 개발자',
-  years: 5,
-  headline: '전자고지·대용량 발송/배치 도메인을 5년간 설계·개발·운영했습니다.',
+  years: 6,
+  headline: '발송 서버를 만들고 고치면서 배운 것들을 적어 두는 곳입니다.',
   subHeadline:
-    '매월 수백만 건의 공공·통신 고지가 지나가는 발송 파이프라인. 델파이 레거시를 Java 21로 재구축하고, 필요한 도구는 직접 만들어 Maven Central에 배포합니다.',
-  // 각 문단을 의미 단위 줄(line)로 분리 — 보고서처럼 읽히도록
+    '공공기관 안내문이 SKT PASS, 카카오, KT 문자로 나가는 발송 서버를 6년째 만지고 있습니다. 건당 과금이라 한 건이 중복돼도 돈이 새는 곳이어서, 트랜잭션 경계와 동시성, 그리고 숫자가 맞는지를 가장 오래 들여다봅니다.',
+  // 각 문단을 의미 단위 줄(line)로 분리
   intro: [
     [
-      'Java·Spring 기반으로 KT 명세서 ETL 배치, PASS 전자고지 PUSH,',
-      '카카오 전자문서 발송 서버를 설계부터 운영까지 담당해 온 백엔드 개발자입니다.',
+      'Java와 Spring Boot로 서버를 만들고, Tibero·Oracle 프로시저와 함께 굴러가는 서비스를 운영합니다.',
+      '요즘 가장 많은 시간을 쓰는 곳은 SKT PASS 전자고지 발송 서버이고, 카카오 전자문서 서버와 KT 청구서 배치도 계속 손보고 있습니다.',
     ],
     [
-      '레거시 현대화가 제 경력의 축입니다 — 델파이 월 배치를 Java로 재구축하고,',
-      '관리자 콘솔을 JSP→Vue2→Vue3로 전환하고, 보험사 발송 엔진을 인수해 재구축했습니다.',
+      '멈출 수 없는 서버를 고치는 일을 좋아합니다.',
+      '테스트를 먼저 깔고 조금씩 커밋하면서 구조를 줄이는 쪽이 결국 제일 빠르다는 걸 몇 번 겪었습니다.',
     ],
     [
-      '운영 사고는 원인 분석부터 복구 SQL, 재발 방지 문서화까지 마무리하고,',
-      '회사 밖에서는 Spring Boot Starter를 직접 만들어 Maven Central에 배포했습니다.',
+      '튜닝이 막히면 같은 일을 더 빨리 하려 하기보다 그 일을 어디서 할지를 다시 봅니다.',
+      '회사 밖에서는 필요한 도구를 직접 만들어 Maven Central과 npm에 올리고, 요즘은 Kotlin으로 옮겨 가는 연습을 하고 있습니다.',
     ],
   ],
   company: 'GIBIS',
-  companyDesc: 'KT 파트너사',
-  tenure: '2021.08 ~ 재직 중',
-  domain: 'KT 공공알림문자 · PASS · 카카오 전자문서',
+  companyDesc: 'KT 전자고지 파트너사 · 대리',
+  tenure: '2021.08 ~ 지금',
+  domain: 'SKT PASS · 카카오 전자문서 · KT 문자',
 }
 
 export const links: ProfileLink[] = [
@@ -41,7 +41,7 @@ export const links: ProfileLink[] = [
   { label: 'GitHub', value: 'github.com/black-astro', href: 'https://github.com/black-astro', icon: 'github' },
 ]
 
-// 핵심 성과 — 이력서 상단 하이라이트
+// 기억에 남는 숫자 — 홈 화면 카드
 export interface Achievement {
   metric: string
   unit: string
@@ -49,48 +49,47 @@ export interface Achievement {
   detail: string
 }
 
-// 여러 프로젝트에서 방어 가능한 성과를 골고루 — 대용량 · 인증 · PASS · 카카오 · 레거시 현대화 · OSS · 인프라
 export const achievements: Achievement[] = [
   {
-    metric: '1,000만',
-    unit: 'row / 회차',
-    label: 'StAX 스트리밍 적재 · 메모리 터짐(OOM) 0건',
-    detail: 'KT_BatchServer — 매월 수신하는 명세서 약 100만 건(1GB+ XML)이 디테일 분해로 회차당 DB INSERT 약 1,000만 row. StAX 상태머신 + 파서 풀·단일 라이터로 힙 수십 MB에만 스트리밍 적재해 운영 OOM 0건(운영 명세·로그 기준).',
+    metric: '1,042 → 260',
+    unit: '줄',
+    label: '운영 중인 PASS 발송 서버 정리',
+    detail:
+      '운영/개발, 채널, 발송/결과 조합마다 복제돼 있던 스케줄러 8개를 2개로 합쳤습니다. 매퍼 바인딩 테스트, 실 DB SQL 스모크 테스트, 기동 테스트를 먼저 만들어 두고 단계마다 커밋했고, 단위 테스트는 6개에서 16개가 됐습니다.',
   },
   {
-    metric: '약 4시간 50분 → 31분',
-    unit: '전 구간',
-    label: '중복제거 아키텍처 재설계 · 튜닝의 한계를 구조 변경으로',
-    detail: 'KT_BatchServer — 개선 전에는 적재(INSERT)에 50분, 중복제거 프로시저에 4시간이 걸렸다. 프로시저를 집합 기반으로 다듬어 봤지만 자릿수가 바뀌지 않아 그 경로를 버리고, 병목을 연산의 위치 문제로 재정의. 중복 판정에 필요한 컬럼이 네 개뿐이라는 점에 착안해 판정을 적재 이전 단계의 로컬 SQLite로 옮겨 윈도우 함수 한 번(20초)으로 처리하고, 확정값으로 1회 적재하도록 바꿔 프로시저 호출과 사후 UPDATE 조인을 함께 없앴다. 전 구간 약 31분. 잔여 병목은 스레드 덤프 샘플링과 구간별 계측으로 좁혀 적재 파일당 44초 → 0.8초(운영 동일 규모 실데이터, 개발 환경 실측).',
-  },
-  {
-    metric: '3',
-    unit: '채널',
-    label: '공공기관 전자고지 발송 백엔드',
-    detail: 'PASS · 카카오 전자문서 · KT 3채널 발송 백엔드를 설계·개발·운영. 국세청·국민건강보험공단·국민연금공단 등 공공기관 안내문이 이 파이프라인을 통과.',
-  },
-  {
-    metric: '일 180만',
-    unit: '건 규모',
-    label: 'PASS 전자고지 · SKT PASS지갑 공식 IF 연동',
-    detail: 'KT PASS 공인알림문자 시스템 개발사로서 SKT PASS지갑 공식 IF(정의서 v1.9)를 연동. 단건/벌크 발송과 결과 회수를 구현하고, 일 발송 리미트 180만 건 규모의 상한 제어 체계로 대량 발송을 통제(구축/발송 서버 분리 설계).',
-  },
-  {
-    metric: '3',
-    unit: '체인',
-    label: '멀티 SecurityFilterChain 인증 분리',
-    detail: 'GibisbizCenter — 단일 백엔드에서 OpenAPI·Electron·Vue3 어드민 3종 클라이언트를 SecurityFilterChain으로 분리. JWT 발급·검증 책임을 나눠 클라이언트별 토큰 수명·인가 정책을 독립 운영.',
-  },
-  {
-    metric: '재발 0',
+    metric: '중복 0',
     unit: '건',
-    label: '운영 사고 원인분석 → 복구 → 재발 방지',
-    detail: '카카오 결과 미처리 사고(SRC_KEY 공백 매칭)를 SQL로 원인 분석 → 복구 SQL로 재처리 → 재현 절차·영향 범위·복구 SQL을 문서화. 이후 결과 대사 기준 동일 사고 재발 0건.',
+    label: '건당 과금 발송의 중복 처리',
+    detail:
+      '여러 워커가 같은 건을 집지 못하게 상태 전이를 조건부 UPDATE로 처리했습니다. 외부 API 호출은 트랜잭션 밖으로 빼고, 같은 구축 작업을 동시에 부르던 경로는 공정 락으로 채번부터 커밋까지 줄 세웠습니다. 발송-결과 대사 기준입니다.',
   },
   {
-    metric: 'Maven Central',
+    metric: '2~3만 건',
+    unit: '/ 2.5~3분',
+    label: '아침 버스트를 초당 상한 아래로',
+    detail:
+      '카카오 API는 초당 200문서까지만 받습니다. "다음에 보내도 되는 시각" 하나만 들고 있는 예약 방식 페이서를 직접 만들어, 아침에 한꺼번에 생기는 물량을 상한을 넘기지 않고 고르게 흘려보냅니다.',
+  },
+  {
+    metric: '4시간 50분 → 31분',
     unit: '',
-    label: 'Spring Boot Starter 정식 배포',
-    detail: 'easy-quartz — 설계·구현·릴리즈 자동화까지 단독으로 Maven Central에 배포. @EasyQuartzScheduled 하나로 5종 스케줄 × 2엔진(Quartz/Spring)을 통합.',
+    label: '튜닝이 막혀서 처리 위치를 옮긴 배치',
+    detail:
+      'KT 청구서 배치의 적재 50분과 중복제거 프로시저 4시간을, 중복 판정을 적재 이전의 로컬 SQLite로 옮겨 약 31분으로 줄였습니다. 운영과 같은 규모 데이터(DB 753만 행)로 개발 환경에서 잰 값입니다.',
+  },
+  {
+    metric: '19.9초 → 81ms',
+    unit: '',
+    label: '프로시저와 인덱스',
+    detail:
+      '서비스 대부분이 Java 백엔드와 Tibero·Oracle 프로시저로 돌아갑니다. PL/SQL 프로시저 5종을 직접 쓰고 다듬었고, 2만 건 UPDATE는 인덱스 하나로 19.9초에서 81ms가 됐습니다.',
+  },
+  {
+    metric: '0.0.2',
+    unit: 'Maven Central',
+    label: '직접 만들어 쓰는 Spring Boot Starter',
+    detail:
+      'easy-quartz는 어노테이션 하나로 5종 스케줄과 Quartz/Spring 두 엔진을 묶는 개인 프로젝트입니다. Job 단위 잠금, 지수 백오프 재시도, Micrometer 메트릭, JDBC JobStore 클러스터링까지 넣었습니다.',
   },
 ]
