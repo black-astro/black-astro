@@ -244,6 +244,7 @@ const SEC_KW = {
   z14:"디자인패턴 싱글턴 전략 팩토리 어댑터 리포지토리 의존성주입 파이썬다운",
   z15:"보안 pickle 역직렬화 rce yaml eval subprocess 공급망 타이포스쿼팅 sql인젝션 경로순회 redos",
   z16:"아키텍처 계층 헥사고날 클린 ddd 의존성역전 폴더구조 유스케이스",
+  p00:"처음 시작 첫프로젝트 헬로월드 hello main.py 메인 __main__ __name__ __init__ 생성자 self 폴더 터미널 실행방법 입문 왕초보",
   p01:"실행 들여쓰기 인덴트 주석 docstring repl 스크립트 첫코드 헬로월드",
   p02:"변수 자료형 타입 int str float bool 형변환 캐스팅 타입힌트 연산자 나눗셈 몫 나머지",
   p03:"문자열 텍스트 글자 f-string 포맷 서식 자르기 붙이기 split join replace strip 정규식 re 치환 슬라이싱 슬라이스 slice 인덱스 마스킹 뒤집기 encode decode ord chr endswith startswith",
